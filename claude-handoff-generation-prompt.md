@@ -9,20 +9,19 @@ involved session, or in a fresh Code session on the same machine.
 - REPO_URL: https://github.com/jhan-positron/notebook
 - TARGET_DIR: handoffs/     # dir inside the repo; create if missing; "." = repo root
 - SCOPE: this session only
-  # SCOPE takes EITHER the literal `this session only` OR a list of items.
-  # Whatever appears as the value IS the active scope — Claude must cover
-  # every listed item, and must not treat a list as illustrative.
-  # List syntax (each line one item, `"<project> / <session name>"`):
-  #   SCOPE:
-  #     - Claude session: "story2814:GOF staging buffer / Wade's review comment"
-  #     - Claude session: "debug_3bda_flat_freq / run CI tests"
-  #     - Claude chat: "<chat title>"
-  #       (Chat-tab chat: not on disk — Claude will ask me to paste content)
+   - SCOPE takes EITHER the literal `this session only` OR a list of items.
+   - Whatever appears as the value IS the active scope — Claude must cover
+   - every listed item, and must not treat a list as illustrative.
+   - List syntax (each line one item, `"<project> / <session name>"`):
+     - SCOPE:
+       - Claude session: "story2814:GOF staging buffer / Wade's review comment"
+       - Claude session: "debug_3bda_flat_freq / run CI tests"
+       - Claude chat: "<chat title>"
+         (Chat-tab chat: not on disk — Claude will ask me to paste content)
 - GRANULARITY: per-session  # how many handoff FILES a multi-item SCOPE yields:
-  #   consolidated = ONE file covering all items
-  #   per-project  = one file per project, covering its listed sessions
-  #   per-session  = one file per listed session/chat
-  # (Ignored when SCOPE is `this session only`.)
+  -   consolidated = ONE file covering all items
+  -   per-project  = one file per project, covering its listed sessions
+  -   per-session  = one file per listed session/chat # (Ignored when SCOPE is `this session only`.)
 - LOCAL_CLONE: auto         # auto = reuse an existing local clone if found; else clone
 
 ## Terminology: project vs session
