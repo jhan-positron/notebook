@@ -11,8 +11,9 @@ involved session, or in a fresh Code session on the same machine.
 - SCOPE: this session only
    - SCOPE takes EITHER the literal `this session only` OR a list of items.
    - Whatever appears as the value IS the active scope — Claude must cover
-   - every listed item, and must not treat a list as illustrative.
-   - List syntax (each line one item, `"<project> / <session name>"`):
+     every listed item, and must not treat a list as illustrative.
+   - List syntax (example only, not active — each line one item,
+     `"<project> / <session name>"`):
      - SCOPE:
        - Claude session: "story2814:GOF staging buffer / Wade's review comment"
        - Claude session: "debug_3bda_flat_freq / run CI tests"
@@ -21,7 +22,8 @@ involved session, or in a fresh Code session on the same machine.
 - GRANULARITY: per-session  # how many handoff FILES a multi-item SCOPE yields:
   -   consolidated = ONE file covering all items
   -   per-project  = one file per project, covering its listed sessions
-  -   per-session  = one file per listed session/chat # (Ignored when SCOPE is `this session only`.)
+  -   per-session  = one file per listed session/chat
+  - GRANULARITY as a whole is ignored when SCOPE is `this session only`.
 - LOCAL_CLONE: auto         # auto = reuse an existing local clone if found; else clone
 
 ## Terminology: project vs session
@@ -122,11 +124,22 @@ If SCOPE covers multiple sessions/chats, repeat the `Claude session:` /
 
 Body sections (omit empty ones):
 1. Objective
-2. Timeline — what was done, by date
-3. Current state — only claims backed by evidence from the session
+2. Environment — hostname(s) and working directories where the work ran.
+   State the host for every machine touched (ssh remote vs local Windows);
+   different projects live on different remote machines, so this is required
+   whenever any file path or command appears later in the file.
+3. Timeline — what was done, by date
+4. Artifacts — full host-qualified locations and file names of everything
+   the session produced or that a resumer needs: generated reports,
+   summaries, handoff/design docs, scripts and tools, data/output
+   directories, plus repo/branch/commit hashes for code changes.
+   Write paths as `<host>:<absolute path>` (e.g.
+   `delphi-3bda:/scratch/jhan/flat_freq_tests/README.md`). This section is
+   mandatory when the session created or modified any file.
+5. Current state — only claims backed by evidence from the session
    (commands, outputs, commit hashes); mark anything unverified as unverified
-4. Open items / next steps
-5. Gotchas & decisions — anything a fresh session would otherwise
+6. Open items / next steps
+7. Gotchas & decisions — anything a fresh session would otherwise
    rediscover the hard way
 
 ## Step 5 — Git workflow with approval gate
