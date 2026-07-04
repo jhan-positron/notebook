@@ -5,6 +5,19 @@ filesystem and git access, so not the Chat tab). Edit the Config block
 first if needed. For a multi-item SCOPE, run it in the most recent
 involved session, or in a fresh Code session on the same machine.
 
+## Triggering by reference (no paste needed)
+
+I may also invoke this by URL instead of pasting, in either form:
+- `please do per https://github.com/jhan-positron/notebook/blob/main/claude-handoff-generation-prompt.md`
+- `please do per <same URL>, add sessions: "projectX/session1", "projectY/session1"`
+
+When triggered this way: clone/pull REPO_URL first (required for Step 5
+anyway) and read this file from the clone — do not rely on fetching the
+URL directly. Run with the Config below as-is (`SCOPE: auto`); any
+`add sessions:` items in my message are SCOPE additions, same semantics as
+listing them under SCOPE (quoted `"<project> / <session name>"`, tolerant
+of spacing around the `/`).
+
 ## Config
 - REPO_URL: https://github.com/jhan-positron/notebook
 - TARGET_DIR: handoffs/     # dir inside the repo; create if missing; "." = repo root
