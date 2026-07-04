@@ -6,6 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "explore best freq combo"
   (project: debug_3bda_flat_freq)
+  - Transcript: DESKTOP-CI2JA7M:C:/Users/jibin/.claude/projects/C--Users-jibin-Documents-claude-debug-3bda-flat-freq/9a9c293d-d698-4655-aa8a-3e0374e20781.jsonl
 
 ## Objective
 Starting from the earlier flat-freq root-cause work (FINDINGS.md + delphi memory), find the best achievable frequency configuration on delphi-3bda (2x Xeon 6962P, 144 cores / 288 threads) via Intel SST (intel-speed-select): (1) the true all-core ceiling and whether HT siblings match, (2) heterogeneous combos where some cores run faster than the rest, (3) the optimum for the TRON workload shape (80 boosted app cores from resource-map.yaml, control plane on cores 0-23 pinned slow), and (4) a hardened, final flat_freq_utils.sh covering both use cases (all-flat and selective-boost).

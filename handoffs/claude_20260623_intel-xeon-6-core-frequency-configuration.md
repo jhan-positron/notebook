@@ -6,6 +6,7 @@
   (source: transcript timestamps, 05:32-06:04 UTC)
 - Claude session: "Intel Xeon 6 core frequency configuration"
   (project: Intel turbo boost)
+  - Transcript: DESKTOP-CI2JA7M:C:/Users/jibin/.claude/projects/ssh-60364261-8d8e-4982-86a9-b7a660e0b235/60364261-8d8e-4982-86a9-b7a660e0b235.jsonl
 
 ## Objective
 Determine, with quoted Intel documentation as evidence, how to configure an Intel Xeon 6 system (delphi-3af6) to trade between (A) a few high-priority cores at ~4.4 GHz with the rest at 2.7 GHz, and (B) all cores running above 2.7 GHz. Ultimate goal: boost Tron (runtron/tronperf) system performance. Research/analysis only — the user later asked for a handoff doc so Codex could review the analysis.

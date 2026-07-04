@@ -6,6 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "debug flat freq on CI machine"
   (project: debug_3bda_flat_freq)
+  - Transcript: DESKTOP-CI2JA7M:C:/Users/jibin/.claude/projects/C--Users-jibin-Documents-claude-debug-3bda-flat-freq/61afeb48-26f0-4f84-8119-089a0e4492a9.jsonl
 
 ## Objective
 Identify why the flat-frequency configuration (intel-speed-select core-power disable + turbo-freq disable) does not take effect on delphi-3bda (Xeon 6962P PCT machines): under load, 72 of 80 app CPUs stay clipped at 2700 MHz while 8 run high. Then confirm a fix experimentally, deliver reusable apply/revert bash utilities, and collect the relevant Intel documentation. Session started from "Please act per README.md" in the local project dir, building on a prior GPT-Codex handoff (HANDOFF_CLAUDE_BIOS_FAULT_TRIANGULATION_20260702.md) and an earlier Claude handoff (claude_HANDOFF-3bda-flat-freq.md).

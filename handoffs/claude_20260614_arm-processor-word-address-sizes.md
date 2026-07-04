@@ -6,6 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "ARM processor word/address sizes"
   (project: ARM spec)
+  - Transcript: DESKTOP-CI2JA7M:C:/Users/jibin/.claude/projects/ssh-1232ffd1-5f23-4b22-82a3-48449f33543c/1232ffd1-5f23-4b22-82a3-48449f33543c.jsonl
 
 ## Objective
 Answer two questions from the ARM markdown document set at /scratch/jhan/documents/ARM/md/:
