@@ -9,19 +9,20 @@ involved session, or in a fresh Code session on the same machine.
 - REPO_URL: https://github.com/jhan-positron/notebook
 - TARGET_DIR: handoffs/     # dir inside the repo; create if missing; "." = repo root
 - SCOPE: this session only
-   To consolidate several items into ONE handoff, list them all, e.g.:
-   SCOPE:
-     - Claude session: "story2814:GOF staging buffer / Wade's review comment"
-     - Claude session: "story2814:GOF staging buffer / GitHub issue for PR discussion"
-     - Claude session: "Asimov interpreter:design / Inteerpreter architecture"
-     - Claude session: "Asimov interpreter:design / PAL model listing"
-     - Claude session: "ARM spec / ARM processor word/address sizes"
-     - Claude session: "Intel turbo boost / Intel Xeon 6 core frequency configuration"
-     - Claude session: "debug_3bda_flat_freq / debug flat freq on CI machine"
-     - Claude session: "debug_3bda_flat_freq / explore best freq combo"
-     - Claude session: "debug_3bda_flat_freq / run CI tests"
-     - Claude chat: "<chat title>"
-      (Chat-tab chat: not on disk — Claude will ask me to paste content)
+  # SCOPE takes EITHER the literal `this session only` OR a list of items.
+  # Whatever appears as the value IS the active scope — Claude must cover
+  # every listed item, and must not treat a list as illustrative.
+  # List syntax (each line one item, `"<project> / <session name>"`):
+  #   SCOPE:
+  #     - Claude session: "story2814:GOF staging buffer / Wade's review comment"
+  #     - Claude session: "debug_3bda_flat_freq / run CI tests"
+  #     - Claude chat: "<chat title>"
+  #       (Chat-tab chat: not on disk — Claude will ask me to paste content)
+- GRANULARITY: per-session  # how many handoff FILES a multi-item SCOPE yields:
+  #   consolidated = ONE file covering all items
+  #   per-project  = one file per project, covering its listed sessions
+  #   per-session  = one file per listed session/chat
+  # (Ignored when SCOPE is `this session only`.)
 - LOCAL_CLONE: auto         # auto = reuse an existing local clone if found; else clone
 
 ## Terminology: project vs session
@@ -37,12 +38,15 @@ involved session, or in a fresh Code session on the same machine.
   e.g. `"debug_3bda_flat_freq / run CI tests"`.
 
 ## Goal
-Produce one markdown handoff file covering the work in SCOPE, written so a
-fresh session (or a human) can resume the work without this session's
-context. Then commit and push it to REPO_URL under TARGET_DIR — after my
-approval.
+Produce markdown handoff file(s) covering ALL items in SCOPE — file count
+per GRANULARITY — written so a fresh session (or a human) can resume the
+work without this session's context. Then commit and push to REPO_URL under
+TARGET_DIR — after my approval.
 
-Pipeline: evidence -> dates -> names -> filename -> file -> approval -> push
+Pipeline: evidence -> dates -> names -> filename(s) -> file(s) -> approval -> push
+
+Steps 1-4 apply PER OUTPUT FILE (dates/slug/header computed from the items
+that file covers). The Step 5 approval gate is shown ONCE listing all files.
 
 ## Step 1 — Determine activity dates (NOT today's date)
 Filename dates are when the work actually happened; it may span several days.
@@ -90,6 +94,10 @@ Filename dates are when the work actually happened; it may span several days.
 - `<slug>`: lowercase kebab-case.
   - Preferred: slugified session name; append slugified chat name with `__`
     separator if both fit.
+  - Apostrophes cannot appear in filenames. Drop possessive `'s` entirely
+    when slugifying: "Wade's review comment" -> `wade-review-comment`
+    (not `wades-review-comment`). Drop bare apostrophes the same way
+    (e.g. "don't" -> `dont`).
   - If that exceeds ~50 chars, replace with a shorter content-hint slug —
     the full names live inside the file, so the slug only needs to hint at
     the contents.
