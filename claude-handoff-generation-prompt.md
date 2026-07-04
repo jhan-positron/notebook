@@ -8,13 +8,22 @@ involved session, or in a fresh Code session on the same machine.
 ## Config
 - REPO_URL: https://github.com/jhan-positron/notebook
 - TARGET_DIR: handoffs/     # dir inside the repo; create if missing; "." = repo root
-- SCOPE: this session only
-   - SCOPE takes EITHER the literal `this session only` OR a list of items.
+- SCOPE: auto
+   - auto (the default): derive the scope from the repo itself — scan every
+     handoff file already in TARGET_DIR and collect their `Claude session:`
+     / `Claude chat:` header lines; every session/chat found is in scope
+     and its handoff gets UPDATED per Step 5. A session with no new
+     activity since its handoff's Activity END date is skipped (report it
+     as unchanged; no commit churn).
+   - If I ALSO list items under SCOPE, they are ADDED to the scanned set —
+     this is how a brand-new session gets its first handoff. I only ever
+     need to type a session name once.
+   - `this session only`: cover just the current session; skip the scan.
    - Whatever appears as the value IS the active scope — Claude must cover
-     every listed item, and must not treat a list as illustrative.
-   - List syntax (example only, not active — each line one item,
-     `"<project> / <session name>"`):
-     - SCOPE:
+     every item, and must not treat a list as illustrative.
+   - List syntax for additions (example only, not active — each line one
+     item, `"<project> / <session name>"`):
+     - SCOPE: auto
        - Claude session: "story2814:GOF staging buffer / Wade's review comment"
        - Claude session: "debug_3bda_flat_freq / run CI tests"
        - Claude chat: "<chat title>"
@@ -79,13 +88,28 @@ Filename dates are when the work actually happened; it may span several days.
 - If SCOPE includes other Claude Code sessions, resolve their names the same
   way. For claude.ai chats (not readable locally), ask me for the exact title.
 - If any name cannot be verified: ask me. Never paraphrase or invent a name.
+- Session renames: if a SCOPE item resolves (by content evidence or my
+  confirmation) to a transcript that an existing handoff already points to
+  via its `Transcript:` line, that is a RENAME of a covered session, not a
+  new session. Update that handoff: put the new name on the
+  `Claude session:` line, add a `Formerly named:` line recording the old
+  session name AND the old filename, and `git mv` the file to the new slug
+  (Step 5). Never create a second file for the same transcript.
+  Note: display names live only in the Claude app and are not on disk, so a
+  pure `SCOPE: auto` run cannot detect renames by itself — the handoff
+  keeps the old name until I mention the session's new name once in SCOPE
+  (or simply tell Claude about the rename).
 - Multi-item SCOPE handling:
   - Current session: use native context.
-  - Other Claude Code sessions: session titles do NOT appear inside the
-    transcripts, so grepping for the title text usually fails. Instead,
-    match by content evidence: grep transcripts for distinctive terms from
-    the title, then verify by reading the opening user request. If a match
-    is uncertain or a title matches no transcript, ask me.
+  - Fast path: if an existing handoff in TARGET_DIR has a `Transcript:`
+    header line, use that path directly — no matching or asking needed.
+    This is the normal case for `SCOPE: auto` refresh runs.
+  - Other Claude Code sessions (no Transcript line yet): session titles do
+    NOT appear inside the transcripts, so grepping for the title text
+    usually fails. Instead, match by content evidence: grep transcripts for
+    distinctive terms from the title, then verify by reading the opening
+    user request. If a match is uncertain or a title matches no transcript,
+    ask me.
   - Claude chats (Chat tab) are cloud-side and not readable from Claude
     Code: ask me to paste the relevant content; include only what I paste.
 - What Claude can and cannot discover on its own: Claude CAN enumerate and
@@ -123,10 +147,19 @@ Open with this header block. Keep the labels verbatim:
     - Activity dates: <YYYY-MM-DD> to <YYYY-MM-DD>
       (source: transcript timestamps | git log | file mtimes)
     - Claude session: "<full exact session name>"
-      - Formerly named: "<previous name>"
-        (only if renamed and verifiable; one line per prior name)
+      (project: <project display name>)
+      - Transcript: <host>:<absolute path to the session .jsonl>
+        (machine-readable pointer so future `SCOPE: auto` runs can match
+        this handoff to its session and check for new activity without
+        asking me; update the line if the transcript moves)
+      - Formerly named: "<previous name>"; file renamed from
+        `<previous filename>` on <YYYY-MM-DD>
+        (one line per prior name, newest first — the full rename history of
+        both the session and the file must be readable right here, without
+        consulting git history)
     - Claude chat: "<full exact chat title>"
-      (only if a chat is in SCOPE; same rename rule applies)
+      (only if a chat is in SCOPE; same rename rule applies; chats have no
+      Transcript line — content must be pasted by me each time)
 
 If SCOPE covers multiple sessions/chats, repeat the `Claude session:` /
 `Claude chat:` lines once per item — always those exact labels.
@@ -160,10 +193,12 @@ Body sections (omit empty ones):
    (dates in filenames drift as work continues).
    - If one exists: UPDATE that file in place — merge the new activity into
      the existing sections, refresh the "Generated by" date, and extend the
-     Activity dates END. If the date range changed, `git mv` the file to
-     the new `claude_<START>-<END>_<slug>.md` name in the same commit so
-     the filename stays truthful. Never create a second file for a session
-     that already has one.
+     Activity dates END. If the date range OR the session name changed
+     (rename detected per Step 2), `git mv` the file to the new
+     `claude_<START>-<END>_<slug>.md` name in the same commit so the
+     filename stays truthful, and record the old filename on the
+     `Formerly named:` header line. Never create a second file for a
+     session that already has one.
    - If none exists: write a new file. If an unrelated file with the same
      name is somehow present, stop and ask before overwriting.
 3. APPROVAL GATE — show me, for every output file: whether it is NEW or an
