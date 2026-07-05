@@ -10,27 +10,24 @@
   - App link: codex://threads/019eae2f-de4a-7d52-b20a-861e996a0dc8
 
 ## Objective
-Resume the Codex chat "please delete a session called exit" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Delete the standalone Codex session whose title/prompt was effectively `exit` while preserving an older BIOS/IPMI chat that merely contained the word `exit`.
 
-## Environment
-- Project: unsaved remote cwd
-- Host / cwd: andoria-11:/home/jhan
-- Codex thread id: 019eae2f-de4a-7d52-b20a-861e996a0dc8
-- App link: codex://threads/019eae2f-de4a-7d52-b20a-861e996a0dc8
+## Evidence source
+- Codex app `read_thread` summaries for thread `019eae2f-de4a-7d52-b20a-861e996a0dc8`.
+- Remote transcript path was not exposed; app-visible turns are the evidence.
 
-## Timeline
-- 2026-06-09: Chat was created according to Codex app inventory.
-- 2026-06-09: Last activity recorded by Codex app inventory.
+## Work performed
+- Initially checked whether the request referred to a tmux/session concept, then confirmed the user meant a Codex session.
+- Inspected Codex local session/history state.
+- Found no `session_index.jsonl` thread named exactly `exit`, but found two prompt-history entries containing `exit`.
+- Identified the standalone target as thread/session `019ea870-13a5-7440-8583-82fffe39686a`, containing only user prompt `exit` and reply `Exiting.`.
+- Used the supported Codex archive operation on that id first.
+- Then, because the user asked for deletion, removed the matching history entry and exact rollout file. This needed unsandboxed filesystem access because the store was read-only from the workspace sandbox.
 
 ## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+- The standalone `exit` Codex session was deleted/removed from history.
+- The older BIOS/IPMI conversation that contained an `exit` turn was intentionally left intact.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
-
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- If asked about this later, distinguish exact standalone session identity from incidental text matches.
+- Do not delete other sessions just because the word `exit` appears in their transcript.

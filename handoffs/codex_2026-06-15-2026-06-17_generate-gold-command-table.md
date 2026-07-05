@@ -10,27 +10,43 @@
   - App link: codex://threads/019ecebc-b8a8-7b22-a829-91c2dec7fe01
 
 ## Objective
-Resume the Codex chat "Generate GOLD command table" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Generate a GOLD command table and corresponding interpreter design/implementation from `positron-ai/asimovsw-docs` branch `bgamari-gold-spec`.
 
-## Environment
-- Project: interpreter
-- Host / cwd: andoria-11:/home/jhan/workspace/asimov/interpreter
-- Codex thread id: 019ecebc-b8a8-7b22-a829-91c2dec7fe01
-- App link: codex://threads/019ecebc-b8a8-7b22-a829-91c2dec7fe01
+## Evidence source
+- Codex app `read_thread` summaries for thread `019ecebc-b8a8-7b22-a829-91c2dec7fe01`.
+- Remote transcript path was not exposed; app-visible turns and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-15: Chat was created according to Codex app inventory.
-- 2026-06-17: Last activity recorded by Codex app inventory.
+## Work performed
+- Fetched `docs/gold.md` through the GitHub connector after public/raw URL attempts returned 404.
+- Generated a fresh `on_GOLD/` tree under `/home/jhan/workspace/asimov/interpreter`.
+- Produced architecture files:
+  - `on_GOLD/README.md`
+  - `on_GOLD/arch_design/commands_table.md`
+  - `on_GOLD/arch_design/design_validation.md`
+  - `on_GOLD/arch_design/interpreter_syntax.md`
+  - `on_GOLD/arch_design/register_schema.json`
+  - `on_GOLD/arch_design/registers.json`
+  - `on_GOLD/arch_design/repo_structure.md`
+- Produced module designs for parser, engine, main, output dispatcher/encoder, register files, simulated hardware controller, and test harness main.
+- Reworked the implementation to use shared command metadata rather than bootstrap-specific branches.
+- Added tests for GOLD commands, aliases, waits, and outputs.
 
-## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+## Validation
+- Built with CMake under `on_GOLD/code/build`.
+- `ctest --test-dir on_GOLD/code/build --output-on-failure` passed 2/2 tests.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
+## Key details
+- Source was cited as `docs/gold.md` on branch `bgamari-gold-spec`, blob SHA `d6e6d82f002425747f041656e28c5f5ca7e98520`.
+- The command table includes abstract GOLD commands and example-derived `WmemLoadAttnCmd` / `ReturnLogits` entries marked as `gold_v0` extensions.
+- `SalLoadCmd` is parsed and validated as a no-op success stub; it does not model SAL slot contents, SPM reads, or learned parameter storage.
 
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## PAL/MCP follow-up
+- The user later asked about PAL `listmodels`.
+- The app `CODEX_HOME=/home/jhan/codex-home-andoria-11` lacked the PAL MCP block, while `/home/jhan/.codex` had it.
+- Copied the `pal` MCP config block into `/home/jhan/codex-home-andoria-11/config.toml`, with backup `config.toml.backup.20260617_202101`.
+- Verified `codex mcp list` in the inherited `CODEX_HOME` showed `pal` enabled.
+
+## Resume checklist
+- Do not treat `SalLoadCmd` as semantically implemented beyond parse/validate/no-op.
+- Use the `on_GOLD/` tree, not the earlier bootstrap tree, for GOLD-specific work.
+- PAL should now be available in the app CODEX_HOME, but verify before relying on it.

@@ -10,27 +10,54 @@
   - App link: codex://threads/019ef1c2-0506-71e1-8555-4630217e9a31
 
 ## Objective
-Resume the Codex chat "Run runtron like CI" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Derive and execute a CI-like direct `runtron` benchmark on `delphi-3af6`, then use it as the baseline for Speed Select/turbo investigations.
 
-## Environment
-- Project: Intel speed-select N transac-mem
-- Host / cwd: delphi-3af6:/home/jhan/workspace/tron
-- Codex thread id: 019ef1c2-0506-71e1-8555-4630217e9a31
-- App link: codex://threads/019ef1c2-0506-71e1-8555-4630217e9a31
+## Evidence source
+- Codex app `read_thread` summaries for thread `019ef1c2-0506-71e1-8555-4630217e9a31`.
+- Remote transcript path was not exposed; app-visible turns and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-22: Chat was created according to Codex app inventory.
-- 2026-06-24: Last activity recorded by Codex app inventory.
+## Work performed
+- Investigated how `systems_test` drives CI-style performance and translated it into direct `runtron` commands.
+- Determined the target workload: `llama-3.2-3b-instruct-fast-tp2 @32u`.
+- Derived the direct command shape: four concurrent `gen/runtron` instances, eight prompts each, with `--instance i,4`, prompt length 199, generation length 335, isolated iterations 5, shared prompt length 800, and `TRON_RANDOMIZE_EXPERTS=defined`.
+- Wrote `/home/jhan/workspace/tron/claude-HANDOFF-runtron-delphi-3af6-ci.md`.
+- Created `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/runs/20260623_005228_delphi-3af6` and generated action plan/runbook/manifest/scripts.
+- Built wrappers:
+  - `scripts/run_ci_like_runtron.sh`
+  - `scripts/run_baseline_with_sidecars.sh`
+- Debugged hugepage/VFIO permission blockers, then reran after the user fixed group/device permissions and loaded `msr`.
+- Patched wrappers to avoid root-owned perf sleeps and run under `sudo -n -u jhan -g positron` where needed.
+
+## Key results
+- Baseline retry2 succeeded for `llama-3.2-3b-instruct-fast-tp2 @32u`:
+  - generation: `145.101 tok/s` per user, estimated `4643.225 tok/s` total
+  - parse: `1179.469 tok/s` per user, estimated `37743.002 tok/s` total
+- Turbo-off was slower:
+  - generation about `-1.30%`
+  - parse about `-2.44%`
+  - lower package power
+  - `no_turbo` was restored to `0`
+- Thread placement summary matched the Granite Rapids resource map:
+  - devices `10/13/38/3b/90/93/b9/bc`
+  - dev cores `25/26/49/50/73/74/97/98`
+  - app slices `27-118` split by instance
+
+## Important artifacts
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/ACTION_PLAN.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/TRON_RUNBOOK.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/HANDOFF.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/SYSTEM_CHANGE_LOG.md`
+- `summaries/turbo_comparison.md`
+- `summaries/thread_placement_current.md`
+- `summaries/tsx_tpause_audit.md`
+- `summaries/resource_map_review.md`
 
 ## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+- The direct runtron CI-like path is the trusted benchmark path for this work.
+- `tronperf` remains useful for targeted Perfetto capture, but direct `runtron` is primary for perf deltas.
+- `intel-speed-select` was not initially installed; a temporary v6.8 build was later used in related Speed Select threads.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
-
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Use explicit `SYSTEM_CONFIG` and explicit `--instance` to avoid stale environment problems.
+- Preserve the user preference for speed: avoid extra shared-machine gates unless a change is reboot/BIOS/package/kernel/destructive/git push/commit/security-sensitive.
+- Log host/runtime changes in `SYSTEM_CHANGE_LOG.md`.

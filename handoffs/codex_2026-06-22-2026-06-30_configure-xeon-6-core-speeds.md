@@ -10,27 +10,61 @@
   - App link: codex://threads/019ef2ee-5e2f-7101-8d42-2c7afa7b298e
 
 ## Objective
-Resume the Codex chat "Configure Xeon 6 core speeds" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Figure out and document how to configure Xeon 6 / Intel Speed Select on `delphi-3af6` so active TRON cores avoid the low 2.7 GHz SST-TF clipped shape and improve benchmark performance.
 
-## Environment
-- Project: Intel speed-select N transac-mem
-- Host / cwd: delphi-3af6:/home/jhan/workspace/tron
-- Codex thread id: 019ef2ee-5e2f-7101-8d42-2c7afa7b298e
-- App link: codex://threads/019ef2ee-5e2f-7101-8d42-2c7afa7b298e
+## Evidence source
+- Codex app `read_thread` summaries for thread `019ef2ee-5e2f-7101-8d42-2c7afa7b298e`.
+- Remote transcript path was not exposed; app-visible turns, summaries, and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-22: Chat was created according to Codex app inventory.
-- 2026-06-30: Last activity recorded by Codex app inventory.
+## Work performed
+- Researched Intel Xeon 6962P Speed Select behavior using local references and host readbacks.
+- Built or used a preserved `intel-speed-select` v1.18 binary from Linux v6.8 sources.
+- Established that `flat_freq` means disabling SST-TF while leaving OS turbo on and core-power disabled across populated SST domains `0 24 48 72 96 120`.
+- Generated CI-team handoff/install guidance for `intel-speed-select`, kernel modules, `/dev/isst_interface`, and reboot persistence.
+- Ran extensive base-versus-flat performance matrices for Llama 3B, Qwen 32B, Llama 70B, and GPT-OSS.
+- Added per-CPU turbostat parsing and backfilled frequency summaries.
+- Ran full-stack thread-real-work diagnostics with Perfetto, perf stat/record, and turbostat.
+- Generated management and distilled-knowledge reports/HTML.
+- Investigated why `delphi-3bda` did not reproduce the `flat_freq` uplift and prepared debug handoffs.
 
-## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+## Configuration result
+- Base policy:
+  - `turbo-freq enable`
+  - `core-power disable`
+  - across CPUs `0 24 48 72 96 120`
+- Flat policy:
+  - `core-power disable`
+  - `turbo-freq disable`
+  - across the same six populated SST domains
+- Readback expectation:
+  - `speed-select-turbo-freq:disabled`
+  - `speed-select-core-power:disabled`
+  - `clos-enable-status:disabled`
+- Representative command shape:
+  - `sudo "$ISST" --cpu "$cpu" turbo-freq disable`
+  - `sudo "$ISST" --cpu "$cpu" core-power disable`
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
+## Key performance results
+- `llama-3.2-3b-instruct-fast-tp2 @32u` CI shape: decode about `+12.48%`, parse about `+28.49%`.
+- `llama-3.1-8b-instruct-good-tp2` one instance long prompt: about `+9.7%` generation/request, `+26%` whole iteration, and `+28.5%` prefill.
+- Qwen 32B TP2 @8u CI shape: decode about `+0.917%`, parse about `+1.505%`.
+- Llama 70B TP4 @4u CI shape: decode about `+1.152%`, parse about `+1.136%`.
+- GPT-OSS TP4 @8u PL2047/gen514: decode about `+8.69%`, parse about `+18.55%`.
+- Prompt-length sweeps showed flat_freq benefit generally grew with longer prefill/prompt lengths, especially for 3B and GPT-OSS.
 
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Thread-real-work finding
+- Earlier scheduler-only Perfetto was misleading.
+- Full-stack PMU evidence showed real CPU work spread across app workers; TX/RX threads scheduled heavily but spent much of that time in wait paths.
+- `CPU27` / work queue was not the dominant real-work thread.
+
+## Important artifacts
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/flat_freq/highlight.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/flat_freq/ci_team_handoff.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/runs/20260626_thread_real_work_shape_fullstack/summaries/final_thread_real_work_report.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/HANDOFF.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/tmp/system_perf_research_workflow_template.html`
+
+## Resume checklist
+- Do not describe flat_freq as a fixed all-core exact clock. It removes the SST-TF priority clipping so participating active cores broadly run around 3.8-3.95 GHz under the tested loads.
+- For 3bda/3bd6 issues, use the later root-cause chats; this thread only reached the first debug framing.
+- For CI reproduction, capture SST readback before each arm and per-CPU turbostat during the benchmark.

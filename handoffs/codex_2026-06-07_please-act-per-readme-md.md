@@ -10,27 +10,37 @@
   - App link: codex://threads/019ea3f3-f68f-7920-804c-a171997cd9f3
 
 ## Objective
-Resume the Codex chat "Please act per README.md" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Run the TRON Perfetto README analysis, clarify thread-count and CPU-placement inconsistencies, and draft updated capture guidance while preserving `input-2-ai`.
 
-## Environment
-- Project: unsaved remote cwd
-- Host / cwd: andoria-11:/home/jhan/workspace/intel-vs-amd/tron-atlas-perfetto
-- Codex thread id: 019ea3f3-f68f-7920-804c-a171997cd9f3
-- App link: codex://threads/019ea3f3-f68f-7920-804c-a171997cd9f3
+## Evidence source
+- Codex app `read_thread` summaries for thread `019ea3f3-f68f-7920-804c-a171997cd9f3`.
+- Remote transcript path was not exposed; app-visible turns and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-07: Chat was created according to Codex app inventory.
-- 2026-06-07: Last activity recorded by Codex app inventory.
+## Work performed
+- Read the repo README and `input-2-ai/README.md`.
+- Generated `/home/jhan/workspace/intel-vs-amd/tron-atlas-perfetto/TRON_PERFETTO_ANALYSIS.md`.
+- Answered session identity questions: thread `019ea3f3-f68f-7920-804c-a171997cd9f3`, host `delphi-3af6`, cwd `/home/jhan/workspace/intel-vs-amd/tron-atlas-perfetto`.
+- Clarified that the captures lacked cache misses/references, cycles/instructions/stalls, scheduler ftrace, page-fault events, NUMA locality, and hugepage locality.
+- Fixed report language around a mismatch between "28 threads" and "19+2+2=23" by distinguishing Perfetto thread table rows from actual worker/TX/RX thread roles.
+- Added CPU placement explanation for Intel Llama gen/full:
+  - workers `28-46`
+  - main/work queue `27`
+  - TX `25-26`
+  - RX `169-170`
+  - workload logical CPUs `25-46,169-170`
+  - likely physical footprint `25-46` because `169-170` are likely SMT siblings of `25-26`
+- Drafted DRAM pressure measurement recommendations.
 
-## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+## Key findings
+- The existing traces do not permit exact runtime scheduling or per-core saturation because `sched_slice=0`.
+- The "28 thread" figure was a Perfetto table-count artifact, not the number of active worker/TX/RX threads.
+- Recommended DRAM pressure evidence includes IMC bandwidth, memory-controller utilization, loaded memory latency, memory-bound stall counters, NUMA locality, page faults, and allocation pressure.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
+## Important artifacts
+- `/home/jhan/workspace/intel-vs-amd/tron-atlas-perfetto/TRON_PERFETTO_ANALYSIS.md`
+- `/tmp/README.md` for revised capture guidance
 
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Treat the root report as analysis of limited traces, not as a full CPU/PMU proof.
+- Do not update `input-2-ai` unless the user explicitly requests it.
+- If asked for DRAM pressure, use sidecars such as `pcm-memory`, `perf stat`, `numastat -p`, and `/proc/<pid>/numa_maps`.

@@ -10,27 +10,57 @@
   - App link: codex://threads/019f1af9-c1db-7b42-aa41-31ec648bb28e
 
 ## Objective
-Resume the Codex chat "root cause flat freq not working" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Root-cause why flat frequency improved performance on `delphi-3af6` but not on `delphi-3bda`, using 3bda/3bd6/3af6 evidence, Oracle fault context, PAL/Claude review, and CLOS-state checks.
 
-## Environment
-- Project: debug_3bda
-- Host / cwd: delphi-3bda:/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda
-- Codex thread id: 019f1af9-c1db-7b42-aa41-31ec648bb28e
-- App link: codex://threads/019f1af9-c1db-7b42-aa41-31ec648bb28e
+## Evidence source
+- Codex app `read_thread` summaries for thread `019f1af9-c1db-7b42-aa41-31ec648bb28e`.
+- Remote transcript path was not exposed; app-visible turns, attached summaries, PAL results, and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-30: Chat was created according to Codex app inventory.
-- 2026-07-02: Last activity recorded by Codex app inventory.
+## Work performed
+- Reviewed 3bda flat-frequency failure evidence and supported Oracle-facing escalation.
+- Identified `PCU_VENDOR_FAULT_CONTEXT_20260701.md` as the first file to send to Oracle, with `PROCESSOR_PCU_FAULT_CORRELATION_20260701.md` as a second attachment.
+- Used PAL/Claude Fable (`claude-fable-5`) after explicit user approval to review curated flat-frequency debug reports.
+- Wrote/updated `pal_fable_flat_freq_review.py` so large reports were passed as PAL context files instead of inline text.
+- Created and fixed `check_spintel_8008_5l_fault.sh` to check whether another machine had the same `SPINTEL-8008-5L` / `fault.cpu.intel.disp_timeout` signature.
+- Helped the user test `delphi-3bd6`, including runner stop/mask guidance and a 3bd6 flat-frequency test script.
+- Wrote `test_flat_freq_function_3bd6.sh` to load modules, apply flat_freq, run a synthetic workload, sample with turbostat, classify pass/fail, and revert.
+- Wrote Claude-facing handoff `HANDOFF_CLAUDE_BIOS_FAULT_TRIANGULATION_20260702.md`.
+- Reviewed Claude's later `ROOT_CAUSE_CLOS_PARTITION_CLAUDE_20260701.md` and live-checked CLOS associations.
+
+## Key findings
+- Initial leading hypothesis was an active Oracle/ILOM CPU/PCU fault on 3bda:
+  - `SPINTEL-8008-5L`
+  - `fault.cpu.intel.disp_timeout`
+  - P1/CPU health marked service required.
+- PAL/Fable agreed the clamp was below Linux HWP/PERF request programming and looked like a latched SST-TF priority mask, but said the fault marker was not yet a proven mechanism.
+- 3bd6 did not have the exact 3bda PCU dispatcher timeout fault; it had a different IERR marker.
+- 3bd6 then reproduced the same failure shape:
+  - ISST readback looked flat (`speed-select-turbo-freq:disabled`, `core-power:disabled`)
+  - HWP/PERF requests were max/flat
+  - actual loaded frequency still split into `72` CPUs around `2700 MHz` and `8` CPUs around `4100 MHz`
+  - fast CPUs included `36,37,54,55,90,91,108,109`
+- BIOS comparison made C-state/TPM differences worth checking but no longer sufficient as the only theory because 3bd6 also failed.
+- Claude's CLOS-partition diagnosis became the strongest working root cause:
+  - live 3bda CLOS0 max `4400 MHz`
+  - live 3bda CLOS3 max `2700 MHz`
+  - slow workload CPUs such as `27` and `70` were CLOS3
+  - fast CPUs such as `36` and `90` were CLOS0
+  - this exactly matched the observed "many 2700 MHz + few fast CPUs" pattern.
 
 ## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+- Working root cause: stale or persistent CLOS/SST-TF priority partitioning, not ordinary cpufreq/HWP/PERF_CTL, and not necessarily the 3bda PCU fault alone.
+- 3af6 current CLOS state was not read during one check because its ISST drivers were not loaded after reboot, and the session deliberately avoided changing host state to load them.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
+## Important artifacts
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/PCU_VENDOR_FAULT_CONTEXT_20260701.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/PROCESSOR_PCU_FAULT_CORRELATION_20260701.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/PAL_FABLE_FLAT_FREQ_REVIEW_20260701.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/check_spintel_8008_5l_fault.sh`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/test_flat_freq_function_3bd6.sh`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/HANDOFF_CLAUDE_BIOS_FAULT_TRIANGULATION_20260702.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/ROOT_CAUSE_CLOS_PARTITION_CLAUDE_20260701.md`
 
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Next proof step is a controlled CLOS-clear A/B on 3bda or post-reboot CLOS confirmation on 3af6, not more generic BIOS comparison.
+- Be careful with absolute language: SPINTEL/TPM/BIOS faults are no longer needed to explain the frequency behavior; that does not prove they are irrelevant.
+- Test the exact CLOS-clear sequence before adopting it as the fix.

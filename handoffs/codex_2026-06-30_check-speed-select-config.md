@@ -10,27 +10,61 @@
   - App link: codex://threads/019f196f-4b4c-75a3-b1eb-3020c53d56de
 
 ## Objective
-Resume the Codex chat "Check speed-select config" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Determine whether `delphi-3bda` was configured correctly for `flat_freq`, then summarize the key evidence for a new session that could compare both `delphi-3af6` and `delphi-3bda`.
 
-## Environment
-- Project: debug_3bda
-- Host / cwd: delphi-3bda:/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda
-- Codex thread id: 019f196f-4b4c-75a3-b1eb-3020c53d56de
-- App link: codex://threads/019f196f-4b4c-75a3-b1eb-3020c53d56de
+## Evidence source
+- Codex app `read_thread` summaries for thread `019f196f-4b4c-75a3-b1eb-3020c53d56de`.
+- Remote transcript path was not exposed; app-visible turns and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-30: Chat was created according to Codex app inventory.
-- 2026-06-30: Last activity recorded by Codex app inventory.
+## Work performed
+- Read the existing `HANDOFF.md` in `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda`.
+- Performed read-only inspection from the Codex session and discovered that the sandbox could not run root-only Intel Speed Select readbacks.
+- Provided exact commands for the user to run externally on `delphi-3bda`, including:
+  - host/topology capture
+  - cpufreq anchor capture
+  - `intel-speed-select --info`
+  - `perf-profile info`
+  - per-anchor `perf-profile info` and `core-power info`
+  - `turbo-freq info -l 0..3` scan
+  - optional turbostat idle snapshot
+- Reviewed `inspect.sh` and the generated inspection directory.
+- Wrote `HANDOFF_SUMMARY.md`, then later wrote a standalone `HANDOFF_BOTH_SYSTEMS.md`.
+- Analyzed `/scratch/jhan/flat_freq_test` turbostat/thread-placement captures from a CI-like 3bda run.
+
+## Key findings
+- The visible platform basics looked sane:
+  - Xeon 6962P, 2 sockets, 72 cores/socket, 288 logical CPUs.
+  - six populated SST anchors `0 24 48 72 96 120`.
+  - `intel_pstate` active, governor performance, EPP performance, turbo globally enabled.
+- Externally generated `isst_anchor_readback.txt` showed all six populated domains in expected flat-frequency posture:
+  - `perf-profile-level-1`
+  - `speed-select-turbo-freq:disabled`
+  - `speed-select-core-power:disabled`
+  - `core-power enable-status:disabled`
+  - `clos-enable-status:disabled`
+- Extra `cpu--1` powerdomains showing turbo-freq enabled were treated as unpopulated/non-anchor domains, not evidence that the six real domains were wrong.
+- 3af6 historical evidence also used `perf-profile-level-1`; the confusion was likely `turbo-ratio-limits-level-0` inside the level-1 block.
+- Uncore was already at max in the captured snapshot, so Bill's uncore pinning idea was likely a no-op for this workload.
+- Runtime CI-like 3bda frequency shape did not match good flat_freq:
+  - active window about samples `85-127`
+  - package-wide `Bzy_MHz` around `2829`
+  - busy physical app cores around `2821 MHz`
+  - 86 CPUs clustered near `2700 MHz`
+  - only 10 CPUs near `3.9-4.0 GHz`
+  - placement itself was sane across domains 1-4; the problem was frequency shape.
+
+## Important artifacts
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/HANDOFF_SUMMARY.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/HANDOFF_BOTH_SYSTEMS.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/20260630_170241_inspection`
+- `/scratch/jhan/flat_freq_test/turbostat_per_cpu_during_ci.tsv`
+- `/scratch/jhan/flat_freq_test/thread_cpu_placement_during_ci.txt`
 
 ## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+- The important distinction is: 3bda looked configured correctly by SST readback, but did not show the desired runtime flat-frequency shape during the CI-like run.
+- SSH from 3bda to 3af6 was blocked by authentication at the end of this chat, so cross-machine live inspection moved to later work.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
-
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Do not stop after confirming ISST readback. The bug is readback-correct but runtime-wrong.
+- Compare runtime turbostat under load, not only `intel-speed-select` policy output.
+- Use `HANDOFF_BOTH_SYSTEMS.md` when starting a fresh cross-machine debug session.

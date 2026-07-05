@@ -10,27 +10,48 @@
   - App link: codex://threads/019f1446-4675-7ee3-8a6c-29d4f7c23fea
 
 ## Objective
-Resume the Codex chat "Explore core power feature" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Explore Intel Speed Select Core Power (SST-CP), produce an explainer/report, and test whether CLOS/core-power or active SST-TF can create useful high/common frequency shapes for TRON.
 
-## Environment
-- Project: Intel speed-select N transac-mem
-- Host / cwd: delphi-3af6:/home/jhan/workspace/tron
-- Codex thread id: 019f1446-4675-7ee3-8a6c-29d4f7c23fea
-- App link: codex://threads/019f1446-4675-7ee3-8a6c-29d4f7c23fea
+## Evidence source
+- Codex app `read_thread` summaries for thread `019f1446-4675-7ee3-8a6c-29d4f7c23fea`.
+- Remote transcript path was not exposed; app-visible turns, PAL calls, and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-29: Chat was created according to Codex app inventory.
-- 2026-06-30: Last activity recorded by Codex app inventory.
+## Work performed
+- Read and re-ran the project according to `/home/jhan/workspace/intel-vs-amd/speed-select/input-2-ai/explore_core-power.md`.
+- Used PAL/Claude (`claude-opus-4-8` and later `claude-opus-4-6`) for plan and interpretation checks.
+- Generated a fresh run area under `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/core-power_experiment`.
+- Captured host preflight and Intel Speed Select help/readback evidence.
+- Built microbenchmarks and harnesses under `/home/jhan/workspace/tron/codex_tmp/core_power_*`.
+- Proved that CLOS max clamps can differentiate two cores under low active-core load.
+- Generated and iteratively improved `final_report.md`, `core_power.html`, `mechanism_probe_results.md`, `core_power_help_source_distill.md`, and related summaries.
+- Ran an active SST-TF follow-up and later high/common frequency-shape searches.
 
-## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+## Key results
+- Gate A CLOS max-clamp worked:
+  - Equal-weight clamp control: CPU27 around `4310.556 MHz` perf cycles/task-clock, CPU28 around `3879.188 MHz`, delta about `431 MHz`.
+  - cpufreq corroborated CPU27 around `4328.750 MHz`, CPU28 around `3899.989 MHz`.
+- Proportional weight effect remained inconclusive in the short 24-core saturation probe.
+- TRON-shaped follow-on initially stopped because existing traces showed 19-39 worker threads, over the brief's stop threshold.
+- Active SST-TF follow-up succeeded:
+  - pilot selected core `4400 MHz`, common active cores `2700 MHz`
+  - same-session FPS gain averaged about `+7.135%`
+  - final cleanup returned all 288 logical CPUs to CLOS0, core-power disabled, turbo-freq enabled.
+- "Base" needed careful naming: baseline has `speed-select-turbo-freq:enabled`, but no active high/low priority CPU layout because `core-power`/CLOS is disabled.
+- Later max search with same CLOS config and benchmark `high >= 4.0 GHz`, `common >= 3.89 GHz` passed the full range:
+  - `117 high + 1 common` for CPUs `24-141`
+  - selected minimum `4099.235 MHz`, common average `3899.941 MHz`
+  - cleanup `assoc_count=288 bad_nonzero=0`
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
+## Important artifacts
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/core-power_experiment/final_report.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/core-power_experiment/core_power.html`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/core-power_experiment/mechanism_probe_results.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/core-power_experiment/core_power_help_source_distill.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/core-power_experiment/runs/20260629_213113_sst_tf_followup`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/core-power_experiment/runs/20260630_220409_max_40_vs_389_common_probe`
 
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Distinguish SST-CP CLOS max clamps from active SST-TF priority buckets.
+- Do not claim CLOS proportional weights are proven useful; only max clamp was proven.
+- The `intel-speed-select` binary path may contain `flat_freq`, but that does not mean the active policy is flat_freq.
+- Future readback recipes should use `turbo-freq info -l 0` where this binary requires a level.

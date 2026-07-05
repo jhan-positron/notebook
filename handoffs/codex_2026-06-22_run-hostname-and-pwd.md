@@ -10,27 +10,23 @@
   - App link: codex://threads/019ef01a-5740-7283-ad05-97390df4d2af
 
 ## Objective
-Resume the Codex chat "Run hostname and pwd" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Answer a simple environment probe by running `hostname` and `pwd`.
 
-## Environment
-- Project: tron-atlas-perfetto
-- Host / cwd: delphi-3af6:/home/jhan/workspace/intel-vs-amd/tron-atlas-perfetto
-- Codex thread id: 019ef01a-5740-7283-ad05-97390df4d2af
-- App link: codex://threads/019ef01a-5740-7283-ad05-97390df4d2af
+## Evidence source
+- Codex app `read_thread` summary for thread `019ef01a-5740-7283-ad05-97390df4d2af`.
+- Remote transcript path was not exposed; the app-visible turn is the evidence.
 
-## Timeline
-- 2026-06-22: Chat was created according to Codex app inventory.
-- 2026-06-22: Last activity recorded by Codex app inventory.
+## Result
+The command output was:
+
+```text
+hostname: delphi-3af6
+pwd: /home/jhan/workspace/intel-vs-amd/tron-atlas-perfetto
+```
 
 ## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+- No files were changed.
+- No follow-up work was left open in this chat.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
-
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- This handoff exists only to preserve stable chat identity; there is no project state to resume.

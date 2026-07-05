@@ -10,27 +10,41 @@
   - App link: codex://threads/019ef01d-df49-76a0-99de-e77e7b2e4cd3
 
 ## Objective
-Resume the Codex chat "Review action plan" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Review a Speed Select action plan for execution risks, then start the read-only implementation pass under the Speed Select workspace.
 
-## Environment
-- Project: Intel speed-select N transac-mem
-- Host / cwd: delphi-3af6:/home/jhan/workspace/tron
-- Codex thread id: 019ef01d-df49-76a0-99de-e77e7b2e4cd3
-- App link: codex://threads/019ef01d-df49-76a0-99de-e77e7b2e4cd3
+## Evidence source
+- Codex app `read_thread` summaries for thread `019ef01d-df49-76a0-99de-e77e7b2e4cd3`.
+- Remote transcript path was not exposed; app-visible turns and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-22: Chat was created according to Codex app inventory.
-- 2026-06-22: Last activity recorded by Codex app inventory.
+## Work performed
+- Reviewed the attached `ACTION_PLAN.md` in a code-review posture.
+- Identified execution hazards before privileged tuning:
+  - TSX safety gate came too late.
+  - Privileged tuning lacked rollback/state capture.
+  - Representative workload and success metrics were ordered too late.
+  - `turbostat --Summary` conflicted with per-core `Bzy_MHz` evidence.
+  - The benchmark matrix risked confounding pinning, SST, and resource-map effects.
+- After the user provided `context.md` and then `input-2-ai/README.md`, generated/updated the Speed Select plan under `/home/jhan/workspace/intel-vs-amd/speed-select/workspace`.
+- Diagnosed a stale `SYSTEM_CONFIG=--instance 1,2` inherited from shell startup rather than TRON.
+- Started execution through read-only phases only.
+
+## Important findings
+- Host context: `delphi-3af6`, cwd `/home/jhan/workspace/tron`.
+- The common startup file sourced `/home/jhan/home/jibin.bashrc.positron.dev`, which exported `SYSTEM_CONFIG=--instance 1,2`.
+- Host-specific override logic looked for `/home/jhan/delphi-3af6-setup.sh`, but the existing override file was `/home/jhan/andoria-11-setup.sh`, so it was never sourced.
+- `./perfetto/tronperf` exists and wraps `gen/runtron`; `gen/tronperf` does not exist.
+- Real `tronperf` execution may touch tracefs and call `sudo chown -R "$USER" /sys/kernel/tracing`, so the session stopped before running it.
+- Host preflight found Xeon 6962P, 288 logical CPUs, `intel_pstate=active`, `no_turbo=0`, `tsx_async_abort=Not affected`, `waitpkg` present, and `rtm`/`hle` not exposed.
+
+## Important artifacts
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/ACTION_PLAN.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/TRON_RUNBOOK.md`
+- `/home/jhan/workspace/intel-vs-amd/speed-select/workspace/runs/20260622_235310_delphi-3af6`
 
 ## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+- The session intentionally stopped at a checkpoint before running benchmarks, `sudo`, sysfs writes, turbo changes, SST changes, package installs, or tuning.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
-
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Fix or account for the `SYSTEM_CONFIG` host-specific override before performance runs.
+- Keep TSX/preflight and rollback snapshots before any benchmark or tuning that could mutate host state.
+- Treat `tronperf` as privileged/mutating because of tracefs behavior.

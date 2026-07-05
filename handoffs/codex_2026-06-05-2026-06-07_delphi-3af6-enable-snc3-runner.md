@@ -10,27 +10,35 @@
   - App link: codex://threads/019e98f4-f958-7301-a6cd-fd39e0d2e43a
 
 ## Objective
-Resume the Codex chat "delphi-3af6 enable-SNC3 runner" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Run the full SNC3 characterization on `delphi-3af6`, generate evidence-backed reports and figures, then translate the results into TRON/SNC3 performance guidance.
 
-## Environment
-- Project: unsaved remote cwd
-- Host / cwd: andoria-11:/home/jhan/workspace/intel-vs-amd/enable-SNC3
-- Codex thread id: 019e98f4-f958-7301-a6cd-fd39e0d2e43a
-- App link: codex://threads/019e98f4-f958-7301-a6cd-fd39e0d2e43a
+## Evidence source
+- Codex app `read_thread` summaries for thread `019e98f4-f958-7301-a6cd-fd39e0d2e43a`.
+- Remote transcript path was not exposed in the app inventory, so this handoff is based on app-visible turns and artifact paths named in the chat.
 
-## Timeline
-- 2026-06-05: Chat was created according to Codex app inventory.
-- 2026-06-07: Last activity recorded by Codex app inventory.
+## Work performed
+- Confirmed the machine was in SNC3 mode: `/sys/devices/system/node/online` was `0-5` on a 2-socket system.
+- Created and patched the SNC3 runner scripts under `/home/jhan/workspace/intel-vs-amd/enable-SNC3/claude-workspace/scripts`, including `01_inspect.sh`, `02_latency.sh`, `05_topology_bw.sh`, `08_thread_scaling.sh`, and `09_loaded_latency.sh`.
+- Wrote predictions before running the suite in `claude-workspace/REPORT/PREDICTIONS.md`.
+- Fixed an initial contaminated/partial run caused by an over-strict `sudo -n true` gate, removed the partial `20260605_1817` result, and reran cleanly.
+- Built the tools, mounted `resctrl`, and ran the full SNC3 suite on `delphi-3af6`.
+- Generated `REPORT/FINAL_REPORT.md` plus a figure bundle under `REPORT/figures/`, including `make_figures.py`, `figure_data.csv`, and nine PNG figures.
+- Later produced `REPORT/TRON_SNC3_PERFORMANCE_PREDICTION.md` to interpret the SNC3 measurements against TRON Perfetto evidence.
+
+## Key findings
+- The suite completed with `run_full_codex OK`; SNC3 CSVs had zero failed rows and the final report/figures were non-empty.
+- Test 12 had 13 rows marked `background_finished_during_probe`; those rows were retained in CSV evidence but excluded from the figure that would otherwise overstate the result.
+- There was no same-machine SNC-OFF Test 12 CSV, so cross-mode claims had to stay caveated.
+- SNC3 looked like a slight win or neutral only for carefully placed compact Llama steady-decode workloads.
+- Naive placement was risky: Intel Llama CPUs `25-46` with `NUMA set 0` mapped to node 1 while memory was on node 0.
+- Qwen, prefill, model-load, and unsharded paths were risky because one SNC node measured around 204 GB/s while SNC-OFF socket binding could expose about 596 GB/s.
 
 ## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+- The main deliverables are the final SNC3 report, figure bundle, and TRON-focused SNC3 prediction note in the `enable-SNC3` workspace.
+- The working conclusion is that SNC3 only helps TRON if worker, memory, DMA, and device queues are explicitly sharded per SNC node.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
-
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Start from `REPORT/FINAL_REPORT.md` and `REPORT/TRON_SNC3_PERFORMANCE_PREDICTION.md`.
+- Treat figure 9/Test 12 with the `background_finished_during_probe` caveat.
+- Do not infer SNC-OFF same-machine loaded-latency deltas unless that missing CSV has since been produced.
+- If rerunning, use the fixed gates and avoid reusing the contaminated `20260605_1817` partial result.

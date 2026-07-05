@@ -10,27 +10,42 @@
   - App link: codex://threads/019f15d7-06cf-7590-b73e-6413248cb5c1
 
 ## Objective
-Resume the Codex chat "Document Tron thread pinning" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Generate a standalone HTML explanation of how TRON maps `config/resource-map.yaml` CPU/device entries to software threads and pinning.
 
-## Environment
-- Project: tron
-- Host / cwd: andoria-11:/home/jhan/workspace/tron
-- Codex thread id: 019f15d7-06cf-7590-b73e-6413248cb5c1
-- App link: codex://threads/019f15d7-06cf-7590-b73e-6413248cb5c1
+## Evidence source
+- Codex app `read_thread` summary for thread `019f15d7-06cf-7590-b73e-6413248cb5c1`.
+- Remote transcript path was not exposed; app-visible turns and named artifact are the evidence.
 
-## Timeline
-- 2026-06-29: Chat was created according to Codex app inventory.
-- 2026-06-29: Last activity recorded by Codex app inventory.
+## Work performed
+- Traced `config/resource-map.yaml` through `src/system/resource_map.cpp` and related runtime paths.
+- Identified the CPU sets used by the C++ path:
+  - `devices`
+  - `tron_cores`
+  - `dev_cores`
+  - optional `helper_cores`
+  - `numa_nodes`
+- Determined that sibling/peer cores are not chosen randomly at thread start.
+- Clarified that although YAML may have `peer_cores`, the C++ path found in this session reads `tron_cores` and uses hwloc to compute peers through `find_peers()` / `peer_of()`. A separate shell parser has a `--peer` mode for tooling.
+- Identified major thread families:
+  - main thread
+  - lazy app worker pool
+  - device TX worker threads
+  - RX subthreads
+  - TSC calibration, tracing, FUSE, monitor, and model/request helper threads as applicable.
+- Wrote a standalone HTML artifact.
 
-## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+## Key conclusions
+- Device side is concrete: `std::thread workers[8]`; one TX worker starts per active FPGA, and each TX worker starts one RX worker pinned to the TX core's hwloc peer.
+- Max data-plane thread count is formula-based:
+  - `1 main + (app_cores - 1 app workers) + 2 * active_devices`
+- For Genoa96 `--instance 1,2`:
+  - `72 app cores -> 71 app workers`
+  - `4 devices -> 8 TX/RX workers`
+  - total core data-plane threads: `80`
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
+## Important artifact
+- `/home/jhan/workspace/tron/codex_tmp/tron_threads_explainer/tron_threads.html`
 
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- If the repo has changed, re-check the resource-map C++ path and line anchors before reusing the HTML as current source documentation.
+- Keep the distinction between configured YAML peer entries and hwloc-computed peer PUs.

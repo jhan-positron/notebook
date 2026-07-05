@@ -10,27 +10,35 @@
   - App link: codex://threads/019ea885-1da7-7643-8cba-aa60f86737e7
 
 ## Objective
-Resume the Codex chat "story 2814: re-populate hwcache-block on-demand" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Review and explain Story 2814 / PR #2906 changes for on-demand HW cache block staging, including design feedback, diagrams, PR comments, and small code cleanup.
 
-## Environment
-- Project: tron
-- Host / cwd: andoria-11:/home/jhan/workspace/tron
-- Codex thread id: 019ea885-1da7-7643-8cba-aa60f86737e7
-- App link: codex://threads/019ea885-1da7-7643-8cba-aa60f86737e7
+## Evidence source
+- Codex app `read_thread` summaries for thread `019ea885-1da7-7643-8cba-aa60f86737e7`.
+- Remote transcript path was not exposed; app-visible turns and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-08: Chat was created according to Codex app inventory.
-- 2026-06-16: Last activity recorded by Codex app inventory.
+## Work performed
+- Reviewed the Story 2814 design around freeing GOF host-side staging buffers after DMA completion and repopulating on demand.
+- Explained the distinction between durable host KV pages, `gal`, `gof`, temporary HW-layout staging buffers, and HBM device copies.
+- Produced Mermaid-style conceptual diagrams in chat for book/pages, page_info, GAL/GOF/staging/shard/tracker, staging subflows, DMA submit, completion/free, and backfill.
+- Reviewed commit `f5ea3148e` and the local `t/t_gof_staging_leaks.cpp` Perfetto test.
+- Pushed the branch range `1c6d3fc8e..857be21be` to `story-2814-free-gof-staging`.
+- Removed one redundant explanatory comment from `/home/jhan/workspace/tron/h/tron/models/model.hpp`, with restore notes saved under `/scratch/jhan/workspace/story2814/PR2906/`.
+- Drafted PR replies for Mike/Wade around helper-splitting, staging state, `public:` nit, and GOFs first transferred outside the original rodeo.
+
+## Key design conclusions
+- Before the PR, "reuse after eviction" did not exist because staging stayed allocated/populated for the GOF lifetime.
+- After the PR, an existing GOF can have freed staging, so the prepare path must distinguish:
+  - first transfer: allocate/populate/reserve/DMA
+  - hot reuse: already populated, reserve-only/DMA
+  - reuse after eviction: reacquire/repopulate/reserve/DMA
+- Splitting `gof_rodeo_impl` into "new" and "re-xfer" helpers is not sufficient by itself because the decisive state is staging allocation/population, not just GOF identity.
+- The delicate invariant is to centralize staging-state handling and preserve the ordering around `dma_inflight++` before `xfer_gof`.
 
 ## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+- GitHub PR #2906 was mergeable and CI was green/skipped as appropriate, but Mike's `CHANGES_REQUESTED` review remained the active process blocker at the time.
+- Wade had approved later, and `tzhou-positron` was requested as reviewer.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
-
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Use the central `prepare_for_dma` staging-state model when answering future review questions.
+- Keep the distinction clear: the PR frees host-side temporary staging, not durable KV pages, GAL/GOF metadata, or device HBM copies.
+- Check current PR review status before asserting whether the merge blocker is still Mike's review.

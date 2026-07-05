@@ -10,27 +10,31 @@
   - App link: codex://threads/019e9913-0290-76e3-87eb-49ecb6402f43
 
 ## Objective
-Resume the Codex chat "Can you connect to the codex which is currently running tasks at delphi-3af6?" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Determine whether a currently running remote Codex task on `delphi-3af6` could be attached to, mirrored, or monitored from the current Codex app session.
 
-## Environment
-- Project: unsaved remote cwd
-- Host / cwd: andoria-11:/home/jhan/workspace/intel-vs-amd/enable-SNC3
-- Codex thread id: 019e9913-0290-76e3-87eb-49ecb6402f43
-- App link: codex://threads/019e9913-0290-76e3-87eb-49ecb6402f43
+## Evidence source
+- Codex app `read_thread` summaries for thread `019e9913-0290-76e3-87eb-49ecb6402f43`.
+- Remote transcript path was not exposed; app turns and referenced log paths are the evidence.
 
-## Timeline
-- 2026-06-05: Chat was created according to Codex app inventory.
-- 2026-06-05: Last activity recorded by Codex app inventory.
+## Work performed
+- Located the live remote Codex run on `delphi-3af6`: session/thread `019e98f4-f958-7301-a6cd-fd39e0d2e43a`.
+- Identified the running shell session as executing `bash claude-workspace/scripts/run_full_codex.sh`.
+- Confirmed that direct attach was not available from the app because the thread was not loaded through the same app/control channel and the exec session identity was private to that host session.
+- Monitored the live run through its logs instead.
 
-## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+## Key evidence
+- Around `2026-06-05 18:40:27 UTC`, the run had started at `18:22:27`, completed `01_inspect_pre`, and was inside `02_latency`.
+- The active latency step had completed `T2 DRAM 4G` for `cpu=0 mem=0..5` and had advanced to `cpu=24 mem=0`.
+- Important logs:
+  - `/home/jhan/workspace/intel-vs-amd/enable-SNC3/claude-workspace/results/snc3/run_full_codex_delphi-3af6_20260605_1822.log`
+  - `/home/jhan/workspace/intel-vs-amd/enable-SNC3/claude-workspace/results/snc3/ptr_chase_delphi-3af6_20260605_1822.log`
+  - `/home/jhan/workspace/intel-vs-amd/enable-SNC3/claude-workspace/results/snc3/ptr_chase_delphi-3af6_20260605_1822.csv`
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
+## Decisions and guidance
+- Existing remote Codex sessions cannot be retroactively live-attached unless they were started through a compatible app-server/remote-control setup.
+- Clean future setup should use Codex app-server remote control, for example `codex app-server daemon bootstrap --remote-control`, `codex app-server daemon start`, or `codex remote-control start --json`, then connect through the app/SSH tunnel with the proper auth token.
+- For this already-running task, the safe options were log monitoring and, after completion, resuming by thread id.
 
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- If a future user asks to "attach" to a remote Codex task, first determine whether it was launched through app-server remote control.
+- If not, monitor logs or resume the completed thread; do not claim true live mirroring is available.

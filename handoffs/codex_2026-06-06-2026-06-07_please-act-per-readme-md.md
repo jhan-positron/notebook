@@ -10,27 +10,36 @@
   - App link: codex://threads/019ea07a-0eb1-77b3-8ad2-9a035a3d526d
 
 ## Objective
-Resume the Codex chat "Please act per README.md" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Analyze TRON Perfetto captures according to the project README, regenerate the report from updated `input-2-ai`, and produce capture-practice guidance without modifying the input files.
 
-## Environment
-- Project: unsaved remote cwd
-- Host / cwd: andoria-11:/home/jhan/workspace/intel-vs-amd/tron-atlas-perfetto
-- Codex thread id: 019ea07a-0eb1-77b3-8ad2-9a035a3d526d
-- App link: codex://threads/019ea07a-0eb1-77b3-8ad2-9a035a3d526d
+## Evidence source
+- Codex app `read_thread` summaries for thread `019ea07a-0eb1-77b3-8ad2-9a035a3d526d`.
+- Remote transcript path was not exposed; app-visible turns and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-06: Chat was created according to Codex app inventory.
-- 2026-06-07: Last activity recorded by Codex app inventory.
+## Work performed
+- First answered how live mirroring of Codex should work: no retroactive attach through the app API; use app-server remote-control for future work, or bridge by logs/messages.
+- Read the root README and `input-2-ai` materials under `/home/jhan/workspace/intel-vs-amd/tron-atlas-perfetto`.
+- Located Perfetto tooling at `/home/jhan/.local/share/perfetto/prebuilts/trace_processor_shell`.
+- Queried traces with SQL, decompressed Qwen trace data under `/tmp`, parsed XLSX/logs, and generated the root report `TRON_PERFETTO_ANALYSIS.md`.
+- Produced scratch helpers such as `/tmp/tron_fresh_extract.sql`, `/tmp/tron_fresh_extract.py`, and `/tmp/tron_fresh_report.py`.
+- Regenerated the analysis from scratch after the user updated `input-2-ai`, covering all nine captures.
+- Created `/tmp/README.md` as a diff-friendly revised capture-practice document and verified the original 97-line README was a subsequence.
 
-## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+## Key findings
+- Current captures mostly had `track_event` and `linux.process_stats`; they lacked `linux.ftrace`, scheduler slices, and PMU counters needed for exact per-core saturation/load.
+- The report separated measured facts, inferences, and missing evidence rather than pretending the unavailable data existed.
+- Perfetto malloc rows only carried `legacy_event.passthrough_utid`; they did not include allocation size, pointer, or bytes, so malloc could not be used as an allocation-size metric.
+- The project file changed was the root `TRON_PERFETTO_ANALYSIS.md`; `input-2-ai` was read-only.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
+## Important artifacts
+- `/home/jhan/workspace/intel-vs-amd/tron-atlas-perfetto/TRON_PERFETTO_ANALYSIS.md`
+- `/tmp/README.md`
+- `/tmp/check_readme_subsequence.py`
+- `/tmp/tron_fresh_extract.sql`
+- `/tmp/tron_fresh_extract.py`
+- `/tmp/tron_fresh_report.py`
 
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Do not treat the existing traces as sufficient for CPU saturation or cache-miss analysis.
+- For future captures, include scheduler/ftrace and sidecar perf or Perfetto `linux.perf` data.
+- Keep `input-2-ai` read-only unless the user explicitly says to edit it.

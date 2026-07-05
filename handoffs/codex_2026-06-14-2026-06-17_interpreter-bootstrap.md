@@ -10,27 +10,40 @@
   - App link: codex://threads/019ec890-f709-7d03-b763-4044b06a2ca3
 
 ## Objective
-Resume the Codex chat "Interpreter bootstrap" with stable identity preserved by thread id, transcript pointer when available, and app link.
+Bootstrap the Asimov interpreter architecture, module designs, implementation skeleton, ARM64 guidance, and eventually create the empty private GitHub repo.
 
-## Environment
-- Project: interpreter
-- Host / cwd: andoria-11:/home/jhan/workspace/asimov/interpreter
-- Codex thread id: 019ec890-f709-7d03-b763-4044b06a2ca3
-- App link: codex://threads/019ec890-f709-7d03-b763-4044b06a2ca3
+## Evidence source
+- Codex app `read_thread` summaries for thread `019ec890-f709-7d03-b763-4044b06a2ca3`.
+- Remote transcript path was not exposed; app-visible turns and named artifacts are the evidence.
 
-## Timeline
-- 2026-06-14: Chat was created according to Codex app inventory.
-- 2026-06-17: Last activity recorded by Codex app inventory.
+## Work performed
+- Followed a Notion-driven workflow in `/home/jhan/workspace/asimov/interpreter`.
+- Kept human/source inputs under `input-2-ai/` and generated outputs under `from-codex/`.
+- Generated architecture reviews under `from-codex/design_review`, including command tables, design validation, syntax, register schemas, and repo structure.
+- Generated module designs under `from-codex/module_designs` for `main`, `register_files`, `command_parser`, `engine`, `simu_hw_controller`, `output_encoder`, `output_dispatcher`, and `test_harness_main`.
+- Implemented `from-codex/code/` with CMake, app entry points, source/header, bootstrap registers, tests, integration script, and a generation summary.
+- Fixed C++ build issues including vexing parse and raw-string regex delimiter problems.
+- Added ARM64 cross-compile documentation and a toolchain file.
+- Created the empty private GitHub repository `https://github.com/positron-ai/asimov-interpreter` after `gh` auth/scope blockers were resolved.
 
-## Current state
-- This first Codex handoff was generated from the app inventory rather than a full transcript expansion.
-- Treat the title and Project name as mutable display labels; use Thread id, Transcript, and App link as the stable match keys.
-- Before making code or document changes from this handoff, open the app link or transcript and inspect the latest turns.
+## Key design decisions
+- Bytecode padding formula was corrected to:
+  - `remainder = (1 + 4 + pure_argument_length + 1) % 4`
+  - `padding = 0 if remainder == 0, otherwise 4 - remainder`
+- `SPM_copy` uses source/destination 14-bit fields and a 23-bit length, represented as `u16`, `u16`, and `u24` with range checks.
+- Register files are plain JSON, not HJSON.
+- SimuLayer uses the same engine-facing controller interface; simulated controllers may use IPC while real hardware stays in process.
+- PCI mode parses but returns an explicit not-implemented result because mmap/ring layout was undefined.
 
-## Open items / next steps
-- Refresh this handoff from transcript content on the next focused update for this chat.
-- Preserve this file across future chat renames by matching Thread id before matching title or filename.
+## Validation
+- `cmake -S from-codex/code -B from-codex/code/build`
+- `cmake --build from-codex/code/build`
+- `ctest --test-dir from-codex/code/build --output-on-failure`
+- 2/2 tests passed.
+- JSON validation passed.
+- ARM64 was documented but not cross-built because `aarch64-linux-gnu-g++` was not installed.
 
-## Gotchas & decisions
-- Transcript availability differs between local Windows chats and remote SSH-backed chats.
-- Remote chat transcript paths were not exposed by the Codex app inventory used for this run.
+## Resume checklist
+- Treat `input-2-ai` as the source-of-truth lock area.
+- Start from `from-codex/code/generation_summary.md` for implementation state.
+- The GitHub repo was intentionally empty; do not assume code was pushed there.
