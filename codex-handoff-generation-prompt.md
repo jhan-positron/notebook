@@ -14,27 +14,35 @@ I may also invoke this by URL instead of pasting, in either form:
 
 When triggered this way: clone/pull REPO_URL first (required for Step 5
 anyway) and read this file from the clone -- do not rely on fetching the URL
-directly. Run with the Config below as-is (`SCOPE: auto`); any `add chats:`
-or older `add threads:` items in my message are SCOPE additions, same semantics
-as listing them under SCOPE. Treat quoted items as exact chat names unless they
-include ` / `, in which case the left side is a Codex app Project name or
-project path hint and the right side is the chat name.
+directly. If my message names no specific chats, run with the Config below
+as-is (`SCOPE: auto`). If my message includes `add chats:` or older
+`add threads:`, treat the quoted items as the explicit active scope for this
+run, even though the phrase says "add". Treat quoted items as exact chat names
+unless they include ` / `, in which case the left side is a Codex app Project
+name or project path hint and the right side is the chat name.
 
 ## Config
 - REPO_URL: https://github.com/jhan-positron/notebook
 - TARGET_DIR: handoffs/     # dir inside the repo; create if missing; "." = repo root
 - SCOPE: auto
-   - auto (the default): derive the scope from the repo itself -- scan every
-     Codex handoff file already in TARGET_DIR and collect their `Codex chat:`
-     header lines plus identity lines under them: `Thread id:`, `Transcript:`,
-     and `App link:`. Also accept older `Codex thread:` header lines and older
-     parenthetical `thread id:` fields as aliases when refreshing existing
-     handoffs. Every chat found is in scope and its handoff gets UPDATED per
-     Step 5. A chat with no new activity since its handoff's Activity END date
+   - auto (the default): derive the scope from Codex itself, not from GitHub.
+     Use the Codex app's Project/chat inventory as the source of truth: list
+     Codex Projects and chats across the local host and connected remote hosts,
+     including projectless chats and any extra host/cwd groups Codex returns.
+     For every chat, collect the visible Project name when available, host,
+     cwd, exact chat title, thread id, app link, and transcript path when
+     readable.
+   - The notebook repo is used after scope discovery, not before it. Once the
+     Codex chat list is known, scan TARGET_DIR for existing Codex handoff files
+     and match them by stable identity: `Thread id:`, `Transcript:`, `App link:`,
+     then `Project:` + `Codex chat:` as a last fallback. Existing handoffs are
+     UPDATED per Step 5; chats without an existing handoff get their first
+     handoff. A chat with no new activity since its handoff's Activity END date
      is skipped (report it as unchanged; no commit churn).
-   - If I ALSO list items under SCOPE, they are ADDED to the scanned set -- this
-     is how a brand-new chat gets its first handoff. I only ever need to type a
-     chat name once.
+   - If I list items under SCOPE, or invoke the URL with `add chats:` /
+     `add threads:`, use those listed items as the explicit active scope for
+     this run instead of the full auto-discovered Codex list. This is how I ask
+     for only a specific subset of chats to be updated or created.
    - `this chat only`: cover just the current Codex chat; skip the scan.
      Accept `this thread only` as an older alias for the same thing.
    - Whatever appears as the value IS the active scope -- Codex must cover every
