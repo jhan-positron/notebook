@@ -25,3 +25,40 @@ canonical one changes.
   (benchmark usage). Central results doc:
   delphi-3bda:/scratch/jhan/flat_freq_tests/README.md
 - NOTE: frequency state applied by this tool does NOT survive a reboot.
+
+## gen_tron_flatfreq.py
+
+- Canonical: delphi-3bda:/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/gen_tron_flatfreq.py
+- Parses tron/config/resource-map.yaml (granite_rapids_6962p) and emits the
+  exact isst command sequence for the boost-TRON-cores shape
+  (--also-boost dev,rinzler,platform; --revert for boot restore).
+
+## test-scripts/ (canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/)
+
+- run_gpt_oss_single.sh — instrumented single-config gpt-oss benchmark
+  (env scrub, turbostat capture, self-contained run folder).
+- run_24h_sweep.sh — the full 11-model sweep (took ~50 h; llama-3.1-70b
+  substituted for Hannah's llama-3.3-70b which is absent from tron main).
+- run_tron80_subset_3af6.sh — gpt-oss + 3B matrices under strict TRON-80
+  shape on delphi-3af6 (~6.5 h).
+- run_tron88_baseline_round_3bda.sh — baseline-matched round (gpt-oss +
+  8B tp4/tp2, lengths 256-2048, users 2-32) under TRON-80+drivers (~2 h).
+- All scrub the SYSTEM_CONFIG/TRON_LOG_LEVEL/SPDLOG_LEVEL env landmines and
+  set CHECKERBOARD_MEMLOCK_KB=197971044 (host limit < checkerboard's 200 GB
+  default). The marked THE BENCHMARK COMMAND block in each is the exact
+  manual invocation.
+
+## docs/
+
+- flat_freq_tests-README.md — copy of
+  delphi-3bda:/scratch/jhan/flat_freq_tests/README.md (renamed to avoid
+  clashing with this provenance file): the central results narrative —
+  run log, host-fault diagnosis + fix recipe, flat-vs-clamped and
+  TRON-80-vs-flat comparison tables, manual how-to.
+- ALLCORE_CEILING_HETERO_CLAUDE_20260702.md — canonical in workspace
+  debug_3bda/: the measurement report behind the v2 recipes (RAPL-bound
+  all-core ceiling, TF-on+assoc 4100x80, heterogeneous shapes, CLOS
+  mechanism findings).
+- PLAN_E5_TRON_TOKPS_20260702.md — canonical in workspace debug_3bda/:
+  the tokens/s A/B plan whose variants (V1 flat / V2 strict TRON /
+  V3 +drivers) map to the runs executed 2026-07-03..05.
