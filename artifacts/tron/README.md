@@ -9,3 +9,4 @@ Repo copies are mirrors: edit the canonical file, not these.
   (a codex_tmp directory — high deletion risk, hence preserved here)
 - Distilled explainer of tron's thread architecture, generated with GPT
   Codex per jhan.
+- Related handoff: handoffs/codex_2026-06-29_document-tron-thread-pinning.md.

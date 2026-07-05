@@ -271,3 +271,22 @@ tron versions differ (hers 66deff22-era branch vs our main ae82870ae).
 Same-host comparison though — stronger than the cross-host tron80 one.
 Older baselines also exist (multi-sweep-20260603/04) and Talos MongoDB
 holds nightly CI history (see llm-toolbox talos-database-access.md).
+
+## 2026-07-05: TRON-88 baseline round COMPLETE (3bda, 55 min)
+
+2026-07-05_tron88-4100-3bda_baseline-matrix/: 56 configs (gpt-oss-tp4 +
+8b-good tp4/tp2, lengths 256-2048 x users 2-32 = Hannah's baseline grid),
+0 failures, rc=0, 14:19-15:14 UTC. Shape (cores 25-46,49-70,73-94,97-118
++ sibs @ CLOS0/TF-on) held 6/6 watch samples; fast-set busy mean 4042 MHz,
+none in clamp band. CSV: sweep-results/results-v2-multi-model-20260705-141935.csv
+
+(a) tron88 vs CLAMPED baseline (same host, exact config pairing):
+    gpt-oss-tp4: parse +14.6, gen +10.9, TTFT 12.6 fst, TTLT 10.3 fst (20/20 all)
+    8b-tp4:      parse +13.7, gen  +9.9, TTFT 12.2 fst, TTLT  9.4 fst (20/20)
+    8b-tp2:      parse +12.9, gen  +7.6, TTFT 11.1 fst, TTLT  7.7 fst
+(b) tron88 vs universal FLAT (same host): +0.9 to +1.8% everywhere —
+    first same-host confirmation that the TRON shape beats flat.
+(c) tron88 vs strict TRON-80 (3af6): ~0% (+-0.4) for gpt-oss — the
+    driver-core boost is neutral for gpt-oss (the earlier 3B generation
+    dip remains the only known driver-clip symptom; 3B not in this round).
+    Also validates cross-host comparability at the ~0.5% level.
