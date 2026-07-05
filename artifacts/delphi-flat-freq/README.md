@@ -62,3 +62,12 @@ canonical one changes.
 - PLAN_E5_TRON_TOKPS_20260702.md — canonical in workspace debug_3bda/:
   the tokens/s A/B plan whose variants (V1 flat / V2 strict TRON /
   V3 +drivers) map to the runs executed 2026-07-03..05.
+- distilled_knowledge_visual.html — canonical:
+  delphi-3bda:/home/jhan/workspace/intel-vs-amd/speed-select/distilled_knowledge_visual.html
+  — distilled speed-select knowledge as a visual HTML page.
+- core_power.html + core_power_help_source_distill.md — canonical:
+  delphi-3bda:.../speed-select/workspace/core-power_experiment/ —
+  distilled core-power (SST-CP) knowledge page + its source distillation.
+- system_perf_research_workflow_template.html — canonical:
+  delphi-3bda:.../speed-select/tmp/ (a tmp dir — extra deletion risk) —
+  system-performance research workflow template.

@@ -46,6 +46,7 @@ of spacing around the `/`).
   -   per-project  = one file per project, covering its listed sessions
   -   per-session  = one file per listed session/chat
   - GRANULARITY as a whole is ignored when SCOPE is `this session only`.
+- PRESERVE_ARTIFACTS: auto  # auto = maintain artifacts/ mirrors (Step 4b); off = skip
 - LOCAL_CLONE: auto         # auto = reuse an existing local clone if found; else clone
 
 ## Terminology: project vs session
@@ -197,6 +198,43 @@ Body sections (omit empty ones):
 7. Gotchas & decisions — anything a fresh session would otherwise
    rediscover the hard way
 
+## Step 4b — Artifact preservation (when PRESERVE_ARTIFACTS: auto)
+
+Important workspace files get mirrored into `artifacts/<topic>/` in the
+repo so accidental workspace deletion cannot destroy them.
+
+- What qualifies (ALL must hold):
+  1. Referenced in a handoff's Artifacts section (a session judged it
+     necessary for resuming work).
+  2. Lives on mutable, non-git storage (workspace NFS, /scratch, /var/tmp,
+     /tmp, home dirs). Files already in a git repo are already safe.
+  3. Executable knowledge or an irreplaceable document: scripts, tools,
+     generators, configs, recipes, analysis/plan docs, distilled-knowledge
+     pages (HTML/md). Litmus test: if the workspace vanished tonight,
+     would recreating this cost hours-to-days?
+  4. Not bulk or regenerable data (benchmark result trees, turbostat
+     captures, raw logs stay on their storage).
+- Registry: each `artifacts/<topic>/README.md` lists every preserved file
+  with its canonical `<host>:<absolute path>`, what it is, and related
+  handoffs. That README is the source of truth for refresh.
+- Refresh on EVERY run (any SCOPE): for each registered artifact, fetch
+  the canonical file and compare content with the repo copy.
+  - Different -> refresh the repo copy (commit as
+    `Refresh artifact: <topic>/<file>`).
+  - Canonical missing -> NEVER delete the repo copy; alert loudly: the
+    repo copy is now the only copy — restore it to the workspace or
+    deregister it deliberately.
+  - Direction is strictly canonical -> repo. Repo copies are mirrors; do
+    not hand-edit them — edit the canonical file and let the next run
+    sync.
+- New artifacts: when generating/updating handoffs, propose qualifying
+  Artifacts entries at the approval gate; on approval copy them in,
+  register them in the topic README (commit as
+  `Preserve artifact: <topic>/<file>`), and annotate the handoff's
+  Artifacts line with `(preserved: artifacts/<topic>/<file>)`.
+- Do NOT place artifacts in handoffs/ — the SCOPE auto scan parses every
+  file there as a handoff.
+
 ## Step 5 — Git workflow with approval gate
 1. Locate or clone the repo per LOCAL_CLONE; `git pull` before adding
    the file.
@@ -217,7 +255,9 @@ Body sections (omit empty ones):
 3. APPROVAL GATE — show me, for every output file: whether it is NEW or an
    UPDATE of an existing handoff (old -> new name if renamed), final path +
    filename, the full header block, and a <=10-line body summary (for
-   updates: what changed). Wait for my explicit approval.
+   updates: what changed). Also list artifact actions from Step 4b
+   (preserved / refreshed / canonical-missing alerts). Wait for my
+   explicit approval.
 4. On approval: commit with message
    `Add Claude handoff: <slug> (<START>..<END>)` for new files, or
    `Update Claude handoff: <slug> (<START>..<END>)` for updates, then push.
