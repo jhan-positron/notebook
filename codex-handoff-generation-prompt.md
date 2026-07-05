@@ -60,6 +60,7 @@ name or project path hint and the right side is the chat name.
   - per-project   = one file per Codex app Project, covering its listed chats
   - per-chat      = one file per listed Codex chat or external chat
   - GRANULARITY as a whole is ignored when SCOPE is `this chat only`.
+- PRESERVE_ARTIFACTS: auto  # auto = maintain artifacts/ mirrors (Step 4b); off = skip
 - LOCAL_CLONE: auto         # auto = reuse an existing local clone if found; else clone
 
 ## Terminology: Project vs chat vs thread id
@@ -262,6 +263,46 @@ Body sections (omit empty ones):
 7. Gotchas & decisions -- anything a fresh chat would otherwise rediscover the
    hard way
 
+## Step 4b -- Artifact preservation (when PRESERVE_ARTIFACTS: auto)
+
+Important workspace files get mirrored into `artifacts/<topic>/` in the repo so
+accidental workspace deletion cannot destroy them.
+
+- What qualifies (ALL must hold):
+  1. Referenced in a handoff's Artifacts section (a chat judged it necessary for
+     resuming work).
+  2. Lives on mutable, non-git storage (Codex workspaces, remote workspaces,
+     projectless Codex-managed working directories, /scratch, /var/tmp, /tmp,
+     home dirs, NFS workspaces). Files already in a git repo are already safe.
+  3. Executable knowledge or an irreplaceable document: scripts, tools,
+     generators, configs, recipes, analysis/plan docs, distilled-knowledge pages
+     (HTML/md). Litmus test: if the workspace vanished tonight, would
+     recreating this cost hours-to-days?
+  4. Not bulk or regenerable data (benchmark result trees, raw logs, large trace
+     files, turbostat captures, and raw command dumps stay on their storage).
+- Registry: each `artifacts/<topic>/README.md` lists every preserved file with
+  its canonical `<host>:<absolute path>`, what it is, and related Codex
+  handoffs. That README is the source of truth for refresh.
+- Refresh on EVERY run (any SCOPE): for each registered artifact, fetch the
+  canonical file and compare content with the repo copy.
+  - Different -> refresh the repo copy and report it at the approval gate.
+  - Canonical missing or inaccessible -> NEVER delete the repo copy; alert
+    loudly: the repo copy may be the only copy, or Codex needs access to the
+    canonical host/path. Restore it to the workspace, grant access, or
+    deregister it deliberately.
+  - Direction is strictly canonical -> repo. Repo copies are mirrors; do not
+    hand-edit them -- edit the canonical file and let the next run sync.
+- New artifacts: when generating/updating handoffs, propose qualifying
+  Artifacts entries at the approval gate; on approval copy them in, register
+  them in the topic README, and annotate the handoff's Artifacts line with
+  `(preserved: artifacts/<topic>/<file>)`.
+- Commit wording for artifact-only changes should be `Preserve artifact:
+  <topic>/<file>` or `Refresh artifact: <topic>/<file>`. If artifact changes
+  are bundled with an approved Codex handoff update, the approval gate must say
+  that explicitly before committing.
+- Do NOT place artifacts in `handoffs/` -- the SCOPE auto scan parses every file
+  there as a handoff.
+
 ## Step 5 -- Git workflow with approval gate
 1. Locate or clone the repo per LOCAL_CLONE; `git pull` before adding the file.
    If `git` is unavailable on PATH in the Windows app, use the bundled Codex Git
@@ -293,8 +334,9 @@ Body sections (omit empty ones):
    <=10-line body summary (for updates: what changed), and an evidence coverage
    line that states which transcript(s) or pasted sources were read. For
    BLOCKED/SKIPPED chats, show the exact reason, such as "remote transcript not
-   readable", "transcript missing", or "scope too large; needs batching". Wait
-   for my explicit approval.
+   readable", "transcript missing", or "scope too large; needs batching". Also
+   list artifact actions from Step 4b (preserved / refreshed /
+   canonical-missing-or-inaccessible alerts). Wait for my explicit approval.
 4. On approval: commit with message
    `Add Codex handoff: <slug> (<START>..<END>)` for new files, or
    `Update Codex handoff: <slug> (<START>..<END>)` for updates, then push.
