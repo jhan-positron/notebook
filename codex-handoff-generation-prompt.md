@@ -31,7 +31,8 @@ name or project path hint and the right side is the chat name.
      including projectless chats and any extra host/cwd groups Codex returns.
      For every chat, collect the visible Project name when available, host,
      cwd, exact chat title, thread id, app link, and transcript path when
-     readable.
+     readable. This inventory step determines scope and identity only; it is
+     not enough evidence for a handoff body.
    - The notebook repo is used after scope discovery, not before it. Once the
      Codex chat list is known, scan TARGET_DIR for existing Codex handoff files
      and match them by stable identity: `Thread id:`, `Transcript:`, `App link:`,
@@ -100,6 +101,30 @@ Pipeline: evidence -> dates -> names -> filename(s) -> file(s) -> approval -> pu
 
 Steps 1-4 apply PER OUTPUT FILE (dates/slug/header computed from the items that
 file covers). The Step 5 approval gate is shown ONCE listing all files.
+
+## Quality bar -- no inventory-only stubs
+Every generated handoff must contain meaningful, transcript-backed content about
+what happened in the chat. Codex app inventory, `session_index.jsonl`, thread
+ids, app links, titles, cwd, and timestamps are identity/date evidence; they are
+not sufficient to write Objective, Timeline, Artifacts, Current state, or Next
+steps.
+
+- For every scoped Codex chat, read the transcript content when a transcript is
+  readable. At minimum, extract the user's substantive prompts, assistant final
+  answers, tool commands/results that affected state, file edits, generated
+  artifacts, commits, and explicit next steps.
+- If a transcript is too large, process it incrementally or in chunks. Do not
+  replace transcript summarization with an identity-only placeholder.
+- If a transcript is unreadable, remote-only, missing, or too large to process
+  in the current run, do not create or refresh that chat's handoff with generic
+  filler. Report that chat as BLOCKED/SKIPPED at the approval gate and state the
+  exact missing evidence or access needed.
+- If `SCOPE: auto` expands to too much work for one reliable run, ask me to
+  approve a smaller batch or an explicit `add chats:` scope. Do not silently
+  downgrade to first-pass stubs.
+- A valid handoff body should let a fresh chat resume the actual task, not just
+  reopen the old chat. If the only available facts are title, dates, cwd,
+  thread id, and app link, the handoff is not ready.
 
 ## Step 1 -- Determine activity dates (NOT today's date)
 Filename dates are when the work actually happened; it may span several days.
@@ -231,7 +256,8 @@ Body sections (omit empty ones):
    mandatory when the chat created or modified any file.
 5. Current state -- only claims backed by evidence from the chat (commands,
    outputs, commit hashes, generated files); mark anything unverified as
-   unverified
+   unverified. Do not use generic text such as "open the app link and inspect
+   the latest turns" as a substitute for summarizing what the transcript shows.
 6. Open items / next steps
 7. Gotchas & decisions -- anything a fresh chat would otherwise rediscover the
    hard way
@@ -261,10 +287,14 @@ Body sections (omit empty ones):
      for a chat that already has one.
    - If none exists: write a new file. If an unrelated file with the same name is
      somehow present, stop and ask before overwriting.
-3. APPROVAL GATE -- show me, for every output file: whether it is NEW or an
-   UPDATE of an existing handoff (old -> new name if renamed), final path +
-   filename, the full header block, and a <=10-line body summary (for updates:
-   what changed). Wait for my explicit approval.
+3. APPROVAL GATE -- show me, for every scoped chat and every output file:
+   whether it is NEW, UPDATE, UNCHANGED, or BLOCKED/SKIPPED. For files, show the
+   old -> new name if renamed, final path + filename, the full header block, a
+   <=10-line body summary (for updates: what changed), and an evidence coverage
+   line that states which transcript(s) or pasted sources were read. For
+   BLOCKED/SKIPPED chats, show the exact reason, such as "remote transcript not
+   readable", "transcript missing", or "scope too large; needs batching". Wait
+   for my explicit approval.
 4. On approval: commit with message
    `Add Codex handoff: <slug> (<START>..<END>)` for new files, or
    `Update Codex handoff: <slug> (<START>..<END>)` for updates, then push.
