@@ -1,17 +1,33 @@
 #!/usr/bin/env bash
-# flat_freq_utils.sh (v2, 2026-07-03) — flat-frequency utilities for the
+# flat_freq_utils.sh (v3, 2026-07-06) — flat-frequency utilities for the
 # delphi Xeon 6962P hosts.
 #
 # Usage:
 #   source flat_freq_utils.sh
 #   flat_freq_apply                    # all 144 cores flat-high
 #   flat_freq_apply "27-46,51-70,75-94,99-118"
-#                                      # listed cores (+HT siblings, added
-#                                      # automatically) flat-high; ALL other
-#                                      # cores flat-low (2700 MHz clip)
+#                                      # 2-tier: listed cores (+HT siblings,
+#                                      # added automatically) flat-high
+#                                      # ~4100; ALL other cores flat-low
+#                                      # (2700 MHz clip)
+#   flat_freq_apply_tiers "27-46,51-70,75-94,99-118" "0,24-26,48-50,72-74,96-98"
+#                                      # 3-tier: arg1 (+sibs) fast ~4100
+#                                      # (CLOS0/TF-on); arg2 (+sibs) mid
+#                                      # <=3900 (CLOS1); rest low <=2700
+#                                      # (CLOS3). Example args = TRON app
+#                                      # cores / TRON aux (TX,RX,rinzler,
+#                                      # platform) cores.
 #   flat_freq_revert                   # restore boot-default (PCT baseline)
 #   flat_freq_status                   # show current SST/CLOS state
 #   flat_freq_check                    # precondition checks only
+#
+# v3 addition (2026-07-06): flat_freq_apply_tiers — 3-tier shapes using
+#   CLOS1 (800-3900) as a middle tier. MEASURED CONSTRAINT: the TF fast
+#   tier grants 4100 whenever any other core runs >2700; 4400 needs ALL
+#   others <=2700; there is no 4200 rung (ALLCORE_CEILING doc 2.5/2.6).
+#   Benchmarked 2026-07-06 (gpt-oss + llama-8b, baseline grid): 3-tier ==
+#   2-tier select mode within noise — the mid tier bought nothing for
+#   those models; kept for workloads that load the aux cores harder.
 #
 # v2 changes vs v1 (evidence: workspace debug_3bda/
 # ALLCORE_CEILING_HETERO_CLAUDE_20260702.md and e1e2_beat80_* run):
@@ -30,11 +46,13 @@
 #   - isst binary auto-detection: NOPASSWD sudo covers different paths per
 #     host (3bda: /opt copy; 3af6: the workspace build).
 #
-# Expected frequencies under load (SSE/scalar; measured 2026-07-02):
+# Expected frequencies under load (SSE/scalar; measured 2026-07-02..06):
 #   <= ~20 busy cores per 24-core power domain (e.g. the TRON 80-core
 #   shape): 4100 MHz flat (~4050 when both HT threads of each core work).
 #   Whole-machine loads: package-power-bound ~3.2-3.6 GHz, still flat.
-#   Selective mode: non-boost cores <= 2700 MHz.
+#   Selective (2-tier) mode: non-boost cores <= 2700 MHz.
+#   3-tier mode: mid cores pinned at their 3900 cap when busy (measured
+#   3888-3900), low cores <= 2700.
 #
 # Functions return non-zero on failure. Preconditions are only CHECKED here;
 # fixing them (sudoers, modules, binary) is deliberately left to the admin.
