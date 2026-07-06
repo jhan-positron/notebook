@@ -452,3 +452,104 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     echo "  flat_freq_apply [cpulist] | flat_freq_revert | flat_freq_status | flat_freq_check"
     exit 1
 fi
+
+# ---------------------------------------------------------------------------
+# 3-tier apply (v3 addition, 2026-07-06)
+#   flat_freq_apply_tiers <fast_cpulist> <mid_cpulist>
+#     fast (+HT sibs) -> CLOS0 (2700-4400, TF on)  ~4100 MHz under load
+#     mid  (+HT sibs) -> CLOS1 (800-3900)          <= 3900 MHz
+#     rest            -> CLOS3 (800-2700)          <= 2700 MHz
+#   MEASURED CONSTRAINT: the TF fast tier grants 4100 whenever any other
+#   core runs >2700; 4400 needs ALL others <=2700. There is no 4200 rung.
+#   Revert with flat_freq_revert (re-assocs every cpu to the boot 0/3 map).
+# ---------------------------------------------------------------------------
+
+flat_freq_apply_tiers() {
+    flat_freq_check || return 1
+    local fast_arg="${1:-}" mid_arg="${2:-}" cpu out rc=0
+    if [[ -z "${fast_arg}" || -z "${mid_arg}" ]]; then
+        echo "usage: flat_freq_apply_tiers <fast_cpulist> <mid_cpulist>"; return 1
+    fi
+
+    local fast_cpus mid_cpus overlap fast_segs mid_segs low_segs nfast nmid
+    fast_cpus=$(_flat_freq_expand "${fast_arg}" | _flat_freq_add_siblings)
+    mid_cpus=$(_flat_freq_expand "${mid_arg}" | _flat_freq_add_siblings)
+    while read -r cpu; do
+        if (( cpu < 0 || cpu >= FLAT_FREQ_NCPU )); then
+            echo "[FAIL] cpu ${cpu} out of range 0-$((FLAT_FREQ_NCPU - 1))"; return 1
+        fi
+    done <<< "${fast_cpus}"$'\n'"${mid_cpus}"
+    overlap=$( { echo "${fast_cpus}"; echo "${mid_cpus}"; } | sort -n | uniq -d )
+    if [[ -n "${overlap}" ]]; then
+        echo "[FAIL] fast/mid overlap after HT-sibling expansion: $(_flat_freq_compress <<< "${overlap}")"
+        return 1
+    fi
+    nfast=$(wc -l <<< "${fast_cpus}"); nmid=$(wc -l <<< "${mid_cpus}")
+    fast_segs=$(_flat_freq_compress <<< "${fast_cpus}")
+    mid_segs=$(_flat_freq_compress <<< "${mid_cpus}")
+    low_segs=$( { seq 0 $((FLAT_FREQ_NCPU - 1)); echo "${fast_cpus}"; echo "${fast_cpus}"; \
+                  echo "${mid_cpus}"; echo "${mid_cpus}"; } \
+                | tr ' ' '\n' | sort -n | uniq -u | _flat_freq_compress )
+
+    echo
+    echo "== 3-TIER freq: ${nfast} fast / ${nmid} mid / $((FLAT_FREQ_NCPU - nfast - nmid)) low (HT sibs included) =="
+    echo "   fast (CLOS0, 2700-4400, ~4100 under load): ${fast_segs}"
+    echo "   mid  (CLOS1, 800-3900):                    ${mid_segs}"
+    echo "   low  (CLOS3, 800-2700):                    ${low_segs}"
+
+    echo "== turbo-freq ENABLE =="
+    for cpu in "${FLAT_FREQ_ANCHORS[@]}"; do
+        out=$(_flat_freq_isst --cpu "${cpu}" turbo-freq enable) || true
+        _flat_freq_cmd_ok "${out}" 'enable:success' 1 \
+            || { echo "[FAIL] turbo-freq enable on cpu ${cpu}:"; printf '%s\n' "${out}"; rc=1; }
+        out=$(_flat_freq_isst --cpu "${cpu}" core-power disable) || true
+        _flat_freq_cmd_ok "${out}" 'disable:success' 1 \
+            || { echo "[FAIL] core-power disable on cpu ${cpu}:"; printf '%s\n' "${out}"; rc=1; }
+    done
+
+    echo "== pinning CLOS0 (2700-4400), CLOS1 (800-3900), CLOS3 (800-2700) =="
+    _flat_freq_pin_configs || rc=1
+    for cpu in "${FLAT_FREQ_ANCHORS[@]}"; do
+        out=$(_flat_freq_isst --cpu "${cpu}" core-power config --clos 1 --weight 0 --min 800 --max 3900) || true
+        _flat_freq_cmd_ok "${out}" 'config:success' 1 \
+            || { echo "[FAIL] clos1 config on cpu ${cpu}:"; printf '%s\n' "${out}"; rc=1; }
+    done
+
+    echo "== associating =="
+    # shellcheck disable=SC2086
+    _flat_freq_assoc_segments 3 ${low_segs} || rc=1
+    # shellcheck disable=SC2086
+    _flat_freq_assoc_segments 1 ${mid_segs} || rc=1
+    # shellcheck disable=SC2086
+    _flat_freq_assoc_segments 0 ${fast_segs} || rc=1
+
+    echo "== verifying =="
+    local a tf bad=0 counts
+    for cpu in "${FLAT_FREQ_ANCHORS[@]}"; do
+        tf=$(_flat_freq_tf_state "${cpu}")
+        [[ "${tf}" == "enabled" ]] || { echo "   [bad] turbo-freq on anchor ${cpu}: ${tf} (want enabled)"; bad=1; }
+    done
+    out=$(_flat_freq_isst --cpu 0 core-power get-config --clos 1) || true
+    [[ "${out}" == *"clos-max:3900"* ]] || { echo "   [bad] clos1 max not 3900"; bad=1; }
+    counts=$(_flat_freq_assoc_counts)
+    [[ "${counts}" == "clos0=${nfast} clos1=${nmid} clos3=$((FLAT_FREQ_NCPU - nfast - nmid))" ]] \
+        || { echo "   [bad] assoc counts: ${counts} (want clos0=${nfast} clos1=${nmid} clos3=$((FLAT_FREQ_NCPU - nfast - nmid)))"; bad=1; }
+    a=$(_flat_freq_get_assoc "$(head -1 <<< "${fast_cpus}")")
+    [[ "${a}" == "0" ]] || { echo "   [bad] first fast cpu assoc: clos ${a} (want 0)"; bad=1; }
+    a=$(_flat_freq_get_assoc "$(head -1 <<< "${mid_cpus}")")
+    [[ "${a}" == "1" ]] || { echo "   [bad] first mid cpu assoc: clos ${a} (want 1)"; bad=1; }
+
+    if [[ ${bad} -eq 0 && ${rc} -eq 0 ]]; then
+        echo "   turbo-freq enabled; 3 CLOS configs pinned; assoc: ${counts}"
+        echo "3-TIER FREQUENCY APPLIED."
+        echo "Expect fast ~4100 MHz under load (measured TF grant; no 4200 rung,"
+        echo "4400 only if ALL other cores <=2700), mid <=3900, low <=2700."
+        echo "Whole-machine loads are package-power-bound (~3.2-3.6 GHz)."
+        echo "NOTE: state does not survive a reboot."
+    else
+        echo "[FAIL] 3-tier NOT cleanly applied — inspect flat_freq_status,"
+        echo "       or run flat_freq_revert / reboot to return to a known state."
+        rc=1
+    fi
+    return ${rc}
+}
