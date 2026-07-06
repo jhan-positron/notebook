@@ -89,6 +89,14 @@ canonical one changes.
   - Canonical: delphi-3bda:/home/jhan/workspace/intel-vs-amd/speed-select/tmp/system_perf_research_workflow_template.html
   - What it is: system-performance research workflow template. The canonical
     lives in a tmp dir, so this mirror is especially important.
+- speed_select_intuition.html
+  - Canonical: DESKTOP-CI2JA7M:C:/Users/jibin/Documents/claude_debug_3bda_flat_freq/speed_select_intuition.html
+    (authored 2026-07-06 in the "run CI tests" session, local Windows machine)
+  - What it is: intuition explainer for the whole technology stack —
+    turbo-freq/core-power as managers of the persistent CLOS table, the
+    min-of-caps frequency model, silent table-rewriting switches, and the
+    discrete grant rungs (4400/4100/2700, no 4200). All numbers are
+    measured turbostat values from the 2026-07 benchmark rounds.
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md,
   handoffs/claude_20260702-20260704_debug-3bda-flat-freq-run-ci-tests.md,
   handoffs/codex_2026-06-22-2026-06-30_configure-xeon-6-core-speeds.md,
