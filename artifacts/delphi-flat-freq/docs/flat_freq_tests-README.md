@@ -250,21 +250,28 @@ verified in logs — `App CPU list: 223-224,96-101,...`):
 | C `2026-07-09_ladderC-tron112-pr3070-3af6_baseline-matrix` | PR 66b66350 | tron112 select | fast 4045 / drivers 2695 |
 
 Realized frequency distributions (busy > 50% samples, each phase bounded
-to its own snapshot window):
+to its own snapshot window). IMPORTANT: compare like-for-like — under
+universal flat the TX/RX driver and OS threads are also CLOS0 and, being
+lightly threaded (one sibling per core), they earn the 4100+ grants; a
+naive "all busy" column therefore looks faster than a workers-only column.
+Worker cores themselves never sustain 4100: both HT siblings loaded costs
+~50 MHz in every shape.
 
-| Band (MHz) | A (all busy) | B (all busy) | C (fast set) |
-|---|---|---|---|
-| 3800–3899 | 4.0% | — | 1.2% |
-| 3900–3999 | 22.3% | 18.5% | 28.6% |
-| 4000–4099 | 60.2% | 69.4% | 66.1% |
-| 4100–4199 | 12.3% | 10.4% | 2.1% |
-| 4200+ | 1.2% | 1.6% | 1.9% |
-| n / mean / max | 4806 / 4044 / 4344 | 6910 / 4057 / 4392 | 6378 / 4045 / 4382 |
+| Band (MHz) | A all busy | B all busy | B workers only | C workers (fast set) | B non-workers |
+|---|---|---|---|---|---|
+| 3800–3899 | 4.0% | — | — | 1.2% | — |
+| 3900–3999 | 22.3% | 18.5% | 21.3% | 28.6% | 0.2% |
+| 4000–4099 | 60.2% | 69.4% | 74.7% | 66.1% | 34.3% |
+| 4100–4199 | 12.3% | 10.4% | 2.1% | 2.1% | 65.4% |
+| 4200+ | 1.2% | 1.6% | 1.9% | 1.9% | — |
+| n / mean | 4806 / 4044 | 6910 / 4057 | 6010 / 4052 | 6378 / 4045 | 900 / 4088 |
 
-(C additionally has the new map's TX/RX driver cores busy in the slow set:
+Workers B vs C: 4052 vs 4045 — identical within noise; the frequency shape
+did not change worker-core behavior between flat and select (as intended).
+C additionally has the new map's TX/RX driver cores busy in the SLOW set:
 n=976, mean 2695 — pinned at their cap, doing real work. The 4200+ samples
-in all phases are light-load moments between configs where few busy cores
-earn higher grants.)
+everywhere are light-load moments between configs where few busy cores
+earn higher grants.
 
 Decomposition (per-config geomeans, win counts):
 
