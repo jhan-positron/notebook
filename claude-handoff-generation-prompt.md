@@ -198,6 +198,11 @@ Body sections (omit empty ones):
 7. Gotchas & decisions — anything a fresh session would otherwise
    rediscover the hard way
 
+Style rule for ALL sections (and for artifact READMEs): reference pull
+requests and issues by their full web link
+(e.g. https://github.com/positron-ai/tron/pull/3070), never a bare
+"PR #3070" — bare numbers are ambiguous across repos and not clickable.
+
 ## Step 4b — Artifact preservation (when PRESERVE_ARTIFACTS: auto)
 
 Important workspace files get mirrored into `artifacts/<topic>/` in the

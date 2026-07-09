@@ -231,7 +231,8 @@ lifting aux cores 2700→3900 buys nothing for these models. The app-worker
 
 ### 2026-07-09 — PR #3070 A/B/C ladder (3af6): software vs shape decomposed
 
-tron PR #3070 (`66b66350`, "gr-6962p-tuning") replaces the core map:
+tron PR #3070 (https://github.com/positron-ai/tron/pull/3070, head
+`66b66350`, branch "gr-6962p-tuning") replaces the core map:
 14 phys cores/slice (2 die-A addressed via HT-sibling IDs + 6 die-B +
 6 die-C), 112 phys cores total vs 80, main thread deliberately lands on
 die B. Testing it requires the PR *binary* (19 files incl. rinzler.cpp) —
@@ -298,6 +299,24 @@ Frequency comparison C vs tier3: fast tiers essentially identical
 aux/driver cores — tier3 ran them at 3899 (CLOS1), C clips them at 2695.
 Given C/B ≈ 0, that difference again doesn't move tokens/s for these
 models — the perf deltas above are the PR's software/placement change.
+
+**C vs the CLAMPED bootup baseline (directly measured — the full stack:
+frequency fix × PR-3070 software):**
+
+| Model | Parse | Generate | TTFT | TTLT |
+|---|---|---|---|---|
+| gpt-oss-120b tp4 | **+26.0%** (20/20) | **+15.1%** (20/20) | 20.6% fst | 14.4% fst |
+| llama-8b tp4 | +16.7% (16/20) | +8.6% (18/20) | 14.5% fst | 8.6% fst |
+| llama-8b tp2 | +6.5% (7/16) | **−13.5%** (3/16) | 7.2% fst | −11.9% |
+
+The effects compose multiplicatively: e.g. gpt-oss parse 1.146 (freq fix)
+× 1.100 (PR software) = 1.261 ≈ the measured +26.0%. Note the split when
+citing these numbers: ~+14.6% ships with the frequency configuration alone
+(deployable today, see positron-infrastructure PR #165,
+https://github.com/positron-ai/positron-infrastructure/pull/165); the
+additional ~+10% requires the PR-3070 tron change to merge. And for
+8b-tp2 the PR regression more than cancels the frequency gain — its
+generate is NET NEGATIVE vs the untouched bootup config.
 
 **Takeaways for PR #3070 review:**
 
