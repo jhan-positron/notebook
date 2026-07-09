@@ -1,347 +1,312 @@
-# flat_freq_tests — checkerboard benchmark runs on delphi-3bda
+# flat_freq_tests — checkerboard benchmark runs on the delphi hosts
 
-Benchmark series comparing inference performance under different CPU frequency
-configurations (SST-CP CLOS state) on delphi-3bda. Owner: jhan.
+Benchmark series comparing inference performance under different CPU
+frequency configurations (Intel SST-CP CLOS shapes) on delphi-3bda and
+delphi-3af6 (Xeon 6962P, 288 logical CPUs, 8 FPGAs each). Owner: jhan.
 
-## Layout
+---
 
-    scripts/                  runner scripts (see headers for usage)
-    <date>_<machine-state>_<test>/   one folder per run (UTC dates)
+## Layout and conventions
 
-Machine-state labels:
-  boot-default-clamped  BIOS PCT partition active: non-PCT cores in CLOS3,
-                        capped at 2700 MHz under load (the "flat freq" bug).
-  flat-freq             flat_freq_apply() run beforehand: all 288 CPUs in
-                        CLOS0, turbo-freq disabled -> no 2700 MHz clamp.
-                        (state resets on reboot; see workspace debug_3bda/)
+```
+scripts/                          runner scripts (see each header for usage)
+<date>_<shape>[-<host>]_<test>/   one folder per run (UTC dates)
+```
 
-## Runs
+Per-run folder contents:
 
-  2026-06-30_boot-default-clamped_gpt-oss-single/
-      Reference run (Hannah, tron branch hrv-intel-speed-select-crosscheck-
-      measure 66deff22): parse 551.5 tok/s, generate 90.6 tok/s, TTFT 2.32 s,
-      TTLT 13.61 s. turbostat: ~89% of busy-core samples at 2.6-2.7 GHz.
-      NOTE: thread_cpu_placement file captured only its own monitor loop
-      (self-matching pgrep) - contains no runtron data.
+```
+sweep_console.log       full run-multi-sweep.sh console output
+turbostat_per_cpu.tsv   per-CPU freq/power capture during the run
+shape_watch.log         periodic CLOS association probes (later runs)
+runner_timeline.txt     start/end timestamps (UTC)
+SWEEP_EXIT_CODE         0 = success
+sweep-results/          checkerboard tree (metrics.json, summary.log,
+                        runtron/log.<n>, consolidated results-v2-*.csv)
+```
 
-  2026-07-02_flat-freq_gpt-oss-single_attempt1-FAILED/
-      First flat-freq attempt (tron main ae82870ae). FAILED: both runtron
-      instances inherited SYSTEM_CONFIG="--instance 1,2" from
-      ~/jibin.bashrc.positron.dev, so both configured as instance 1 ->
-      hugepage lock collision (inst 0) + segfault in device init (inst 1).
-      Runner now unsets SYSTEM_CONFIG/TRON_LOG_LEVEL/SPDLOG_LEVEL.
+### Frequency-shape glossary
 
-  2026-07-02_flat-freq_gpt-oss-single/
-      Rerun with env scrubbed. See its folder for results.
+| Shape label | Meaning | Busy-core result (measured) |
+|---|---|---|
+| `boot-default-clamped` | BIOS PCT partition: 16 cores/machine in CLOS0, everything else CLOS3 ≤ 2700 | most busy cores exactly 2700 |
+| `flat-freq` (v1, used by the 24h sweep) | all 288 → CLOS0, turbo-freq DISABLED | ~3900 shape, run mean 3756 |
+| universal flat (v2, `flat_freq_apply`) | all 288 → CLOS0, turbo-freq ENABLED | ~4100 grant, run means 4044–4057 |
+| `tron80` / select | TRON app cores (+HT sibs) → CLOS0/TF-on, rest CLOS3 | fast ~4000–4100, rest ≤ 2700 |
+| `tron88` | tron80 + the 8 FPGA-driver cores in the fast set | same as tron80 |
+| `tier3` (`flat_freq_apply_tiers`) | fast CLOS0 / mid CLOS1 ≤ 3900 / low CLOS3 ≤ 2700 | 4032 / 3899 / idle |
+| `tron112` (PR #3070 map) | the PR's 112 phys cores (+sibs) → CLOS0, rest CLOS3 | fast ~4045, drivers 2700 |
 
-## Per-run contents
+All shapes are applied with `flat_freq_utils.sh` (canonical:
+`workspace debug_3bda/`, mirrored in the notebook repo) and DO NOT survive
+a reboot — the BIOS re-deals the PCT partition at every boot.
 
-    sweep_console.log      full run-multi-sweep.sh console output
-    turbostat_per_cpu.tsv  5s-interval per-CPU freq/power capture during run
-    runner_timeline.txt    start/end timestamps (UTC)
-    SWEEP_EXIT_CODE        0 = success
-    sweep-results/         checkerboard output tree (metrics.json,
-                           summary.log, runtron/log.<n>, alderaan.log)
+### Why "universal flat" numbers differ across this file (3.27 vs 3.76 vs ~4.05 GHz)
 
-## HOST FAULT — 2026-07-02 (blocks all benchmarks)
+Three different things, all real:
 
-delphi-3bda rebooted 05:08 UTC with 6 of 8 FPGAs unprogrammed: they
-enumerated as [12ba:0076] with a single 256M BAR (bootloader state); only
-b9:00.0 / bc:00.0 enumerated as the real Positron device [8200:0011] with
-BAR0 4M + BAR2 1G + BAR4 128G. The six were flashed after boot (config
-space now shows 8200:0011 everywhere) but the kernel never re-assigned
-their BAR2/BAR4 (sysfs resource table zeroed). Result: every process that
-maps BAR2 on those devices segfaults at offset 0x200010 (NULL + mailbox
-offset) — 130 kernel-logged tron crashes since 11:16 UTC incl. daytime CI
-and both flat-freq benchmark attempts here.
+1. **All-288-thread synthetic spin** (Jul 2 exploration): package-power-bound
+   at ~3.27 GHz × 288T / 502 W per package. No shape can beat power.
+2. **24h sweep under v1 flat** (TF disabled): busy mean 3756 — the v1 recipe
+   tops out at the 3900 TRL shape.
+3. **Ladder phases A/B under v2 flat** (TF enabled): busy means 4044/4057 —
+   the TF high-priority grant gives 4100-class to CLOS0 members, and
+   checkerboard loads ≤ ~112 of 144 cores, far from the power wall.
 
-Evidence: journalctl -k -b (boot enumeration + trap storm),
-/sys/bus/pci/devices/0000:{10,b9}:00.0/resource, runtron logs in
-2026-07-02_flat-freq_gpt-oss-single/sweep-results.
-
-Fix: warm reboot while images are resident (BARs get assigned at boot
-enumeration), or platform bring-up by infra. After ANY reboot re-run
-flat_freq_apply (CLOS state resets) before benchmarking.
-
-## 2026-07-03: host fault RESOLVED + flat-freq result
-
-Fix sequence (evening 2026-07-02 UTC): pho bw images use -c {0,1,4,5,6,7}
-archer_agm_01.05.08.00.rbf (cards had lost fabric config) -> PCI bridge
-remove+rescan -> warm reboot with cards configured -> BIOS sized all four
-stack MMIO windows correctly -> 8/8 cards full BARs -> pho test cards dma
-readback PASS 8/8. Root cause of the day-long breakage: cards entered POST
-unconfigured, BIOS shrink-wrapped stack decode windows to 512M, post-boot
-activation could then never get BARs assigned (Linux cannot grow the
-firmware decode windows at runtime).
-
-  2026-07-03_flat-freq_gpt-oss-single/   <- THE clean flat-freq run
-      exit 0, 0 failed, 8 samples. vs 2026-06-30 clamped baseline:
-        parse    644.7 tok/s  (551.5 -> +16.9%)
-        generate 102.6 tok/s  ( 90.6 -> +13.3%)
-        TTFT     1.985 s      (2.321 -> -14.5%)
-        TTLT     11.94 s      (13.61 -> -12.2%)
-      turbostat: busy cores flat at 3.9 GHz (mean 3897, min 3711 MHz;
-      99% of busy samples in 3800-3999 bin). No 2700 clamp. Peak pkg
-      power ~600 W total. Per-instance iteration throughput 722/691
-      new tok/s (baseline 616/623).
-      Note: ~9 min wall time due to cold weight load after reboot;
-      inference itself ~12 s/iteration.
-
-## 2026-07-03: 24-hour multi-model sweep (flat-freq) — RUNNING
-
-Output: 2026-07-03_flat-freq_24h-sweep/   Started 00:56 UTC 2026-07-03.
-Expected duration ~24-30 h (539 runs: 11 model configs x 7 zipped length
-configs x 7 user counts, speculation off).
-
-MODEL SUBSTITUTION vs Hannah's reference command: tron main (ae82870ae) has
-no llama-3.3-70b-instruct-good; replaced with llama-3.1-70b-instruct-good
-(tp4, tp2) — same-size dense 70B, equivalent for frequency comparisons.
-First attempt (multi-sweep-20260703-004933 in /var/tmp sweeps) was aborted
-after every llama-3.3 config failed with "Unsupported model".
+---
 
 ## How to run these tests manually
 
-From a shell on delphi-3bda:
+From a shell on delphi-3bda or delphi-3af6:
 
-    cd /home/jhan/workspace/run_checkerboard/checkerboard
-    unset SYSTEM_CONFIG TRON_LOG_LEVEL SPDLOG_LEVEL   # jhan-shell landmine!
-    export CHECKERBOARD_MEMLOCK_KB=197971044          # host limit < 200GB default
+```bash
+cd /home/jhan/workspace/run_checkerboard/checkerboard
+unset SYSTEM_CONFIG TRON_LOG_LEVEL SPDLOG_LEVEL   # jhan-shell landmine!
+export CHECKERBOARD_MEMLOCK_KB=197971044          # host limit < 200GB default
 
-    # Single gpt-oss test (~2 min warm, ~10 min after reboot):
-    ./run-multi-sweep.sh \
-      --models ingested-gpt-oss-120b-tp4 \
-      -p 1024 -g 1024 --shared-system-prompt-lengths 256 -s 0 -u 8
+# Single gpt-oss test (~2 min warm, ~10 min after reboot):
+./run-multi-sweep.sh \
+  --models ingested-gpt-oss-120b-tp4 \
+  -p 1024 -g 1024 --shared-system-prompt-lengths 256 -s 0 -u 8
 
-    # 24-hour sweep: see the "THE BENCHMARK COMMAND" block in
-    # scripts/run_24h_sweep.sh (same invocation, 11 models, 7 lengths,
-    # 7 user counts). The three length lists are ZIPPED by position,
-    # not cross-multiplied.
+# Full sweeps: see the marked "THE BENCHMARK COMMAND" block in each
+# scripts/run_*.sh. The three length lists are ZIPPED by position,
+# not cross-multiplied.
 
-    # Results: sweeps/multi-sweep-<ts>/<model>/<config>/<inst>-<users>/
-    #   metrics.json (harmonic means), summary.log, runtron/log.<n>
-    # Consolidated CSV: ./post-processing/export_to_spreadsheet.py sweeps/multi-sweep-<ts>
+# Results: sweeps/multi-sweep-<ts>/<model>/<config>/<inst>-<users>/
+# Consolidated CSV: ./post-processing/export_to_spreadsheet.py sweeps/multi-sweep-<ts>
+```
 
 Before benchmarking after ANY reboot:
-  1. flat freq:  source ~/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/flat_freq_utils.sh
-                 FLAT_FREQ_ISST=/opt/intel-speed-select/intel-speed-select
-                 flat_freq_apply
-  2. FPGAs: all 8 of /sys/bus/pci/devices/0000:{10,13,38,3b,90,93,b9,bc}:00.0/resource
-     must have 3 non-zero BAR lines; validate with: pho test cards dma readback --bdf all
-  3. Machine idle: no runtron/rinzler; stale /dev/hugepages/libpos* owned by
-     OTHERS must be investigated (fuser) before removal; your own are reused.
 
-Wrappers with monitoring (recommended): scripts/run_gpt_oss_single.sh [outdir],
-scripts/run_24h_sweep.sh [outdir]. Both scrub the env landmine, capture
-turbostat, and copy results into a self-contained run folder.
+1. Frequency shape:
+   ```bash
+   source ~/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/flat_freq_utils.sh
+   flat_freq_apply                                   # universal flat, or:
+   flat_freq_apply "27-46,51-70,75-94,99-118"        # tron80 select, or:
+   flat_freq_apply_tiers "<fast>" "<mid>"            # 3-tier
+   ```
+2. FPGAs healthy: all 8 of `/sys/bus/pci/devices/0000:{10,13,38,3b,90,93,b9,bc}:00.0/resource`
+   must have 3 non-zero BAR lines; validate with `pho test cards dma readback --bdf all`.
+3. Machine idle: no runtron/rinzler; stale `/dev/hugepages/*slice*` files owned
+   by OTHERS must be checked with `fuser` before removal; your own are reused.
 
-## 2026-07-02: SST frequency-exploration work stream (parallel to the
-## benchmark runs above; Claude session, ~17:40-22:06 UTC)
+Wrappers with monitoring (recommended) live in `scripts/` — all scrub the
+env landmine, capture turbostat, and produce self-contained run folders.
 
-All artifacts under the NFS workspace, herein W =
-/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/
-Machine was left in the flat-freq state (+ boot-faithful CLOS2/3 configs)
-after every run. Main report: W/ALLCORE_CEILING_HETERO_CLAUDE_20260702.md
-(repro command blocks + exact core lists for every phase).
+---
 
-  All-core ceiling + heterogeneous (RUN1/RUN2):
-      W/allcore_ceiling_delphi-3bda_20260702_174444/SUMMARY.md
-      W/allcore_tfon_addendum_delphi-3bda_20260702_181035/
-      Full-machine load is RAPL-bound: ~3.27 GHz x 288T (~3.6 GHz x 144T)
-      at 502 W/pkg in EVERY config; 3.9 GHz all-core is not reachable.
-      HT sibling pairs equal within <=7 MHz (first sibling-loaded test).
-      KEY RECIPE DELTA: turbo-freq ENABLED + assoc-only -> 4100.0 x80 on
-      the checkerboard shape vs 3900 x80 from flat_freq_apply's disables
-      (+200 MHz; no BIOS change needed). turbo-freq enable --auto puts
-      arbitrary cores at 4400 but clips everything else to 2700.
-      Landmine found: core-power enable silently resets CLOS2/CLOS3
-      configs (destroys the boot 2700 clamp config).
+## Run log (chronological)
 
-  TRON scenario (control plane 0-23+sibs pinned 2 GHz):
-      W/tron_scenario_delphi-3bda_20260702_192615/ and _b_..._194020/
-      Pinning requires CLOS min=max=2000 (min=800 starves to ~0.8 GHz).
-      App-core (24-143) ceiling is package-asymmetric: pkg0 ~3.64 GHz /
-      pkg1 ~3.26 GHz; flat is the aggregate optimum; hetero mixes lose
-      0.9-10%. Report section 5.
+### 2026-06-30 — clamped baseline (Hannah)
 
-  Tooling:
-      W/flat_freq_utils.sh PATCHED (backup .bak-20260702): apply pins
-      CLOS0; revert restores all boot CLOS configs incl. the CLOS3
-      2700 clamp + verifies; FLAT_FREQ_ISST env-overridable (/opt copy
-      works NOPASSWD non-interactively). Tested apply->revert->apply.
-      W/gen_tron_flatfreq.py: parses tron config/resource-map.yaml
-      (granite_rapids_6962p) and emits the exact isst commands to boost
-      tron_cores+peer_cores(+HT siblings) to CLOS0 with the rest clipped;
-      --also-boost dev,rinzler,platform; --revert; --emit. Validated
-      end-to-end (= E1 below). NOTE: default clips dev/rinzler to 2700.
+`2026-06-30_boot-default-clamped_gpt-oss-single/` — reference run, tron
+branch `hrv-intel-speed-select-crosscheck-measure` (66deff22), boot-default
+clamp: parse 551.5 tok/s, generate 90.6, TTFT 2.32 s, TTLT 13.61 s;
+turbostat ~89% of busy samples at 2.6–2.7 GHz. (Her full 188-config sweep
+`multi-sweep-20260630-030357` on 3bda later serves as the clamped baseline
+for grid comparisons.) NOTE: the thread-placement capture in this folder
+recorded only its own monitor loop — no runtron data.
 
-  Can any 80-core freq combination beat all-80-same-freq? (E1+E2):
-      W/PLAN_BEAT_80CORE_AGGREGATE_20260702.md (plan + results appendix)
-      W/e1e2_beat80_delphi-3bda_20260702_220207/
-      E1: generator config verbatim -> 4100.0 x80 exact = 328.0 GHz-cores
-      (peer-HT-loaded 160T shape: ~4047). E2: "4400 requires all other
-      cores <=2700" rule SURVIVED direct falsification with ~50 W/pkg
-      unused headroom -> all-80@4100 is the runtime-SST aggregate
-      optimum; BIOS C6 revert (E4) can at best tie -> SKIP.
+### 2026-07-02 — two failed attempts + host fault
 
-  Next (pending review): W/PLAN_E5_TRON_TOKPS_20260702.md — tokens/s A/B
-      of flat_freq_apply(3900) vs generator 4100 variants using the
-      single gpt-oss recipe above. The 2026-07-03 clean run in this
-      README is the V1 data point (+16.9% parse / +13.3% gen vs clamped);
-      open question is whether 4100 variants add more.
+- `..._attempt1-FAILED/` — both instances inherited
+  `SYSTEM_CONFIG="--instance 1,2"` from `~/jibin.bashrc.positron.dev`
+  → hugepage lock collision + init crash. Runners now unset
+  `SYSTEM_CONFIG TRON_LOG_LEVEL SPDLOG_LEVEL`.
+- `..._attempt2-FAILED-fpga-bars/` — **host fault**: 3bda booted 05:08 with
+  6/8 FPGAs unprogrammed (BittWare bootloader `12ba:0076`, one 256 MB BAR);
+  BIOS shrink-wrapped their PCIe stack windows; post-boot flashing could
+  never get the real 4M+1G+128G BARs assigned (Linux cannot grow firmware
+  decode windows). Every BAR2-touching process segfaulted at offset
+  0x200010 — 130 kernel-logged crashes incl. all daytime CI.
+- **Fix recipe** (evening, jointly with jhan): `pho bw images use -c
+  {0,1,4,5,6,7} archer_agm_01.05.08.00.rbf` (over USB/BMC) → warm reboot
+  WITH images resident → BIOS sizes all stack windows → 8/8 full BARs →
+  `pho test cards dma readback` PASS 8/8.
 
-## 2026-07-05: 24h sweep COMPLETE + TRON-80 comparison run started on 3af6
+### 2026-07-02 — SST frequency-exploration work stream (parallel session)
 
-24h flat-freq sweep (2026-07-03_flat-freq_24h-sweep/) finished 02:53 UTC
-2026-07-05 after 49h57m (11 models; "24h" is a misnomer at these lengths).
-- 483 configs produced metrics (56 configs auto-skipped where user count <
-  instance count); exit code 1 solely because of the single known failure.
-- Failures: exactly 1 of 483 — llama-3.2-3b-instruct-fast-tp1 /
-  spec-off-p1024-g1024-s256 / 8-8, instance 4 segfaulted in TEARDOWN after
-  its iteration completed (tron shutdown bug, data for that config lost).
-- Flat shape held for the whole run: flat_freq_watch.log 300/300 samples
-  clos:0; turbostat 531,188 busy-core samples, mean 3756 MHz, 0.00% in the
-  2600-2799 clamp band, 100% >= 3600 MHz.
-- Consolidated CSV: sweep-results/results-v2-multi-model-20260703-005629.csv
+Artifacts under `W = workspace debug_3bda/`; main report
+`W/ALLCORE_CEILING_HETERO_CLAUDE_20260702.md` (repro blocks per phase).
 
-New run: 2026-07-05_tron80-4100-3af6_gpt-oss-3b-matrix/ on delphi-3af6 —
-strict TRON-80 shape (cores 27-46,51-70,75-94,99-118 + HT sibs in
-CLOS0/TF-on, verified 4100-4400 MHz; all others CLOS3 <= 2700, verified
-2700) applied via flat_freq_apply v2 select mode. Subset: gpt-oss-120b-tp4
-+ llama-3.2-3b-fast-tp4, full 7x7 matrices — same matrices as the 24h run
-for direct flat-vs-TRON80 comparison (expect TRON-80 faster: busy cores
-4100 vs ~3900). Runner: scripts/run_tron80_subset_3af6.sh.
+- **All-core ceiling**: full-machine load is RAPL-bound (~3.27 GHz × 288T,
+  ~3.6 × 144T, 502 W/pkg) in every config. HT sibling pairs equal ≤ 7 MHz.
+- **Key recipe delta**: TF ENABLED + assoc-only → **4100.0 × 80** on the
+  checkerboard shape vs 3900 with the disable recipe (+200 MHz).
+  `turbo-freq enable --auto` puts arbitrary cores at 4400 but clips all
+  else to 2700. Landmine: `core-power enable` silently resets CLOS2/3.
+- **E1/E2** (`W/e1e2_beat80_.../`): generator config verbatim → 4100.0×80
+  exact; the "4400 requires all others ≤2700" rule survived direct
+  falsification with ~50 W/pkg unused → all-80@4100 is the runtime-SST
+  aggregate optimum. No 4200 rung exists.
+- **TRON scenario**: control-plane pinning needs CLOS min=max (min=800
+  starves to 0.8 GHz); app-core ceiling package-asymmetric under full load.
+- **Tooling**: `flat_freq_utils.sh` (patched → later v2/v3) and
+  `gen_tron_flatfreq.py` (parses tron resource-map.yaml → exact isst
+  sequence; `--also-boost dev,rinzler,platform`; `--revert`).
 
-## 2026-07-05: TRON-80 run COMPLETE — comparison vs universal flat
+### 2026-07-03 — clean flat-freq single run
 
-2026-07-05_tron80-4100-3af6_gpt-oss-3b-matrix/ finished 09:31 UTC (6h35m,
-rc=0, 98 configs, 0 failures). Shape held the whole run (shape_watch 40/40
-cpu30=clos:0 and cpu2=clos:3; turbostat TRON cores: 56,039 busy samples,
-mean 3977 MHz, 99.9% >= 3900, none in 2600-2799). Consolidated CSV:
-sweep-results/results-v2-multi-model-20260705-025559.csv
+`2026-07-03_flat-freq_gpt-oss-single/` (v1 flat shape, busy ~3.9 GHz):
 
-Per-config geomean ratios, TRON-80@4100 (3af6) vs universal-flat@3900
-(3bda 24h run), 49/49 overlapping configs per model:
+| Metric | Clamped baseline | Flat | Delta |
+|---|---|---|---|
+| Parse | 551.5 | 644.7 | **+16.9%** |
+| Generate | 90.6 | 102.6 | **+13.3%** |
+| TTFT | 2.32 s | 1.99 s | −14.5% |
+| TTLT | 13.61 s | 11.94 s | −12.2% |
 
-  ingested-gpt-oss-120b-tp4:  parse +2.9% (better in 46/49),
-    generate +1.0% (38/49), TTFT 2.9% faster (46/49), TTLT 1.3% faster.
-    -> TRON-80 wins on all four metrics, as expected.
+### 2026-07-03 → 05 — "24-hour" multi-model sweep (flat v1, 3bda)
 
-  llama-3.2-3b-instruct-fast-tp4: parse +2.7%, TTFT 2.6% faster (38/49),
-    but generate -0.8% (better in only 11/49) and TTLT -0.4%.
-    -> Mixed. Parse (CPU-bound) gains; small-model generation regresses
-    slightly — consistent with the strict-80 shape clipping the FPGA
-    DRIVER cores (25,26,49,50,73,74,97,98) to 2700 (they ran ~3900 in the
-    flat run). This is the exact V2-risk noted in PLAN_E5; the
-    --also-boost dev variant (88-core shape) is the candidate fix.
+`2026-07-03_flat-freq_24h-sweep/` — 49 h 57 m (11 model×TP configs; the
+"24h" name is a misnomer at these lengths). 483 configs with metrics
+(56 auto-skipped where users < instances); exactly **1 failure**
+(3b-tp1/p1024/8-inst: teardown segfault after a completed iteration — tron
+shutdown bug). Shape held: 300/300 CLOS probes, 531k busy samples mean
+3756 MHz, 0.00% clamp band. Model substitution: llama-3.1-70b for Hannah's
+llama-3.3-70b (absent from tron main).
+CSV: `sweep-results/results-v2-multi-model-20260703-005629.csv`.
 
-Caveat: cross-host comparison (3af6 vs 3bda, same 6962P/8-FPGA spec, same
-NFS runtron build ae82870ae); magnitudes are 1-3%, so host variance is not
-fully excluded, but the per-config pairing and consistent directionality
-support the frequency-shape explanation.
+### 2026-07-05 — flat vs clamped (the headline grid comparison)
 
-State left on 3af6: TRON-80 shape still applied (does not survive reboot);
-jhan-owned libpos hugepage slice files remain (reused by future runs).
+151 paired configs vs Hannah's clamped baseline (same host; tron versions
+differ). Flat wins nearly every config:
 
-## 2026-07-05: 24h flat run vs CLAMPED baseline (Hannah, Jun 30)
+| Model | Parse | Generate | TTFT | TTLT | cfgs |
+|---|---|---|---|---|---|
+| gpt-oss-120b tp4 | +12.6% | +9.9% | 11.1% fst | 9.4% fst | 20 |
+| llama-8b-good tp4 | +12.2% | +8.4% | 11.2% fst | 8.2% fst | 20 |
+| llama-8b-good tp2 | +11.4% | +6.7% | 9.9% fst | 6.8% fst | 16 |
+| llama-3b-fast tp4 | +13.9% | +7.6% | 11.9% fst | 7.8% fst | 20 |
+| llama-3b-fast tp2 | +16.8% | +7.3% | 13.3% fst | 7.7% fst | 16 |
+| llama-3b-fast tp1 | +13.0% | +5.9% | 11.7% fst | 6.4% fst | 11 |
+| mixtral tp4 | +7.5% | +4.4% | 7.0% fst | 4.8% fst | 20 |
+| mixtral tp2 | +6.3% | +3.2% | 6.0% fst | 3.5% fst | 16 |
+| mixtral tp1 | +4.3% | +3.4% | 4.1% fst | 3.5% fst | 12 |
 
-Baseline found: delphi-3bda:/var/tmp/hvaneenoo/checkerboard/sweeps/
-multi-sweep-20260630-030357/results-v2-multi-model-20260630-030357.csv —
-188 configs, same host (3bda), Hannah tron branch hrv-intel-speed-select,
-boot-default CLAMPED state (verified: its gpt-oss p1024 2-8 row matches
-her instrumented single run within ~2%, whose turbostat showed the
-2.6-2.7 GHz clamp).
+Gaps: no clamped baseline for 70B (hers is 3.3, ours 3.1); baseline has
+fewer user counts. Older baselines: `multi-sweep-20260603/04`; Talos
+MongoDB holds nightly CI history.
 
-151 configs pair with the 24h flat run. Flat-freq uplift vs clamped
-(per-config geomeans; flat wins nearly every individual config):
+### 2026-07-05 — TRON-80 run (3af6) vs universal flat
 
-  model                  parse    generate  TTFT       TTLT
-  gpt-oss-120b tp4      +12.6%    +9.9%    11.1% fst   9.4% fst  (20 cfg)
-  llama-8b-good tp4     +12.2%    +8.4%    11.2% fst   8.2% fst  (20)
-  llama-8b-good tp2     +11.4%    +6.7%     9.9% fst   6.8% fst  (16)
-  llama-3b-fast tp4     +13.9%    +7.6%    11.9% fst   7.8% fst  (20)
-  llama-3b-fast tp2     +16.8%    +7.3%    13.3% fst   7.7% fst  (16)
-  llama-3b-fast tp1     +13.0%    +5.9%    11.7% fst   6.4% fst  (11)
-  mixtral tp4            +7.5%    +4.4%     7.0% fst   4.8% fst  (20)
-  mixtral tp2            +6.3%    +3.2%     6.0% fst   3.5% fst  (16)
-  mixtral tp1            +4.3%    +3.4%     4.1% fst   3.5% fst  (12)
+`2026-07-05_tron80-4100-3af6_gpt-oss-3b-matrix/` — 6 h 35 m, 98 configs,
+0 failures; TRON cores 56k busy samples mean 3977, none clamped.
 
-Gaps/caveats: 70B has NO clamped baseline (hers is llama-3.3, ours 3.1 —
-no pairing); baseline covers fewer user counts than our 482-config run;
-tron versions differ (hers 66deff22-era branch vs our main ae82870ae).
-Same-host comparison though — stronger than the cross-host tron80 one.
-Older baselines also exist (multi-sweep-20260603/04) and Talos MongoDB
-holds nightly CI history (see llm-toolbox talos-database-access.md).
+- gpt-oss-tp4 (49 cfg): parse **+2.9%** (46/49), generate +1.0%, TTFT 2.9% fst.
+- 3b-fast-tp4 (49 cfg): parse +2.7% but generate **−0.8%** (11/49) — the
+  strict-80 shape clips the FPGA-driver cores to 2700; small-model
+  generation feels it (the PLAN_E5 "V2 risk", confirmed).
 
-## 2026-07-05: TRON-88 baseline round COMPLETE (3bda, 55 min)
+Cross-host caveat (3af6 vs 3bda) later bounded at ~0.5% by the tron88 run.
 
-2026-07-05_tron88-4100-3bda_baseline-matrix/: 56 configs (gpt-oss-tp4 +
-8b-good tp4/tp2, lengths 256-2048 x users 2-32 = Hannah's baseline grid),
-0 failures, rc=0, 14:19-15:14 UTC. Shape (cores 25-46,49-70,73-94,97-118
-+ sibs @ CLOS0/TF-on) held 6/6 watch samples; fast-set busy mean 4042 MHz,
-none in clamp band. CSV: sweep-results/results-v2-multi-model-20260705-141935.csv
+### 2026-07-05 — TRON-88 baseline round (3bda, 55 min)
 
-(a) tron88 vs CLAMPED baseline (same host, exact config pairing):
-    gpt-oss-tp4: parse +14.6, gen +10.9, TTFT 12.6 fst, TTLT 10.3 fst (20/20 all)
-    8b-tp4:      parse +13.7, gen  +9.9, TTFT 12.2 fst, TTLT  9.4 fst (20/20)
-    8b-tp2:      parse +12.9, gen  +7.6, TTFT 11.1 fst, TTLT  7.7 fst
-(b) tron88 vs universal FLAT (same host): +0.9 to +1.8% everywhere —
-    first same-host confirmation that the TRON shape beats flat.
-(c) tron88 vs strict TRON-80 (3af6): ~0% (+-0.4) for gpt-oss — the
-    driver-core boost is neutral for gpt-oss (the earlier 3B generation
-    dip remains the only known driver-clip symptom; 3B not in this round).
-    Also validates cross-host comparability at the ~0.5% level.
+`2026-07-05_tron88-4100-3bda_baseline-matrix/` — 56 configs, 0 failures;
+shape = tron80 + driver cores (`25-46,49-70,73-94,97-118` +sibs); fast-set
+busy mean 4042, none clamped.
 
-## 2026-07-06: 3-TIER (tier3) round COMPLETE (3bda, 55 min)
+| Comparison | Result |
+|---|---|
+| (a) vs clamped (same host) | gpt-oss +14.6/+10.9 (20/20); 8b-tp4 +13.7/+9.9; 8b-tp2 +12.9/+7.6 |
+| (b) vs universal flat (same host) | +0.9 to +1.8% everywhere — first same-host select-beats-flat confirmation |
+| (c) vs strict tron80 (3af6) | ~0% ± 0.4 for gpt-oss — driver boost neutral; also pins host variance at ~0.5% |
 
-2026-07-06_tier3-4100-3900-3bda_baseline-matrix/: 56 configs, 0 failures,
-rc=0, 02:23-03:17 UTC. Shape via flat_freq_apply_tiers (v3, new):
-  fast  app-worker cores 27-46,51-70,75-94,99-118 (+sibs) CLOS0/TF-on
-  mid   TRON-aux 0,24-26,48-50,72-74,96-98 (+sibs; TX on dev cores, RX on
-        dev sibs, rinzler, platform) CLOS1 800-3900
-  low   rest CLOS3 800-2700
-(User asked 4.2 GHz tier1; not grantable — TF gives 4100 when any core
->2700, 4400 only if ALL others <=2700, no 4200 rung; see ALLCORE doc 2.5/2.6.)
+### 2026-07-06 — 3-tier round (3bda, 55 min)
 
-Realized (busy >50% samples): tier1 mean 4032 (68% in 4000-4099);
-tier2 mean 3899, hard-pinned 3888-3900 — TX/RX driver threads DID load
-their cores (880 busy samples; first shape where they show up as busy);
-tier3 zero busy samples (OS only). Shape watch 0 deviations.
+`2026-07-06_tier3-4100-3900-3bda_baseline-matrix/` — 56 configs, 0
+failures. Shape via `flat_freq_apply_tiers` (v3): fast = app cores
+(CLOS0/TF-on), mid = TRON-aux `0,24-26,48-50,72-74,96-98`+sibs (CLOS1
+≤ 3900), low = rest (≤ 2700). (4.2 GHz tier-1 was requested but is not
+grantable: TF gives 4100 when any core > 2700; no 4200 rung.)
 
-tier3 vs CLAMPED: gpt-oss parse +14.6 gen +10.7 (20/20); 8b-tp4 +13.7/+11.0;
-8b-tp2 +12.8/+7.6 — statistically identical to tron88-vs-clamped.
-tier3 vs TRON-88: 0.0 +- 0.4% everywhere (8b-tp4 gen +0.9% at 12/20 —
-within noise). CONCLUSION: lifting the TX/RX/aux cores from 2700 to 3900
-buys nothing measurable for these models; the app-worker 4100 tier is the
-only lever that matters. tron88 and tier3 are interchangeable; tier3 uses
-less power headroom in principle but both are far from power-bound here.
+Realized: tier1 mean 4032 (68% in 4000–4099); tier2 mean 3899 hard-pinned
+3888–3900 (TX/RX driver threads genuinely busy — first shape where they
+show up); tier3 zero busy samples.
 
-## 2026-07-09: PR#3070 A/B/C ladder COMPLETE (3af6) — software vs shape decomposed
+Results: vs clamped ≈ identical to tron88; **vs tron88: 0.0 ± 0.4%** —
+lifting aux cores 2700→3900 buys nothing for these models. The app-worker
+4100 tier is the only lever that matters.
 
-Phases (each 56 configs, 0 failures, shape watch 0 deviations):
-  A 2026-07-09_ladderA-flat4100-main-3af6_baseline-matrix   main ae82870ae + universal flat (busy mean 4044)
-  B 2026-07-09_ladderB-flat4100-pr3070-3af6_baseline-matrix pr3070 66b66350 + universal flat (busy mean 4057)
-  C 2026-07-09_ladderC-tron112-pr3070-3af6_baseline-matrix  pr3070 + select 7-14,24-71,79-86,96-143 (fast busy 4045/clamp 0; slow busy = new-map TX/RX drivers pinned 2700)
-New-map pinning verified in logs (App CPU list 223-224,96-101,...).
+### 2026-07-09 — PR #3070 A/B/C ladder (3af6): software vs shape decomposed
 
-B/A = PR-3070 SOFTWARE effect (flat both sides):
-  gpt-oss-tp4: parse +9.3 (19/20) gen +3.4 (14/20) TTFT 8.6 fst TTLT 4.1 fst  <- big win
-  8b-tp4:      parse +3.6 gen -0.1 — mild win
-  8b-tp2:      parse -5.8 gen -18.1 (1/16) TTLT -19.6 — SERIOUS REGRESSION
-C/B = new-map shape effect: ~0 +- 1.8% everywhere (select==flat again; slight
-  drag on 8b-tp4 parse -1.8, drivers-clipped signature on 8b-tp2 gen -1.3).
-C/A combined: gpt-oss parse +9.6/gen +3.8; 8b-tp2 gen -19.2.
-Sanity A vs tron80-3af6 (gpt-oss): +-0.5% — measurement stable across days.
+tron PR #3070 (`66b66350`, "gr-6962p-tuning") replaces the core map:
+14 phys cores/slice (2 die-A addressed via HT-sibling IDs + 6 die-B +
+6 die-C), 112 phys cores total vs 80, main thread deliberately lands on
+die B. Testing it requires the PR *binary* (19 files incl. rinzler.cpp) —
+built from `pull/3070/head`, published to `/scratch/jhan/tron-pr3070`.
+Shape list validated two independent ways: manual derivation ==
+`gen_tron_flatfreq.py` output == `flat_freq_apply` expansion
+(`7-14,24-71,79-86,96-143` + sibs = 224 CPUs fast, 64 low).
 
-TAKEAWAYS for PR review: (1) new map is a clear win for gpt-oss-120b-tp4
-(prefill/parse most, consistent with die-A prefill design) and mildly good
-for 8b-tp4; (2) 8b TP2 REGRESSES ~18-20% on generation — the 4-instance/
-2-slice topology under the new map needs attention before merge; (3) the
-frequency-shape choice (flat vs select) remains a wash — the software/
-placement change is what matters.
+Phases (each 56 configs, 0 failures, 0 shape deviations; new-map pinning
+verified in logs — `App CPU list: 223-224,96-101,...`):
 
-Measurement notes: first B/C attempt failed via runtron RPATH pointing into
-the 3bda-local build tree (fixed with LD_LIBRARY_PATH; smoke-test on the
-TARGET host from now on). Runner kill cannot reap root turbostat children
--> orphan turbostats accumulate (19 on 3af6; needs sudo pkill turbostat);
-per-phase turbostat files contaminated by successor phases — analyses above
-bounded to each phase's own snapshot window.
+| Phase | runtron | Shape | Busy mean |
+|---|---|---|---|
+| A `2026-07-09_ladderA-flat4100-main-3af6_baseline-matrix` | main ae82870ae | universal flat | 4044 |
+| B `2026-07-09_ladderB-flat4100-pr3070-3af6_baseline-matrix` | PR 66b66350 | universal flat | 4057 |
+| C `2026-07-09_ladderC-tron112-pr3070-3af6_baseline-matrix` | PR 66b66350 | tron112 select | fast 4045 / drivers 2695 |
+
+Realized frequency distributions (busy > 50% samples, each phase bounded
+to its own snapshot window):
+
+| Band (MHz) | A (all busy) | B (all busy) | C (fast set) |
+|---|---|---|---|
+| 3800–3899 | 4.0% | — | 1.2% |
+| 3900–3999 | 22.3% | 18.5% | 28.6% |
+| 4000–4099 | 60.2% | 69.4% | 66.1% |
+| 4100–4199 | 12.3% | 10.4% | 2.1% |
+| 4200+ | 1.2% | 1.6% | 1.9% |
+| n / mean / max | 4806 / 4044 / 4344 | 6910 / 4057 / 4392 | 6378 / 4045 / 4382 |
+
+(C additionally has the new map's TX/RX driver cores busy in the slow set:
+n=976, mean 2695 — pinned at their cap, doing real work. The 4200+ samples
+in all phases are light-load moments between configs where few busy cores
+earn higher grants.)
+
+Decomposition (per-config geomeans, win counts):
+
+| Ratio | gpt-oss-120b tp4 | llama-8b tp4 | llama-8b tp2 |
+|---|---|---|---|
+| **B/A — software effect** (flat both sides) | parse **+9.3%** (19/20), gen +3.4% (14/20), TTLT 4.1% fst | parse +3.6%, gen −0.1% | parse −5.8% (4/16), gen **−18.1%** (1/16), TTLT −19.6% |
+| **C/B — shape effect** (PR both sides) | ~0 (+0.3%) | parse −1.8%, gen −0.5% | parse +0.2%, gen −1.3% |
+| **C/A — combined** | parse +9.6% (20/20), gen +3.8% | parse +1.8%, gen −0.5% | parse −5.6%, gen −19.2% |
+
+Sanity: A vs tron80-3af6 (gpt-oss, main binary, flat vs old select):
+±0.5% — measurement stable across days.
+
+**C vs the 2026-07-06 tier3 round** (new-map select on 3af6 vs old-map
+3-tier on 3bda — i.e., "new world vs best old world", cross-host):
+
+| Model | Parse | Generate | TTFT | TTLT |
+|---|---|---|---|---|
+| gpt-oss-120b tp4 | **+10.0%** (20/20) | +3.9% (16/20) | 8.8% fst | 4.6% fst |
+| llama-8b tp4 | +2.6% (11/20) | −2.2% (7/20) | 2.7% fst | −1.8% |
+| llama-8b tp2 | −5.6% (5/16) | **−19.6%** (1/16) | −4.5% | −21.3% |
+
+Frequency comparison C vs tier3: fast tiers essentially identical
+(4045 vs 4032, both ~66–68% in the 4000–4099 band); the difference is the
+aux/driver cores — tier3 ran them at 3899 (CLOS1), C clips them at 2695.
+Given C/B ≈ 0, that difference again doesn't move tokens/s for these
+models — the perf deltas above are the PR's software/placement change.
+
+**Takeaways for PR #3070 review:**
+
+1. New map is a clear win for gpt-oss-120b-tp4 (+9–10%, prefill/parse most,
+   consistent with the die-A prefill design) and mildly good for 8b-tp4.
+2. **8b TP2 regresses ~18–20% on generation** — the 4-instance/2-slice
+   topology under the new map needs attention before merge.
+3. Frequency-shape choice (flat vs select) remains a wash; the software/
+   placement change is what matters. Universal flat + new map captures
+   nearly the whole win.
+
+Measurement notes: first B/C attempt failed instantly — the PR runtron's
+RPATH pointed into the 3bda-local build tree (`libversion.so` not found on
+3af6); fixed with `LD_LIBRARY_PATH` into the `/scratch` copy. Lesson:
+smoke-test on the TARGET host. Also: runner `kill` cannot reap root
+turbostat children → orphan turbostats accumulate (19 on 3af6, needs
+`sudo pkill turbostat`; 3bda similar) and per-phase turbostat files get
+contaminated by successor phases — all analyses above are bounded to each
+phase's own snapshot window.
