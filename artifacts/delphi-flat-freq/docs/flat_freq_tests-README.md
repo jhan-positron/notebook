@@ -290,3 +290,58 @@ none in clamp band. CSV: sweep-results/results-v2-multi-model-20260705-141935.cs
     driver-core boost is neutral for gpt-oss (the earlier 3B generation
     dip remains the only known driver-clip symptom; 3B not in this round).
     Also validates cross-host comparability at the ~0.5% level.
+
+## 2026-07-06: 3-TIER (tier3) round COMPLETE (3bda, 55 min)
+
+2026-07-06_tier3-4100-3900-3bda_baseline-matrix/: 56 configs, 0 failures,
+rc=0, 02:23-03:17 UTC. Shape via flat_freq_apply_tiers (v3, new):
+  fast  app-worker cores 27-46,51-70,75-94,99-118 (+sibs) CLOS0/TF-on
+  mid   TRON-aux 0,24-26,48-50,72-74,96-98 (+sibs; TX on dev cores, RX on
+        dev sibs, rinzler, platform) CLOS1 800-3900
+  low   rest CLOS3 800-2700
+(User asked 4.2 GHz tier1; not grantable — TF gives 4100 when any core
+>2700, 4400 only if ALL others <=2700, no 4200 rung; see ALLCORE doc 2.5/2.6.)
+
+Realized (busy >50% samples): tier1 mean 4032 (68% in 4000-4099);
+tier2 mean 3899, hard-pinned 3888-3900 — TX/RX driver threads DID load
+their cores (880 busy samples; first shape where they show up as busy);
+tier3 zero busy samples (OS only). Shape watch 0 deviations.
+
+tier3 vs CLAMPED: gpt-oss parse +14.6 gen +10.7 (20/20); 8b-tp4 +13.7/+11.0;
+8b-tp2 +12.8/+7.6 — statistically identical to tron88-vs-clamped.
+tier3 vs TRON-88: 0.0 +- 0.4% everywhere (8b-tp4 gen +0.9% at 12/20 —
+within noise). CONCLUSION: lifting the TX/RX/aux cores from 2700 to 3900
+buys nothing measurable for these models; the app-worker 4100 tier is the
+only lever that matters. tron88 and tier3 are interchangeable; tier3 uses
+less power headroom in principle but both are far from power-bound here.
+
+## 2026-07-09: PR#3070 A/B/C ladder COMPLETE (3af6) — software vs shape decomposed
+
+Phases (each 56 configs, 0 failures, shape watch 0 deviations):
+  A 2026-07-09_ladderA-flat4100-main-3af6_baseline-matrix   main ae82870ae + universal flat (busy mean 4044)
+  B 2026-07-09_ladderB-flat4100-pr3070-3af6_baseline-matrix pr3070 66b66350 + universal flat (busy mean 4057)
+  C 2026-07-09_ladderC-tron112-pr3070-3af6_baseline-matrix  pr3070 + select 7-14,24-71,79-86,96-143 (fast busy 4045/clamp 0; slow busy = new-map TX/RX drivers pinned 2700)
+New-map pinning verified in logs (App CPU list 223-224,96-101,...).
+
+B/A = PR-3070 SOFTWARE effect (flat both sides):
+  gpt-oss-tp4: parse +9.3 (19/20) gen +3.4 (14/20) TTFT 8.6 fst TTLT 4.1 fst  <- big win
+  8b-tp4:      parse +3.6 gen -0.1 — mild win
+  8b-tp2:      parse -5.8 gen -18.1 (1/16) TTLT -19.6 — SERIOUS REGRESSION
+C/B = new-map shape effect: ~0 +- 1.8% everywhere (select==flat again; slight
+  drag on 8b-tp4 parse -1.8, drivers-clipped signature on 8b-tp2 gen -1.3).
+C/A combined: gpt-oss parse +9.6/gen +3.8; 8b-tp2 gen -19.2.
+Sanity A vs tron80-3af6 (gpt-oss): +-0.5% — measurement stable across days.
+
+TAKEAWAYS for PR review: (1) new map is a clear win for gpt-oss-120b-tp4
+(prefill/parse most, consistent with die-A prefill design) and mildly good
+for 8b-tp4; (2) 8b TP2 REGRESSES ~18-20% on generation — the 4-instance/
+2-slice topology under the new map needs attention before merge; (3) the
+frequency-shape choice (flat vs select) remains a wash — the software/
+placement change is what matters.
+
+Measurement notes: first B/C attempt failed via runtron RPATH pointing into
+the 3bda-local build tree (fixed with LD_LIBRARY_PATH; smoke-test on the
+TARGET host from now on). Runner kill cannot reap root turbostat children
+-> orphan turbostats accumulate (19 on 3af6; needs sudo pkill turbostat);
+per-phase turbostat files contaminated by successor phases — analyses above
+bounded to each phase's own snapshot window.
