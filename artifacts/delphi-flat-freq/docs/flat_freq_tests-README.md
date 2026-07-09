@@ -237,9 +237,31 @@ tron PR #3070 (https://github.com/positron-ai/tron/pull/3070, head
 6 die-C), 112 phys cores total vs 80, main thread deliberately lands on
 die B. Testing it requires the PR *binary* (19 files incl. rinzler.cpp) —
 built from `pull/3070/head`, published to `/scratch/jhan/tron-pr3070`.
-Shape list validated two independent ways: manual derivation ==
-`gen_tron_flatfreq.py` output == `flat_freq_apply` expansion
-(`7-14,24-71,79-86,96-143` + sibs = 224 CPUs fast, 64 low).
+Shape list validated two independent ways — exact invocations (run on
+both hosts; outputs shown are what each printed):
+
+```bash
+# 1. Generator: parse the PR's resource map (extracted from pull/3070/head)
+git -C /tmp/jhan-tron3070 show pr3070:config/resource-map.yaml > /tmp/jhan-rm-pr3070.yaml
+python3 /home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/gen_tron_flatfreq.py \
+    /tmp/jhan-rm-pr3070.yaml --section granite_rapids_6962p
+#  -> boost set: 7-14,24-71,79-86,96-143,151-158,168-215,223-230,240-287 (224 CPUs)
+#  -> slow set:  0-6,15-23,72-78,87-95,144-150,159-167,216-222,231-239   (64 CPUs)
+
+# 2. Apply with the MANUALLY derived argument (union of the 8 slice lists,
+#    sibling IDs 151-158/223-230 folded to physical cores 7-14/79-86):
+source /home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/flat_freq_utils.sh
+flat_freq_apply 7-14,24-71,79-86,96-143
+#  -> high (CLOS0, 2700-4400): 7-14 24-71 79-86 96-143 151-158 168-215 223-230 240-287
+#  -> low  (CLOS3, <=2700):    0-6 15-23 72-78 87-95 144-150 159-167 216-222 231-239
+#  -> turbo-freq enabled; configs pinned; assoc: clos0=224 clos3=64
+```
+
+VALIDATION RESULT: the apply expansion is byte-identical to the generator's
+boost/slow sets in both directions. Phase C's runner
+(`scripts/run_pr3070_ladder_BC_3af6.sh`) invokes exactly this
+`flat_freq_apply 7-14,24-71,79-86,96-143`; phases A/B invoke
+`flat_freq_apply` with no arguments (universal flat).
 
 Phases (each 56 configs, 0 failures, 0 shape deviations; new-map pinning
 verified in logs — `App CPU list: 223-224,96-101,...`):
