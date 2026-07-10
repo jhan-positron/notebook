@@ -74,6 +74,34 @@ of spacing around the `/`).
 - SCOPE items therefore name sessions as `"<project> / <session name>"`,
   e.g. `"debug_3bda_flat_freq / run CI tests"`.
 
+## Terminology: local vs remote — the three session cases
+
+What matters to this prompt is where the TRANSCRIPT lives, not where the
+work ran:
+
+1. **Local session** — cwd on this machine; project folder name is derived
+   from the cwd (e.g. `C--Users-jibin-Documents-...`). Fully automatic:
+   discovery, titles, dates, rename detection.
+2. **Remote-cwd session driven from this machine** — the `ssh-<uuid>`
+   project folders: the work ran on an ssh host, but the Claude app on
+   this machine wrote the transcript locally. **This counts as LOCAL** —
+   `SCOPE: auto` discovers it and title/date evidence is local. Honor the
+   differences:
+   - The project folder name is an opaque `ssh-<uuid>`; the REMOTE cwd is
+     recoverable from the `cwd` field inside the transcript records.
+     Project display names are not on disk — ask me when one is needed
+     for the header.
+   - The handoff's `Transcript:` line still names THIS machine (that is
+     where the JSONL is). The Environment section must name BOTH hosts,
+     and artifacts are host-qualified remote paths.
+   - Evidence is local, artifacts are remote: generating/updating the
+     handoff always works, but Step 4b canonical fetches need ssh
+     reachability to the remote host at run time.
+3. **Session on another machine** — Claude Code running on the remote box
+   itself (or a different laptop). Nothing about it is in this machine's
+   store: `SCOPE: auto` cannot see it; it must be listed under SCOPE, and
+   names/dates/content must come from that machine or from me.
+
 ## Goal
 Produce markdown handoff file(s) covering ALL items in SCOPE — file count
 per GRANULARITY — written so a fresh session (or a human) can resume the
@@ -248,6 +276,10 @@ repo so accidental workspace deletion cannot destroy them.
   - Canonical missing -> NEVER delete the repo copy; alert loudly: the
     repo copy is now the only copy — restore it to the workspace or
     deregister it deliberately.
+  - Canonical UNREACHABLE (ssh host down / no route) is NOT the missing
+    case: skip the refresh, report those mirrors as unverified this run,
+    no alarm. The alarm is for a canonical that is GONE from a reachable
+    location.
   - Direction is strictly canonical -> repo. Repo copies are mirrors; do
     not hand-edit them — edit the canonical file and let the next run
     sync.
