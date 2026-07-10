@@ -22,15 +22,22 @@ of spacing around the `/`).
 - REPO_URL: https://github.com/jhan-positron/notebook
 - TARGET_DIR: handoffs/     # dir inside the repo; create if missing; "." = repo root
 - SCOPE: auto
-   - auto (the default): derive the scope from the repo itself — scan every
-     handoff file already in TARGET_DIR and collect their `Claude session:`
-     / `Claude chat:` header lines; every session/chat found is in scope
-     and its handoff gets UPDATED per Step 5. A session with no new
-     activity since its handoff's Activity END date is skipped (report it
-     as unchanged; no commit churn).
-   - If I ALSO list items under SCOPE, they are ADDED to the scanned set —
-     this is how a brand-new session gets its first handoff. I only ever
-     need to type a session name once.
+   - auto (the default): scan BOTH sides and reconcile them.
+     (a) Scan every handoff file already in TARGET_DIR and collect their
+     `Claude session:` / `Claude chat:` header lines. (b) Enumerate every
+     local Code-tab session on this machine — every session JSONL in every
+     project folder under `~/.claude/projects/` — reading each session's
+     display name from its `custom-title` record (fallback: `ai-title`;
+     see Step 2). Then: a session that already has a handoff gets it
+     UPDATED per Step 5 (skipped and reported as unchanged if it has no
+     new activity since the handoff's Activity END date — no commit
+     churn); a session with NO handoff gets a NEW one. Sessions with no
+     substantive work (aborted starts, a few messages, pure meta-runs of
+     this prompt) are not silently skipped — list them at the approval
+     gate as proposed skips so I can override.
+   - If I ALSO list items under SCOPE, they are ADDED to the scanned set.
+     Listing is only needed for items auto cannot see: Chat-tab chats,
+     sessions on other machines — or to supply/override a name.
    - `this session only`: cover just the current session; skip the scan.
    - Whatever appears as the value IS the active scope — Claude must cover
      every item, and must not treat a list as illustrative.
@@ -54,10 +61,16 @@ of spacing around the `/`).
   line in the Claude app sidebar. One project = one working directory = one
   folder under `~/.claude/projects/`. Example: project `debug_3bda_flat_freq`
   (cwd `C:\Users\jibin\Documents\claude_debug_3bda_flat_freq`).
-- A **session** is one conversation inside a project — one JSONL transcript
-  file in that project's folder. Example: project `debug_3bda_flat_freq`
-  contains three sessions: "debug flat freq on CI machine",
-  "explore best freq combo", and "run CI tests".
+- A **session** is one conversation inside a project — normally one JSONL
+  transcript file in that project's folder. Example: project
+  `debug_3bda_flat_freq` contains three sessions: "debug flat freq on CI
+  machine", "explore best freq combo", and "run CI tests".
+  CAUTION: resuming a conversation can create a SECOND JSONL (new
+  sessionId) that replays the earlier history and continues from there —
+  that is still ONE session (one sidebar entry, one handoff). Detect the
+  split by identical `custom-title` records and/or identical opening user
+  messages; the handoff's `Transcript:` line points at the newest file and
+  notes the earlier one(s).
 - SCOPE items therefore name sessions as `"<project> / <session name>"`,
   e.g. `"debug_3bda_flat_freq / run CI tests"`.
 
@@ -85,20 +98,25 @@ Filename dates are when the work actually happened; it may span several days.
 - If dates cannot be established from evidence: ask me. Do not guess.
 
 ## Step 2 — Determine session and chat names
-- Find this session's exact display name (the title shown in the app
+- Find each session's exact display name (the title shown in the app
   sidebar under the project header — see Terminology above). Try in order:
-  1. The session JSONL under `~/.claude/projects/<project-dir>/` —
-     title/summary records, if present. Multiple title records over time
+  1. The session JSONL under `~/.claude/projects/<project-dir>/` — the
+     `custom-title` record (`{"type":"custom-title","customTitle":"..."}`,
+     near the top of the file) IS the sidebar display name when I have
+     named/renamed the session; the `ai-title` record is the auto-generated
+     title used when I have not. Newest record wins. (Titles ARE stored on
+     disk — verified 2026-07-10; this supersedes the older observation
+     that they were not.) Multiple/differing title records over time
      indicate renames; keep that history.
   2. `~/.claude/sessions/<pid>.json` — CAUTION: its `name` field with
      `"nameSource": "derived"` is an auto-generated internal name (e.g.
      `claude-debug-3bda-flat-freq-76`), NOT the display title. Never use a
      derived name as the session name.
-  3. If no store yields a display title (common — verified 2026-07-04),
-     ask me for the exact name as shown in the sidebar. Offer to accept a
-     screenshot of the sidebar: the small grey header is the project, the
-     list items under it are the sessions, and the highlighted item is the
-     current session.
+  3. If a transcript has neither title record (old sessions predating the
+     feature), ask me for the exact name as shown in the sidebar. Offer to
+     accept a screenshot of the sidebar: the small grey header is the
+     project, the list items under it are the sessions, and the
+     highlighted item is the current session.
 - If SCOPE includes other Claude Code sessions, resolve their names the same
   way. For claude.ai chats (not readable locally), ask me for the exact title.
 - If any name cannot be verified: ask me. Never paraphrase or invent a name.
@@ -109,30 +127,31 @@ Filename dates are when the work actually happened; it may span several days.
   `Claude session:` line, add a `Formerly named:` line recording the old
   session name AND the old filename, and `git mv` the file to the new slug
   (Step 5). Never create a second file for the same transcript.
-  Note: display names live only in the Claude app and are not on disk, so a
-  pure `SCOPE: auto` run cannot detect renames by itself — the handoff
-  keeps the old name until I mention the session's new name once in SCOPE
-  (or simply tell Claude about the rename).
+  A pure `SCOPE: auto` run detects renames by itself: compare each
+  handoff's `Claude session:` name against the newest title record in the
+  transcript its `Transcript:` line points to; a mismatch is a rename.
 - Multi-item SCOPE handling:
   - Current session: use native context.
   - Fast path: if an existing handoff in TARGET_DIR has a `Transcript:`
     header line, use that path directly — no matching or asking needed.
     This is the normal case for `SCOPE: auto` refresh runs.
-  - Other Claude Code sessions (no Transcript line yet): session titles do
-    NOT appear inside the transcripts, so grepping for the title text
-    usually fails. Instead, match by content evidence: grep transcripts for
-    distinctive terms from the title, then verify by reading the opening
-    user request. If a match is uncertain or a title matches no transcript,
-    ask me.
+  - Other Claude Code sessions (no Transcript line yet): match the sidebar
+    title against the transcripts' `custom-title`/`ai-title` records. For
+    old transcripts with no title records, fall back to content evidence:
+    grep for distinctive terms from the title, then verify by reading the
+    opening user request. If a match is uncertain or a title matches no
+    transcript, ask me.
   - Claude chats (Chat tab) are cloud-side and not readable from Claude
     Code: ask me to paste the relevant content; include only what I paste.
 - What Claude can and cannot discover on its own: Claude CAN enumerate and
   content-scan every local transcript under `~/.claude/projects/` (all
-  projects, all sessions on this machine) and propose candidates with
-  dates and topics — I do not need to list paths. What Claude CANNOT get
-  from disk is the sidebar display titles (only derived internal names are
-  stored), so I must supply/confirm exact names. Sessions from other
-  machines and Chat-tab chats are not in the local store at all.
+  projects, all sessions on this machine), including their sidebar display
+  titles (`custom-title`/`ai-title` records) — I do not need to list paths
+  or names for anything local. What is NOT in the local store at all:
+  sessions from other machines, and Chat-tab chats. Project display names
+  shown in the sidebar are also not on disk (only the cwd-derived folder
+  name is); use the cwd path and ask me if a friendlier project name
+  matters for the header.
 
 ## Step 3 — Filename
 - Pattern: `claude_<START>-<END>_<slug>.md`, dates as YYYYMMDD.
