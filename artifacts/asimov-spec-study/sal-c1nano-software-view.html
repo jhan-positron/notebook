@@ -101,7 +101,7 @@
 <header>
   <p class="eyebrow">Asimov &middot; CMN &rarr; SAL command path &middot; engineering note</p>
   <h1>SAL from the C1-Nano software perspective: the SPA command path, queues, and pacing</h1>
-  <p class="sources">Compiled 2026-07-09 from <code>CMN_uArch_Spec.docx</code> (&sect;4.4 Hardware Command Access, &sect;12 SAL Packet Assembler, &sect;11 FSR), <code>Asimov_Arch_Spec</code> (&sect;5.1.4 SLS, &sect;5.4.3 Inference flow, &sect;5.9 Progress Counters), and the CMN block diagrams. Companion to the SPM note; same conventions.</p>
+  <p class="sources">Compiled 2026-07-09 from <code>CMN_uArch_Spec.docx</code> (&sect;4.4, &sect;12 SPA, &sect;11 FSR) and <code>Asimov_Arch_Spec</code> (&sect;5.1.4, &sect;5.4.3, &sect;5.9). <strong>RTL cross-checked 2026-07-10</strong> against <code>Positron-AI-TSMC/asimov</code>: <code>design/css/cmn/rtl/cmn_spa*.sv</code> + <code>cmn-spa-concept.md</code>, <code>design/sls/sal/rtl/*</code>, <code>sal_pkg.sv</code>, <code>sal_csr.rdl</code>, <code>sal_cmd.h</code>, <code>sls_sal_uarch.md</code>, <code>cmn_fsr_main.rdl</code>, <code>hra_addr_map_pkg.sv</code> — corrections applied inline.</p>
 </header>
 
 <section>
@@ -114,7 +114,7 @@
     </tr>
     <tr>
       <td>What commands exist?</td>
-      <td>Three families: <strong>AMEM Load Cmd</strong> (carries Routing Data + Attention MetaData), <strong>Activation Cmd</strong>, and <strong>Weights Load Cmd</strong> (which bypasses SAL's math pipe straight to CPS). See Q1.</td>
+      <td>Eight <code>tdest</code> types (RTL enum): <code>NOOP</code>, <code>SAL_CMD</code>, <code>CPS_METADATA_CMD</code>, <code>CPS_ACTIV_CMD</code>, <code>CPS_WEIGHTS_CMD</code>, <code>CPS_ROUT_CMD</code> (a bare 176-bit rd_t), <code>SAL_LO_PRI_CMD</code>, <code>RSVD</code>. Only <code>CPS_WEIGHTS_CMD</code> bypasses the queues. See Q1.</td>
     </tr>
     <tr>
       <td>What is SPA and why does it exist?</td>
@@ -122,7 +122,7 @@
     </tr>
     <tr>
       <td>What are the packet formats?</td>
-      <td>SAL commands: 4 &times; 128-bit persistent slots = 512 b per packet, slot 3 is the trigger. CPS commands: 256 b in two half-slots, four types. In-band per-lane tags select type/slot/half. <span class="verdict v-mixed">Bit-level command fields are still unpublished.</span> See Q3.</td>
+      <td>SAL commands: 4 &times; 128-bit persistent slots = 512 b per packet, slot 3 is the trigger. CPS commands: 256 b in two half-slots, four types. In-band per-lane tags select type/slot/half. <span class="verdict v-yes">SAL_CMD is now fully bit-defined</span> (489-bit <code>sal_cmd_t</code>, <code>sal_cmd.h</code> + uArch &sect;5.2.6.2); CPS payloads remain opaque to SAL. See Q3.</td>
     </tr>
     <tr>
       <td>How does software pace and observe SAL?</td>
@@ -211,7 +211,7 @@
     <text x="894" y="284" font-size="10.5" fill="#5b6875">WLCs bypass the math pipe;</text>
     <text x="894" y="299" font-size="10.5" fill="#5b6875">arbitration at pipe tail</text>
     <rect x="894" y="312" width="192" height="30" rx="4" fill="#e7f2ef" stroke="#2e7d6b"/>
-    <text x="904" y="332" font-size="11" fill="#2e7d6b">CSRs &#183; HRA 0x236000</text>
+    <text x="904" y="332" font-size="11" fill="#2e7d6b">CSRs &#183; HRA 4 MB @ 0x2040_0000</text>
     <text x="894" y="362" font-size="10.5" fill="#5b6875">&#8594; AMem writes (X vectors)</text>
     <text x="894" y="377" font-size="10.5" fill="#5b6875">&#8594; Acmds + routing data to CPS</text>
 
@@ -230,7 +230,7 @@
     <path d="M820,120 L876,105" stroke="#2563a8" stroke-width="2.4" marker-end="url(#a-data)"/>
     <text x="806" y="94" font-size="10.5" fill="#2563a8">AXI-Stream 256 b packets</text>
     <path d="M526,195 C560,195 560,327 890,327" stroke="#2e7d6b" stroke-width="2" stroke-dasharray="6 3" fill="none" marker-end="url(#a-reg)"/>
-    <text x="560" y="345" font-size="10" fill="#2e7d6b">AXI4-Lite &#183; CSRs &#183; also &sect;4.4 command root (see open items)</text>
+    <text x="560" y="345" font-size="10" fill="#2e7d6b">HRA register chain (cmn_hra_axi_axil_adapter) &#8212; registers only, NOT a command path</text>
     <path d="M880,240 C700,255 560,240 526,235" stroke="#97a3ae" stroke-width="1.6" stroke-dasharray="3 3" fill="none" marker-end="url(#a-grey)"/>
     <text x="600" y="232" font-size="10" fill="#97a3ae">progress pulses &amp; queue counters &#8594; FSR</text>
     <path d="M820,480 C880,480 940,460 975,404" stroke="#2563a8" stroke-width="2" fill="none" marker-end="url(#a-data)" marker-start="url(#a-data)"/>
@@ -253,11 +253,12 @@
   <span class="qtag">Q1</span>
   <h2>The command path: stores in, packets out</h2>
   <p>Software never talks AXI-Stream, and SAL never parses loads/stores. A C1-Nano thread (or a DMA descriptor it programs) simply writes into its <strong>SPA partition</strong> — a 4 KB window of the address map. The CMN carries those writes over an HN-I port (AXI4-MM, 256-bit) to the <strong>SAL Packet Assembler</strong>, which assembles them into well-formed 256-bit AXI-Stream packets and hands them to SAL's command interface in order.</p>
-  <p>Three command families ride this path (CMN spec &sect;4.4 and the command-flow diagram):</p>
+  <p>The RTL command-type enum (<code>cmn_sal_cmd_type_pkg</code>, carried as AXIS <code>tdest</code>) refines the docx's three families:</p>
   <ul>
-    <li><strong>AMEM Load Cmd</strong> — "load these vectors from SPM into AMem", carrying the per-vector <strong>Routing Data</strong> (the same <code>rd_t</code> defined in <code>mdata_pkg.sv</code>) and <strong>Attention MetaData</strong> that will travel with the work downstream.</li>
-    <li><strong>Activation Cmd</strong> — "process this batch"; forwarded by SAL to CPS once the AMem load work is complete. This ordering is the reason the command path is routed <em>through</em> SAL at all.</li>
-    <li><strong>Weights Load Cmd</strong> — forwarded to CPS, <em>bypassing</em> SAL's vector math pipeline, with a small arbiter at the pipe tail merging the two streams.</li>
+    <li><strong><code>SAL_CMD</code> / <code>SAL_LO_PRI_CMD</code></strong> — two-beat 512 b commands for SAL itself. The "load AMem" work is <em>inside</em> the SAL command's exec descriptor (<code>exec.amem_wb</code> + <code>exec.amem_addr</code>), not a separate command.</li>
+    <li><strong><code>CPS_ROUT_CMD</code></strong> — a single-beat command whose payload <em>is</em> a bare 176-bit <code>rd_t</code> routing-data record; <strong><code>CPS_METADATA_CMD</code></strong> carries a 226-bit attention-metadata payload. Both ride the high-priority queue as opaque beats and are forwarded to CPS.</li>
+    <li><strong><code>CPS_ACTIV_CMD</code></strong> — "process this batch". Since May 2026 it rides the HP queue too (the old direct passthrough is gone); <code>cps_cmd_adapter</code> additionally <em>delays its release to CPS until the preceding AMem writes are architecturally visible</em> (propagation delay + CSR-tunable <code>cps_activ_cmd_delay</code>) — this ordering guarantee is the reason the command path routes through SAL.</li>
+    <li><strong><code>CPS_WEIGHTS_CMD</code></strong> — the only type that bypasses both queues (dedicated skid path), merged at the pipe tail with priority <em>weights &gt; released ACTIV &gt; other CPS commands</em>.</li>
   </ul>
 </section>
 
@@ -277,33 +278,33 @@
   <span class="qtag">Q3</span>
   <h2>Formats — what is pinned and what is not</h2>
   <div class="tablewrap"><table>
-    <tr><th>Structure</th><th>Shape</th><th>Status</th></tr>
-    <tr><td>SAL_CMD / SAL_LO_PRI packet</td><td class="num">4 &times; 128 b slots = 512 b; slot 3 = trigger</td><td>Container defined; <strong>field bit-layout TBD</strong></td></tr>
-    <tr><td>CPS command</td><td class="num">256 b payload, 2 &times; ~124 b halves; 4 types</td><td>Container + packing defined; fields TBD</td></tr>
-    <tr><td>In-band lane tags</td><td class="num">per 128 b lane: cmd_type, slot, half</td><td>Positions within the lane TBD (&sect;12 "see Address Map")</td></tr>
-    <tr><td>Routing Data inside AMEM Load Cmd</td><td class="num">rd_t, 176 b</td><td><span class="verdict v-yes">Bit-accurate</span> in <code>mdata_pkg.sv</code> (refmod_exp)</td></tr>
-    <tr><td>Write address</td><td class="num">addr[16:12] = partition_id (0..19); addr[11:0] ignored</td><td>Defined (&sect;12 Address Map)</td></tr>
+    <tr><th>Structure</th><th>Shape</th><th>Status (RTL cross-check)</th></tr>
+    <tr><td>SAL_CMD / SAL_LO_PRI packet</td><td class="num">4 &times; 128 b tiers (123 b payload each, top 5 b SW-reserved) &rarr; 489-bit internal <code>sal_cmd_t</code></td><td><span class="verdict v-yes">Fully bit-defined</span> in <code>sal_cmd.h</code> (with per-function builders) and <code>sls_sal_uarch.md</code> &sect;5.2.6.2; fields: 19 b <code>prog_cnt</code> (sentinel <code>0x7ffff</code> = no dependency), 173 b exec, data_ld/lparams_ld/latent_ld extensions; opmodes GEN/NORM/ACCUM/ACCUM_ADD_LATENT/PE/LPA/PW/TOP96</td></tr>
+    <tr><td>CPS command</td><td class="num">single 256 b beat; egress packs 2 &times; 124 b halves + 8 b zero pad</td><td>Container defined; payload opaque to SAL (formats live with CPS)</td></tr>
+    <tr><td>In-band lane tags</td><td class="num">per 128 b lane: cmd_type at [127:125], slot/half below</td><td><span class="verdict v-yes">Defined</span> — <code>cmn_spa_pkg.sv</code> <code>ib_lane_t</code>; SAL lane payload 123 b, CPS 124 b</td></tr>
+    <tr><td>Routing data command</td><td class="num">CPS_ROUT_CMD = bare rd_t, 176 b</td><td><span class="verdict v-yes">Bit-accurate</span> in RTL <code>mdata_pkg.sv</code> (<code>sal_pkg.sv cps_rout_cmd_t</code>)</td></tr>
+    <tr><td>Write address</td><td class="num">addr[16:12] = partition_id (0..19)</td><td>Defined; addr[4] additionally selects the 128 b lane for 16 B beats, and alignment is SLVERR-checked — the offset aliases, it is not fully ignored</td></tr>
   </table></div>
-  <p>The Arch spec's own command tables are still placeholders (<code>&lt;insert Load AMem Cmd here&gt;</code>, &sect;5.4.3), same situation as routing data was before <code>mdata_pkg.sv</code> — expect the refmod to grow the equivalent package for SAL/CPS commands.</p>
+  <p>Queue geometry (RTL): HP queue 4096 entries, LP queue 1024 entries, both of 512-bit command entries; overflow pushes are silently dropped with a sticky IRQ. A full invalid-command capture unit records framing/reserved-type/LP-exec violations with cause codes.</p>
 </section>
 
 <section>
   <span class="qtag">Q4</span>
   <h2>Pacing and observability</h2>
-  <p>SAL runs two command queues with strict priority: the <strong>high-priority queue</strong> (activations into AMem plus their Acmds/routing data to CPS — RMS norm, RoPE, SwiGLU, MoE Combiner) always preempts the <strong>low-priority queue</strong> (work written back to SPM — attention merge, all-reduce after Wo/Wff2, residual add). Software paces itself entirely through <span class="pill reg">FSR counters</span> read over each DSU's Peripheral Port (64-bit, low latency, no mesh round-trip):</p>
+  <p>SAL runs two command queues — HP 4096-deep (<code>SAL_CMD</code> + queued CPS types), LP 1024-deep (<code>SAL_LO_PRI_CMD</code> only, restricted to write-back work) — with strict priority <em>among ungated heads</em>: an HP head waiting on its 19-bit <code>prog_cnt</code> dependency releases the LP queue to overtake it (LP's own gate is CSR-switchable, default on). The functional labels (RMS norm vs all-reduce etc.) are software conventions; the RTL opmodes are GEN/NORM/ACCUM/ACCUM_ADD_LATENT/PE/LPA/PW/TOP96 on either queue. Software paces itself through <span class="pill reg">FSR</span> read over each DSU's Peripheral Port (64-bit AXI5, 1 MB aperture):</p>
   <ul>
-    <li>HP/LP <strong>queue depth</strong> counters (+1 on post, &minus;1 on drain) — back-pressure signal for issuing more commands.</li>
-    <li>HP/LP <strong>SPM read</strong>, <strong>SPM write</strong>, and <strong>AMem write</strong> counters (+1 per 128-element vector) — completion tracking per pipeline stage.</li>
-    <li>SPA emits <strong>per-type progress pulses</strong> to FSR, so command ingestion is observable separately from execution.</li>
+    <li>FSR holds <strong>17 event counters + 4 live queue-depth mirrors</strong> (16-bit, <code>cmn_fsr_main.rdl</code>): SAL HP/LP &times; {SPM read, SPM write, AMem write}, 4 CPS completion counters, the SVL results counter, and 6 SPA per-packet-type counters.</li>
+    <li>The wait idiom is <strong>preset-and-poll-for-zero</strong>: software writes <code>0x10000 &minus; K</code> into a counter and polls until it wraps to 0 after K events.</li>
+    <li>SPA's pulses fire on completed <em>packet egress</em> (AXIS <code>tlast</code> handshake toward SAL) — ingestion is observable separately from execution.</li>
+    <li>The SPM read/write events are counted <em>outside</em> SAL (SAL tags each SPM request with its queue of origin); 32-bit debug views of the same counts live in the sub-block CSRs.</li>
   </ul>
-  <p>All counters are 32-bit internally, publish 16 bits to FSR, free-run with rollover, and can be reset via HRA for debug (Arch spec &sect;5.9).</p>
 </section>
 
 <section>
   <span class="qtag">Q5</span>
   <h2>What reaches SAL besides the software command path</h2>
   <ul>
-    <li><span class="pill meta">SPM RG records</span> — SAL owns one of SPM's seven egress queues (<code>send_to_sal</code>, simple 1-credit interface). This is how hardware producers (SVL, C2C peers, other cores via CMN metadata-only writes) hand SAL work notifications without software in the loop.</li>
+    <li><span class="pill meta">SPM RG records</span> — SAL owns one of SPM's seven egress queues (<code>send_to_sal</code>, credit bank of 16 = <code>SPM_RG_INIT_CREDIT</code>). RTL detail (<code>wait_mdata.sv</code>): incoming <code>md_t</code> records are demuxed into four 256-deep FIFO pairs by their <code>spm_source</code> field (SVL/SAL/C2C/CMN); SAL data-load commands then consume them — comparing the record's <code>id.hw_id</code> against the command's expected ID, and (with <code>use_mdata_addr</code>) taking the SPM address from the record's <code>spm_addr</code> (or <code>c2c_spm_rwrite_addr</code> for C2C-sourced records) and the transfer count from <code>datagram_size</code>. A <code>save_mdata</code>/<code>mwb_*</code> mechanism lets a command re-emit the record with overwritten hw_id/send_to fields.</li>
     <li><span class="pill data">SPM vector data</span> — SAL reads latents and partial tensors over its 2 kb read interface and writes results back over its 2 kb write interface (the high/low-priority SPM counters above track exactly this traffic).</li>
     <li><strong>Not SVL.</strong> SVL and SAL are siblings in SLS but do not feed each other directly — SVL's outputs reach SAL only by way of SPM (vectors + RG records) or AMem/CPS orchestration.</li>
   </ul>
@@ -311,10 +312,10 @@
 
 <section>
   <span class="qtag">Q6</span>
-  <h2>Registers</h2>
-  <p>SAL's control/status registers sit behind the same CSR fabric as SPM's: C1-Nano &rarr; CMN SBSX (ACE5&rarr;AXI4-Lite) &rarr; SAL, with a 4 KB HRA window at <code>0x236000&ndash;0x236FFF</code> (beside SPM at <code>0x234000</code> and SVL at <code>0x237000</code>). The SPA's shadow registers — packed read-back of every slot bank — live in the SPA address map for debug and snapshot verification.</p>
+  <h2>Registers — the docx address map is superseded</h2>
+  <p><strong>RTL correction:</strong> the generated HRA map (<code>hra_addr_map_pkg.sv</code>, 30-bit aperture-relative addresses) gives SAL a <strong>4 MB window at <code>0x2040_0000&ndash;0x207F_FFFF</code></strong> — not 4 KB at <code>0x236000</code>. Neighbors: SVL 4 MB @ <code>0x2080_0000</code>, SPM 4 KB @ <code>0x2003_1000</code>, SSA 16 KB @ <code>0x2003_4000</code>, CPS @ <code>0x2003_0000</code>, C2C @ <code>0x2000_0000</code>. The 4 MB is real, not padding: SAL's CSR map embeds external SRAM programming windows — <code>theta_lut</code> @ +0x100000 (131072 entries, RoPE angles), LPA L1/L2 LUTs @ +0x200000/+0x210000, <code>sal_cfg</code> @ +0x220000 (1024 circuit configs selected per-command by <code>exec.conf_idx</code>), and two 32-entry clamp-descriptor SRAMs. Notable core CSRs: <code>ctrl</code> (incl. <code>en_lo_pri_q_cnt_gate</code>), <code>out_fp_fmt</code> (must match the SPM consumer), <code>cps_activ_cmd_delay</code>, queue-depth/AMem/SPM counters, FIFO status, two-group IRQ block, invalid-command capture, and a telemetry adapter with 74 slots. Inside the SLS CSR daisy-chain the leaves sit at SSA <code>0x00_0000</code> / SAL <code>0x80_0000</code> / SVL <code>0xC0_0000</code>.</p>
   <div class="caveat">
-    <p><strong>Open item — two command-path descriptions.</strong> CMN spec &sect;4.4 describes a single SBSX/ACE5&rarr;<em>AXI4-Lite</em> bridge as "the root point for all commands directing SAL+CPS operations", while &sect;12 describes the SPA consuming <em>AXI4-MM 256-bit</em> writes on an HN-I port. The known-gaps table still lists "AXI-Lite solution: SAL command queue" as open, which suggests &sect;4.4 is the older design and the SPA is its replacement — but the spec does not say so explicitly. Worth a one-line clarification from the CMN team.</p>
+    <p><strong>Resolved (was an open item):</strong> the SPA AXI-Stream <em>is</em> the SAL command path, full stop. The AXI-Lite bridge that CMN spec &sect;4.4 described does exist in RTL — but as <code>cmn_hra_axi_axil_adapter</code>, the HN-I&rarr;HRA <em>register-access</em> chain, not a command path. &sect;4.4's "root point for all commands" wording is stale and should be rewritten to point at the SPA. Note also the docx's summarized <code>0x233000&ndash;0x237000</code> table matches nothing in the generated map (the SPM note's <code>0x234000</code> claim inherits this staleness — the RTL SPM window is <code>0x2003_1000</code>).</p>
   </div>
 </section>
 
@@ -333,7 +334,7 @@
 </section>
 
 <footer>
-  Sources: <em>CMN_uArch_Spec</em> &sect;4.4 (Hardware Command Access), &sect;12 (SAL Packet Assembler: slots, snapshot, CPS commands, address map), &sect;11 (FSR); <em>Asimov_Arch_Spec</em> &sect;5.1.4 (SAL scope &amp; activation request fields), &sect;5.4.3 (on-chip execution flow), &sect;5.9 (progress counters, HP/LP queue semantics); <em>SPM spec</em> &sect;5.5 (send_to_sal egress); <code>mdata_pkg.sv</code> (rd_t). Command field bit-layouts remain unpublished; flagged inline where relevant.
+  Sources: <em>CMN_uArch_Spec</em> &sect;4.4/&sect;12/&sect;11; <em>Asimov_Arch_Spec</em> &sect;5.1.4/&sect;5.4.3/&sect;5.9; <em>SPM spec</em> &sect;5.5. RTL cross-check (Positron-AI-TSMC/asimov @ main, 2026-07-10): <code>cmn_spa.sv/_pkg/_rdl</code> + <code>cmn-spa-concept.md</code>, <code>sal.sv</code>, <code>sal_cmd_queues.sv</code>, <code>sal_cmd_parser.sv</code>, <code>cps_cmd_adapter.sv</code>, <code>wait_mdata.sv</code>, <code>sal_pkg.sv</code>, <code>sal_csr.rdl</code>, <code>sal_cmd.h</code>, <code>sls_sal_uarch.md</code>, <code>cmn_fsr_main.rdl</code> + <code>fsr_concept.md</code>, <code>hra_addr_map_pkg.sv</code>. SAL command formats are now bit-defined; CPS command payload formats remain with CPS.
 </footer>
 </div>
 

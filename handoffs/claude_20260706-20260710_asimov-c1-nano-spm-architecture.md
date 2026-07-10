@@ -147,7 +147,72 @@ All times UTC.
   observe (FSR SVL Results Counter), consume (generated data as the +32
   ACP write). The control loop runs through SAL/CPS-authored routing
   data; attention QK^T results go only to EMem (software sees nothing
-  per-vector); the unpublished SVL CSR list is the main gap. Session end.
+  per-vector); the unpublished SVL CSR list is the main gap.
+
+2026-07-10 (continued — RTL cross-check rounds)
+- ~17:00-19:00 — Naming/structure Q&A on the md model: confirmed
+  "meta data" == "RG data" (synonyms across specs/RTL; container struct
+  renamed rg_data to match rg_mem/rg_fifo); clarified that rg_mem is the
+  DEDICATED metadata array (3.19 MiB, 6 tiles), not part of the 16 MiB —
+  "shares the same address space" means mirrored 16-bit INDEX space only.
+  Added the 16 MiB data-memory box + "rg_mem[N] <-> word N (1:1)" pairing
+  notation to the SVG.
+- 19:17-19:24 — SPM RTL CROSS-CHECK (user request; access to the NDA repo
+  Positron-AI-TSMC/asimov turned out to be GRANTED now — gh as
+  jhan-positron lists the full ~14.5K-file tree). Found the real SPM RTL
+  at design/spm/rtl/ (+ registers/spm.rdl, doc/spm-cmn-if.md) and ran a
+  6-agent verification workflow. HEADLINE: the refmod_exp mdata_pkg.sv the
+  user had supplied as source of truth is STALE — the RTL repo has its own
+  design/common/packages/mdata_pkg.sv with a different rd_t: send_to bits
+  at [6:4] (sal/cmn/c2c) over version[3:0]; id={sw_id[23:0] SW-opaque,
+  hw_id[7:0]}[39:8]; spm_addr[55:40]; c2c_spm_rwrite_addr[71:56],
+  spm_source[73:72], acp_rd_addr[167:152], acp_mem_target_sel[151] ALL
+  EXIST (the CMN docx was closer to truth than refmod);
+  datagram_size[95:74]; C2C dest/src addr + two 7-bit counter indices;
+  spm_stride/spm_count are SAL command fields, not routing data. Other
+  verdicts: ACP slots are 64 B ({base22=PA[43:22] per-CORE CSR,
+  acp_rd_addr, 6'b0}, gd at +32 — refmod's 256 B comment stale, docx 4.9
+  right); egress mdata FIFOs are 368 b not 360 (docx FIFO table stale);
+  bypass/direct-path exists ONLY for queue 0 (SAL) — C2C + 5 DSU queues
+  are always store-and-forward; the docx's CMN bank-conflict-dodging
+  chunk selection has NO RTL counterpart (flush = fence > starve(64cy) >
+  full > quiesce(4cy)); CMN metadata-only writes are selected by AXI addr
+  bit[24] (window base 0x100_0000; addr[6]=CPU, [5]=rd/gd, [4]=lane);
+  spm-cmn-if.md finally states byte order (lane 0 = lowest addr = lowest
+  bits). Rewrote spm-meta-data-model.md (RTL rd_t verbatim, docx<->RTL
+  deltas table) and redrew the SVG bitfield to the RTL layout.
+- 21:40-21:48 — SAL/SVL RTL CROSS-CHECK against the two HTML pages
+  (second 6-agent workflow over cmn_spa*, sal*, svl*, ssa*, FSR, and the
+  generated HRA map). Confirmed: SPA mechanics end-to-end (20x4 KB
+  partitions, slot-3 trigger, snapshot timing, CPS half-slot packing
+  [123:0]/[247:124]/pad, per-type egress pulses), SAL single AXIS command
+  ingress, SVL streaming nature, topk CSR 7 b reset 8, SSA adapter widths
+  (2048 b data / 368 b md_t), SVL's uncredited SPM path (SSA ties credit
+  to 1). REFUTED/corrected: HRA map — SAL is a 4 MB window @ 0x2040_0000,
+  SVL 4 MB @ 0x2080_0000, SPM 4 KB @ 0x2003_1000 (docx 0x233000-0x237000
+  summarized map matches NOTHING; the 4 MB windows hold LUT SRAM
+  programming windows); CMN spec 4.4-vs-12 contradiction RESOLVED — SPA
+  is THE SAL command path, the AXI-Lite bridge is the HRA register chain
+  (cmn_hra_axi_axil_adapter); command families corrected (8-type tdest
+  enum; CPS_ROUT_CMD = bare 176 b rd_t; AMem loading is inside SAL_CMD's
+  exec descriptor; CPS_ACTIV rides the HP queue since May 2026 with
+  release delayed until AMem writes visible; only CPS_WEIGHTS bypasses);
+  SAL command bit layout is now PUBLISHED (489-bit sal_cmd_t —
+  sls_sal_uarch.md 5.2.6.2 + sal_cmd.h with builders); queues HP 4096 /
+  LP 1024 deep, strict priority only among ungated heads (prog_cnt-gated
+  HP head lets LP overtake); SPM->SAL mdata credit = 16 not 1
+  (wait_mdata demuxes md_t by spm_source into 4x256 FIFOs, hw_id
+  compare, use_mdata_addr coupling); SVL CSR list now PUBLISHED
+  (svl_csr.rdl: topk@0x20, out_fp_fmt, lpa_desc/L1/L2 LUTs, 32 clamp +
+  128 softcap entries — write-only windows read back 0xDEADBEEF);
+  "SVL writes nothing to SPM during attention" is K-pass-only — the
+  V-pass (ATTN_SM_V) DOES write SPM + attn_gd (sume/smax); FSR = 17
+  event counters + 4 depth mirrors, wait idiom = preset 0x10000-K and
+  poll wrap-to-zero. Both HTML pages corrected and artifacts republished
+  (same URLs). ALSO: Ben's cmn/spa/concept markdown was FOUND — it lives
+  in the RTL repo at design/css/cmn/docs/cmn-spa-concept.md (the earlier
+  org-wide hunt failed only because this repo was unreachable then).
+- ~22:00 — Updated this handoff + notebook artifact mirrors. Session end.
 
 ## Artifacts
 
@@ -168,60 +233,150 @@ C:\Users\jibin\Documents\Asimov arch claude\ unless noted:
 - svl-c1nano-software-view.html — SVL software-view page; artifact
   https://claude.ai/code/artifact/567beab8-1167-4e45-8c26-385784864811
   (preserved: artifacts/asimov-spec-study/svl-c1nano-software-view.html)
+- spm-meta-data-model.md and spm-meta-data-structure.svg are ALSO
+  preserved at artifacts/asimov-spec-study/ (added 2026-07-10 with the
+  RTL-verified content)
 - Spec sources (read-only inputs): C:\Users\jibin\Documents\Asimov
   arch\docs\ (Asimov Arch spec, SPM spec, CMN_uArch_Spec.docx; README.md
   there lists them)
-- Ground truth for the record layout:
-  https://github.com/positron-ai/refmod_exp
-  design/common/packages/mdata_pkg.sv (md_t/rd_t/gd_t)
+
+RTL ground truth (repo Positron-AI-TSMC/asimov @ main — access granted
+2026-07-10; all docs/RTL below were fetched and cross-checked):
+
+- Record layout (SOURCE OF TRUTH; supersedes the stale refmod_exp copy):
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/common/packages/mdata_pkg.sv
+- SPM RTL:
+  https://github.com/Positron-AI-TSMC/asimov/tree/main/design/spm/rtl
+  — key files: spm_mdata.sv, spm_mdata_tgt_decode.sv,
+  spm_mdata_virtual_queue.sv, spm_mdata_fifo.sv, spm_mdata_rd_arbiter.sv,
+  spm_mdata_direct_path.sv, spm_ctrl_south.sv, spm_cmn_if.sv,
+  spm_cmn_mdata_asm.sv, spm_cmn_wr_top.sv, spm_cmn_rd_top.sv,
+  spm_defines.svh, spm.sv, spm_rdt_cfg.sv
+- SPM registers + interface doc:
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/spm/registers/spm.rdl
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/spm/doc/spm-cmn-if.md
+- ACP manager + M7 redundancy programming:
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/css/cmn/rtl/cmn_acp_mgr.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/css/cmn/rtl/cmn_m7_spm_rdt_cfg.sv
+- SPA (SAL Packet Assembler) — RTL, package, RDL, and Ben's concept doc:
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/css/cmn/rtl/cmn_spa.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/css/cmn/packages/cmn_spa_pkg.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/css/cmn/registers/cmn_spa.rdl
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/css/cmn/docs/cmn-spa-concept.md
+- SAL RTL + package + CSRs + SW ABI + uArch doc:
+  https://github.com/Positron-AI-TSMC/asimov/tree/main/design/sls/sal/rtl
+  (sal.sv, sal_cmd_queues.sv, sal_cmd_parser.sv, cps_cmd_adapter.sv,
+  wait_mdata.sv)
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/packages/sal_pkg.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/sal/registers/sal_csr.rdl
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/sal/sw/sal_cmd.h
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/doc/sls_sal_uarch.md
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/doc/sls_sal_SW_Programming_Guide.md
+- SVL RTL + package + CSRs + uArch doc:
+  https://github.com/Positron-AI-TSMC/asimov/tree/main/design/sls/svl/rtl
+  (svl.sv, svl_ctrl.sv, top_k.sv, sume.sv, smax.sv)
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/packages/svl_pkg.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/svl/registers/svl_csr.rdl
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/doc/sls_svl_uarch.md
+- SSA (SLS<->SPM adapter, owns the column condenser + md_t assembly):
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/ssa/rtl/ssa.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/ssa/rtl/spm_mdata_write_adapter.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/ssa/rtl/spm_mdata_read_adapter.sv
+- FSR (progress counters) — concept doc, RDL, package:
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/css/cmn/docs/fsr_concept.md
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/css/cmn/registers/cmn_fsr_main.rdl
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/css/cmn/packages/cmn_fsr_pkg.sv
+- Address map + shared packages:
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/common/packages/hra_addr_map_pkg.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/common/packages/platform_pkg.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/common/packages/cmn_sal_cmd_type_pkg.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/common/packages/cps_sls_pkg.sv
+  https://github.com/Positron-AI-TSMC/asimov/blob/main/design/sls/registers/sls_top_csr.rdl
+
+Historical (superseded) sources:
+
+- https://github.com/positron-ai/refmod_exp
+  design/common/packages/mdata_pkg.sv — STALE rd_t layout; do not use
 - rd_t software-side mirror: positron-ai/asimov-sw
-  asimov-model/src/Asimov/Gold/Encoding.hs and Ast.hs
+  asimov-model/src/Asimov/Gold/Encoding.hs and Ast.hs (re-verify against
+  the RTL package before trusting)
 
 ## Current state
 
 - All three HTML notes, the md model, and the SVG are current as of
-  2026-07-10 05:05 UTC and mutually consistent (shared template and color
-  conventions; the md/SVG carry the bit-exact refmod_exp layout).
-- The routing-data definition is resolved: md_t 368 b = rd_t 176 b +
-  gd_t 192 b from refmod_exp mdata_pkg.sv — authoritative for software,
-  pending RTL sign-off confirmation (RTL repo is in the NDA org,
-  inaccessible to this account as of 2026-07-10).
-- Ben Gamari's cmn/spa/concept markdown was NOT found anywhere reachable
-  by plain git; a task chip ("Search positron-ai GitHub for CMN SPA
-  concept doc") was left to sweep the org with the newly-authorized
-  GitHub connector in a fresh session. (A separate 2026-07-10 00:16-01:23
-  session in this project ran that connector-based search — it has its
-  own transcript b3870038-ecf5-497f-b84e-896e5fc1b750.jsonl and no
-  handoff yet.)
+  2026-07-10 ~22:00 UTC, mutually consistent, and RTL-CROSS-CHECKED
+  against Positron-AI-TSMC/asimov @ main (two 6-agent verification
+  rounds: SPM, then SAL/SVL/SPA/FSR). Corrections are applied inline and
+  each page's header/footer names the RTL files checked.
+- The routing-data definition is resolved AT THE RTL LEVEL: md_t 368 b =
+  rd_t 176 b [175:0] + gd_t 192 b [367:176] from the RTL repo's
+  design/common/packages/mdata_pkg.sv. The refmod_exp copy is STALE (old
+  layout) — the GOLD model should be regenerated from the RTL package.
+- NDA-repo access is GRANTED (gh as jhan-positron works since
+  2026-07-10); the earlier "inaccessible" state and the org-wide
+  connector search plan are obsolete. Ben's cmn/spa/concept markdown is
+  FOUND at design/css/cmn/docs/cmn-spa-concept.md in the RTL repo.
+- Artifact mirrors in this notebook repo (artifacts/asimov-spec-study/)
+  hold the RTL-cross-checked versions of all three HTML pages plus the
+  md model and SVG.
 
 ## Open items / next steps
 
-1. Confirm the ACP slot pitch discrepancy with the CMN team: refmod_exp's
-   address math implies 256 B per entry; CMN spec 4.9 sized the SAM
-   ranges at 64K x 64 B.
-2. Get the RTL link from Ben (his pending action item from the Jul 8
-   meeting) and re-verify rd_t/md_t against design/common/packages/
-   mdata_pkg.sv in the real RTL repo at sign-off.
-3. Finish the cmn/spa/concept markdown hunt with the GitHub connector
-   (org-wide repo listing was the missing capability), or just ask Ben —
-   the Jul 8 meeting flagged that file as outdated pending BL's review,
-   so treat its content as stale anyway.
-4. Escalate the spec gaps recorded on the pages: bit-level ACP
-   notification fields, endianness (little-endian assumed, unconfirmed),
-   the SAL-vs-CMN queue-list typo, the CMN 4.4 vs 12 command-path
-   contradiction, and the unpublished SVL CSR list.
-5. Optional: fold an SPA cross-reference into the SPM page (offered,
-   not requested).
+1. RESOLVED 2026-07-10: ACP slot pitch is 64 B ({base22, acp_rd_addr,
+   6'b0}, gd at +32) per cmn_acp_mgr.sv code — the 256 B reading came
+   from stale comments (present in refmod AND in the RTL pkg header;
+   worth a comment-cleanup PR). RESOLVED: rd_t re-verified against the
+   RTL package. RESOLVED: cmn-spa-concept.md found in the RTL repo.
+   RESOLVED: SVL CSR list (svl_csr.rdl) and SAL command bit formats
+   (sal_cmd.h + sls_sal_uarch.md 5.2.6.2) are published. RESOLVED: CMN
+   spec 4.4-vs-12 — SPA is the command path; 4.4's AXI-Lite is the HRA
+   register chain.
+2. Escalate the remaining docx errata upstream: the summarized address
+   map (0x233000-0x237000) matches nothing in hra_addr_map_pkg.sv (SAL
+   4 MB @ 0x2040_0000, SVL 4 MB @ 0x2080_0000, SPM 4 KB @ 0x2003_1000);
+   SPM spec FIFO table (mdata width 360 -> 368 b, per-queue structure);
+   "bypass per-target" wording (RTL: SAL queue only); the CMN
+   bank-conflict-avoidance sentence (no RTL counterpart); the queue-list
+   typo; docx 4.4 wording. The in-repo docs (sls_sal_uarch.md,
+   sls_svl_uarch.md, cmn-spa-concept.md, fsr_concept.md, spm-cmn-if.md)
+   are far more current than the docx specs — prefer them.
+3. RTL comment-cleanup PR candidates: mdata_pkg.sv ACP header comment
+   (256 B/spm_addr — contradicts cmn_acp_mgr.sv), acp_rd_addr field
+   comment "64K x 256B", spm_cmn_wr_top.sv "64B metadata entry",
+   cps_sls_pkg.sv "svl_routing_data // 168b" (is 176 b), svl_ctrl.sv
+   line-1 "consider this code completely broken" disclaimer.
+4. Known doc/RTL number drifts to watch at sign-off: spm-cmn-if.md says
+   8 prefetch buffers / RTL default 10; doc "2 outstanding writes" / RTL
+   NUM_OUTSTANDING=8; DSU "~20 pending ACP writes" (docx) has no RTL
+   counterpart (FIFO depth 32 = 2x SPM_RG_INIT_CREDIT).
+5. Software-contract gotchas surfaced by the cross-check, worth a SW
+   guide note: SVL LUT/clamp/softcap windows are write-only (read back
+   0xDEADBEEF — no verification); LPA descriptor staging inherits stale
+   bytes; topk reprogramming mid-command is illegal; top-k gd colliding
+   with a V-pass push is silently dropped; ACP B-channel errors are
+   ignored (SLVERR silent); SAL queue overflow drops are silent-but-IRQ.
+6. Optional: refresh the SPM HTML page's register-window claim
+   (0x234000 -> 0x2003_1000) and fold in an SPA cross-reference; the
+   SAL page already carries the correction note.
 
 ## Gotchas & decisions
 
 - The specs' "<insert Routing Data here>" placeholders are real: NO docx
-  spec publishes the record packing. The only bit-accurate sources are
-  refmod_exp mdata_pkg.sv (canonical for software) and asimov-sw
-  Encoding.hs (Haskell mirror). The Jul 8 meeting treated the Haskell
-  spec as primary reference and the markdown docs as outdated.
-- refmod_exp is the reference-model repo, NOT the RTL. The RTL design/
-  tree lives in a separate NDA org this account cannot reach.
+  spec publishes the record packing. The bit-accurate source is the RTL
+  repo's design/common/packages/mdata_pkg.sv (verified against the SPM
+  RTL that imports it). refmod_exp's copy and asimov-sw Encoding.hs are
+  older layouts — regenerate/re-verify both from the RTL package.
+- refmod_exp is the reference-model repo, NOT the RTL. Its mdata_pkg.sv
+  is STALE (send_to at [2:0], spm_addr[18:3], spm_stride/spm_count —
+  all superseded). The RTL repo Positron-AI-TSMC/asimov became
+  reachable to this account on 2026-07-10 (gh CLI as jhan-positron);
+  fetch files via `gh api repos/Positron-AI-TSMC/asimov/contents/<path>`
+  (base64) — plain HTTPS clone of the full repo is heavy (~14.5K files,
+  large IP trees).
+- Even RTL comments can be stale — the mdata_pkg ACP header comment
+  contradicts the cmn_acp_mgr.sv code (which wins: 64 B slots,
+  acp_rd_addr as index, per-core base CSRs). Verify against code, not
+  comments.
 - Metadata is push-only toward software (ACP writes into L2 with cache
   stashing); there is no memory-mapped read path for RG records (debug
   registers aside). Writing records via the CMN AXI ports IS possible and

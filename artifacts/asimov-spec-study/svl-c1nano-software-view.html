@@ -101,7 +101,7 @@
 <header>
   <p class="eyebrow">Asimov &middot; C1-Nano &harr; CMN &harr; SVL &middot; engineering note</p>
   <h1>SVL from the C1-Nano software perspective: configure it, observe it, consume its output — never command it</h1>
-  <p class="sources">Compiled 2026-07-09 from <code>Asimov_Arch_Spec</code> (&sect;5.1.4 SVL, &sect;5.2.6 specialized acceleration, &sect;5.4.3 inference flow, &sect;5.7, &sect;5.9 progress counters), <code>CMN_uArch_Spec.docx</code> (&sect;11 FSR, &sect;4.8 ACP), <code>SPM spec</code> &sect;5.5, and <code>mdata_pkg.sv</code> (refmod_exp). Companion to the SPM and SAL notes; same conventions.</p>
+  <p class="sources">Compiled 2026-07-09 from <code>Asimov_Arch_Spec</code> (&sect;5.1.4, &sect;5.2.6, &sect;5.4.3, &sect;5.7, &sect;5.9), <code>CMN_uArch_Spec.docx</code> (&sect;11, &sect;4.8), <code>SPM spec</code> &sect;5.5. <strong>RTL cross-checked 2026-07-10</strong> against <code>Positron-AI-TSMC/asimov</code>: <code>design/sls/svl/rtl/*</code>, <code>svl_pkg.sv</code>, <code>cps_sls_pkg.sv</code>, <code>svl_csr.rdl</code>, <code>sls_svl_uarch.md</code>, <code>ssa.sv</code> + mdata adapters, <code>cmn_fsr_main.rdl</code>, <code>hra_addr_map_pkg.sv</code> — corrections applied inline.</p>
 </header>
 
 <section>
@@ -118,7 +118,7 @@
     </tr>
     <tr>
       <td>What can software configure?</td>
-      <td>SVL CSRs behind the HRA window at <code>0x237000</code> — e.g. top-k extraction (k &le; 8, a 7-bit CSR field), LUT/LPA-based function setup. The full CSR list is not yet published. See Q3.</td>
+      <td>SVL CSRs behind a <strong>4 MB HRA window at <code>0x2080_0000</code></strong> (docx's 0x237000/4 KB is stale). The CSR list <span class="verdict v-yes">is published</span> in <code>svl_csr.rdl</code>: top-k depth (7-bit, reset 8), output format, LPA descriptors + L1/L2 LUTs, 32 clamp descriptors, 128 softcap entries, IRQ/telemetry blocks. See Q3.</td>
     </tr>
     <tr>
       <td>What does software get back?</td>
@@ -126,7 +126,7 @@
     </tr>
     <tr>
       <td>Attention vs non-attention?</td>
-      <td>During attention (QK<sup>T</sup>) SVL writes only to EMem — nothing reaches SPM, so software sees nothing per-vector. Outside attention every 128-element vector lands in SPM with an md_t record. See Q5.</td>
+      <td><span class="verdict v-mixed">Refined by RTL:</span> during the attention <strong>K-pass</strong> SVL writes only to EMem — nothing reaches SPM. But the <strong>V-pass</strong> (<code>ATTN_SM_V</code>) <em>does</em> write results to SPM with an md_t carrying Σz/max generated data. Outside attention every vector lands in SPM with an md_t. See Q5.</td>
     </tr>
   </table></div>
 </section>
@@ -190,7 +190,7 @@
     <text x="614" y="286" font-size="10.5" fill="#5b6875">SIGMOID &#183; SILU &#183; EXP &#183; RECIP &#183;</text>
     <text x="614" y="301" font-size="10.5" fill="#5b6875">TANH/GELU (LUT) &#183; TOPK (k&#8804;8, CSR)</text>
     <rect x="604" y="328" width="192" height="30" rx="4" fill="#e7f2ef" stroke="#2e7d6b"/>
-    <text x="614" y="348" font-size="11" fill="#2e7d6b">CSRs &#183; HRA 0x237000</text>
+    <text x="614" y="348" font-size="11" fill="#2e7d6b">CSRs &#183; HRA 4 MB @ 0x2080_0000</text>
 
     <!-- EMem -->
     <rect x="880" y="150" width="220" height="60" rx="6" fill="#f3f5f7" stroke="#97a3ae" stroke-width="1.2"/>
@@ -249,19 +249,20 @@
 <section>
   <span class="qtag">Q2</span>
   <h2>Software's real control knob: routing data injected upstream</h2>
-  <p>SVL decides what to do with each vector based on the <strong>Routing Data that travels in sync with it</strong> — the same <code>rd_t</code> from <code>mdata_pkg.sv</code>. That routing data enters the machine when software posts an Activation Cmd through the SPA&rarr;SAL&rarr;CPS path (see the SAL note): the CW "includes routing data information to be conveyed in sync with TWE output vectors so downstream modules know what each vector is (model, matmul, user &hellip;) and where to store it in SPM" (Arch spec &sect;5.1.4). So the control loop is real but long: <code>C1-Nano &rarr; SPA &rarr; SAL &rarr; CPS &rarr; (rides with TWE outputs) &rarr; SVL &rarr; SPM &rarr; ACP &rarr; C1-Nano</code>. Software steers SVL per-vector, but always one command-batch ahead, never interactively.</p>
+  <p>The RTL makes the "two-channel" split explicit (<code>sls_svl_uarch.md</code> &sect;5.1.5): the <strong>CSR plane holds retained configuration</strong> (table contents, top-k depth, output format), while everything per-vector arrives as the <strong>CPS passthrough context</strong> riding the TWS corner sideband in sync with the accumulator data (<code>cps_sls_pkg::svl_passthru_t</code>): a 4-bit <code>svl_opmode</code> <em>per beat</em> (SVL never latches a command), clamp enable + descriptor index (1 of 32), LPA descriptor index (1 of 64), softcap index (1 of 128), the K-token window + 64-bit speculation mask, and the 176-bit routing data. So table <em>contents</em> are CSR-programmed; table <em>selection</em> is per-command. SVL forwards the routing data essentially untouched — the RTL overrides exactly three fields: <code>spm_source = SPM_SRC_SVL</code>, <code>gd_valid</code> (set only for TOPK and ATTN_SM_V), and <code>datagram_size = 256</code>. The control loop remains long: <code>C1-Nano &rarr; SPA &rarr; SAL &rarr; CPS &rarr; (rides with TWE outputs) &rarr; SVL &rarr; SPM &rarr; ACP &rarr; C1-Nano</code> — per-vector steering, always one command-batch ahead, never interactive.</p>
 </section>
 
 <section>
   <span class="qtag">Q3</span>
-  <h2>Surface 1 — CSR configuration</h2>
-  <p>Path: C1-Nano &rarr; CMN SBSX (ACE5&rarr;AXI4-Lite) &rarr; SVL CSR block, HRA window <code>0x237000&ndash;0x237FFF</code> (beside SAL at <code>0x236000</code>). Documented knobs:</p>
+  <h2>Surface 1 — CSR configuration (now fully published)</h2>
+  <p>Path: C1-Nano &rarr; HRA register chain &rarr; SVL CSR block — a <strong>4 MB window at <code>0x2080_0000</code></strong> per the generated <code>hra_addr_map_pkg.sv</code> (the docx's 0x237000/4 KB matches nothing in the RTL map; within the SLS CSR daisy-chain SVL is the leaf at <code>0xC0_0000</code>). The register list from <code>svl_csr.rdl</code>:</p>
   <ul>
-    <li><strong>Top-k extraction</strong>: k &le; 8, "per CSR 7-bit field" (Arch spec &sect;5.2.6) — sets how many top elements SVL reports per vector into Generated Data.</li>
-    <li><strong>LUT-based functions</strong> (TANH, GELU) and the LPA (LUT-based Polynomial Approximation) module — table contents/coefficients are software-loadable by design intent.</li>
+    <li><code>ctrl</code> @0x00 (soft_reset, stat snapshot) &middot; <code>build_version</code> &middot; <code>scratch</code> &middot; <code>out_fp_fmt</code> @0x18 (BF16/FP16 for SPM output — must match the consumer) &middot; <strong><code>topk</code> @0x20: 7-bit, reset 8, valid 1&ndash;8</strong> (0 clamps to 1, &gt;8 raises <code>topk_cfg_err</code> when a TOPK op runs) &middot; <code>svl_result_cnt</code> @0x28 (32-bit RO).</li>
+    <li>Two-group IRQ block (norm + critical; critical-only: invalid_opmode, fifo_protocol_err, topk_cfg_err) &middot; SRAM trim/test &middot; telemetry adapter (58 slots + 32 matchers).</li>
+    <li><strong>Math-table windows</strong> (all write-only; reads return a 0xDEADBEEF sentinel — no readback verification): <code>lpa_desc</code> @0x1000 (64 descriptors &times; 4 words, word-3 write commits), 32 <code>clamp_desc</code> @0x6000, 128 softcap entries @0x7000 (c1/c2 for <code>sc = c1&middot;tanh(c2&middot;x)</code>), LPA L1/L2 LUTs @0x200000/0x210000 (1024 &times; 64 b each; L2 = three BF19 Horner coefficients).</li>
   </ul>
   <div class="caveat">
-    <p><strong>Gap:</strong> no spec yet enumerates the SVL CSR set — the register list, which functions are CSR-selected versus routing-data-selected, and the LPA table load mechanism are all unpublished. The 7-bit top-k field is the only concretely documented CSR today.</p>
+    <p><strong>Resolved (was a gap) — with new software obligations.</strong> The CSR set is fully enumerated in <code>svl_csr.rdl</code> + <code>sls_svl_uarch.md</code>. But note: SVL hardware enforces only <em>two</em> field-level checks (invalid opmode, top-k depth); every other programming rule is a software contract whose violation produces silently wrong data. The write-only table windows cannot be verified by readback, the LPA staging register carries stale bytes into partially-written descriptors, and reprogramming <code>topk</code> mid-command is a sequencing violation.</p>
   </div>
 </section>
 
@@ -269,7 +270,7 @@
   <span class="qtag">Q4</span>
   <h2>Surfaces 2 &amp; 3 — observe via FSR, consume via ACP</h2>
   <ul>
-    <li><span class="pill reg">FSR</span> — the <strong>SVL Results Counter</strong> increments once per 128-element vector written from SVL to SPM, timed to SRAM-write completion (Arch spec &sect;5.9.2). Read over the DSU Peripheral Port like all FSR state. This is software's pacing signal for "how many partial tensors have landed."</li>
+    <li><span class="pill reg">FSR</span> — the <strong>SVL Results Counter</strong> increments once per 128-element vector written from SVL to SPM, timed to SRAM-write completion. It lives as a 16-bit FSR counter (lane 3 of <code>cmn_fsr_main.rdl</code>, wait idiom: preset <code>0x10000&minus;K</code>, poll for wrap-to-zero) and is mirrored into the SVL CSR <code>svl_result_cnt</code> @0x28 (32-bit; RTL nuance: the count is SAL-sourced at the SPM boundary and mirrored with one register of latency). Read over the DSU Peripheral Port like all FSR state.</li>
     <li><span class="pill meta">Generated Data</span> — for each non-attention vector, SVL computes descriptives so software doesn't have to: <code>topk_gd_t</code> (8 lanes of {8-bit index, 16-bit value} — MoE router gates, final logits) or <code>attn_gd_t</code> (&Sigma;z <code>sume</code> and <code>smax</code>, 19 b each). These ride in the md_t record (bits [367:176]) and reach the selected core as the second 32 B ACP write — already stashed in that core's L2 by the time software looks. Bit layouts are pinned in <code>mdata_pkg.sv</code>; validity is gated by <code>rd.s.gd_valid</code>.</li>
   </ul>
   <p>Net effect: the top-k/sum/max work that would otherwise be a software reduction over every 256 B vector arrives precomputed, cache-warm, and addressed to the right core — that is the entire point of the SVL&harr;software relationship.</p>
@@ -279,11 +280,12 @@
   <span class="qtag">Q5</span>
   <h2>Attention vs non-attention: when software sees nothing</h2>
   <div class="tablewrap"><table>
-    <tr><th>Mode</th><th>SVL output</th><th>Software visibility</th></tr>
-    <tr><td>Attention (QK<sup>T</sup> = S)</td><td class="num">E&rsquo;s &rarr; EMem (BF19)</td><td>None per-vector — "during QKT=S, SVL does not write anything to SPM". Only downstream counters move.</td></tr>
-    <tr><td>Non-attention</td><td class="num">128-elem vectors &rarr; SPM + md_t</td><td>Full: Results Counter, RG record via ACP (if send_to_cmn), vector readable in SPM.</td></tr>
+    <tr><th>Mode (RTL opmode)</th><th>SVL output</th><th>Software visibility</th></tr>
+    <tr><td>Attention K-pass (<code>ATTN_SM_K</code> / <code>_SC</code> / <code>_GELU</code>)</td><td class="num">exp(x&minus;max) &rarr; EMem (BF19); &Sigma;z/max stats &rarr; TWS</td><td>None per-vector — the K-pass opmodes push no routing data, no metadata, no SPM traffic (RTL suppresses the whole sideband path).</td></tr>
+    <tr><td>Attention V-pass (<code>ATTN_SM_V</code>)</td><td class="num">results &rarr; SPM + md_t with <code>attn_gd_t</code> (&Sigma;z, max)</td><td><span class="verdict v-mixed">Correction vs docx:</span> the V-pass <em>does</em> write SPM and delivers generated data — software sees it like any non-attention vector.</td></tr>
+    <tr><td>Non-attention (SIGMOID/SILU/EXP/RECIP/TANH/GELU/TOPK/LPA/INDEXER/BYPASS)</td><td class="num">128-elem vectors &rarr; SPM + md_t</td><td>Full: Results Counter, RG record via ACP (if send_to_cmn), vector readable in SPM. Only TOPK sets <code>gd_valid</code> with <code>topk_gd_t</code>.</td></tr>
   </table></div>
-  <p>The attention loop (TWE &rarr; SVL &rarr; EMem &rarr; TWE) is deliberately closed in hardware; software orchestrates it only at command granularity and observes it only through CPS/TWS progress counters.</p>
+  <p>Notes from the RTL: only TANH/GELU/LPA are LUT-based — SIGMOID and SILU are composed from the EXP/ADD/RECIP(&times;MULT) primitives. The full opmode enum has 14 modes including BYPASS, LPA (programmable piecewise polynomial), and INDEXER (ReLU&rarr;weight&rarr;accumulate, with its weight SRAM loaded through a SAL backdoor). SVL's outputs go to <em>SSA</em>, which assembles the md_t and owns the column-condenser (the CCF is in SSA, not SVL) — and the SVL&rarr;SSA/SPM path truly has no backpressure: SSA ties SVL's credit to constant 1, and a top-k generated-data entry that collides with a V-pass push is silently dropped (telemetry pulse only).</p>
 </section>
 
 <section>
@@ -300,7 +302,7 @@
 </section>
 
 <footer>
-  Sources: <em>Asimov_Arch_Spec</em> &sect;5.1.4 (SVL scope), &sect;5.2.6 (function list, TOPK CSR field, CCF), &sect;5.4.3 (QKT behavior, once-per-vector notification), &sect;5.7 (&Sigma;z/max descriptive metadata), &sect;5.9.2 (SVL Results Counter); <em>CMN_uArch_Spec</em> &sect;11 (FSR), &sect;4.8&ndash;4.10 (ACP delivery); <em>SPM spec</em> &sect;3/&sect;5.5 (SVL as uncredited producer, bank-conflict requirement); <code>mdata_pkg.sv</code> (gd_t/topk_gd_t/attn_gd_t bit layouts). The SVL CSR list is unpublished; flagged inline.
+  Sources: <em>Asimov_Arch_Spec</em> &sect;5.1.4/&sect;5.2.6/&sect;5.4.3/&sect;5.7/&sect;5.9.2; <em>CMN_uArch_Spec</em> &sect;11, &sect;4.8&ndash;4.10; <em>SPM spec</em> &sect;3/&sect;5.5. RTL cross-check (Positron-AI-TSMC/asimov @ main, 2026-07-10): <code>svl.sv</code>, <code>svl_ctrl.sv</code>, <code>top_k.sv</code>, <code>sume.sv</code>/<code>smax.sv</code>, <code>svl_pkg.sv</code>, <code>cps_sls_pkg.sv</code>, <code>svl_csr.rdl</code>, <code>sls_svl_uarch.md</code>, <code>ssa.sv</code> + <code>spm_mdata_write_adapter.sv</code>, <code>cmn_fsr_main.rdl</code>, <code>hra_addr_map_pkg.sv</code>, RTL <code>mdata_pkg.sv</code>. The CSR list is now published; remaining software contracts (write-only tables, silent-drop corners) flagged inline.
 </footer>
 </div>
 
