@@ -156,6 +156,7 @@ C:\Users\jibin\Documents\Asimov arch claude\ unless noted:
 
 - spm-c1nano-software-view.html — SPM software-view page; also published
   at https://claude.ai/code/artifact/7d842ce5-1cc9-43e5-8286-063efa75e69c
+  (preserved: artifacts/asimov-spec-study/spm-c1nano-software-view.html)
 - spm-meta-data-model.md — the SPM metadata data-structure model (Notion
   "SPM model" template; verbatim rd_t/md_t SV; spec<->refmod deltas table;
   citation list)
@@ -163,8 +164,10 @@ C:\Users\jibin\Documents\Asimov arch claude\ unless noted:
   flow strip
 - sal-c1nano-software-view.html — SAL/SPA software-view page; artifact
   https://claude.ai/code/artifact/6c47a9c4-3b1a-4044-940e-b04048f8a75a
+  (preserved: artifacts/asimov-spec-study/sal-c1nano-software-view.html)
 - svl-c1nano-software-view.html — SVL software-view page; artifact
   https://claude.ai/code/artifact/567beab8-1167-4e45-8c26-385784864811
+  (preserved: artifacts/asimov-spec-study/svl-c1nano-software-view.html)
 - Spec sources (read-only inputs): C:\Users\jibin\Documents\Asimov
   arch\docs\ (Asimov Arch spec, SPM spec, CMN_uArch_Spec.docx; README.md
   there lists them)
