@@ -5,7 +5,7 @@ Preserved copies of workspace tools that are hard to recreate. The live
 survive accidental workspace deletion. Update the repo copy whenever the
 canonical one changes.
 
-## flat_freq_utils.sh (v2, 2026-07-03)
+## flat_freq_utils.sh (v3, 2026-07-06)
 
 - Canonical location:
   delphi-3bda:/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/flat_freq_utils.sh
@@ -14,14 +14,19 @@ canonical one changes.
   6962P hosts. `flat_freq_apply` (no args) = all 288 CPUs -> CLOS0, TF on
   (universal flat, 4100-class for <=20 busy cores/domain);
   `flat_freq_apply <cpulist>` = select mode, listed cores + HT siblings ->
-  CLOS0 (4100-class), rest -> CLOS3 <= 2700; `flat_freq_revert` = boot
-  default; `flat_freq_status` = read-only state. Auto-detects the
-  NOPASSWD isst binary per host (3bda: /opt copy, 3af6: workspace build).
+  CLOS0 (4100-class), rest -> CLOS3 <= 2700;
+  `flat_freq_apply_tiers <fast> <mid>` (v3 addition, 2026-07-06) = 3-tier
+  mode, fast -> CLOS0 ~4100 / mid -> CLOS1 <=3900 / rest -> CLOS3 <=2700;
+  `flat_freq_revert` = boot default; `flat_freq_status` = read-only state.
+  Auto-detects the NOPASSWD isst binary per host (3bda: /opt copy, 3af6:
+  workspace build). Header documents the measured grant constraints (4400
+  only when all others <=2700; no 4200 rung).
 - Verified: universal flat + select mode measured on both 3bda and 3af6
   (2026-07-02/03 experiment series); used for the 24h flat sweep, the
-  TRON-80 run (3af6), and the TRON-88 baseline round (3bda).
+  TRON-80 run (3af6), the TRON-88 and 3-tier rounds (3bda), and the
+  PR-3070 A/B/C ladder (3af6, 2026-07-09).
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md
-  (created v2), handoffs/claude_20260702-20260704_debug-3bda-flat-freq-run-ci-tests.md
+  (created v2), handoffs/claude_20260702-20260709_debug-3bda-flat-freq-run-ci-tests.md
   (benchmark usage). Central results doc:
   delphi-3bda:/scratch/jhan/flat_freq_tests/README.md
 - NOTE: frequency state applied by this tool does NOT survive a reboot.
@@ -31,9 +36,13 @@ canonical one changes.
 - Canonical: delphi-3bda:/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/gen_tron_flatfreq.py
 - Parses tron/config/resource-map.yaml (granite_rapids_6962p) and emits the
   exact isst command sequence for the boost-TRON-cores shape
-  (--also-boost dev,rinzler,platform; --revert for boot restore).
+  (--also-boost dev,rinzler,platform; --revert for boot restore). Also
+  emits a physical-cores-only boost set (HT siblings folded, with sibling
+  clock note) — used 2026-07-08/09 to independently validate the
+  hand-derived flat_freq_apply argument for the
+  https://github.com/positron-ai/tron/pull/3070 core map.
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md,
-  handoffs/claude_20260702-20260704_debug-3bda-flat-freq-run-ci-tests.md.
+  handoffs/claude_20260702-20260709_debug-3bda-flat-freq-run-ci-tests.md.
 
 ## test-scripts/
 
@@ -53,11 +62,32 @@ canonical one changes.
   - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/run_tron88_baseline_round_3bda.sh
   - What it is: baseline-matched round (gpt-oss +
   8B tp4/tp2, lengths 256-2048, users 2-32) under TRON-80+drivers (~2 h).
+- run_tier3_baseline_round_3bda.sh
+  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/run_tier3_baseline_round_3bda.sh
+  - What it is: the same baseline-matched grid under the 3-tier shape
+  (flat_freq_apply_tiers fast/mid/low, ~1 h) with a 3-probe tier-drift
+  watch (2026-07-06 round).
+- run_pr3070_baseline_round_3bda.sh
+  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/run_pr3070_baseline_round_3bda.sh
+  - What it is: baseline-matched grid under the PR-3070 (tron112) select
+  shape on 3bda, RUNTRON_BIN pointed at the PR build. Staged 2026-07-08
+  but never run — superseded by the A/B/C ladder on 3af6.
+- run_pr3070_ladder_3af6.sh
+  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/run_pr3070_ladder_3af6.sh
+  - What it is: the A->B->C decomposition ladder for
+  https://github.com/positron-ai/tron/pull/3070 (A main+flat, B PR+flat,
+  C PR+matched select), re-asserting the shape between phases, per-phase
+  turbostat/shape-watch/CSV export (~3 h).
+- run_pr3070_ladder_BC_3af6.sh
+  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/run_pr3070_ladder_BC_3af6.sh
+  - What it is: the B+C rerun after the RPATH/libversion.so failure —
+  bakes in the LD_LIBRARY_PATH fix for running the /scratch copy of the
+  PR build on a non-build host (the 2026-07-09 results came from this).
 - All scrub the SYSTEM_CONFIG/TRON_LOG_LEVEL/SPDLOG_LEVEL env landmines and
   set CHECKERBOARD_MEMLOCK_KB=197971044 (host limit < checkerboard's 200 GB
   default). The marked THE BENCHMARK COMMAND block in each is the exact
   manual invocation.
-- Related handoffs: handoffs/claude_20260702-20260704_debug-3bda-flat-freq-run-ci-tests.md.
+- Related handoffs: handoffs/claude_20260702-20260709_debug-3bda-flat-freq-run-ci-tests.md.
 
 ## docs/
 
@@ -98,6 +128,6 @@ canonical one changes.
     discrete grant rungs (4400/4100/2700, no 4200). All numbers are
     measured turbostat values from the 2026-07 benchmark rounds.
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md,
-  handoffs/claude_20260702-20260704_debug-3bda-flat-freq-run-ci-tests.md,
+  handoffs/claude_20260702-20260709_debug-3bda-flat-freq-run-ci-tests.md,
   handoffs/codex_2026-06-22-2026-06-30_configure-xeon-6-core-speeds.md,
   handoffs/codex_2026-06-29-2026-06-30_explore-core-power-feature.md.
