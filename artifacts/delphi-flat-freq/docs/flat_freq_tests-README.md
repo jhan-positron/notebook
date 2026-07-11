@@ -399,3 +399,55 @@ Findings:
    shape-less 17cf). Watch the next nights: if a healthy 17cf recovers to
    ~98 while 3bda stays ~93 on the same tron, revisit the shape hypothesis
    (strict shape clamps rinzler+driver cores on the production path).
+
+### 2026-07-11 — RCA consensus (Claude + gpt-5.6-sol via PAL): why the nightly shows no uplift
+
+Four-round consensus dialogue (PAL MCP on andoria-11, model gpt-5.6-sol),
+with live read-only evidence fetched between rounds. Verdict: consensus
+reached.
+
+Decisive live evidence (captured DURING a nightly decode phase on 3bda):
+- TX driver threads: 99.9% CPU at exactly 2700 MHz (cores 49/50) —
+  saturated AND clamped under the deployed strict-tron80 shape.
+- Main rinzler serving thread: 80.3% CPU on clamped core 48.
+- The production engine is rinzler itself (cmdline: rinzler --model ...
+  --app-cores ... --dev-cores ...); app threads correctly on boosted
+  cores (e.g. 3937 MHz @ 99.8% busy); serving/driver threads on the slow
+  set. Checkerboard bypasses this path entirely.
+- Boot-service shape provenance: applied once at boot Jul 9 15:28:48,
+  zero CLOS writes since, readback matches config (shape-inactive
+  hypothesis closed).
+- Speculation setting: /etc/rinzler/instance-N.env, platformd-owned 600 —
+  unread; GATING provenance item before cross-era comparisons are final.
+
+Consensus RCA:
+(i) Strict tron80 leaves the production per-token path clamped (TX 100%
+    @2700, rinzler-main 80% @2700) -> nightly @8u decode cannot benefit
+    from worker-only boost. [evidenced] This does NOT explain the
+    3bda-vs-17cf cross-era gap (17cf's aux cores equally clamped+saturated
+    under boot default; 3bda-tron80 dominates 17cf-clamped per-core).
+(ii) The cross-era gap (93.3 vs 97.5-99) is most likely tron build
+    ef720667. [leading hypothesis, to confirm]
+(iii) Closed branches: shape-not-active (refuted), host variance as main
+    effect (other models match across hosts within noise).
+
+Consensus plan (priority order):
+1. Preserve Jul-10 + current nightly artifacts/configs.
+2. Same-build cross-host comparison from the next healthy nightlies
+   (both DUTs now on ef720667+): healthy 17cf at ~93 confirms the build
+   regression independent of shape.
+3. Verify harness/model/speculation config equivalence across eras
+   (spec setting location known, needs platformd/root read).
+4. If reproduced: bisect 198650bf..ef720667 (decode/scheduler/gpt-oss
+   paths) and open a tron issue with raw evidence.
+5. Measure aux pressure during the gpt-oss phase specifically (tp4).
+6. Paired one-night A/B on 3bda: strict tron80 vs tron80+aux
+   (dev,rinzler,platform), pre-run isst readback + placement capture,
+   identical build/model/spec; phase-specific TPS + TX/rinzler CPU+freq.
+   Prediction if (i) holds: aux boost lifts nightly decode on BOTH hosts.
+7. Ansible role change is CONDITIONAL on 6 (sol's amendment): do not
+   deploy universal flat "regardless"; verify range semantics first.
+8. Add provenance to nightly reports: shape readback, build, model config,
+   spec mode, thread-placement summary.
+9. Longer term: CPU-saturating nightly test with server-side prefill
+   metrics separated from client TTFT.
