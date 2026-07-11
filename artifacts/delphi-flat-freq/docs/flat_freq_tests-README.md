@@ -487,6 +487,14 @@ Consensus plan (priority order):
    EXPECTED RESULT (post-amendment): little to no change — checkerboard
    driver A/Bs and the TX spin-wait signature predict aux frequency is
    immaterial; run it once as a cheap discriminator, not as the fix.
+   2026-07-11 refinement: the RINZLER cores are the interesting part of
+   "aux" — see "Rinzler-core frequency facts" below. Each active engine
+   instance runs a near-saturated work_queue thread clamped at 2700, no
+   checkerboard A/B has ever exercised rinzler-core frequency (checkerboard
+   never spawns rinzler), and the boot-default config even had one fast
+   rinzler core (72) that the deployed tron80 shape demoted to 2700.
+   Read the 6b perfetto/IPC verdict on that thread before spending a
+   nightly on this A/B.
 6b. Workload-shape profiling during a FULL CI/nightly run on 3bda
    (cannot be done now — needs an approved window + root): run perfetto
    (tron has in-process tracing) and/or perf (perf_event_paranoid=4
@@ -527,3 +535,76 @@ Consensus plan (priority order):
    spec mode, thread-placement summary.
 9. Longer term: CPU-saturating nightly test with server-side prefill
    metrics separated from client TTFT.
+
+### 2026-07-11 — Rinzler-core frequency facts (the "boost rinzler cores" idea)
+
+Questions answered here: how fast do the rinzler cores run under (a) last
+night's deployed shape and (b) the clamped/boot-default config, and (c)
+what occupies the fast cores under the clamped config? All 3bda numbers
+verified live 2026-07-11 by isst get-assoc readback + a turbostat sample
+while production engines were serving llama-3.3-70b-instruct-good-tp4
+(2 rinzler instances).
+
+How many rinzler cores: 4 physical — Linux CPUs 24, 48, 72, 96 — plus HT
+siblings 168, 192, 216, 240 = 8 logical CPUs (resource-map
+granite_rapids_6962p rinzler_cores). Live placement: each active engine
+instance occupies ONE rinzler physical core — rinzler-main on one HT
+thread (~14% CPU) and a hot work_queue thread on the other (~87% CPU;
+the busiest serving-path thread observed). tp4 models run 2 instances;
+today they landed on cores 24 and 96 (NOT sequential 24,48 — assignment
+varies), leaving core 72 idle.
+
+(a) Last night on 3bda (deployed strict tron80, PR#165 boot service):
+ALL 4 rinzler cores + siblings are CLOS3 -> clipped at 2700 MHz.
+Verified: get-assoc reads clos:3 on 24/48/72/96/216; turbostat shows the
+busy rinzler CPUs pinned exactly at the clip (CPU 96: 99.8% busy at
+2700 MHz; CPU 168: 73% at 2699) while an idle-ish worker CPU floats at
+3400+.
+
+(b) Clamped / boot-default config: the fast set is FIXED BY THE BIOS PCT
+partition, not by software role — 16 physical cores 0,1,18,19,36,37,54,55
+(pkg0) + 72,73,90,91,108,109,126,127 (pkg1), plus HT siblings, in CLOS0
+(2700-4400 window, TF on); everything else CLOS3 <=2700. Therefore at
+clamped config:
+- rinzler cores 24, 48, 96 -> 2700 clip (same as under the deployed shape);
+- rinzler core 72 (+ sibling 216) -> FAST, 4400-capable. The 4400-rung
+  condition (all other cores <=2700) is exactly satisfied at boot default,
+  so it realizes ~4300-4400 when busy.
+So the clamped config had ONE fast rinzler core, and deploying tron80
+DEMOTED it to 2700. Whether that demotion ever touched an active instance
+depends on where the instances land (today 72 was idle at 2 instances);
+with 4-instance (tp2) or 8-instance (tp1) models core 72 is always
+active. (17cf presumed to have the identical partition — same SKU, same
+fused PCT pairs — but we have never read 17cf's registers directly.)
+
+(c) What software runs on the boot-default fast cores (PCT set crossed
+with the production role map):
+- 0 (+144): platform cores — platformd, unpinned OS/housekeeping.
+- 72 (+216): rinzler core — rinzler-main + work_queue when in use.
+- 73 (+217): dev core — the TX driver thread of one FPGA (its RX on 217).
+- 1, 18, 19, 36, 37, 54, 55, 90, 91, 108, 109, 126, 127 (+siblings): no
+  pinned tron threads — OS pool (Caddy, talos, kernel threads), mostly
+  idle, bursting toward 4400.
+i.e. at clamped config NONE of the 80 workers, 7 of 8 dev cores, and 3 of
+4 rinzler cores are fast; the boot fast set mostly hosts near-idle OS
+cores, plus one rinzler core and one TX core by coincidence of the PCT
+layout.
+
+Why "boost rinzler cores" is genuinely UNTESTED: checkerboard drives
+runtron directly and never spawns rinzler, so none of our checkerboard
+A/Bs (flat-vs-select, tron88-vs-tron80, the PR-3070 ladder) ever exercised
+rinzler-core frequency — those cores sat idle in every run. Only a
+production-path (nightly) A/B can test it. It is cheap to configure:
+assoc CPUs 24,48,72,96,168,192,216,240 into CLOS0 — e.g.
+flat_freq_apply with the worker list + rinzler cores, or
+gen_tron_flatfreq.py --also-boost rinzler — and the 4-core addition is
+expected to keep the ~4100-class grant (the 88-core tron88 set held
+4100). A manual assoc persists until reboot (the PR#165 boot service
+re-applies strict tron80 only at boot). This is plan item 6, now with the
+rinzler work_queue thread as the primary suspect to watch: it is the one
+serving-path thread that is BOTH near-saturated and clamped. Caveat
+unchanged: ~87-100% occupancy may be poll-wait rather than starved
+compute (the TX lesson — 99.9% CPU, voluntary_ctxt_switches=1, no real
+work); the 6b perfetto sched + per-thread IPC capture on this exact
+thread decides which, and should be read before spending a nightly on
+the A/B.
