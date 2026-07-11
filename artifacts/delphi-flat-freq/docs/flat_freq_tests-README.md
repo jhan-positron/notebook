@@ -429,6 +429,23 @@ Q1: Why doesn't the nightly @8u decode metric show the worker boost?
     — per-token latency is dominated by FPGA round-trip + waits, not CPU
     clock. Evidence: 3bda-boosted == 17cf-clamped within noise on every
     other model; prefill~ constant ~800 across all eras and shapes.
+  - FALSIFIABLE PREDICTION (2026-07-11, tested by plan item 6b): if the
+    leading hypothesis is right, the tron worker cores during a nightly
+    gpt-oss phase will NOT be doing full-load work the way they were in
+    our checkerboard runs — they will spend a larger share of each token
+    interval waiting, because in the nightly the work arrives through the
+    rinzler serving path (client -> Caddy -> rinzler engine) at @8u pacing
+    instead of checkerboard's direct saturating drive. If 6b instead shows
+    workers compute-busy like checkerboard, the leading hypothesis is
+    wrong and the build-regression track (Q2) has to carry the whole gap.
+    Measurement caveat: "waiting" will NOT reliably show as low Busy% —
+    tron's poll/wait infra makes waiting threads read as busy to
+    /proc and turbostat (TX: 99.9% CPU with voluntary_ctxt_switches=1).
+    The discriminating signals in the 6b capture are the perfetto sched
+    trace (real running vs runnable vs sleep per worker thread, per-token
+    gaps) and per-engine IPC from perf stat (spin/wait loops burn cycles
+    at low instructions-per-cycle vs matmul-feeding work), compared
+    against the same signals during a checkerboard run at the same shape.
   - DOWNGRADED (was "RCA(i)"): "clamped serving path caps decode". TX
     threads DO read 99.9% CPU at 2700 and rinzler-main 80% — but that is
     wait-OCCUPANCY, not starved compute: TX shows
@@ -481,6 +498,12 @@ Consensus plan (priority order):
    (scheduling, token pacing, batching waits), i.e. where per-token time
    actually goes at @8u, and why worker MHz does not reach the client
    metric.
+   Success criterion: this directly tests the FALSIFIABLE PREDICTION under
+   Q1 above — workers waiting-dominated per token at @8u through rinzler
+   (leading hypothesis holds) vs compute-busy like checkerboard (hypothesis
+   falsified; build regression must carry the gap). For the comparison
+   side, capture the same perfetto/perf signals during a checkerboard run
+   at the same shape (allowed on 3af6 any time; on 3bda only in a window).
    TOOLING STAGED 2026-07-10 (capture only needs the window now, ~2 min):
    - installed (no root, user-space): /scratch/jhan/tools/tracebox and
      /scratch/jhan/tools/trace_processor (perfetto v57.2, prebuilts cached);
