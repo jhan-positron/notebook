@@ -358,3 +358,44 @@ turbostat children → orphan turbostats accumulate (19 on 3af6, needs
 `sudo pkill turbostat`; 3bda similar) and per-phase turbostat files get
 contaminated by successor phases — all analyses above are bounded to each
 phase's own snapshot window.
+
+### 2026-07-11 — Nightly-CI reality check: the @8u TPS metric is frequency-insensitive
+
+Question raised: 3bda's first clean TPS nightly (2026-07-10, under the
+deployed strict tron80 shape from positron-infrastructure PR #165,
+https://github.com/positron-ai/positron-infrastructure/pull/165) showed
+gpt-oss decode 93.28 / prefill ~799 — "no flat-freq improvement".
+
+Evidence gathered from #ci-cd-notifications nightly history:
+
+| Night | Host | Shape | tron | gpt-oss decode/user | prefill~ |
+|---|---|---|---|---|---|
+| Jul 4 | 17cf | clamped | 07.04 | 99.03 | 804 |
+| Jul 6 | 17cf | clamped | 198650bf | 98.09 | 801 |
+| Jul 7 | 17cf | clamped | 198650bf | 98.02 | 803 |
+| Jul 8 | 17cf | clamped | 198650bf | 97.52 | 801 |
+| Jul 10 | 17cf | clamped | ef720667 | 93.39 (host SICK: hugepage bug platformd#413, all models down) | 797 |
+| Jul 10 | 3bda | tron80 boosted | ef720667 | 93.28 (all OTHER models healthy) | 799 |
+
+Findings:
+1. 3bda had NO earlier TPS nightlies (June reports were MMLU-only; Jul 9
+   run crashed via tron#3097) — so there is no same-machine clamped
+   baseline; the "no improvement" impression came from comparing to 17cf.
+2. Boosted 3bda == clamped-healthy 17cf on EVERY other model within noise
+   (3b 191.6 vs 191-193; 8b-tp2 194.4 vs 190-196; 70b rows equal; mixtral
+   80.8 vs 80-82; qwen, gemma equal). CONCLUSION: the nightly @8u decode
+   metric is FPGA-pipeline-bound and essentially insensitive to CPU
+   frequency shape. The flat-freq win lives in CPU-saturated regimes
+   (concurrent prefill storms, high user counts — what checkerboard
+   measures); this benchmark does not exercise them.
+3. Client-side prefill~ (prompt/TTFT at 1k) is ~800 in every era and both
+   shapes — the single-stream prefill pipeline ceiling. It is NOT
+   comparable to checkerboard's parse metric (which saturates workers with
+   4 simultaneous prefills per instance and IS frequency-sensitive:
+   551 clamped -> 645+ unclamped).
+4. Real anomaly worth flagging: gpt-oss decode dropped ~5% on BOTH DUTs on
+   Jul 10 (97.5-99 -> 93.3) coinciding with tron v2026.07.10-ef720667 —
+   likely a tron regression, not the frequency shape (identical dip on the
+   shape-less 17cf). Watch the next nights: if a healthy 17cf recovers to
+   ~98 while 3bda stays ~93 on the same tron, revisit the shape hypothesis
+   (strict shape clamps rinzler+driver cores on the production path).
