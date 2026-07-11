@@ -608,3 +608,87 @@ compute (the TX lesson — 99.9% CPU, voluntary_ctxt_switches=1, no real
 work); the 6b perfetto sched + per-thread IPC capture on this exact
 thread decides which, and should be read before spending a nightly on
 the A/B.
+
+### 2026-07-12 — 2nd nightly on deployed tron80: build regression confirmed on GNR
+
+Nightly reports (#ci-cd-notifications, all on tron v2026.07.10-ef720667
+unless noted). gpt-oss-120b-tp4 @8u decode TPS:
+
+  host / shape                     Jul 07   Jul 08   Jul 10   Jul 11
+  17cf clamped, 198650bf            98.02    97.52      -        -
+  17cf clamped, ef720667              -        -      93.39    88.24
+  3bda tron80-boosted, ef720667       -        -      93.28    94.18
+  andoria (Genoa), 198650bf        114.90   115.49      -        -
+  andoria (Genoa), ef720667           -        -     115.44   115.52
+
+Findings:
+1. BUILD REGRESSION CONFIRMED, GNR-ONLY: 17cf, same host and same clamped
+   shape, dropped 97.52 -> 93.39 (-4.2%) exactly when the build moved
+   198650bf -> ef720667; Genoa is flat across the same transition
+   (115.49 -> 115.44). This substantially answers plan item 2 and
+   justifies item 4 (bisect 198650bf..ef720667, GNR-specific paths).
+2. 17cf IS ALSO SICK AS A HOST: on Jul 10/11 several tp2 models read far
+   below goal (3B @32u: 64% then 32%; mixtral 51% then 71%; gemma 88%)
+   while 3bda passes the same models on the same build — so 17cf's 88.24
+   (Jul 11) overstates the regression; the clean signal is the Jul 8 ->
+   Jul 10 drop. 17cf needs host attention before it is a valid comparator
+   (functional also 172/173 both nights).
+3. Same-build cross-host: 3bda-boosted beat or matched 17cf-clamped on
+   EVERY model both nights (gpt-oss: +0% Jul 10, +6.7% Jul 11 with the
+   17cf-health confound). No evidence the boost hurts; still no clean
+   evidence it helps at @8u.
+4. Decomposition (Q1/Q2): 93.28 ~= 97.8 x 0.955 — the ef720667 build cost
+   (~-4.5% from 17cf's clean pair) fully accounts for 3bda sitting at ~93
+   instead of the 17cf-era ~98. Both leading hypotheses strengthened:
+   Q2 = build regression is real; Q1 = the @8u metric shows ~no worker-
+   frequency effect (boost contribution ~= 0 within night-to-night noise).
+5. 3bda itself: 93.28 -> 94.18 (+1.0%), functional 172/173 -> 173/173.
+   Two consecutive clean nights on the deployed strict tron80 = the
+   baseline pair for the planned rinzler-boost nightly A/B (item 6).
+6. Context from the Jul-9 report (Rhys): that night's failures on both
+   delphi DUTs were rinzler hugepage mmap crash loops -
+   https://github.com/positron-ai/tron/issues/3097, fix up at
+   https://github.com/positron-ai/tron/pull/3148 - the same file family
+   as the leftovers cleaned below.
+
+### 2026-07-11 — daytime window on 3bda: state findings + staged tests
+
+Machine check at 15:16 UTC (post-nightly): nobody logged in, zero
+rinzler/runtron processes (engines idle out after CI), platformd active.
+Two window-relevant discoveries:
+
+1. LEFTOVER HUGEPAGE FILES BLOCK ANY DUT-SIDE BENCHMARK: last night's
+   engines left /dev/hugepages/slice-{0..7}-of-8 (positron-owned,
+   verified unmapped via fuser + /proc scan) holding ALL 512 x 1 GiB
+   hugepages. With user approval, deleted them one-at-a-time with
+   verification (first delete freed exactly 64 pages -> unmapped
+   confirmed; final state 512/512 free). Same cleanup precedent:
+   2026-07-02 (stale libpos-slice files). Related bug: tron#3097.
+2. 3bda IS IN ITS DAYTIME-CI ROLE: per llm-toolbox
+   key-resources/ci-runners-cheatsheet.md, 3bda is a split runner —
+   ci-runner-start@ timer starts the GitHub Actions runner at 14:00 UTC
+   (PR benchmark jobs; one was observed executing at 15:45 UTC), and
+   ci-runner-stop@ stops it at 02:45 UTC for the talos nightly. So
+   "machine looks idle" mid-day is FALSE availability: a GH job can land
+   any moment. Official handover for a manual window:
+   sudo /opt/positron/ci/ci-runner.sh stop|start|status.
+   CONSEQUENCE: the staged checkerboard window round was NOT launched
+   (would race GH jobs, and the frequency shape must stay standard while
+   PR benchmarks can run). Scripts staged for a future proper window:
+   scripts/run_window_round_3bda.sh (baseline-matched grid under the
+   deployed shape, verify-only, instrumented) and
+   scripts/yield_monitor_3bda.sh (auto-yield guard: non-jhan login,
+   rinzler/talos/foreign-runtron, deadline; TODO add Runner.Worker
+   trigger).
+
+Planned next (pending explicit user go): arm tonight's nightly as the
+rinzler-boost A/B — at 02:55 UTC (after runner-stop, before nightly)
+apply "tron84" = tron80 workers + rinzler cores 24,48,72,96 (+HT sibs)
+-> CLOS0 ~4100, drivers/others stay <= 2700; baseline = the Jul 10/11
+tron80 pair. Script drafted: scripts/apply_tron84_rinzler_AB.sh
+(preflight refuses if Runner.Worker alive or pre-shape is not strict
+tron80; readback at 02:55 and 06:55 UTC for provenance; revert =
+reboot via PR#165 boot service or flat_freq_apply with the worker-only
+list). Caveats: a reboot before the nightly silently reverts the A/B
+(check readback files before interpreting); a new tron build tonight
+would confound build-vs-shape (check the report's version line).

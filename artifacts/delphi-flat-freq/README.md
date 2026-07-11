@@ -99,6 +99,27 @@ canonical one changes.
   or ui.perfetto.dev. Staged 2026-07-10; preflight verified against live
   engines on 3bda; not yet run for real (needs an approved CI window +
   cached sudo).
+- run_window_round_3bda.sh
+  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/run_window_round_3bda.sh
+  - What it is: daytime-window checkerboard round (gpt-oss + 8B, baseline-
+  matched grid) under the DEPLOYED tron80 shape — verify-only on shape,
+  writes RUNNER_PGID for the yield monitor, cleans its own hugepage files.
+  Staged 2026-07-11, not yet run (3bda's daytime GitHub-runner role was
+  discovered first — needs a ci-runner.sh handover window).
+- yield_monitor_3bda.sh
+  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/yield_monitor_3bda.sh
+  - What it is: auto-yield guard for window tests on the CI machine — kills
+  the runner's process group and cleans hugepages on non-jhan login,
+  rinzler/talos/foreign-runtron appearance, or deadline. TODO: add a
+  Runner.Worker (GitHub job) trigger.
+- apply_tron84_rinzler_AB.sh
+  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/apply_tron84_rinzler_AB.sh
+  (drafted 2026-07-11; installation pending user go)
+  - What it is: delayed applier for the rinzler-boost nightly A/B — waits
+  for 02:55 UTC (post runner-stop), preflights (no Runner.Worker, strict
+  tron80 present), applies tron84 (workers + rinzler 24,48,72,96 + sibs
+  -> CLOS0), double readback for provenance. Baseline = Jul 10/11 tron80
+  nightly pair.
 - All benchmark runners scrub the SYSTEM_CONFIG/TRON_LOG_LEVEL/SPDLOG_LEVEL env landmines and
   set CHECKERBOARD_MEMLOCK_KB=197971044 (host limit < checkerboard's 200 GB
   default). The marked THE BENCHMARK COMMAND block in each is the exact
