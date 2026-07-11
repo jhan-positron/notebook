@@ -470,6 +470,17 @@ Consensus plan (priority order):
    EXPECTED RESULT (post-amendment): little to no change — checkerboard
    driver A/Bs and the TX spin-wait signature predict aux frequency is
    immaterial; run it once as a cheap discriminator, not as the fix.
+6b. Workload-shape profiling during a FULL CI/nightly run on 3bda
+   (cannot be done now — needs an approved window + root): run perfetto
+   (tron has in-process tracing) and/or perf (perf_event_paranoid=4
+   currently blocks unprivileged use) across a complete gpt-oss phase.
+   Capture per-thread time breakdown — real work vs wait — for app
+   workers, TX/RX drivers, and rinzler-main, plus per-token timeline.
+   This answers the open question the frequency A/Bs cannot: whether the
+   serving path gates worker throughput in FREQUENCY-INDEPENDENT ways
+   (scheduling, token pacing, batching waits), i.e. where per-token time
+   actually goes at @8u, and why worker MHz does not reach the client
+   metric.
 7. Ansible role change is CONDITIONAL on 6 (sol's amendment): do not
    deploy universal flat "regardless"; verify range semantics first.
 8. Add provenance to nightly reports: shape readback, build, model config,
