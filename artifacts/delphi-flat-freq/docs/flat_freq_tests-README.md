@@ -420,16 +420,39 @@ Decisive live evidence (captured DURING a nightly decode phase on 3bda):
 - Speculation setting: /etc/rinzler/instance-N.env, platformd-owned 600 —
   unread; GATING provenance item before cross-era comparisons are final.
 
-Consensus RCA:
-(i) Strict tron80 leaves the production per-token path clamped (TX 100%
-    @2700, rinzler-main 80% @2700) -> nightly @8u decode cannot benefit
-    from worker-only boost. [evidenced] This does NOT explain the
-    3bda-vs-17cf cross-era gap (17cf's aux cores equally clamped+saturated
-    under boot default; 3bda-tron80 dominates 17cf-clamped per-core).
-(ii) The cross-era gap (93.3 vs 97.5-99) is most likely tron build
-    ef720667. [leading hypothesis, to confirm]
-(iii) Closed branches: shape-not-active (refuted), host variance as main
-    effect (other models match across hosts within noise).
+Consensus RCA — two SEPARATE questions (amended 2026-07-11 after user
+challenge; supersedes earlier wording that overweighted the serving-path
+clamp):
+
+Q1: Why doesn't the nightly @8u decode metric show the worker boost?
+  - Leading: the metric is largely CPU-frequency-insensitive at this load
+    — per-token latency is dominated by FPGA round-trip + waits, not CPU
+    clock. Evidence: 3bda-boosted == 17cf-clamped within noise on every
+    other model; prefill~ constant ~800 across all eras and shapes.
+  - DOWNGRADED (was "RCA(i)"): "clamped serving path caps decode". TX
+    threads DO read 99.9% CPU at 2700 and rinzler-main 80% — but that is
+    wait-OCCUPANCY, not starved compute: TX shows
+    voluntary_ctxt_switches=1 (pure poll loop; tron ships mwaitx wait
+    infra), the perfetto thread study found app workers busiest with
+    main/TX/RX mostly idle in work terms, and our own checkerboard A/Bs
+    (tron88 vs tron80 = 0.0+-0.4%; ladder C/B ~ 0 for gpt-oss) directly
+    measured driver-clamping as a non-effect. The one-night aux-boost A/B
+    (plan item 6) remains a cheap discriminator but with LOW expected
+    effect.
+  - Open decomposition: checkerboard decode gained +13% clamped->flat on
+    workers, so full CPU-insensitivity cannot be assumed for the nightly
+    either. 93.28 = (17cf-era ~98) x (build delta) x (worker-freq delta):
+    one equation, two unknowns until the next healthy same-build
+    nightlies land on both hosts.
+
+Q2: Why is 3bda's 93.28 below 17cf's 97.5-99 era? Leading: tron build
+    ef720667 (both DUTs read ~93.3 on it; older builds on 17cf read ~98;
+    the shape cannot explain it — 3bda-tron80 dominates 17cf-clamped on
+    every core). Confirm via next healthy same-build nightlies + a
+    198650bf..ef720667 diff review.
+
+Closed branches: shape-not-active (boot-service provenance + readback);
+host variance as main effect (cross-model equality within noise).
 
 Consensus plan (priority order):
 1. Preserve Jul-10 + current nightly artifacts/configs.
@@ -444,7 +467,9 @@ Consensus plan (priority order):
 6. Paired one-night A/B on 3bda: strict tron80 vs tron80+aux
    (dev,rinzler,platform), pre-run isst readback + placement capture,
    identical build/model/spec; phase-specific TPS + TX/rinzler CPU+freq.
-   Prediction if (i) holds: aux boost lifts nightly decode on BOTH hosts.
+   EXPECTED RESULT (post-amendment): little to no change — checkerboard
+   driver A/Bs and the TX spin-wait signature predict aux frequency is
+   immaterial; run it once as a cheap discriminator, not as the fix.
 7. Ansible role change is CONDITIONAL on 6 (sol's amendment): do not
    deploy universal flat "regardless"; verify range semantics first.
 8. Add provenance to nightly reports: shape readback, build, model config,
