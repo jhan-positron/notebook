@@ -83,7 +83,23 @@ canonical one changes.
   - What it is: the B+C rerun after the RPATH/libversion.so failure —
   bakes in the LD_LIBRARY_PATH fix for running the /scratch copy of the
   PR build on a non-build host (the 2026-07-09 results came from this).
-- All scrub the SYSTEM_CONFIG/TRON_LOG_LEVEL/SPDLOG_LEVEL env landmines and
+- ci_workload_profile.sh (+ ci_profile_trace.cfg)
+  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/ci_workload_profile.sh
+    and delphi-3bda:/scratch/jhan/tools/ci_profile_trace.cfg
+  - What it is: plan-item-6b capture kit — profiles workload shape during a
+  FULL CI/nightly run (observational only; refuses to run unless engine
+  processes are already up, never starts/stops tron). Captures a perfetto
+  system trace (sched_switch/waking + cpu_frequency/idle via
+  /scratch/jhan/tools/tracebox), perf record -a -g + per-engine perf stat
+  (run as root, which bypasses perf_event_paranoid=4 without a sysctl
+  change), and before/after provenance (engine cmdlines, per-thread
+  psr/wchan/ctxt-switch snapshots, turbostat, isst shape probes). Gates on
+  the gpt-oss phase by default (--model/--any to change); --check = safe
+  preflight. Analysis via /scratch/jhan/tools/trace_processor (SQL, on-host)
+  or ui.perfetto.dev. Staged 2026-07-10; preflight verified against live
+  engines on 3bda; not yet run for real (needs an approved CI window +
+  cached sudo).
+- All benchmark runners scrub the SYSTEM_CONFIG/TRON_LOG_LEVEL/SPDLOG_LEVEL env landmines and
   set CHECKERBOARD_MEMLOCK_KB=197971044 (host limit < checkerboard's 200 GB
   default). The marked THE BENCHMARK COMMAND block in each is the exact
   manual invocation.

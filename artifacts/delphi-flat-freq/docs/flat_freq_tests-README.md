@@ -481,6 +481,23 @@ Consensus plan (priority order):
    (scheduling, token pacing, batching waits), i.e. where per-token time
    actually goes at @8u, and why worker MHz does not reach the client
    metric.
+   TOOLING STAGED 2026-07-10 (capture only needs the window now, ~2 min):
+   - installed (no root, user-space): /scratch/jhan/tools/tracebox and
+     /scratch/jhan/tools/trace_processor (perfetto v57.2, prebuilts cached);
+     perf 6.8.12 + bpftrace were already present.
+   - capture script: /scratch/jhan/flat_freq_tests/scripts/ci_workload_profile.sh
+     (+ /scratch/jhan/tools/ci_profile_trace.cfg). Observational only —
+     refuses to run unless engine processes are already up; gates on the
+     gpt-oss phase by default (--model/--any). Running perf as root
+     bypasses perf_event_paranoid=4, so NO sysctl change is needed.
+   - preflight verified on live 3bda engines: --check --any -> PREFLIGHT OK.
+   - window-time procedure: wait for the nightly's gpt-oss phase, then
+       sudo -v && /scratch/jhan/flat_freq_tests/scripts/ci_workload_profile.sh
+     Output lands in /scratch/jhan/flat_freq_tests/<ts>_ci-workload-profile-3bda/
+     (perfetto .pftrace, perf.data, per-engine IPC, before/after thread +
+     ctxt-switch snapshots, turbostat, isst shape). Analyze on-host with
+     /scratch/jhan/tools/trace_processor or upload the .pftrace to
+     https://ui.perfetto.dev.
 7. Ansible role change is CONDITIONAL on 6 (sol's amendment): do not
    deploy universal flat "regardless"; verify range semantics first.
 8. Add provenance to nightly reports: shape readback, build, model config,
