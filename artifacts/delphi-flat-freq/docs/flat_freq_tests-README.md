@@ -681,6 +681,64 @@ Two window-relevant discoveries:
    rinzler/talos/foreign-runtron, deadline; TODO add Runner.Worker
    trigger).
 
+### 2026-07-12 — Hannah's 3bd6 validation run: tron112 service deployed, ladder composite reproduced
+
+Hannah's checkerboard run (no rinzler):
+/scratch/hvaneenoo/results-v2-multi-model-20260711-220227.csv — System =
+delphi-3bd6 (NOT 3af6/3bda; the file merely lives on shared /scratch),
+tron main v2026.07.11-29924aa8, 188 configs, 6 models x tp1/2/4, started
+22:02 UTC 2026-07-11.
+
+SHAPE VERIFIED — BUT IT IS tron112 (PR-3070 map), NOT tron80:
+- intel-speed-select-state.service on 3bd6: active + enabled;
+  /etc/default/intel-speed-select-state ("Managed by the intel-speed-select
+  Ansible role") has FAST_CORE_RANGES='7-14 24-71 79-86 96-143' — exactly
+  the https://github.com/positron-ai/tron/pull/3070 die-aware map (112
+  phys cores; matches gen_tron_flatfreq.py output validated 2026-07-08).
+  So PR-3070 has presumably merged to main and the Ansible role was
+  updated to the new map.
+- Live probe (unprivileged cpufreq, spin-pinned): cpu51=4400 MHz,
+  cpu25=4348, cpu24=4313 (all inside the fast ranges; ~4400 rung because
+  only 3 cores busy) vs cpu2 = 2700 exact clip. cpu27 probe earlier:
+  4372. Shape is real and live.
+
+BASELINE VALIDATED: her Jun-30 3bd6 run (multi-sweep-20260630-062732,
+build 66deff22) reads +2.2% vs the canonical 3bda clamped baseline at the
+gpt-oss p1024/g1024/s256 2-inst 8-users anchor (563.8 vs 551.5 parse) —
+a clean same-host clamped baseline. (Units note: the CSV "Users" column
+is TOTAL users; our prose "2 inst x 4 users" = Users=8.)
+
+RESULTS — new (tron112 flat, 29924aa8) vs same-host clamped (66deff22),
+geomean over all matched configs, via scripts/compare_csv.py:
+  gpt-oss-tp4      parse +25.0%  gen +15.9%   (n=20)
+  8b-tp2 / tp4     parse +19.5% / +18.3%  gen +16.2% / +8.0%
+  3b tp1/tp2/tp4   parse +31.8/+30.4/+22.5%  gen +21.5/+20.1/+10.8%
+  70b tp2/tp4      parse +4.4%  gen +5.9-7.7%   (FPGA-bound, as expected)
+  mixtral          parse +8-11%  gen +4-7%
+Long-context high-user configs gain most (gpt-oss p2048 2x16-32u parse
++42-43%) — the CPU-parse-bound signature.
+
+DECOMPOSITION — the composite reproduces our PR-3070 ladder:
+- vs our ladder-A (universal flat 4100, OLD map, main Jul 9, 3af6):
+  gpt-oss parse +9.2% / gen +4.2% -> matches our measured PR-3070
+  SOFTWARE effect (ladder B/A: +9.3% / +3.4%) almost exactly.
+- vs our tron80-4100 run (Jul 5, 3af6): +9.4% / +4.7% — same story.
+- Composite vs clamped: hers +25.0%/+15.9% vs our ladder A->C prediction
+  +26.0%/+15.1% — agreement within ~1 pt on a different host, different
+  build, deployed via the productionized service. The flat-freq +
+  PR-3070 stack is CONFIRMED end-to-end.
+- The ladder-B 8b-tp2 generate regression (-18%) is ABSENT in her run
+  (8b-tp2 gen vs ladder-A: +8.7%) — fixed before merge or specific to
+  the pre-merge PR build.
+- Note vs Q2: build 29924aa8 (which postdates ef720667) is FASTER than
+  Jul-9 main on checkerboard load, while ef720667 REGRESSED the @8u
+  nightly serving metric on GNR — further evidence the nightly @8u
+  metric and checkerboard throughput measure different regimes.
+
+(2026-07-12 ~04:10-04:20 UTC: delphi-3bda became unreachable (ssh
+timeout) during this analysis — checkerboard hosts 3af6/3bd6 fine.
+Nightly window risk; needs a look when someone has console access.)
+
 Planned next (pending explicit user go): arm tonight's nightly as the
 rinzler-boost A/B — at 02:55 UTC (after runner-stop, before nightly)
 apply "tron84" = tron80 workers + rinzler cores 24,48,72,96 (+HT sibs)
