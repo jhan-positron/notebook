@@ -9,7 +9,7 @@ The original working tree is:
 
 A curated, non-bulk subset is preserved in this notebook under:
 
-`artifacts/intel-snc/`
+`../artifacts/intel-snc/`
 
 ## Primary Takeaway
 
@@ -41,21 +41,21 @@ message that explains why SNC/3 did not automatically improve performance.
 
 ## Start Here
 
-- [artifacts/intel-snc/input-2-ai/README.md](artifacts/intel-snc/input-2-ai/README.md):
+- [../artifacts/intel-snc/input-2-ai/README.md](../artifacts/intel-snc/input-2-ai/README.md):
   the hand-authored project control folder. These files capture the goal,
   context, execution plan, environment constraints, expected output structure,
   and the evolution of the investigation. Treat these as user-authored
   provenance, not generated output.
-- [artifacts/intel-snc/claude-workspace/REPORT/FINAL_REPORT.md](artifacts/intel-snc/claude-workspace/REPORT/FINAL_REPORT.md):
+- [../artifacts/intel-snc/claude-workspace/REPORT/FINAL_REPORT.md](../artifacts/intel-snc/claude-workspace/REPORT/FINAL_REPORT.md):
   final same-machine SNC3 report for `delphi-3af6`. It records the clean run,
   result CSV paths, figure paths, prediction scorecard, and caveats.
-- [artifacts/intel-snc/claude-workspace/REPORT/TRON_SNC3_PERFORMANCE_PREDICTION.md](artifacts/intel-snc/claude-workspace/REPORT/TRON_SNC3_PERFORMANCE_PREDICTION.md):
+- [../artifacts/intel-snc/claude-workspace/REPORT/TRON_SNC3_PERFORMANCE_PREDICTION.md](../artifacts/intel-snc/claude-workspace/REPORT/TRON_SNC3_PERFORMANCE_PREDICTION.md):
   TRON-specific interpretation. It explains why compact Llama decode might
   benefit only with correct placement, while Qwen/model-load/wide phases can
   regress unless sharded across SNC nodes.
-- [artifacts/intel-snc/pre-work/intel-amd-comparison/pass1_outline.md](artifacts/intel-snc/pre-work/intel-amd-comparison/pass1_outline.md):
+- [../artifacts/intel-snc/pre-work/intel-amd-comparison/pass1_outline.md](../artifacts/intel-snc/pre-work/intel-amd-comparison/pass1_outline.md):
   structured Intel-vs-AMD background study with tables, diagrams, and citations.
-- [artifacts/intel-snc/pre-work/intel-amd-comparison/pass2_writeup.md](artifacts/intel-snc/pre-work/intel-amd-comparison/pass2_writeup.md):
+- [../artifacts/intel-snc/pre-work/intel-amd-comparison/pass2_writeup.md](../artifacts/intel-snc/pre-work/intel-amd-comparison/pass2_writeup.md):
   prose version of the same background study. This is the file with the useful
   text diagrams for Intel Xeon 6962P, AMD EPYC 9654, DDR5 channels, mesh/EMIB,
   CHAs, CCDs, and system topology.
@@ -64,23 +64,23 @@ message that explains why SNC/3 did not automatically improve performance.
 
 Use these handoffs to recover the conversation trail:
 
-- [handoffs/codex_2026-06-03-2026-06-11_intel-snc3.md](handoffs/codex_2026-06-03-2026-06-11_intel-snc3.md):
+- [../handoffs/codex_2026-06-03-2026-06-11_intel-snc3.md](../handoffs/codex_2026-06-03-2026-06-11_intel-snc3.md):
   broad Codex SNC3 investigation thread, including script review, topology
   reasoning, figure fixes, Test12 follow-up, and artifact paths.
-- [handoffs/codex_2026-06-05-2026-06-07_delphi-3af6-enable-snc3-runner.md](handoffs/codex_2026-06-05-2026-06-07_delphi-3af6-enable-snc3-runner.md):
+- [../handoffs/codex_2026-06-05-2026-06-07_delphi-3af6-enable-snc3-runner.md](../handoffs/codex_2026-06-05-2026-06-07_delphi-3af6-enable-snc3-runner.md):
   clean-run summary for the full `delphi-3af6` SNC3 characterization and TRON
   prediction work.
-- [handoffs/codex_2026-06-01-2026-06-11_fix-code-connection-error.md](handoffs/codex_2026-06-01-2026-06-11_fix-code-connection-error.md):
+- [../handoffs/codex_2026-06-01-2026-06-11_fix-code-connection-error.md](../handoffs/codex_2026-06-01-2026-06-11_fix-code-connection-error.md):
   related thread that touched the figure generator and `input-2-ai` fixes.
-- [handoffs/codex_2026-06-05_can-you-connect-to-the-codex-which-is-currently-running-tasks-at.md](handoffs/codex_2026-06-05_can-you-connect-to-the-codex-which-is-currently-running-tasks-at.md):
+- [../handoffs/codex_2026-06-05_can-you-connect-to-the-codex-which-is-currently-running-tasks-at.md](../handoffs/codex_2026-06-05_can-you-connect-to-the-codex-which-is-currently-running-tasks-at.md):
   remote-session coordination notes around the running SNC3 work.
-- [handoffs/codex_2026-06-05_how-to-print-all-the-bios-config-of-this-machine.md](handoffs/codex_2026-06-05_how-to-print-all-the-bios-config-of-this-machine.md):
+- [../handoffs/codex_2026-06-05_how-to-print-all-the-bios-config-of-this-machine.md](../handoffs/codex_2026-06-05_how-to-print-all-the-bios-config-of-this-machine.md):
   useful side note for finding BIOS/SNC-related settings.
 
 To rediscover anything broader later:
 
 ```bash
-rg -n "SNC3|SNC/3|SNC-OFF|Sub-NUMA|enable-SNC3" handoffs artifacts
+rg -n "SNC3|SNC/3|SNC-OFF|Sub-NUMA|enable-SNC3" ../handoffs ../artifacts
 ```
 
 ## Remote Workspace Map
@@ -131,7 +131,7 @@ Key directories:
 
 ## Preserved Artifact Set
 
-Preserved in [artifacts/intel-snc/](artifacts/intel-snc/):
+Preserved in [../artifacts/intel-snc/](../artifacts/intel-snc/):
 
 - `primary-takeaway-test11-snc3-vs-snc-off.png`
   - Source: the graph attached on 2026-07-12.
@@ -176,10 +176,10 @@ From the final report:
 
 1. Open [intel-snc-knowledge.html](intel-snc-knowledge.html) for the mental
    model.
-2. Read [artifacts/intel-snc/input-2-ai/context.md](artifacts/intel-snc/input-2-ai/context.md)
-   and [artifacts/intel-snc/input-2-ai/goal.md](artifacts/intel-snc/input-2-ai/goal.md).
+2. Read [../artifacts/intel-snc/input-2-ai/context.md](../artifacts/intel-snc/input-2-ai/context.md)
+   and [../artifacts/intel-snc/input-2-ai/goal.md](../artifacts/intel-snc/input-2-ai/goal.md).
 3. Read the final report and TRON prediction report under
-   `artifacts/intel-snc/claude-workspace/REPORT/`.
+   `../artifacts/intel-snc/claude-workspace/REPORT/`.
 4. If rerunning measurements, start from the preserved `code/` and `scripts/`
    but verify the live remote tree first.
 5. Always runtime-detect SNC mode:
