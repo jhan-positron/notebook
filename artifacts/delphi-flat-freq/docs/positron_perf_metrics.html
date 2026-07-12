@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Positron Performance Metrics — The One-Stop Explainer</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1a1a1a; --muted: #666;
+  --accent: #0b6e99; --rule: #ddd; --codebg: #f4f4f4;
+  --verified: #1a7f37; --verifiedbg: #e6f4ea;
+  --proxy: #9a6700;   --proxybg: #fff4d6;
+  --inferred: #8250df; --inferredbg: #f3ecff;
+  --cpu: #0b6e99; --fpga: #b54708; --shared: #e8f2f7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --fg: #e6e6e6; --muted: #9aa0a6;
+    --accent: #58a6d6; --rule: #333; --codebg: #22252a;
+    --verified: #4ec26f; --verifiedbg: #12301c;
+    --proxy: #e3b341;   --proxybg: #33290f;
+    --inferred: #b8a7ff; --inferredbg: #251b3a;
+    --cpu: #58a6d6; --fpga: #e8915b; --shared: #1b2b33;
+  }
+}
+html { scroll-behavior: smooth; }
+body { margin: 0 auto; max-width: 980px; padding: 24px 20px 80px;
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.6 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+h1 { font-size: 1.9em; line-height: 1.25; margin: .3em 0 .2em; }
+h2 { font-size: 1.4em; margin-top: 2em; border-bottom: 2px solid var(--rule); padding-bottom: .2em; }
+h3 { font-size: 1.12em; margin-top: 1.5em; }
+p, li { max-width: 74ch; }
+code { background: var(--codebg); padding: 1px 5px; border-radius: 4px; font-size: .88em; }
+pre { background: var(--codebg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font-size: .85em; line-height: 1.45; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: .92em; }
+th, td { border: 1px solid var(--rule); padding: 7px 9px; text-align: left; vertical-align: top; }
+th { background: var(--codebg); }
+a { color: var(--accent); }
+figure { margin: 1.6em 0; }
+figcaption { font-size: .88em; color: var(--muted); margin-top: 6px; }
+svg { width: 100%; height: auto; display: block; }
+svg text { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; fill: var(--fg); }
+.badge { display: inline-block; font-size: .72em; font-weight: 700; letter-spacing: .04em;
+  padding: 1px 8px; border-radius: 10px; vertical-align: 2px; }
+.b-verified { color: var(--verified); background: var(--verifiedbg); }
+.b-proxy    { color: var(--proxy);    background: var(--proxybg); }
+.b-inferred { color: var(--inferred); background: var(--inferredbg); }
+.callout { border-left: 4px solid var(--accent); background: var(--codebg);
+  padding: 10px 16px; border-radius: 0 8px 8px 0; margin: 1.2em 0; }
+.tldr { border: 2px solid var(--accent); border-radius: 10px; padding: 14px 18px; margin: 1.4em 0; }
+.caveat { border-left: 4px solid var(--proxy); background: var(--proxybg);
+  padding: 8px 14px; border-radius: 0 8px 8px 0; margin: .9em 0; font-size: .93em; }
+.small { font-size: .85em; color: var(--muted); }
+sup a { text-decoration: none; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+  border: 1px solid var(--rule); border-radius: 8px; padding: 8px 14px; margin: 1em 0; font-size: .88em; }
+</style>
+</head>
+<body>
+
+<h1>Positron Performance Metrics<br><span style="font-weight:400;font-size:.7em">The one-stop explainer: checkerboard, tron, nightly CI — and how industry numbers map onto ours</span></h1>
+
+<p class="small">Written 2026-07-12. Every factual claim below was verified against the
+<code>tron</code>/<code>checkerboard</code> source (file:line cited) or a published reference (URL cited),
+then reviewed to consensus between Claude (Anthropic) and GPT-5.6-sol over three PAL review rounds.
+Claims that could <em>not</em> be pinned to a source are explicitly labeled.</p>
+
+<div class="legend">
+  <strong>Label system:</strong>
+  <span class="badge b-verified">VERIFIED</span> read from source code or a primary reference
+  <span class="badge b-proxy">DERIVED / PROXY</span> computed from verified numbers, with assumptions
+  <span class="badge b-inferred">INFERRED</span> our best interpretation — no located source
+</div>
+
+<div class="tldr">
+<strong>TL;DR — the one distinction that prevents most metric mistakes:</strong>
+<p style="margin:.5em 0 0"><em>Per-user tokens/s buys responsiveness: it tells you how quickly one
+request receives tokens while sharing the machine. Aggregate tokens/s buys capacity: it tells you how
+much total work the system completes per unit time across all requests. Confusing them makes either a
+crowded system look fast by quoting total output, or a fast single stream look scalable by multiplying
+its rate by user count.</em></p>
+<p class="small" style="margin:.5em 0 0">Positron's checkerboard CSV columns (Parse, Generate, TTFT, TTLT) are all
+<strong>per-request</strong> numbers. Cerebras/Groq/Positron-Atlas marketing numbers are also per-request.
+MLPerf and "system throughput" numbers are aggregate. They are different currencies.</p>
+</div>
+
+<h2 id="perrequest">1. What "per-request" means <span class="badge b-verified">VERIFIED</span></h2>
+
+<p>In a checkerboard run, <strong>each simulated user issues exactly one request per test config</strong>,
+and all users' requests are submitted simultaneously at t=0 — an open-loop single burst with no warmup
+and no pacing (<code>stream_generate.hpp:351-378, 698-731, 1332-1336</code>). Users are split evenly across
+engine instances, which are separate <code>runtron</code> processes (tp4&rarr;2 instances, tp2&rarr;4, tp1&rarr;8;
+<code>run-benchmark.sh:255,336</code>). The CSV "Users" column is the total across instances.</p>
+
+<p>Each request is timed <em>on its own timeline</em>, producing one sample of each metric. The pipeline is:
+runtron logs one line per request &rarr; <code>collect_metrics.py:39-42</code> scrapes them by regex &rarr;
+<code>metrics.json</code> stores <code>{sample_count, harmonic_mean, mean}</code> &rarr; the CSV exports the
+<strong>harmonic mean</strong> only (<code>export_metadata.py:196</code>). So:</p>
+
+<div class="callout">
+<strong>A CSV cell = the harmonic mean, over all requests in the test, of a quantity measured on one
+request's own clock.</strong> That is what "per-request" means here. With 2 instances &times; 16 users,
+a cell summarizes 32 one-request samples (verified against a real <code>metrics.json</code> with
+<code>sample_count: 8</code> for a 2&times;8u test).
+</div>
+
+<div class="caveat"><strong>Caveat (consensus round 2):</strong> the harmonic mean is applied to the
+<em>latency</em> columns (TTFT/TTLT) too, which <em>underweights slow requests</em> — it can conceal tail
+behavior and must not be read as a percentile or SLO number. The arithmetic mean sits unused in
+<code>metrics.json</code>.</div>
+
+<p>Why per-request rates <em>fall</em> as Users rises: all N requests are in the engine at once, sharing
+the same forward passes and scheduler (see §2 and §4). Each request's own timeline stretches, so its
+personal tokens/s drops — even while the machine's total output climbs.</p>
+
+<h2 id="phases">2. The life of one request: parsing, prefill, generate <span class="badge b-verified">VERIFIED</span></h2>
+
+<p>Terminology, straight from the code: <strong>"parse" is Positron's word for prefill — they are exactly
+the same thing.</strong> "Generate" is a timing window inside decode. The full lifecycle:</p>
+
+<ol>
+<li><strong>Tokenize (CPU, before submission).</strong> Prompts are encoded to token IDs up front —
+before the request clock starts (<code>stream_generate.hpp:1103-1117</code>; rinzler tokenizes in-process,
+including chat-template application: <code>rinzler.cpp:2088-2094</code>). Checkerboard's TTFT therefore
+excludes tokenizer time.</li>
+<li><strong>Prefill == parse.</strong> The full submitted prompt — shared system prompt S <em>plus</em> user
+prompt P (verified: p2048+s512 logs "Request with <strong>2560</strong> tokens in") — is pushed through the
+model in chunks of 128 tokens per user (<code>libtron.hpp:197-205</code>) to build the KV state. When the
+prompt is fully processed, <code>on_start</code> fires (<code>libtron.hpp:294</code>) and the final prefill
+logits are sampled: <strong>the first output token comes "for free" from parsing</strong>
+(<code>stream_generate.hpp:231-232</code>).</li>
+<li><strong>Decode == generation.</strong> One token per engine forward pass per request, continuously
+batched with everyone else's work (§3), until exactly G tokens exist (checkerboard forces
+<code>--dont-stop -l G</code>; <code>run-benchmark.sh:265</code>).</li>
+</ol>
+
+<figure>
+<svg viewBox="0 0 960 330" role="img" aria-label="Request lifecycle timeline with metric windows">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/>
+    </marker>
+  </defs>
+  <!-- time axis -->
+  <line x1="30" y1="150" x2="940" y2="150" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="915" y="140" font-size="12" fill="var(--muted)">time</text>
+  <!-- tokenize box (before submit) -->
+  <rect x="40" y="118" width="90" height="34" rx="6" fill="var(--codebg)" stroke="var(--cpu)"/>
+  <text x="85" y="139" font-size="12" text-anchor="middle">tokenize (CPU)</text>
+  <text x="85" y="108" font-size="10" text-anchor="middle" fill="var(--muted)">before the clock starts</text>
+  <!-- submit line -->
+  <line x1="150" y1="80" x2="150" y2="215" stroke="var(--fg)" stroke-width="2"/>
+  <text x="150" y="70" font-size="12" text-anchor="middle" font-weight="bold">submit (t=0)</text>
+  <!-- prefill chunks -->
+  <rect x="160" y="118" width="46" height="34" rx="3" fill="var(--shared)" stroke="var(--accent)"/>
+  <rect x="210" y="118" width="46" height="34" rx="3" fill="var(--shared)" stroke="var(--accent)"/>
+  <rect x="260" y="118" width="46" height="34" rx="3" fill="var(--shared)" stroke="var(--accent)"/>
+  <rect x="310" y="118" width="46" height="34" rx="3" fill="var(--shared)" stroke="var(--accent)"/>
+  <text x="258" y="139" font-size="11" text-anchor="middle">prefill = "parse"  (S+P tokens, 128-tok chunks)</text>
+  <text x="258" y="168" font-size="10" text-anchor="middle" fill="var(--muted)">FPGA matmuls + CPU attention; queueing included</text>
+  <!-- first token -->
+  <line x1="360" y1="95" x2="360" y2="205" stroke="var(--verified)" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="360" y="88" font-size="11" text-anchor="middle" fill="var(--verified)">token 1 ("free" from parse)</text>
+  <!-- decode ticks -->
+  <g stroke="var(--fpga)" stroke-width="2">
+    <line x1="400" y1="135" x2="400" y2="152"/><line x1="445" y1="135" x2="445" y2="152"/>
+    <line x1="490" y1="135" x2="490" y2="152"/><line x1="535" y1="135" x2="535" y2="152"/>
+    <line x1="580" y1="135" x2="580" y2="152"/><line x1="625" y1="135" x2="625" y2="152"/>
+    <line x1="670" y1="135" x2="670" y2="152"/><line x1="715" y1="135" x2="715" y2="152"/>
+    <line x1="760" y1="135" x2="760" y2="152"/><line x1="805" y1="135" x2="805" y2="152"/>
+  </g>
+  <text x="400" y="126" font-size="10" text-anchor="middle">tok 2</text>
+  <text x="760" y="126" font-size="10" text-anchor="middle">tok G−1</text>
+  <text x="805" y="126" font-size="10" text-anchor="middle">tok G</text>
+  <text x="600" y="170" font-size="11" text-anchor="middle" fill="var(--muted)">decode = "generate": 1 token per shared forward pass</text>
+  <!-- early report -->
+  <line x1="760" y1="95" x2="760" y2="205" stroke="var(--proxy)" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="762" y="88" font-size="11" fill="var(--proxy)">report fires here (1 token early)</text>
+  <!-- metric brackets -->
+  <g font-size="11.5">
+    <line x1="150" y1="225" x2="360" y2="225" stroke="var(--verified)" stroke-width="3"/>
+    <text x="255" y="243" text-anchor="middle" fill="var(--verified)">TTFT  =  submit &#8594; token 1      |      Parse (tok/s) = (S+P) / TTFT</text>
+    <line x1="400" y1="262" x2="760" y2="262" stroke="var(--fpga)" stroke-width="3"/>
+    <text x="580" y="280" text-anchor="middle" fill="var(--fpga)">Generate (tok/s) window: token 2 &#8594; token G−1   (counts G−2 tokens at default padding=1)</text>
+    <line x1="150" y1="300" x2="760" y2="300" stroke="var(--muted)" stroke-width="3"/>
+    <text x="455" y="318" text-anchor="middle" fill="var(--muted)">TTLT = submit &#8594; early report (&#8776;1 token before the true last token)</text>
+  </g>
+</svg>
+<figcaption><strong>Fig 1 — one request's timeline and exactly where each CSV metric is measured.</strong>
+Sources: parse line + window <code>stream_generate.hpp:739-749</code>; generate window and early report
+<code>:228-246, 775-782, 805-812</code>; TTFT/TTLT <code>:252-256</code>.</figcaption>
+</figure>
+
+<h3>What each phase does, and on which silicon</h3>
+
+<p>From the tron design document (<code>doc/tron_design_document.md:60-80</code>) and code: the FPGAs run
+<strong>all matrix multiplies</strong> (WQ/WK/WV, WO, the MLP W1/W2/W3, and the logits projection Wcls).
+The host CPU runs <strong>everything between the matmuls</strong>: embedding lookup, RMSNorm, RoPE,
+residual adds, <strong>attention</strong>, and sampling. Hardware attention exists but is off by default
+(<code>USE_HW_ATTN</code>, <code>hw_attn_config.hpp:13-22</code>) — and even when enabled,
+<strong>prefill attention must run on the CPU</strong> (multi-query edges are software-only,
+<code>full.hpp:1493-1500</code>; decode attention is HW-eligible only past token 128).</p>
+
+<div class="callout"><strong>Why this matters:</strong> prefill attention cost grows with context length and is
+unconditionally CPU work executed by the app-pool "attention worker" threads on the tron cores. This is the
+mechanism behind our measured frequency results: boosting worker cores 2700&rarr;~4100&nbsp;MHz lifted parse
+rates by up to +43% on long-prompt/high-user configs (near the 4100/2700−1 = 52% clock-ratio ceiling) but
+only ~+12% on short/light configs — the uplift map is a CPU-boundedness map.</div>
+
+<figure>
+<svg viewBox="0 0 960 350" role="img" aria-label="Phase-to-hardware map">
+  <!-- lanes -->
+  <rect x="20" y="60" width="920" height="120" rx="8" fill="none" stroke="var(--cpu)" stroke-width="1.5"/>
+  <text x="34" y="82" font-size="13" font-weight="bold" fill="var(--cpu)">HOST CPU</text>
+  <rect x="20" y="200" width="920" height="100" rx="8" fill="none" stroke="var(--fpga)" stroke-width="1.5"/>
+  <text x="34" y="222" font-size="13" font-weight="bold" fill="var(--fpga)">FPGA (per card)</text>
+  <!-- column headers -->
+  <text x="330" y="46" font-size="13" font-weight="bold" text-anchor="middle">PREFILL ("parse")</text>
+  <text x="760" y="46" font-size="13" font-weight="bold" text-anchor="middle">DECODE ("generate")</text>
+  <line x1="545" y1="55" x2="545" y2="305" stroke="var(--rule)" stroke-dasharray="3 4"/>
+  <!-- CPU prefill items -->
+  <g font-size="11">
+    <rect x="140" y="92" width="120" height="26" rx="5" fill="var(--codebg)" stroke="var(--cpu)"/>
+    <text x="200" y="109" text-anchor="middle">embed &#183; RoPE &#183; norms</text>
+    <rect x="270" y="92" width="130" height="26" rx="5" fill="var(--verifiedbg)" stroke="var(--verified)" stroke-width="2"/>
+    <text x="335" y="109" text-anchor="middle" font-weight="bold">ATTENTION (always CPU)</text>
+    <rect x="410" y="92" width="110" height="26" rx="5" fill="var(--codebg)" stroke="var(--cpu)"/>
+    <text x="465" y="109" text-anchor="middle">sample token 1</text>
+    <text x="330" y="140" text-anchor="middle" fill="var(--muted)">app-pool "attention workers" on tron cores drain the prefill backlog</text>
+    <!-- CPU decode items -->
+    <rect x="580" y="92" width="120" height="26" rx="5" fill="var(--codebg)" stroke="var(--cpu)"/>
+    <text x="640" y="109" text-anchor="middle">embed &#183; RoPE &#183; norms</text>
+    <rect x="710" y="92" width="130" height="26" rx="5" fill="var(--codebg)" stroke="var(--cpu)" stroke-dasharray="5 3"/>
+    <text x="775" y="109" text-anchor="middle">attention (CPU by default*)</text>
+    <rect x="850" y="92" width="80" height="26" rx="5" fill="var(--codebg)" stroke="var(--cpu)"/>
+    <text x="890" y="109" text-anchor="middle">sampling</text>
+    <text x="758" y="140" text-anchor="middle" fill="var(--muted)">*HW-attn only if USE_HW_ATTN=1 and token index &#8805; 128 (default off)</text>
+    <!-- scheduler strip -->
+    <rect x="140" y="152" width="790" height="22" rx="5" fill="var(--inferredbg)" stroke="var(--inferred)"/>
+    <text x="535" y="167" text-anchor="middle" fill="var(--inferred)">work_queue thread: one scheduler worker per model — drains requests, walks the token tree, launches every forward pass</text>
+    <!-- FPGA items -->
+    <rect x="140" y="232" width="380" height="26" rx="5" fill="var(--codebg)" stroke="var(--fpga)"/>
+    <text x="330" y="249" text-anchor="middle">ALL matmuls: WQ/WK/WV &#183; WO &#183; W1/W2/W3 &#183; Wcls</text>
+    <rect x="580" y="232" width="350" height="26" rx="5" fill="var(--codebg)" stroke="var(--fpga)"/>
+    <text x="755" y="249" text-anchor="middle">ALL matmuls (same weights, batch of 1 token &#215; N users)</text>
+    <text x="535" y="285" text-anchor="middle" fill="var(--muted)">TX thread per FPGA launches DMA; RX thread babysits results — both mwaitx poll loops on dev cores (busy-looking waits)</text>
+  </g>
+  <!-- arrows CPU<->FPGA -->
+  <line x1="330" y1="120" x2="330" y2="230" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="365" y1="230" x2="365" y2="122" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="755" y1="120" x2="755" y2="230" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="790" y1="230" x2="790" y2="122" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#arr)"/>
+  <text x="30" y="335" font-size="10.5" fill="var(--muted)">Sources: doc/tron_design_document.md &#167;4; llama.hpp:512, model.hpp:767,2223; hw_attn_config.hpp:13-22; full.hpp:1493-1500; worker.cpp:11-21,2012-2014; work_queue.hpp:316-360,446-448.</text>
+</svg>
+<figcaption><strong>Fig 2 — who does what.</strong> Matmul volume goes to the FPGAs; the connective tissue —
+including all prefill attention — is CPU work on the pinned worker threads.</figcaption>
+</figure>
+
+<h2 id="paths">3. Checkerboard (tron-direct) vs production (rinzler) <span class="badge b-verified">VERIFIED</span></h2>
+
+<p>A common misconception (we held it too): rinzler is <em>not</em> a proxy in front of runtron.
+<strong>rinzler <em>is</em> the engine process</strong> — it links the same <code>libtron</code>/alderaan
+inference library and drives the FPGAs in-process, adding an HTTP frontend
+(<code>README.code-org.md:16-17</code>; <code>rinzler.cpp:1706-1719, 3173-3218</code>).
+<code>runtron</code> is the dev-CLI frontend over the same library. So checkerboard and production run the
+same engine, scheduler, batcher, and FPGA path; what differs is everything <em>around</em> it:</p>
+
+<figure>
+<svg viewBox="0 0 960 430" role="img" aria-label="Checkerboard vs production serving path">
+  <!-- headers -->
+  <text x="240" y="30" font-size="14" font-weight="bold" text-anchor="middle">CHECKERBOARD (benchmark)</text>
+  <text x="720" y="30" font-size="14" font-weight="bold" text-anchor="middle">PRODUCTION / NIGHTLY CI</text>
+  <line x1="480" y1="20" x2="480" y2="410" stroke="var(--rule)" stroke-dasharray="3 4"/>
+  <g font-size="11.5">
+    <!-- left: checkerboard -->
+    <rect x="120" y="45" width="240" height="30" rx="6" fill="var(--codebg)" stroke="var(--muted)"/>
+    <text x="240" y="64" text-anchor="middle">run-multi-sweep.sh &#8594; N one-shot prompts</text>
+    <line x1="240" y1="75" x2="240" y2="95" stroke="var(--muted)" marker-end="url(#arr)"/>
+    <rect x="80" y="95" width="320" height="180" rx="8" fill="var(--shared)" stroke="var(--accent)" stroke-width="2"/>
+    <text x="240" y="115" text-anchor="middle" font-weight="bold">runtron process (per instance)</text>
+    <rect x="100" y="125" width="280" height="24" rx="5" fill="var(--codebg)" stroke="var(--cpu)"/>
+    <text x="240" y="141" text-anchor="middle">tokenize (HF tokenizers) — before the clock</text>
+    <rect x="100" y="155" width="280" height="24" rx="5" fill="var(--inferredbg)" stroke="var(--inferred)"/>
+    <text x="240" y="171" text-anchor="middle">scheduler work_queue + token tree (prefix cache)</text>
+    <rect x="100" y="185" width="280" height="24" rx="5" fill="var(--codebg)" stroke="var(--cpu)"/>
+    <text x="240" y="201" text-anchor="middle">app worker pool (attention workers) — tron cores</text>
+    <rect x="100" y="215" width="280" height="24" rx="5" fill="var(--codebg)" stroke="var(--cpu)"/>
+    <text x="240" y="231" text-anchor="middle">TX/RX DMA threads — dev cores</text>
+    <text x="240" y="262" text-anchor="middle" fill="var(--muted)">metrics: per-request log lines (in-process clocks)</text>
+    <line x1="240" y1="275" x2="240" y2="295" stroke="var(--muted)" marker-end="url(#arr)"/>
+    <rect x="120" y="295" width="240" height="30" rx="6" fill="var(--codebg)" stroke="var(--fpga)"/>
+    <text x="240" y="314" text-anchor="middle" fill="var(--fpga)">FPGAs (TP group per instance)</text>
+    <!-- right: production -->
+    <rect x="620" y="45" width="200" height="28" rx="6" fill="var(--codebg)" stroke="var(--muted)"/>
+    <text x="720" y="63" text-anchor="middle">clients / talos CI harness</text>
+    <line x1="720" y1="73" x2="720" y2="90" stroke="var(--muted)" marker-end="url(#arr)"/>
+    <rect x="620" y="90" width="200" height="28" rx="6" fill="var(--codebg)" stroke="var(--muted)"/>
+    <text x="720" y="108" text-anchor="middle">Caddy load balancer (two-tier)</text>
+    <line x1="720" y1="118" x2="720" y2="135" stroke="var(--muted)" marker-end="url(#arr)"/>
+    <rect x="560" y="135" width="320" height="205" rx="8" fill="var(--shared)" stroke="var(--accent)" stroke-width="2"/>
+    <text x="720" y="155" text-anchor="middle" font-weight="bold">rinzler process (per instance) — THE engine</text>
+    <rect x="580" y="165" width="280" height="24" rx="5" fill="var(--codebg)" stroke="var(--muted)"/>
+    <text x="720" y="181" text-anchor="middle">HTTP/SSE (OpenAI-compatible /v1/&#8230;)</text>
+    <rect x="580" y="195" width="280" height="24" rx="5" fill="var(--proxybg)" stroke="var(--proxy)"/>
+    <text x="720" y="211" text-anchor="middle">admission gate: max_concurrent &#8594; 429 (rejection)</text>
+    <rect x="580" y="225" width="280" height="24" rx="5" fill="var(--codebg)" stroke="var(--cpu)"/>
+    <text x="720" y="241" text-anchor="middle">chat template + tokenize (in-process, on the clock)</text>
+    <rect x="580" y="255" width="280" height="24" rx="5" fill="var(--inferredbg)" stroke="var(--inferred)"/>
+    <text x="720" y="271" text-anchor="middle">same scheduler work_queue — rinzler cores</text>
+    <rect x="580" y="285" width="280" height="24" rx="5" fill="var(--codebg)" stroke="var(--cpu)"/>
+    <text x="720" y="301" text-anchor="middle">same worker pool + TX/RX — tron/dev cores</text>
+    <text x="720" y="328" text-anchor="middle" fill="var(--muted)">metrics: measured client-side, across the network</text>
+    <line x1="720" y1="340" x2="720" y2="358" stroke="var(--muted)" marker-end="url(#arr)"/>
+    <rect x="620" y="358" width="200" height="30" rx="6" fill="var(--codebg)" stroke="var(--fpga)"/>
+    <text x="720" y="377" text-anchor="middle" fill="var(--fpga)">same FPGAs</text>
+  </g>
+  <text x="480" y="420" font-size="10.5" text-anchor="middle" fill="var(--muted)">Same engine library both sides (blue boxes). Production adds the outer ring: LB, HTTP/SSE, admission, network, real arrival patterns.</text>
+</svg>
+<figcaption><strong>Fig 3 — the two measurement paths.</strong> Sources: <code>rinzler.cpp:1706-1719,
+1948-1957, 2088-2094, 2448-2483, 2942</code>; Caddy/platformd tier referenced in
+<code>doc/memory_pressure_governor.md:826-828</code> (config lives outside the repo
+<span class="badge b-inferred">INFERRED</span>).</figcaption>
+</figure>
+
+<table>
+<tr><th></th><th>Checkerboard (runtron direct)</th><th>Nightly CI / production (rinzler)</th></tr>
+<tr><td>Engine, scheduler, batching, FPGA path</td><td colspan="2" style="text-align:center">identical (same libtron library)</td></tr>
+<tr><td>Request entry</td><td>in-process call, pre-tokenized</td><td>HTTP + chat template + tokenize on the clock</td></tr>
+<tr><td>Load shape</td><td>one burst; each user exactly 1 request</td><td>real arrivals; CI: sustained closed-loop-style load @8 users</td></tr>
+<tr><td>What TTFT includes</td><td>internal queueing + prefill only</td><td>+ network, LB, HTTP, SSE, admission effects</td></tr>
+<tr><td>Overload behavior</td><td>everything queues internally</td><td>admission <em>rejection</em> (429), not queueing</td></tr>
+<tr><td>Reported metrics</td><td>Parse / Generate / TTFT / TTLT (per-request HM)</td><td>per-user decode TPS @8u; "prefill" &#8776; prompt_len / client TTFT</td></tr>
+<tr><td>Sees rinzler's work_queue placement?</td><td>n/a (thread lives in runtron itself)</td><td>yes — scheduler thread runs on the pinned rinzler cores</td></tr>
+</table>
+
+<p>The hot thread production observers see at 87–100% CPU on rinzler cores — named like
+<code>72/?-work_queue</code> (<code>work_queue.hpp:446-448</code>) — is the scheduler's single worker per
+model: it drains requests, mutates the shared token tree, and launches every forward pass back-to-back
+(<code>work_queue.hpp:316-360</code>). Unlike the TX/RX DMA threads (busy-looking <code>mwaitx</code> poll
+loops), this occupancy is real scheduling work under load.</p>
+
+<h2 id="aggregate">4. System aggregate throughput — and why you can't get it from the CSV <span class="badge b-proxy">DERIVED / PROXY</span></h2>
+
+<p>Aggregate throughput answers "how many tokens does the whole box produce per second across all users?"
+Checkerboard <strong>does not report it, and it cannot be recovered from the CSV</strong>: the CSV stores
+harmonic means of per-request rates, and true aggregate needs the burst <em>makespan</em>
+(first submission &rarr; last completion), which isn't exported. (The engine can log per-pass throughput
+under <code>TRON_PERF_INTERVAL_SEC</code>, <code>full.hpp:205-227</code>, but checkerboard doesn't collect it.)</p>
+
+<figure>
+<svg viewBox="0 0 960 430" role="img" aria-label="Per-request versus aggregate throughput">
+  <g font-size="11.5">
+    <!-- left schematic -->
+    <text x="150" y="30" font-size="13" font-weight="bold" text-anchor="middle">the same box, two load levels</text>
+    <text x="40" y="58" fill="var(--muted)">N = 2:</text>
+    <rect x="90" y="46" width="200" height="14" rx="3" fill="var(--verifiedbg)" stroke="var(--verified)"/>
+    <rect x="90" y="64" width="200" height="14" rx="3" fill="var(--verifiedbg)" stroke="var(--verified)"/>
+    <text x="300" y="60" fill="var(--verified)" font-size="10.5">each request fast (own timeline short)</text>
+    <text x="40" y="118" fill="var(--muted)">N = 8:</text>
+    <g fill="var(--proxybg)" stroke="var(--proxy)">
+      <rect x="90" y="100" width="290" height="9" rx="2"/><rect x="90" y="112" width="290" height="9" rx="2"/>
+      <rect x="90" y="124" width="290" height="9" rx="2"/><rect x="90" y="136" width="290" height="9" rx="2"/>
+      <rect x="90" y="148" width="290" height="9" rx="2"/><rect x="90" y="160" width="290" height="9" rx="2"/>
+      <rect x="90" y="172" width="290" height="9" rx="2"/><rect x="90" y="184" width="290" height="9" rx="2"/>
+    </g>
+    <text x="90" y="210" font-size="10.5" fill="var(--muted)">every request slower (shared passes), but MORE total tokens per wall-second</text>
+    <!-- right: real numbers -->
+    <text x="670" y="30" font-size="13" font-weight="bold" text-anchor="middle">real data: gpt-oss-120b tp4, p1024/g1024/s256 (2026-07-11 run)</text>
+    <!-- axes -->
+    <line x1="470" y1="330" x2="930" y2="330" stroke="var(--muted)"/>
+    <line x1="470" y1="330" x2="470" y2="50" stroke="var(--muted)"/>
+    <text x="700" y="352" text-anchor="middle" fill="var(--muted)">total users &#8594;  (2, 4, 8, 16, 32)</text>
+    <text x="452" y="60" text-anchor="end" font-size="10" fill="var(--muted)">tok/s</text>
+    <!-- x positions: 2,4,8,16,32 -> 510,600,690,780,870 ; y: scale 9000 max -> y=330-(v/9000)*270 -->
+    <!-- measured per-request HM parse: 2087,1306,727.9,384.1,259.6 -->
+    <polyline points="510,267 600,291 690,308 780,318 870,322" fill="none" stroke="var(--verified)" stroke-width="2.5"/>
+    <g fill="var(--verified)"><circle cx="510" cy="267" r="4"/><circle cx="600" cy="291" r="4"/><circle cx="690" cy="308" r="4"/><circle cx="780" cy="318" r="4"/><circle cx="870" cy="322" r="4"/></g>
+    <text x="516" y="258" fill="var(--verified)" font-size="10.5">2087</text>
+    <text x="875" y="318" fill="var(--verified)" font-size="10.5">259.6</text>
+    <text x="620" y="270" fill="var(--verified)" font-weight="bold">measured: per-request Parse (harmonic mean)</text>
+    <!-- proxy N x HM: 4174,5224,5823,6146,8307 -->
+    <polyline points="510,205 600,173 690,155 780,146 870,81" fill="none" stroke="var(--proxy)" stroke-width="2.5" stroke-dasharray="7 4"/>
+    <g fill="var(--proxy)"><circle cx="510" cy="205" r="4"/><circle cx="600" cy="173" r="4"/><circle cx="690" cy="155" r="4"/><circle cx="780" cy="146" r="4"/><circle cx="870" cy="81" r="4"/></g>
+    <text x="516" y="196" fill="var(--proxy)" font-size="10.5">4174</text>
+    <text x="866" y="72" fill="var(--proxy)" font-size="10.5">8307</text>
+    <text x="560" y="120" fill="var(--proxy)" font-weight="bold">users &#215; HM parse — concurrency-scaled</text>
+    <text x="560" y="134" fill="var(--proxy)" font-weight="bold">per-request PROXY, not measured aggregate</text>
+    <!-- conceptual true aggregate -->
+    <path d="M 510 240 C 620 170, 760 140, 870 125" fill="none" stroke="var(--muted)" stroke-width="2" stroke-dasharray="2 5"/>
+    <text x="700" y="230" fill="var(--muted)" font-size="10.5">true makespan aggregate: rises then saturates — NOT MEASURED (conceptual)</text>
+  </g>
+  <!-- formula legend -->
+  <g font-size="10.5">
+    <rect x="40" y="240" width="360" height="150" rx="8" fill="var(--codebg)" stroke="var(--rule)"/>
+    <text x="55" y="262" font-weight="bold">formulas (per consensus):</text>
+    <text x="55" y="284">per-request (CSV cell) = HM(rate_i), rate_i on request i's own clock</text>
+    <text x="55" y="306">proxy = N &#215; HM(rate_i) = N&#178;L / &#931;t&#7522;  — upper-bound flavor</text>
+    <text x="55" y="328">true aggregate = &#931; tokens_i / (t_last_done − t_first_submit)</text>
+    <text x="55" y="350">N&#215;HM &#8800; true aggregate unless all requests finish together</text>
+    <text x="55" y="372" fill="var(--muted)">"logical tokens": cached shared-prefix tokens still counted (see &#167;5)</text>
+  </g>
+</svg>
+<figcaption><strong>Fig 4 — three different things people call "throughput".</strong> Green = measured
+per-request numbers from the CSV. Amber dashed = the users&times;HM proxy
+<span class="badge b-proxy">DERIVED / PROXY</span>. Dotted = the honest shape of true aggregate — it is not in
+the data <span class="badge b-inferred">INFERRED</span>.</figcaption>
+</figure>
+
+<h3>Reading it against the workload knobs</h3>
+<ul>
+<li><strong>Users &uarr;:</strong> per-request rate falls (requests share forward passes and queue behind each
+other), aggregate rises toward saturation. Neither number alone describes the system — quote both.</li>
+<li><strong>User prompt p &uarr;:</strong> per-request parse rate has a hump (amortize fixed costs, then
+attention's superlinear context cost bites — visible in both clamped and boosted runs at p512).</li>
+<li><strong>Shared system prompt s:</strong> submitted with every request and always counted in Parse's
+numerator — but the engine's prefix tree may serve those tokens from KV cache
+(<code>token_cache.hpp:30-90</code>, <code>tokens_reused</code> counters), so Parse is a <em>logical</em>
+input-token rate that can exceed tokens physically computed.
+<span class="badge b-verified">VERIFIED</span> mechanism; exact simultaneous-parse semantics
+<span class="badge b-inferred">INFERRED</span>.</li>
+<li><strong>Grid confound:</strong> in our standard sweeps s is zipped to p/4 and g=p — so s, p, and g effects
+are confounded by design. Treat rows as a workload family, not as independent-variable scans.</li>
+</ul>
+
+<h2 id="industry">5. How industry numbers map onto ours <span class="badge b-verified">VERIFIED</span> <span class="small">(references below)</span></h2>
+
+<p>The industry has converged on a small vocabulary, defined most cleanly by NVIDIA's benchmarking
+guide<sup><a href="#ref2">[2]</a></sup> and operationalized by Artificial Analysis (AA), the de facto
+scoreboard<sup><a href="#ref6">[6]</a></sup>:</p>
+
+<table>
+<tr><th>Industry metric</th><th>Definition</th><th>Nearest Positron metric</th><th>Mapping caveats</th></tr>
+<tr>
+<td><strong>Output Speed</strong> (AA); "tokens/s per user" (Cerebras<sup><a href="#ref7">[7]</a></sup>, Groq<sup><a href="#ref8">[8]</a></sup>, Positron Atlas<sup><a href="#ref11">[11]</a></sup>); TPS/user (NVIDIA)</td>
+<td>Per-request output tokens/s <em>after</em> the first token; AA reports median (P50) over network</td>
+<td><strong>Generate (tok/s)</strong> — per-request decode-window rate; nightly CI's "decode TPS @8u"</td>
+<td>Ours: harmonic mean, in-process, excludes first <em>and</em> ~last token. Theirs: median, over network+SSE. Must match concurrency to compare — AA is near-single-stream; our CSVs span 2–32 users.</td></tr>
+<tr>
+<td><strong>TTFT</strong> (AA, NVIDIA, vLLM<sup><a href="#ref4">[4]</a></sup>)</td>
+<td>Request sent &rarr; first token received</td>
+<td><strong>TTFT</strong></td>
+<td>Checkerboard TTFT excludes tokenizer, HTTP, network, LB, SSE (in-process clock). Nightly CI TTFT includes them.</td></tr>
+<tr>
+<td><strong>ITL / TPOT</strong></td>
+<td>(e2e − TTFT)/(output tokens − 1); per-user speed &rarr; 1/ITL</td>
+<td>&#8776; 1 / Generate</td>
+<td>Same window philosophy (excludes first token).</td></tr>
+<tr>
+<td><strong>Prefill throughput</strong> (no canonical standard; e.g. Anthropic's 21K tok/s input claim<sup><a href="#ref9">[9]</a></sup>)</td>
+<td>Prompt tokens processed per second</td>
+<td><strong>Parse (tok/s)</strong>; nightly CI's prompt_len/TTFT</td>
+<td>Ours is queue-inclusive ((S+P)/TTFT), counts cached shared-prefix tokens (logical rate), in-process. Three caveats — always state them.</td></tr>
+<tr>
+<td><strong>System throughput</strong> (NVIDIA aggregate TPS; MLPerf offline<sup><a href="#ref10">[10]</a></sup>)</td>
+<td>Total tokens / wall-clock window across all requests</td>
+<td><em>None exported.</em> users&times;HM is only a proxy (&#167;4)</td>
+<td>Do not present N&times;HM as aggregate.</td></tr>
+<tr>
+<td><strong>MLPerf server scenario</strong><sup><a href="#ref10">[10]</a></sup></td>
+<td>Max tokens/s under Poisson arrivals with TTFT &le; 2s AND TPOT &le; 200ms SLOs</td>
+<td>Nightly CI goals (decode TPS floor per user @8u)</td>
+<td>Analogous SLO framing — not equivalent (different arrival process, SLO set).</td></tr>
+</table>
+
+<h3>Who quotes what</h3>
+<ul>
+<li><strong>Accelerator vendors lead with per-user speed:</strong> Cerebras "1,800 tokens/s on Llama 3.1-8B",
+"2,522 TPS/user on Llama 4 Maverick vs 1,038 for NVIDIA Blackwell"<sup><a href="#ref7">[7]</a></sup>;
+Groq "300 tokens/s per user on Llama-2 70B", AA-verified 276 t/s on Llama 3.3-70B<sup><a href="#ref8">[8]</a></sup>.
+These are all the AA Output-Speed family — the same family as our per-request <strong>Generate</strong>.</li>
+<li><strong>Model companies mostly quote relative speed</strong> ("GPT-4o is 2&times; faster", "Haiku 4.5 is
+4–5&times; faster than Sonnet 4.5") and leave absolute t/s to third parties; DeepSeek-V3's "60 tokens/second"
+is the notable absolute exception<sup><a href="#ref9">[9]</a></sup>.</li>
+<li><strong>Positron's public Atlas benchmark uses exactly the per-user family:</strong>
+"280 tokens/sec/user on Llama 3.1-8B (BF16, no speculation) vs 182 tokens/sec/user for NVIDIA DGX H200",
+plus system framing: 4.54&times; perf/W and 3.08&times; perf/$<sup><a href="#ref11">[11]</a></sup>.
+Relative to internal metrics: <strong>that number lives in the Generate/decode-speed family</strong>, measured
+at the concurrency stated in its methodology (not asserted single-stream here), with perf/W an
+MLPerf-server-like system dimension our CSV doesn't carry. It is <em>not</em> a Parse/prefill number and
+<em>not</em> an aggregate number.</li>
+</ul>
+
+<div class="callout"><strong>The three-sentence rule (consensus, verbatim):</strong> <em>Per-user tokens/s buys
+responsiveness: it tells you how quickly one request receives tokens while sharing the machine. Aggregate
+tokens/s buys capacity: it tells you how much total work the system completes per unit time across all
+requests. Confusing them makes either a crowded system look fast by quoting total output, or a fast single
+stream look scalable by multiplying its rate by user count.</em></div>
+
+<h2 id="inferred">6. Everything in this page that is inference, not verification</h2>
+<ul>
+<li><span class="badge b-proxy">PROXY</span> Any "aggregate" figure derived as users&times;HM (Fig 4) — labeled on the figure itself.</li>
+<li><span class="badge b-inferred">INFERRED</span> Exact concurrency semantics when many users parse an identical shared prefix simultaneously (reuse counters verified; wait-vs-recompute path not traced end-to-end).</li>
+<li><span class="badge b-inferred">INFERRED</span> Rinzler-core pinning is deployment configuration (systemd/platformd); no pinning code in the tron repo.</li>
+<li><span class="badge b-inferred">INFERRED</span> Whether HW attention is enabled in current production builds (code default: off; prefill attention is CPU in every configuration).</li>
+<li><span class="badge b-inferred">INFERRED</span> The Caddy two-tier topology (referenced in tron docs; config lives outside the repo).</li>
+<li><span class="badge b-inferred">INFERRED</span> The EE Times quote in [11] comes from search excerpts; the full article wasn't fetched.</li>
+</ul>
+
+<h2 id="refs">References</h2>
+<ol class="small">
+<li id="ref1"><strong>Positron source (verified on checkout, 2026-07-12):</strong>
+tron @ <code>/home/jhan/workspace/run_checkerboard/tron</code>, checkerboard @ <code>&#8230;/checkerboard</code>.
+Key cites — metrics: <code>h/runtron/stream_generate.hpp:228-256, 739-749, 775-812, 1103-1140</code>;
+<code>checkerboard/utils/collect_metrics.py:39-42</code>, <code>utils/export_metadata.py:72-75,196</code>,
+<code>utils/export_to_spreadsheet.py:216-220</code>, <code>run-benchmark.sh:255,265,336</code>;
+phases/hardware: <code>doc/tron_design_document.md &#167;4,&#167;6.1</code>, <code>h/libtron.hpp:197-205,225-226,294</code>,
+<code>h/tron/models/hw_attn_config.hpp:13-22</code>, <code>h/tron/scheduler/full.hpp:1452-1556,1493-1500</code>,
+<code>h/tron/scheduler/work_queue.hpp:316-360,446-448</code>, <code>h/tron/scheduler/token_cache.hpp:30-90</code>,
+<code>src/rinzler.cpp:1706-1719,1948-1957,2088-2094,2448-2483</code>, <code>src/pos/worker.cpp:11-21,2012-2014</code>.</li>
+<li id="ref2">NVIDIA, "LLM Inference Benchmarking: Fundamental Concepts" — <a href="https://developer.nvidia.com/blog/llm-benchmarking-fundamental-concepts/">developer.nvidia.com/blog/llm-benchmarking-fundamental-concepts</a>; NIM metrics — <a href="https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html">docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html</a></li>
+<li id="ref3">DistServe (goodput/SLO framing) — <a href="https://arxiv.org/abs/2401.09670">arxiv.org/abs/2401.09670</a></li>
+<li id="ref4">vLLM bench serve metrics — <a href="https://docs.vllm.ai/en/latest/cli/bench/serve/">docs.vllm.ai/en/latest/cli/bench/serve</a></li>
+<li id="ref6">Artificial Analysis methodology — <a href="https://artificialanalysis.ai/methodology">artificialanalysis.ai/methodology</a> and <a href="https://artificialanalysis.ai/methodology/performance-benchmarking">/methodology/performance-benchmarking</a></li>
+<li id="ref7">Cerebras: <a href="https://www.cerebras.ai/press-release/cerebras-launches-the-worlds-fastest-ai-inference">launch PR (1,800 t/s Llama 3.1-8B)</a>; <a href="https://www.cerebras.ai/press-release/maverick">Llama 4 Maverick 2,522 TPS/user vs Blackwell 1,038</a>; <a href="https://www.cerebras.ai/press-release/cerebras-inference-llama-405b">405B at 969 t/s</a></li>
+<li id="ref8">Groq: <a href="https://www.prnewswire.com/news-releases/groq-sets-new-large-language-model-performance-record-of-300-tokens-per-second-per-user-on-meta-ai-foundational-llm-llama-2-70b-301980280.html">300 t/s per user PR</a>; <a href="https://groq.com/blog/new-ai-inference-speed-benchmark-for-llama-3-3-70b-powered-by-groq">Llama 3.3-70B 276 t/s (AA)</a></li>
+<li id="ref9">DeepSeek-V3 "60 tokens/second" — <a href="https://api-docs.deepseek.com/news/news1226/">api-docs.deepseek.com/news/news1226</a>; OpenAI GPT-4o "2x faster" — <a href="https://openai.com/index/hello-gpt-4o/">openai.com/index/hello-gpt-4o</a>; Anthropic Claude 3 Haiku (21K tok/s input) — <a href="https://www.anthropic.com/news/claude-3-haiku">anthropic.com/news/claude-3-haiku</a>; Haiku 4.5 — <a href="https://www.anthropic.com/news/claude-haiku-4-5">anthropic.com/news/claude-haiku-4-5</a></li>
+<li id="ref10">MLPerf Inference Llama-2-70B benchmark design — <a href="https://mlcommons.org/2024/03/mlperf-llama2-70b/">mlcommons.org/2024/03/mlperf-llama2-70b</a></li>
+<li id="ref11">Positron Atlas public benchmark — <a href="https://www.positron.ai/atlas">positron.ai/atlas</a>; coverage: <a href="https://www.tomshardware.com/tech-industry/artificial-intelligence/positron-ai-says-its-atlas-accelerator-beats-nvidia-h200-on-inference-in-just-33-percent-of-the-power-delivers-280-tokens-per-second-per-user-with-llama-3-1-8b-in-2000w-envelope">Tom's Hardware</a>; <a href="https://www.eetimes.com/startup-positron-takes-on-nvidia-with-fpgas/">EE Times</a> <span class="badge b-inferred">quote unverified</span>; <a href="https://www.bittware.com/products/positron-atlas/">BittWare partner page</a></li>
+<li id="ref12"><strong>Provenance:</strong> consensus reached 2026-07-12 between Claude (Anthropic, Fable 5) and GPT-5.6-sol over 3 review rounds via the PAL MCP bridge; code facts gathered by two source-verification passes over the tron/checkerboard checkouts; measured example numbers from <code>/scratch/jhan/flat_freq_tests/reference/results-v2-multi-model-20260711-220227.csv</code> (delphi-3bd6, tron main@29924aa8) and its 2026-06-30 same-host baseline.</li>
+</ol>
+
+</body>
+</html>

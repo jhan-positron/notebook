@@ -31,6 +31,22 @@ canonical one changes.
   delphi-3bda:/scratch/jhan/flat_freq_tests/README.md
 - NOTE: frequency state applied by this tool does NOT survive a reboot.
 
+## docs/positron_perf_metrics.html
+
+- Canonical: DESKTOP-CI2JA7M:C:/Users/jibin/Documents/claude_debug_3bda_flat_freq/positron_perf_metrics.html
+  (authored 2026-07-12)
+- What it is: the one-stop explainer of Positron performance metrics —
+  per-request semantics (harmonic means, one-burst load model), request
+  lifecycle SVGs (parse==prefill, generate=decode window, exact metric
+  windows with file:line cites), CPU-vs-FPGA phase map (prefill attention
+  is always CPU), checkerboard-vs-rinzler path contrast, per-request vs
+  aggregate throughput (users x HM labeled as proxy only), and the
+  industry-metric mapping (Artificial Analysis / Cerebras / Groq / MLPerf /
+  Positron Atlas public benchmark) with URLs. Every claim labeled
+  VERIFIED / PROXY / INFERRED. Consensus-reviewed by Claude + gpt-5.6-sol
+  (3 PAL rounds, 2026-07-12); code facts from two source-verification
+  passes over the tron/checkerboard checkouts.
+
 ## gen_tron_flatfreq.py
 
 - Canonical: delphi-3bda:/home/jhan/workspace/intel-vs-amd/speed-select/workspace/debug_3bda/gen_tron_flatfreq.py
