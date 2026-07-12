@@ -301,6 +301,16 @@ accidental workspace deletion cannot destroy them.
   Artifacts entries at the approval gate; on approval copy them in, register
   them in the topic README, and annotate the handoff's Artifacts line with
   `(preserved: artifacts/<topic>/<file>)`.
+- HTML artifacts: GitHub's normal blob view does not render standalone HTML.
+  When preserving or generating an `.html` file in this notebook repo, add a
+  convenient rendered-view link using this exact pattern, after substituting the
+  final repo-relative path:
+  `https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/<repo-relative-path>`.
+  Put the URL in a line-2 source comment immediately after `<!doctype html>` /
+  `<!DOCTYPE html>`, for example `<!-- Rendered view: <url> -->`, and add a
+  visible top-of-page `Open rendered view` link to the same URL. If an
+  artifact README links to that HTML file, include the rendered-view URL there
+  too so GitHub readers can open the page directly.
 - Commit wording for artifact-only changes should be `Preserve artifact:
   <topic>/<file>` or `Refresh artifact: <topic>/<file>`. If artifact changes
   are bundled with an approved Codex handoff update, the approval gate must say
