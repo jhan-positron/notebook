@@ -33,6 +33,8 @@ canonical one changes.
 
 ## ../positron_perf_metrics.html (repo location: artifacts/positron_perf_metrics.html)
 
+- Rendered view:
+  https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/positron_perf_metrics.html
 - Moved 2026-07-12 from docs/ to the artifacts/ root at user request (it is a
   cross-cutting tron/checkerboard/CI metrics doc, not delphi-flat-freq-specific).
 - Canonical: DESKTOP-CI2JA7M:C:/Users/jibin/Documents/claude_debug_3bda_flat_freq/positron_perf_metrics.html

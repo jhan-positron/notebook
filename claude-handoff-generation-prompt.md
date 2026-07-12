@@ -288,6 +288,18 @@ repo so accidental workspace deletion cannot destroy them.
   register them in the topic README (commit as
   `Preserve artifact: <topic>/<file>`), and annotate the handoff's
   Artifacts line with `(preserved: artifacts/<topic>/<file>)`.
+- HTML artifacts: GitHub's normal blob view does not render standalone
+  HTML. When preserving or generating an `.html` file in this notebook
+  repo, add a convenient rendered-view link using this exact pattern,
+  after substituting the final repo-relative path:
+  `https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/<repo-relative-path>`.
+  Put the URL in a line-2 source comment immediately after
+  `<!doctype html>` / `<!DOCTYPE html>`, for example
+  `<!-- Rendered view: <url> -->`, and add a visible top-of-page
+  `Open rendered view` link to the same URL. If an artifact README links
+  to that HTML file, include the rendered-view URL there too so GitHub
+  readers can open the page directly. If the file later MOVES within the
+  repo, update both the comment and the visible link to the new path.
 - Do NOT place artifacts in handoffs/ — the SCOPE auto scan parses every
   file there as a handoff.
 
