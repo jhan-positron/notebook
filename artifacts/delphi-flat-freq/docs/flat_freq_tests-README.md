@@ -735,9 +735,34 @@ DECOMPOSITION — the composite reproduces our PR-3070 ladder:
   nightly serving metric on GNR — further evidence the nightly @8u
   metric and checkerboard throughput measure different regimes.
 
-(2026-07-12 ~04:10-04:20 UTC: delphi-3bda became unreachable (ssh
-timeout) during this analysis — checkerboard hosts 3af6/3bd6 fine.
-Nightly window risk; needs a look when someone has console access.)
+2026-07-12 3bda OUTAGE (investigated ~04:00-04:45 UTC via 3af6 jump):
+- delphi-3bda is HARD-DOWN, not a tailscale glitch: tailscale last saw it
+  ~22:05-22:30 UTC 2026-07-11 (tx no rx since), and a full ping +
+  host-key sweep of the lab /22 (192.168.0.0/22) found NO host answering
+  ssh as 3bda on any LAN IP. Per user, Hannah ran her test at 3bda too —
+  it started 22:02 UTC, i.e. the host dropped off the network within ~30
+  minutes of that run starting. The successful 220227 CSV analyzed above
+  is the 3bd6 run; whatever happened on 3bda (its own sweep dir, crash
+  logs) is on its local disk until the host returns.
+- NEEDS: BMC/console check (power state, kernel panic?). History of
+  host-level faults under FPGA test load on this fleet (2026-07-02 BAR
+  wedge + PCU dispatcher timeout on 3bda; IERR marker on 3bd6).
+- CONSEQUENCE: tonight's 3bda nightly cannot run (talos cannot reach it).
+- When it returns, check in order: (a) FPGA enumeration (boot-
+  unprogrammed 12ba:0076 history — may need pho image load + warm
+  reboot); (b) whether /etc/default/intel-speed-select-state on 3bda was
+  also updated to the tron112 ranges like 3bd6, or still carries tron80
+  (determines the deployed shape!); (c) tailscaled up; (d) sync the
+  canonical copy of this README (mirror is ahead while 3bda is down).
+- Fleet discovery notes: delphi LAN = 192.168.0.0/22, jump via 3af6
+  works when tailscale is down (3af6=192.168.0.78, 3bd6=192.168.2.155);
+  ssh HOST KEYS ARE NOT UNIQUE — delphi-3c51 (192.168.2.188) presents
+  the identical ed25519 key as rebuilt 3bda (same image), so identify
+  hosts by `hostname`, never by host key.
+- Applier fix needed before any future arming: flat_freq_apply prechecks
+  the workspace isst binary which is NOT in sudoers — non-interactive
+  runs must set FLAT_FREQ_ISST=/opt/intel-speed-select/intel-speed-select
+  (add to apply_tron84_rinzler_AB.sh).
 
 Planned next (pending explicit user go): arm tonight's nightly as the
 rinzler-boost A/B — at 02:55 UTC (after runner-stop, before nightly)
