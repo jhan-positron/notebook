@@ -764,6 +764,71 @@ DECOMPOSITION — the composite reproduces our PR-3070 ladder:
   runs must set FLAT_FREQ_ISST=/opt/intel-speed-select/intel-speed-select
   (add to apply_tron84_rinzler_AB.sh).
 
+### 2026-07-13 — P4.3: rinzler-core frequency A/B through the REAL serving path (3bda, self-serve)
+
+Context: 3bda returned from the Jul-11 silent freeze (no journal, no SEL
+entry — power-cycled Jul 12 20:03, booted Jul 13 16:27); CI disabled by
+Hannah -> dedicated experiment machine. Machine standardized on main:
+tron package upgraded ef720667 -> 2026.07.13-29924aa8 (PR-3070 merged),
+tron112 shape via the Ansible boot service (config already updated fleet-
+wide Jul 11 20:54). FPGA dma readback PASS. platformd regenerated
+instance envs with NEW-map cores after a config PATCH
+(models=[{shape: ingested-gpt-oss-120b}], tp=4, count=2) — rinzler
+processes pinned to new rinzler cores (1,145,2,146 / 73,217,74,218),
+TRON_USE_SPECULATION=1 (consensus item 3 CLOSED: production runs spec ON).
+
+Design: interleaved 5-min blocks A/B/A/B/A/B (A = deployed tron112,
+rinzler cores clos:3 @2700; B = + cores 1,2,73,74 + sibs -> clos:0,
+realized ~4000 MHz by turbostat), after a clean stack restart + 5-min
+conditioning. Load: scripts /scratch/jhan/p43/loadgen.py from 3af6 over
+LAN — closed-loop @8 users, UNIQUE ~1k-token prompts per request
+(two instrument traps found and fixed: identical prompts hit the
+persistent KV prefix cache, TTFT 1.23s -> 0.092s; and deterministic
+per-user seeds made run N+1 replay run N's prompts, which the PERSISTENT
+token cache served as prefix hits, TTFT -> 0.135s. Also /v1/completions
+does not stream per-token and yields no text for harmony models — use
+/v1/chat/completions, one SSE event per token, verified 59 events / 60
+tokens). Per-token timestamps -> per-user decode TPS, TTFT, makespan
+aggregate. perfetto+perf captured in blocks A2 and B3.
+
+Results (gpt-oss-120b-tp4, 2 instances, @8u, ~660 reqs/block, 0 errors):
+
+  pair   A clamped   B boosted   decode delta   TTFT A->B
+  1      103.97      105.29      +1.27%         1.242 -> 1.229 s
+  2      104.35      105.63      +1.23%         1.241 -> 1.231 s
+  3      104.06      105.27      +1.16%         1.242 -> 1.230 s
+
+  BOOST EFFECT: +1.2% +/- 0.06% decode TPS/user, -0.9% TTFT — small but
+  REAL and perfectly reproducible (3/3 pairs; A-blocks stable +/-0.2%).
+  Aggregate: +1.1% (552 -> 558 tok/s makespan).
+
+MECHANISM (perfetto sched traces, 60 s windows):
+- There is NO "*work_queue*" thread in build 29924aa8 — the scheduler
+  coordinator moved to the FAST die-B worker cores by design (the new
+  resource map pins Main/coordinator to the lowest tron core per slice,
+  ~54ns L3). The ef720667-era hot work_queue-on-rinzler-cores picture is
+  obsolete.
+- Under @8u load the rinzler cores are ~2.5% occupied (fuse_worker +
+  Drogon HTTP/SSE IO). The +1.2% therefore comes from the per-token SSE
+  delivery path + per-request chat-template tokenization running ~48%
+  faster on the serving-thread cores — a small critical-path component.
+- Worker threads read ~95% sched-Running during load (includes their
+  poll loops; work-vs-spin split needs the captured perf data — open).
+
+VERDICT: boosting rinzler cores is a real but ~1% effect on the new
+stack. It is FREE (cores are ~idle; no grant-rung or power downside
+observed) — worth adding 1-2,73-74 to FAST_CORE_RANGES in the Ansible
+role if we want the last percent, but it is NOT the missing-uplift
+explanation. The @8u serving metric on the new stack is engine-bound,
+not serving-path-bound.
+
+Artifacts: /scratch/jhan/p43/ (loadgen.py, p43_rinzler_boost.sh, blocks/
+summaries + per-request jsonl + turbostat), profile captures
+/scratch/jhan/flat_freq_tests/20260713-{182616,184618}_ci-workload-
+profile-delphi-3bda/ (pftrace + perf.data + IPC + thread snapshots).
+Timeline note: a mid-run `posadm restart` contaminated the first Arm-A
+attempt (detected, discarded, redesigned to interleaved blocks).
+
 Planned next (pending explicit user go): arm tonight's nightly as the
 rinzler-boost A/B — at 02:55 UTC (after runner-stop, before nightly)
 apply "tron84" = tron80 workers + rinzler cores 24,48,72,96 (+HT sibs)
