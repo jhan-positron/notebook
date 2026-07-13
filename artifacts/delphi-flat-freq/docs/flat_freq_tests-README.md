@@ -946,6 +946,49 @@ Machine left in deployed state: workers fast (tron112), rinzler cores
 clos:3, gpt-oss serving up. Scripts preserved: p43_worker_toggle.sh,
 role_busy.py (turbostat per-role analyzer).
 
+### 2026-07-13 — P4.3c: the prefill-flatness sliver — cache theory REFUTED, scheduler-pinning theory emerges
+
+Question: why did CI's prefill~= stay ~790 tok/s in EVERY era when parse
+is +12% worker-clock-sensitive?
+
+Discriminating arms (loadgen --shared-prefix-chars / --think-time, each
+under the worker toggle, 180 s blocks):
+  arm                                workers-4000   workers-2700   sensitivity
+  shared-prefix (784/834 tok cached,  TTFT 0.180 s   0.185 s       +2.8% (FLAT)
+    verified via usage.cached_tokens)
+  paced 2u unique prompts             TTFT 0.399 s   0.446 s       +11.8% (FULL)
+  8u unique closed-loop (P4.3b)       TTFT 1.243 s   1.390 s       +11.8% (FULL)
+-> cache-hit prefill is the ONLY mode that reproduces frequency-flatness,
+   BUT its TTFT magnitude (0.18 s) is nothing like CI's ~1.3 s.
+
+CI's own records (talos API, verified from systems_test@994badfc source:
+closed-loop 8u barrier rounds, fresh client per request, deterministic
+ShareGPT corpus, prefill = prompt_length/TTFT, per-request cached_tokens
+recorded):
+  session                          n   TTFT mean  cached
+  3bda Jul-11 BOOSTED ef720667    80   1307 ms    69/1035 tok (7%)
+  17cf Jul-11 CLAMPED ef720667    80   1300 ms    69/1035 tok (7%)
+  17cf Jul-08 CLAMPED 198650bf    80   1279 ms    69/1035 tok (7%)
+-> PROMPT-REUSE/CACHE THEORY REFUTED for CI: only the template+system
+   prefix caches (constant 69 tok); prompts genuinely prefill fresh.
+-> CI's flatness is REAL: boosted and clamped hosts measured identical
+   TTFT on the same build/night, cache-free.
+
+UNIFIED EXPLANATION (status: SUPPORTED, one test from confirmed): on the
+OLD build the single scheduler thread (work_queue) was the prefill
+bottleneck, and PRODUCTION pins it to clamped rinzler cores (CPUAFFINITY)
+— so CI prefill was scheduler-capped at ~790 regardless of worker clocks
+— while CHECKERBOARD leaves the same thread unpinned ("N/?-work_queue" =
+migratable), letting it ride boosted cores, hence +12% there. The new
+build moved the coordinator onto fast worker cores by design, which is
+why the serving path NOW shows the full +11.8% in our toggles.
+Every piece is independently observed (work_queue at 87-100% on clamped
+rinzler cores during the actual Jul-11 nightly; thread unpinned in
+runtron; CPUAFFINITY in instance envs; new-build traces have no
+work_queue and full sensitivity). DECISIVE TEST: one talos run on the
+new stack — prefill~= should break from ~790 and become clock-sensitive.
+Ask Hannah.
+
 Planned next (pending explicit user go): arm tonight's nightly as the
 rinzler-boost A/B — at 02:55 UTC (after runner-stop, before nightly)
 apply "tron84" = tron80 workers + rinzler cores 24,48,72,96 (+HT sibs)

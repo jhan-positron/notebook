@@ -77,20 +77,24 @@ def one_request(host, port, model, prompt, max_tokens, timeout=600):
         rec["error"] = repr(e)
     return rec
 
-def user_loop(uid, endpoints, model, prompt_chars, max_tokens, out, lock, t_end):
+def user_loop(uid, endpoints, model, prompt_chars, max_tokens, out, lock, t_end,
+              shared_prefix="", think_time=0.0):
     ep = endpoints[uid % len(endpoints)]
     host, port = ep.split(":")
     # time-salted: deterministic seeds made runs replay identical prompt
     # sequences, which tron's PERSISTENT token cache served as prefix hits
     # (TTFT 1.23s -> 0.135s across runs, 2026-07-13). Salt per process run.
     rng = random.Random(hash((uid, time.time_ns())))
+    tail_chars = max(prompt_chars - len(shared_prefix), 120)
     while not STOP.is_set() and time.time() < t_end:
-        prompt = make_prompt(prompt_chars, rng)
+        prompt = (shared_prefix + " " if shared_prefix else "") + make_prompt(tail_chars, rng)
         rec = one_request(host, int(port), model, prompt, max_tokens)
         rec["user"] = uid
         with lock:
             out.append(rec)
             print(json.dumps(rec), file=OUTF, flush=True)
+        if think_time > 0:
+            time.sleep(think_time)
 
 def main():
     global OUTF
@@ -103,14 +107,25 @@ def main():
     ap.add_argument("--duration", type=int, default=900)
     ap.add_argument("--out", required=True)
     ap.add_argument("--label", default="")
+    ap.add_argument("--shared-prefix-chars", type=int, default=0,
+                    help="build a FIXED prefix (seed 777, identical across "
+                         "runs) of this many chars + unique tail — exercises "
+                         "the persistent prefix cache like a templated corpus")
+    ap.add_argument("--think-time", type=float, default=0.0,
+                    help="seconds each user sleeps between requests")
     a = ap.parse_args()
+
+    shared_prefix = ""
+    if a.shared_prefix_chars > 0:
+        shared_prefix = make_prompt(a.shared_prefix_chars, random.Random(777))
 
     endpoints = a.endpoints.split(",")
     OUTF = open(a.out, "w")
     out, lock = [], threading.Lock()
     t_start = time.time(); t_end = t_start + a.duration
     threads = [threading.Thread(target=user_loop,
-               args=(u, endpoints, a.model, a.prompt_chars, a.max_tokens, out, lock, t_end),
+               args=(u, endpoints, a.model, a.prompt_chars, a.max_tokens, out, lock, t_end,
+                     shared_prefix, a.think_time),
                daemon=True) for u in range(a.users)]
     for t in threads: t.start()
     try:
