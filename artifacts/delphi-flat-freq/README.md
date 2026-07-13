@@ -148,6 +148,18 @@ canonical one changes.
 
 ## docs/
 
+- ci_boost_pipeline.html
+  - Rendered view:
+    https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/ci_boost_pipeline.html
+  - Canonical: DESKTOP-CI2JA7M:C:/Users/jibin/Documents/claude_debug_3bda_flat_freq/ci_boost_pipeline.html
+    (authored 2026-07-13)
+  - What it is: pipeline-view explainer of why CI never showed the flat-freq
+    boost — per-stage measured A/B deltas (prefill +11.8% vs decode +3.7%
+    from the worker toggle; rinzler toggle +1.2%/-0.9%), Amdahl clock-
+    sensitive-share decomposition (~85% of decode per-token time is
+    clock-insensitive waits), the boost-vs-ef720667-regression cancellation
+    figure, and a claim ledger labeling every statement CONFIRMED /
+    SUPPORTED / SUSPICION / REFUTED / DERIVED.
 - flat_freq_tests-README.md
   - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/README.md
   - What it is: central results narrative, renamed to avoid clashing with this
