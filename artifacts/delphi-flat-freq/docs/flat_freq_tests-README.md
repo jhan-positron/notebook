@@ -822,6 +822,33 @@ role if we want the last percent, but it is NOT the missing-uplift
 explanation. The @8u serving metric on the new stack is engine-bound,
 not serving-path-bound.
 
+PARSE/PREFILL ANALYSIS (added 2026-07-13, from the same blocks — per-
+request prefill = prompt_tokens/TTFT, the CI "prefill~=" metric family;
+prompt_tokens calibrated via usage: 823 tok per 4000-char prompt):
+
+  pair   A clamped   B boosted   parse delta
+  1      663.1       669.9       +1.03%
+  2      663.6       668.8       +0.78%
+  3      663.0       669.1       +0.92%
+  (tok/s per request, mean~=HM; block stability +/-0.1%)
+
+  BOOST EFFECT ON PREFILL: +0.9% +/- 0.1% — same story as decode: real,
+  reproducible, ~1%. Consistent with the mechanism (tokenization + SSE
+  on rinzler cores touch both phases' critical path a little).
+
+Baseline comparison at CI prompt-length parity (A1k block: baseline
+shape, 979-token calibrated prompts, 300 s): TTFT 1.539 s -> prefill
+~636 tok/s; decode 102.7 tps/user. Same-family CI-era numbers (ef720667
++ tron80, @8u, ~1k prompts, over network): prefill~=783-799, TTFT
+1.28-1.31 s. CAUTION — NOT attributable as a regression: load pattern
+(closed-loop zero-think-time vs talos pacing), chat-template inclusion,
+output length, and network boundary all differ; the honest comparison
+is the next talos-style run on this stack. What IS clean: the A/B
+deltas above, measured under identical conditions.
+Cross-reference (different regime, per the metrics explainer): checker-
+board tron112 in-process parse at p1024 2x8u = 727.9 tok/s (burst load,
+ssp prefix effects, no HTTP).
+
 Artifacts: /scratch/jhan/p43/ (loadgen.py, p43_rinzler_boost.sh, blocks/
 summaries + per-request jsonl + turbostat), profile captures
 /scratch/jhan/flat_freq_tests/20260713-{182616,184618}_ci-workload-
