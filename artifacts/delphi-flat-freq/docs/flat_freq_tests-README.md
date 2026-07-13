@@ -849,12 +849,102 @@ Cross-reference (different regime, per the metrics explainer): checker-
 board tron112 in-process parse at p1024 2x8u = 727.9 tok/s (burst load,
 ssp prefix effects, no HTTP).
 
+THREADS x CORES x FREQUENCY — the two shapes under test (new PR-3070
+map; "workers" = the map's tron_cores, hosting the app worker pool =
+attention workers + the Main/coordinator thread + the scheduler loop):
+
+  Shape 1: tron112 (deployed baseline; FAST='7-14 24-71 79-86 96-143'+sibs)
+  phys cores        siblings          role / threads                 freq
+  0, 72             144, 216          platform: platformd, OS        2700
+  1, 2, 73, 74      145,146,217,218   rinzler proc: HTTP/SSE IO,     2700
+                                      tokenize, fuse, admission
+  3-6, 75-78        147-150,219-222   dev: TX DMA + RX (sibling)     2700
+  7-14, 79-86 (dieA) 151-158,223-230  workers: attention (via        ~4000
+                                      sibling thread ids)
+  24-71, 96-143     168-215,240-287   workers: attention + Main/     ~4000
+  (die B/C)                           coordinator (lowest core/slice)
+  15-23, 87-95      159-167,231-239   spare (OS strays)              2700
+
+  Shape 2: tron112 + rinzler boost (p43_rinzler_boost.sh apply):
+  identical except cores 1,2,73,74 + sibs -> ~4000 (measured 3889).
+  112 fast phys -> 116; grant rung unchanged.
+
+CORE BUSINESS BY ARM (turbostat 30-s frames under load, mean Busy% /
+Bzy_MHz; frames classified by the toggle core's frequency):
+
+  Rinzler A/B experiment (workers always fast):
+  role       A clamped        B boosted        note
+  workers    49.1% @ 4020     49.1% @ 4022     unchanged (control OK)
+  rinzler    24.5% @ 2640     23.2% @ 3889     same work, ~5% less busy
+  dev        99.8% @ 2700     99.8% @ 2700     TX/RX spin loops (always)
+  platform    4.7% @ ~2490     4.7% @ ~2495    background
+  spare       2.6% @ ~2430     2.7% @ ~2440    background
+
+  Worker W/F experiment (rinzler always clamped):
+  role       W workers-2700   F workers-4000   note
+  workers    49.1% @ 2728     49.1% @ 3992     IDENTICAL busy% at both
+                                               clocks -> C0 time is poll-
+                                               wait scaling with wall
+                                               clock, not compute (compute-
+                                               bound cores would get BUSIER
+                                               when clamped). Matches the
+                                               IPC 0.02 stall signature.
+  rinzler    27.8% @ 2642     25.7% @ 2639     slightly busier when engine
+                                               slower (more waiting/token)
+  dev        99.8% @ 2700     99.8% @ 2700     spin, both arms
+
 Artifacts: /scratch/jhan/p43/ (loadgen.py, p43_rinzler_boost.sh, blocks/
 summaries + per-request jsonl + turbostat), profile captures
 /scratch/jhan/flat_freq_tests/20260713-{182616,184618}_ci-workload-
 profile-delphi-3bda/ (pftrace + perf.data + IPC + thread snapshots).
 Timeline note: a mid-run `posadm restart` contaminated the first Arm-A
 attempt (detected, discarded, redesigned to interleaved blocks).
+
+### 2026-07-13 — P4.3b: the WORKER-core toggle through the serving path — Q1 CLOSED
+
+The experiment CI could never run for us: toggle the 112 worker cores
+(map tron_cores + sibs) between CLOS3 2700 and CLOS0 ~4000 while the
+SAME rinzler serving stack handles the SAME @8u load (rinzler/dev/
+platform untouched, verified per block). Interleaved pairs, 5 min each,
+scripts/p43_worker_toggle.sh:
+
+  pair  W workers-2700       F workers-4000       decode    parse
+  1     100.53 / 1.392s      104.11 / 1.243s      +3.6%     +12.0%
+  2     100.32 / 1.386s      104.18 / 1.242s      +3.8%     +11.6%
+  3     100.41 / 1.390s      104.28 / 1.244s      +3.9%     +11.7%
+  (decode tps/user / TTFT)   WORKER-CLOCK EFFECT: decode +3.7+/-0.15%,
+                             parse/prefill +11.8+/-0.2%
+
+FINDINGS (Q1 — why CI never showed the checkerboard boost):
+1. Prefill IS fully clock-sensitive through the serving path (+12% for
+   +47% clock — same as checkerboard's +12.6%). The CPU-bound phase
+   behaves identically in both harnesses.
+2. Decode @8u gains only +3.7% from the same clock change — the cores
+   are wait-dominated, proven three independent ways: IPC 0.02 (perf,
+   both arms), worker Busy% IDENTICAL at 49.1% under 2700 and 4000 MHz
+   (turbostat; compute-bound cores would get busier when clamped), and
+   the +3.7% behavioral ceiling itself.
+3. The CI arithmetic closes by superposition: worker boost gave 3bda
+   roughly +3-4% decode @8u; the ef720667 build regression (GNR-only,
+   17cf-measured) cost ~-4.5% THE SAME NIGHT the boost went live.
+   Net ~= -1% == "CI showed no improvement". Both effects were real;
+   they cancelled.
+4. OPEN SLIVER: CI's prefill~= stayed ~790 tok/s across ALL eras while
+   our toggle moves parse +/-12% — CI's TTFT likely carries a non-prefill
+   component (talos pacing/queueing, network, prompt-reuse against the
+   persistent prefix cache?). Needs one look at the talos client or a
+   like-for-like talos run on the new stack.
+5. Tuning priorities implied: (a) the Q2 bisect (+4.5% decode on GNR,
+   software); (b) wait-structure attacks — HW attention (USE_HW_ATTN,
+   decode >=128 tok, default off), forward-pass cadence tunables
+   (TRON_LIVE_TOKEN_LIMIT, 128-tok prefill chunks), speculation depth;
+   (c) uncore/mesh frequency (attention is memory-bound; not an isst
+   knob); (d) the free ~1% rinzler-core boost; (e) operating point —
+   @8u is far below the aggregate-throughput knee.
+
+Machine left in deployed state: workers fast (tron112), rinzler cores
+clos:3, gpt-oss serving up. Scripts preserved: p43_worker_toggle.sh,
+role_busy.py (turbostat per-role analyzer).
 
 Planned next (pending explicit user go): arm tonight's nightly as the
 rinzler-boost A/B — at 02:55 UTC (after runner-stop, before nightly)
