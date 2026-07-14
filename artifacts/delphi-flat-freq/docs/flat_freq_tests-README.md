@@ -1092,8 +1092,13 @@ ACTION PLAN:
 3. [mine] Formalize talos_run.sh wrapper (venv + env + SEED_OFFSET +
    session bookkeeping) as the standard runner; upstream SEED_OFFSET so
    the primary mechanism is not a patched clone.
-4. [watch] ef720667 residual (~-1.5% on 17cf) across next nightlies;
-   escalate to a bisect only if it persists.
+4. [scheduled] ef720667 investigation: daily idle-window task (12:33
+   UTC, gated on CI window + machine idleness + HOLD marker) executes
+   /scratch/jhan/ef720667-inv/PLAN.md — source-build ef720667 +
+   198650bf (apt no longer carries them), checkerboard A/B first,
+   manual-serving talos A/B only if needed. CI window measured from
+   talos session records: start ~04:30 UTC, end ~11:00-11:20 UTC,
+   very stable -> OUR window = 12:00-04:00 UTC daily.
 5. [team] 3bda Jul-11 silent freeze (no journal/SEL) — hardware/BMC
    investigation if it recurs.
 6. [next frontier, daytime windows] wait-structure experiments: HW
