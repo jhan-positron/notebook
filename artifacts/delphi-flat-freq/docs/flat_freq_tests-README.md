@@ -1060,6 +1060,51 @@ cross-host, as measured. Timeline of eras, for the record:
   Jul 14 real nightly:  new stack fleet-wide -> boost visible in CI
                         (874 vs 788 cross-host).
 
+### 2026-07-14 — Operating directives + forward action plan (user-set)
+
+DIRECTIVES: (1) talos/CI harness is the PRIMARY test mechanism from now
+on (checkerboard only for targeted comparisons); (2) 3bda is ours in
+DAYTIME, nightly CI owns it at night (~07:00-11:00 UTC) — end-of-day
+ritual: restore fleet-standard serving config, leave deployed tron112
+shape, nothing running into the CI window.
+
+ATTRIBUTION CLARIFICATION (recorded after user challenge): the -4.5%
+decode regression that cancelled the boost on Jul 10-11 nightlies was
+build ef720667 (Jul 10, PRE-PR-3070, old map; evidence: 17cf same-shape
+97.52->93.39 at that build change, Genoa flat; mostly healed by
+de7647f3, residual ~-1.5%). PR-3070 never degraded gpt-oss — it
+improved it (+9.3%/+3.4% software effect, ladder-measured). ef720667
+never appeared in any checkerboard A/B, which is why checkerboard never
+saw its regression.
+
+ACTION PLAN:
+1. [user] Send the Hannah/team note: nightly-visible boost story; deploy
+   boost service to 17cf (788 vs 874 prefill every morning); optional
+   +1% rinzler cores (FAST_CORE_RANGES += 1-2 73-74); tie role ranges to
+   resource-map.yaml; 3 harness fixes to upstream (SEED_OFFSET,
+   surface worker exceptions, KV-store-survives-reprovision note).
+2. [ready to run] Long-prompt gpt-oss CI config proposal: checkerboard
+   gradient (+12% parse @p256 -> +43% @p2048) says the current
+   prompt=1024-only nightly sits at the shallow end for CPU-side
+   sensitivity. Pilot in a daytime window: talos harness, prompt=4096
+   @8u, fast-vs-clamped; then PR the config into systems_test perf.py
+   (check ShareGPT generator behavior >2k tokens first).
+3. [mine] Formalize talos_run.sh wrapper (venv + env + SEED_OFFSET +
+   session bookkeeping) as the standard runner; upstream SEED_OFFSET so
+   the primary mechanism is not a patched clone.
+4. [watch] ef720667 residual (~-1.5% on 17cf) across next nightlies;
+   escalate to a bisect only if it persists.
+5. [team] 3bda Jul-11 silent freeze (no journal/SEL) — hardware/BMC
+   investigation if it recurs.
+6. [next frontier, daytime windows] wait-structure experiments: HW
+   attention (USE_HW_ATTN, decode >=128 tok), forward-pass cadence
+   (TRON_LIVE_TOKEN_LIMIT, 128-tok prefill chunk size), speculation
+   depth, uncore/mesh frequency; operating-point/capacity study beyond
+   @8u.
+7. [housekeeping] handoff-generation pass for recent sessions; remove
+   debug patches from /tmp/jhan-systest clone once SEED_OFFSET lands
+   upstream.
+
 UNIFIED EXPLANATION (status: CONFIRMED 2026-07-14 — the operative
 prediction verified by the CI harness itself AND by the production
 nightly; previously SUPPORTED): on the
