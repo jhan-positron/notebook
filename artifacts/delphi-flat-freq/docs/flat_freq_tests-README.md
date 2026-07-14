@@ -974,6 +974,27 @@ recorded):
 -> CI's flatness is REAL: boosted and clamped hosts measured identical
    TTFT on the same build/night, cache-free.
 
+2026-07-14 05:30 UTC status — talos self-run staged, PAUSED for machine
+contention: the decisive talos-harness A/B was fully prepared (venv at
+3af6:/scratch/jhan/p43/talos/venv with openai/pymongo/rich/transformers/
+opensearch-py; harness clone /tmp/jhan-systest @994badfc, PYTHONPATH with
+/tmp/jhan-talos; invocation = benchmark_tps(Config()) with env MODEL/
+N_USERS=8/N_ROUNDS=10/PROMPT_LENGTH=1024/GENERATE_LENGTH=1536/
+TOKENIZER_MODEL=openai/gpt-oss-120b/OPENAI_HOST=http://192.168.1.4/v1,
+TALOS_SESSION=fresh uuid; results then queryable via
+talos:5000/sessions/<uuid>/metrics). Findings from smoke: (a) harness
+workers die as opaque BrokenProcessPool on API errors (debug markers left
+in the /tmp/jhan-systest clone; real error surfaced standalone: model
+404); (b) at 05:23 UTC a localhost process on 3bda (after a positron-user
+session from 100.94.250.110, 23:29-03:13) reprovisioned serving to
+qwen-2.5-32b x4 — gpt-oss gone, machine no longer exclusively ours.
+Overnight A/B NOT launched (would perturb the other party's work).
+Resume checklist (~40 min once ownership confirmed): re-PATCH config to
+gpt-oss tp4 x2, verify advertised name via port 80 /v1/models, rerun
+smoke (N_USERS=1 N_ROUNDS=1), then arm F run -> worker clamp -> arm W run
+-> restore, N_ROUNDS=10 each; compare prefill_mean/ttft vs the ~790
+constant. Frequency shape untouched throughout (tron112 deployed).
+
 UNIFIED EXPLANATION (status: SUPPORTED, one test from confirmed): on the
 OLD build the single scheduler thread (work_queue) was the prefill
 bottleneck, and PRODUCTION pins it to clamped rinzler cores (CPUAFFINITY)
