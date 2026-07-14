@@ -995,7 +995,51 @@ smoke (N_USERS=1 N_ROUNDS=1), then arm F run -> worker clamp -> arm W run
 -> restore, N_ROUNDS=10 each; compare prefill_mean/ttft vs the ~790
 constant. Frequency shape untouched throughout (tron112 deployed).
 
-UNIFIED EXPLANATION (status: SUPPORTED, one test from confirmed): on the
+### 2026-07-14 — P4.3d: THE TALOS HARNESS ITSELF CONFIRMS IT — Q1 fully closed
+
+Ran the actual CI measurement code (systems_test@994badfc, the commit of
+the Jul-11 nightly; venv on 3af6; nightly-parity: 8 users, 10 barrier
+rounds, prompt 1024 / generate 1536, capture 896-1024, sharegpt corpus,
+via Caddy port 80) against 3bda's new stack, toggling ONLY the worker
+cores between rounds of runs. Cache-cold verified per arm via the
+harness's own cached_tokens (~71 = template prefix, same as CI's
+historical 69):
+
+  arm  workers  prefill tok/s  TTFT ms  decode TPS/u  cached  seeds
+  F    ~4000    883            1207     95.26         72.8    0-79
+  F2   ~4000    867            1224     93.58         71.0    400-479
+  W3    2700    736            1441     87.97         71.0    200-279
+
+  WORKER-CLOCK EFFECT VIA THE CI HARNESS: prefill +19% (736 -> 875 avg),
+  TTFT -16%, decode +7.3%. F/F2 reproduce within 2% (corpus effects nil).
+
+The prediction lands on both ends:
+- New stack, workers fast: prefill 875 BREAKS AWAY from the historical
+  ~790 constant (+11%), decode 94.4 ~= the boosted-era nightlies
+  (93.3-94.2) almost exactly.
+- Workers clamped: prefill falls to 736 — back to (slightly below) the
+  historical constant band; the old "~790 forever" regime is the
+  clamped-scheduler regime.
+Note decode's talos-measured sensitivity (+7.3%) exceeds the loadgen's
+(+3.7%) — different load pattern (barrier-synced rounds, 1536-token
+generations, capture-window TPS); both small, same direction.
+
+TWO HARNESS GOTCHAS DEMONSTRATED LIVE (worth reporting to the CI team):
+1. Deterministic seeds (seed = round*n_users + user, fixed corpus) mean
+   ANY back-to-back rerun against a live engine hits the persistent
+   prefix cache: our first W arm read "prefill 4745 tok/s" with 647/1035
+   tokens cached. CI is protected ONLY by fresh provisioning per nightly.
+2. The KV store survives same-model reprovisioning (hugepage-backed
+   store files persist): even after an engine bounce, 479 tokens still
+   cached. Fresh SEED ranges are the reliable isolation (we patched a
+   SEED_OFFSET env into our systems_test clone; one-line, worth
+   upstreaming).
+3. (From the smoke debugging: harness workers die as opaque
+   BrokenProcessPool on any API error — the underlying exception is
+   swallowed. Also worth upstreaming a fix.)
+
+UNIFIED EXPLANATION (status: CONFIRMED 2026-07-14 — the operative
+prediction verified by the CI harness itself; previously SUPPORTED): on the
 OLD build the single scheduler thread (work_queue) was the prefill
 bottleneck, and PRODUCTION pins it to clamped rinzler cores (CPUAFFINITY)
 — so CI prefill was scheduler-capped at ~790 regardless of worker clocks
