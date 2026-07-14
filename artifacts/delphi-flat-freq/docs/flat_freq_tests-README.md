@@ -1038,8 +1038,31 @@ TWO HARNESS GOTCHAS DEMONSTRATED LIVE (worth reporting to the CI team):
    BrokenProcessPool on any API error — the underlying exception is
    swallowed. Also worth upstreaming a fix.)
 
+PUBLIC CONFIRMATION — THE REAL NIGHTLY (2026-07-14, build de7647f3;
+CI re-enabled on 3bda by Rhys/Hannah; ran ~11:00 UTC, before our runs):
+  gpt-oss @8u          3bda (tron112 boosted)   17cf (clamped)
+  prefill~=            874 tok/s                788 tok/s      (+11%)
+  TTFT                 1171 ms                  1299 ms        (-10%)
+  decode TPS/user      95.70                    96.05          (~equal)
+First nightly ever to show the flat-freq boost — 3bda's 874/1171 matches
+our Arm-F prediction (875/1207) almost exactly, and 17cf stays at the
+historical ~790 constant (no boost service; on the new map its scheduler
+sits on clamped worker cores). 8B tp2 shows the same split: 3bda prefill
+1.4k / TTFT 742ms vs 17cf 1k / 1022ms. Decode @8u remains ~insensitive
+cross-host, as measured. Timeline of eras, for the record:
+  Jul 10-11 nightlies:  OLD build (ef720667) + tron80 — scheduler pinned
+                        on clamped rinzler cores on BOTH hosts -> both
+                        capped ~790, no visible boost (+ the -4.5% build
+                        regression cancelling decode gains).
+  Jul 11 checkerboard:  new stack (29924aa8+tron112) -> +25%/+16%
+                        (Hannah, 3bd6) — boost fully visible.
+  Jul 14 talos toggles: new stack, same host — prefill 736<->875 (+19%).
+  Jul 14 real nightly:  new stack fleet-wide -> boost visible in CI
+                        (874 vs 788 cross-host).
+
 UNIFIED EXPLANATION (status: CONFIRMED 2026-07-14 — the operative
-prediction verified by the CI harness itself; previously SUPPORTED): on the
+prediction verified by the CI harness itself AND by the production
+nightly; previously SUPPORTED): on the
 OLD build the single scheduler thread (work_queue) was the prefill
 bottleneck, and PRODUCTION pins it to clamped rinzler cores (CPUAFFINITY)
 — so CI prefill was scheduler-capped at ~790 regardless of worker clocks
