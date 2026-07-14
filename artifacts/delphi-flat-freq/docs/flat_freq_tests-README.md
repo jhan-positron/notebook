@@ -1105,6 +1105,56 @@ ACTION PLAN:
    debug patches from /tmp/jhan-systest clone once SEED_OFFSET lands
    upstream.
 
+### 2026-07-14 — Long-prompt pilot (action-plan item 2): talos harness, prompt-length gradient
+
+Method: talos harness, gpt-oss-tp4 @8u, generate=1536, capture 896-1024,
+engine bounce before EVERY run (cache verified clean: cached ~69/53 =
+template overlap only), fresh SEED_OFFSET per arm, workers toggled
+between F (~4000) and W (2700). p4096 arms are n=8 (single round) —
+see corpus limitation below. p1024 rows from P4.3d for reference.
+
+  prompt   arm  n   TTFT ms   prefill tok/s   decode TPS/u
+  1024     F    80  1207      875             94.4 (avg F/F2)
+  1024     W    80  1441      736             88.0
+  2048     F    80  3144      653             83.6
+  2048     W    80  3688      553             80.1
+  4096     F     8  9399      440             74.4
+  4096     W     8  11296     366             65.4
+
+  Worker-clock sensitivity by prompt length (F vs W):
+  prefill: +19% / +18% / +20%  — UNIFORM ~+19-20% at every length
+           (talos's barrier rounds keep all 8 prefills concurrent at
+           every p, unlike checkerboard's burst overlap which grew
+           with p — hence checkerboard's +12->+43% gradient vs talos's
+           flat ~20%).
+  decode:  +7.3% / +4.4% / +13.8% — rises at long context (deeper
+           attention per token = more CPU work), though p4096 is n=8.
+  Absolute rates fall with length (prefill 875->440; decode 94->74):
+  attention superlinearity, as expected.
+
+WHY THIS BELONGS IN CI: (a) prefill stays ~20% clock/CPU-sensitive at
+every length — long-prompt configs guard the CPU-side path where the
+scheduler-placement class of regression hid for weeks; (b) TTFT at
+p4096 is 9.4-11.3 s — the user-visible long-context pain point, worth
+an SLO-style goal; (c) today NOTHING in the nightly tests >1024-token
+prompts while the model advertises 131k context.
+
+HARNESS/CORPUS WORK NEEDED FOR THE systems_test PR (discovered here):
+1. prompt.py generate() RAISES for convos shorter than prompt_length —
+   the harness cannot run >~2k prompts today. Our clone carries a
+   deterministic long-convo selector patch (map seeds onto qualifying
+   convos).
+2. Corpus: only 13/1000 sharegpt convos are >=4096 tokens (>=80 exist
+   for 2048). p4096 needs corpus augmentation (concatenate convos or a
+   long-context corpus) for full 80-request rounds.
+3. Bonus bug: generate() mutates the cached convo (inserts the system
+   message into self.convos permanently) — harmless for fresh-process
+   runs, corrupts long-lived processes.
+Recommendation for the PR: add prompt=2048 config now (works with
+existing corpus, +80 qualifying convos), stage prompt=4096 behind the
+corpus fix; also record prefill from OBSERVED prompt_tokens (perf.py
+currently divides the CONFIGURED length by TTFT).
+
 UNIFIED EXPLANATION (status: CONFIRMED 2026-07-14 — the operative
 prediction verified by the CI harness itself AND by the production
 nightly; previously SUPPORTED): on the
