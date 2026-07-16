@@ -1060,6 +1060,28 @@ cross-host, as measured. Timeline of eras, for the record:
   Jul 14 real nightly:  new stack fleet-wide -> boost visible in CI
                         (874 vs 788 cross-host).
 
+### 2026-07-16 — Power cost of the flat-freq boost (turbostat PkgWatt, 3bda, load-window means)
+
+  config (same instrument, same host)   workload            Bzy_MHz  PkgWatt  RAMWatt
+  CLAMPED boot-default (Jun-30 CI run)  gpt-oss single       2829     469 W    51 W
+  FLAT v1 3.9GHz (Jul-3)                same gpt-oss single  3887     610 W    49 W
+  tron88 4100-class (Jul-5)             gpt-oss+8B grid      3797     659 W    62 W
+  tier3 (Jul-6)                         same grid            3794     658 W    62 W
+  (24h sweep whole-window incl. 70B/mixtral phases: 789 W / RAM 128 W)
+
+Matched comparison (identical gpt-oss workload): clamped -> flat =
++141 W package (+30%) for +16.9% parse / +13.3% gen -> CPU-package
+perf/W DROPS ~10-13%. BUT the system view flips it: CPU packages are a
+minority of an inference appliance's draw (8 FPGAs at ~210-225 W each;
+comparable GNR system ~2.3 kW under soak) -> +141 W ~= +6% system power
+for +13-17% throughput => SYSTEM-level perf/W IMPROVES (INFERRED — 3bda
+wall power not directly measured; FPGA-share assumption from the
+andoria soak hardware numbers). Both sockets stayed well inside the
+2x500 W TDP budget (max seen 789 W). Data: turbostat_per_cpu*.tsv in
+the run folders (clamped file: 2026-06-30.../turbostat_per_cpu_during_ci
+.tsv; NOTE the Jul-3 file kept logging through the 24h sweep — window
+the first ~120 loaded samples for the single run).
+
 ### 2026-07-16 — THE COMPLETED 2x2 (build x shape, talos serving path, 3bda) — final word
 
 Method: laptop-independent orchestrator (11:37-12:09 UTC window after the
