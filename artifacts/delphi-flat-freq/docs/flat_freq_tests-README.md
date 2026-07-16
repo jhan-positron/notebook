@@ -1172,7 +1172,7 @@ sibling — fatal to PR-3070's two-threads-per-core placement. TRON_NO_RTM
 
 ### 2026-07-14 — Operating directives + forward action plan (user-set)
 
-DIRECTIVES: (1) talos/CI harness is the PRIMARY test mechanism from now
+DIRECTIVES: (0, 2026-07-16) EVERY test captures power: wrap runs with /scratch/jhan/tools/power_capture.sh start|stop <outdir> (turbostat PkgWatt/RAMWatt; summary auto-written); report watts next to perf. (1) talos/CI harness is the PRIMARY test mechanism from now
 on (checkerboard only for targeted comparisons); (2) 3bda is ours in
 DAYTIME, nightly CI owns it at night (~07:00-11:00 UTC) — end-of-day
 ritual: restore fleet-standard serving config, leave deployed tron112
