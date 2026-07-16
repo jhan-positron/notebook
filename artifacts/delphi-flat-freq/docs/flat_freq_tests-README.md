@@ -1060,6 +1060,94 @@ cross-host, as measured. Timeline of eras, for the record:
   Jul 14 real nightly:  new stack fleet-wide -> boost visible in CI
                         (874 vs 788 cross-host).
 
+### 2026-07-16 — THE COMPLETED 2x2 (build x shape, talos serving path, 3bda) — final word
+
+Method: laptop-independent orchestrator (11:37-12:09 UTC window after the
+nightly): per-arm rinzler BINARY swapped via systemd drop-in (fingerprint-
+verified per arm: prz_*-198650bf / prz_*-29924aa8), IDENTICAL platformd-
+generated placement args (new-map --app-cores) for both builds — so the
+build axis is pure engine-binary, single-variable. Store files cleaned
+between builds; fresh SEED_OFFSET per run; nightly-parity params; talos
+client on 3af6; perfetto/perf captured in 0bf rep-2 both shapes. Machine
+restored (stock 0e50a645 binary, trio, tron112) by 12:09.
+
+  gpt-oss tp4 @8u        workers-clamped(2700)     tron112(~4000)
+  0bf (n=3)              prefill 744 / dec 92.4    prefill 877 / dec 97.1
+  aa8 (src n=1 + pkg)    prefill 756 / dec 88.0-89.5  prefill 871-875 / dec 94.4-94.6
+
+HEADLINES:
+1. COMPOSITE (aa8+tron112 vs 0bf+clamped, the campaign end-to-end by CI
+   methodology): prefill +17.7%, decode +2.4%.
+2. Frequency effect is build-INDEPENDENT: 0bf toggles +18.0% prefill /
+   +5.1% decode; aa8 +16% / +6.5%. The flat-freq win needs only the
+   112-worker placement, not the new engine code.
+3. PR-3070 BINARY effect through serving at IDENTICAL placement:
+   prefill ~0% (877 vs 871-875) — the ladder's +9.3% "software" parse
+   gain was THE MAP (worker count/placement), not kernels;
+   decode -3% (0bf 97.1/92.4 vs aa8 94.5/88-89.5 at fast/clamp) — the
+   aa8 engine is slightly SLOWER serving gpt-oss @8u. PLAUSIBLE
+   mechanism (untested): aa8's coordinator lives ON a worker core
+   (fast but steals worker capacity); 0bf's scheduler sits on dedicated
+   rinzler cores. Worth a look by the tron team; small but consistent
+   across both shapes. NOTE: best decode cell of the whole 2x2 is
+   [0bf + tron112] = 97.1.
+4. MECHANISM REVISION (honesty ledger): perfetto shows 0bf's scheduler
+   thread ~90% busy at 2700 (CPUAFFINITY-confined, both arms) while
+   prefill scaled fully -> a clamped scheduler does NOT cap prefill at
+   this workload. The historical ~790-constant is therefore attributed
+   to the OLD MAP's worker layout (80 workers/old placement), mechanism
+   within it UNRESOLVED (candidates: worker-capacity saturation point,
+   old-map die-crossing, scheduler-under-old-map-conditions). The
+   scheduler-clock-cap claim is PARTIALLY REFUTED as the specific cause;
+   the map-unlock claim (PR-3070's placement made serving frequency-
+   responsive, nightly-visible) stands CONFIRMED by this 2x2 + the
+   Jul-14 nightly. [0bf/aa8 + OLD-map args] cells would settle the
+   residual mechanism if ever needed.
+aa8 source-vs-package consistency: verified (94.56/870.9 vs 94.4/875).
+
+### 2026-07-15 — ef720667 investigation CONCLUDED + machine-regime correction
+
+VERDICT (phases 1-2, two independent run sets): the -4.5% gpt-oss decode
+regression DOES NOT reproduce in direct-runtron checkerboard conditions.
+Pooled clean runs, gen tok/s @2x8u p1024/g1024/s256, same shape, same
+day, interleaved: 198650bf n=4 mean 97.8 {100.3, 99.4, 95.5, 95.9};
+ef720667 n=6 mean 99.5 {96.6, 100.5, 100.5, 104.0, 98.8, 96.4} — the
+suspect build is, if anything, ~+2% FASTER; spread ~±4%. Combined with
+the CI-only visibility (17cf 97.5->93.4) => the regression lived in the
+SERVING path (where the old build's scheduler was pinned-clamped), which
+checkerboard structurally bypasses. Build retired, prod healed
+(residual ~-1.5% on de7647f3), phase 3 (manual old-build serving A/B)
+judged not worth the effort by this session — but the scheduled task
+remains ACTIVE per user (a run was in progress 2026-07-15 19:0x UTC);
+final phase-3/retirement decision deferred to the user after that run
+reports.
+BONUS reproduction: 198650bf (pre-#3148) reliably TRON_ASSERTs on
+back-to-back runs when hugepages are not yet released ("Failed to mmap
+libpos-slice: Cannot allocate memory") — live confirmation of the
+tron#3097 bug class the Jul-9 nightlies died of; ef720667+ tolerates.
+Fix for benchmarking old builds: wait for HugePages_Free to recover
+between runs (phase2b free-gate: zero failures).
+
+MACHINE-REGIME CORRECTION (from the scheduled session's gate-fail,
+2026-07-15 14:12, verified against systemd timers): the split-runner
+timers are ACTIVE again — GitHub CI runner owns 3bda from 14:00 UTC to
+02:45 UTC (daytime PR benchmarks; ci-runner-start@ fired 14:00, stopped
+rinzler@0-3, Runner.Listener accepting jobs); talos nightly ~04:25-11:20
+UTC. TRULY FREE windows: ~11:30-13:45 UTC and ~02:45-04:20 UTC only.
+The earlier "3bda is ours all daytime (12:00-04:00 UTC)" model was
+WRONG/stale. ACTION: reconcile with Hannah — either she re-disables the
+GH runner on 3bda (restoring "ours in daytime") or our experiment
+windows shrink to the two gaps / require ci-runner.sh handovers.
+Also flagged: serving engines left up during GH-runner time (status quo
+since Jul-14) potentially perturb PR benchmarks — Hannah's call.
+TSX provenance (Bill's question, 2026-07-15): TSX/RTM ENABLED on both
+CI DUTs (rtm CPU flag; tsx=on cmdline; runtron logs "INIT: Intel RTM
+(TSX) supported" in every run). The kernel's "Unknown parameter tsx=on"
+boot warning is cosmetic. tron uses RTM+tpause as its wait/wakeup
+primitive (mwaitx.cpp); no-TSX fallback = pause-spin that fights the HT
+sibling — fatal to PR-3070's two-threads-per-core placement. TRON_NO_RTM
+=1 exists for quantifying the cliff.
+
 ### 2026-07-14 — Operating directives + forward action plan (user-set)
 
 DIRECTIVES: (1) talos/CI harness is the PRIMARY test mechanism from now
