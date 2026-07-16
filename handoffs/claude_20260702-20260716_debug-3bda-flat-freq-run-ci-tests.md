@@ -412,11 +412,12 @@ All times UTC.
 - Mechanism revision recorded (scheduler-clock cap partially refuted;
   old-map layout owns the historical ~790 cap; ledger updated in
   ci_boost_pipeline.html).
-- ab23 launched (running at handoff time): aa8 stock-coordinator vs
-  dedicated-coordinator (main moved to boosted spare 15/87 via
-  app-cores lowest-core swap, wrapper rz_wrapper.sh) x3 interleaved —
-  tests the -3% decode hypothesis. Machine reclaimed from daytime GH CI
-  via ci-runner.sh stop (job drained first).
+- ab23 launched: aa8 stock-coordinator vs dedicated-coordinator (main
+  moved to boosted spare 15/87 via app-cores lowest-core swap, wrapper
+  rz_wrapper.sh) x3 interleaved — tests the -3% decode hypothesis.
+  Machine reclaimed from daytime GH CI via ci-runner.sh stop (job
+  drained first). n=3 trended +1.5% decode; the 10-pair confirmation
+  (completed 23:27 UTC) pooled to a NULL — see Current state.
 
 ## Artifacts
 
@@ -526,10 +527,26 @@ On GitHub (jhan-positron/notebook):
   coordinator (main on boosted spare 15/87) vs stock, 3 interleaved pairs:
   decode 93.08 -> 94.46 (+1.5%), prefill 873 -> 887 (+1.7%), TTFT
   1220 -> 1195 ms. TREND POSITIVE but within-noise at n=3 (pairs +2.9%/
-  -1.0%/+2.6%) — recovers roughly half the -3% aa8 decode gap IF real.
-  Needs a 10-pair confirmation before pitching the placement change to
-  the tron team. Results/placement snapshots: /scratch/jhan/ab23/results/.
-  GH CI auto-resumes at the next 14:00 UTC timer.
+  -1.0%/+2.6%). CONFIRMATION RUN (10 more pairs, reps 4-13, seeds 6000+)
+  COMPLETED 23:27 UTC: the trend evaporated. Pooled n=13 pairs:
+
+  | metric | stock | dedicated coordinator | delta |
+  |---|---|---|---|
+  | decode tok/s/u | 93.78 | 93.81 | +0.03% (NULL) |
+  | prefill tok/s | 876.7 | 881.1 (excl. one outlier rep) | +0.5% (noise) |
+  | TTFT ms | 1212 | 1204 | -0.7% (noise) |
+
+  VERDICT: coordinator placement is a NULL at 8 users — it does NOT
+  explain the -3% aa8 serving-decode cost; that mechanism is back to
+  unknown (somewhere else in the aa8 engine changes). Hand the tron team
+  the -3% finding WITHOUT a placement mechanism claim. Power context:
+  run predates the per-arm power directive; single live datapoint during
+  the run = 732 W pkg @ 3902 MHz busy (power_capture.sh smoke test) —
+  consistent with the flat-freq ~610-660 W loaded band plus client burst.
+  Results/placement snapshots: /scratch/jhan/ab23/results/. Machine
+  auto-restored (RESTORE done 23:27: trio serving config re-PATCHed,
+  tron112 fast shape reasserted, stock ExecStart drop-in removed, spares
+  15/87/159/231 back to clos3). GH CI auto-resumes at 14:00 UTC.
 - Machine regime: 3bda is the ONLY machine (user directive; 3af6 = load
   client only). GitHub CI owns 14:00->02:45 UTC unless reclaimed; talos
   nightly ~04:25-11:20 UTC. End-of-window ritual: restore trio serving
@@ -546,13 +563,15 @@ On GitHub (jhan-positron/notebook):
 
 ## Open items / next steps (rewritten 2026-07-16; stale items resolved)
 
-1. ab23 confirmation run: 10 interleaved pairs of stock-vs-dedicated
-   coordinator (result at n=3: +1.5% decode, suggestive not conclusive;
-   kit ready at /scratch/jhan/ab23/, just raise the rep loop). If
-   confirmed, hand the placement recommendation + data to the tron team.
+1. RESOLVED 2026-07-16 23:27 UTC: ab23 confirmation = NULL at n=13 pairs
+   (decode +0.03%, prefill +0.5%, TTFT noise — full table in Current
+   state above). Coordinator placement retired as the -3% mechanism; the
+   aa8 serving-decode cost is unexplained again. Next mechanism
+   candidates live in the wait-structure item below.
 2. [user] Send the team note (draft in transcript; add the 2x2 composite
-   +17.7%/+2.4%, the -3% aa8 serving-decode finding + ab23 outcome, TSX
-   provenance for Bill, and the 3bda daytime-ownership question).
+   +17.7%/+2.4%, the -3% aa8 serving-decode finding + the ab23 null
+   [placement is NOT the mechanism], TSX provenance for Bill, and the
+   3bda daytime-ownership question).
 3. [next PR] systems_test changes: p2048 gpt-oss config now / p4096 behind
    a corpus fix; generator fixes (short-convo raise, corpus mutation,
    SEED_OFFSET); prefill from OBSERVED prompt_tokens; surface worker
