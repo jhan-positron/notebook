@@ -250,6 +250,17 @@ requests and issues by their full web link
 (e.g. https://github.com/positron-ai/tron/pull/3070), never a bare
 "PR #3070" — bare numbers are ambiguous across repos and not clickable.
 
+Results rule (added 2026-07-16, user directive): every performance test
+or experiment the handoff covers MUST carry its measured RESULTS inline —
+the headline perf numbers (with baseline and delta) AND the measured
+power consumption (mean PkgWatt/RAMWatt under load, via the standard
+/scratch/jhan/tools/power_capture.sh summary when available), plus a
+perf-per-watt reading where both sides of a comparison have power data.
+"See the README for numbers" is not sufficient — a handoff must let a
+fresh session (or a human) get the quantitative outcome without opening
+other files. Use proper markdown tables (fixed-width plain-text tables
+render as jumbled prose on GitHub unless fenced).
+
 ## Step 4b — Artifact preservation (when PRESERVE_ARTIFACTS: auto)
 
 Important workspace files get mirrored into `artifacts/<topic>/` in the

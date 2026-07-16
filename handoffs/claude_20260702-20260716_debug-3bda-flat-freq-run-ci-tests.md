@@ -39,6 +39,26 @@ stock-vs-dedicated-coordinator A/B. Mechanism revision recorded
 NOT the scheduler clock (0bf's scheduler ran ~90% busy on clamped cores
 while prefill scaled fully).
 
+Power consumption (turbostat PkgWatt, same host/instrument, load-window
+means; measured 2026-07-16 from the era run folders):
+
+| config | workload | Bzy_MHz | PkgWatt (2 sockets) | RAMWatt |
+|---|---|---|---|---|
+| clamped boot-default (Jun-30) | gpt-oss single | 2829 | 469 W | 51 W |
+| flat 3.9 GHz (Jul-3) | same gpt-oss single | 3887 | 610 W | 49 W |
+| tron88 4100-class (Jul-5) | gpt-oss+8B grid | 3797 | 659 W | 62 W |
+| tier3 (Jul-6) | same grid | 3794 | 658 W | 62 W |
+
+Matched workload: flat-freq costs +141 W package (+30%) for +16.9%
+parse / +13.3% gen -> CPU-package perf/W −10-13%; system-level perf/W
+IMPROVES (CPU is a minority of appliance draw — 8 FPGAs at ~210-225 W,
+comparable system ~2.3 kW under soak; +141 W ≈ +6% system power for
++13-17% throughput; INFERRED — wall power not directly measured, BMC
+could harden it). Both sockets stayed inside the 2x500 W budget (max
+seen 789 W during 70B/mixtral phases). Standing directive from
+2026-07-16: every test wraps /scratch/jhan/tools/power_capture.sh
+start|stop and reports watts next to perf.
+
 ## Objective
 
 Measure the inference-performance impact of the flat-frequency fix (removing
