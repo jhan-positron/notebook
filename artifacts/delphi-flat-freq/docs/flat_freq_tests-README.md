@@ -1108,7 +1108,7 @@ HEADLINES:
    gain was THE MAP (worker count/placement), not kernels;
    decode -3% (0bf 97.1/92.4 vs aa8 94.5/88-89.5 at fast/clamp) — the
    aa8 engine is slightly SLOWER serving gpt-oss @8u. PLAUSIBLE
-   mechanism (untested): aa8's coordinator lives ON a worker core
+   mechanism (TESTED 2026-07-16 -> NULL at n=13, see ab23 section): aa8's coordinator lives ON a worker core
    (fast but steals worker capacity); 0bf's scheduler sits on dedicated
    rinzler cores. Worth a look by the tron team; small but consistent
    across both shapes. NOTE: best decode cell of the whole 2x2 is
@@ -1298,3 +1298,61 @@ reboot via PR#165 boot service or flat_freq_apply with the worker-only
 list). Caveats: a reboot before the nightly silently reverts the A/B
 (check readback files before interpreting); a new tron build tonight
 would confound build-vs-shape (check the report's version line).
+
+### 2026-07-16 — ab23 coordinator-placement A/B: NULL at n=13 (hypothesis retired)
+
+Tests the 2x2 HEADLINE-3 "plausible mechanism": does aa8's Main/
+coordinator thread sharing a fast WORKER core (lowest core per slice:
+24/96 for gpt-oss tp4 x2) cost the -3% serving decode vs 0bf's
+dedicated-scheduler layout?
+
+Design (kit: /scratch/jhan/ab23/): aa8 build via systemd drop-in;
+  stock  = unmodified app-cores (Main on worker cores 24/96);
+  dedic  = rz_wrapper.sh rewrites app-cores per instance
+           (",24-29,"->",15,25-29,"  ",96-101,"->",87,97-101,") so Main
+           lands on spare cores 15/87, boosted clos0 for the session
+           (with HT sibs 159/231); worker set otherwise IDENTICAL
+           (worker count unchanged; core 24/96 simply idles in dedic).
+  Serving path: platformd PATCH -> gpt-oss tp4 x2; client on 3af6 =
+  talos benchmark_tps nightly-parity (8u, p1024/g1024, 80 req/cell,
+  cache-cold fresh seed ranges per cell, verified cached_tokens ~69).
+  Interleaved stock/dedic pairs, full re-provision between cells.
+
+Results — n=3 (completed 20:31 UTC) trended +1.5% decode / +1.7%
+prefill (pairs +2.9%/-1.0%/+2.6%). Confirmation reps 4-13 (21:33-23:27
+UTC, seeds 6000-7900) erased it. POOLED n=13 pairs:
+
+| metric          | stock  | dedic  | delta          |
+|-----------------|--------|--------|----------------|
+| decode tok/s/u  | 93.78  | 93.81  | +0.03% (NULL)  |
+| prefill tok/s   | 876.7  | 881.1* | +0.5%  (noise) |
+| TTFT ms         | 1212   | 1204   | -0.7%  (noise) |
+
+*dedic_r8 excluded from prefill/TTFT means (transient: TTFT 2105 ms,
+one bad round); its decode 93.64 is normal and included.
+
+Arm-application VERIFIED from journald (the ps-snapshot placement files
+are inconclusive — captured pre-spawn): during dedic cells BOTH gpt-oss
+serving instances logged the rewrite and matching engine pinning —
+  rz_wrapper: instance=0 app-cores rewritten: 151-152,15,25-29,...
+  rz_wrapper: instance=1 app-cores rewritten: 223-224,87,97-101,...
+  INIT: Pinning application cores to 151-152,15,25-29,... (rz0/2)
+while stock cells pin 151-152,24-29,... / 223-224,96-101,... The clos0
+boost path is the same sudo isst used by worker_toggle, which logged
+success at window open. Restore verified after ALL_DONE (23:27 UTC):
+drop-in removed, trio serving back, tron112 fast shape reasserted,
+spares 15/87/159/231 back to clos3.
+
+CONCLUSION: coordinator placement does NOT matter at 8u on this
+workload — consistent with the wait-domination picture (decode ~85%
+wait-bound; the coordinator's cycles-stolen-from-one-worker are lost in
+slack). The -3% aa8 serving-decode cost vs 0bf is UNEXPLAINED again;
+remaining candidates are engine-code differences probed by the
+wait-structure items (speculation depth, USE_HW_ATTN, chunk cadence).
+Do NOT pitch a placement change to the tron team; hand them the -3%
+finding without a mechanism claim.
+
+POWER: this run predates directive (0) per-arm capture. Single live
+datapoint mid-run (power_capture.sh smoke, 23:05 UTC): 732 W pkg @
+3902 MHz busy — flat-freq loaded band + client burst. Any rerun must
+wrap cells with power_capture.sh start/stop.
