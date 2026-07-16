@@ -24,28 +24,20 @@ gpt-oss-120b tp4, p1024, 8 users; checkerboard = the matched 2x8u row of
 Hannah's 3bd6 pair; CI = the talos-harness 2x2 on 3bda (identical
 placement args for both builds; fingerprint-verified per arm).
 
-  old->new boost                 checkerboard        CI (talos)
-  prefill/parse composite        +29.1% (564->728)   +17.4% (744->873)
-  generate/decode composite      +14.8% (89->102)    +2.3%  (92.4->94.5)
-  - frequency term (clamp->fast) +18.1% / ~+11%      +18.0% / +5-6.5%
-    (parse / gen)                (derived)           (measured toggles)
-  - engine+map term (0bf->aa8)   +9.3% / +3.4%       ~0% / -3%
-    (parse / gen)                (ladder-measured)   (measured, same args)
+| old-world → new-world boost | checkerboard | CI (talos) | why they differ |
+|---|---|---|---|
+| prefill/parse composite | +29.1% (564→728) | +17.4% (744→873) | see terms below |
+| generate/decode composite | +14.8% (89.2→102.4) | +2.3% (92.4→94.5) | see terms below |
+| — frequency term (clamp→fast) | +18.1% parse / ~+11% gen (derived) | +18.0% prefill / +5-6.5% decode (measured) | prefill: identical — the frequency win transfers perfectly. decode: serving @8u is ~85% waits + spec-ON, so clocks buy less |
+| — engine+map term (0bf→aa8) | +9.3% parse / +3.4% gen (ladder) | ~0% prefill / −3% decode (measured, same placement) | prefill: checkerboard credited the map (80→112 workers) — the CI cells gave both builds the new-map placement, so that credit doesn't appear; decode: the aa8 engine is genuinely ~3% slower through serving (opposite sign vs checkerboard!) |
 
-Readings: (1) the prefill FREQUENCY term is +18% in BOTH harnesses — the
-flat-freq win transfers perfectly and is build-independent; (2) the
-composite prefill gap is bookkeeping: checkerboard credited the MAP
-(80->112 workers) +9.3%, while the CI 2x2 gave both builds the new-map
-placement so that credit does not appear; (3) decode differs for real:
-serving @8u is ~85% waits (frequency term shrinks 11%->5-6%) AND the aa8
-engine costs ~-3% decode through serving at identical placement (opposite
-sign vs checkerboard's +3.4%) — plausible mechanism: aa8's coordinator
-shares a physical core with a worker's HT sibling, 0bf's scheduler had
-dedicated cores; being tested by the ab23 stock-vs-dedicated-coordinator
-A/B (running at handoff time). Mechanism revision recorded 2026-07-16:
-the historical ~790 prefill cap was the OLD MAP's layout, NOT the
-scheduler clock (0bf's scheduler ran ~90% busy on clamped cores while
-prefill scaled fully).
+Additional readings: the −3% aa8 serving-decode cost's plausible
+mechanism (coordinator sharing a physical core with a worker's HT
+sibling vs 0bf's dedicated scheduler cores) is under test by the ab23
+stock-vs-dedicated-coordinator A/B. Mechanism revision recorded
+2026-07-16: the historical ~790 prefill cap was the OLD MAP's layout,
+NOT the scheduler clock (0bf's scheduler ran ~90% busy on clamped cores
+while prefill scaled fully).
 
 ## Objective
 
