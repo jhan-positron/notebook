@@ -1496,3 +1496,64 @@ SEED_OFFSET per cell, cached 69-71 verified all 12 cells). 2x2x3:
   the PR-3070-lineage ENGINE lost clock response -> diff engine
   changes; serving exonerated. Both ~+8% => condition-of-day confound,
   re-examine (bitfile, corpus, prompts).
+
+### 2026-07-17 evening — BREAKTHROUGH CANDIDATE: the +13.7% anchor era ran with TSX/RTM DISABLED (wait-regime confound)
+
+Found by the tron diff-triage workflow (153 commits ae82870a..0e50a645,
+GitHub-only, 8 agents, adversarially verified) + a targeted check it
+prescribed. Evidence chain (all verifiable without 3bda):
+1. mwaitx.cpp at ae82870a ALREADY contains the startup line
+   "INIT: Intel RTM (TSX) supported" (src/system/mwaitx.cpp:47 —
+   byte-identical logging code at 198650bf).
+2. The FULL archived runtron logs of the anchor runs contain ZERO
+   rtm/tsx mentions (grep -c -i rtm = 0 on every instance log):
+   2026-06-30_boot-default-clamped_gpt-oss-single/.../runtron/log.{0,1}
+   and 2026-07-03_flat-freq_gpt-oss-single/sweep-results/.../log.{0,1}
+   (read via andoria-15 NFS mount during the 3bda maintenance window).
+3. Jul-14/15 checkerboard logs (build 198650bf, same lazy logging code)
+   DO show the line (sweep-inventory + comparability audits, 07-17 am).
+=> RTM/TSX was NOT active on 3bda before the 2026-07-13 16:27 reboot.
+   The ENTIRE pre-reboot era — Jun-30 clamped baseline, Jul-3 flat
+   (+13.3% gen), the 24h sweep, tron88, tier3 — ran tron's no-TSX
+   fallback: SPIN+PAUSE waits. Everything since Jul-13 (Jul-14/15
+   checkerboard, P4.3, ab22/ab23/ab25, all talos serving data) runs
+   RTM+TPAUSE parked waits.
+
+MECHANISM (tron's own t/t_mwaitx_cliff.cpp, added Jul-7 in PR-3137):
+spin+pause bystander waiters hammer the shared wait-stats cache line
+(~10 MHz/waiter vs ~1.3 MHz parked); measured on delphi-3c51: decode
+13-30% SLOWER under spin+pause until RTM was enabled. Spinning is
+clock-proportional work -> under spin+pause the whole decode loop is
+clock-COUPLED (inflated frequency response, the +13.7%); parked tpause
+waits are clock-insensitive -> the RTM-era true response is the +7-8%
+we keep measuring. IF CONFIRMED, the decode-gap question INVERTS:
+nothing was ever missing from CI — the checkerboard-era +13-15% decode
+expectation was an artifact of a misconfigured host (RTM off), and
+enabling RTM at the Jul-13 reboot itself delivered a large absolute
+decode gain (to be quantified by ab26 cell A vs the Jul-3 102.6).
+
+SHA CORRECTION (same workflow): the PR-3070 merge is 48e7740918 and
+touches ONLY config/resource-map.yaml (+26/-5) — the "relocated
+scheduler" is pure yaml pinning (Main -> die-B HT-sibling slot), not a
+code change. 29924aa860 is an unrelated CI-workflow merge nearby on
+main. Our "aa8" source build (checkout at 29924aa8) CONTAINS PR-3070,
+so no measurement conclusions change — only the anchor label. Diff
+also yields the candidate list for the small aa8-vs-0bf -3% serving
+decode delta: the 56c map's internal structure (attention-via-HT-
+sibling; active even at matched app-cores pins since each build loads
+its own yaml), arena-allocator default flip 6590b12915 (testable:
+TRON_USE_ARENA_ALLOCATOR=0, gate was +-2%), client-disconnect cancel
+(serving-only, inert without disconnect churn). Everything else in the
+range: verified no-op for gpt-oss decode (incl. all speculation-gated
+code — inert; runtron metric semantics unchanged by 4a7af2c7e8, only
+the "[Concurrency]" -> "[Load]" log prefix, a scraper hazard).
+
+ab26 REVISED (v2 staged at /scratch/jhan/ab26/orchestrator26.sh via
+andoria): arms A/B = {0bf, aa8} x {clamp-all, fast-all} x 3 reps under
+today's RTM regime; arm D = 0bf + TRON_NO_RTM=1 x {clamp-all,
+fast-all} x 2 reps = POSITIVE CONTROL recreating the June regime on
+today's host. Per-cell power capture + per-cell wait-regime provenance
+(grep engine banner into cellmap.txt). PREDICTIONS: A,B ~+7-8%
+response, fast-all absolute ABOVE 102.6; D ~+13% response, absolute
+LOWER. That outcome closes the decode-gap investigation with the
+mechanism demonstrated live.

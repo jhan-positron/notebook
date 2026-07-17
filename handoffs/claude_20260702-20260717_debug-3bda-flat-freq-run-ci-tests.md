@@ -81,15 +81,44 @@ shape; perf/W at fast-all = 96.05/796 = 0.121 tok/s/W vs clamp
 89.70/579 = 0.155 (CPU-package basis; system-level still improves,
 FPGA-dominated).
 
-RESIDUAL (~5.4pp, sharply bounded): runtron +13.7% (build ae82870a) vs
-serving +8.3% (deployed 0e50a645) at MATCHED geometry + toggle scope =
-either (a) the serving process's execution structure, or (b) the newer
-build lineage lost decode clock-sensitivity. Discriminator = ab26
-(runtron freq A/B on 0bf + aa8 lineages via checkerboard RUNTRON_BIN
-override; 3 singles per arm, per-cell power): both ~+13% ⇒ serving
-process → perfetto attach-the-waits next; aa8 ~+8% with 0bf ~+13% ⇒
-the PR-3070-lineage ENGINE → diff engine changes, serving exonerated.
-ab26 kit staged; run pending 3bda's return from maintenance.
+RESIDUAL — LEADING EXPLANATION FOUND 07-17 evening (wait-regime
+confound; evidence-complete pending the ab26 live control):
+**the +13.7% anchor era ran with TSX/RTM DISABLED on 3bda.** Evidence:
+mwaitx.cpp at ae82870a already logs "INIT: Intel RTM (TSX) supported"
+(identical code at 198650bf), yet the FULL archived Jun-30 + Jul-3
+runtron logs contain ZERO rtm/tsx lines (grep -c = 0, every instance;
+read via andoria-15 NFS during the maintenance window), while the
+Jul-14/15 logs show the line. RTM became active at the Jul-13 16:27
+reboot. Pre-reboot, tron waits fell back to SPIN+PAUSE —
+clock-proportional busy-work (tron's own t_mwaitx_cliff.cpp: decode
+13-30% slower; waiters ping the wait-stats line ~10MHz/waiter vs
+~1.3MHz parked) — making the decode loop clock-COUPLED and inflating
+frequency response to +13.7%. Post-reboot RTM+tpause parks waiters
+(clock-insensitive) → the true RTM-era response is the +7-8%
+consistently measured since (P4.3, ab22, ab25 are ALL post-reboot).
+If ab26 confirms, NOTHING was ever missing from CI: the
+checkerboard-era decode expectation was an artifact of a misconfigured
+host, and the Jul-13 reboot itself likely delivered a sizable absolute
+decode gain (ab26 cell A vs Jul-3's 102.6 quantifies it). Supporting:
+the 153-commit diff triage (8 agents, adversarially verified) found NO
+engine code change of flattening magnitude — the PR-3070 merge is
+48e7740918, config/resource-map.yaml ONLY ("relocated scheduler" =
+pure yaml pinning; 29924aa860 is an unrelated CI-workflow merge; our
+"aa8" checkout CONTAINS PR-3070, so only the label changes).
+ab26 v2 (staged /scratch/jhan/ab26/orchestrator26.sh via andoria,
+pending host return): {0bf, aa8} × {clamp-all, fast-all} × 3 reps
+under today's RTM regime, PLUS 0bf + TRON_NO_RTM=1 × both freqs × 2 =
+POSITIVE CONTROL recreating the June regime. Per-cell power + per-cell
+wait-regime provenance (engine banner grep → cellmap.txt).
+Predictions: RTM arms ~+7-8% response, fast-all absolute ABOVE 102.6;
+no-RTM arm ~+13% response, absolute LOWER → case closed with the
+mechanism demonstrated live. Leftover small item either way: the
+aa8-vs-0bf −3% serving decode; diff candidates = 56c-map internal
+structure (attention-via-HT-sibling; active even at matched app-cores
+pins since each build loads its own yaml), arena-allocator default
+flip 6590b12915 (test: TRON_USE_ARENA_ALLOCATOR=0; acceptance gate was
+±2%), client-disconnect cancel (serving-only; inert without disconnect
+churn).
 
 Power consumption (turbostat PkgWatt, same host/instrument, load-window
 means; measured 2026-07-16 from the era run folders):
