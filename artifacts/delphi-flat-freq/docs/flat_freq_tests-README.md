@@ -1448,3 +1448,51 @@ pending user go): serving path, deployed binary, 2x2x3 =
   loop under serving. Caveat: clamp-all is slightly harsher than the
   boot-default clamp (which left the 16 PCT boot cores fast — 10% of
   busy samples in the Jun-30 turbostat); noted for interpretation.
+
+### 2026-07-17 — ab25 RESULT: geometry does NOT explain the decode gap; residual isolated to serving-process-or-build
+
+Ran 11:44-12:28 UTC in the post-nightly window (kit /scratch/jhan/ab26/../ab25/,
+journal + per-cell power + journald pinning evidence in results/).
+Serving path, deployed binary (0e50a645), gpt-oss tp4 x2, talos
+nightly-parity client (u8 p1024 g1536 capture 896-1024, fresh
+SEED_OFFSET per cell, cached 69-71 verified all 12 cells). 2x2x3:
+
+| arm                    | decode (n=3) | prefill | TTFT ms | PkgWatt @ Bzy_MHz |
+|------------------------|--------------|---------|---------|-------------------|
+| legacy geom, clamp-all | 86.48        | 645.5   | 1626    | 551 @ 2694        |
+| legacy geom, fast-all  | 93.69        | 817.3   | 1304    | 708 @ 4024        |
+| native geom, clamp-all | 89.70        | 735.0   | 1436    | 579 @ 2698        |
+| native geom, fast-all  | 96.05        | 896.7   | 1187    | 796 @ 4028        |
+
+- Decode frequency-response THROUGH SERVING: legacy geometry +8.3%,
+  native +7.1% — nowhere near runtron's +13.7% anchor. GEOMETRY
+  (40-phys legacy vs 48+8HT die-aware slices) moves response only ~1pp.
+  Prefill response: +26.6% legacy / +22.0% native (prefill is MORE
+  clock-responsive through serving than runtron's parse +16.4%; the
+  anomaly is decode-only).
+- CONSISTENCY CHECKS PASSED: all-core toggle (+7.1% native) beats
+  ab22's 112-set-only toggle (+5.7%) by ~1.3pp ~= the directly measured
+  +1.2% rinzler-core effect. Pinning verified per provisioning from
+  journald (legacy arms: 27-36,37-46,51-60,61-70 / 75-84,85-94,99-108,
+  109-118 with rewritten dev-cores; native arms: slice layout).
+- MAP VALUE CONFIRMED through serving: native beats legacy geometry
+  absolutely at both clocks (+3.7% decode / +13.9% prefill at clamp;
+  +2.5% / +9.7% at fast) — PR-3070's extra workers + slice structure
+  are real wins.
+- POWER (directive 0): fast-all = 796 W pkg (native) — +136 W over the
+  deployed tron112 shape (~660 W) for only ~+1.3% decode vs the
+  112-set toggle. tron112 remains the right production shape; fast-all
+  is a diagnostic arm only. clamp 551-579 W. RAMWatt flat 51-53 W.
+- REMAINING UNKNOWN, now sharply bounded: runtron +13.7% (build
+  ae82870a) vs serving +8.3% (deployed 0e50a645) at MATCHED geometry
+  and toggle scope = ~5.4pp attributable to (a) the serving process
+  execution structure, or (b) the newer build lineage having lost
+  decode clock-sensitivity. Discriminator = ab26 (runtron freq A/B on
+  0bf and aa8 lineages, flat-all vs clamp-all, 3 singles each,
+  checkerboard harness with RUNTRON_BIN override — env wins per
+  config/checkerboard.defaults.env:12). Predictions: both lineages
+  ~+13% => serving process is the diluter -> perfetto attach-the-waits
+  on the engine loop under serving next. aa8 ~+8% with 0bf ~+13% =>
+  the PR-3070-lineage ENGINE lost clock response -> diff engine
+  changes; serving exonerated. Both ~+8% => condition-of-day confound,
+  re-examine (bitfile, corpus, prompts).
