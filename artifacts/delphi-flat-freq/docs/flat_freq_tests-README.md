@@ -1356,3 +1356,95 @@ POWER: this run predates directive (0) per-arm capture. Single live
 datapoint mid-run (power_capture.sh smoke, 23:05 UTC): 732 W pkg @
 3902 MHz busy — flat-freq loaded band + client burst. Any rerun must
 wrap cells with power_capture.sh start/stop.
+
+### 2026-07-17 — Eddy's under-stress claim REFUTED (inverted); four decode-gap hypotheses killed in one night; ab25 designed
+
+1) EDDY CLAIM ("CI sends one prompt at 1K; tronperf loops different user
+prompts, so tronperf stresses more") — VERDICT: FALSE, direction inverted.
+Verified three ways (stock-source trace, Mongo empirical audit of real
+nightlies, tool identification; all adversarially re-derived):
+- Stock talos CI at p1024/8u/10r sends 80 UNIQUE prompts per run:
+  seed = round*n_users + user (stock testlib/tps.py:144), distinct
+  sharegpt convo per seed + unique seed-derived "[TIME: hh:mm:ss]"
+  system message (prompt.py:60-71). Full HTTP/SSE serving path,
+  ignore_eos, generate_length 1536 (perf.py:135-146; n_rounds=10).
+- Last 5 recorded 3bda nightlies (Mongo, 400 requests): TTFT median
+  1.17-1.33 s, 0% under 300 ms, cached_tokens only {0, 71} (~7% =
+  chat-template preamble). Real cold prefill every request, every night.
+- "tronperf" is NOT a load generator: it is the perfetto tracing wrapper
+  around runtron (tron/perfetto/tronperf; exec's runtron --trace-gen).
+  Its recorded invocation (run-tronperf.sh) sends 8 FIXED Moby Dick
+  chapter prompts (/scratch/prompts/md_chN.txt, chapter i+1 per user i,
+  identical every run), one-shot batch at t=0, no loop. The only loop
+  (--iterations, unused) REPLAYS the same prompts as prefix-cache hits
+  (tokens_reused) — i.e. it stresses LESS than CI, not more.
+- Kernel of truth worth fixing (goes into the systems_test PR):
+  (a) the stock 80-prompt set is byte-identical every run/night (no
+  RNG, no SEED_OFFSET upstream), so any back-to-back same-model
+  same-config rerun is ~100% prefix-cache hit; the nightly escapes only
+  because it rebuilds tron and provisions 8 other model configs before
+  gpt-oss (hugepage KV evicted). (b) prefill = CONFIGURED
+  prompt_length / TTFT, never cache-corrected (tps.py:340, perf.py:325;
+  verified empirically: 729.86 = 1024/1.403 exactly) — under cache hits
+  it would silently report ~10,000 tok/s. Hardening: date-derived
+  SEED_OFFSET upstream + cache-aware prefill (subtract cached_tokens,
+  fail-loud when cached_tokens > preamble or TTFT < 0.3 s).
+- Our A/B data is unaffected: patched SEED_OFFSET ranges; all 26
+  sessions from 07-16 re-verified in Mongo (cached <= 71, 0% TTFT<0.3s).
+
+2) DECODE-GAP LEDGER — four deaths recorded 07-17 (workflow + agents):
+- SPECULATION: DEAD. gpt-oss CANNOT speculate on any binary present —
+  speculation is EAGLE-draft-based and no eagle-ingested-gpt-oss-120b
+  entry/weights exist (model-definitions.i has eagle for llama-8b/70b
+  only). platformd sets TRON_USE_SPECULATION=1 (schema default true)
+  but find_eagle_model silently clears it (full.cpp:306-356, verified
+  in journald: zero EAGLE lines in gpt-oss windows). BOTH harnesses ran
+  gpt-oss spec-off. Also: zero spec-on checkerboard artifacts exist on
+  any host tree (1012/1012 cells Speculation:0 — never invoked).
+  NOTE: the llama trio DOES run EAGLE speculation in production.
+- METRIC DEFINITIONS: DEAD (<=2-3pp; both harnesses decode-only,
+  TTFT-excluded, linear in uniform speedup; file:line audited twice).
+- PHASE OVERLAP (H3): DEAD. runtron prefills are batch-interleaved:
+  all 4 users' parses complete within 18 us of each other BEFORE the
+  first decode token (microsecond log forensics, multi-sweep-20260701-
+  052049 cell); checkerboard's generate window is pure batched decode,
+  structurally like talos's 896-1024 capture window. Overlap ~0.0002%.
+- 0bf-PARTIAL-CLAMP: DEAD. ab22 serving pinned BOTH builds to the same
+  fast-set layout — platformd's RZ_CLI_ARGS --app-cores overrides the
+  binary's built-in map (journald-verified: rz0/2 = 24-71+HT151-158,
+  rz1/2 = 96-143+HT223-230, 0/56 outside the fast set). 0bf's +5.14%
+  is clean like-for-like.
+- RINZLER-CLAMPED-CORES (H2): CLOSED as minor, quantified. The serving
+  front-end (SSE egress + chat template) is a serial ~4% of the token
+  period at fixed 2700; boosting exactly those cores gave +1.2 +- 0.06%
+  decode (P4.3, 3/3 pairs). Covers ~1.2pp of the ~8pp gap.
+- CLEAN ANCHORS: checkerboard freq response +13.7% gen / +16.4% parse
+  (same-build ae82870a pair, clamp and flat turbostat-verified);
+  serving freq response +5.1% (0bf) / +5.7% (aa8) at identical
+  placement (ab22). Talos samples DEEPER context (~1.9-2.0k) than
+  checkerboard's window average (~1.5k), where attention share is
+  LARGER — the anomaly direction is real, not definitional.
+- REMAINING HYPOTHESES: (a) worker GEOMETRY — checkerboard instances =
+  40 phys cores, no HT (legacy layout); serving instances = 48 phys +
+  8 HT in die-aware slices; (b) serving-process residual (rinzler
+  engine loop vs runtron in-process). Discriminator = ab25.
+
+3) ab25 DESIGN (kit staged; install blocked by session permissions,
+pending user go): serving path, deployed binary, 2x2x3 =
+  {GEOM old = legacy layout via drop-in wrapper rewriting --app-cores/
+   --dev-cores (inst0 27-36,37-46,51-60,61-70 dev 25,26,49,50; inst1
+   75-84,85-94,99-108,109-118 dev 95,119,120,121) | GEOM new = native}
+  x {clamp-all = ALL 288 cpus clos3 (2700) | fast-all = ALL clos0
+   (~3.9GHz at this load)} x 3 interleaved reps.
+  Nightly-parity client on 3af6 (u8 p1024 g1536 capture 896-1024,
+  fresh SEED_OFFSET 9000+), per-cell power_capture.sh (directive 0),
+  journald pinning verification with abort-on-mismatch, window gate
+  11:28-13:45 UTC, full restore (trio + tron112 shape) at end/abort.
+  PREDICTION: old-geom freq response ~+13% => geometry explains the
+  gap (serving path exonerated; CI decode numbers are honest for the
+  production placement — the checkerboard layout is simply more
+  clock-sensitive per worker). ~+6-7% => the serving process itself
+  is the diluter => next step perfetto attach-the-waits on the engine
+  loop under serving. Caveat: clamp-all is slightly harsher than the
+  boot-default clamp (which left the 16 PCT boot cores fast — 10% of
+  busy samples in the Jun-30 turbostat); noted for interpretation.
