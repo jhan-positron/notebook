@@ -26,7 +26,7 @@ canonical one changes.
   TRON-80 run (3af6), the TRON-88 and 3-tier rounds (3bda), and the
   PR-3070 A/B/C ladder (3af6, 2026-07-09).
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md
-  (created v2), handoffs/claude_20260702-20260709_debug-3bda-flat-freq-run-ci-tests.md
+  (created v2), handoffs/claude_20260702-20260717_debug-3bda-flat-freq-run-ci-tests.md
   (benchmark usage). Central results doc:
   delphi-3bda:/scratch/jhan/flat_freq_tests/README.md
 - NOTE: frequency state applied by this tool does NOT survive a reboot.
@@ -62,7 +62,7 @@ canonical one changes.
   hand-derived flat_freq_apply argument for the
   https://github.com/positron-ai/tron/pull/3070 core map.
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md,
-  handoffs/claude_20260702-20260709_debug-3bda-flat-freq-run-ci-tests.md.
+  handoffs/claude_20260702-20260717_debug-3bda-flat-freq-run-ci-tests.md.
 
 ## test-scripts/
 
@@ -140,11 +140,38 @@ canonical one changes.
   tron80 present), applies tron84 (workers + rinzler 24,48,72,96 + sibs
   -> CLOS0), double readback for provenance. Baseline = Jul 10/11 tron80
   nightly pair.
+- ab22_client_3af6.sh / ab22_orchestrator_3bda.sh
+  - Canonicals: delphi-3bda:/scratch/jhan/ab22_client_3af6.sh and
+    delphi-3bda:/scratch/jhan/ab22_orchestrator_3bda.sh (shared filer)
+  - What they are: the ab22 serving-path A/B kit (3bda orchestrator +
+  3af6 client) from the decode-gap investigation; see the run-ci-tests
+  handoff for the round's design and results.
+- ab23_orchestrator_3bda.sh / rz_wrapper.sh
+  - Canonicals: delphi-3bda:/scratch/jhan/ab23/orchestrator.sh (NOTE:
+    canonical lives under ab23/ under the shorter name; mirror refreshed
+    from it 2026-07-17) and delphi-3bda:/scratch/jhan/ab23/rz_wrapper.sh
+  - What they are: the ab23 coordinator-placement A/B kit (verdict: NULL
+  at n=13, hypothesis retired — see the run-ci-tests handoff).
+- p43_rinzler_boost.sh / p43_worker_toggle.sh / loadgen.py / role_busy.py
+  - Canonicals: delphi-3bda:/scratch/jhan/p43/{p43_rinzler_boost.sh,
+    p43_worker_toggle.sh,loadgen.py,role_busy.py}
+  - What they are: the p43 rinzler-boost / worker-toggle experiment kit
+  with its load generator and per-role busyness monitor.
+- power_capture.sh
+  - Canonical: delphi-3bda:/scratch/jhan/tools/power_capture.sh
+  - What it is: the standard start/stop turbostat power-capture wrapper
+  (auto PkgWatt/RAMWatt summary) mandated by the 2026-07-16
+  every-test-captures-power directive (see the handoff prompt's results
+  rule).
+- compare_csv.py
+  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/compare_csv.py
+  - What it is: checkerboard results-CSV comparison helper (per-config
+  keyed geomeans) used by the A/B rounds. Preserved 2026-07-17.
 - All benchmark runners scrub the SYSTEM_CONFIG/TRON_LOG_LEVEL/SPDLOG_LEVEL env landmines and
   set CHECKERBOARD_MEMLOCK_KB=197971044 (host limit < checkerboard's 200 GB
   default). The marked THE BENCHMARK COMMAND block in each is the exact
   manual invocation.
-- Related handoffs: handoffs/claude_20260702-20260709_debug-3bda-flat-freq-run-ci-tests.md.
+- Related handoffs: handoffs/claude_20260702-20260717_debug-3bda-flat-freq-run-ci-tests.md.
 
 ## docs/
 
@@ -197,6 +224,6 @@ canonical one changes.
     discrete grant rungs (4400/4100/2700, no 4200). All numbers are
     measured turbostat values from the 2026-07 benchmark rounds.
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md,
-  handoffs/claude_20260702-20260709_debug-3bda-flat-freq-run-ci-tests.md,
+  handoffs/claude_20260702-20260717_debug-3bda-flat-freq-run-ci-tests.md,
   handoffs/codex_2026-06-22-2026-06-30_configure-xeon-6-core-speeds.md,
   handoffs/codex_2026-06-29-2026-06-30_explore-core-power-feature.md.

@@ -94,8 +94,8 @@ log "window open"
 $ISST --cpu 15,87,159,231 core-power assoc --clos 0 >/dev/null 2>&1
 bash /scratch/jhan/p43/p43_worker_toggle.sh fast >> "$AB/journal.log" 2>&1
 
-SEED=5000
-for rep in 1 2 3; do
+SEED=6000
+for rep in 4 5 6 7 8 9 10 11 12 13; do
   set_arm stock
   run_cell "stock_r$rep" "$SEED"; SEED=$((SEED+100))
   set_arm dedic

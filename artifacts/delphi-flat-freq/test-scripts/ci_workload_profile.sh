@@ -61,7 +61,7 @@ for p in "${PIDS[@]}"; do for t in /proc/$p/task/*/status; do
   awk -v f="$t" '/^Name|^Pid|^voluntary_ctxt|^nonvoluntary_ctxt/ {print f": "$0}' "$t"; done; done > ctxt-before.txt
 ISST="sudo -n /opt/intel-speed-select/intel-speed-select"
 { $ISST --cpu 27 core-power get-assoc; $ISST --cpu 0 core-power get-config --clos 3; } > isst-shape.txt 2>&1
-sudo -n turbostat --quiet --show Package,Core,CPU,Busy%,Bzy_MHz -i 5 -n 2 > turbostat-before.txt 2>&1 &
+sudo -n turbostat --quiet --show Package,Core,CPU,Avg_MHz,Busy%,Bzy_MHz,PkgWatt,RAMWatt -i 5 -n 2 > turbostat-before.txt 2>&1 &
 TSPID=$!
 
 # --- 1. perfetto system trace ---
