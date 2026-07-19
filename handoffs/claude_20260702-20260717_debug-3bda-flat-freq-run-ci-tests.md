@@ -81,8 +81,34 @@ shape; perf/W at fast-all = 96.05/796 = 0.121 tok/s/W vs clamp
 89.70/579 = 0.155 (CPU-package basis; system-level still improves,
 FPGA-dominated).
 
-RESIDUAL — LEADING EXPLANATION FOUND 07-17 evening (wait-regime
-confound; evidence-complete pending the ab26 live control):
+RESIDUAL — CLOSED 2026-07-19 (ab26 v5 + ab27 live controls). FINAL:
+the flat-freq fix's true, reproducible effect on the current stack
+(gpt-oss tp4, 8u) is PREFILL +16-18% / DECODE +5-8%, consistent across
+serving AND runtron with every software knob controlled. The June
++13.7% decode anchor was an ERA-SPECIFIC HOST STATE in the CLAMPED arm
+(June clamp 90.6 vs today 95.0-97.8 at matched binary behavior,
+bitfile 01.05.08.00 unchanged; fast arms agree across all eras). It
+did not survive the Jul-17/18 maintenance and is not reconstructable
+(no uncore telemetry in the era captures). Controls that closed it:
+- ab26 v5 (2-instance, 20/20 clean): 0bf RTM +7.7% (95.80->103.18),
+  aa8 RTM +5.4% (97.81->103.08), aa8 TRON_NO_RTM +7.9%
+  (97.76->105.51, banner-verified both instances) => the wait-regime
+  hypothesis REFUTED at real topology (the v3/v4 regime effect was an
+  artifact of the SYSTEM_CONFIG-broken single-instance runs). The
+  RTM-was-off-in-June FACT stands; it is not the mechanism.
+- ab27 (allocator A/B, 14/14 clean; June builds compiled arena=OFF,
+  0bf=ON, reverted via TRON_USE_ARENA_ALLOCATOR=0): legacy heap
+  +6.2% (95.02->100.96) vs arena +5.9% (96.64->102.37) => allocator
+  hypothesis REFUTED (arena worth ~+1.5% absolute, small).
+- Root cause of the ab26 v2-v4 instance failures: the DOCUMENTED
+  SYSTEM_CONFIG landmine (~/.bashrc exports --instance 1,2; env beats
+  argv, driver.cpp:166-172; the maintenance reboot killed the shell
+  where it had been unset — 0/84 pre-reboot vs 84/84 post-reboot logs
+  carry the override). Fixed by unset in orchestrators; durable
+  dotfile fix + API-key rotation = user action.
+RETIRE the +13-15% decode expectation. CI was always honest.
+
+Historical note (superseded analysis kept for the record):
 **the +13.7% anchor era ran with TSX/RTM DISABLED on 3bda.** Evidence:
 mwaitx.cpp at ae82870a already logs "INIT: Intel RTM (TSX) supported"
 (identical code at 198650bf), yet the FULL archived Jun-30 + Jul-3
@@ -710,11 +736,21 @@ On GitHub (jhan-positron/notebook):
    state above). Coordinator placement retired as the -3% mechanism; the
    aa8 serving-decode cost is unexplained again. Next mechanism
    candidates live in the wait-structure item below.
-1b. [NEXT, blocked on maintenance] ab26 build-lineage control — the
-   decode-gap decision point (design + decision tree in DECODE-GAP
-   STATUS). Then, per its outcome: perfetto attach-the-waits on the
-   serving engine loop (tooling already staged:
-   scripts/ci_workload_profile.sh) OR engine-diff hunt ae82870a→0e50a645.
+1b. RESOLVED 2026-07-19: ab26 v2-v5 + ab27 executed; decode-gap CLOSED
+   (see DECODE-GAP STATUS final block). True effect: prefill +16-18%,
+   decode +5-8%; June anchor = era-specific host state, retired.
+   NEW user actions from the arc: (i) add `unset SYSTEM_CONFIG` to
+   delphi-3bda-setup.sh (landmine revives on every reboot; my
+   orchestrators scrub it but manual runs are exposed); (ii) ROTATE
+   the plaintext OpenAI/Anthropic API keys exported world-readable in
+   the NFS-shared ~/.bashrc and move them out of dotfiles.
+   NEW team-note items: ci-runner.sh clear_hugepage_residue globs miss
+   the slice-K-of-8 naming; harness defense-in-depth (env -u
+   SYSTEM_CONFIG in run-benchmark.sh); single-instance topologies are
+   markedly spin-pause-sensitive (v3/v4 data) — relevant to any
+   1-instance deployment with RTM off; arena allocator is worth ~+1.5%
+   decode (small, positive); verify tsx=on fleet-wide anyway (RTM-off
+   costs showed up in the broken topology and June ran without it).
 2. [user] Send the team note (draft in transcript; add the 2x2 composite
    +17.7%/+2.4%, the -3% aa8 serving-decode finding + the ab23 null
    [placement is NOT the mechanism], the decode-gap ledger + ab25

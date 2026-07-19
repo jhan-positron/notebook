@@ -1557,3 +1557,81 @@ today's host. Per-cell power capture + per-cell wait-regime provenance
 response, fast-all absolute ABOVE 102.6; D ~+13% response, absolute
 LOWER. That outcome closes the decode-gap investigation with the
 mechanism demonstrated live.
+
+### 2026-07-18/19 — ab26 v2-v5 + ab27: the decode-gap investigation CLOSED
+
+THE ARC (each step evidence-verified; kits/results under /scratch/jhan/
+ab26/ [results_v2run, results_v3run, results_v4run, results=v5] and
+/scratch/jhan/ab27/):
+
+1) ab26 v2-v4 all lost one runtron instance per launch (48/48). Root
+   cause (debug agent, file:line): the DOCUMENTED SYSTEM_CONFIG
+   landmine — ~/.bashrc exports SYSTEM_CONFIG="--instance 1,2" and the
+   engine applies env OVER argv (driver.cpp:166-172), so BOTH
+   instances configured as instance 1,2 and flock-raced on
+   libpos-slice-4 (huge.cpp:335, 8 tries x 50ms*2^n = 6.35s = the
+   observed death gap). Jul-14/15 worked only because a long-lived
+   shell had `unset SYSTEM_CONFIG`; the Jul-18 01:38 maintenance
+   reboot revived the landmine (0/84 pre-reboot logs carry the env
+   override line; 84/84 post-reboot do). "Active" hugepage files are
+   flock-only — no stale-flag mechanism exists; the v3/v4 hugepage-
+   hygiene and warm-store theories were wrong. FIX: unset in every
+   orchestrator (v5+); durable fix = unset in delphi-3bda-setup.sh
+   (user decision; also rotate the plaintext API keys exported by the
+   same world-readable NFS dotfile).
+   SIDE-BUG for the team: ci-runner.sh clear_hugepage_residue globs
+   only libpos*/rinzler-* and misses the new slice-K-of-8 naming.
+
+2) ab26 v5 (clean, 20/20 launches failed=0, 2 instances, warm store,
+   per-cell regime provenance; runtron path, all-core clamp/fast
+   toggle, 3 reps):
+   | arm            | gen clamp | gen fast | gen resp | parse resp |
+   |----------------|-----------|----------|----------|------------|
+   | 0bf RTM        | 95.80     | 103.18   | +7.7%    | +17.7%     |
+   | aa8 RTM        | 97.81     | 103.08   | +5.4%    | +15.6%     |
+   | aa8 TRON_NO_RTM| 97.76     | 105.51   | +7.9%    | +16.3%     |
+   THE RTM/WAIT-REGIME HYPOTHESIS IS REFUTED at real topology: the
+   no-RTM control (banner-verified in both instances) shows NO clamp
+   penalty and NO response inflation. The dramatic regime effect seen
+   in v3/v4 was specific to the SYSTEM_CONFIG-broken single-instance
+   topology (worth a note to the tron team, not our answer). The RTM
+   log-absence discovery stands as FACT (June ran RTM-off) but is not
+   the June-anomaly mechanism. Session power: 595 W pkg @ 3367 MHz
+   (mixed arms), RAM 52 W.
+
+3) PRECISE LOCALIZATION: across eras the FAST arms agree (June 102.6;
+   v5 103.1-103.2; ab27 101.0-102.4) — the entire June-vs-now delta is
+   the CLAMPED arm: June 90.3-90.6 vs today 95.0-97.8, i.e. clamped
+   decode got ~5-7% FASTER despite today's clamp-all being harsher
+   than June's boot-default clamp.
+
+4) ab27 (allocator A/B; GitHub-verified differential: June builds
+   compiled TRON_ARENA_ALLOCATOR_DEFAULT_ON=OFF, 198650bf+=ON;
+   runtime-reverted via TRON_USE_ARENA_ALLOCATOR=0; 14/14 clean,
+   provenance from the pos_heap_setup log line):
+   | 0bf arm     | gen clamp | gen fast | resp  | parse resp |
+   |-------------|-----------|----------|-------|------------|
+   | legacy heap | 95.02     | 100.96   | +6.2% | +18.0%     |
+   | arena       | 96.64     | 102.37   | +5.9% | +18.2%     |
+   ALLOCATOR HYPOTHESIS REFUTED: legacy heap does NOT recreate June's
+   slow clamp arm. (Arena is worth ~+1.5% absolute — nice, small.)
+
+5) FINAL ATTRIBUTION: with software fully controlled (build, map,
+   geometry, allocator, wait regime, spec, metrics, cache-coldness,
+   path) and the bitfile unchanged (01.05.08.00 all eras), the June
+   +13.3-13.7% decode response is an ERA-SPECIFIC HOST STATE in the
+   clamped arm that did not survive the Jul-17/18 maintenance
+   (candidates: BIOS/uncore/memory config, microcode; June-era
+   turbostat has no uncore column so it is not reconstructable).
+   Every recreation attempt on today's host converges to +5-8%.
+
+== BOTTOM LINE (the original question, finally) ==
+The flat-frequency fix's TRUE, REPRODUCIBLE effect on the current
+stack (gpt-oss-120b tp4, 8 users) is:
+  PREFILL/PARSE : +16-18%  (every harness, every era — rock solid)
+  DECODE        : +5-8%    (serving AND runtron, all controls agree)
+CI (talos) was always honest. The +13-15% decode expectation came from
+June-era checkerboard runs whose CLAMPED baseline was anomalously slow
+(era-specific host state + unlucky timing of the never-explained
+config); it should be RETIRED as a target. Deployed tron112 remains
+the right shape (ab25: fast-all costs +136 W for ~+1.3%).
