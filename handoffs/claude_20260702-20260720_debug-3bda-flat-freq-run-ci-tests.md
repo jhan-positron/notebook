@@ -603,6 +603,21 @@ DECODE-GAP STATUS block above for the full story and tables)
   Artifacts); post-reboot/maintenance canary ritual defined (clamp+fast
   p1024 pair, alarm >3% drift — July-3's anomaly lived in the clamped
   arm, which the nightly never measures); per-run provenance mandatory.
+- ab30 (perfetto A/B, Jul-20 afternoon): the P4.3 "+1.2% from boosting
+  front-end cores" mechanism NAMED and adversarially verified. NOT
+  HTTP/SSE (Drogon = 46us/token; ZERO engine-thread wakeups by
+  front-end threads in 47k tokens, both arms): each instance's
+  `work_queue` thread — the forward-pass ORCHESTRATOR (FPGA job prep,
+  TX/RX descriptors, MoE routing, KV saves between mwaitx spin-waits)
+  — is confined by CPUAFFINITY to front-end cores 1/73 at ~99% duty,
+  putting ~2.9 ms of each ~9.9 ms iteration's orchestration on clamped
+  clocks (~0.84 ms clock-bound; serial share ~0.4 ms = the P4.3
+  number). mwaitx handoffs are sched-invisible — wake/block signatures
+  cannot be used on this stack. TEAM RECOMMENDATION: pin the two
+  work_queue threads to fast-CLOS cores (>= +1.2% decode, free);
+  follow-on target: the ~2.05 ms/iter clock-invariant MMIO/descriptor
+  path (~21% of the iteration). Evidence: README 07-20 ab30 section;
+  traces at /scratch/jhan/flat_freq_tests/20260720-14*.
 
 ## Artifacts
 
