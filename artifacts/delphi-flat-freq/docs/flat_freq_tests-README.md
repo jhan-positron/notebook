@@ -1687,3 +1687,47 @@ config lands. Re-fit constants after engine changes (one 30-min sweep).
 Full write-up + how-to-use: artifacts/delphi-flat-freq/docs/
 flat_freq_explained.html section "A model that predicts generation
 performance" (rendered-view link at top of file).
+
+### 2026-07-20 — DIRECTIVE (user): repro insurance — never lose an era's host state again
+
+Lesson: the July-3 clamped-decode anomaly is PERMANENTLY unexplainable
+because no record of that era's host configuration exists. Three-layer
+insurance now in force:
+
+(1) STATE CAPTURE — /scratch/jhan/tools/sysconfig_snapshot.sh (read-only,
+    ~520 diff-friendly lines): kernel cmdline (tsx/hugepages), BIOS ver +
+    microcode, isst feature state + ALL 288 CLOS assocs, uncore min/max,
+    governor + cpuidle states, RAPL limits, DIMM speeds, numa/hugepage/THP
+    state, boot freq-service config, tron/platformd versions +
+    resource-map md5, platformd config, instance envs (md5 + key lines),
+    FPGA PCIe LnkSta (degraded link = silent perf loss), login-shell env
+    landmines (SYSTEM_CONFIG etc.) + memlock, live engine provenance
+    banners (RTM/allocator/pinning).
+    WHEN: at the start of every experiment orchestrator (ab30+ MUST call
+    it into results/); after every reboot; BEFORE and AFTER any announced
+    maintenance; snapshots accumulate in /scratch/jhan/sysconfig_snapshots/
+    and get archived to the notebook repo
+    (artifacts/delphi-flat-freq/sysconfig-snapshots/).
+    DIAGNOSIS = diff two snapshots.
+    Baseline of record: delphi-3bda_20260720_045931.txt (tsx=on, uncore
+    800MHz-2.5GHz, tron112 assocs, RTM on, arena on, memlock OK).
+
+(2) PERFORMANCE FINGERPRINT (canary) — the July-3 anomaly lived in the
+    CLAMPED arm, which nothing routinely measures (nightly only runs the
+    production fast shape; its pass goals are far too loose to catch
+    drift: Friday ran at 178% of goal). Ritual: after any reboot or
+    maintenance, run ONE clamp-all + ONE fast-all p1024 cell (either
+    harness, ~10-15 min incl. restore) and compare BOTH absolutes and
+    the ratio against the trailing reference (currently: runtron
+    ~96/103 clamp/fast, serving ~90/96; alarm at >3% drift on any of
+    the four numbers). This catches a July-3-style baseline shift the
+    same day it happens, with the snapshot diff ready to explain it.
+    TEAM ASK (for the note + systems_test PR): add a clamped-arm canary
+    + trailing-median regression bands (+-5%) to the nightly, replacing
+    the static goals that a 6% drift would never trip.
+
+(3) PER-RUN PROVENANCE (already standard since ab26 v5): every cell
+    records failed_count, surviving instances, wait-regime banner,
+    allocator banner, cached_tokens, per-cell power; SYSTEM_CONFIG/
+    TRON_* scrubbed in every orchestrator. A result without provenance
+    doesn't enter the record.
