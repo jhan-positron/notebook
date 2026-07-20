@@ -835,19 +835,38 @@ On GitHub (jhan-positron/notebook):
   (29.1/19.9/17.5/16.6%); comm-truncation rule (TASK_COMM_LEN=16 turns
   "NNN/?-work_queue" into "NNN/?-work_queu" — enumerate per-pid, match
   loosely, never grep full thread-name suffixes).
-- ab32 (pin fix as-it-would-ship: taskset work_queue tids to fast cores
-  7/79 vs stock, clamp untouched, 3 interleaved reps): v3 aborted on a
-  verification bug (`ps -p <tid>` can't select a non-leader thread ->
-  empty psr -> guard fired; the taskset itself was fine). Stock_r1 from
-  v3 was clean: 102.29 decode t/s/u. v4 (pid-aware `ps -Lo`
-  verification, both arms verified, drift check at block end) RUNNING
-  as of ~20:40 UTC. Prediction: pinned ~= stock x1.012. Kit:
-  /scratch/jhan/ab32/ (v3 artifacts in results_v3_aborted/,
-  journal_v3.log).
-- Full detail appended to the canonical README on 3bda (2026-07-20
-  evening section). flat_freq_explained.html Effect-2 bullets need the
-  consolidated revision once ab32 reports (retire the "up to ~21%"
-  wording; add measured overlap + ab32 verdict + uncore guardrail).
+- ab32 COMPLETED (v7, 21:54 UTC) — the pin fix tested as it would ship
+  (taskset work_queue tids to fast cores 7/79 vs stock, clamp
+  untouched, 3 interleaved 240s pairs, placement verified per block):
+  **REGRESSION.** stock 96.56 t/s/u vs pinned 94.92 => decode -1.7%,
+  TTFT +11%, direction 3/3. Prediction (x1.012) REFUTED. REVISED
+  RECOMMENDATION: the work_queue fix is only safe in its FREQUENCY
+  form (CLOS clamp exemption of the front-end cores, P4.3's +1.2%);
+  migration off the front-end cores loses locality (HT-sibling/L2
+  adjacency to Drogon/SSE partners + mesh distance) worth more than
+  the +48% clock gain. Full table + kit lessons in the canonical
+  README ab32 section.
+- BONUS: the provisioning lottery — two same-host gpt-oss
+  provisionings 65min apart, sysconfig-snapshot-identical, measured
+  stock 102.29 vs 96.56 (-5.6%). Suspect: platformd instance<->unit/
+  FPGA-pair shuffle. n=2; brackets nightly-CI run-to-run variance
+  (each nightly = one provisioning draw). Next kit: capture rinzler
+  cmdlines (devices/dev-cores/numa) during runs.
+- ab32 debugging arc (v3->v7, all root-caused): ps -p can't see
+  non-leader tids; idle psr is stale (verify affinity via taskset
+  readback, psr only under load); engine threads rename from generic
+  "rinzler" comm only under streaming load (discover DURING a load
+  block); /v1/models-ready != first-inference-ready (prewarm each
+  port); `ssh 'setsid nohup x &'` never returns — use `setsid --fork`;
+  pgrep guards self-match if the launch string is in the same cmdline;
+  orchestrator waits must fail loud. Aborted attempts archived in
+  /scratch/jhan/ab32/ (journal_v*abort.log, results_v*_aborted/).
+- Docs synced: canonical README + mirror (ab31b + ab32 sections),
+  flat_freq_explained.html Effect-2 bullets revised (overlap prize
+  retired w/ measured ~88% overlap + 0.4-0.5ms serial head; pin-fix
+  bullet now frequency-form-only w/ ab32 numbers; uncore guardrail
+  bullet added; fig-note under the iteration diagram), artifact
+  republished same URL, all three copies synced.
 
 ## Open items / next steps (rewritten 2026-07-16; stale items resolved)
 
