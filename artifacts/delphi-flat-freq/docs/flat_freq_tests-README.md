@@ -1635,3 +1635,33 @@ June-era checkerboard runs whose CLAMPED baseline was anomalously slow
 (era-specific host state + unlucky timing of the never-explained
 config); it should be RETIRED as a target. Deployed tron112 remains
 the right shape (ab25: fast-all costs +136 W for ~+1.3%).
+
+### 2026-07-20 — ab28: prompt-length sweep on the CLEAN host — length-dependence CONFIRMED
+
+The June-era observation "longer prompts => bigger boost" survives every
+control. aa8 build, RTM on, SYSTEM_CONFIG scrubbed, warm store, 18/18
+launches failed=0 (both instances), checkerboard 2x4=8u, all-core
+clamp-all/fast-all toggle, 2 reps, per-cell power. Kit+results:
+/scratch/jhan/ab28/. Ran 02:42-03:16 UTC, restored before the nightly.
+
+| p=g len | gen clamp | gen fast | GEN boost | PARSE boost | PkgWatt clamp->fast |
+|---------|-----------|----------|-----------|-------------|---------------------|
+| 256     | 110.2     | 111.2    | +0.9% (noise) | +10.0%  | 530 -> 749 W        |
+| 1024    | 96.1      | 102.8    | +7.0%     | +14.8%      | (~same band)        |
+| 2048    | 81.7      | 89.9     | +10.1%    | +20.4%      |                     |
+| 4096    | 59.1      | 67.0     | +13.4%    | +26.6%      | 601 -> 840 W        |
+
+READINGS:
+- The SLOPE of the June curve was real; only its LEVEL was inflated by
+  the era host state (June p1024 +10.4% -> clean +7.0%; June p2048
+  +15.1% -> clean +10.1%).
+- Mechanism consistent with the wait-structure picture: decode attention
+  is CPU work proportional to context, so the clock-sensitive fraction
+  grows with length. Parse boost grows with length too (+10% at p256 ->
+  +26.6% at p4096).
+- HEADLINE QUALIFIER for all prior "+5-8% decode" statements: that is
+  the p1024 figure. At p4096 the flat-freq fix is worth +13.4% decode /
+  +26.6% parse — long-context workloads benefit substantially more.
+- RAMWatt rises with length (50-51 W at p256 -> 65-66 W at p4096) —
+  KV/attention memory traffic visible in the power channel.
+- p256 gen absolutes are noisy (short cells); its +0.9% is within noise.
