@@ -578,44 +578,66 @@ GENERATE_PATTERN = re.compile(r"Generating .* at ([0-9.]+) average tok/s")
       <text x="548" y="221" fill="#52514e" font-size="13" text-anchor="end">mean 10.4 ms → 97 tok/s (dark dot)</text>
     </svg>
   </div>
-  <p><strong>Effect 2 — the last ~0.4&nbsp;ms: an engine thread living on the clamped front-end
-  cores (mechanism traced by the July 20 perfetto A/B).</strong> It is <em>not</em> the
-  streaming: token delivery costs only 46&nbsp;µs/token, and in 60-second scheduler traces of both
-  arms, <em>no engine thread was ever woken by a front-end thread</em> — zero events across
-  47,472 tokens. The real mechanism: each engine instance's <span class="mono">work_queue</span>
-  thread — the forward-pass <em>orchestrator</em> that prepares and enqueues every FPGA matmul
-  job, writes descriptors, and does MoE routing between spin-waits — is confined by the process
-  affinity to front-end cores 1 and 73, running ~99% busy at the clamped 2.7&nbsp;GHz. About
-  2.9&nbsp;ms of every ~9.9&nbsp;ms iteration's orchestration executes there; ~0.84&nbsp;ms of it is
-  clock-bound, and the serial-path share works out to ~0.4&nbsp;ms — exactly the P4.3 number. So
-  what looked like "serving overhead" is really an <em>engine</em> thread that happens to live
-  on the front-end cores.</p>
+  <p><strong>Effect 2 — an engine thread living on the clamped front-end cores (mechanism traced
+  by the July 20 perfetto A/B).</strong> It is <em>not</em> the streaming: token delivery costs
+  only 46&nbsp;µs/token, and in 60-second scheduler traces of both arms, <em>no engine thread was
+  ever woken by a front-end thread</em> — zero events across 47,472 tokens. The real mechanism:
+  each engine instance's <span class="mono">work_queue</span> thread — the forward-pass
+  <em>orchestrator</em> that prepares and enqueues every FPGA matmul job, writes descriptors,
+  and does MoE routing — is confined by the process affinity to front-end cores 1 and 73, at the
+  clamped 2.7&nbsp;GHz. <strong>Important qualifier: this thread occupies its core ~99% of the
+  time, but ~70% of that occupancy is spin-waiting on FPGA completions — the real work is
+  ~2.9&nbsp;ms per ~9.9&nbsp;ms iteration (~29%).</strong> Of that 2.9&nbsp;ms, ~2.05&nbsp;ms is
+  hardware-latency-bound (register/descriptor access — insensitive to CPU clock) and
+  ~0.84&nbsp;ms is genuinely clock-bound. Clocking the core 2.7→3.9 shrinks the clock-bound part;
+  the slice of it the FPGA was actually waiting on is ~0.12&nbsp;ms per token — which is exactly
+  what +1.2% of a 9.9&nbsp;ms token means (P4.3 measured that +1.2% directly, three interleaved
+  pairs). So what looked like "serving overhead" is really an <em>engine</em> thread that
+  happens to live on the front-end cores.</p>
+  <div class="callout">
+    <p><strong>The kitchen version.</strong> The FPGA is the oven; the 112 workers are line cooks
+    at fast stations; <span class="mono">work_queue</span> is the <em>expediter</em> who writes
+    every order ticket and loads every oven tray — and the oven can't start a tray he hasn't
+    prepared. His desk sits in the slow corner of the kitchen (a clamped core). Most of his
+    2.9&nbsp;ms per cake is filling in forms with slow hardware (goes at the hardware's pace no
+    matter how fast he is); ~0.84&nbsp;ms is his own writing speed. Move his desk to a fast corner
+    and the tray-prep the oven was waiting on shrinks ~0.12&nbsp;ms per cake: +1.2%. The waiters
+    (SSE) just carry finished plates — 46&nbsp;µs, never once holding up the kitchen. And nobody
+    in this kitchen rings a bell when handing work over — they watch each other's counters
+    (spin-waiting) — which is why the OS's "who woke whom" ledger was blank and it took
+    stopwatch-style profiling to find the expediter.</p>
+  </div>
   <ul>
-    <li><strong>Free +1.2% decode</strong>: pin the two <span class="mono">work_queue</span>
-    threads to fast cores (two physical cores' worth of clamp exemption) — captures the effect
-    with no other change.</li>
-    <li><strong>Bigger follow-on target</strong>: ~2.05&nbsp;ms per iteration of the orchestrator's
-    work is I/O-latency-bound (hardware register/descriptor access) — about 21% of every token
-    that <em>no clock setting can speed up</em>. Overlapping or batching that path is a real
-    engine optimization opportunity.</li>
+    <li><strong>Free +1.2% decode (config-level change)</strong>: pin the two
+    <span class="mono">work_queue</span> threads to fast cores — two physical cores' worth of
+    clamp exemption, no engine code touched.</li>
+    <li><strong>Bigger follow-on target (engine code change)</strong>: up to ~2.05&nbsp;ms per
+    iteration of the orchestrator's work is hardware-latency-bound — clock settings cannot touch
+    it; the fix would be overlapping that work with FPGA compute (prepare tray N+1 while tray N
+    bakes). Honest caveat: how much of that 2.05&nbsp;ms sits on the serial token path versus
+    already overlapping is not yet measured — sizing it is the first step, and the upper bound
+    is ~21% of every token.</li>
     <li><strong>Method note</strong>: the engine hands work between threads by spinning
     (mwaitx/tpause), which the OS scheduler never sees — that's why wait/wakeup analysis showed
     nothing and it took CPU-duty + profiler evidence to find this.</li>
   </ul>
   <div class="tablewrap">
   <table>
-    <tr><th>Per-token reconstruction (p1024, fast workers)</th><th class="num">ms/token</th><th class="num">tok/s</th></tr>
-    <tr><td>Engine benchmark metric (averages ctx 1024→2048, mean ~1.5k)</td><td class="num">9.9</td><td class="num">103</td></tr>
-    <tr><td>Same engine, sampled only where CI samples (ctx 1920→2048)</td><td class="num">10.4</td><td class="num">97</td></tr>
-    <tr><td>+ the work_queue engine orchestrator running on clamped front-end cores (P4.3 + the July 20 trace)</td><td class="num">10.8</td><td class="num">93</td></tr>
-    <tr><td><strong>Friday's actual nightly CI measurement</strong></td><td class="num"><strong>10.77</strong></td><td class="num"><strong>92.9</strong></td></tr>
+    <tr><th>Per-token reconstruction (p1024, fast workers)</th><th class="num">ms/token</th><th class="num">tok/s</th><th>evidence</th></tr>
+    <tr><td>Engine benchmark metric (averages ctx 1024→2048, mean ~1.5k)</td><td class="num">9.9</td><td class="num">103</td><td>ab28 measured</td></tr>
+    <tr><td>Same engine, sampled only where CI samples (ctx 1920→2048)</td><td class="num">10.35</td><td class="num">97</td><td>ab28 model</td></tr>
+    <tr><td>+ serving stack at matched fast clocks (HTTP/SSE etc.)</td><td class="num">10.41</td><td class="num">96</td><td>ab25 measured</td></tr>
+    <tr><td>+ front-end clamp on the work_queue orchestrator (the +1.2%)</td><td class="num">10.53–10.58</td><td class="num">~95</td><td>P4.3 / ab22 measured</td></tr>
+    <tr><td>+ nightly run conditions (last of 9 configs, night state)</td><td class="num">10.77</td><td class="num">92.9</td><td>nightly measured</td></tr>
   </table>
   </div>
-  <p style="margin-top:0.75rem">Three independent measurements (the length-sweep fit, the P4.3
-  front-end toggle, the production nightly) agree through one formula — the reconstruction lands
-  within 0.1% of the real nightly number. Request-level divide at this shape: ~1.2&nbsp;s prefill
-  (TTFT) then ~16&nbsp;s of decode — roughly 7% / 93% of a request's wall time, which is why decode
-  throughput dominates what users experience.</p>
+  <p style="margin-top:0.75rem">Each step is separately measured, and the chain lands on the real
+  nightly number. (An earlier version of this table bundled the last three steps into one
+  "+0.4&nbsp;ms serving" row — numerically it added up, but it over-attributed to the orchestrator
+  clamp what actually splits across the serving stack (~0.06&nbsp;ms), the clamp itself
+  (~0.12–0.17&nbsp;ms), and night-vs-daytime run conditions (~0.19&nbsp;ms).) Request-level divide at
+  this shape: ~1.2&nbsp;s prefill (TTFT) then ~16&nbsp;s of decode — roughly 7% / 93% of a request's
+  wall time, which is why decode throughput dominates what users experience.</p>
   <p>Caveats: the constants are specific to this configuration (gpt-oss-120b tp4, 8 users, aa8
   build, RTM on; the serving-path terms above extend it to what CI measures); the model slightly
   over-predicts attention below ~1k context; re-fit the two constants after any engine change
