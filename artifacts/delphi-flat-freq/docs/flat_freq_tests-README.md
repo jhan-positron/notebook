@@ -1731,3 +1731,54 @@ insurance now in force:
     allocator banner, cached_tokens, per-cell power; SYSTEM_CONFIG/
     TRON_* scrubbed in every orchestrator. A result without provenance
     doesn't enter the record.
+
+### 2026-07-20 — ab30 perfetto: the "serving coupling" mechanism NAMED — it's the work_queue engine orchestrator on clamped cores (mechanism D)
+
+Setup: two 60s full-system sched traces under identical steady 8u decode
+load (loadgen 3af6 -> instance ports 13000/13001, mongo-independent),
+front-end cpus {1,2,73,74,+HT} clamped(2.7) vs boosted(3.9); perf
+record/stat per arm; idle-baseline traces for contrast; power +
+sysconfig snapshot per directive. Kits/results: /scratch/jhan/ab30/
+(results_noload = quarantined first attempt: loadgen endpoint-format
+bug; stale DONE-marker bug in orchestrator noted — clean REQ_*/DONE_*
+at start in future kits). Traces:
+/scratch/jhan/flat_freq_tests/20260720-1431*_ci-workload-profile-* and
+20260720-1436*; IDLE-BASELINE dirs from the no-load attempt.
+
+FINDINGS (analysis + independent adversarial re-derivation, exact match):
+1. HTTP/SSE is NOT the coupling: DrogonIoLoop totals 46 us/token
+   (~0.8 bursts/token, mean slice 57 us) and NO engine thread is ever
+   woken by a front-end thread: 0 events in 47,472 tokens (clamped) and
+   0 in 36,450 (boosted). Mechanisms A (sync handoff) and B
+   (backpressure) REFUTED as instrumented; pure interference (C) also
+   refuted (workers run 3.93 GHz with unchanged spin duty in both arms).
+2. THE MECHANISM (D): each rinzler instance's `work_queue` thread — the
+   forward-pass ORCHESTRATOR (perf callchain: work_queue::do_work ->
+   full_scheduler::forward -> hw_prepare / prepare_hardware_matmul_job /
+   write_tx/rx_descriptors / enqueue_hardware_matmul_job / moe_routing /
+   save_k/save_v, between mwaitx waits on FPGA completions) — is
+   confined by the process CPUAFFINITY taskset to front-end cores 1 and
+   73, ~99% busy, spawned on first request (absent in idle traces).
+   ~2.9 ms of every ~9.88 ms decode iteration's orchestration executes
+   at the clamp: ~2.05 ms/iter MMIO/latency-bound (CLOCK-INVARIANT) +
+   ~0.84 ms/iter genuinely clock-bound. Boost recovers ~0.25 ms/iter of
+   busy time; the client-visible +1.2% (0.117 ms/iter) = the serial-path
+   half; back-solving the serial 2.7GHz-equivalent gives ~0.38-0.4 ms =
+   exactly the P4.3 Amdahl number. All three measurements (P4.3 toggle,
+   ab28 model, ab30 traces) now close through one picture.
+   mwaitx/tpause handoffs are invisible to sched — hence zero wakeups;
+   trace analyses on this stack must not rely on block/wake signatures.
+3. HISTORICAL echo: this is the same work_queue thread as the old-map
+   prefill saga. PR-3070's map relocated the per-slice coordinators,
+   but the work_queue EXECUTOR still inherits the front-end taskset on
+   the deployed stack (0e50a645).
+CAVEAT: the ms decomposition (2.9/0.84/0.25) rests on the root-only
+perf profile; the sched+turbostat evidence is independently consistent
+(duty 29.2%@2.7 vs 26.7%@3.9 solves to the same split).
+
+RECOMMENDATION (tron team, concrete): pin/affine the per-instance
+work_queue threads to fast-CLOS cores (or add cores 1,73+siblings to
+the fast set — 2 physical cores, negligible power) => capture at least
+the +1.2% decode with no other change. Bigger follow-on target: the
+~2.05 ms/iter clock-invariant MMIO/descriptor path (~21% of the
+iteration) — clock won't help it; batching/overlap might.
