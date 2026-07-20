@@ -811,6 +811,44 @@ On GitHub (jhan-positron/notebook):
   the 07-14 portion of the live transcript; needs +2 lines: 2x2 composite,
   -3% engine decode finding, regime/ownership question).
 
+## 2026-07-20 evening addendum — mechanism sized (ab30-ab32)
+
+- ab30 (perfetto A/B, afternoon): each rinzler instance's `work_queue`
+  thread = the forward-pass orchestrator, CPUAFFINITY-confined to
+  clamped front-end cores 1/73; ~99% core occupancy but only ~29% real
+  work (~2.9ms/9.9ms iter). Drogon/SSE is 46us/token — HTTP is NOT the
+  serving cost. mwaitx/tpause handoffs are invisible to sched tracing —
+  never diagnose engine wakeups via block/wake signatures.
+- ab31/ab31b (uncore two-point probe): mesh 2.5->1.6GHz costs decode
+  -6.2% (long ctx) / -7.3% (short ctx) — context-INDEPENDENT => the
+  mesh-sensitive component is the fixed token path (descriptors/
+  doorbells), not attention. NEW OPS GUARDRAIL: an uncore cap silently
+  costs 6-7% decode; uncore state is in sysconfig_snapshot +
+  canary_reference.md.
+- ab31b phase profile (20s, 397k samples, instance-0): work_queue duty
+  26.9%, folded profile FLAT, anti-phased with worker attention
+  (corr -0.32, ~12% overlap), quiet/FPGA zone ~55% => orchestrator work
+  is ALREADY ~88% overlapped with FPGA compute. Genuinely-serial head
+  ~0.4-0.5ms/iter. THE "up to 2.05ms / 21% overlap opportunity" IS
+  RETIRED — remaining engine opportunity ~0.2-0.3ms latency-bound head.
+  Side findings: worker duty gradient within an instance
+  (29.1/19.9/17.5/16.6%); comm-truncation rule (TASK_COMM_LEN=16 turns
+  "NNN/?-work_queue" into "NNN/?-work_queu" — enumerate per-pid, match
+  loosely, never grep full thread-name suffixes).
+- ab32 (pin fix as-it-would-ship: taskset work_queue tids to fast cores
+  7/79 vs stock, clamp untouched, 3 interleaved reps): v3 aborted on a
+  verification bug (`ps -p <tid>` can't select a non-leader thread ->
+  empty psr -> guard fired; the taskset itself was fine). Stock_r1 from
+  v3 was clean: 102.29 decode t/s/u. v4 (pid-aware `ps -Lo`
+  verification, both arms verified, drift check at block end) RUNNING
+  as of ~20:40 UTC. Prediction: pinned ~= stock x1.012. Kit:
+  /scratch/jhan/ab32/ (v3 artifacts in results_v3_aborted/,
+  journal_v3.log).
+- Full detail appended to the canonical README on 3bda (2026-07-20
+  evening section). flat_freq_explained.html Effect-2 bullets need the
+  consolidated revision once ab32 reports (retire the "up to ~21%"
+  wording; add measured overlap + ab32 verdict + uncore guardrail).
+
 ## Open items / next steps (rewritten 2026-07-16; stale items resolved)
 
 1. RESOLVED 2026-07-16 23:27 UTC: ab23 confirmation = NULL at n=13 pairs
@@ -852,8 +890,10 @@ On GitHub (jhan-positron/notebook):
    think-time closed loop — p43 loadgen.py is the ready basis), mixed
    generate lengths (no ignore_eos), concurrency sweep >8.
 4. [next frontier] Wait-structure experiments (decode is ~85% waits @8u
-   through serving): TRON_LIVE_TOKEN_LIMIT / prefill chunk cadence,
-   uncore frequency. USE_HW_ATTN is OFF THE TABLE (user directive
+   through serving): TRON_LIVE_TOKEN_LIMIT / prefill chunk cadence.
+   UNCORE: RESOLVED 07-20 (ab31/ab31b — see evening addendum; -6..-7%
+   guardrail, mechanism sized, overlap prize retired).
+   USE_HW_ATTN is OFF THE TABLE (user directive
    07-17: never used in production; don't hide unknowns behind new
    features). Speculation-depth removed (dead — gpt-oss can't
    speculate). Optional: TSX-off cliff via TRON_NO_RTM=1; optional
