@@ -1782,3 +1782,51 @@ the fast set — 2 physical cores, negligible power) => capture at least
 the +1.2% decode with no other change. Bigger follow-on target: the
 ~2.05 ms/iter clock-invariant MMIO/descriptor path (~21% of the
 iteration) — clock won't help it; batching/overlap might.
+
+### 2026-07-20 evening — ab31/ab31b: the serial-share question ANSWERED (and the "2.05ms overlap prize" honestly retired)
+
+Three probes under steady 8u serving decode (loadgen, mongo-independent):
+
+(1) UNCORE PROBE, two context points (ab31 long ~1.5k ctx, ab31b short
+~0.4k ctx): pinning mesh/uncore 2.5 -> 1.6 GHz costs decode -6.2% (long)
+and -7.3% (short). Context-INDEPENDENT => the mesh-latency-sensitive
+serial component sits in the FIXED token path (orchestrator descriptor/
+doorbell traffic), NOT attention. ~0.6ms/token spill from a 56% mesh
+slowdown => the pipeline overlap has limited slack.
+OPS GUARDRAIL (new): uncore must run its full 0.8-2.5GHz range — a
+BIOS/power-management uncore cap silently costs 6-7% decode. Uncore
+state is in sysconfig_snapshot; treat any uncore change as a canary
+alarm. (Caveat: short block = high request churn, not a pure low-ctx
+decode measure; the 4x attention swing producing NO delta reduction is
+still decisive.)
+
+(2) PHASE PROFILE (ab31b phase.perf.data: 20s, 397,537 samples, 5
+threads — capture landed on instance-0 only; ~4.1kHz/thread since -F is
+shared): work_queue real-work duty 26.9% (~2.8ms/iter, matches ab30's
+2.9). THE KEY RESULT: the folded-iteration profile is FLAT (<=4pp
+modulation) and wq work is ANTI-phased with worker attention
+(corr -0.32; only ~12% of wq work overlaps attention; quiet/FPGA zone
+~55% of the period) => the orchestrator's work is SPREAD ACROSS THE
+ITERATION, INTERLEAVED WITH FPGA COMPUTE — the engine ALREADY pipelines
+job-prep under FPGA execution. The genuinely-serial head is small:
+~0.4-0.5 ms/iter — i.e. the clock-bound serial path we already knew.
+=> REVISION of the earlier "up to 2.05ms (~21%) overlap opportunity":
+MEASURED, that work is already ~88% overlapped. The remaining serial
+head ceiling is ~4-5% of the token, of which the pin fix captures the
+clock-scalable ~1.2%; the residue (~0.2-0.3ms latency-bound head) is
+the true remaining engine opportunity — real but modest.
+Caveats: single-instance capture; period jitter +-1ms limits head
+resolution below ~0.4ms; perf windows adjacent to (not inside) the
+perfetto-traced windows.
+
+(3) SURPRISES: (a) worker load GRADIENT within an instance — sampled
+workers' duty 29.1/19.9/17.5/16.6% (core 25/0 carries ~1.5x) — work not
+evenly shared; possibly interesting to the tron team. (b) THE COMM
+MYSTERY SOLVED: thread comm = "<cpu>/?-work_queue", and TASK_COMM_LEN=16
+truncates 3-digit-CPU names to "NNN/?-work_queu" (no trailing 'e') —
+which is why global `grep -- "-work_queue"` found nothing while per-pid
+enumeration worked. RULE: never grep engine thread names with full
+suffixes; enumerate per-pid and match loosely ("work_queu").
+
+ab31 v1 (aborted perf) + kits: /scratch/jhan/ab31{,b}/; analysis
+intermediates /tmp/jhan_phase.txt etc. on 3bda.
