@@ -487,17 +487,48 @@
   </ul>
   <h3>Where serving ("post-decode") fits — and why it's smaller than it looks</h3>
   <p>Extending the model to the serving path answers "why does CI decode read so much lower?"
-  precisely. The pure serving work per token — incremental detokenization, SSE chunk assembly,
-  the socket write — is a thin slice, <strong>~0.4&nbsp;ms (~4%) at the front-end cores' 2.7&nbsp;GHz</strong>
-  (measured directly by the P4.3 core-boost experiment). The rest of the benchmark-vs-CI gap is
-  the metrics measuring at different depths: the CI harness samples decode at ~2k context
-  (tokens 896–1024 after a 1k prompt), where the attention slice is simply bigger.</p>
+  precisely. Two effects stack, and neither is what it first looks like.</p>
+  <p><strong>Effect 1 — the metrics sample different depths of the same request.</strong> Each
+  token's cost <em>rises during a request</em> as context grows (token #1 attends over 1024
+  tokens; token #1024 attends over ~2048). The engine benchmark averages every token of the
+  request; the CI metric deliberately measures only tokens 896–1024 — the deepest, slowest strip:</p>
+  <div class="viz" style="margin:1rem 0">
+    <svg viewBox="0 0 660 300" role="img" style="width:100%; height:auto" aria-label="Per-token time rises across a request; the benchmark averages all of it, CI samples only the last strip">
+      <rect x="70" y="35" width="560" height="200" fill="#E6F1FB" rx="4"/>
+      <rect x="560" y="35" width="70" height="200" fill="#F0997B" opacity="0.55" rx="4"/>
+      <line x1="70" y1="235" x2="630" y2="235" stroke="#c3c2b7" stroke-width="1"/>
+      <line x1="70" y1="235" x2="70" y2="35" stroke="#c3c2b7" stroke-width="1"/>
+      <line x1="70" y1="196" x2="630" y2="77" stroke="#378ADD" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="350" cy="137" r="5" fill="#185FA5"/>
+      <circle cx="595" cy="85" r="5" fill="#993C1D"/>
+      <text x="70" y="252" fill="#52514e" font-size="12">ctx 1024</text>
+      <text x="332" y="252" fill="#52514e" font-size="12">1536</text>
+      <text x="598" y="252" fill="#52514e" font-size="12">2048</text>
+      <text x="350" y="272" fill="#898781" font-size="12" text-anchor="middle">context each token attends over (prompt 1024 + tokens generated so far)</text>
+      <text x="62" y="200" fill="#52514e" font-size="12" text-anchor="end">9.4</text>
+      <text x="62" y="81" fill="#52514e" font-size="12" text-anchor="end">10.4</text>
+      <text x="62" y="46" fill="#898781" font-size="12" text-anchor="end">ms/tok</text>
+      <text x="350" y="120" fill="#0b0b0b" font-size="13" text-anchor="middle">benchmark averages ALL tokens → 9.9 ms (103 tok/s)</text>
+      <text x="552" y="115" fill="#0b0b0b" font-size="13" text-anchor="end">CI averages only tokens 896–1024</text>
+      <text x="552" y="133" fill="#52514e" font-size="13" text-anchor="end">the deepest strip → 10.4 ms (97 tok/s)</text>
+    </svg>
+  </div>
+  <p><strong>Effect 2 — a small, real serving coupling (~0.4&nbsp;ms, mechanism not isolated).</strong>
+  The P4.3 experiment changed the clock of <em>only</em> the serving front-end cores and the
+  client-measured decode rate moved +1.2%&nbsp;±&nbsp;0.06% — proof the front-end couples into the token
+  rate, worth ~0.4&nbsp;ms/token at 2.7&nbsp;GHz. What P4.3 did <em>not</em> establish is the mechanism:
+  candidates are a synchronous per-token streaming callback, bounded-queue backpressure, or
+  shared-cache/uncore interference. (Note: chat-template tokenization is per-request work that
+  lands in TTFT, not in this per-token slice.) If it were pure pipelined delivery on separate
+  cores, a constant delay would cancel out of the CI window metric and the clock toggle would
+  have changed nothing — it didn't, so some coupling is real; a perfetto trace could name it if
+  it ever matters beyond ~4%.</p>
   <div class="tablewrap">
   <table>
     <tr><th>Per-token reconstruction (p1024, fast workers)</th><th class="num">ms/token</th><th class="num">tok/s</th></tr>
-    <tr><td>Engine benchmark metric (avg ctx ~1.5k): 8.27 floor + 1.6 attention</td><td class="num">9.9</td><td class="num">103</td></tr>
-    <tr><td>Same engine at CI's measurement depth (ctx ~2.0k): + 0.5 attention</td><td class="num">10.4</td><td class="num">97</td></tr>
-    <tr><td>+ serving front-end at 2.7&nbsp;GHz (SSE + detokenize, per P4.3)</td><td class="num">10.8</td><td class="num">93</td></tr>
+    <tr><td>Engine benchmark metric (averages ctx 1024→2048, mean ~1.5k)</td><td class="num">9.9</td><td class="num">103</td></tr>
+    <tr><td>Same engine, sampled only where CI samples (ctx 1920→2048)</td><td class="num">10.4</td><td class="num">97</td></tr>
+    <tr><td>+ serving coupling at 2.7&nbsp;GHz front-end (empirical, P4.3)</td><td class="num">10.8</td><td class="num">93</td></tr>
     <tr><td><strong>Friday's actual nightly CI measurement</strong></td><td class="num"><strong>10.77</strong></td><td class="num"><strong>92.9</strong></td></tr>
   </table>
   </div>
