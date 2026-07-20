@@ -737,6 +737,80 @@ GENERATE_PATTERN = re.compile(r"Generating .* at ([0-9.]+) average tok/s")
 </section>
 
 <section>
+  <h2>Does the CI test under-stress the system? — checked, and no</h2>
+  <p>A fair challenge raised during the investigation: maybe the CI test sends too few (or
+  repeated) prompts, and its rounds idle while waiting for the slowest request — so a "looping"
+  tool would stress the system harder. We verified this from the CI code and five nights of
+  recorded production data. The code says otherwise:</p>
+  <div style="background:var(--card); border:1px solid var(--ring); border-radius:8px; padding:0.9rem 1.1rem; overflow-x:auto; margin:0 0 1rem;">
+<pre class="mono" style="margin:0; font-size:0.78rem; line-height:1.55;">
+# testlib/tps.py:142-145 — a DIFFERENT prompt for every user in every round
+prompt = wkr.prompt_generator.generate(
+    prompt_length=wkr.config.prompt_length,
+    seed=round_index * wkr.config.n_users + index,   # 8 users x 10 rounds = 80 unique seeds
+)
+
+# testlib/prompt.py — each seed picks a different corpus conversation,
+# plus a seed-derived timestamp making every prompt unique even beyond that
+convo = self.convos[seed % len(self.convos)]['conversations']   # 1000-convo corpus
+system_prompt = {'from': 'system',
+                 'value': f'[TIME: {fake_time}] You are a helpful assistant.'}
+
+# testlib/tps.py:374 — every request decodes the FULL 1536 tokens, no early stop
+extra_body={ "ignore_eos": True },
+
+# testlib/tps.py:76,356 — 8 concurrent users, staggered 0.1 s
+stagger_delay: float = float(os.environ.get('STAGGER_DELAY', 0.1))
+time.sleep(user_index * config.stagger_delay)
+</pre>
+  </div>
+  <p>So one CI run = <strong>80 unique cold prompts</strong> through the full serving path, each
+  forced to generate all 1536 tokens, at 8-way concurrency. The barrier rounds are real (a round
+  ends when its last request finishes) — but because prompt and generation lengths are uniform,
+  all 8 users finish within ~1–2&nbsp;s of a ~17–19&nbsp;s round: <strong>~90% of every round runs at
+  full 8-user load</strong>, and the measured window samples only that saturated steady state.
+  The recorded data agrees: across five production nights (400 requests), zero requests show
+  cache-hit signatures — TTFT median 1.17–1.33&nbsp;s, never under 300&nbsp;ms, cached tokens only the
+  ~71-token template preamble.</p>
+  <p>The comparison tool, meanwhile, stresses <em>less</em>, not more. "tronperf" is a profiling
+  wrapper around runtron whose recorded use sends <strong>8 fixed Moby Dick chapters, once, with
+  no loop</strong> — and its only loop option replays the <em>same</em> prompts, which the engine
+  serves from the prefix cache:</p>
+  <div style="background:var(--card); border:1px solid var(--ring); border-radius:8px; padding:0.9rem 1.1rem; overflow-x:auto; margin:0 0 1rem;">
+<pre class="mono" style="margin:0; font-size:0.78rem; line-height:1.55;">
+# src/runtron.cpp:560-562 — user i always gets Moby Dick chapter i+1, identical every run
+int chapter = (i % N_CHAPTERS_MOBY_DICK) + 1;
+params.prompt_files.push_back("/scratch/prompts/md_ch" + std::to_string(chapter) + ".txt");
+
+# run-tronperf.sh (the recorded invocation) — one-shot batch, no loop flags at all
+perfetto/tronperf --gen -m llama-3.1-8b-instruct-good-tp2 \
+  --prompt-length 256 -l 256 --instance 0,2 --shared-system-prompt-length 64 -u 8
+
+# h/runtron/stream_generate.hpp:633-641 — the --iterations loop (unused in practice)
+# replays the SAME prompts vector; the engine counts them as prefix-cache reuse
+for (size_t iter = 0; iter < iterations; ++iter) {
+  response = stream_generate(scheduler, prompts, ...);
+  auto cur_reused_toks = tokens_reused(scheduler);
+</pre>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <tr><th></th><th>CI (talos)</th><th>tronperf / runtron</th></tr>
+    <tr><td>Prompts per run</td><td>80, all unique (corpus + unique timestamp)</td><td>8, fixed files, identical every run</td></tr>
+    <tr><td>New prompts each round/iteration</td><td>yes — fresh seed per round</td><td>no — the loop replays the same prompts (cache hits)</td></tr>
+    <tr><td>Path exercised</td><td>full serving path (HTTP, tokenize, SSE)</td><td>engine-direct, no serving stack</td></tr>
+    <tr><td>Decode length</td><td>full 1536, forced (ignore_eos)</td><td>as configured, one pass</td></tr>
+  </table>
+  </div>
+  <p style="margin-top:0.75rem">One kernel of the challenge <em>was</em> right and got adopted:
+  the CI's 80-prompt set is byte-identical every night (the seeds have no run-to-run variation),
+  and its prefill metric never corrects for cache hits — harmless tonight only because the
+  nightly rebuilds the engine and cycles 8 other models first. Back-to-back same-config reruns
+  would silently report ~10× fake prefill. The hardening (date-derived seed rotation,
+  cache-aware prefill with a fail-loud gate) is in the test-harness PR queue.</p>
+</section>
+
+<section>
   <h2>Useful things found along the way</h2>
   <ul>
     <li><strong>The nightly CI is trustworthy</strong> — it sends 80 unique prompts per run through the
