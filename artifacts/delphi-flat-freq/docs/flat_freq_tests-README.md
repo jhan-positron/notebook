@@ -1830,3 +1830,78 @@ suffixes; enumerate per-pid and match loosely ("work_queu").
 
 ab31 v1 (aborted perf) + kits: /scratch/jhan/ab31{,b}/; analysis
 intermediates /tmp/jhan_phase.txt etc. on 3bda.
+
+### 2026-07-20 late — ab32: the pin fix TESTED AS IT WOULD SHIP — and it LOSES. Recommendation revised.
+
+Question: does moving the two work_queue threads to idle FAST cores
+(taskset to 7 / 79, tron112 clamp untouched) deliver P4.3's +1.2%?
+Setup: 2x gpt-oss tp4, 8u loadgen (p~1k/g1024), 3 interleaved
+stock/pinned pairs of 240s, placement verified per block (affinity
+readback at set + psr under load mid-block and at block end), power
+captured per block, zero request errors.
+
+| rep | stock t/s/u (ttft) | pinned t/s/u (ttft) | pair delta |
+|-----|--------------------|---------------------|------------|
+| r1  | 97.48 (1.161s)     | 95.58 (1.264s)      | -1.9%      |
+| r2  | 95.32 (1.028s)     | 94.45 (1.211s)      | -0.9%      |
+| r3  | 96.87 (1.179s)     | 94.73 (1.262s)      | -2.2%      |
+| mean| 96.56 (1.123s)     | 94.92 (1.246s)      | **-1.7%**  |
+
+VERDICT: the migration form of the pin fix is a REGRESSION: decode
+-1.7%, TTFT +11%, direction consistent 3/3. Prediction (x1.012)
+REFUTED. Power/clock identical across arms (~732-739W, ~3650-3670MHz).
+
+INTERPRETATION (fits everything we've measured): the work_queue
+thread's stock placement on the front-end cores is LOCALITY-optimal —
+it shares HT siblings and L2/mesh neighborhood with the Drogon/SSE
+front-end threads it exchanges tokens with, and sits by the dev-cores.
+Migrating it to a fast core buys +48% clock on ~0.84ms of clock-bound
+work (~+1.2%) but pays MORE in handoff/mesh latency on the
+latency-bound ~2ms (ab31: this path is mesh-sensitive; -6..-7% under
+uncore cap). Clock gain < locality loss => net -1.7%.
+
+REVISED TEAM RECOMMENDATION: the ONLY safe form of the work_queue fix
+is the FREQUENCY form — exempt the front-end cores from the CLOS3
+clamp (what P4.3 measured: +1.2%) or fold them into FAST_CORE_RANGES.
+Do NOT migrate the thread off the front-end cores; thread affinity to
+"better" cores makes it worse. (Config-level change, no code needed.)
+
+BONUS FINDING — the provisioning lottery: tonight's two gpt-oss
+provisionings, IDENTICAL host state by sysconfig-snapshot diff (same
+boot, uncore healthy, same shapes), measured stock decode 102.29
+(prov A, 20:12) vs 96.56 mean (prov B, 21:17): a -5.6% provisioning-
+level shift. Prime suspect: platformd's instance<->unit/FPGA-pair
+assignment shuffle (documented shuffle observed 19:48 and in the
+snapshot env diff). n=2, but it brackets nightly-CI run-to-run
+variance: each nightly rides one provisioning draw. Next kit should
+capture rinzler cmdlines (devices/dev-cores/numa) during runs to pin
+the mechanism.
+
+KIT LESSONS (v3->v7, each root-caused live):
+- `ps -p <tid>` cannot select a non-leader thread; use `ps -Lo` on the
+  owning pid.
+- An IDLE thread's psr never updates on sched_setaffinity — verify
+  placement by `taskset -pc` AFFINITY READBACK; check psr only under
+  load.
+- Engine threads keep generic comm "rinzler" until they RENAME under
+  real streaming load ("<cpu>/<instance>-<role>"); one idle completion
+  does not trigger it => name-based discovery must run DURING a load
+  block.
+- /v1/models-ready != first-inference-ready: a cold 120B instance
+  serves the model list minutes before its first token. PRE-WARM each
+  instance port with a direct /v1/completions before timing anything.
+- platformd shuffles instance<->unit mapping per provisioning: never
+  hardcode front-end core numbers; classify work_queue threads by
+  SOCKET and record stock affinity via readback.
+- `ssh host 'setsid nohup x &'` never returns (wrapper waits in
+  do_wait on the background child) and silently stalls multi-command
+  launch sequences; use `ssh host 'setsid --fork x'`. And a pgrep
+  guard self-matches if its own cmdline contains the plain script
+  name — separate check-ssh from launch-ssh.
+- Orchestrator waits must FAIL LOUD: v4 logged "warmup done" on a
+  silent 400s timeout and ran an empty measurement block.
+
+Artifacts: /scratch/jhan/ab32/results/ (loadgen_*.json = per-request
+records; summaries in journal.log; placement.txt; per-block power;
+sysconfig snapshot), aborted attempts archived as
+journal_v*abort.log + results_v*_aborted/.

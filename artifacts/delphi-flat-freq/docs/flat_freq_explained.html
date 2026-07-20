@@ -92,6 +92,7 @@
     font-size: 0.92rem;
     font-variant-numeric: tabular-nums;
   }
+  .fig-note { font-size: 0.9rem; color: #52514e; margin: 0.35rem 0 0.9rem; }
   .tablewrap { overflow-x: auto; background: var(--card); border: 1px solid var(--ring); border-radius: 8px; }
   th, td {
     text-align: left;
@@ -644,16 +645,33 @@ GENERATE_PATTERN = re.compile(r"Generating .* at ([0-9.]+) average tok/s")
       <text x="96" y="171" fill="#993C1C" font-size="11">the serial slice: 0.40 ms @2.7 GHz → 0.26 ms @3.9 = −0.12 ms/token = +1.2%</text>
     </svg>
   </div>
+  <p class="fig-note"><em>Measured refinement (perf phase profile, Jul 20 night, 397k samples):
+  the blue "job prep" work is in reality not clustered — it is spread across the whole
+  iteration, anti-phased with the workers' attention bursts, and <strong>~88% of it already
+  overlaps the FPGA bar</strong>. The red serial slice (~0.4–0.5&nbsp;ms) is the honest
+  remaining serial cost, and it is exactly the clock-bound piece the +1.2% comes from.</em></p>
   <ul>
-    <li><strong>Free +1.2% decode (config-level change)</strong>: pin the two
-    <span class="mono">work_queue</span> threads to fast cores — two physical cores' worth of
-    clamp exemption, no engine code touched.</li>
-    <li><strong>Bigger follow-on target (engine code change)</strong>: up to ~2.05&nbsp;ms per
-    iteration of the orchestrator's work is hardware-latency-bound — clock settings cannot touch
-    it; the fix would be overlapping that work with FPGA compute (prepare tray N+1 while tray N
-    bakes). Honest caveat: how much of that 2.05&nbsp;ms sits on the serial token path versus
-    already overlapping is not yet measured — sizing it is the first step, and the upper bound
-    is ~21% of every token.</li>
+    <li><strong>The +1.2% is real — but only in its frequency form (measured both ways,
+    Jul&nbsp;20 night)</strong>: exempt the front-end cores from the clamp (a CLOS config
+    change; P4.3 measured +1.2%, three interleaved pairs). We also tested the tempting
+    alternative — <em>migrate</em> the two <span class="mono">work_queue</span> threads to idle
+    fast cores by thread affinity (ab32, three interleaved A/B pairs, placement verified every
+    block): decode <strong>−1.7%</strong>, TTFT +11% — <em>worse than doing nothing</em>. The
+    thread's stock home next to its HTTP/SSE partner threads and the FPGA driver cores is
+    locality-optimal: +48% clock on the ~0.84&nbsp;ms clock-bound slice loses to the added
+    cross-core handoff and mesh latency on the ~2&nbsp;ms latency-bound slice. Fix by frequency,
+    never by migration.</li>
+    <li><strong>The "up to ~21% overlap opportunity" is retired (measured)</strong>: the phase
+    profile shows the engine <em>already</em> pipelines job-prep under FPGA execution — ~88% of
+    the orchestrator's ~2.9&nbsp;ms is overlapped; the genuinely serial head is
+    ~0.4–0.5&nbsp;ms per iteration. After the frequency fix above, the remaining engine
+    opportunity is a ~0.2–0.3&nbsp;ms latency-bound head — real but modest (~2–3%), and it needs
+    hardware-access restructuring, not clocks.</li>
+    <li><strong>New operational guardrail — uncore (mesh) frequency</strong>: capping the mesh
+    2.5→1.6&nbsp;GHz costs decode −6.2% (long context) and −7.3% (short context) — context-
+    independent, so it is this fixed serving path, not attention. A BIOS or power-management
+    uncore cap would silently cost 6–7% decode; keep uncore on auto (0.8–2.5&nbsp;GHz). It is
+    captured in the sysconfig snapshot and canary reference.</li>
     <li><strong>Method note</strong>: the engine hands work between threads by spinning
     (mwaitx/tpause), which the OS scheduler never sees — that's why wait/wakeup analysis showed
     nothing and it took CPU-duty + profiler evidence to find this.</li>
