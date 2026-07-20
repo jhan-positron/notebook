@@ -296,12 +296,23 @@
     <dd>The factory boot setting that locks most CPU cores to 2.7&nbsp;GHz. Our "before" condition.</dd>
     <dt>flat-freq fix</dt>
     <dd>Our fix that releases the worker cores to run ~3.9–4.0&nbsp;GHz. The "after" condition.</dd>
+    <dt>serving / serving path</dt>
+    <dd>THE definition to hold onto (used consistently below): the production route a request
+    takes — over HTTP into the <span class="mono">rinzler</span> server process, which runs the
+    engine and streams tokens back. Customers use this path; so does the CI test. The opposite is
+    "engine-direct": running the engine straight from a dev tool with no HTTP at all.</dd>
     <dt>checkerboard / runtron</dt>
     <dd>The team's benchmark harness. It drives <span class="mono">runtron</span>, a developer
-    command-line tool that runs the inference engine directly (no HTTP serving layer).</dd>
-    <dt>CI / talos / serving</dt>
-    <dd>The nightly automated test. It sends requests over HTTP through the real production
-    serving process (<span class="mono">rinzler</span>), like customers do.</dd>
+    command-line tool that runs the inference engine directly — it does NOT use the serving
+    path.</dd>
+    <dt>CI / talos</dt>
+    <dd>The nightly automated test. It sends requests through the serving path, like customers
+    do.</dd>
+    <dt>front-end cores</dt>
+    <dd>CPU cores 1, 2, 73, 74 (+ their HT siblings) — where the serving process keeps its
+    non-worker threads (the HTTP/streaming threads, and — as the July 20 trace revealed — one
+    important <em>engine</em> thread per instance). Clamped at 2.7&nbsp;GHz in the production
+    frequency shape.</dd>
     <dt>0bf</dt>
     <dd>Nickname for engine build <span class="mono">198650bf</span> — the older code baseline,
     from before the new core-layout change. Same lineage as the July 3 measurement.</dd>
@@ -333,12 +344,12 @@
   <div class="tablewrap">
   <table>
     <tr><th>Suspect</th><th>Plain-language version</th><th>How tested</th><th>Verdict</th></tr>
-    <tr><td>Speculation</td><td>Maybe serving used speculative decoding and the benchmark didn't</td><td>Source + logs: gpt-oss <em>cannot</em> speculate on any build (no draft model exists) — both sides ran without it</td><td class="verdict-dead">ruled out</td></tr>
+    <tr><td>Speculation</td><td>Maybe the serving path used speculative decoding and the benchmark didn't</td><td>Source + logs: gpt-oss <em>cannot</em> speculate on any build (no draft model exists) — both sides ran without it</td><td class="verdict-dead">ruled out</td></tr>
     <tr><td>Metric definitions</td><td>Maybe the two tools just compute "tokens/s" differently</td><td>Line-by-line audit of both harnesses; both measure the same thing, distortion ≤2–3 points</td><td class="verdict-dead">ruled out</td></tr>
     <tr><td>Prompt caching</td><td>Maybe repeated prompts made tests unrealistically easy</td><td>Verified per-request cache counters in all our runs and 5 nights of CI records — all cold</td><td class="verdict-dead">ruled out</td></tr>
     <tr><td>Scheduler placement</td><td>Maybe the coordinator thread was fighting a worker for a core</td><td>Live A/B, 13 paired runs (ab23)</td><td class="verdict-dead">null (+0.03%)</td></tr>
-    <tr><td>Worker layout / geometry</td><td>Maybe old 40-core layout responds to clocks differently than the new one</td><td>Live A/B through serving at both layouts (ab25)</td><td class="verdict-dead">moves ~1 point only</td></tr>
-    <tr><td>Serving overhead</td><td>Maybe the HTTP/streaming layer dilutes the gain</td><td>Boosted exactly those cores in a live A/B (P4.3)</td><td class="verdict-dead">worth +1.2 points, small</td></tr>
+    <tr><td>Worker layout / geometry</td><td>Maybe old 40-core layout responds to clocks differently than the new one</td><td>Live A/B through the serving path at both layouts (ab25)</td><td class="verdict-dead">moves ~1 point only</td></tr>
+    <tr><td>Front-end core clamp</td><td>Maybe the HTTP/streaming layer dilutes the gain</td><td>Boosted exactly those cores in a live A/B (P4.3)</td><td class="verdict-dead">worth +1.2 points, small — and later traced (July 20) to an engine thread living on those cores, not to HTTP; see the model section</td></tr>
     <tr><td>Engine code changes</td><td>Maybe a commit between the builds slowed things down</td><td>All 153 commits triaged and patch-read; nothing of the required size</td><td class="verdict-dead">ruled out</td></tr>
     <tr><td>RTM waiting mode</td><td>June ran with busy-spin waiting (RTM off) — maybe that inflated the boost</td><td>Live control: forced busy-spin on today's machine with <span class="mono">TRON_NO_RTM=1</span> (ab26)</td><td class="verdict-dead">speeds: clamped 97.8 → 97.8 (identical), fast 103.1 → 105.5 (+2%). June's slow clamped baseline (90.6) did not reappear. We do not recommend disabling RTM because: 1) it is a small gain; 2) PR-3137 found 13–30% degradation on Llama-8b when disabling RTM</td></tr>
     <tr><td>Memory allocator</td><td>June builds used the old allocator — maybe the new one sped up the baseline</td><td>Live control: reverted to the old allocator with one env var (ab27)</td><td class="verdict-dead">+6.2% vs +5.9% — no</td></tr>
@@ -402,7 +413,7 @@
     <tr><td>All cores fast</td><td class="num">96.1</td><td class="num">897</td><td class="num">796 W @ 4.0 GHz</td></tr>
   </table>
   </div>
-  <p style="margin-top:0.75rem">Serving agrees with the benchmark: gen +7.1%, prefill +22%.
+  <p style="margin-top:0.75rem">The serving path agrees with the engine-direct benchmark: gen +7.1%, prefill +22%.
   (Production keeps the deployed "tron112" shape rather than all-cores-fast — boosting the
   extra non-worker cores costs ~+136&nbsp;W for only ~+1.3% gen.)</p>
 </section>
@@ -485,9 +496,10 @@
     <li>Extrapolating the curve: at p8192 the model predicts ~47 tok/s fast / ~40 clamped
     (boost ~+19%) — testable whenever a long-context config lands.</li>
   </ul>
-  <h3>Where serving ("post-decode") fits — and why it's smaller than it looks</h3>
-  <p>Extending the model to the serving path answers "why does CI decode read so much lower?"
-  precisely. Two effects stack, and neither is what it first looks like.</p>
+  <h3>Why numbers through the serving path read a few percent lower</h3>
+  <p>Extending the model to the serving path answers "why does CI decode read so much lower than
+  the engine-direct benchmark?" precisely. Two effects stack, and neither is what it first looks
+  like.</p>
   <p><strong>Effect 1 — the metrics sample different depths of the same request.</strong> Each
   token's cost <em>rises during a request</em> as context grows (token #1 attends over 1024
   tokens; token #1024 attends over ~2048). The engine benchmark averages every token of the
@@ -515,25 +527,36 @@
       <text x="548" y="221" fill="#52514e" font-size="13" text-anchor="end">mean 10.4 ms → 97 tok/s (dark dot)</text>
     </svg>
   </div>
-  <p><strong>Effect 2 — the "serving coupling" (~0.4&nbsp;ms), now traced to its mechanism
-  (July 20 perfetto A/B).</strong> It is <em>not</em> the streaming: SSE delivery costs only
-  46&nbsp;µs/token, and in 60-second scheduler traces of both arms, <em>no engine thread was ever
-  woken by a front-end thread</em> — zero events across 47,472 tokens. The real mechanism: each
-  engine instance's <span class="mono">work_queue</span> thread — the forward-pass
-  <em>orchestrator</em> that prepares and enqueues every FPGA matmul job, writes descriptors,
-  and does MoE routing between spin-waits — is confined by the process affinity to "front-end"
-  cores 1 and 73, running ~99% busy at the clamped 2.7&nbsp;GHz. About 2.9&nbsp;ms of every ~9.9&nbsp;ms
-  iteration's orchestration executes there; ~0.84&nbsp;ms of it is clock-bound, and the serial-path
-  share works out to ~0.4&nbsp;ms — exactly the P4.3 number. So the "serving slice" is really an
-  <em>engine</em> thread that happens to live on serving cores. Concrete fix available: pin the
-  two <span class="mono">work_queue</span> threads to fast cores (two physical cores' worth of
-  clamp exemption) — captures the +1.2% with no other change.</p>
+  <p><strong>Effect 2 — the last ~0.4&nbsp;ms: an engine thread living on the clamped front-end
+  cores (mechanism traced by the July 20 perfetto A/B).</strong> It is <em>not</em> the
+  streaming: token delivery costs only 46&nbsp;µs/token, and in 60-second scheduler traces of both
+  arms, <em>no engine thread was ever woken by a front-end thread</em> — zero events across
+  47,472 tokens. The real mechanism: each engine instance's <span class="mono">work_queue</span>
+  thread — the forward-pass <em>orchestrator</em> that prepares and enqueues every FPGA matmul
+  job, writes descriptors, and does MoE routing between spin-waits — is confined by the process
+  affinity to front-end cores 1 and 73, running ~99% busy at the clamped 2.7&nbsp;GHz. About
+  2.9&nbsp;ms of every ~9.9&nbsp;ms iteration's orchestration executes there; ~0.84&nbsp;ms of it is
+  clock-bound, and the serial-path share works out to ~0.4&nbsp;ms — exactly the P4.3 number. So
+  what looked like "serving overhead" is really an <em>engine</em> thread that happens to live
+  on the front-end cores.</p>
+  <ul>
+    <li><strong>Free +1.2% decode</strong>: pin the two <span class="mono">work_queue</span>
+    threads to fast cores (two physical cores' worth of clamp exemption) — captures the effect
+    with no other change.</li>
+    <li><strong>Bigger follow-on target</strong>: ~2.05&nbsp;ms per iteration of the orchestrator's
+    work is I/O-latency-bound (hardware register/descriptor access) — about 21% of every token
+    that <em>no clock setting can speed up</em>. Overlapping or batching that path is a real
+    engine optimization opportunity.</li>
+    <li><strong>Method note</strong>: the engine hands work between threads by spinning
+    (mwaitx/tpause), which the OS scheduler never sees — that's why wait/wakeup analysis showed
+    nothing and it took CPU-duty + profiler evidence to find this.</li>
+  </ul>
   <div class="tablewrap">
   <table>
     <tr><th>Per-token reconstruction (p1024, fast workers)</th><th class="num">ms/token</th><th class="num">tok/s</th></tr>
     <tr><td>Engine benchmark metric (averages ctx 1024→2048, mean ~1.5k)</td><td class="num">9.9</td><td class="num">103</td></tr>
     <tr><td>Same engine, sampled only where CI samples (ctx 1920→2048)</td><td class="num">10.4</td><td class="num">97</td></tr>
-    <tr><td>+ serving coupling at 2.7&nbsp;GHz front-end (empirical, P4.3)</td><td class="num">10.8</td><td class="num">93</td></tr>
+    <tr><td>+ the work_queue engine orchestrator running on clamped front-end cores (P4.3 + the July 20 trace)</td><td class="num">10.8</td><td class="num">93</td></tr>
     <tr><td><strong>Friday's actual nightly CI measurement</strong></td><td class="num"><strong>10.77</strong></td><td class="num"><strong>92.9</strong></td></tr>
   </table>
   </div>
@@ -543,7 +566,7 @@
   (TTFT) then ~16&nbsp;s of decode — roughly 7% / 93% of a request's wall time, which is why decode
   throughput dominates what users experience.</p>
   <p>Caveats: the constants are specific to this configuration (gpt-oss-120b tp4, 8 users, aa8
-  build, RTM on; the serving terms above extend it to the CI path); the model slightly
+  build, RTM on; the serving-path terms above extend it to what CI measures); the model slightly
   over-predicts attention below ~1k context; re-fit the two constants after any engine change
   (it takes one 4-length sweep, ~30 minutes).</p>
 </section>
