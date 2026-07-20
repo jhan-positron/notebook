@@ -1,3 +1,4 @@
+<!-- Rendered view: https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/flat_freq_explained.html -->
 <title>The Missing Decode Boost, Explained</title>
 <style>
   :root {
@@ -465,6 +466,61 @@
     at 4096 tokens</strong>. Long-context workloads benefit substantially more than the standard
     benchmark suggests.</p>
   </div>
+</section>
+
+<section id="model">
+  <h2>A model that predicts generation performance</h2>
+  <p>The length sweep supports a simple two-part model of where each generated token's time goes,
+  accurate enough to use for tuning predictions. Fitting all 16 measurements:</p>
+  <div class="callout">
+    <p class="mono" style="margin-bottom:0.35rem">time per token (ms) ≈ FLOOR + SLOPE × avg_context (k&nbsp;tokens)</p>
+    <p style="margin-bottom:0.35rem">fast clocks:&nbsp;&nbsp;<span class="mono">8.27 ms + 1.05 µs/token</span></p>
+    <p style="margin-bottom:0.35rem">clamped clocks:&nbsp;&nbsp;<span class="mono">8.36 ms + 1.37 µs/token</span></p>
+    <p style="margin-bottom:0">avg_context ≈ prompt length + generated/2 (context grows while generating). TPS = 1000 ÷ time.</p>
+  </div>
+  <p>The <strong>floor</strong> is the FPGA matmuls plus waiting — it is context-independent and,
+  decisively, <strong>clock-independent</strong>: the two fits land within 1% of each other (8.27 vs
+  8.36&nbsp;ms) across a 48% clock change. The <strong>slope</strong> is the CPU attention pass over
+  the KV cache — it is the only part that responds to clocks, and only partially (×1.30 faster for
+  ×1.48 clock: attention is partly memory-bandwidth-bound, corroborated by RAM power rising
+  ~50→66&nbsp;W across the sweep).</p>
+
+  <div class="viz">
+    <h3>Each token's time budget, by context length (fast clocks)</h3>
+    <div class="note">gray = clock-immune floor · blue = clock-sensitive CPU attention</div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <div style="display:flex; align-items:center; gap:10px;"><span style="width:120px; font-size:0.8rem; color:var(--ink-2); text-align:right;">p256 (~0.4k ctx)</span><div style="flex:1; height:16px; display:flex;"><div style="width:55.1%; background:var(--ink-3); border-radius:3px 0 0 3px;"></div><div style="width:2.7%; background:var(--s-clamp); border-radius:0 3px 3px 0;"></div><span style="font-size:0.8rem; margin-left:8px; font-variant-numeric:tabular-nums;">9.0 ms → 111 tok/s</span></div></div>
+      <div style="display:flex; align-items:center; gap:10px;"><span style="width:120px; font-size:0.8rem; color:var(--ink-2); text-align:right;">p1024 (~1.5k)</span><div style="flex:1; height:16px; display:flex;"><div style="width:55.1%; background:var(--ink-3); border-radius:3px 0 0 3px;"></div><div style="width:10.8%; background:var(--s-clamp); border-radius:0 3px 3px 0;"></div><span style="font-size:0.8rem; margin-left:8px; font-variant-numeric:tabular-nums;">9.7 ms → 103 tok/s</span></div></div>
+      <div style="display:flex; align-items:center; gap:10px;"><span style="width:120px; font-size:0.8rem; color:var(--ink-2); text-align:right;">p2048 (~3k)</span><div style="flex:1; height:16px; display:flex;"><div style="width:55.1%; background:var(--ink-3); border-radius:3px 0 0 3px;"></div><div style="width:21.5%; background:var(--s-clamp); border-radius:0 3px 3px 0;"></div><span style="font-size:0.8rem; margin-left:8px; font-variant-numeric:tabular-nums;">11.1 ms → 90 tok/s</span></div></div>
+      <div style="display:flex; align-items:center; gap:10px;"><span style="width:120px; font-size:0.8rem; color:var(--ink-2); text-align:right;">p4096 (~6k)</span><div style="flex:1; height:16px; display:flex;"><div style="width:55.1%; background:var(--ink-3); border-radius:3px 0 0 3px;"></div><div style="width:43.1%; background:var(--s-clamp); border-radius:0 3px 3px 0;"></div><span style="font-size:0.8rem; margin-left:8px; font-variant-numeric:tabular-nums;">14.9 ms → 67 tok/s</span></div></div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:1.5rem">How well does it predict?</h3>
+  <ul>
+    <li>In-range predictions land within <strong>±3.6%</strong> of measurement at every length, both clock settings.</li>
+    <li>Leave-one-out test (fit on three lengths, predict the fourth): interior points within ±4.5%; extrapolated endpoints within ±10%.</li>
+    <li>The model's <em>derived</em> boost curve matches the measured one within ~1.5 points at every length (predicted +2.4 / +5.8 / +9.3 / +13.9% vs measured +0.9 / +7.0 / +10.1 / +13.4%).</li>
+    <li>Structure check on old data: the June 24h sweep stays linear in context out to p8192 (~12k ctx), so the two-part form holds well beyond the fitted range (with era-specific constants).</li>
+  </ul>
+
+  <h3>Using it to rank tuning ideas before running them</h3>
+  <p>Because the two parts respond to different levers, the model predicts what a tuning idea is
+  worth <em>before</em> anyone builds it:</p>
+  <ul>
+    <li><strong>Faster CPU clocks / more worker cores</strong> only shrink the blue part → worth
+    +7% at 1k prompts but +13–19% at 4–8k. (This is the flat-freq result, predicted.)</li>
+    <li><strong>Cutting the floor by 1 ms</strong> (FPGA pipeline, scheduling, wait wake-up) →
+    ~+11% at 1k prompts, ~+7% at 4k — helps short contexts most, helps everywhere.</li>
+    <li><strong>Halving attention cost</strong> (kernel work, bandwidth) → ~+9% at 1k but
+    <strong>~+28% at 4k</strong> — the long-context lever.</li>
+    <li>Extrapolating the curve: at p8192 the model predicts ~47 tok/s fast / ~40 clamped
+    (boost ~+19%) — testable whenever a long-context config lands.</li>
+  </ul>
+  <p>Caveats: the constants are specific to this configuration (gpt-oss-120b tp4, 8 users, aa8
+  build, RTM on, engine-direct path — serving subtracts its known ladder, see the CI section
+  logic); the model slightly over-predicts attention below ~1k context; re-fit the two constants
+  after any engine change (it takes one 4-length sweep, ~30 minutes).</p>
 </section>
 
 <section>

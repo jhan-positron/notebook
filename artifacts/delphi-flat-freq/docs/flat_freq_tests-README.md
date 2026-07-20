@@ -1665,3 +1665,25 @@ READINGS:
 - RAMWatt rises with length (50-51 W at p256 -> 65-66 W at p4096) —
   KV/attention memory traffic visible in the power channel.
 - p256 gen absolutes are noisy (short cells); its +0.9% is within noise.
+
+### 2026-07-20 — per-token decode model VALIDATED (from ab28; predictive for tuning)
+
+time/token(ms) = FLOOR + SLOPE * avg_ctx(k), avg_ctx ~= prompt + gen/2.
+Fits (aa8, RTM on, runtron path, 8u, all 16 ab28 cells):
+  fast  : 8.27 ms + 1.052 us/ctx-token
+  clamp : 8.36 ms + 1.370 us/ctx-token
+VALIDATION: floor CLOCK-INVARIANT (8.27 vs 8.36, 1% apart across a 48%
+clock change = the FPGA+wait component, exactly as the wait-domination
+picture requires); slope scales x1.30 for x1.48 clock (attention partly
+memory-BW-bound; RAMWatt 50->66 W corroborates); in-range predictions
++-3.6%; leave-one-out endpoints +-10%; model-derived boost curve matches
+measured within ~1.5pp at every length; June 24h sweep confirms the
+affine form holds to p8192 (~12k ctx, era-specific constants).
+TUNING PREDICTIONS the model makes: clock/worker levers only touch the
+slope term (+7% @1k -> +13-19% @4-8k); -1ms floor = +11% @1k / +7% @4k;
+halving attention = +9% @1k / +28% @4k (the long-context lever); p8192
+predicted ~47 fast / ~40 clamp (+19%) — testable when a long-context
+config lands. Re-fit constants after engine changes (one 30-min sweep).
+Full write-up + how-to-use: artifacts/delphi-flat-freq/docs/
+flat_freq_explained.html section "A model that predicts generation
+performance" (rendered-view link at top of file).
