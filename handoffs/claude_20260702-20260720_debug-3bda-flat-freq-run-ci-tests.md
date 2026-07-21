@@ -922,8 +922,22 @@ A1's +1.2%). NO power penalty: pkg ~763W both arms (Bzy 3661 vs 3678).
 Exempt also completed 288 req/block every rep vs clamp ~280 (+2.9%
 aggregate) and TTFT -4.7%. Caveat: 24u is heavy but NOT RAPL-bound
 (3.66GHz >> 3.27 floor) — true saturation would need full llama-trio
-load; at the heaviest gpt-oss load available, zero downside. SHIP
-DECISION now waits only on A3 (boot persistence, user's window).
+load; at the heaviest gpt-oss load available, zero downside.
+
+A3 RE-SCOPED (user, 07-21): the freq shape ships via Hannah's
+intel-speed-select ANSIBLE ROLE — the boot service on 3bda
+(intel-speed-select-state.service reading /etc/default/intel-speed-
+select-state, "Managed by the intel-speed-select Ansible role") is its
+rendered output. So no separate reboot test by us: the change = ONE
+line in the role defaults, FAST_CORE_RANGES '7-14 24-71 79-86 96-143'
+-> add '1-2' and '73-74' (the apply script auto-expands HT siblings
+145,146,217,218 and self-verifies via verify_candidate). Action:
+inform Hannah + team (draft handed to user 07-21); post-deploy check =
+`intel-speed-select-state verify` + a freq readback under load.
+SHIP DECISION: evidence complete (A1 +1.2% @8u, A2 +1.35% @24u no
+power penalty, ab32 anti-verdict on migration); rollout is Hannah's
+pipeline. Never hand-edit the rendered file on a host — Ansible
+overwrites it.
 
 B2/B3 CODE LANDED: systems_test branch commit 660dc14 (on db56015):
 ARRIVAL_MODE=nowait (no round barrier; barrier default unchanged) +
