@@ -4,10 +4,16 @@
 
 - Activity dates: 2026-07-15 to 2026-07-16
   (source: transcript timestamps)
-- Claude session: "Investigate tron build regression on Granite Rapids"
+- Claude session: "Ef720667 regression investigation"
   (project: debug_3bda_flat_freq; cwd C:\Users\jibin\Documents\claude_debug_3bda_flat_freq;
   scheduled-task session "ef720667-regression-investigation")
   - Transcript: DESKTOP-CI2JA7M:C:/Users/jibin/.claude/projects/C--Users-jibin-Documents-claude-debug-3bda-flat-freq/954ea976-67c4-4f95-a98d-5c618d788629.jsonl
+    (sibling scheduled-task run of the same task:
+    .../435b4d9e-f410-4800-83ff-a91acf1cf51e.jsonl, last activity 07-16)
+  - Formerly named: "Investigate tron build regression on Granite Rapids";
+    file renamed from
+    `claude_20260715-20260716_tron-build-regression-granite-rapids.md`
+    on 2026-07-21
 
 ## Objective
 
