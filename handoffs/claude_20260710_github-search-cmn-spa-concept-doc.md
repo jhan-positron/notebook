@@ -4,9 +4,12 @@
 
 - Activity dates: 2026-07-10 to 2026-07-10
   (source: transcript timestamps)
-- Claude session: "Search positron-ai GitHub for CMN SPA markdown and mdata_pkg RTL"
+- Claude session: "Search positron-ai GitHub for CMN SPA concept doc"
   (project: Asimov spec study; cwd C:\Users\jibin\Documents\Asimov arch claude)
   - Transcript: DESKTOP-CI2JA7M:C:/Users/jibin/.claude/projects/C--Users-jibin-Documents-Asimov-arch-claude/b3870038-ecf5-497f-b84e-896e5fc1b750.jsonl
+  - Formerly named: "Search positron-ai GitHub for CMN SPA markdown and
+    mdata_pkg RTL"; file renamed from
+    `claude_20260710_github-search-cmn-spa-mdata-rtl.md` on 2026-07-21
 
 ## Objective
 
