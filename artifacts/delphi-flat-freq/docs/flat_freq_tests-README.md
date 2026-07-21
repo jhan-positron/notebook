@@ -1905,3 +1905,39 @@ Artifacts: /scratch/jhan/ab32/results/ (loadgen_*.json = per-request
 records; summaries in journal.log; placement.txt; per-block power;
 sysconfig snapshot), aborted attempts archived as
 journal_v*abort.log + results_v*_aborted/.
+
+### 2026-07-21 — plan-day results: A2 PASS, B5 sized, B1 parity, B2 null, B3 ~7% cache inflation
+
+- A2 (ab33 v2, 24u heavy load, freq verified every block): un-clamp
+  +1.35% decode (54.07->54.80; pairs -0.8/+1.9/+3.1), NO power penalty
+  (~763W both arms), TTFT -4.7%, +2.9% aggregate (288 vs ~280 req/
+  block). Not RAPL-bound even at 24u (3.66GHz). SHIP gate = A3 only.
+  (v1 aborted on racy single-cpu freq read — an idle cpu reads 800MHz
+  floor; fixed with discovered FE sets + max-across-set.)
+- B5 (ab34, 6 fresh provisioning draws): decode 96.84..103.66
+  (mean 99.72, CV 2.4%, max-min 6.9%) with BYTE-IDENTICAL assignment
+  fingerprints => lottery is NOT the platformd unit shuffle (corrects
+  the ab32-section guess); it is sub-visible provisioning state.
+  CI implication: single-night deltas <~5% are weather.
+- B1 (ab29, exact talos harness, p1024 x {fast,clamp} x 3): fast
+  94.82 dec / 842 pre vs nightly ~92.9/874 — parity within the B5
+  lottery band. CI-native boost: +6.9% decode / +15.7% prefill —
+  matches the investigation verdict bands through the official
+  harness.
+- B2 (ab35, barrier vs nowait ARRIVAL_MODE, same build/day): decode
+  IDENTICAL (92.30 vs 92.29), wall/aggregate identical => the round
+  barrier does NOT soften decode at uniform lengths (capture windows
+  run at full concurrency — predicted from tps.py, now measured).
+  Real difference: TTFT (barrier's synced 8-way prefill bursts +9%
+  mean, higher p95). nowait's value arrives with mixed gen lengths.
+- B3 (same cells): EVERY request has ~71 cached prompt tokens (fixed
+  preamble prefix-cache hit) => CI prefill is ~7% INFLATED
+  (prefill_corr 776..1019 vs reported). Applies to historical
+  nightlies (consistent across eras; trends fine, absolutes high).
+  Fail-loud detector works (logged on every request).
+- Harness code shipped to branch: systems_test 660dc14 (ARRIVAL_MODE
+  nowait + prefill_observed/prefill_cache_corrected + CACHE_FAIL_LOUD).
+  B1 ran the STAGED clone (db56015) for provenance; B2/B3 ran the new
+  clone /scratch/jhan/systest-b2.
+- Kits: /scratch/jhan/ab33 (results + results_v1_aborted), ab34, ab29,
+  ab35. All runs restored the machine; nightly window respected.
