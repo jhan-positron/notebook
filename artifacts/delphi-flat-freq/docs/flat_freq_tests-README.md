@@ -1941,3 +1941,24 @@ journal_v*abort.log + results_v*_aborted/.
   clone /scratch/jhan/systest-b2.
 - Kits: /scratch/jhan/ab33 (results + results_v1_aborted), ab34, ab29,
   ab35. All runs restored the machine; nightly window respected.
+
+### 2026-07-21 correction (user review) — B1 was NOT a same-config parity run
+
+The Jul-21 entry above says "fast 94.82 vs nightly ~92.9 — parity
+within the lottery band". OVERSTATED, corrected here: ab29's arms were
+the INVESTIGATION arms (fast = assoc clos0 on ALL 288 cpus; clamp =
+clos3 on all), not the production tron112 shape the nightly runs
+(front-end cores clamped). Known differences ab29-fast vs nightly:
+(1) front-end clamp — nightly has it, ab29-fast does not (+1.2%,
+P4.3/ab33); (2) night state — nightly's gpt-oss cell is the last of 9
+configs after hours of serving (~2% cost, reconstruction ladder);
+(3) provisioning draw (CV 2.4%); (4) prompts differ (branch
+SEED_OFFSET=20000+ vs nightly's fixed seeds); (5) client host/network
+path (ab29 client on 3af6 via 192.168.1.4 vs nightly's local runner).
+The +2.1% observed gap is CONSISTENT with (1)+(2) minus lottery — the
+harness and metric are the same code path, so the boost measurement
+(+6.9% dec / +15.7% pre, within-run interleaved A/B) STANDS; the
+"reproduces nightly numbers" claim is downgraded to "consistent after
+accounting for known config differences". A true parity cell
+(production shape + SEED_OFFSET=0 + post-nightly state) is a cheap
+future add if strict parity is ever needed.
