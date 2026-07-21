@@ -912,7 +912,18 @@ ab33 v1 ABORT + v2 (01:54): v1's freq guard read ONE cpu's
 scaling_cur_freq — 800MHz idle floor when work_queue sat on another of
 its 4 cpus (cpu73 read 3.78GHz = exempt toggle PROVEN working). v2:
 FE sets discovered from work_queue affinity under warmup load (ab32-v7
-method), max-across-set check, 2 attempts. Running, ETA ~02:40 UTC.
+method), max-across-set check, 2 attempts.
+
+A2 RESULT (ab33 v2 COMPLETE 02:33 UTC): PASS. 24u heavy load, 3
+interleaved pairs, freq verified every block (clamp 2.70GHz, exempt
+3.7-3.9GHz, first attempt each): decode/user clamp 54.07 vs exempt
+54.80 = +1.35% (pairs -0.8/+1.9/+3.1 — noisier at 24u, mean matches
+A1's +1.2%). NO power penalty: pkg ~763W both arms (Bzy 3661 vs 3678).
+Exempt also completed 288 req/block every rep vs clamp ~280 (+2.9%
+aggregate) and TTFT -4.7%. Caveat: 24u is heavy but NOT RAPL-bound
+(3.66GHz >> 3.27 floor) — true saturation would need full llama-trio
+load; at the heaviest gpt-oss load available, zero downside. SHIP
+DECISION now waits only on A3 (boot persistence, user's window).
 
 B2/B3 CODE LANDED: systems_test branch commit 660dc14 (on db56015):
 ARRIVAL_MODE=nowait (no round barrier; barrier default unchanged) +
