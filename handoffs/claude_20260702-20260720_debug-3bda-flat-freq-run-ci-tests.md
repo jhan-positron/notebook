@@ -868,6 +868,36 @@ On GitHub (jhan-positron/notebook):
   bullet added; fig-note under the iteration diagram), artifact
   republished same URL, all three copies synced.
 
+## 2026-07-21 00:57 UTC — overnight chain ARMED (laptop-immune)
+
+User approved the test plan (all runs host-side, setsid --fork, no
+laptop dependency; user rebooting laptop). Prompt length fixed at
+p1024 everywhere per user decision. INFRA UPDATE: talos MongoDB is
+BACK (talos:27017 open, verified 00:51 UTC); apt-repo wheel still
+unreachable — escalation message handed to user for the infra team.
+
+Armed chain (all verified armed in journals at 00:56-00:57 UTC):
+1. ab33 = plan A2 (un-clamp @ saturation): 24-user loadgen, 3
+   interleaved pairs clamp-vs-exempt on front-end cores
+   {1,2,73,74,145,146,217,218} via isst assoc toggle, per-block power,
+   mid-block freq verification (cpu1/cpu73 scaling_cur_freq). Runs
+   immediately; ETA done ~01:45 UTC. Pass = exempt >= clamp - noise.
+2. ab34 = plan B5 (provisioning lottery): gated on ab33 ALL_DONE; up
+   to 6 fresh gpt-oss provisioning draws, each = full reprovision +
+   assignment fingerprint (results/cmdlines_drawN.txt: rinzler
+   cmdlines + hugepages) + one 240s 8u block. Draw cutoff 03:20 UTC,
+   hard guard 03:50 — clears the 04:25 nightly. Restores trio at end.
+3. nightly (~04:25-11:20): machine handed back automatically.
+4. ab29 = plan B1 (CI parity, exact talos harness): self-waits for the
+   11:35-13:00 UTC post-nightly window, mongo-gated at fire time,
+   TRIMMED to p1024 only x {fast,clamp} x 3 reps = 6 cells (user cut
+   the length sweep). Client daemons for all three armed on 3af6
+   (14h windows cover through ~15:00 UTC).
+Results land in /scratch/jhan/ab33|ab34|ab29/{results,journal.log}.
+Analysis pending next session. A3 (boot persistence) deliberately NOT
+scheduled — needs its own maintenance window. systems_test PR draft =
+my next no-machine deliverable (unblocks B2/B3/B4).
+
 ## Open items / next steps (rewritten 2026-07-16; stale items resolved)
 
 1. RESOLVED 2026-07-16 23:27 UTC: ab23 confirmation = NULL at n=13 pairs
