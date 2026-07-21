@@ -894,6 +894,34 @@ Armed chain (all verified armed in journals at 00:56-00:57 UTC):
    the length sweep). Client daemons for all three armed on 3af6
    (14h windows cover through ~15:00 UTC).
 Results land in /scratch/jhan/ab33|ab34|ab29/{results,journal.log}.
+
+B5 RESULT (ab34 COMPLETE 01:52 UTC, 6/6 draws): decode t/s/u per fresh
+provisioning draw = 99.68 / 98.08 / 103.66 / 96.84 / 98.80 / 101.28
+(mean 99.72, std 2.44 = CV 2.4%, max-min 6.9%). CRITICAL: assignment
+fingerprints IDENTICAL across all 6 draws (same units, devices,
+app-cores, numa, ports) => the lottery is NOT the platformd unit
+shuffle — it is sub-visible provisioning state (hugepage/memory
+layout, weight placement, FPGA state...). This CORRECTS the ab32
+README section's "prime suspect: unit shuffle" guess. Implication for
+CI: nightly numbers carry ~±3-4% provisioning noise at IDENTICAL
+config — regression detection needs trailing bands, not single-night
+deltas. Also reframes earlier cross-provisioning comparisons (v3's
+102.29 vs v7's 96.56 = two draws from this same distribution).
+
+ab33 v1 ABORT + v2 (01:54): v1's freq guard read ONE cpu's
+scaling_cur_freq — 800MHz idle floor when work_queue sat on another of
+its 4 cpus (cpu73 read 3.78GHz = exempt toggle PROVEN working). v2:
+FE sets discovered from work_queue affinity under warmup load (ab32-v7
+method), max-across-set check, 2 attempts. Running, ETA ~02:40 UTC.
+
+B2/B3 CODE LANDED: systems_test branch commit 660dc14 (on db56015):
+ARRIVAL_MODE=nowait (no round barrier; barrier default unchanged) +
+prefill_observed/prefill_cache_corrected + CACHE_FAIL_LOUD detection.
+Pushed to GitHub. Clone for runs: 3af6:/scratch/jhan/systest-b2 (ab29's
+/tmp/jhan-systest untouched for B1 provenance). ab35 kit ARMED (client
+01:51:55, orchestrator 01:52:00): B2 {barrier,nowait}x3 + B3 fields,
+p1024/8u via exact CI harness, gated on ab29 ALL_DONE then 14:05 UTC
+reclaim; mongo-gated; results /scratch/jhan/ab35/results/.
 Analysis pending next session. A3 (boot persistence) deliberately NOT
 scheduled — needs its own maintenance window. systems_test branch work
 = my next no-machine deliverable. DEPENDENCY CORRECTION (user, 07-21):
