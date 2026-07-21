@@ -175,6 +175,19 @@ canonical one changes.
 
 ## docs/
 
+- perfetto_reading_tron.html
+  - Rendered view:
+    https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/perfetto_reading_tron.html
+  - Canonical: DESKTOP-CI2JA7M:C:/Users/jibin/Documents/claude_debug_3bda_flat_freq/perfetto_reading_tron.html
+    (authored 2026-07-21)
+  - What it is: trace-reading guide answering "is tron CPU-bound or
+    FPGA-bound?" — six annotated perfetto-style snippets covering the two
+    traps (spin-wait reads as Running; the FPGA has no track), the measured
+    decode shape, the zero-wakeup property, the idle-capture gotcha, and
+    the clock-A/B perturbation method; ends with an operating-point table
+    reconciling "FPGA waits for CPU" observations (long context, prefill,
+    small models) with the CI-point floor-bound result, plus a scoping
+    checklist and pointers to the preserved .pftrace pair.
 - ci_boost_pipeline.html
   - Rendered view:
     https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/ci_boost_pipeline.html

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<!-- Rendered view: https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/perfetto_reading_tron.html -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading tron in perfetto: CPU-bound or FPGA-bound?</title>
+<style>
+  :root {
+    --ink: #0b0b0b; --ink-2: #52514e; --ink-3: #8f8d86;
+    --paper: #fbfaf7; --card: #ffffff; --ring: #e3e1da; --grid: #edece6;
+    --blue: #378ADD; --blue-d: #185FA5; --red: #993C1C; --orange: #E5801C;
+    --green: #2e8b46; --good-bg: #eef6ee;
+  }
+  html { background: var(--paper); }
+  body { margin: 0 auto; max-width: 860px; padding: 2rem 1.2rem 4rem;
+         font-family: Georgia, "Times New Roman", serif; color: var(--ink);
+         font-size: 1.02rem; line-height: 1.55; }
+  h1 { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 1.6rem; line-height: 1.25; }
+  h2 { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 1.2rem; margin-top: 2.2rem;
+       border-bottom: 2px solid var(--ring); padding-bottom: 0.3rem; }
+  h3 { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 1.0rem; margin-top: 1.4rem; }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 0.92em; background: #f2f1ec; padding: 0.05rem 0.3rem; border-radius: 3px; }
+  pre { background: #f2f1ec; border: 1px solid var(--ring); border-radius: 6px; padding: 0.7rem 0.9rem;
+        font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; overflow-x: auto; line-height: 1.45; }
+  .viz { background: var(--card); border: 1px solid var(--ring); border-radius: 8px; padding: 1rem 1.2rem; margin: 1rem 0; }
+  .viz h4 { font-family: system-ui, sans-serif; font-size: 0.95rem; margin: 0 0 0.15rem; }
+  .note { color: var(--ink-2); font-size: 0.85rem; font-family: system-ui, sans-serif; margin-bottom: 0.6rem; }
+  .callout { border-left: 4px solid var(--blue-d); background: #f2f7fd; border-radius: 0 8px 8px 0;
+             padding: 0.8rem 1.1rem; margin: 1rem 0; }
+  .callout.good { border-left-color: var(--green); background: var(--good-bg); }
+  .callout.warn { border-left-color: var(--red); background: #fbf1ec; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+  .tablewrap { overflow-x: auto; background: var(--card); border: 1px solid var(--ring); border-radius: 8px; }
+  th, td { text-align: left; padding: 0.5rem 0.8rem; border-bottom: 1px solid var(--grid); }
+  th { font-family: system-ui, sans-serif; font-size: 0.85rem; }
+  svg { max-width: 100%; height: auto; }
+  a { color: var(--blue-d); }
+</style>
+</head>
+<body>
+<p style="font-family: system-ui, sans-serif; font-size: 0.85rem;"><a href="https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/perfetto_reading_tron.html">Open rendered view</a></p>
+
+<h1>Reading tron in perfetto: is it CPU-bound or FPGA-bound?</h1>
+<p style="color: var(--ink-2);">A guide through the trace shapes that mislead, written after two perfetto
+captures and a perf phase profile of gpt-oss-120b tp4 serving on delphi-3bda (July 2026). Short answer:
+<strong>the question needs an operating point</strong> — decode at CI's configuration is floor-bound
+(FPGA + fixed I/O path), and the same system is genuinely CPU-bound in other regimes (long context,
+prefill, small models). A perfetto trace alone <em>cannot</em> settle it, for two reasons this page
+demonstrates. Both interpretations of "a lot of FPGA wait" can come from the same machine.</p>
+
+<div class="callout">
+<p style="margin:0"><strong>Reference traces to load in <a href="https://ui.perfetto.dev">ui.perfetto.dev</a></strong>
+(loaded A/B pair, 8 users steady, ~2min each, on the shared filer — root-owned, so <span class="mono">sudo chown</span> or copy first):<br>
+<span class="mono">delphi-3bda:/scratch/jhan/flat_freq_tests/20260720-143130_ci-workload-profile-delphi-3bda/ci-workload.pftrace</span> (work_queue clamped 2.7&nbsp;GHz)<br>
+<span class="mono">delphi-3bda:/scratch/jhan/flat_freq_tests/20260720-143622_ci-workload-profile-delphi-3bda/ci-workload.pftrace</span> (work_queue boosted 3.9&nbsp;GHz)<br>
+Plus two <em>accidental no-load</em> captures (useful contrast, see snippet 5):
+<span class="mono">…/20260720-141032_…-IDLE-BASELINE/</span> and <span class="mono">…/20260720-141524_…-IDLE-BASELINE/</span></p>
+</div>
+
+<h2>Snippet 1 — the trap that makes tron look CPU-bound: spin-wait reads as "Running"</h2>
+<div class="viz">
+<h4>What the thread-state track shows for the orchestrator thread</h4>
+<div class="note">schematic recreation of the sched track for <span class="mono">1/?-work_queue</span> under steady 8-user decode</div>
+<svg viewBox="0 0 800 120" role="img" aria-label="A thread track that is solid green Running for the entire window">
+  <text x="8" y="30" font-size="12" fill="#52514e">1/?-work_queue</text>
+  <rect x="150" y="14" width="640" height="24" rx="2" fill="#2e8b46"/>
+  <text x="420" y="30" font-size="11" fill="#fff" text-anchor="middle">Running (100% of the window)</text>
+  <text x="8" y="75" font-size="12" fill="#52514e">what it means</text>
+  <rect x="150" y="60" width="185" height="24" rx="2" fill="#378ADD"/>
+  <rect x="335" y="60" width="455" height="24" rx="2" fill="none" stroke="#8f8d86" stroke-dasharray="4,3"/>
+  <text x="242" y="76" font-size="11" fill="#fff" text-anchor="middle">real work ~29%</text>
+  <text x="560" y="76" font-size="11" fill="#52514e" text-anchor="middle">spin-waiting on the FPGA (mwaitx/tpause) ~70%</text>
+  <text x="150" y="108" font-size="10" fill="#8f8d86">measured: 2.9 ms real work per 9.9 ms iteration (perf cycles analysis, Jul 20)</text>
+</svg>
+</div>
+<p><strong>Analysis.</strong> tron's threads never sleep while waiting for the FPGA — they spin
+(<span class="mono">mwaitx</span>/<span class="mono">tpause</span>). To the scheduler, and therefore to
+perfetto's thread-state track, a spinning thread is indistinguishable from a computing thread: solid
+green "Running". Naively summing Running time says "the CPUs are ~100% busy — CPU-bound!" when the
+measured real-work duty of this thread is 29%. <em>Any CPU-bound conclusion drawn from Running-state
+occupancy in a tron trace is unreliable.</em> The same applies to the 112 worker threads (~99% Running,
+~21% real work in attention).</p>
+<p><strong>Check it in your own trace:</strong> you can't, from sched data alone — that's the point.
+You need an instruction-rate signal: <span class="mono">perf stat -t &lt;tid&gt;</span> under load, or a
+sampled profile (<span class="mono">perf record -t &lt;tid&gt;</span>) and look at the callchain mix —
+spin loops show as a tight <span class="mono">wait/poll</span> frame.</p>
+
+<h2>Snippet 2 — the second trap: the FPGA has no track</h2>
+<div class="viz">
+<h4>What perfetto shows vs what the hardware is doing</h4>
+<div class="note">the FPGA appears in a CPU trace only as the <em>absence</em> of CPU activity — and tron never yields, so even that absence is hidden inside "Running"</div>
+<svg viewBox="0 0 800 150" role="img" aria-label="Three lanes: perfetto CPU lanes solid, the actual FPGA lane must be inferred">
+  <text x="8" y="30" font-size="12" fill="#52514e">perfetto sees:</text>
+  <rect x="150" y="14" width="640" height="24" rx="2" fill="#2e8b46"/>
+  <text x="420" y="30" font-size="11" fill="#fff" text-anchor="middle">CPU threads "Running" wall to wall — no FPGA anywhere</text>
+  <text x="8" y="75" font-size="12" fill="#52514e">reality (inferred):</text>
+  <rect x="150" y="60" width="35" height="24" rx="2" fill="none" stroke="#993C1C" stroke-width="2" stroke-dasharray="4,3"/>
+  <rect x="185" y="60" width="605" height="24" rx="2" fill="#b4b2a9"/>
+  <text x="480" y="76" font-size="11" fill="#fff" text-anchor="middle">FPGA computing matmuls (~95% of the iteration)</text>
+  <text x="167" y="100" font-size="10" fill="#993C1C">FPGA idle head: waits ~0.4–0.5 ms for the CPU's serial job-prep</text>
+  <text x="150" y="138" font-size="10" fill="#8f8d86">measured: folded phase profile, 397k samples — orchestrator work is ~88% overlapped with FPGA compute</text>
+</svg>
+</div>
+<p><strong>Analysis.</strong> Perfetto traces the CPU. The FPGA shows up only if a driver emits track
+events, which tron's doesn't. So "the FPGA had a lot of wait time" cannot be read directly from these
+traces — it has to be <em>inferred</em>, usually from gaps in CPU activity. But trap 1 means there are
+no visible gaps: everything spins. The honest measured decomposition (from perf sampling + the phase
+analysis, not from sched tracks) is: the FPGA computes for most of the iteration and idles
+<strong>~0.4–0.5&nbsp;ms per 9.9&nbsp;ms token (~4–5%)</strong> waiting for the CPU's genuinely serial
+job-prep. That serial head is real — it's the +1.2% the front-end un-clamp recovers — but it is not
+"a lot".</p>
+
+<h2>Snippet 3 — what the correct decode shape looks like (measured)</h2>
+<div class="viz">
+<h4>One decode iteration, real-work view (spin removed)</h4>
+<div class="note">this is what remains after separating work from spin — the shape the wall-clock-lanes diagram draws</div>
+<svg viewBox="0 0 800 190" role="img" aria-label="Orchestrator work spread thin across the iteration, anti-phased with worker attention bursts, FPGA computing almost throughout">
+  <text x="8" y="28" font-size="12" fill="#52514e">FPGA</text>
+  <rect x="150" y="12" width="26" height="22" rx="2" fill="none" stroke="#993C1C" stroke-width="2" stroke-dasharray="4,3"/>
+  <rect x="176" y="12" width="614" height="22" rx="2" fill="#b4b2a9"/>
+  <text x="8" y="66" font-size="12" fill="#52514e">work_queue</text>
+  <g fill="#378ADD">
+    <rect x="150" y="50" width="24" height="22" rx="2"/>
+    <rect x="200" y="50" width="9" height="22" rx="1"/><rect x="226" y="50" width="9" height="22" rx="1"/><rect x="252" y="50" width="9" height="22" rx="1"/><rect x="278" y="50" width="9" height="22" rx="1"/><rect x="304" y="50" width="9" height="22" rx="1"/><rect x="330" y="50" width="9" height="22" rx="1"/><rect x="356" y="50" width="9" height="22" rx="1"/><rect x="382" y="50" width="9" height="22" rx="1"/><rect x="408" y="50" width="9" height="22" rx="1"/><rect x="434" y="50" width="9" height="22" rx="1"/><rect x="460" y="50" width="9" height="22" rx="1"/><rect x="486" y="50" width="9" height="22" rx="1"/><rect x="512" y="50" width="9" height="22" rx="1"/><rect x="538" y="50" width="9" height="22" rx="1"/><rect x="564" y="50" width="9" height="22" rx="1"/><rect x="590" y="50" width="9" height="22" rx="1"/><rect x="616" y="50" width="9" height="22" rx="1"/><rect x="642" y="50" width="9" height="22" rx="1"/><rect x="668" y="50" width="9" height="22" rx="1"/><rect x="694" y="50" width="9" height="22" rx="1"/><rect x="720" y="50" width="9" height="22" rx="1"/><rect x="746" y="50" width="9" height="22" rx="1"/><rect x="772" y="50" width="9" height="22" rx="1"/>
+  </g>
+  <text x="8" y="104" font-size="12" fill="#52514e">workers (attention)</text>
+  <g fill="#2e8b46">
+    <rect x="230" y="88" width="90" height="22" rx="2"/>
+    <rect x="530" y="88" width="90" height="22" rx="2"/>
+  </g>
+  <text x="150" y="134" font-size="10" fill="#993C1C">red dashes = the only FPGA wait: the ~0.4–0.5 ms serial head</text>
+  <text x="150" y="150" font-size="10" fill="#8f8d86">blue slivers = orchestrator real work, spread across the iteration, anti-phased with attention (corr −0.32)</text>
+  <text x="150" y="166" font-size="10" fill="#8f8d86">measured Jul 20 night: 397k perf samples; wq duty 26.9%, ~88% of it under FPGA compute</text>
+</svg>
+</div>
+<p><strong>Analysis.</strong> When we separated work from spin (perf sampling at ~4&nbsp;kHz per thread,
+folded over thousands of iterations), the orchestrator's work turned out to be <em>spread across the
+whole iteration and interleaved with FPGA compute</em> — the engine already pipelines job-prep under
+execution. If tron were CPU-bound at this operating point, the FPGA lane would show long idle stretches
+whenever the blue work runs; instead they overlap ~88% of the time.</p>
+
+<h2>Snippet 4 — why sched-based reasoning fails completely here: zero wakeups</h2>
+<div class="viz">
+<h4>Typical pipeline app vs tron, wakeup-arrow view</h4>
+<div class="note">perfetto's wakeup arrows are how you normally trace producer→consumer handoffs</div>
+<svg viewBox="0 0 800 150" role="img" aria-label="A typical app shows wakeup arrows between threads; tron shows none at all">
+  <text x="8" y="26" font-size="12" fill="#52514e">typical app</text>
+  <rect x="150" y="12" width="120" height="20" rx="2" fill="#378ADD"/><rect x="360" y="12" width="120" height="20" rx="2" fill="#378ADD"/>
+  <rect x="270" y="40" width="90" height="20" rx="2" fill="#2e8b46"/><rect x="480" y="40" width="90" height="20" rx="2" fill="#2e8b46"/>
+  <path d="M270,22 q 20 20 10 22" stroke="#993C1C" fill="none" stroke-width="1.5" marker-end="none"/>
+  <path d="M480,22 q 20 20 10 22" stroke="#993C1C" fill="none" stroke-width="1.5"/>
+  <text x="600" y="42" font-size="10" fill="#993C1C">wakeup arrows visible</text>
+  <text x="8" y="106" font-size="12" fill="#52514e">tron</text>
+  <rect x="150" y="92" width="640" height="20" rx="2" fill="#2e8b46"/>
+  <text x="420" y="106" font-size="11" fill="#fff" text-anchor="middle">every thread always Running — zero sched wakeups between engine threads</text>
+  <text x="150" y="140" font-size="10" fill="#8f8d86">measured: 60 s traces of both arms, 47,472 tokens — no engine thread was ever woken by a front-end thread</text>
+</svg>
+</div>
+<p><strong>Analysis.</strong> Because handoffs happen by watching shared memory (spin), the scheduler
+never mediates them, so perfetto shows <em>no</em> wakeup arrows, <em>no</em> blocked→runnable
+transitions, <em>no</em> latency chains — across 47k tokens we found literally zero. Every standard
+perfetto workflow for finding "who waits on whom" silently returns nothing on tron. This is the deepest
+reason two people can stare at the same trace and disagree: the trace does not contain the dependency
+information the argument is about.</p>
+
+<h2>Snippet 5 — check what your capture actually recorded: load matters</h2>
+<div class="viz">
+<h4>The same tracks, loaded vs accidentally idle</h4>
+<div class="note">our first capture attempt ran with a mis-pointed load generator — the "serving" traces were actually idle, and the shapes differ completely</div>
+<svg viewBox="0 0 800 130" role="img" aria-label="Loaded capture: dense activity. Idle capture: sparse periodic blips.">
+  <text x="8" y="26" font-size="12" fill="#52514e">loaded (real)</text>
+  <rect x="150" y="12" width="640" height="20" rx="2" fill="#2e8b46"/>
+  <text x="8" y="72" font-size="12" fill="#52514e">idle (accident)</text>
+  <g fill="#2e8b46"><rect x="150" y="58" width="8" height="20"/><rect x="310" y="58" width="8" height="20"/><rect x="470" y="58" width="8" height="20"/><rect x="630" y="58" width="8" height="20"/></g>
+  <text x="420" y="73" font-size="11" fill="#8f8d86" text-anchor="middle">periodic housekeeping blips only</text>
+  <text x="150" y="112" font-size="10" fill="#8f8d86">both trace sets are preserved (the *-IDLE-BASELINE dirs) — load one of each and compare</text>
+</svg>
+</div>
+<p><strong>Analysis.</strong> Two operational gotchas invalidate many casual captures:
+(1) if the capture ran without steady load — or during warm-up, or after a request finished — the
+shapes mean nothing for the serving question; (2) engine threads keep a generic
+<span class="mono">rinzler</span> name until they do real streaming work, and the kernel truncates
+names to 15 chars (<span class="mono">103/?-work_queue</span> becomes
+<span class="mono">103/?-work_queu</span>), so name-based track hunting silently misses threads.
+Before interpreting a trace: confirm the request rate during the capture window, and find the
+orchestrator by enumerating the rinzler process's threads, not by searching the name.</p>
+
+<h2>Snippet 6 — the evidence perfetto cannot give you: the clock A/B</h2>
+<div class="viz">
+<h4>The decisive experiment: change the CPU clock 48%, watch the token time</h4>
+<div class="note">if decode were CPU-bound, per-token time would follow the CPU clock — it moved 1%</div>
+<svg viewBox="0 0 800 130" role="img" aria-label="Two bars nearly equal: floor 8.36 ms at clamped clocks vs 8.27 at fast clocks, despite a 48 percent clock change">
+  <text x="8" y="30" font-size="12" fill="#52514e">all cores 2.7 GHz</text>
+  <rect x="160" y="14" width="580" height="22" rx="2" fill="#E5801C"/>
+  <text x="748" y="30" font-size="11" fill="#993C1C">floor 8.36 ms</text>
+  <text x="8" y="66" font-size="12" fill="#52514e">all cores 3.9–4.4 GHz</text>
+  <rect x="160" y="50" width="574" height="22" rx="2" fill="#378ADD"/>
+  <text x="742" y="66" font-size="11" fill="#185FA5">8.27 ms</text>
+  <text x="160" y="102" font-size="11" fill="#0b0b0b">+48% CPU clock → −1% token-time floor. A CPU-bound system cannot behave like this.</text>
+  <text x="160" y="120" font-size="10" fill="#8f8d86">context-dependent part (CPU attention) did respond: ×1.30 for ×1.48 clock — it is CPU work, and it grows with context</text>
+</svg>
+</div>
+<p><strong>Analysis.</strong> This is how the question actually gets settled: not by reading trace
+shapes but by <em>perturbing</em> the suspected bottleneck. Cranking every CPU core 48% moved the
+per-token floor by 1% (and separately, capping the <em>mesh</em> clock — the I/O path — cost 6–7%,
+context-independent). If decode at this operating point were CPU-bound, those two dials would read the
+other way around. The CPU-sensitive part is the attention slope, which is small at 1.5k context and
+large at 6k — which leads to the reconciliation below.</p>
+
+<h2>Where your colleague can be right: the operating-point table</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>regime</th><th>dominant cost</th><th>evidence</th></tr>
+  <tr><td>decode, p1024/8u, gpt-oss tp4 (the CI point)</td><td><strong>floor-bound</strong>: FPGA compute + fixed I/O path (~84% of token time)</td><td>clock A/B (+48% → −1%); mesh cap −6–7%; phase profile</td></tr>
+  <tr><td>decode at long context (p4096+, ~6k ctx)</td><td>CPU attention grows to <strong>~43%</strong> of token time — increasingly CPU-bound</td><td>floor+slope model, ab28 sweep (slope ×1.30 with clock)</td></tr>
+  <tr><td>prefill / TTFT</td><td>heavily CPU-involved — flat-freq moved prefill <strong>+16–18%</strong></td><td>every A/B in the investigation</td></tr>
+  <tr><td>smaller models / tp2 (llama trio)</td><td>shorter FPGA matmuls, same fixed orchestration → CPU/orchestration share is proportionally larger; FPGA wait gaps plausible</td><td>not yet measured on 3bda — worth one capture at that config</td></tr>
+  <tr><td>any capture read via Running-state or wakeups</td><td>indeterminate — traps 1 and 4</td><td>this page</td></tr>
+</table>
+</div>
+<div class="callout good">
+<p style="margin:0"><strong>Reconciliation.</strong> "The FPGA waits a lot for the CPU" and "the FPGA
+paces decode" are both true statements — about different configurations, phases, or trace-reading
+methods. Before comparing conclusions, pin down: model & tensor-parallel size, prompt/generated
+lengths, concurrency, load steadiness during the capture window, and whether "wait" was inferred from
+Running-state (unreliable here) or from a work/spin separation. If your colleague's captures were
+llama-class, tp2, prefill-heavy, or long-context, his reading and ours are the same physics.</p>
+</div>
+
+<h2>Practical checklist for scoping tron in perfetto</h2>
+<ol>
+  <li><strong>Record the operating point with the trace</strong>: model, tp, users, prompt/gen lengths, and the live request rate during the capture (we save a loadgen summary next to every trace).</li>
+  <li><strong>Find threads by enumeration, not name</strong>: <span class="mono">ps -Lo tid,psr,comm -p $(pgrep -x rinzler)</span>, match loosely (<span class="mono">work_queu</span>), remember names appear only under streaming load.</li>
+  <li><strong>Never sum Running time</strong> — separate work from spin with <span class="mono">perf</span> sampling or instruction counts (snippet 1).</li>
+  <li><strong>Don't look for wakeup chains</strong> — there are none (snippet 4).</li>
+  <li><strong>Infer FPGA state from the work-phase structure</strong>, not from CPU gaps (snippets 2–3).</li>
+  <li><strong>Settle "bound-by" questions with a perturbation</strong>: core-clock A/B, mesh-clock A/B, or context-length sweep — each dial isolates one resource (snippet 6).</li>
+</ol>
+
+<footer style="margin-top:2.5rem; color: var(--ink-2); font-size: 0.85rem; border-top: 1px solid var(--ring); padding-top: 0.8rem;">
+Sources: ab30 perfetto A/B (Jul 20), ab31b perf phase profile (397k samples), ab28 length sweep, P4.3/ab33
+clock A/Bs, ab31/ab31b uncore probes — full record at
+<span class="mono">delphi-3bda:/scratch/jhan/flat_freq_tests/README.md</span> and the companion explainer
+<span class="mono">flat_freq_explained.html</span> (same docs folder). Schematics are drawn from the
+measured numbers; load the referenced .pftrace files to see the raw tracks.
+</footer>
+</body>
+</html>
