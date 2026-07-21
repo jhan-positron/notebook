@@ -895,8 +895,12 @@ Armed chain (all verified armed in journals at 00:56-00:57 UTC):
    (14h windows cover through ~15:00 UTC).
 Results land in /scratch/jhan/ab33|ab34|ab29/{results,journal.log}.
 Analysis pending next session. A3 (boot persistence) deliberately NOT
-scheduled — needs its own maintenance window. systems_test PR draft =
-my next no-machine deliverable (unblocks B2/B3/B4).
+scheduled — needs its own maintenance window. systems_test branch work
+= my next no-machine deliverable. DEPENDENCY CORRECTION (user, 07-21):
+B2/B3 need only the CODE ON THE BRANCH (run from the patched clone,
+exactly like ab29) — NOT the merged PR. Only B4 needs merge+deploy
+(it rides real nightlies). Merge is the team's call via normal review
+(user reviews first, then team; I never merge).
 
 ## Open items / next steps (rewritten 2026-07-16; stale items resolved)
 
