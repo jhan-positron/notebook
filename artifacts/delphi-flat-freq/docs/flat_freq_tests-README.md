@@ -2062,3 +2062,35 @@ proposal.
 Kits: /scratch/jhan/ab37{,b}, ab38 (traces fpga_lane.pftrace 579MB/
 416MB; pairs+gap analysis /tmp on 3af6, copies in kits). All runs
 restored the machine.
+
+### 2026-07-22 (later) — worker-attention OVERLAY on the FPGA gaps (ab36 trace, one clock)
+
+User hypothesis test: "workers do attention during the 70% relay-quiet
+gap time." Method: union of ALL 112 workers' attention-path slices
+(strict = attention:join + moe_blend + kernel_add* + fill_logits;
+broad = + "Attention Ready"; "Attention Pending" excluded as a wait)
+intersected with each device's gaps; 2.4s dense window, artifact gaps
+(>2ms, buffer-loss zones) excluded.
+
+RESULTS (uniform across 8 devices):
+- Gap coverage by worker compute: 53-56% strict / 75-77% broad =>
+  hypothesis SUBSTANTIALLY CONFIRMED - but coverage is BELOW the
+  workers' wall baseline (67-68%/80-83%): gaps slightly ANTI-align
+  with attention (consistent w/ ab31b anti-phase).
+- By gap size: short (<50us) gaps ~70% attention-covered (normal
+  pipelining); mid (50-200us) the QUIETEST (41-47%) = global lulls;
+  long (>=200us) ~49-59%.
+- INSTANCE-LEVEL BOTTOM LINE: union(4 FPGAs + all worker attn-path +
+  relay) computes 86.4-88.0% of wall => TRULY GLOBAL DEAD TIME =
+  12.0-13.7% (~1.2-1.4ms/token, conservative/broad).
+REFINED VERDICT: no single engine is the bottleneck; each engine
+individually idles heavily (FPGA <=28-41%), the token is a dependency
+chain relayed across engines. Structural win = deeper cross-layer/
+cross-user overlap; the ~1.2-1.4ms global dead time (+~14% ceiling)
+is the hard floor of pure relay/wire cost. (This refines the earlier
+"3.4ms dead" estimate, which counted per-device idleness not covered
+by the SAME device's threads - much of it is covered by worker
+compute elsewhere in the instance.)
+Analysis: /tmp/overlay2.py + globalquiet.py on 3af6 (copies in ab36
+kit); real-data lanes render (2.4ms window, dev 10, 1485us real gap)
+embedded in perfetto_reading_tron.html.
