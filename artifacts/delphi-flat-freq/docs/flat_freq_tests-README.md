@@ -2020,3 +2020,45 @@ aborted attempts journal_v1-v4 in kit dir (each root-caused: TRACE_FILE
 mode misread; socket path /tmp-vs-/run defaults; socket perms; client
 self-match pgrep trap AGAIN - check and launch MUST be separate ssh
 calls).
+
+### 2026-07-22 — ab37/ab37b (gap anatomy MEASURED) + ab38 (refresh validation Part A)
+
+ab37b (driver-detail capture, 2s loss-free, 8 devices, 408k paired
+jobs, capture block 102.1 t/s/u @732W): GAP INTERIOR MEASURED —
+~30% of gap time = relay CPU work (dominated by "rx collecting
+results" ~16us/job; callback+tail-advance small); ~70% = NOTHING on
+either relay thread (wire/DMA/mbox/dependency), uniform 68.8-71.3%
+across all 8 devices. TX-side prep = 0% of gaps (fully pipelined
+inside busy periods - already well engineered). Occupancy honesty
+across captures: launch->collect bracket reads 41.2% (ab36, heavy
+all-category tracing) vs 27.7% (ab37b, light tracing) - the bracket
+includes RX pickup lag and INFLATES under tracing load (job span p50
+18.9us -> 10.6us, gap p99 938us -> 159us between captures) => treat as
+UPPER bound: true FPGA compute occupancy <= ~28%. Verdict unchanged
+and strengthened: decode is PIPELINE-LATENCY-bound.
+(ab37 8s run: 1GB buffer overflowed at driver-detail density - whole
+per-thread streams dropped, 1 usable device; lesson: 2s sessions for
+driver-detail, or >=2GB buffers.)
+
+ab38 (refresh validation Part A, 10 interleaved fresh-provisioning
+draws, safe recipe = residue sweep + drop_caches + compact_memory;
+hugepage pool cycle EXCLUDED from unattended runs by design):
+
+| arm | draws (decode t/s/u) | mean | CV |
+|---|---|---|---|
+| norefresh | 96.00 97.85 97.21 96.25 101.74 | 97.81 | 2.37% |
+| refresh | 99.50 97.32 102.14 101.59 100.24 | 100.16 | 1.90% |
+
+Verdict: refresh does NOT meaningfully shrink the lottery spread
+(CV ~same at n=5) => the draw-to-draw variance lives BELOW OS memory
+state (FPGA/driver-side suspected). But refresh RAISED THE MEAN +2.4%
+(marginal at n=5, t~1.75; possible contamination: compaction benefits
+may persist into later norefresh draws). Reading: refresh = mean-
+lifter (night-state recovery), not variance-shrinker. Part B (fresh-
+vs-night gap with/without refresh, machine untouched after a real
+nightly) scheduled for the Jul-23 11:35 window before any CI-team
+proposal.
+
+Kits: /scratch/jhan/ab37{,b}, ab38 (traces fpga_lane.pftrace 579MB/
+416MB; pairs+gap analysis /tmp on 3af6, copies in kits). All runs
+restored the machine.
