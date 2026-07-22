@@ -1962,3 +1962,61 @@ harness and metric are the same code path, so the boost measurement
 accounting for known config differences". A true parity cell
 (production shape + SEED_OFFSET=0 + post-nightly state) is a cheap
 future add if strict parity is ever needed.
+
+### 2026-07-22 — ab36: the MEASURED FPGA lane. Verdict revised: decode is PIPELINE-LATENCY-bound.
+
+Goal (user): replace the inferred FPGA-busy story with measured data.
+Finding: tron ALREADY ships perfetto TrackEvent instrumentation on the
+whole FPGA job path (driver category: matmul enqueue -> Launch hardware
+matmul job -> tx_launch -> "rx collecting results", flow-linked per
+request; src/pos/driver.cpp + worker.cpp), compiled into the deployed
+binary, with a built-in SIGUSR1 tracer (src/pos/perf.cpp) that in
+serving mode means "register as SYSTEM-BACKEND producer" (the literal
+"traced" arg; TRACE_FILE is only for the in-process mode). NO PATCH
+NEEDED.
+
+Capture recipe (v5, after 4 root-caused failures):
+tracebox traced + traced_probes (root) -> chmod 0777 the sockets
+(rinzler runs as positron; root-owned 0755 socket fails SILENTLY -
+release builds log connect errors at debug level only) -> symlink
+/run/perfetto names -> /tmp defaults -> SIGUSR1 both rinzlers ->
+VERIFY producers via `perfetto --query | grep rinzler` -> record 20s
+track_event(driver)+sched session under steady load. Buffer 256MB
+filled in ~3.3s at this density (433MB trace) - size >=1GB next time.
+
+RESULT (3.0s intact window, 600k jobs, 599,988 flow-paired = 99.93%,
+8u loadgen 98.59 t/s/u capture-window metric, 741W):
+
+| metric | value |
+|---|---|
+| FPGA-pipeline busy (union launch->collect) | 41.2% wall (40.0-42.0 across 8 devices) |
+| matmul jobs per device | ~22k/s; span p50 19-22us, p95 ~130us |
+| idle gaps per device | ~11k/s; p50 16us (per-layer handoffs), p99 ~1ms |
+| FPGA idle | ~59% of wall |
+
+RECONCILED TOKEN BUDGET (10.1ms iteration): FPGA 4.2ms (41%) + CPU
+attention 2.1ms (21%) + serial head 0.4ms (4%) + HANDOFF DEAD TIME
+~3.4ms (34%). Cross-check: FPGA+dead+serial ~= 8.0ms ~= the 8.27ms
+clock-immune floor - the floor+slope model STANDS, its floor anatomy
+is now measured: ~half FPGA compute, ~40% latency, ~5% serial CPU.
+
+CORRECTIONS: (1) the earlier "FPGA computes most of the iteration"
+inference (elimination: CPU-quiet => FPGA-busy) was WRONG - CPU-quiet
+splits into FPGA-busy 41% + nobody-computing latency ~34%. Teammate's
+"FPGA waits a lot" observation CONFIRMED; "therefore CPU-bound" still
+refuted (clock A/B). (2) The "~0.2-0.3ms latency head" opportunity is
+superseded: total handoff dead time is ~3.4ms/token - THE BIGGEST
+KNOWN HEADROOM (halving it ~ +20% decode). Levers are structural:
+deeper per-device job queues, batched/coalesced descriptor+DMA
+traffic, fewer relay hops per layer. Mesh-clock sensitivity (-6-7%
+uncore cap) fits: dead time is wire latency.
+
+Docs updated: perfetto_reading_tron.html (snippet 7 + corrections;
+verdict "pipeline-latency-bound"), flat_freq_explained.html (second
+measured refinement fig-note; Problems section item 2 rewritten).
+Artifacts: delphi-3bda:/scratch/jhan/ab36/results/fpga_lane.pftrace
+(433MB) + pairs analysis (fpga_busy.py in kit) + perf_capture.data;
+aborted attempts journal_v1-v4 in kit dir (each root-caused: TRACE_FILE
+mode misread; socket path /tmp-vs-/run defaults; socket perms; client
+self-match pgrep trap AGAIN - check and launch MUST be separate ssh
+calls).
