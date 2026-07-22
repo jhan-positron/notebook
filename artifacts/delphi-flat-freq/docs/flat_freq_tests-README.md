@@ -2094,3 +2094,25 @@ compute elsewhere in the instance.)
 Analysis: /tmp/overlay2.py + globalquiet.py on 3af6 (copies in ab36
 kit); real-data lanes render (2.4ms window, dev 10, 1485us real gap)
 embedded in perfetto_reading_tron.html.
+
+### 2026-07-22 late — ab40: Bill's rinzler-cores extension (more front-end cores)
+
+VALIDATION VERDICT (the "data-driven" claim): PARTIALLY confirmed —
+editing /opt/positron/config/resource-map.yaml propagates to
+CPUAFFINITY/RZ_CLI_ARGS with NO rebuild, BUT platformd reads the map
+ONLY AT ITS OWN STARTUP (caches it). Proven the hard way: an early
+platformd restart under the ext map poisoned six subsequent draws —
+all ran extended regardless of the file on disk (v2 "A/B" void; its
++1.4% ext-vs-stock was ext-vs-ext lottery noise, CV ~1.3%). Recipe:
+edit map -> systemctl restart platformd -> reprovision. Machine
+cleaned (stock map + platformd restart + trio reprovision verified
+CPUAFFINITY back to 1,145/2,146/73,217/74,218).
+
+THE EXTENSION under test: rinzler_cores 2->4 physical cores/instance
+using same-die unused cores (socket0 +15,16; socket1 +87,88; + HT
+siblings; still clamped — core COUNT is the only variable). The 6962P
+map has 9 unused physical cores per socket (15-23, 87-95), same die A
+as the rinzler cores.
+
+v3 (per-draw platformd restart + per-draw CPUAFFINITY assertion)
+launched 20:12 UTC; results appended when complete.
