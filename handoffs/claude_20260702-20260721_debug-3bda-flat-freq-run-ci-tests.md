@@ -1206,3 +1206,27 @@ Added 2026-07-10..16:
   fleet way, no sudo); verify zero rinzler processes before touching
   hugepages or shapes; foreign hugepage slice files must be fuser-verified
   before removal.
+
+## 2026-07-22 late — armed at laptop-reboot time (results to collect)
+
+- ab40 v2 RUNNING (armed 19:01 UTC): Bill's rinzler-cores extension
+  A/B. Validation draw: does platformd regenerate CPUAFFINITY from an
+  edited /opt/positron/config/resource-map.yaml alone (fallback:
+  platformd restart; abort = claim invalid)? Then 3 stock vs 3 ext
+  interleaved provisioning draws (ext = rinzler_cores 2->4 phys cores/
+  instance using same-die unused cores 15,16/87,88 + HT siblings, still
+  clamped). v1 aborted on a kit bug (unprivileged grep of 0750 env
+  files — NOT evidence against the claim). Results:
+  delphi-3bda:/scratch/jhan/ab40/results/ (loadgen_draw*_{stock,ext},
+  cpuaffinity_*, cmdlines_*). Map restored to stock at end (backups in
+  kit; file is tron-package-owned — permanent change ships via package).
+- ab39 ARMED: refresh Part B (night-state vs refreshed provisioning,
+  post-nightly, machine untouched before 11:35 UTC Jul-23 window);
+  6 interleaved draws; results /scratch/jhan/ab39/results/.
+- Context for ab40: resource-map facts — deployed at /opt/positron/
+  config/resource-map.yaml (tron pkg); platformd schema default points
+  there, parses yaml rinzler_cores, emits CPUAFFINITY/RZ_CLI_ARGS at
+  provisioning; rinzler also loads it at startup (src/system/
+  resource_map.cpp). 6962P section: 9 UNUSED physical cores per socket
+  (15-23, 87-95; same die A as rinzler cores 1,2/73,74 per the map's
+  die comment).
