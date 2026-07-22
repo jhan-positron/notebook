@@ -42,12 +42,13 @@
 <p style="font-family: system-ui, sans-serif; font-size: 0.85rem;"><a href="https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/perfetto_reading_tron.html">Open rendered view</a></p>
 
 <h1>Reading tron in perfetto: is it CPU-bound or FPGA-bound?</h1>
-<p style="color: var(--ink-2);">A guide through the trace shapes that mislead, written after two perfetto
-captures and a perf phase profile of gpt-oss-120b tp4 serving on delphi-3bda (July 2026). Short answer:
-<strong>the question needs an operating point</strong> — decode at CI's configuration is floor-bound
-(FPGA + fixed I/O path), and the same system is genuinely CPU-bound in other regimes (long context,
-prefill, small models). A perfetto trace alone <em>cannot</em> settle it, for two reasons this page
-demonstrates. Both interpretations of "a lot of FPGA wait" can come from the same machine.</p>
+<p style="color: var(--ink-2);">A guide through the trace shapes that mislead, written after three perfetto
+captures and a perf phase profile of gpt-oss-120b tp4 serving on delphi-3bda (July 2026). Short answer
+(updated Jul 22 with the <em>measured</em> FPGA lane, snippet 7): <strong>at the CI operating point,
+decode is pipeline-latency-bound</strong> — FPGA compute ~41% of wall, CPU attention ~21%, and ~34%
+is stage-handoff latency where neither side computes; the same system is genuinely CPU-bound in other
+regimes (long context, prefill, small models). Naive trace reading misleads here for two reasons this
+page demonstrates — and its own first draft fell for one of them (snippet 7's correction).</p>
 
 <div class="callout">
 <p style="margin:0"><strong>Reference traces to load in <a href="https://ui.perfetto.dev">ui.perfetto.dev</a></strong>
@@ -105,10 +106,12 @@ spin loops show as a tight <span class="mono">wait/poll</span> frame.</p>
 <p><strong>Analysis.</strong> Perfetto traces the CPU. The FPGA shows up only if a driver emits track
 events, which tron's doesn't. So "the FPGA had a lot of wait time" cannot be read directly from these
 traces — it has to be <em>inferred</em>, usually from gaps in CPU activity. But trap 1 means there are
-no visible gaps: everything spins. The FPGA computes for most of the iteration and idles
-<strong>~0.4–0.5&nbsp;ms per 9.9&nbsp;ms token (~4–5%)</strong> waiting for the CPU's genuinely serial
-job-prep. That serial head is real — it's the +1.2% the front-end un-clamp recovers — but it is not
-"a lot".</p>
+no visible gaps: everything spins. The CPU-side serial head the FPGA waits on at iteration start is
+<strong>~0.4–0.5&nbsp;ms per token</strong> — real, and it's the +1.2% the front-end un-clamp
+recovers. <em>(Correction, Jul 22: an earlier version of this paragraph inferred the FPGA computes
+"for most of the iteration." The measured lane in snippet 7 shows total FPGA occupancy is ~41% —
+the serial head is only one of its idle modes; most idle is distributed per-layer handoff latency.
+The inference trap this snippet warns about caught this page's own author.)</em></p>
 <div class="callout">
 <p style="margin:0"><strong>Where the 0.4–0.5&nbsp;ms comes from — deliberately NOT perfetto.</strong>
 Two independent non-trace sources agree: (1)&nbsp;<em>clock-toggle arithmetic</em> — un-clamping the
@@ -172,6 +175,12 @@ nor attention is dense, yet progress continues — by elimination, the FPGA is c
 regions on the submission side. Cross-check: +48% CPU clock moved token time 1% — nothing CPU-side is
 pacing the quiet zone. <em>The definitive upgrade would be tron emitting enqueue/complete timestamps
 (a userspace perfetto track): the FPGA lane becomes measured instead of inferred, per layer.</em></p>
+<p style="margin:0.5rem 0 0"><strong>SUPERSEDED (Jul 22):</strong> that upgrade turned out to already
+exist in tron, and the measured lane (snippet&nbsp;7) revealed the elimination step above was
+over-attributing: step (3)'s "by elimination, the FPGA is computing there" is only ~<strong>41%</strong>
+true — the rest of the CPU-quiet time is stage-handoff <em>latency</em> where neither side computes.
+Steps (1), (2) and (4) stand; the lesson is that elimination cannot distinguish "the other device is
+working" from "everyone is waiting on a wire".</p>
 </div>
 
 <h2>Snippet 4 — why sched-based reasoning fails completely here: zero wakeups</h2>
@@ -242,11 +251,67 @@ context-independent). If decode at this operating point were CPU-bound, those tw
 other way around. The CPU-sensitive part is the attention slope, which is small at 1.5k context and
 large at 6k — which leads to the reconciliation below.</p>
 
+<h2>Snippet 7 — the MEASURED FPGA lane (Jul 22) — and a correction to this page</h2>
+<div class="callout good">
+<p style="margin:0"><strong>The inference era of this page is over.</strong> tron already ships
+perfetto TrackEvent instrumentation on the whole FPGA job path
+(<span class="mono">src/pos/driver.cpp</span>, <span class="mono">worker.cpp</span>: enqueue →
+"Launch hardware matmul job" → <span class="mono">tx_launch</span> → "rx collecting results",
+flow-linked per request) — compiled into the production binary. Enabling it needs no patch and no
+rebuild: run system <span class="mono">traced</span>/<span class="mono">traced_probes</span>
+(<span class="mono">tracebox</span> works), make the sockets world-writable (rinzler runs as user
+<span class="mono">positron</span> — a root-owned 0755 socket fails <em>silently</em>), send the
+process SIGUSR1 once (registers the producer; verify with <span class="mono">perfetto
+--query</span>), then record a session with the <span class="mono">driver</span> category.</p>
+</div>
+<div class="viz">
+<h4>Measured: per-device FPGA-pipeline occupancy under steady 8-user serving</h4>
+<div class="note">ab36 capture, Jul 22 00:33 UTC — 600k matmul jobs, 599,988 flow-paired (99.93%), 3.0 s intact window, decode 98.6 tok/s/user @ 741 W</div>
+<div class="tablewrap"><table>
+  <tr><th>metric</th><th>value (8 devices)</th></tr>
+  <tr><td>FPGA-pipeline busy (union of launch→collect intervals)</td><td><strong>41.2% of wall clock</strong> (min 40.0, max 42.0 — tight across devices)</td></tr>
+  <tr><td>matmul jobs per device</td><td>~22,000/s; median job span 19–22 µs, p95 ~130 µs</td></tr>
+  <tr><td>idle gaps per device</td><td>~11,000/s; median 16 µs (per-layer handoffs), p99 ~1 ms</td></tr>
+  <tr><td>FPGA idle total</td><td>~588 ms per second of wall clock (~59%)</td></tr>
+</table></div>
+</div>
+<p><strong>The correction.</strong> Earlier versions of this page inferred (snippets 2–3) that the
+FPGA computes through most of the iteration, because CPU real work was sparse in ~55% of the cycle
+and "something must be making progress." That elimination step was wrong: <em>CPU-quiet does not
+equal FPGA-busy</em>. Measured, the quiet time splits between FPGA compute and <strong>stage-handoff
+latency where neither side computes</strong> — DMA transfers, mailbox waits, descriptor round-trips,
+thread-relay lag. The bracket we measure (launch→collect) <em>over</em>-estimates FPGA busy, so 41%
+is an upper bound.</p>
+<p><strong>The reconciled token budget</strong> (at 98.6 tok/s/user → ~10.1 ms per iteration):
+FPGA-pipeline occupied ~4.2 ms (41%) + CPU attention ~2.1 ms (21%) + orchestrator serial head
+~0.4 ms (4%) + <strong>~3.4 ms (~34%) handoff/latency dead time</strong>. Cross-check: FPGA + dead
+time + serial ≈ 8.0 ms ≈ the 8.27 ms clock-immune floor from the length sweep — the model stands,
+but its floor is now decomposed: <em>~half FPGA compute, ~40% pure latency, ~5% serial CPU</em>. The
+dead time being latency (not CPU compute) is exactly why +48% CPU clock moved nothing while the
+mesh/uncore cap cost 6–7%.</p>
+<div class="callout warn">
+<p style="margin:0"><strong>Revised verdict — neither CPU-bound nor FPGA-bound:
+pipeline-latency-bound.</strong> At the CI operating point, the largest single component of decode
+time is not FPGA compute and not CPU compute — it is the latency of relaying work between them,
+paid ~11,000 times per second per device in ~16 µs slices. The "FPGA waits a lot" observation is
+<em>confirmed by measurement</em> (~59% idle). The "therefore CPU-bound" conclusion still does not
+follow — the waits don't shrink with CPU clock — but the headroom implication is real and big:
+eliminating even half the dead time would be worth roughly +20% decode. That moves to the top of
+the follow-up list.</p>
+</div>
+<p class="fig-note">Reproduction: trace at
+<span class="mono">delphi-3bda:/scratch/jhan/ab36/results/fpga_lane.pftrace</span> (433 MB; buffer
+filled after ~3.3 s — size the buffer ≥1 GB or shorten the session next time); pairing/union
+analysis <span class="mono">delphi-3af6:/tmp/fpga_busy.py</span> (kit copy in
+<span class="mono">ab36/</span>); session recipe in the kit's
+<span class="mono">orchestrator36.sh</span> (v5). Caveats: 3 s intact window (~300 iterations);
+serving mix includes prefill bursts; launch→collect brackets include result-DMA and RX-thread lag.</p>
+
 <h2>Where your colleague can be right: the operating-point table</h2>
 <div class="tablewrap">
 <table>
   <tr><th>regime</th><th>dominant cost</th><th>evidence</th></tr>
-  <tr><td>decode, p1024/8u, gpt-oss tp4 (the CI point)</td><td><strong>floor-bound</strong>: FPGA compute + fixed I/O path (~84% of token time)</td><td>clock A/B (+48% → −1%); mesh cap −6–7%; phase profile</td></tr>
+  <tr><td>decode, p1024/8u, gpt-oss tp4 (the CI point)</td><td><strong>pipeline-latency-bound</strong> (measured, snippet 7): FPGA compute ~41% + handoff latency ~34% + CPU attention ~21% + serial head ~4%</td><td>measured FPGA lane (ab36); clock A/B (+48% → −1%); mesh cap −6–7%</td></tr>
   <tr><td>decode at long context (p4096+, ~6k ctx)</td><td>CPU attention grows to <strong>~43%</strong> of token time — increasingly CPU-bound</td><td>floor+slope model, ab28 sweep (slope ×1.30 with clock)</td></tr>
   <tr><td>prefill / TTFT</td><td>heavily CPU-involved — flat-freq moved prefill <strong>+16–18%</strong></td><td>every A/B in the investigation</td></tr>
   <tr><td>smaller models / tp2 (llama trio)</td><td>shorter FPGA matmuls, same fixed orchestration → CPU/orchestration share is proportionally larger; FPGA wait gaps plausible</td><td>not yet measured on 3bda — worth one capture at that config</td></tr>
