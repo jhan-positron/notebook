@@ -2116,3 +2116,34 @@ as the rinzler cores.
 
 v3 (per-draw platformd restart + per-draw CPUAFFINITY assertion)
 launched 20:12 UTC; results appended when complete.
+
+ab40 v3 RESULTS (2026-07-22 20:15-20:55 UTC, 6 draws, all per-draw
+affinity assertions passed — arms verified genuinely different):
+
+| draw | arm   | decode t/s/u (capture) | PkgWatt | Bzy_MHz |
+|------|-------|------------------------|---------|---------|
+| 1    | stock | 99.89                  | 740     | 3643    |
+| 2    | ext   | 100.24                 | 738     | 3650    |
+| 3    | stock | 97.95                  | 741     | 3643    |
+| 4    | ext   | 100.17                 | 736     | 3650    |
+| 5    | stock | 100.41                 | 734     | 3652    |
+| 6    | ext   | 105.19                 | 740     | 3639    |
+
+stock mean 99.42 (sd 1.30) vs ext mean 101.87 (sd 2.88):
+ext +2.45 t/s/u = +2.5%. Direction consistent — ext wins ALL THREE
+interleaved adjacent pairs (+0.35% / +2.27% / +4.76%) — but the
+magnitude is inside the provisioning lottery (ab34 CV 2.4%,
+max-min 6.9%; draw 6's 105.19 exceeds ab34's observed max), and
+Welch t = 1.34 (p ~= 0.25). Power identical across arms (734-741 W;
+the extra cores are clamped CLOS3 cores that were idling anyway).
+
+VERDICT ab40: directionally POSITIVE, magnitude UNCONFIRMED at
+n=3/arm. +2.5% point estimate would beat the un-clamp's +1.2-1.35%
+(A1/A2), for free in power — worth a confirmation run at higher n
+(>=6/arm) before proposing to Bill/team. NOT yet ship-grade evidence.
+
+KIT LESSON (v3): restore_all that copies the stock map back MUST ALSO
+restart platformd — v3's restore didn't, so the post-run trio came up
+on the CACHED ext map (caught and fixed 21:0x UTC: platformd restart
++ trio reprovision, CPUAFFINITY verified back to stock 1,145/2,146/
+73,217/74,218, trio serving, map md5 afe0ddae).

@@ -1230,3 +1230,25 @@ Added 2026-07-10..16:
   resource_map.cpp). 6962P section: 9 UNUSED physical cores per socket
   (15-23, 87-95; same die A as rinzler cores 1,2/73,74 per the map's
   die comment).
+
+## ab40 — Bill's rinzler-cores extension (2026-07-22, COMPLETE)
+
+Two questions, two answers:
+
+1. "Just updating the resource map file is enough" — FALSE as stated,
+   TRUE amended: /opt/positron/config/resource-map.yaml edits propagate
+   to CPUAFFINITY/RZ_CLI_ARGS with no rebuild, but platformd READS THE
+   MAP ONLY AT ITS OWN STARTUP (caches). Recipe: edit map ->
+   `systemctl restart platformd` -> reprovision. Proven by v2's six
+   poisoned draws (all ran a cached ext map while disk said stock) and
+   v3's restore trap (trio came up ext after stock map was restored;
+   fixed same evening).
+2. Extension effect (rinzler_cores 2->4 phys cores/instance from the
+   9 unused same-die cores per socket; clamped; core count only
+   variable): ext wins all 3 interleaved pairs, mean +2.5%
+   (99.42 -> 101.87 t/s/u), power flat ~737 W both arms. Inside
+   lottery band at n=3/arm (t=1.34) — directionally positive,
+   needs a >=6/arm confirmation before shipping.
+
+Machine left clean: stock map (afe0ddae), platformd restarted under
+it, trio reprovisioned, CPUAFFINITY verified stock.
