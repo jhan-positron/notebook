@@ -2673,3 +2673,39 @@ segmenting the continuous trace on the FE cores' own Bzy_MHz
 (2700 vs 3770 segments); segment-based package power confirms the
 arm delta (+6 W @8u: 733.8 clamped vs 739.6 un-clamped). Fix the
 stop path before the next kit relies on per-block brackets.
+
+### ab43 (2026-07-23 19:00-19:23 UTC) — instruction-level confirmation
+(perf stat PMU counters, completing Bill's question)
+
+One fresh gpt-oss draw, 4 blocks C U U C @8u, arms toggled live and
+freq-verified per block; 120s `perf stat -C 1,73,145,217 -A -e
+cycles,instructions,cache-references,cache-misses,
+branch-instructions,branch-misses` window inside each block.
+
+| metric (4 FE cpus total)   | clamp 2.70 GHz | fast 3.90 GHz | ratio |
+|----------------------------|----------------|---------------|-------|
+| cycles/s                   | 5.48 G         | 7.99 G        | 1.457 |
+| instructions/s             | 1.42 G         | 1.54 G        | 1.079 |
+| IPC                        | 0.260          | 0.192         | 0.74  |
+| cache-miss / cache-ref     | ~5.4%          | ~5.4%         | ~1    |
+| branch-miss rate           | ~1.9%          | ~1.7%         | ~1    |
+
+READING: cycles/s scales EXACTLY with the clock (1.457 vs clock ratio
+1.444) while instructions/s stays nearly flat (+7.9%, vs +44.4% if
+the cores were compute-saturated). IPC drops 0.26 -> 0.19
+accordingly. This is the instruction-level signature of
+LATENCY-BOUND cores: they burn cycles at whatever clock they are
+given, but retire work at the rate the FPGA pipeline feeds them.
+The flat instructions/s also rules out spin-loop waiting (a spin
+loop RETIRES instructions and would scale with clock) — the waits
+park the core in tpause/mwaitx, where nothing retires — matching
+the perfetto zero-wakeup finding (and ruling out lock contention:
+no futex churn, no atomic-contention cache signature; miss rates
+modest and arm-independent). The +8% instructions/s uptick is the
+small clock-bound compute slice — the same slice that yields the
++1.12% decode gain.
+Absolute IPC ~0.2-0.26 (vs workers' 0.02 from P4.3b): the FE cores
+do roughly 10x the per-cycle work of workers, still far from
+compute-bound (healthy compute code runs IPC 1-3+).
+Kit: /scratch/jhan/ab43 (perfstat_*.csv per block). Machine
+restored, trio verified.
