@@ -1335,3 +1335,33 @@ only (never reprovisions inside the window).
 
 Kit: /scratch/jhan/ab42 (orchestrator on 3bda pid 2943256, client on
 3af6 pid 363487, journal.log + journal_client.log separate).
+
+### 2026-07-23 — ab39 RESULTS (refresh validation Part B, post-nightly)
+
+6 fresh draws right after the nightly ended (11:43-12:19 UTC),
+alternating norefresh/refresh (safe recipe: residue sweep +
+drop_caches + compact_memory):
+
+| draw | arm       | decode t/s/u |   | draw | arm     | decode t/s/u |
+|------|-----------|--------------|---|------|---------|--------------|
+| 1    | norefresh | 99.21        |   | 2    | refresh | 101.06       |
+| 3    | norefresh | 95.85        |   | 4    | refresh | 97.75        |
+| 5    | norefresh | 97.35        |   | 6    | refresh | 96.29        |
+
+norefresh 97.47 vs refresh 98.37 => +0.92% (2 of 3 adjacent pairs
+positive, ns at n=3/arm vs lottery CV 2.4%).
+
+REFRESH VERDICT (Parts A+B combined, for the CI-team proposal): the
+safe between-model refresh is NOT worth inserting into CI. It does
+not shrink the lottery (Part A: CV 1.90 vs 2.37), and its mean lift
+is small and inconsistent (Part A +2.4% marginal daytime; Part B
++0.9% ns post-nightly). It does NOT reliably recover the ~2%
+night-state cost => that cost lives below OS memory state (consistent
+with Part A). Comparability in CI comes from trailing bands, not
+refreshes.
+
+BONUS cross-run observation: ab39's 6 draws (all post-nightly,
+stock config) average 97.9 vs ab41's 9 stock draws (pre-nightly,
+evening-idle machine) 100.3 => -2.4% night-state depression measured
+across runs — independent corroboration of the ~2% reconstruction-
+ladder estimate.
