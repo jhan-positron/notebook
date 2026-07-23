@@ -1270,3 +1270,42 @@ ab41 (confirmation run, launched 2026-07-23 ~00:1x UTC): 12 draws,
 time-order; per-draw platformd restart + CPUAFFINITY assertion;
 restore_all fixed to restart platformd after restoring the stock map
 and to verify trio affinity. Results appended when complete.
+
+ab41 RESULTS (2026-07-23 00:17-01:45 UTC, 12/12 draws, all per-draw
+affinity assertions passed, ABBA arm order, restore verified):
+
+| draw | arm   | decode t/s/u | PkgWatt |   | draw | arm   | decode t/s/u | PkgWatt |
+|------|-------|--------------|---------|---|------|-------|--------------|---------|
+| 1    | stock | 99.18        | 744     |   | 7    | ext   | 99.22        | 740     |
+| 2    | ext   | 101.74       | 745     |   | 8    | stock | 101.39       | 737     |
+| 3    | ext   | 96.61        | 740     |   | 9    | stock | 101.79       | 736     |
+| 4    | stock | 100.55       | 738     |   | 10   | ext   | 100.58       | 736     |
+| 5    | stock | 99.84        | 738     |   | 11   | ext   | 99.84        | 736     |
+| 6    | ext   | 96.76        | 735     |   | 12   | stock | 101.36       | 735     |
+
+ab41 alone: stock 100.69 (sd 1.02) vs ext 99.13 (sd 2.07) =>
+ext -1.55% (Welch t=1.66, ns). Ext won only 1 of 6 adjacent ABBA
+comparisons. Power flat (~735-745 W both arms).
+
+COMBINED VERDICT ab40+ab41 (9v9 draws): stock 100.26 (sd 1.21) vs
+ext 100.04 (sd 2.57) => -0.2%, t=0.24, p~0.8. Bill's rinzler-cores
+extension (1->2 phys front-end cores/instance) has NO measurable
+decode effect at 8u/p1024. ab40's +2.5% was the PROVISIONING LOTTERY
+(its draw6 105.19 sat above ab34's whole band; ab41's ABBA order and
+n=6/arm dissolved it). Consistent with ab32: front-end threads are
+locality/latency-sensitive, not CPU-throughput-bound -- more clamped
+cores neither help nor hurt. Side observation (weak, n=9): ext arm
+shows higher draw-to-draw variance (sd 2.57 vs 1.21) -- not
+actionable.
+
+Run-quality notes: run 1 aborted at draw 1 by a WRONG validation
+(loadgen --out is per-request JSONL, ~172 records/block; the summary
+goes to stdout/journal -- json.load on it always fails). The abort
+exercised the hardened restore path successfully (trio verified back
+in one try). Fix: validate >=50 records. Kit hardening from
+pre-launch review (3 blockers fixed BEFORE launch): stock-arm
+affinity check failed open on error-text captures (now requires real
+CPUAFFINITY= lines); config-PATCH curls had no timeout (now -m 30);
+no signal trap (now finish_abort on TERM/INT/HUP). NFS gotcha: two
+hosts appending one journal.log can lose lines (O_APPEND not atomic
+across NFS clients) -- lost the client "armed" line; harmless here.
