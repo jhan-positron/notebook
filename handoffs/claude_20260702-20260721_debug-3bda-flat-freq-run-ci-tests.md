@@ -1398,3 +1398,96 @@ not in platformd/rinzler/HTTP/loadgen. Consistent with ab34's
 byte-identical-fingerprint finding. Terminology check confirmed: our
 ab3x/ab4x tests are serving-path (user prompts -> HTTP -> rinzler);
 ab26/ab27 were runtron (in-process, no rinzler).
+
+## OPEN PROBLEM (dedicated statement, 2026-07-23) — the instance-creation lottery: definition, scope, repro
+
+This supersedes the "provisioning lottery" wording in earlier
+sections: the dice are rolled at INSTANCE CREATION, and runtron can
+reproduce it without any serving infrastructure.
+
+### What "instance creation" concretely is (evidenced from a real
+runtron launch log, sweeps/multi-sweep-20260720-031312 log.0, and
+the serving kits):
+
+Serving-path preamble (rinzler only):
+1. `systemctl stop rinzler@0..3` (old tenants die, their hugepage
+   slice files released)
+2. hugepage residue sweep (`find /dev/hugepages -type f -delete`)
+3. PATCH platformd /api/config -> platformd computes the assignment
+   (which unit gets which devices/cores/numa) and writes
+   /etc/rinzler/instance-N.env (CPUAFFINITY, RZ_CLI_ARGS)
+4. `systemctl start rinzler@N`
+
+Per-process phases (runtron and rinzler both; timings from the log):
+5. load resource-map.yaml; pin application + device-driver cores;
+   set NUMA memory policy
+6. allocate the hugepage pool: 140x 1GiB pages from
+   /dev/hugepages/libpos* on the instance numa node; build the arena
+   heap (pos_heap_v2) on it  [~17 s]
+7. open FPGA devices via VFIO (4 per tp4 instance): map BAR2/BAR4 +
+   HBM windows (hbm_north/south/kv, amem/rmem/metadata), init 2048
+   activation slots, TX/RX rings. NOTE: the bitfile is NOT
+   (re)programmed -- it is flashed/persistent (01.05.08.00 all eras);
+   init only reads the release code
+8. spawn + pin relay workers (Tx per device on dev cores 3-6, Rx on
+   sibling cores 147-150)
+9. load tokenizer; then ALLOCATE + LOAD MODEL WEIGHTS into the
+   instance's own hugepage heap  [46.7 s for gpt-oss-120b tp4 --
+   layout decided by the allocator at this moment, per launch]
+10. reserve persistent KV cache (70 GB) and allocate KV books
+11. (rinzler only) start Drogon HTTP/SSE listener; first-inference
+    warmup
+
+NOT part of instance creation (do not re-roll): FPGA bitfile
+(flash-persistent), BIOS/CLOS frequency config (boot-time), kernel
+driver state.
+
+### Scope (measured, exact data in the 2026-07-23 lottery-scope
+section above):
+- WITHIN one loaded instance: NO lottery. ab29 serving repeats CV
+  0.25-0.41% (max-min <0.8%); P4.3 A-blocks +/-0.2%; ab35 B2's two
+  arms 92.30 vs 92.29 on the same instance.
+- ACROSS instance creations, serving path: CV 2.4%, max-min 6.9%
+  (ab34, n=6, byte-identical assignment fingerprints).
+- ACROSS instance creations, runtron (no HTTP/rinzler/platformd):
+  cell CVs 0.29-3.80%, max-min up to 7.1% (ab26 v5 + ab27, n=28
+  reps / 10 cells, each rep a fresh launch minutes apart).
+- MODEL CHANGE (e.g. llama -> gpt-oss): on this stack a model change
+  IS instance re-creation -- there is no in-place model swap (PATCH
+  -> stop units -> new instances -> weight load). Every ab34 draw
+  explicitly cycled trio/llama-8b -> gpt-oss and the 6 draws spread
+  CV 2.4% => model switching re-rolls the dice, every time. The
+  nightly ladder (9 configs = 9 re-creations) additionally shows the
+  separate, additive ~2% night-state depression (ab39-vs-ab41
+  cross-run: post-nightly 97.9 vs evening-idle 100.3 stock).
+
+### How to reproduce (cheapest first):
+1. RUNTRON (recommended; removes platformd/rinzler/HTTP from the
+   suspect list and needs no ports): pattern of ab26 v5
+   (/scratch/jhan/ab26/orchestrator26.sh): N back-to-back launches,
+   IDENTICAL config/binary/arm, 3+ min apart; read
+   metrics.generate.mean per launch. Expect cell CV 1-4% with
+   occasional 5-7% spreads. REMEMBER: unset SYSTEM_CONFIG.
+2. SERVING (matches CI conditions): pattern of ab34
+   (/scratch/jhan/ab34/): N fresh provisioning draws of gpt-oss
+   2xtp4, one 240s 8u loadgen block each, capture-window metric.
+
+### Ruled out (with the kit that ruled it out):
+- platformd unit/device/core shuffle (ab34: fingerprints
+  byte-identical across draws)
+- serving stack / HTTP / loadgen (ab26/ab27: runtron repro)
+- OS page-cache/compaction state (ab38: drop_caches+compact refresh
+  does NOT shrink CV: 1.90 vs 2.37)
+- allocator choice (ab27: arena AND legacy both roll; arena-on cell
+  was the widest spread, 7.1%)
+- wait regime / RTM (ab26 v5: no-RTM cells roll too)
+
+### Candidate mechanisms for the next experiment (untested):
+physical page placement of the per-launch hugepage pool and the
+weight/KV layout inside it (steps 6/9/10) -- capture per launch:
+/proc/<pid>/numa_maps, hugetlbfs file->physical mapping via
+/proc/<pid>/pagemap, KV book addresses from the log, plus
+per-device TX/RX ring state; correlate with the launch's decode
+mean over 10-15 runtron launches. If placement correlates,
+mitigation candidates: pool pre-touch ordering, node-interleave
+policy, or reserved hugepage pools per instance.
