@@ -1252,3 +1252,21 @@ Two questions, two answers:
 
 Machine left clean: stock map (afe0ddae), platformd restarted under
 it, trio reprovisioned, CPUAFFINITY verified stock.
+
+CORRECTION to the ab40 sections above (2026-07-23): the extension is
+1 -> 2 PHYSICAL cores per instance slot (2 -> 4 logical CPUs), not
+"2 -> 4 phys". Exact change (the one-line diff in the 6962P section):
+  stock: rinzler_cores ["1","145","2","146","73","217","74","218"]
+  ext:   rinzler_cores ["1,15","145,159","2,16","146,160",
+                        "73,87","217,231","74,88","218,232"]
+i.e. added physical cores 15,16 (socket 0) + 87,88 (socket 1) and
+their HT siblings 159,160 + 231,232 — the two lowest-numbered cores
+from each socket's unused pool (15-23 / 87-95), same die A as the
+existing front-end cores, still CLOS3-clamped. Front-end physical
+total 4 -> 8.
+
+ab41 (confirmation run, launched 2026-07-23 ~00:1x UTC): 12 draws,
+6v6, ABBA arm pattern (S E E S x3) to de-confound arm from
+time-order; per-draw platformd restart + CPUAFFINITY assertion;
+restore_all fixed to restart platformd after restoring the stock map
+and to verify trio affinity. Results appended when complete.
