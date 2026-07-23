@@ -2626,3 +2626,50 @@ negligible against the ~740 W baseline.
 - CI expectation when this lands: decode +~1% @8u and prefill/TTFT
   slightly better; single-night deltas of this size are inside the
   lottery band — confirm via trailing bands, not one night.
+
+### Bill's perf-counter question (2026-07-23): are the front-end cores
+saturated, or latency-bound (e.g. lock contention)? ANSWER: neither
+saturated nor lock-contended — hardware-handshake POLLING WAIT.
+
+We have before/after counter data from ab42 itself (per-core
+turbostat ran through both arms of every draw) plus the earlier
+thread-level profiling. Three measurements, one picture:
+
+1. THE SATURATION TEST (ab42 turbostat, both arms): active FE cores
+   (1/73 + siblings) Busy% @8u = 44.6% clamped (2.70 GHz) vs 45.6%
+   un-clamped (3.90 GHz) — IDENTICAL. If the cores were saturated
+   (fixed compute), the same work at 2.7 GHz would need 3900/2700 =
+   1.44x the C0 time: clamp Busy% would read ~66%. It doesn't move
+   at all => the cores are wait-dominated, not throughput-bound.
+   (Same method that showed the WORKER cores wait-dominated in
+   P4.3b: Busy% 49.1% identical at 2700 and 4000 MHz, IPC 0.02.)
+2. NOT lock contention (ab30/ab31b profiling): the FE work_queue
+   thread occupies its core ~99% sched-wise but does only ~27% duty
+   of real work; its waits are tpause/mwaitx POLLING on FPGA job
+   handoffs — ZERO sched wakeups (no futex/mutex churn, which is
+   what lock contention would show). tpause parks the core in a
+   light sleep that counts as C0-idle, which is exactly why
+   turbostat reads ~45% busy while the scheduler sees 99%.
+3. WHY the un-clamp still pays +1.12%: the ~27% real-work duty
+   includes a ~0.84 ms/token clock-bound slice (P4.3-era anatomy);
+   +44% clock on that slice = the measured ~+1% — small because the
+   slice is small, real because it is genuinely compute.
+
+For Bill in one line: the FE cores are ~45% hardware-busy regardless
+of clock — they spend most of their time polling the FPGA pipeline,
+not fighting locks and not maxed out; the +1% comes from the small
+compute slice they do have.
+
+Available on request (not yet captured): perf-stat IPC/cache
+counters specifically on cpus 1,73,145,217 per arm — a cheap ~20 min
+two-block capture (ab43 candidate) if the team wants instruction-
+level confirmation on the FE cores like P4.3b produced for workers.
+
+KIT LESSON discovered during this analysis: power_capture.sh `stop`
+did NOT kill turbostat in ab42 — each block's power.tsv accumulated
+the rest of its draw (per-block files overlap!). The per-arm numbers
+above and the power table in the ship section were re-derived by
+segmenting the continuous trace on the FE cores' own Bzy_MHz
+(2700 vs 3770 segments); segment-based package power confirms the
+arm delta (+6 W @8u: 733.8 clamped vs 739.6 un-clamped). Fix the
+stop path before the next kit relies on per-block brackets.
