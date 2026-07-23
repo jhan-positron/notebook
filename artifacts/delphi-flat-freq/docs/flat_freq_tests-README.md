@@ -2429,3 +2429,47 @@ Recommendation to CI team if they want single-night sensitivity
 better than ~5%: reprovision-and-average (k=2 or 3) for the models
 they gate on; otherwise keep trailing bands. Warmup tweaks and
 same-instance reruns are not worth implementing.
+
+### TERMINOLOGY: what exactly a "reprovision" is (referenced by the
+OPEN PROBLEM statement and the workaround analysis above)
+
+A reprovision = tear the serving instances down and rebuild them from
+configuration, WITHOUT a reboot. One reprovision = one "draw" in the
+lottery terminology (it re-rolls the instance-creation dice). The
+exact sequence, as implemented in every kit:
+
+1. Stop the tenants: `sudo systemctl stop rinzler@0 rinzler@1
+   rinzler@2 rinzler@3` (their hugepage slice files are released).
+2. Sweep residue: `sudo find /dev/hugepages -type f -delete`.
+   (ci-runner.sh has its own cleanup but its glob MISSES the newer
+   slice-K-of-8 file naming -- known side-bug, sweep explicitly.)
+3. Declare the new config -- PATCH platformd's HTTP API:
+   `curl -X PATCH -H "Content-Type: application/json" -d '<body>'
+   http://localhost:8080/api/config`
+   gpt-oss 2xtp4 body: {"inference":{"engines":{"default":{"models":
+   [{"shape":"ingested-gpt-oss-120b"}],"tensor_parallelism":4,
+   "count":2}}}}
+   llama trio body: models=[llama-3.2-3b-instruct-fast,
+   llama-3.1-8b-instruct-good, llama-3.3-70b-instruct-good], tp=2,
+   count=4. (Kits PATCH llama-8b alone first, sleep 3, then the
+   target config -- mirrors the nightly's transition pattern.)
+4. platformd computes the assignment (units/devices/cores/numa from
+   resource-map.yaml) and writes /etc/rinzler/instance-N.env
+   (CPUAFFINITY, RZ_CLI_ARGS), then starts the units.
+   PREREQUISITE GOTCHA: platformd reads resource-map.yaml ONLY at its
+   own startup -- a map edit requires `systemctl restart platformd`
+   BEFORE the reprovision or the cached old map is used (bit ab40
+   twice).
+5. Instances boot through the instance-creation phases (see the OPEN
+   PROBLEM action list): hugepage pool alloc ~17 s, FPGA VFIO init,
+   weight load ~47 s (gpt-oss-120b tp4), KV reservation, listener up.
+6. Readiness is NOT "/v1/models lists the model": gate on gateway
+   /v1/models AND per-port 13000/13001 AND one real completion per
+   port (first inference can lag listing by minutes; kits prewarm
+   with a tiny /v1/completions request).
+
+End-to-end timing: ~5-7 min for gpt-oss 2xtp4; the trio takes longer
+(70b weight load). Reference implementations: provision_draw() +
+restore_all() in /scratch/jhan/ab41/orchestrator41.sh and
+/scratch/jhan/ab42/orchestrator42.sh; the draw-study form in
+/scratch/jhan/ab34/orchestrator34.sh.
