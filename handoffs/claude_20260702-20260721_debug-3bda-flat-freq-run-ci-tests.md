@@ -1649,3 +1649,85 @@ Bonus (recorded above): the within-draw block sequence also settled
 the CI-workaround question — draw levels are fixed for the instance
 lifetime; first block is the fastest (gentle ~1.4% clamp-arm decline
 over 50 min, 5/5 draws).
+
+## SHIP CANDIDATE (dedicated section): the front-end un-clamp — additional freq-config change
+
+This is the second change to ship alongside the flat-freq fix, now
+fully evidenced. Everything below is measured, not inferred.
+
+### The change
+
+One line in Hannah's intel-speed-select Ansible role defaults:
+
+    FAST_CORE_RANGES: '7-14 24-71 79-86 96-143'
+    ->
+    FAST_CORE_RANGES: '1-2 7-14 24-71 73-74 79-86 96-143'
+
+The apply script auto-adds the HT siblings (145-146, 217-218) and its
+verify_candidate self-checks the counts. The rendered outputs are
+/etc/default/intel-speed-select-state + intel-speed-select-
+state.service (never hand-edit on a host; Ansible overwrites).
+
+Mechanically: the 4 physical FRONT-END cores per machine (1,2 on
+socket 0; 73,74 on socket 1 — the `rinzler_cores` of the 6962P
+resource map) move from CLOS3 (max 2700 MHz) to CLOS0 (max 4400,
+realized 3.90 GHz under load) via SST core-power association. These
+cores host each instance's front-end threads (HTTP/SSE delivery +
+orchestration), which carry a ~0.84 ms/token clock-bound slice.
+
+What this change is NOT (both tested, both rejected):
+- NOT thread migration to existing fast cores — ab32: decode -1.7%,
+  TTFT +11% (locality to HT/L2 partners beats clock).
+- NOT more front-end cores — ab40+ab41: core-count extension has no
+  effect (pooled 9v9: -0.2%).
+
+### Evidence (three experiments, two load points, one conclusion)
+
+| ID | design | draws | result |
+|----|--------|-------|--------|
+| P4.3 (Jul 13) | live toggle, 3 interleaved 5-min pairs @8u | 1 | +1.2% ± 0.06 decode, -0.9% TTFT (3/3 pairs) |
+| A2 / ab33 (Jul 21) | live toggle @24u saturation, 3 pairs | 1 | +1.35% decode (pairs -0.8/+1.9/+3.1), TTFT -4.7% |
+| A4 / ab42 (Jul 23) | 5 fresh draws x (4 pairs @8u + 1 pair @24u), every block freq-verified under load | 5 | @8u +1.12% ± 0.21 (5/5 draws, t=11.9); @24u +2.44% ± 1.05 (5/5, t=5.2) |
+
+![ab42: un-clamp effect per draw, 8 users](../artifacts/delphi-flat-freq/docs/ab42_unclamp_dumbbells.svg)
+
+The decisive property (ab42): draw levels scattered 6.3% (the
+provisioning lottery on full display) while the paired effect stayed
+inside a 0.5pp band and positive in every draw — the gain does not
+depend on the draw. Per-block frequency evidence: clamp arm max
+2.700-2.706 GHz across all 25 clamp blocks; fast arm 3.900-3.903 GHz
+across all 25 fast blocks, INCLUDING the 24u blocks (no RAPL
+throttling of the FE cores even at saturation).
+
+### Power (measured per block, ab42; 20 blocks/arm @8u, 5/arm @24u)
+
+| load | clamped | un-clamped | delta | perf delta |
+|------|---------|------------|-------|------------|
+| 8u  | 736.2 W pkg | 742.6 W pkg | +6.4 W (+0.9%) | +1.12% |
+| 24u | 765.2 W pkg | 772.8 W pkg | +7.6 W (+1.0%) | +2.44% |
+
+RAM power unchanged (51-52 W @8u, 64-66 W @24u, both arms). Package
+Bzy_MHz moves only ~3644 -> 3661 @8u (8 of 288 cpus changed).
+Perf-per-watt IMPROVES in both arms (the gain exceeds the power
+cost at 24u; roughly break-even-to-positive at 8u). Nuance vs the
+earlier A2 note "no power penalty": ab33's 3 blocks could not
+resolve the ~7 W cost; ab42's 25-block averages can. It is real and
+negligible against the ~740 W baseline.
+
+### Deployment / operations notes
+
+- Persistence: the role's boot service re-applies on every boot;
+  A3 (dedicated reboot test) is unnecessary — rollout + `intel-
+  speed-select-state verify` covers it.
+- Post-deploy verification on a host: `intel-speed-select-state
+  verify`, then under load check max scaling_cur_freq across
+  1,2,73,74,145,146,217,218 reads ~3.9 GHz (NEVER judge from idle
+  reads — idle cores sit at the 800 MHz floor).
+- RESTORE TRAP for experiment kits: our kits' restore_all re-clamps
+  via `assoc --clos 3` on REST112, which INCLUDES 1-2/73-74 — after
+  this ships, kits must drop those cores from REST112 (or restore
+  via `systemctl restart intel-speed-select-state`) or they will
+  quietly revert the shipped config on every experiment teardown.
+- CI expectation when this lands: decode +~1% @8u and prefill/TTFT
+  slightly better; single-night deltas of this size are inside the
+  lottery band — confirm via trailing bands, not one night.
