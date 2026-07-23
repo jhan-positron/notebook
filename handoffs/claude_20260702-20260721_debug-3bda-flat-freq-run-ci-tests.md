@@ -1309,3 +1309,29 @@ CPUAFFINITY= lines); config-PATCH curls had no timeout (now -m 30);
 no signal trap (now finish_abort on TERM/INT/HUP). NFS gotcha: two
 hosts appending one journal.log can lose lines (O_APPEND not atomic
 across NFS clients) -- lost the client "armed" line; harmless here.
+
+## ab42 armed (2026-07-23 04:28 UTC) — A4: un-clamp multi-draw confirmation
+
+Why: A1/P4.3 (+1.2% +/- 0.06 @8u) and A2/ab33 (+1.35% @24u, noisy
+pairs) were each measured on ONE provisioning draw; ab40/ab41 just
+demonstrated how single-draw evidence can mislead (though those were
+cross-draw designs — the un-clamp evidence is within-draw paired and
+structurally stronger). ab42 closes the draw-dependence gap.
+
+Design: 5 fresh gpt-oss draws (map untouched); per draw 8x 240s
+blocks @8u in C U U C C U U C order + one 24u pair (order alternates
+by draw), arms toggled LIVE via isst assoc (FE set
+1,2,73,74,145,146,217,218 between CLOS3/CLOS0). Per block: freq
+verified UNDER LOAD gated on a client STARTED marker (fast: any of 3
+samples >=3.4GHz, 3.2 @24u; clamp: ALL samples <=3.0GHz), power
+captured, loadgen rc= and users= asserted from DONE, >=users*8
+records. Gate: ab39 ALL_DONE + >=14:05 UTC; expected window
+~14:10-19:40. Review (wf_111c4403) fixed 2 blockers pre-launch:
+freq assert raced cross-host REQ visibility (could sample idle cpus
+-> false abort on fast arms / vacuous pass on clamp arms); signal
+trap during the 9h gate would have run a full restore mid-ab39/
+nightly (now MUTATED-gated). Mid-draw nightly cutoff now re-clamps
+only (never reprovisions inside the window).
+
+Kit: /scratch/jhan/ab42 (orchestrator on 3bda pid 2943256, client on
+3af6 pid 363487, journal.log + journal_client.log separate).
