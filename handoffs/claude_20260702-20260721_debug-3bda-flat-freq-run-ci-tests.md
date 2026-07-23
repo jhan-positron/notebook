@@ -1365,3 +1365,36 @@ stock config) average 97.9 vs ab41's 9 stock draws (pre-nightly,
 evening-idle machine) 100.3 => -2.4% night-state depression measured
 across runs — independent corroboration of the ~2% reconstruction-
 ladder estimate.
+
+### 2026-07-23 — lottery scope check (user question): does the lottery appear in runtron too? YES.
+
+Question: is the provisioning lottery visible only in serving-path
+tests (HTTP -> rinzler), or also in runtron? Pulled raw per-rep data
+from the existing kits — each ab26 v5 / ab27 rep was its own FRESH
+runtron launch (per-cell sweep dirs; fresh instances, weight load,
+hugepage alloc, FPGA init), so reps ARE independent draws:
+
+| class (identical config within cell)      | kit        | n  | CV        | max-min |
+|-------------------------------------------|------------|----|-----------|---------|
+| same running instance, repeated blocks    | ab29 fast  | 3  | 0.25%     | 0.46%   |
+|   (serving path)                          | ab29 clamp | 3  | 0.41%     | 0.77%   |
+| fresh runtron launches (no HTTP/rinzler)  | ab26 0bf_clamp | 3 | 1.64% | 2.88%   |
+|                                           | ab26 0bf_fast  | 3 | 1.27% | 2.21%   |
+|                                           | ab26 aa8_clamp | 3 | 2.98% | 5.47%   |
+|                                           | ab26 aa8_fast  | 3 | 1.90% | 3.80%   |
+|                                           | ab27 arenaoff_clamp | 3 | 1.06% | 1.99% |
+|                                           | ab27 arenaoff_fast  | 3 | 0.29% | 0.57% |
+|                                           | ab27 arenaon_clamp  | 3 | 3.80% | 7.10% |
+|                                           | ab27 arenaon_fast   | 3 | 2.32% | 4.51% |
+| fresh serving provisionings (HTTP->rinzler)| ab34      | 6  | 2.4%      | 6.9%    |
+
+VERDICT: the lottery is NOT a serving-path artifact. Fresh runtron
+launches scatter with the same magnitude (cell spreads up to 7.1%)
+as fresh serving provisionings (6.9%), while repeated blocks INSIDE
+one loaded instance are tight (0.25-0.41% CV; P4.3 A-blocks +/-0.2%).
+=> the dice are rolled at INSTANCE CREATION (weight placement,
+hugepage/memory layout, FPGA-side init) — common to both paths —
+not in platformd/rinzler/HTTP/loadgen. Consistent with ab34's
+byte-identical-fingerprint finding. Terminology check confirmed: our
+ab3x/ab4x tests are serving-path (user prompts -> HTTP -> rinzler);
+ab26/ab27 were runtron (in-process, no rinzler).
