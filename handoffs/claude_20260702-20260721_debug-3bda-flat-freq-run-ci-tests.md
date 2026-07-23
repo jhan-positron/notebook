@@ -1491,3 +1491,46 @@ per-device TX/RX ring state; correlate with the launch's decode
 mean over 10-15 runtron launches. If placement correlates,
 mitigation candidates: pool pre-touch ordering, node-interleave
 policy, or reserved hugepage pools per instance.
+
+### Nightly-CI implication + workaround analysis (2026-07-23, user
+question; appended to the OPEN PROBLEM statement above)
+
+YES, nightly CI inherits the lottery in full: each model cell each
+night = one instance creation = one draw (a model change IS instance
+re-creation; there is no in-place swap). This is the mechanical basis
+of the standing rule "single-night deltas <~5% are weather".
+
+Workarounds EVALUATED WITH DATA (no new test needed -- ab42's
+within-draw block sequence answered the open piece):
+
+1. "Warmup prompts after model load, then run the official test" --
+   DOES NOT HELP. The dice are rolled at creation, before any
+   traffic. Evidence: (a) every ab34 draw already ran prewarm
+   inference before its official block; the 6.9% spread happened
+   anyway. (b) ab42 draws 1-4 (40 blocks): each draw's clamp blocks
+   over ~50 min of CONTINUOUS load stay within ~1% of the draw's
+   level while the four draw levels span 6.3% (clamp means 95.84 /
+   96.70 / 99.05 / 102.06) -- no amount of running moves a draw
+   toward another draw's level. (c) The small within-instance drift
+   that does exist is DOWNWARD (b1 fastest in 4/4 draws, total ~1.4%
+   b1->b8 in clamp, ~0.4% in fast) -- so extra pre-test traffic
+   would slightly LOWER the official number, not stabilize it.
+2. "Run the official test twice (same instance)" -- DOES NOT HELP
+   against the lottery. Consecutive same-instance runs simply agree
+   with each other (ab29: CV 0.25-0.41%; ab42 same-arm blocks ~0.3-
+   0.7%) while BOTH carry the draw's offset. It does defend against
+   a transient bad first block, but no such transient exists with
+   the current prewarm (b1 is the FASTEST block).
+3. "Run the test twice WITH a reprovision in between" -- HELPS: k
+   independent draws shrink the lottery error ~sqrt(k) (2 draws ->
+   ~1.7%, 3 draws -> ~1.4% typical, from CV 2.4%). Cost: ~7 min
+   provisioning + test time per extra draw per model. This is the
+   only quick workaround that attacks the actual mechanism.
+4. Trailing bands across nights (current rule) -- free, already in
+   place; each night is one draw, so multi-night aggregation is
+   equivalent to (3) spread over days.
+
+Recommendation to CI team if they want single-night sensitivity
+better than ~5%: reprovision-and-average (k=2 or 3) for the models
+they gate on; otherwise keep trailing bands. Warmup tweaks and
+same-instance reruns are not worth implementing.
