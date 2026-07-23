@@ -2473,3 +2473,74 @@ End-to-end timing: ~5-7 min for gpt-oss 2xtp4; the trio takes longer
 restore_all() in /scratch/jhan/ab41/orchestrator41.sh and
 /scratch/jhan/ab42/orchestrator42.sh; the draw-study form in
 /scratch/jhan/ab34/orchestrator34.sh.
+
+### Reprovision terminology — three clarifications (2026-07-23, user
+review of the 6-step definition; verified against the ab26 kit):
+
+- Q: for runtron runs, is step 1 (stop rinzler units) still needed,
+  or should one stop "tron"? A: step 1 applies and RINZLER is the
+  thing to stop — tron is the engine library, not a daemon, and
+  runtron is a transient process that takes hugepages + FPGA devices
+  (VFIO) only while it runs and releases them on exit. What must be
+  cleared is whatever currently HOLDS those resources: the resident
+  rinzler serving units. Verified: orchestrator26.sh:163-165 stops
+  rinzler@0..3 + sweeps slice files before its runtron cells, and
+  restarts rinzler only in restore. Between back-to-back runtron runs
+  there is nothing to stop. Steps 3/4/6 do NOT apply to runtron at
+  all (no platformd, no HTTP): runtron reads the resource map ITSELF
+  at process start — and note it reads the copy next to its binary
+  (.../gen/../config/resource-map.yaml per the launch log), NOT
+  /opt/positron/config — relevant for map experiments.
+- Q: is the PATCH (step 3) "loading a model", and is it needed
+  between two runs of the same model? A: the PATCH declares the
+  desired model set; platformd reconciles reality to it (the weight
+  load happens inside the new instances). Two runs on the SAME
+  instances need NO PATCH — just send load again (they agree to
+  ~0.3%, ab29). A FRESH DRAW of the same model needs the full cycle,
+  and the verified recipe bounces through an intermediate config
+  (stop -> sweep -> PATCH llama-8b -> PATCH target): the intermediate
+  guarantees platformd sees a real change. Whether re-PATCHing an
+  IDENTICAL config alone rebuilds instances is UNTESTED (may be a
+  reconcile no-op) — use the verified cycle.
+- Q: is step 4 (assignment computation) needed when the resource map
+  is unchanged? A: it is not an invocable step — platformd recomputes
+  the assignment automatically on every reconcile, because its inputs
+  are the map (static) AND the declared config (models/tp/count).
+  Unchanged map => same assignment out (ab34: byte-identical
+  fingerprints across draws), but the step always runs, and identical
+  assignment does NOT imply identical performance (the lottery lives
+  below the assignment level). The platformd-restart prerequisite
+  applies only when the map FILE is edited.
+
+### 2026-07-23 — ab42 RESULTS (A4): un-clamp effect CONFIRMED across draws — ship-grade
+
+5/5 draws completed 14:11-18:21 UTC; all 50 blocks freq-verified
+under load (clamp 2.700-2.706 GHz, fast 3.900-3.903 GHz — including
+all 24u blocks, so the RAPL concern never materialized); restore
+verified (trio serving, re-clamped). Per-draw paired effect
+(fast vs clamp means within the same instance):
+
+| draw | clamp @8u | fast @8u | effect @8u | 24u pair effect |
+|------|-----------|----------|------------|-----------------|
+| 1    | 99.05     | 99.90    | +0.86%     | +0.90%          |
+| 2    | 102.06    | 103.12   | +1.04%     | +1.94%          |
+| 3    | 95.84     | 97.07    | +1.29%     | +3.08%          |
+| 4    | 96.70     | 98.04    | +1.38%     | +2.72%          |
+| 5    | 96.61     | 97.61    | +1.03%     | +3.56%          |
+
+VERDICT A4: the front-end un-clamp is REAL and DRAW-INDEPENDENT.
+@8u: +1.12% +/- 0.21 (sd across draws), positive 5/5, t=11.9
+(p<0.001) — dead-on P4.3's single-draw +1.2 +/- 0.06.
+@24u: +2.44% +/- 1.05, positive 5/5, t=5.2 — larger than @8u and
+tighter than ab33's noisy +1.35 (n=3). Draw levels spanned 6.3%
+(lottery) while the effect stayed in a 0.5pp band => the effect does
+NOT depend on the draw. Power flat (~735-745 W) regardless of arm.
+SHIP CASE COMPLETE for Hannah's one-line FAST_CORE_RANGES change
+(P4.3 + A2/ab33 + A4/ab42; A3 covered by rollout + verify).
+Caveat noted: ab42's 24u absolute level (45-47 t/s/u) sits below
+ab33's (54) — different block/ramp construction; the PAIRED
+within-instance effects are the comparable quantity.
+Bonus (recorded above): the within-draw block sequence also settled
+the CI-workaround question — draw levels are fixed for the instance
+lifetime; first block is the fastest (gentle ~1.4% clamp-arm decline
+over 50 min, 5/5 draws).
