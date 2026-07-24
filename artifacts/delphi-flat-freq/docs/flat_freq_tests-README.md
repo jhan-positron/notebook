@@ -2709,3 +2709,44 @@ do roughly 10x the per-cycle work of workers, still far from
 compute-bound (healthy compute code runs IPC 1-3+).
 Kit: /scratch/jhan/ab43 (perfstat_*.csv per block). Machine
 restored, trio verified.
+
+### Lottery scope, part 2 (2026-07-24, user question): do the AMD
+machines (same FPGA + HBM config) show the fluctuation? NO — and on
+Intel it is gpt-oss-specific. Source: #ci-cd-notifications nightly
+reports, 2026-06-17..07-24 (802 rows scraped; broken nights 07-01
+globally and 07-09 on delphi excluded; the 2026-07-14 delphi tune-up
+step (70b-tp2@4u +6.7%, 3b@32u +2.9%) treated as an era boundary,
+not variance).
+
+ANDORIA-B1A3 (GENOA96, AMD) — 5 weeks, ~33 nights/model, nightly
+tron churn INCLUDED: every model CV 0.18-1.15%, max-min 0.85-4.19%.
+Same-build window (198650bf, Jul 3-8, 6 fresh nightly draws):
+CV 0.16-1.02%, max-min <=2.9%. Same-day rerun pairs (Jul-22/24):
+deltas <=1.8%. gpt-oss-120b-tp4 on AMD: CV 0.44% (stable window).
+
+DELPHI-3BDA (Intel GNR) matched stable window Jul 14-24 (n=8-9):
+8 of 9 models CV 0.07-1.18% — as tight as AMD — but
+ingested-gpt-oss-120b-tp4@8u: CV 3.19%, max-min 10.22%, alone and
+an order of magnitude above everything else. Matches the controlled
+B5/ab34 measurement (CV 2.4%, mm 6.9% across same-night draws).
+
+IMPLICATIONS for the open problem:
+1. NOT the FPGA/HBM hardware (identical config on andoria; no
+   fluctuation there) => host-side mechanism, as suspected.
+2. On Intel it is MODEL-DEPENDENT: essentially only gpt-oss-120b-tp4
+   (largest weights, MoE, tp4) rolls big dice in nightly data; the
+   llama/qwen/mixtral models are stable on BOTH hosts. Consistent
+   with the weight/hugepage-placement hypothesis: the biggest host-
+   memory footprint has the most placement entropy. (Our controlled
+   Intel lottery evidence — ab34, ab26/27 runtron — is all gpt-oss;
+   we never measured other models' draw variance in isolation.)
+3. Next-experiment refinement: the pagemap/placement capture should
+   compare gpt-oss vs a stable model (e.g. mixtral) on the same
+   Intel host — the contrast is the signal. An AMD-vs-Intel hugepage
+   allocator difference (e.g. NUMA/zone fragmentation behavior,
+   1GiB page pool state) is now the leading suspect axis.
+CAVEATS: nightly data = 1 draw/night, so night-state and software
+churn fold in (both small per the same-build windows); June rows
+predate "DUT:" headers in the reports (GNR DUT in June was 17cf per
+Rhys 06-25 — Intel comparisons here use only the Jul-14-24 window,
+which is unambiguously 3bda).
