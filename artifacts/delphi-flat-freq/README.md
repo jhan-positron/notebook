@@ -26,7 +26,7 @@ canonical one changes.
   TRON-80 run (3af6), the TRON-88 and 3-tier rounds (3bda), and the
   PR-3070 A/B/C ladder (3af6, 2026-07-09).
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md
-  (created v2), handoffs/claude_20260702-20260717_debug-3bda-flat-freq-run-ci-tests.md
+  (created v2), handoffs/claude_20260702-20260724_debug-3bda-flat-freq-run-ci-tests.md
   (benchmark usage). Central results doc:
   delphi-3bda:/scratch/jhan/flat_freq_tests/README.md
 - NOTE: frequency state applied by this tool does NOT survive a reboot.
@@ -62,7 +62,7 @@ canonical one changes.
   hand-derived flat_freq_apply argument for the
   https://github.com/positron-ai/tron/pull/3070 core map.
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md,
-  handoffs/claude_20260702-20260717_debug-3bda-flat-freq-run-ci-tests.md.
+  handoffs/claude_20260702-20260724_debug-3bda-flat-freq-run-ci-tests.md.
 
 ## test-scripts/
 
@@ -167,14 +167,39 @@ canonical one changes.
   - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/compare_csv.py
   - What it is: checkerboard results-CSV comparison helper (per-config
   keyed geomeans) used by the A/B rounds. Preserved 2026-07-17.
+- sysconfig_snapshot.sh
+  - Canonical: delphi-3bda:/scratch/jhan/tools/sysconfig_snapshot.sh
+  - What it is: full system-configuration snapshot capture feeding the
+  sysconfig-snapshots/ registry below. Registered 2026-07-26.
 - All benchmark runners scrub the SYSTEM_CONFIG/TRON_LOG_LEVEL/SPDLOG_LEVEL env landmines and
   set CHECKERBOARD_MEMLOCK_KB=197971044 (host limit < checkerboard's 200 GB
   default). The marked THE BENCHMARK COMMAND block in each is the exact
   manual invocation.
-- Related handoffs: handoffs/claude_20260702-20260717_debug-3bda-flat-freq-run-ci-tests.md.
+- Related handoffs: handoffs/claude_20260702-20260724_debug-3bda-flat-freq-run-ci-tests.md.
+
+## sysconfig-snapshots/
+
+- delphi-3bda_20260720_045931.txt / delphi-3af6_20260720_051547.txt /
+  canary_reference.md
+  - Canonical: delphi-3bda:/scratch/jhan/sysconfig_snapshots/ (shared
+    filer; point-in-time captures via sysconfig_snapshot.sh;
+    canary_reference.md is the expected-state reference). Registered
+    2026-07-26.
 
 ## docs/
 
+- flat_freq_explained.html
+  - Rendered view:
+    https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/flat_freq_explained.html
+  - Canonical: DESKTOP-CI2JA7M:C:/Users/jibin/Documents/claude_debug_3bda_flat_freq/flat_freq_explained.html
+    (authored 2026-07-21/22)
+  - What it is: the flat-freq story explainer (problems/time-budget
+  lenses, wall-clock lane figures, overlay results). Registered
+  2026-07-26.
+- ab42_unclamp_dumbbells.svg
+  - REPO-PRIMARY figure (no workspace canonical): per-draw dumbbell
+  chart of the ab42 un-clamp confirmation, embedded by the canonical
+  flat_freq_tests README. Edit in-repo. Registered 2026-07-26.
 - perfetto_reading_tron.html
   - Rendered view:
     https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/perfetto_reading_tron.html
@@ -237,6 +262,6 @@ canonical one changes.
     discrete grant rungs (4400/4100/2700, no 4200). All numbers are
     measured turbostat values from the 2026-07 benchmark rounds.
 - Related handoffs: handoffs/claude_20260702-20260703_debug-3bda-explore-best-freq-combo.md,
-  handoffs/claude_20260702-20260717_debug-3bda-flat-freq-run-ci-tests.md,
+  handoffs/claude_20260702-20260724_debug-3bda-flat-freq-run-ci-tests.md,
   handoffs/codex_2026-06-22-2026-06-30_configure-xeon-6-core-speeds.md,
   handoffs/codex_2026-06-29-2026-06-30_explore-core-power-feature.md.

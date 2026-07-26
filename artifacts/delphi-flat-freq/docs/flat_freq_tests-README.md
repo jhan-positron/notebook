@@ -2584,7 +2584,7 @@ What this change is NOT (both tested, both rejected):
 | A2 / ab33 (Jul 21) | live toggle @24u saturation, 3 pairs | 1 | +1.35% decode (pairs -0.8/+1.9/+3.1), TTFT -4.7% |
 | A4 / ab42 (Jul 23) | 5 fresh draws x (4 pairs @8u + 1 pair @24u), every block freq-verified under load | 5 | @8u +1.12% ± 0.21 (5/5 draws, t=11.9); @24u +2.44% ± 1.05 (5/5, t=5.2) |
 
-![ab42: un-clamp effect per draw, 8 users](ab42_unclamp_dumbbells.svg)
+![ab42: un-clamp effect per draw, 8 users](../artifacts/delphi-flat-freq/docs/ab42_unclamp_dumbbells.svg)
 
 The decisive property (ab42): draw levels scattered 6.3% (the
 provisioning lottery on full display) while the paired effect stayed
