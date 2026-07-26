@@ -13,7 +13,7 @@ cleanup.
   implementation, validation, mock software, and test metrics. The lower-right
   CPU / PCIe hardware sketch from the source image was intentionally omitted.
 - Related handoff:
-  handoffs/codex_2026-06-09-2026-07-17_random.md
+  handoffs/codex_2026-06-09-2026-07-23_random.md
 
 ## interpreter-notes-terminus.svg
 
@@ -23,4 +23,4 @@ cleanup.
   is the user-requested final version where `Formulas based` was changed to
   `Terminus based`.
 - Related handoff:
-  handoffs/codex_2026-06-09-2026-07-17_random.md
+  handoffs/codex_2026-06-09-2026-07-23_random.md
