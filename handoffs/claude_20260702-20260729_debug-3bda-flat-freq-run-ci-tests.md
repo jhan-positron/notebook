@@ -1931,10 +1931,14 @@ which is unambiguously 3bda).
 
 # PHASE 2 — the per-launch "lottery" instrumentation campaign (2026-07-26 → 2026-07-29, ab44–ab57)
 
-> Appended 2026-07-29 by the session. This phase is self-contained: a fresh
-> session can resume from this section + the living lab log
-> (`from-claude/02-investigation-plan.md`, append-only, every run has a dated
-> entry) without reading Phase 1. All dates below are Pacific unless marked UTC.
+> Appended 2026-07-29 by the session. This phase is self-contained for
+> ORIENTATION: read this section alone to know what is established, what is
+> retracted, machine state, and the next steps. Drill into any specific run
+> via the living lab log — the append-only per-run record with a dated entry
+> for every experiment:
+> DESKTOP-CI2JA7M:C:\Users\jibin\Documents\claude_debug_3bda_flat_freq\from-claude\02-investigation-plan.md
+> (mirror: delphi-3bda:/scratch/jhan/flat_freq_tests/from-claude/02-investigation-plan.md).
+> Phase 1 above need not be read. All dates below are Pacific unless marked UTC.
 
 ## Objective
 
