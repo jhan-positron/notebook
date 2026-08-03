@@ -31,3 +31,16 @@ copies during the next handoff run.
   captures the later spacing/readability fixes.
 - Related handoff:
   handoffs/codex_2026-07-22-2026-07-23_follow-readme-instructions.md
+
+## pr2934-perf-20260803/
+
+- Rendered view:
+  https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/intel-amx/pr2934-perf-20260803/pr2934-performance.html
+- Canonical:
+  DESKTOP-CI2JA7M:C:/Users/jibin/Documents/Intel_AMX/from-codex/pr2934-perf-20260803/
+- What it is: compact preserved subset of the Bill PR2934 benchmark:
+  fixed-light performance chart, summary CSV, analysis JSON, run-suite script,
+  runtron-bin override patch, occupancy-capture script, and source SHA record.
+  The raw benchmark result trees and logs remain only at the canonical path.
+- Related handoff:
+  handoffs/codex_2026-08-02_benchmark-pr-2934-on-3af6.md
