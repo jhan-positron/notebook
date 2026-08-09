@@ -284,3 +284,20 @@ canonical one changes.
 - Also published (same content) at:
   https://claude.ai/code/artifact/7dc7471a-4c91-4e0d-94ba-10bc5b576135
 - Related handoff: handoffs/claude_20260702-20260729_debug-3bda-flat-freq-run-ci-tests.md (PHASE 2)
+
+## docs/bystander-probe.html (2026-08-09)
+
+- Canonical location:
+  DESKTOP-CI2JA7M:C:\Users\jibin\Documents\claude_debug_3bda_flat_freq\from-claude\bystander-probe.html
+  (mirror: delphi-3bda:/scratch/jhan/flat_freq_tests/from-claude/bystander-probe.html)
+- What it is: the dedicated record of the m8 "bystander probe" experiment
+  (kits ab44-ab54): a standalone DRAM pointer-chase program (source
+  delphi-3bda:/scratch/jhan/f3kit/dramprobe.c) on spare CPU 7 during decode,
+  whose latency tracked the concurrent runtron draw's lottery ticket
+  (ab44 rho -0.811/-0.741 pre-registered split; replication, attenuation
+  and the ab47 predictor downgrade all on the record). Contains the
+  verbatim inner loop, per-kit invocations, per-draw data with scatter
+  plots, absolute latency levels, and every caveat.
+- Rendered view:
+  https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/bystander-probe.html
+- Related handoff: handoffs/claude_20260702-20260729_debug-3bda-flat-freq-run-ci-tests.md (PHASE 2)

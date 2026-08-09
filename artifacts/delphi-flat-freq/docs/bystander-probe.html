@@ -1,0 +1,207 @@
+<!-- Rendered view: https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/bystander-probe.html -->
+<meta charset="utf-8">
+<title>The bystander probe (m8) — code, setup, and test data</title>
+<style>
+  :root{color-scheme:light only;
+    --ink:#22303f; --ink2:#4a5a6b; --ink3:#8a97a5; --line:#e3e2dd;
+    --blue:#2a78d6; --blue-soft:#e8f1fc; --orange:#eb6834; --orange-soft:#fdeee6;
+    --gray:#b9b7b0; --gray-soft:#f2f1ee; --red:#c0392b; --paper:#fdfdfb;
+  }
+  html{background:var(--paper)}
+  body{max-width:980px;margin:0 auto;padding:28px 20px 60px;font:15px/1.55 "Segoe UI",system-ui,sans-serif;color:var(--ink);background:var(--paper)}
+  h1{font-size:25px;line-height:1.25;margin:0 0 6px}
+  h2{font-size:19px;margin:38px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{font-size:15.5px;margin:20px 0 6px}
+  .meta{color:var(--ink3);font-size:12.5px;margin-bottom:20px}
+  .take{background:var(--blue-soft);border:1px solid var(--blue);border-radius:10px;padding:13px 17px;font-size:15px}
+  .caveat{background:var(--gray-soft);border-left:4px solid var(--ink3);border-radius:6px;padding:11px 15px;font-size:13.5px;margin:12px 0}
+  figure{margin:16px 0 8px}
+  figcaption{font-size:12.5px;color:var(--ink2);margin-top:6px;line-height:1.5}
+  .scrollx{overflow-x:auto}
+  table{border-collapse:collapse;font-size:13.5px;min-width:620px}
+  th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+  th{background:var(--gray-soft)}
+  .num{font-variant-numeric:tabular-nums}
+  pre{background:#f4f3f0;border:1px solid var(--line);border-radius:8px;padding:12px 14px;font:12.5px/1.5 "Cascadia Code",Consolas,ui-monospace,monospace;overflow-x:auto}
+  code{background:var(--gray-soft);padding:1px 5px;border-radius:4px;font-size:12.5px;font-family:"Cascadia Code",Consolas,ui-monospace,monospace}
+  dl.glos{font-size:13.5px}
+  dl.glos dt{font-weight:700;margin-top:9px}
+  dl.glos dd{margin:2px 0 0 0;color:var(--ink2)}
+</style>
+
+<h1>The bystander probe (m8) — code, setup, and test data</h1>
+<div class="meta">Dedicated record of the DRAM pointer-chase experiment on delphi-3bda (kits ab44–ab54, 2026-07-27…29) · every number sourced from on-host analysis files, collected and re-verified 2026-08-09 · companion to goal1-conclusion.html §3.3 and the suspicion-ledger "m8" row · <a href="https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/bystander-probe.html">rendered view for GitHub readers</a></div>
+
+<div class="take"><b>What this test showed.</b> A tiny standalone C program, running on a spare CPU core and doing nothing but chasing pointers through its own private 2 GiB buffer, could <i>feel</i> which lottery ticket the concurrently-running engine had drawn: when runtron had a fast draw, the bystander's memory latency was lower (ab44: ρ = −0.81 discovery / −0.74 confirmation, pre-registered split). The same program, run on the <i>empty</i> machine before each launch, read flat every time (spread &lt;1 ns, n=25). The per-launch state is therefore machine-visible on the shared memory path — but only while the engine's traffic flows — and it is not a property of tron's own code. Later, heavier-instrumented nights attenuated the signal, and a confound check downgraded it from "predictor" to "sometimes-visible symptom" — both kept on the record below.</div>
+
+<h2>1 · The program</h2>
+<p><b>Source:</b> <code>delphi-3bda:/scratch/jhan/f3kit/dramprobe.c</code> (4,767 bytes; build: <code>gcc -O2 -pthread -o dramprobe dramprobe.c</code>). One latency thread plus N optional bandwidth-injector threads; the bystander test uses <b>latency-only mode</b> (N=0).</p>
+<p><b>How it measures pure memory latency.</b> It allocates a 2 GiB anonymous buffer (<code>MADV_HUGEPAGE</code>, first-touched on the pinned CPU so the memory is NUMA-local), then builds one giant closed loop through it: a <b>full-cycle random permutation of cache lines</b> (Fisher–Yates shuffle, xorshift64 PRNG, fixed seed), one pointer per 64-byte line. Each load's <i>result</i> is the address of the next load — so the hardware prefetcher can't guess ahead and exactly one memory request is ever outstanding. The reading is a pure DRAM round-trip time, insensitive to bandwidth.</p>
+<pre>/* the chain build + inner loop, verbatim from dramprobe.c */
+size_t *idx = malloc(n * sizeof(size_t));
+for (size_t i = 0; i &lt; n; i++) idx[i] = i;
+uint64_t rng = 0x9e3779b97f4a7c15ULL;
+for (size_t i = n - 1; i &gt; 0; i--) {                 /* Fisher-Yates */
+    rng ^= rng &lt;&lt; 13; rng ^= rng &gt;&gt; 7; rng ^= rng &lt;&lt; 17;
+    size_t j = rng % (i + 1);
+    size_t t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+}
+for (size_t i = 0; i &lt; n; i++)                        /* one pointer per cacheline */
+    buf[idx[i] * 8] = (uint64_t)(&amp;buf[idx[(i + 1) % n] * 8]);
+free(idx);
+
+uint64_t *cur = (uint64_t *)buf[0];
+const int CHUNK = 20000;
+while (!stop_flag) {
+    double t0 = now_s();
+    for (int i = 0; i &lt; CHUNK; i++) cur = (uint64_t *)*cur;   /* dependent loads */
+    double t1 = now_s();
+    a-&gt;ns_per_load = (t1 - t0) * 1e9 / CHUNK;
+    __asm__ volatile("" ::"r"(cur));
+}</pre>
+<p>Latency = wall time of 20,000 dependent loads ÷ 20,000 (<code>CLOCK_MONOTONIC</code>), republished once per second as CSV rows <code>sec,inj_threads,write_pct,inj_GBps,lat_ns</code> after a built-in 3 s warm-up.</p>
+
+<h3>How the kits ran it (identical in ab44v2, ab47, ab49, ab50, ab51, ab52, ab54)</h3>
+<pre>timeout 45 /scratch/jhan/f3kit/dramprobe $SPARE 0 0 0 30 2  &gt; $OUT/probe.csv
+#                                        core │ │ │ │  │ └─ 2 GiB buffer
+#                                             │ │ │ │  └─ 30 s (one row/s)
+#                                    no injectors, 0% writes — latency-only</pre>
+<ul style="font-size:13.5px">
+<li><b>When:</b> launched at benchstart+8 s (after the engine's "model loaded" log marker); the scored window, <b>rows 3–28 = seconds +11…+36 of the draw</b>, sits fully inside steady decode (prefill ends ~+4 s). Pre-declared in the kit comments and the metric manifest (m8: "mean of samples 3..28").</li>
+<li><b>Which core:</b> the kit's <code>node0_spare_cpu()</code> parses the engine's own "Pinning application cores to…" / "Pinning device driver cores to…" log lines and returns the first CPU ≥ 3 on NUMA node 0 not in that set (CPUs 0–2 reserved as platform cores). With the engine's deterministic pinning (driver 3–6; app 24–71 + 151-158…), the pick is always <b>CPU 7</b> — same socket and memory controllers as the engine and its store, <i>deliberately</i>: a probe on the other socket would sense nothing by design.</li>
+<li><b>Row 0 artifact:</b> the first row's bandwidth column is inflated by warm-up accounting (investigated + live-tested 2026-07-28); the 3–28 window predates and avoids it.</li>
+</ul>
+
+<h2>2 · The setup, drawn</h2>
+<figure>
+<svg viewBox="0 0 940 250" width="100%" role="img" aria-label="Diagram: socket 0 with tron cores and the probe on spare CPU 7, both sharing the memory controllers and DRAM; socket 1 grayed out">
+  <rect x="15" y="18" width="620" height="176" rx="10" fill="#ffffff" stroke="var(--ink3)" stroke-width="1.4"/>
+  <text x="30" y="40" font-size="13" font-weight="700" fill="var(--ink)">Socket 0 (NUMA node 0)</text>
+  <rect x="30" y="52" width="250" height="58" rx="7" fill="var(--blue-soft)" stroke="var(--blue)" stroke-width="1.5"/>
+  <text x="155" y="74" font-size="12.5" text-anchor="middle" font-weight="600" fill="var(--ink)">tron app cores 24–71 (+HT)</text>
+  <text x="155" y="92" font-size="11" text-anchor="middle" fill="var(--ink2)">attention workers · scheduler · sampling</text>
+  <rect x="30" y="120" width="250" height="40" rx="7" fill="var(--blue-soft)" stroke="var(--blue)" stroke-width="1.5"/>
+  <text x="155" y="145" font-size="12" text-anchor="middle" fill="var(--ink)">driver cores 3–6 / 147–150 (TX/RX)</text>
+  <rect x="320" y="52" width="150" height="58" rx="7" fill="var(--orange-soft)" stroke="var(--orange)" stroke-width="2"/>
+  <text x="395" y="74" font-size="12.5" text-anchor="middle" font-weight="700" fill="var(--orange)">CPU 7 — the probe</text>
+  <text x="395" y="92" font-size="10.5" text-anchor="middle" fill="var(--ink2)">runs nothing else (verified/draw)</text>
+  <text x="320" y="128" font-size="10.5" fill="var(--red)">⚠ HT sibling of CPU 7 is CPU 151 —</text>
+  <text x="320" y="142" font-size="10.5" fill="var(--red)">an active tron app core (shares front-end + L1/L2)</text>
+  <rect x="500" y="120" width="120" height="40" rx="7" fill="var(--gray-soft)" stroke="var(--ink3)" stroke-width="1.2"/>
+  <text x="560" y="138" font-size="11" text-anchor="middle" fill="var(--ink2)">4× FPGA cards</text>
+  <text x="560" y="152" font-size="10.5" text-anchor="middle" fill="var(--ink3)">10/13/38/3b (DMA)</text>
+  <!-- memory path -->
+  <rect x="60" y="205" width="520" height="32" rx="7" fill="#fff" stroke="var(--ink)" stroke-width="1.6"/>
+  <text x="320" y="226" font-size="12.5" text-anchor="middle" font-weight="700" fill="var(--ink)">shared memory controllers + DRAM (the sensed path)</text>
+  <line x1="155" y1="160" x2="155" y2="205" stroke="var(--blue)" stroke-width="2.4"/>
+  <line x1="395" y1="110" x2="395" y2="205" stroke="var(--orange)" stroke-width="2.4"/>
+  <line x1="560" y1="160" x2="500" y2="205" stroke="var(--ink3)" stroke-width="2" stroke-dasharray="5 4"/>
+  <!-- socket 1 -->
+  <rect x="660" y="18" width="265" height="176" rx="10" fill="var(--gray-soft)" stroke="var(--ink3)" stroke-width="1" opacity="0.75"/>
+  <text x="675" y="40" font-size="13" font-weight="700" fill="var(--ink3)">Socket 1 (unused by these draws)</text>
+  <text x="675" y="62" font-size="11" fill="var(--ink3)">own memory controllers — a probe here</text>
+  <text x="675" y="77" font-size="11" fill="var(--ink3)">would sense nothing, by design</text>
+</svg>
+<figcaption>The probe deliberately shares socket 0's memory path with the engine — that is what lets it sense the state. The one isolation caveat is the hyperthread pairing (CPU 7 ↔ 151). During-decode window: probe seconds +11…+36 of each ~46 s draw.</figcaption>
+</figure>
+
+<h2>3 · The data</h2>
+<h3>ab44 — the discovery night (24 draws, lightest instrumentation)</h3>
+<figure><svg id="sc44" viewBox="0 0 940 360" width="100%" role="img" aria-label="Scatter: 24 ab44 draws, engine speed vs probe latency; fast draws cluster at low latency"></svg>
+<figcaption>Each dot = one draw; the probe never touches the engine, yet its latency ranks the engine's speed. Spearman ρ = <b>−0.811</b> (discovery half, odd draws) / <b>−0.741</b> (confirmation half, even draws) — a pre-registered split, both halves independently significant. Mode-class means: fast draws 161.9 ns, slow draws 175.2 ns (+8%, and +38% over the 127.3 ns idle floor).</figcaption></figure>
+
+<h3>ab49 — replication two nights later (26 draws)</h3>
+<figure><svg id="sc49" viewBox="0 0 940 360" width="100%" role="img" aria-label="Scatter: 26 ab49 draws, engine speed vs probe latency; correlation minus 0.60"></figure>
+<figcaption>Replicated at ρ = <b>−0.597</b> (p = 0.0021) under added instrumentation (10 s traces overlapped the probe window).</figcaption></figure>
+
+<h3>Every measurement of the probe, in one table</h3>
+<div class="scrollx"><table>
+<tr><th>kit (conditions)</th><th class="num">ρ (probe lat vs speed)</th><th class="num">p</th><th class="num">n</th><th>reading</th></tr>
+<tr><td>ab44 discovery / confirmation (lightest)</td><td class="num"><b>−0.811 / −0.741</b></td><td class="num">0.0014 / 0.0058</td><td class="num">12+12</td><td>CONFIRMED under the pre-registered odd/even split</td></tr>
+<tr><td>ab47 pooled / fresh-only / warm-only</td><td class="num">−0.381 / −0.361 / −0.463</td><td class="num">0.016 / 0.117 / 0.041</td><td class="num">40/20/20</td><td>⚠ significance carried by 4 extreme draws (187–191 ns) — <b>all in the order-confounded warm arm</b>; fresh-only n.s. → predictor claim downgraded</td></tr>
+<tr><td>ab49 (10 s traces overlap window)</td><td class="num"><b>−0.597</b></td><td class="num">0.0021</td><td class="num">26</td><td>replicated</td></tr>
+<tr><td>ab50 (heaviest: 90 s traces)</td><td class="num">+0.188</td><td class="num">0.356</td><td class="num">26</td><td>null under heavy instrumentation</td></tr>
+<tr><td>ab51 (25 s traces)</td><td class="num">−0.318</td><td class="num">0.114</td><td class="num">26</td><td>attenuated, n.s.</td></tr>
+<tr><td>ab52 (full probe battery)</td><td class="num">−0.241</td><td class="num">0.246</td><td class="num">26</td><td>attenuated, n.s.</td></tr>
+<tr><td>ab52 <b>pre-launch, empty machine</b> (8 read injectors)</td><td class="num">−0.111</td><td class="num">n.s.</td><td class="num">25</td><td><b>flat before every launch</b>: 141.87–142.88 ns — the state is invisible until the engine runs</td></tr>
+</table></div>
+
+<h3>Absolute latency levels (context for the ns numbers)</h3>
+<div class="scrollx"><table>
+<tr><th>condition</th><th class="num">probe latency</th></tr>
+<tr><td>Machine idle, no injectors (true floor, node 0)</td><td class="num">127.3 ns</td></tr>
+<tr><td>Empty machine under 8 read injectors (~72 GB/s), pre-launch, 25 draws</td><td class="num">142.5 ns mean, spread &lt; 1 ns</td></tr>
+<tr><td>During decode, fast draws (ab44 / ab51 / ab52 means)</td><td class="num">161.9 / 165.7 / 161.0 ns</td></tr>
+<tr><td>During decode, slow draws (same kits)</td><td class="num">175.2 / 174.9 / 169.7 ns</td></tr>
+<tr><td>Extremes observed across all kits</td><td class="num">153.7 – 190.9 ns</td></tr>
+</table></div>
+
+<h2>4 · What it established — and what it did not</h2>
+<ul style="font-size:14px">
+<li><b>Established:</b> the per-launch state is visible to a process that shares nothing with tron but the socket's memory path — it is a machine-level memory-service condition, not tron-internal accounting. And it expresses <i>only under the engine's concurrent traffic</i> (pre-launch flat, during-decode separated) — which is why every idle-machine probe in the campaign came back null.</li>
+<li><b>Magnitude:</b> the bystander feels roughly a third to half of tron's relative penalty (+5–11% latency vs tron's ~10–15% throughput deficit) — consistent with the probe sampling only the serialized-latency component while tron compounds it across many parallel requests plus DMA.</li>
+<li><b>NOT established — kept honest:</b> it is a <i>symptom, not a cause or a predictor</i>. The ab47 check broke the predictor reading (see table); heavier instrumentation swamps it (ab50/51/52); and the ledger's standing verdict is "a sometimes-visible symptom, never a predictor." It was later folded into the launch-health early-warning idea only as a possible <i>additional</i> signal, not a gate.</li>
+</ul>
+<div class="caveat"><b>All caveats in one place:</b> (1) CPU 7's HT sibling is CPU 151, an active tron app core — front-end/L1/L2 shared, so the probe is a close neighbor, not a perfect outsider. (2) The <code>node0_spare_cpu()</code> exclusion parse reads the two "Pinning…" log lines only; tron's RX threads (147–150) weren't in the parse — harmless here because the scan returns CPU 7 first, but a re-user of the function should know. (3) probe.csv row 0 carries a warm-up accounting artifact in its bandwidth column; the pre-declared rows 3–28 window avoids it. (4) ab44's "fast ≈157 ns" figure quoted in older docs is the fast-mode <i>median</i>; the mean is 161.9 ns — this page uses means.</div>
+
+<h2>5 · Pointers</h2>
+<div class="scrollx"><table>
+<tr><th>what</th><th>where</th></tr>
+<tr><td>Probe source + binary</td><td><code>delphi-3bda:/scratch/jhan/f3kit/dramprobe.c</code> (+ <code>dramprobe</code>)</td></tr>
+<tr><td>Per-draw raw output</td><td><code>delphi-3bda:/scratch/jhan/ab{44,47,49,50,51,52,54}/results/draw_*/probe.csv</code></td></tr>
+<tr><td>Per-draw tables + correlations</td><td><code>ab44:</code> <code>from-claude-mining/pass2/intel_ab44_per_draw.csv</code> + <code>_summary.csv</code> · <code>ab47/analysis/prereg_results.txt</code> §5 · <code>ab49/analysis/analysis_output.txt</code> §[3] · <code>ab50/analysis/prereg_results.txt:106</code> · <code>ab51/analysis/prereg51_results.txt:96</code> · <code>ab52/analysis/spearman_table.csv</code></td></tr>
+<tr><td>Metric definition (m8) + the odd/even pre-registration</td><td><code>from-claude/metric-manifest-v1.md</code></td></tr>
+<tr><td>Narrative + attenuation discussion</td><td><code>from-claude/goal1-conclusion.html</code> §3.3 · suspicion-ledger.html, Group A "DRAM loaded latency (m8)" row</td></tr>
+</table></div>
+
+<h2>6 · Glossary</h2>
+<dl class="glos">
+<dt>pointer chase</dt><dd>A loop where each memory read yields the address of the next read — serializing all requests and defeating prefetch, so the time per read ≈ true memory round-trip latency.</dd>
+<dt>bystander</dt><dd>The probe shares no code, data, or cores with the engine — only the socket's memory controllers. Anything it feels must live in shared hardware.</dd>
+<dt>m8</dt><dd>The metric-manifest name for this measurement: decode-window loaded latency, mean of probe rows 3–28.</dd>
+<dt>discovery/confirmation split</dt><dd>Correlations computed separately on odd-numbered and even-numbered draws, pre-registered — a guard against one-half flukes.</dd>
+<dt>warm-arm confound (ab47)</dt><dd>In ab47, every warm relaunch followed its fresh partner in time, so "warm" and "later" are entangled; the 4 highest-latency draws were all warm → their leverage can't be attributed cleanly.</dd>
+</dl>
+
+<script>
+(function(){
+  const AB44 = [
+    [82.292,168.97,"low"],[82.240,174.01,"low"],[91.175,159.29,"high"],[89.564,165.20,"high"],
+    [92.629,155.40,"high"],[86.923,178.02,"low"],[92.255,155.96,"high"],[91.725,166.27,"high"],
+    [83.481,184.99,"low"],[89.461,178.71,"high"],[91.750,169.90,"high"],[89.816,173.42,"high"],
+    [84.665,162.03,"low"],[92.416,157.68,"high"],[81.746,186.59,"low"],[91.177,161.73,"high"],
+    [82.045,180.32,"low"],[91.134,154.45,"high"],[87.600,168.85,"mid"],[92.254,153.74,"high"],
+    [91.453,156.23,"high"],[80.206,168.38,"low"],[84.872,173.26,"low"],[92.833,158.62,"high"]
+  ];
+  const AB49 = [
+    [94.289,159.30],[89.863,161.37],[92.755,156.02],[90.887,166.16],[92.725,173.07],[84.305,171.51],
+    [87.338,187.25],[82.596,186.92],[92.260,158.07],[88.405,177.07],[90.696,163.69],[88.329,163.38],
+    [93.096,159.28],[85.510,169.18],[93.559,160.23],[88.686,153.69],[85.184,170.76],[92.363,157.40],
+    [91.354,154.80],[87.823,163.28],[91.981,157.89],[87.310,168.57],[86.376,167.87],[89.586,153.72],
+    [89.054,170.83],[84.861,169.63]
+  ];
+  function scatter(id, data, colorFn, note){
+    const svg=document.getElementById(id); if(!svg) return;
+    const L=80,R=910,T=26,B=310;
+    const x0=79,x1=95.5,y0=150,y1=192;
+    const X=g=>L+(g-x0)/(x1-x0)*(R-L), Y=t=>B-(t-y0)/(y1-y0)*(B-T);
+    let s='';
+    for(let t=150;t<=190;t+=10){s+=`<line x1="${L}" y1="${Y(t)}" x2="${R}" y2="${Y(t)}" stroke="#e3e2dd"/>`+
+      `<text x="${L-8}" y="${Y(t)+4}" font-size="10.5" fill="#8a97a5" text-anchor="end">${t}</text>`;}
+    for(let g=80;g<=95;g+=5){s+=`<text x="${X(g)}" y="${B+18}" font-size="10.5" fill="#8a97a5" text-anchor="middle">${g}</text>`;}
+    s+=`<line x1="${L}" y1="${B}" x2="${R}" y2="${B}" stroke="#8a97a5" stroke-width="1.2"/>`;
+    s+=`<text x="${(L+R)/2}" y="${B+38}" font-size="12" fill="#4a5a6b" text-anchor="middle">runtron draw speed — decode tokens/s per user (higher = faster ticket)</text>`;
+    s+=`<text x="20" y="${(T+B)/2}" font-size="12" fill="#4a5a6b" text-anchor="middle" transform="rotate(-90 20 ${(T+B)/2})">probe latency (ns)</text>`;
+    const n=data.length,mx=data.reduce((a,d)=>a+d[0],0)/n,my=data.reduce((a,d)=>a+d[1],0)/n;
+    let sxy=0,sxx=0;data.forEach(d=>{sxy+=(d[0]-mx)*(d[1]-my);sxx+=(d[0]-mx)**2;});
+    const b=sxy/sxx,a=my-b*mx;
+    s+=`<line x1="${X(x0+0.3)}" y1="${Y(a+b*(x0+0.3))}" x2="${X(x1-0.3)}" y2="${Y(a+b*(x1-0.3))}" stroke="#b9b7b0" stroke-width="1.6" stroke-dasharray="7 5"/>`;
+    data.forEach(d=>{s+=`<circle cx="${X(d[0])}" cy="${Y(d[1])}" r="7" fill="${colorFn(d)}" stroke="#ffffff" stroke-width="1.2"/>`;});
+    s+=`<text x="${X(79.4)}" y="${Y(188)}" font-size="12.5" fill="#22303f" font-weight="700">${note}</text>`;
+    svg.innerHTML=s;
+  }
+  scatter("sc44", AB44, d=>d[2]==="high"?"#2a78d6":(d[2]==="low"?"#eb6834":"#b9b7b0"),
+    "faster engine ⇒ lower bystander latency (blue = fast draws, orange = slow, gray = mid)");
+  scatter("sc49", AB49, ()=>"#2a78d6", "replication: ρ = −0.597, p = 0.0021 (n = 26)");
+})();
+</script>
