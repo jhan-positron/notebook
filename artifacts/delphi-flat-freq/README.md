@@ -265,3 +265,22 @@ canonical one changes.
   handoffs/claude_20260702-20260724_debug-3bda-flat-freq-run-ci-tests.md,
   handoffs/codex_2026-06-22-2026-06-30_configure-xeon-6-core-speeds.md,
   handoffs/codex_2026-06-29-2026-06-30_explore-core-power-feature.md.
+
+## docs/suspicion-ledger.html (through the ab60 series, 2026-08-02)
+
+- Canonical location:
+  DESKTOP-CI2JA7M:C:\Users\jibin\Documents\claude_debug_3bda_flat_freq\from-claude\suspicion-ledger.html
+  (mirror: delphi-3bda:/scratch/jhan/flat_freq_tests/from-claude/suspicion-ledger.html)
+- What it is: the excluded-factors ledger for the delphi-3bda per-launch
+  decode lottery — every suspicion/claim (40 tracked) with how it was
+  tested, its test ID (dated entry in the lab log 02-investigation-plan.md),
+  verdict chips (ruled out / retracted / could-not-test / still-a-suspect),
+  and an integrity-notes column recording every correction. Categories:
+  memory & data placement, machine & platform state, SST & frequency
+  policy, software & workload (incl. the ab59 dense-model control),
+  the localization chase, and instruction-level PMU scoping.
+- Rendered view:
+  https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/suspicion-ledger.html
+- Also published (same content) at:
+  https://claude.ai/code/artifact/7dc7471a-4c91-4e0d-94ba-10bc5b576135
+- Related handoff: handoffs/claude_20260702-20260729_debug-3bda-flat-freq-run-ci-tests.md (PHASE 2)
