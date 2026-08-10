@@ -4,6 +4,18 @@ Preserved compact reports, reviews, and decision documents for the TRON
 gpt-oss decode-performance fluctuation investigation. Repo copies are mirrors:
 edit canonical files first, then refresh these copies.
 
+## tron-serving-concepts.html
+
+- Rendered view:
+  https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/tron-perf-fluctuation/tron-serving-concepts.html
+- Canonical:
+  DESKTOP-CI2JA7M:W:/workspace/perf-fluctuation/from-claude/tron-serving-concepts.html
+- What it is: Claude-generated conceptual explainer for TRON serving terms:
+  session, batch, forward pass, token tree, shared prefix safety, and the
+  off-by-one relationship between generated tokens and forward passes.
+- Related handoff:
+  direct artifact publish request on 2026-08-09.
+
 ## resolve_tron_gpt-oss_random.html
 
 - Rendered view:

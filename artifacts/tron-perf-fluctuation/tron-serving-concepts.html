@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<!-- Rendered view: https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/tron-perf-fluctuation/tron-serving-concepts.html -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tron serving concepts: session, batch, forward pass</title>
+<style>
+  :root {
+    --ink: #1a202c;
+    --muted: #5a6472;
+    --line: #d7dce3;
+    --card: #f6f8fa;
+    --accent: #2563eb;   /* session A blue */
+    --orange: #ea580c;   /* session B orange */
+    --teal: #0d9488;     /* session C teal */
+    --purple: #7c3aed;   /* session D purple */
+    --red: #dc2626;      /* wrong / correction */
+    --green: #15803d;    /* right */
+    --code-bg: #eef1f5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 80px;
+    background: #ffffff; color: var(--ink);
+    font: 16px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 1020px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 28px 0 4px; }
+  h2 { font-size: 21px; margin: 44px 0 10px; border-bottom: 2px solid var(--line); padding-bottom: 6px; }
+  h3 { font-size: 17px; margin: 26px 0 8px; }
+  p  { margin: 8px 0; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.92em; background: var(--code-bg); border-radius: 4px; padding: 1px 5px;
+  }
+  .figwrap { overflow-x: auto; margin: 14px 0 4px; }
+  svg { display: block; max-width: 100%; height: auto; }
+  .caption { font-size: 13.5px; color: var(--muted); margin: 4px 0 18px; }
+  .takeaway {
+    font-size: 15px; margin: 8px 0 18px; padding: 8px 14px;
+    background: #eff6ff; border-left: 4px solid var(--accent); border-radius: 0 6px 6px 0;
+  }
+
+  /* warmup */
+  ol.warmup { padding-left: 26px; margin: 12px 0; }
+  ol.warmup li { margin: 7px 0; }
+  ol.warmup a { color: var(--accent); text-decoration: none; }
+  ol.warmup a:hover { text-decoration: underline; }
+
+  /* misconception cards */
+  .wr { display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0 18px; }
+  .wr > div { flex: 1 1 320px; border-radius: 8px; padding: 10px 14px; }
+  .wrong { background: #fef2f2; border: 1px solid #fecaca; }
+  .right { background: #f0fdf4; border: 1px solid #bbf7d0; }
+  .wrong b { color: var(--red); }
+  .right b { color: var(--green); }
+
+  table { border-collapse: collapse; margin: 12px 0 20px; font-size: 14.5px; width: 100%; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  .glossary td:first-child { white-space: nowrap; font-weight: 600; }
+
+  .note { font-size: 14px; color: var(--muted); }
+  .pill { display:inline-block; border-radius: 10px; padding: 0 8px; font-size: 12.5px; font-weight: 600; color:#fff; }
+</style>
+</head>
+<body>
+<div class="rendered-view-link" style="padding: 10px 18px; background: #ffffff; border-bottom: 1px solid #d8dee8; font: 14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;"><a href="https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/tron-perf-fluctuation/tron-serving-concepts.html">Open rendered view</a></div>
+<main>
+
+<h1>Tron serving concepts</h1>
+<p class="sub">session · token tree · batch · token_jobs · minibatch groups · forward pass · layers · logits ·
+grounded in tron <code>main@07202eb1a</code> · generated 2026-08-09</p>
+
+<!-- ============================================================ -->
+<h2 id="warmup">Warmup — each sentence is one load-bearing fact</h2>
+<p class="note">Read these first; every sentence links to the example that demonstrates it.</p>
+<ol class="warmup">
+  <li>Tron never sees "users" — it sees <b>sessions</b>, one per <code>stream_generate()</code> call; one user can hold several sessions at once. <a href="#ex-batch">→ Example 2</a></li>
+  <li>A <b>session</b> is one prompt + its growing completion, plus the transaction state around it (<code>handle_id</code>). <a href="#glossary">→ glossary</a></li>
+  <li><b>"Sequence" is not a tron concept</b> — where other engines say sequence, tron says session, and the session's tokens are "the prompt + its completion". <a href="#glossary">→ glossary</a></li>
+  <li>The <b>token tree</b> is the KV cache: each session's tokens are a root-to-leaf path, and sessions with a common prompt prefix share the same edges. <a href="#ex-tree">→ Example 3</a></li>
+  <li>Every step, the scheduler collects the live tokens of <b>all</b> active sessions into one <b>batch</b> (<code>token_jobs</code>) — freely mixing prefill and decode, at different positions, from different users. <a href="#ex-batch">→ Example 2</a></li>
+  <li>Tokens in one batch share only one thing: <b>the model weights</b>. Position is a per-token input, and attention is isolated per session by tree ancestry — so there is <b>no</b> "same position" requirement. <a href="#ex-why">→ Example 4</a></li>
+  <li>One <code>forward()</code> call = one <b>forward pass</b>: the whole batch flows through <b>every layer exactly once</b> — layers live <i>inside</i> a pass, never the other way around. <a href="#ex-anatomy">→ Example 1</a></li>
+  <li><b>lm_head</b> runs once at the end of a pass, and only for <b>listeners</b> — positions that requested logits. Mid-prefill passes have no listener and skip it. <a href="#ex-anatomy">→ Example 1</a></li>
+  <li>A forward pass generates <b>one token per listener</b> (in decode: one per decoding session) — not "one token", and mid-prefill passes generate zero. <a href="#ex-batch">→ Example 2</a></li>
+  <li>The <b>first</b> generated token comes out of the <b>last prefill pass</b>, so decode pass <i>k</i> yields generated token <i>k+1</i>. <a href="#ex-timeline">→ Example 5</a></li>
+  <li><b>Minibatch groups</b> (<code>q_batches</code>) are how one pass internally splits its token jobs for attention workers — an execution detail inside the pass, not a serving concept. <a href="#ex-anatomy">→ Example 1</a></li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 id="ladder">The concept ladder</h2>
+<p>Largest to smallest. Everything above the dashed line is <i>serving state</i> (lives across steps);
+everything below is rebuilt fresh for <i>every single forward pass</i>.</p>
+
+<div class="figwrap">
+<svg viewBox="0 0 960 560" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13">
+  <!-- users -->
+  <rect x="20" y="14" width="920" height="66" rx="8" fill="#f6f8fa" stroke="#d7dce3"/>
+  <text x="36" y="38" font-weight="bold" font-size="14">users / clients</text>
+  <text x="36" y="58" fill="#5a6472" font-family="-apple-system,Segoe UI,sans-serif">not a tron concept — tron only sees the calls they make; one user may hold several concurrent generations</text>
+
+  <path d="M480 80 L480 100" stroke="#5a6472" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- sessions -->
+  <rect x="20" y="102" width="920" height="88" rx="8" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="36" y="126" font-weight="bold" font-size="14">sessions</text>
+  <text x="140" y="126" fill="#5a6472" font-family="-apple-system,Segoe UI,sans-serif">one per stream_generate() call · unique handle_id · state = stream_generation_client_state</text>
+  <text x="36" y="148" fill="#1a202c" font-family="-apple-system,Segoe UI,sans-serif">a session's tokens = the prompt + its completion  (other engines call this a "sequence" — tron's code does not)</text>
+  <text x="36" y="172" fill="#5a6472" font-family="-apple-system,Segoe UI,sans-serif">context.hpp:21 · token_stream_monitor.hpp:392</text>
+
+  <path d="M480 190 L480 210" stroke="#5a6472" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- token tree -->
+  <rect x="20" y="212" width="920" height="66" rx="8" fill="#f0fdfa" stroke="#5eead4"/>
+  <text x="36" y="236" font-weight="bold" font-size="14">token tree (KV cache)</text>
+  <text x="230" y="236" fill="#5a6472" font-family="-apple-system,Segoe UI,sans-serif">each session = a root-to-leaf path · shared prompt prefixes share edges</text>
+  <text x="36" y="258" fill="#5a6472" font-family="-apple-system,Segoe UI,sans-serif">token_tree.hpp · each Q token attends to exactly its ancestors (kv_cache.hpp:87)</text>
+
+  <!-- dashed divider -->
+  <line x1="20" y1="296" x2="940" y2="296" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="7 5"/>
+  <text x="700" y="291" fill="#5a6472" font-size="12" font-family="-apple-system,Segoe UI,sans-serif">↑ persistent serving state — ↓ rebuilt every step</text>
+
+  <path d="M480 300 L480 318" stroke="#5a6472" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- batch -->
+  <rect x="20" y="320" width="920" height="66" rx="8" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="36" y="344" font-weight="bold" font-size="14">batch = token_jobs</text>
+  <text x="210" y="344" fill="#5a6472" font-family="-apple-system,Segoe UI,sans-serif">the scheduler gathers, this step, every live token of every active session</text>
+  <text x="36" y="366" fill="#5a6472" font-family="-apple-system,Segoe UI,sans-serif">mixes prefill chunks + decode tokens · each job carries its own position and its own tree page</text>
+
+  <path d="M480 386 L480 404" stroke="#5a6472" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- forward pass -->
+  <rect x="20" y="406" width="920" height="140" rx="8" fill="#faf5ff" stroke="#c4b5fd"/>
+  <text x="36" y="430" font-weight="bold" font-size="14">one forward pass = one forward() call</text>
+  <text x="400" y="430" fill="#5a6472" font-family="-apple-system,Segoe UI,sans-serif">model.hpp:1526 · the whole batch, through every layer, once</text>
+  <!-- inner boxes -->
+  <rect x="36" y="444" width="180" height="40" rx="6" fill="#ffffff" stroke="#a78bfa"/>
+  <text x="126" y="463" text-anchor="middle">minibatch groups</text>
+  <text x="126" y="478" text-anchor="middle" fill="#5a6472" font-size="11.5">q_batches (attention split)</text>
+  <rect x="240" y="444" width="200" height="40" rx="6" fill="#ffffff" stroke="#a78bfa"/>
+  <text x="340" y="463" text-anchor="middle">layers 1..L</text>
+  <text x="340" y="478" text-anchor="middle" fill="#5a6472" font-size="11.5">each executes exactly once</text>
+  <rect x="464" y="444" width="200" height="40" rx="6" fill="#ffffff" stroke="#a78bfa"/>
+  <text x="564" y="463" text-anchor="middle">lm_head → logits</text>
+  <text x="564" y="478" text-anchor="middle" fill="#5a6472" font-size="11.5">only for listeners</text>
+  <rect x="688" y="444" width="216" height="40" rx="6" fill="#ffffff" stroke="#a78bfa"/>
+  <text x="796" y="463" text-anchor="middle">tokens</text>
+  <text x="796" y="478" text-anchor="middle" fill="#5a6472" font-size="11.5">one per listener (0..N)</text>
+  <path d="M216 464 L238 464" stroke="#5a6472" stroke-width="1.4" marker-end="url(#arr)"/>
+  <path d="M440 464 L462 464" stroke="#5a6472" stroke-width="1.4" marker-end="url(#arr)"/>
+  <path d="M664 464 L686 464" stroke="#5a6472" stroke-width="1.4" marker-end="url(#arr)"/>
+  <text x="36" y="528" fill="#5a6472" font-family="-apple-system,Segoe UI,sans-serif" font-size="12.5">a request needs MANY forward passes (a few for prefill + ~one per generated token); each pass serves MANY sessions</text>
+
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3.5" orient="auto">
+      <path d="M0,0 L7,3.5 L0,7 z" fill="#5a6472"/>
+    </marker>
+  </defs>
+</svg>
+</div>
+<p class="caption">Concept hierarchy. Box heights are not to scale; source references are file:line in the tron checkout.</p>
+
+<!-- ============================================================ -->
+<h2 id="ex-anatomy">Example 1 — inside one forward() call (and the layer-vs-pass hierarchy)</h2>
+
+<div class="wr">
+  <div class="wrong"><b>Heard / assumed:</b> "a forward pass is the execution of one layer" or "one layer has multiple forward passes" — i.e. layer ⊃ pass.</div>
+  <div class="right"><b>Actual:</b> pass ⊃ layers. One <code>forward()</code> call runs <i>every</i> layer exactly once. Tron's own MoE counter <code>total_passes</code> increments once per <code>forward()</code> call (model.hpp:1565) — "pass" in tron's vocabulary is the whole-model unit.</div>
+</div>
+
+<div class="figwrap">
+<svg viewBox="0 0 960 330" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13">
+  <!-- outer pass box -->
+  <rect x="14" y="16" width="932" height="240" rx="10" fill="#faf5ff" stroke="#a78bfa" stroke-width="1.6"/>
+  <text x="30" y="42" font-weight="bold" font-size="15">ONE forward pass  =  one forward() call   (model.hpp:1526)</text>
+
+  <!-- embed -->
+  <rect x="30" y="60" width="92" height="46" rx="6" fill="#ffffff" stroke="#64748b"/>
+  <text x="76" y="87" text-anchor="middle">embed</text>
+
+  <!-- layers -->
+  <g>
+    <rect x="146" y="60" width="86" height="46" rx="6" fill="#eff6ff" stroke="#2563eb"/>
+    <text x="189" y="80" text-anchor="middle">layer 1</text>
+    <text x="189" y="97" text-anchor="middle" font-size="11" fill="#5a6472">attn+FFN</text>
+    <rect x="248" y="60" width="86" height="46" rx="6" fill="#eff6ff" stroke="#2563eb"/>
+    <text x="291" y="80" text-anchor="middle">layer 2</text>
+    <text x="291" y="97" text-anchor="middle" font-size="11" fill="#5a6472">attn+FFN</text>
+    <text x="372" y="88" text-anchor="middle" font-size="16" fill="#5a6472">…</text>
+    <rect x="408" y="60" width="86" height="46" rx="6" fill="#eff6ff" stroke="#2563eb"/>
+    <text x="451" y="80" text-anchor="middle">layer L</text>
+    <text x="451" y="97" text-anchor="middle" font-size="11" fill="#5a6472">attn+FFN</text>
+  </g>
+  <text x="320" y="130" text-anchor="middle" fill="#2563eb" font-size="12.5">each layer runs EXACTLY ONCE per pass — inside plugin run (model.hpp:1629)</text>
+
+  <!-- lm_head -->
+  <rect x="530" y="60" width="120" height="46" rx="6" fill="#fff7ed" stroke="#ea580c"/>
+  <text x="590" y="80" text-anchor="middle">lm_head</text>
+  <text x="590" y="97" text-anchor="middle" font-size="11" fill="#5a6472">run_logits :1640</text>
+
+  <!-- logits/sample -->
+  <rect x="686" y="60" width="100" height="46" rx="6" fill="#ffffff" stroke="#64748b"/>
+  <text x="736" y="80" text-anchor="middle">logits</text>
+  <text x="736" y="97" text-anchor="middle" font-size="11" fill="#5a6472">per listener</text>
+  <rect x="822" y="60" width="106" height="46" rx="6" fill="#f0fdf4" stroke="#15803d"/>
+  <text x="875" y="80" text-anchor="middle">token(s)</text>
+  <text x="875" y="97" text-anchor="middle" font-size="11" fill="#5a6472">0..N of them</text>
+
+  <path d="M122 83 L144 83" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <path d="M232 83 L246 83" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <path d="M334 83 L352 83" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <path d="M388 83 L406 83" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <path d="M494 83 L528 83" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <path d="M650 83 L684 83" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <path d="M786 83 L820 83" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+  <!-- lm_head note -->
+  <text x="590" y="150" text-anchor="middle" fill="#ea580c" font-size="12.5">lm_head runs ONCE per pass, only for listener</text>
+  <text x="590" y="166" text-anchor="middle" fill="#ea580c" font-size="12.5">positions — NOT once per layer, NOT for</text>
+  <text x="590" y="182" text-anchor="middle" fill="#ea580c" font-size="12.5">mid-prefill tokens (partition_listeners :1649)</text>
+
+  <!-- minibatch groups strip -->
+  <rect x="30" y="196" width="464" height="44" rx="6" fill="#ffffff" stroke="#a78bfa" stroke-dasharray="5 4"/>
+  <text x="44" y="214" font-size="12.5" fill="#5a6472">internal detail: the pass splits its token jobs into minibatch groups</text>
+  <text x="44" y="230" font-size="12.5" fill="#5a6472">(q_batches) to schedule attention workers — construct_minibatches :1585</text>
+
+  <!-- request loop -->
+  <path d="M946 128 L946 296 L14 296 L14 262" fill="none" stroke="#15803d" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrg)"/>
+  <text x="480" y="288" text-anchor="middle" fill="#15803d" font-size="13">each new token feeds the NEXT forward pass — a request loops through many passes</text>
+
+  <defs>
+    <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#5a6472"/></marker>
+    <marker id="arrg" markerWidth="8" markerHeight="8" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#15803d"/></marker>
+  </defs>
+</svg>
+</div>
+<p class="takeaway">Hierarchy, largest→smallest: request → forward passes → layers → attention/FFN sub-blocks. The multiplicity people talk about ("a layer runs many times") is <i>across</i> passes — layer 7 runs once in pass 1, once in pass 2, … — never multiple times within one pass.</p>
+
+<!-- ============================================================ -->
+<h2 id="ex-batch">Example 2 — one forward pass, three users, four sessions</h2>
+<p>The scene: user X submitted <b>two</b> prompts (two sessions A and B — this is what "one user can hold
+several concurrent generations" means), user Y has session C decoding, user Z's session D just arrived and
+is mid-prefill. The scheduler packs <b>all</b> of their live tokens into one batch.</p>
+
+<div class="figwrap">
+<svg viewBox="0 0 980 520" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13">
+  <!-- USERS column -->
+  <text x="70" y="28" font-weight="bold" font-size="14" font-family="-apple-system,Segoe UI,sans-serif">users</text>
+  <rect x="16" y="44" width="120" height="120" rx="8" fill="#f6f8fa" stroke="#94a3b8"/>
+  <text x="76" y="70" text-anchor="middle" font-weight="bold">user X</text>
+  <text x="76" y="88" text-anchor="middle" font-size="11.5" fill="#5a6472">2 prompts</text>
+  <text x="76" y="103" text-anchor="middle" font-size="11.5" fill="#5a6472">in flight</text>
+  <rect x="16" y="200" width="120" height="70" rx="8" fill="#f6f8fa" stroke="#94a3b8"/>
+  <text x="76" y="230" text-anchor="middle" font-weight="bold">user Y</text>
+  <rect x="16" y="306" width="120" height="70" rx="8" fill="#f6f8fa" stroke="#94a3b8"/>
+  <text x="76" y="336" text-anchor="middle" font-weight="bold">user Z</text>
+
+  <!-- SESSIONS column -->
+  <text x="240" y="28" font-weight="bold" font-size="14" font-family="-apple-system,Segoe UI,sans-serif">sessions (handle_id)</text>
+  <rect x="176" y="44" width="220" height="52" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="190" y="66" fill="#2563eb" font-weight="bold">A · decoding</text>
+  <text x="190" y="84" font-size="12">at position 3781</text>
+  <rect x="176" y="112" width="220" height="52" rx="8" fill="#fff7ed" stroke="#ea580c" stroke-width="1.6"/>
+  <text x="190" y="134" fill="#ea580c" font-weight="bold">B · decoding</text>
+  <text x="190" y="152" font-size="12">at position 12</text>
+  <rect x="176" y="209" width="220" height="52" rx="8" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.6"/>
+  <text x="190" y="231" fill="#0d9488" font-weight="bold">C · decoding</text>
+  <text x="190" y="249" font-size="12">at position 540</text>
+  <rect x="176" y="315" width="220" height="52" rx="8" fill="#faf5ff" stroke="#7c3aed" stroke-width="1.6"/>
+  <text x="190" y="337" fill="#7c3aed" font-weight="bold">D · mid-prefill</text>
+  <text x="190" y="355" font-size="12">prompt chunk: 512 tokens</text>
+
+  <path d="M136 82 L174 70" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arr3)"/>
+  <path d="M136 116 L174 138" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arr3)"/>
+  <path d="M136 235 L174 235" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arr3)"/>
+  <path d="M136 341 L174 341" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+  <!-- BATCH column -->
+  <text x="530" y="28" font-weight="bold" font-size="14" font-family="-apple-system,Segoe UI,sans-serif">ONE batch (token_jobs)</text>
+  <rect x="436" y="44" width="240" height="360" rx="10" fill="#ffffff" stroke="#64748b" stroke-width="1.6"/>
+  <!-- job rows -->
+  <rect x="450" y="60" width="212" height="34" rx="5" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="460" y="81" font-size="12"><tspan fill="#2563eb" font-weight="bold">A</tspan> tok@3781 · wants logits ★</text>
+  <rect x="450" y="102" width="212" height="34" rx="5" fill="#fff7ed" stroke="#ea580c"/>
+  <text x="460" y="123" font-size="12"><tspan fill="#ea580c" font-weight="bold">B</tspan> tok@12 · wants logits ★</text>
+  <rect x="450" y="144" width="212" height="34" rx="5" fill="#f0fdfa" stroke="#0d9488"/>
+  <text x="460" y="165" font-size="12"><tspan fill="#0d9488" font-weight="bold">C</tspan> tok@540 · wants logits ★</text>
+  <rect x="450" y="186" width="212" height="150" rx="5" fill="#faf5ff" stroke="#7c3aed"/>
+  <text x="460" y="209" font-size="12"><tspan fill="#7c3aed" font-weight="bold">D</tspan> tok@0 … tok@511</text>
+  <text x="460" y="228" font-size="12" fill="#5a6472">512 prompt jobs</text>
+  <text x="460" y="247" font-size="12" fill="#5a6472">building KV only,</text>
+  <text x="460" y="266" font-size="12" fill="#5a6472">NO logits requested</text>
+  <text x="460" y="322" font-size="12" fill="#7c3aed">(not D's last chunk)</text>
+  <text x="450" y="366" font-size="12.5" fill="#1a202c">= 515 token jobs total</text>
+  <text x="450" y="386" font-size="12.5" fill="#1a202c">   3 listeners (★)</text>
+
+  <path d="M396 70 L448 74" stroke="#2563eb" stroke-width="1.4" marker-end="url(#arr3)"/>
+  <path d="M396 138 L448 118" stroke="#ea580c" stroke-width="1.4" marker-end="url(#arr3)"/>
+  <path d="M396 235 L448 160" stroke="#0d9488" stroke-width="1.4" marker-end="url(#arr3)"/>
+  <path d="M396 341 L448 260" stroke="#7c3aed" stroke-width="1.4" marker-end="url(#arr3)"/>
+
+  <!-- FORWARD column -->
+  <text x="800" y="28" font-weight="bold" font-size="14" font-family="-apple-system,Segoe UI,sans-serif">one forward pass</text>
+  <rect x="716" y="44" width="180" height="252" rx="10" fill="#faf5ff" stroke="#a78bfa" stroke-width="1.6"/>
+  <text x="806" y="70" text-anchor="middle" font-size="12.5">embed</text>
+  <rect x="736" y="82" width="140" height="30" rx="5" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="806" y="102" text-anchor="middle" font-size="12">layer 1 ×1</text>
+  <rect x="736" y="120" width="140" height="30" rx="5" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="806" y="140" text-anchor="middle" font-size="12">layer 2 ×1</text>
+  <text x="806" y="170" text-anchor="middle" fill="#5a6472">⋮</text>
+  <rect x="736" y="182" width="140" height="30" rx="5" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="806" y="202" text-anchor="middle" font-size="12">layer L ×1</text>
+  <rect x="736" y="224" width="140" height="30" rx="5" fill="#fff7ed" stroke="#ea580c"/>
+  <text x="806" y="244" text-anchor="middle" font-size="12">lm_head: 3 rows</text>
+  <text x="806" y="280" text-anchor="middle" font-size="11.5" fill="#5a6472">all 515 jobs ride together</text>
+
+  <path d="M676 220 L714 200" stroke="#64748b" stroke-width="1.6" marker-end="url(#arr3)"/>
+
+  <!-- OUTPUT -->
+  <rect x="716" y="330" width="180" height="128" rx="10" fill="#f0fdf4" stroke="#15803d" stroke-width="1.6"/>
+  <text x="806" y="354" text-anchor="middle" font-weight="bold" fill="#15803d" font-size="13">output: 3 tokens</text>
+  <text x="730" y="378" font-size="12"><tspan fill="#2563eb" font-weight="bold">A</tspan>: next token (#3782)</text>
+  <text x="730" y="398" font-size="12"><tspan fill="#ea580c" font-weight="bold">B</tspan>: next token (#13)</text>
+  <text x="730" y="418" font-size="12"><tspan fill="#0d9488" font-weight="bold">C</tspan>: next token (#541)</text>
+  <text x="730" y="442" font-size="12"><tspan fill="#7c3aed" font-weight="bold">D</tspan>: nothing this pass</text>
+  <path d="M806 296 L806 328" stroke="#15803d" stroke-width="1.6" marker-end="url(#arrg2)"/>
+
+  <text x="480" y="486" text-anchor="middle" font-size="13.5" fill="#1a202c" font-family="-apple-system,Segoe UI,sans-serif">One pass, 515 token jobs from 4 sessions at positions 3781 / 12 / 540 / 0..511 — different users, different</text>
+  <text x="480" y="506" text-anchor="middle" font-size="13.5" fill="#1a202c" font-family="-apple-system,Segoe UI,sans-serif">tokens, different positions, prefill and decode mixed. Output: one token per listener — 3 tokens, not 1.</text>
+
+  <defs>
+    <marker id="arr3" markerWidth="8" markerHeight="8" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#64748b"/></marker>
+    <marker id="arrg2" markerWidth="8" markerHeight="8" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#15803d"/></marker>
+  </defs>
+</svg>
+</div>
+<p class="caption">Schematic — box sizes not proportional to compute. ★ = listener (a position whose logits were requested; <code>in_listener_index</code>, model.hpp:1516).</p>
+
+<div class="wr">
+  <div class="wrong"><b>Held intuition:</b> "a forward pass generates 1 token, so sharing a pass between users requires everyone to be at the same token."</div>
+  <div class="right"><b>Actual:</b> a pass generates one token <i>per listener</i>. Nothing requires same token, same position, or same phase — Example 4 shows the mechanism that makes this safe.</div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="ex-tree">Example 3 — the token tree: sessions A and B share a prefix</h2>
+<p>Continuing Example 2: user X's two sessions A and B started from the same system prompt.
+The token tree stores that prefix <b>once</b>; each session is a root-to-leaf path, and its
+<code>seq_tip</code> points at its newest token.</p>
+
+<div class="figwrap">
+<svg viewBox="0 0 960 300" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13">
+  <!-- root -->
+  <circle cx="60" cy="150" r="9" fill="#1a202c"/>
+  <text x="60" y="128" text-anchor="middle" font-size="12">root</text>
+
+  <!-- shared edge -->
+  <line x1="69" y1="150" x2="300" y2="150" stroke="#64748b" stroke-width="7" stroke-linecap="round"/>
+  <text x="185" y="136" text-anchor="middle" font-size="12" fill="#1a202c">shared edge: system prompt (900 tok)</text>
+  <text x="185" y="172" text-anchor="middle" font-size="11.5" fill="#5a6472">stored ONCE · refcounted by A and B</text>
+  <circle cx="300" cy="150" r="7" fill="#1a202c"/>
+  <text x="300" y="130" text-anchor="middle" font-size="11.5" fill="#5a6472">branch point</text>
+
+  <!-- A branch -->
+  <line x1="306" y1="146" x2="560" y2="60" stroke="#2563eb" stroke-width="5" stroke-linecap="round"/>
+  <text x="430" y="80" text-anchor="middle" fill="#2563eb" font-size="12">A's question (81 tok)</text>
+  <circle cx="560" cy="60" r="6" fill="#2563eb"/>
+  <line x1="566" y1="58" x2="770" y2="40" stroke="#2563eb" stroke-width="5" stroke-linecap="round" stroke-dasharray="1 9"/>
+  <text x="668" y="24" text-anchor="middle" fill="#2563eb" font-size="12">A's completion so far (2800 tok, growing)</text>
+  <circle cx="782" cy="39" r="8" fill="#ffffff" stroke="#2563eb" stroke-width="2.5"/>
+  <text x="812" y="44" fill="#2563eb" font-size="12">seq_tip A @3781</text>
+
+  <!-- B branch -->
+  <line x1="306" y1="154" x2="560" y2="240" stroke="#ea580c" stroke-width="5" stroke-linecap="round"/>
+  <text x="430" y="228" text-anchor="middle" fill="#ea580c" font-size="12">B's question (100 tok)</text>
+  <circle cx="560" cy="240" r="6" fill="#ea580c"/>
+  <line x1="566" y1="242" x2="680" y2="256" stroke="#ea580c" stroke-width="5" stroke-linecap="round" stroke-dasharray="1 9"/>
+  <text x="630" y="284" text-anchor="middle" fill="#ea580c" font-size="12">B's completion (12 tok)</text>
+  <circle cx="692" cy="257" r="8" fill="#ffffff" stroke="#ea580c" stroke-width="2.5"/>
+  <text x="722" y="262" fill="#ea580c" font-size="12">seq_tip B @1012</text>
+</svg>
+</div>
+<p class="caption">Dotted segments = tokens appended one per decode pass. Edge lengths not to scale.</p>
+
+<p class="takeaway">Session = the transaction; its tokens = one root-to-leaf path = "the prompt + its completion".
+Attention isolation falls out of the tree: a query token attends to <b>exactly its ancestors</b>
+(kv_cache.hpp:87), so A's tokens see the shared prefix + A's path — never anything of B's beyond
+the shared prefix, and nothing of C's or D's at all. This is also the prefix-cache win: B's prompt
+reused 900 tokens of KV that were never recomputed (<code>prompt_tokens_reused</code>, context.hpp:66).</p>
+
+<!-- ============================================================ -->
+<h2 id="ex-why">Example 4 — why mixed positions are safe: what is actually shared</h2>
+<p>The batch dimension is just <b>rows of a matrix multiply</b>. Every linear layer computes
+<code>row × same weight matrix</code> independently per row. Position and history enter per row, not per batch:</p>
+
+<div class="figwrap">
+<svg viewBox="0 0 960 320" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13">
+  <text x="30" y="30" font-weight="bold" font-size="14" font-family="-apple-system,Segoe UI,sans-serif">one linear layer inside the pass (same picture for every GEMM)</text>
+
+  <!-- activation rows -->
+  <text x="120" y="66" text-anchor="middle" font-size="12.5" fill="#5a6472">activations (one row per token job)</text>
+  <rect x="40" y="80" width="160" height="26" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="120" y="98" text-anchor="middle" font-size="11.5">A @pos 3781</text>
+  <rect x="40" y="110" width="160" height="26" fill="#fff7ed" stroke="#ea580c"/>
+  <text x="120" y="128" text-anchor="middle" font-size="11.5">B @pos 12</text>
+  <rect x="40" y="140" width="160" height="26" fill="#f0fdfa" stroke="#0d9488"/>
+  <text x="120" y="158" text-anchor="middle" font-size="11.5">C @pos 540</text>
+  <rect x="40" y="170" width="160" height="70" fill="#faf5ff" stroke="#7c3aed"/>
+  <text x="120" y="202" text-anchor="middle" font-size="11.5">D @pos 0..511</text>
+  <text x="120" y="220" text-anchor="middle" font-size="11.5" fill="#5a6472">(512 rows)</text>
+
+  <text x="238" y="165" font-size="22" fill="#1a202c">×</text>
+
+  <!-- weights -->
+  <rect x="280" y="80" width="180" height="160" fill="#fef9c3" stroke="#ca8a04" stroke-width="2"/>
+  <text x="370" y="150" text-anchor="middle" font-weight="bold">W</text>
+  <text x="370" y="172" text-anchor="middle" font-size="11.5" fill="#5a6472">the ONLY shared thing</text>
+  <text x="370" y="188" text-anchor="middle" font-size="11.5" fill="#5a6472">read once, applied to all rows</text>
+
+  <text x="498" y="165" font-size="22" fill="#1a202c">=</text>
+
+  <!-- output rows -->
+  <rect x="530" y="80" width="160" height="26" fill="#eff6ff" stroke="#2563eb"/>
+  <rect x="530" y="110" width="160" height="26" fill="#fff7ed" stroke="#ea580c"/>
+  <rect x="530" y="140" width="160" height="26" fill="#f0fdfa" stroke="#0d9488"/>
+  <rect x="530" y="170" width="160" height="70" fill="#faf5ff" stroke="#7c3aed"/>
+  <text x="610" y="66" text-anchor="middle" font-size="12.5" fill="#5a6472">outputs, row-independent</text>
+
+  <!-- per-row inputs -->
+  <rect x="726" y="72" width="222" height="176" rx="8" fill="#f6f8fa" stroke="#94a3b8"/>
+  <text x="740" y="96" font-weight="bold" font-size="12.5" font-family="-apple-system,Segoe UI,sans-serif">per-ROW inputs (not shared):</text>
+  <text x="740" y="120" font-size="12">· its own position</text>
+  <text x="752" y="137" font-size="11" fill="#5a6472">in_token_positions :1507 (RoPE)</text>
+  <text x="740" y="160" font-size="12">· its own tree page</text>
+  <text x="752" y="177" font-size="11" fill="#5a6472">in_token_pages → attends only</text>
+  <text x="752" y="192" font-size="11" fill="#5a6472">to its ancestors (kv_cache.hpp:87)</text>
+  <text x="740" y="215" font-size="12">· its own session/group id</text>
+  <text x="752" y="232" font-size="11" fill="#5a6472">in_live_groups :1530</text>
+
+  <text x="480" y="286" text-anchor="middle" font-size="13.5" font-family="-apple-system,Segoe UI,sans-serif">Decode is bottlenecked on READING W from memory. Amortizing that read across many sessions' rows</text>
+  <text x="480" y="306" text-anchor="middle" font-size="13.5" font-family="-apple-system,Segoe UI,sans-serif">is the whole point of batching — and it needs no agreement between rows about position or phase.</text>
+</svg>
+</div>
+
+<p>Your intuition — "everyone in the batch must be at the same token" — describes <b>static batching</b>:
+start N prompts together, step them in lockstep, pad the short ones. Modern engines (tron included)
+do <b>continuous batching</b>: sessions join and leave mid-flight, each at its own position, and the
+scheduler rebuilds <code>token_jobs</code> from scratch before <i>every</i> pass.</p>
+
+<!-- ============================================================ -->
+<h2 id="ex-timeline">Example 5 — one session's lifetime in passes (the off-by-one)</h2>
+<p>Single session, no other traffic (your 5cat draw shape: batch = 1). Prompt of 1024 tokens,
+prefill chunk 512, generating 4 tokens:</p>
+
+<div class="figwrap">
+<svg viewBox="0 0 960 250" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13">
+  <text x="30" y="26" font-weight="bold" font-size="14" font-family="-apple-system,Segoe UI,sans-serif">forward passes, in wall-clock order →</text>
+
+  <!-- prefill 1 -->
+  <rect x="30" y="46" width="150" height="86" rx="8" fill="#f6f8fa" stroke="#64748b" stroke-width="1.6"/>
+  <text x="105" y="70" text-anchor="middle" font-weight="bold">prefill pass 1</text>
+  <text x="105" y="90" text-anchor="middle" font-size="11.5">prompt tok 0..511</text>
+  <text x="105" y="108" text-anchor="middle" font-size="11.5" fill="#5a6472">512 jobs · no listener</text>
+  <text x="105" y="124" text-anchor="middle" font-size="11.5" fill="#dc2626">no lm_head · no token</text>
+
+  <!-- prefill 2 -->
+  <rect x="200" y="46" width="150" height="86" rx="8" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.6"/>
+  <text x="275" y="70" text-anchor="middle" font-weight="bold">prefill pass 2</text>
+  <text x="275" y="90" text-anchor="middle" font-size="11.5">prompt tok 512..1023</text>
+  <text x="275" y="108" text-anchor="middle" font-size="11.5" fill="#5a6472">512 jobs · 1 listener ★</text>
+  <text x="275" y="124" text-anchor="middle" font-size="11.5" fill="#15803d">lm_head → gen tok 1</text>
+
+  <!-- decode passes -->
+  <rect x="370" y="46" width="130" height="86" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="435" y="70" text-anchor="middle" font-weight="bold">decode 1</text>
+  <text x="435" y="90" text-anchor="middle" font-size="11.5">in: gen tok 1</text>
+  <text x="435" y="108" text-anchor="middle" font-size="11.5" fill="#5a6472">1 job · 1 listener ★</text>
+  <text x="435" y="124" text-anchor="middle" font-size="11.5" fill="#15803d">→ gen tok 2</text>
+
+  <rect x="520" y="46" width="130" height="86" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="585" y="70" text-anchor="middle" font-weight="bold">decode 2</text>
+  <text x="585" y="90" text-anchor="middle" font-size="11.5">in: gen tok 2</text>
+  <text x="585" y="108" text-anchor="middle" font-size="11.5" fill="#5a6472">1 job · 1 listener ★</text>
+  <text x="585" y="124" text-anchor="middle" font-size="11.5" fill="#15803d">→ gen tok 3</text>
+
+  <rect x="670" y="46" width="130" height="86" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.6"/>
+  <text x="735" y="70" text-anchor="middle" font-weight="bold">decode 3</text>
+  <text x="735" y="90" text-anchor="middle" font-size="11.5">in: gen tok 3</text>
+  <text x="735" y="108" text-anchor="middle" font-size="11.5" fill="#5a6472">1 job · 1 listener ★</text>
+  <text x="735" y="124" text-anchor="middle" font-size="11.5" fill="#15803d">→ gen tok 4</text>
+
+  <text x="850" y="95" font-size="18" fill="#5a6472">…</text>
+
+  <path d="M180 89 L198 89" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr5)"/>
+  <path d="M350 89 L368 89" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr5)"/>
+  <path d="M500 89 L518 89" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr5)"/>
+  <path d="M650 89 L668 89" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arr5)"/>
+
+  <!-- annotation -->
+  <path d="M275 136 L275 172" stroke="#ca8a04" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text x="60" y="192" font-size="13" font-family="-apple-system,Segoe UI,sans-serif">gen token 1 comes from the LAST PREFILL pass ⇒ decode pass k produces gen token k+1.</text>
+  <text x="60" y="214" font-size="13" font-family="-apple-system,Segoe UI,sans-serif">N generated tokens = N−1 decode passes. Trace cross-check: tokens_generated ≈ decode_forward_count + 1.</text>
+
+  <defs>
+    <marker id="arr5" markerWidth="8" markerHeight="8" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#5a6472"/></marker>
+  </defs>
+</svg>
+</div>
+<p class="caption">Pass widths not to scale (a 512-token prefill pass takes far longer than a 1-token decode pass).
+Assumes no speculative decoding — with EAGLE active (<code>in_eagle_*</code> args, model.hpp:1531), one pass can accept several tokens and the 1:1 mapping breaks.</p>
+
+<div class="wr">
+  <div class="wrong"><b>Assumed:</b> decode forward pass N produces generated token N.</div>
+  <div class="right"><b>Actual:</b> off by one — token 1 is produced by the last prefill pass; decode pass k produces token k+1. And when mining a shared-engine trace, first classify each pass as prefill-shaped vs decode-shaped (the PDJN caveat: both phases run the same <code>forward()</code>).</div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="glossary">Glossary — every concept, one row, with its source anchor</h2>
+<table class="glossary">
+  <tr><th>concept</th><th>what it is</th><th>in tron code</th></tr>
+  <tr><td>user / client</td>
+      <td>whoever calls the engine; may hold several concurrent generations (= several prompts in flight)</td>
+      <td><b>not a tron concept</b> — tron sees only sessions</td></tr>
+  <tr><td>request / session</td>
+      <td>one generation transaction: starts at <code>stream_generate()</code>, ends at close/cancel; owns one prompt + its growing completion</td>
+      <td><code>handle_id</code> (context.hpp:21), <code>stream_generation_client_state</code>; "session" defined at token_stream_monitor.hpp:392</td></tr>
+  <tr><td>sequence</td>
+      <td>other engines' word for a session's token stream; say "the prompt + its completion"</td>
+      <td><b>not a tron concept</b> — appears only in attention-math comments and the <code>seq_tip</code> abbreviation</td></tr>
+  <tr><td>token tree</td>
+      <td>the KV cache, organized as a tree; each session = a root-to-leaf path; shared prompt prefixes share edges; a query token attends to exactly its ancestors</td>
+      <td>token_tree.hpp; kv_cache.hpp:87; prefix reuse counter <code>prompt_tokens_reused</code> (context.hpp:66)</td></tr>
+  <tr><td>batch / token_jobs</td>
+      <td>everything one forward pass processes: all live tokens of all active sessions this step, prefill and decode mixed; rebuilt before every pass</td>
+      <td><code>in_token_jobs</code> (model.hpp:1533), built by the scheduler (full.hpp:1615)</td></tr>
+  <tr><td>minibatch groups</td>
+      <td>internal split of the batch's query tokens for attention-worker scheduling; execution detail inside a pass</td>
+      <td><code>in_live_groups</code> / <code>q_batches</code> / <code>construct_minibatches</code> (model.hpp:1585)</td></tr>
+  <tr><td>forward pass / forward() call</td>
+      <td>same thing: one whole-model execution of the batch — embed, all layers once, logits for listeners</td>
+      <td><code>forward()</code> model.hpp:1526; MoE <code>total_passes</code> ++1 per call (model.hpp:1565)</td></tr>
+  <tr><td>layer</td>
+      <td>one attention+FFN (or MoE) block; the model has L of them; each runs exactly once per pass</td>
+      <td>inside <code>plugin_state.run(q_batches)</code> (model.hpp:1629)</td></tr>
+  <tr><td>listener</td>
+      <td>a position whose logits were requested this pass; ≈ one per decoding session, none for mid-prefill tokens</td>
+      <td><code>in_listener_index</code> (model.hpp:1516), <code>partition_listeners</code> (model.hpp:1649)</td></tr>
+  <tr><td>logits</td>
+      <td>one score per vocabulary entry, produced by lm_head from a listener's final hidden state; input to sampling</td>
+      <td><code>run_logits</code> (model.hpp:1640), <code>fill_logits_buffer</code> (model.hpp:3005)</td></tr>
+  <tr><td>token</td>
+      <td>the sampled next element of a session's completion; a pass yields one per listener (0..N)</td>
+      <td>delivered via <code>in_listener_notifications</code> (model.hpp:1523)</td></tr>
+</table>
+<p class="note">All file:line references are tron <code>main@07202eb1a</code>
+(checkout <code>/home/jhan/workspace/tron</code>, paths under <code>h/tron/…</code>).</p>
+
+</main>
+</body>
+</html>
