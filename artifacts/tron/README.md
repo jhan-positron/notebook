@@ -5,10 +5,17 @@ Repo copies are mirrors: edit the canonical file, not these.
 
 ## tron_threads.html
 
-- Canonical: delphi-3bda:/home/jhan/workspace/tron/codex_tmp/tron_threads_explainer/tron_threads.html
-  (a codex_tmp directory — high deletion risk, hence preserved here)
-- Distilled explainer of tron's thread architecture, generated with GPT
-  Codex per jhan.
+- Rendered view:
+  https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/tron/tron_threads.html
+- Canonical: this repo copy (regenerated 2026-08-17 with Claude Code; the
+  earlier copy at delphi-3bda:/home/jhan/workspace/tron/codex_tmp/tron_threads_explainer/tron_threads.html
+  was synced to match).
+- Distilled explainer of tron's thread architecture: resource-map -> CPU
+  sets, thread families and pinning, plus a function-to-thread distribution
+  for the software-attention path (RMSNorm, RoPE, attention kernel,
+  SiLU/SwiGLU, wcls, logits/sampling) and per-machine numbers for AMD
+  Genoa96 and Intel Xeon 6962P. Originally generated with GPT Codex per
+  jhan (2026-06-29); regenerated and extended with Claude Code.
 - Related handoff: handoffs/codex_2026-06-29_document-tron-thread-pinning.md.
 
 ## kv-cache-structure.html
