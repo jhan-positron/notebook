@@ -1,0 +1,511 @@
+<meta charset="utf-8">
+<title>AMX Status 2026-08-19</title>
+<style>
+body { background:#ffffff; color:#0b0b0b; font-family:system-ui,sans-serif;
+       max-width:1000px; margin:24px auto; padding:0 20px; line-height:1.55; }
+h1 { font-size:24px; margin-bottom:2px; }
+h2 { font-size:18px; margin-top:30px; border-bottom:1px solid #e1e0d9; padding-bottom:6px; }
+p.sub { color:#52514e; margin-top:0; }
+table { border-collapse:collapse; font-size:13.5px; width:100%; }
+th,td { border-bottom:1px solid #e1e0d9; padding:7px 10px 7px 0; text-align:left; vertical-align:top; }
+th { color:#52514e; }
+figure { margin:14px 0 4px 0; overflow-x:auto; }
+figcaption { font-size:12.5px; color:#52514e; }
+.take { background:#f4f3ef; border-left:4px solid #e7298a; padding:8px 12px; font-size:14px; margin:12px 0; }
+code { background:#f4f3ef; padding:1px 4px; font-size:12.5px; }
+.links li { font-size:13.5px; }
+</style>
+<h1>AMX &#xD7; tron software attention &#x2014; status, 2026-08-19</h1>
+<p class="sub">Target: decode throughput of <code>ingested-qwen-3-4b-instruct-2507-tp2</code> on the
+Xeon 6 6962P (delphi-3bda), software (CPU) attention only. All numbers below are measured (3 repeats
+unless noted) and previously reviewed; sources at the bottom.</p>
+
+<h2>1. Where we are against the overall plan</h2>
+<table>
+<tr><th style="width:34%">Phase / gate (doc 04)</th><th style="width:13%">State</th><th>Standing</th></tr>
+<tr><td>P0 &#x2014; microbenchmarks + baselines</td><td><span style="background:#0ca30c;color:#ffffff;border-radius:9px;padding:1px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">DONE</span></td><td>Attention is the qwen decode wall at long context (share &#x2248;14/30/64% at ctx 256/2K/8K). Kernel grid measured across width &#xD7; residency; 4+4 PV blocking adopted; AMX clock-license cost &#x2248;8%.</td></tr>
+<tr><td>P1 &#x2014; sharing instrumentation</td><td><span style="background:#0ca30c;color:#ffffff;border-radius:9px;padding:1px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">DONE</span></td><td>Prefill work is 99.9% shared (avg width 110.9); private decode is GQA-only (width 1.02); shared-prompt decode width 5.06. Verdict: P4 batching is justified for shared-prompt + prefill only.</td></tr>
+<tr><td>P2 &#x2014; kernels inside the real tron code</td><td><span style="background:#0ca30c;color:#ffffff;border-radius:9px;padding:1px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">DONE</span></td><td>Three increments shipped behind default-off flags + runtime kill switch: QK on AMX, PV on AMX, and the K-mirror orientation. Formulation DECIDED (Sol consensus): canonical-K &#x2014; K kept in today&#x27;s original single-copy storage, read as-is &#x2014; is the supported default; the mirror (a second, rearranged copy of K) is a gated opt-in for pinned AMX hosts. Byte-equivalence unit tests pass. Afternoon addition &#x2014; increment 3 (parallel-arena mirror): kill switch is now a true rollback (fallback penalty gone), mirror memory comes from ordinary RAM only when AMX runs (page capacity equals canonical&#x27;s), same speed. Sol&#x27;s revision verdict: KEEP-CURRENT today; consensus end state once gates pass = arena-mirror default on AMX hosts, canonical as compatibility/constrained-memory fallback.</td></tr>
+<tr><td>P3 &#x2014; fp32 v* numerics policy</td><td><span style="background:#898781;color:#ffffff;border-radius:9px;padding:1px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">QUEUED</span></td><td>Separately flagged change; untouched by the AMX work so far.</td></tr>
+<tr><td>P4 &#x2014; shared-KV batching (width &#x2265; 8)</td><td><span style="background:#898781;color:#ffffff;border-radius:9px;padding:1px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">QUEUED</span></td><td>Justified by P1 data for shared-prompt + prefill. The mirror-vs-canonical default is re-evaluated here with capacity-adjusted, end-to-end results.</td></tr>
+<tr><td>P5 &#x2014; tuning experiments</td><td><span style="background:#898781;color:#ffffff;border-radius:9px;padding:1px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">QUEUED</span></td><td>Per-experiment T4 verdicts. The separate-arena mirror was built and measured the same day (increment 3): it removes the fallback penalty entirely and makes mirror memory AMX-only; it does not add AMX speed (the &quot;unlock &#x2248;14%&quot; expectation was refuted &#x2014; see &#xA7;4.3).</td></tr>
+<tr><td>T1 &#x2014; logit tolerance (gate for enable-by-default)</td><td><span style="background:#d95f02;color:#ffffff;border-radius:9px;padding:1px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">FIRST PASS DONE</span></td><td>Full first pass on qwen vs an HF fp32 reference: AMX-vs-AVX max TVD 0.054 (median 0.0000) &#x2014; passes the repo criterion; AMX adds no error on top of tron&#x27;s existing distance from HF. Extension done (afternoon): three prompts, 956 aligned steps vs HF fp32 references &#x2014; AMX-vs-AVX max TVD 0.054, one step in 956 above 0.05 (prompts 2&#x2013;3: zero outliers). Remaining: batching variations + criteria text. Known issue, non-blocking (positioned by jhan, 2026-08-19): tron sits &#x2248;0.11 median TVD from the HF reference with AMX off &#x2014; pre-existing engine behavior, identical in both arms, not introduced by AMX and not a gate for AMX enablement. Recorded here for whoever works on engine-vs-HF fidelity later.</td></tr>
+<tr><td>T2/T3 &#x2014; dispatch/OS tests, CI strategy</td><td><span style="background:#898781;color:#ffffff;border-radius:9px;padding:1px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">QUEUED</span></td><td>Before any enable-by-default; needs a non-AMX host for the fallback cases.</td></tr>
+<tr><td>T4 &#x2014; formal end-to-end A/B</td><td><span style="background:#d95f02;color:#ffffff;border-radius:9px;padding:1px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">FIRST PASS DONE</span></td><td>Ran self-serve this morning (09:31&#x2013;10:26 UTC) per jhan&#x27;s standing authorization. True symmetric 3-binary suite (a clean binary with no AMX code compiled, sha recorded): decode vs clean &#x2014; canonical +3.8/+15.2/+19.0/+17.5%, mirror +4.5/+19.8/+22.6/+26.6% (1u/2K, 1u/8K, 8u/2K, 8u/8K); prefill up to +105%. The clean binary reproduces the original P0 baseline, confirming the week&#x27;s kill-switch A/Bs were sound. Capacity: 16 and 24 users at ctx 8192 completed with zero failures on both binaries; the mirror holds +6% aggregate at saturation. Power (measured at 8u/8K, package level): essentially flat (+0.3&#x2013;1.6%) with busy clocks only &#x2248;4% lower at this many-core load &#x2014; so <b>energy per generated token drops 14.5% (canonical) / 21.6% (mirror)</b>. Shapes done (afternoon): llama-3.1-8b-tp2 decode +15.0%/+19.7% (the gains generalize); gpt-oss-20b-tp2 &#x2212;0.3&#x2026;&#x2212;1.6% (no regression where the fast path does not engage). Capacity edge: both builds admit 48 users at ctx 8192 (&#x2248;58 of 64 GB page budget), zero failures; arena-mirror +6% aggregate there. Boundary probes: 32/48/56/64 users at ctx 8192 ALL completed cleanly on both builds (zero failures; arena-mirror faster at every point, &#x2212;3.4% wall at 64u) &#x2014; no admission failure reached, so the real capacity edge lies beyond 64 users and my budget arithmetic was conservative; the true edge + mixed-context workloads remain for gate 3. Replication done (evening): 8 reps per cell, variation 0.1&#x2013;0.7%; decode vs clean with 95% confidence &#x2014; canonical +15.3%&#xB1;0.4 / +17.7%&#xB1;0.2, arena-mirror +19.7%&#xB1;0.3 / +27.8%&#xB1;0.8 (1u/8K, 8u/8K). Gate 5 complete.</td></tr>
+</table>
+<div class="take"><b>One-line position:</b> the kernel phases (P0&#x2013;P2) are complete with the
+formulation decided; the work has moved to the qualification gates (T1 under way, T2&#x2013;T4 queued)
+and the batching/tuning phases (P4/P5) that decide how far the gains extend.</div>
+
+<h2>2. Measured AMX gains to date (real qwen, same-binary kill-switch A/B)</h2>
+<figure><svg viewBox="0 0 980 322" width="980" height="322" role="img" aria-label="AMX gains over the AVX baseline per workload: decode +4.5 to +28.4 percent, prefill +44 to +105 percent" font-family="system-ui,sans-serif" font-size="12">
+<line x1="200.0" y1="26" x2="200.0" y2="292" stroke="#e1e0d9"/>
+<text x="200.0" y="308" text-anchor="middle" fill="#898781" font-size="11">+0%</text>
+<line x1="327.3" y1="26" x2="327.3" y2="292" stroke="#e1e0d9"/>
+<text x="327.3" y="308" text-anchor="middle" fill="#898781" font-size="11">+25%</text>
+<line x1="454.5" y1="26" x2="454.5" y2="292" stroke="#e1e0d9"/>
+<text x="454.5" y="308" text-anchor="middle" fill="#898781" font-size="11">+50%</text>
+<line x1="581.8" y1="26" x2="581.8" y2="292" stroke="#e1e0d9"/>
+<text x="581.8" y="308" text-anchor="middle" fill="#898781" font-size="11">+75%</text>
+<line x1="709.1" y1="26" x2="709.1" y2="292" stroke="#e1e0d9"/>
+<text x="709.1" y="308" text-anchor="middle" fill="#898781" font-size="11">+100%</text>
+<rect x="10.0" y="8" width="12" height="12" fill="#e7298a"/><text x="28.0" y="18" fill="#52514e" font-size="11.5">decode (token generation)</text>
+<rect x="220.0" y="8" width="12" height="12" fill="#1b9e77"/><text x="238.0" y="18" fill="#52514e" font-size="11.5">prefill (prompt parsing)</text>
+<text x="188.0" y="52" text-anchor="end" fill="#0b0b0b" font-weight="600">1 user</text>
+<text x="188.0" y="66" text-anchor="end" fill="#52514e" font-size="11">ctx 2048</text>
+<rect x="200.0" y="42" width="22.9" height="15" fill="#e7298a"/>
+<text x="228.9" y="54" fill="#e7298a" font-weight="700">+4.5%</text>
+<rect x="200.0" y="61" width="235.2" height="15" fill="#1b9e77"/>
+<text x="441.2" y="73" fill="#1b9e77" font-weight="700">+46.2%</text>
+<text x="188.0" y="114" text-anchor="end" fill="#0b0b0b" font-weight="600">1 user</text>
+<text x="188.0" y="128" text-anchor="end" fill="#52514e" font-size="11">ctx 8192</text>
+<rect x="200.0" y="104" width="82.0" height="15" fill="#e7298a"/>
+<text x="288.0" y="116" fill="#e7298a" font-weight="700">+16.1%</text>
+<rect x="200.0" y="123" width="536.1" height="15" fill="#1b9e77"/>
+<text x="742.1" y="135" fill="#1b9e77" font-weight="700">+105.3%</text>
+<text x="188.0" y="176" text-anchor="end" fill="#0b0b0b" font-weight="600">8 users</text>
+<text x="188.0" y="190" text-anchor="end" fill="#52514e" font-size="11">ctx 2048</text>
+<rect x="200.0" y="166" width="117.1" height="15" fill="#e7298a"/>
+<text x="323.1" y="178" fill="#e7298a" font-weight="700">+23.0%</text>
+<rect x="200.0" y="185" width="226.0" height="15" fill="#1b9e77"/>
+<text x="432.0" y="197" fill="#1b9e77" font-weight="700">+44.4%</text>
+<text x="188.0" y="238" text-anchor="end" fill="#0b0b0b" font-weight="600">8 users</text>
+<text x="188.0" y="252" text-anchor="end" fill="#52514e" font-size="11">ctx 8192</text>
+<rect x="200.0" y="228" width="144.6" height="15" fill="#e7298a"/>
+<text x="350.6" y="240" fill="#e7298a" font-weight="700">+28.4%</text>
+<rect x="200.0" y="247" width="508.1" height="15" fill="#1b9e77"/>
+<text x="714.1" y="259" fill="#1b9e77" font-weight="700">+99.8%</text>
+</svg><figcaption>Each bar is one same-binary A/B: ALL code changes on vs all off (not a sum of per-step
+deltas). The bars show the opt-in mirror configuration &#x2014; the largest measured gains. Decode at
+8 users/ctx 8192 = aggregate 114.4 &#x2192; 146.9 tok/s; the 8192-token prompt parses in half the
+time. Axis starts at 0. Exact numbers and per-increment breakdowns:
+<a href="p2-inc1b.html">p2-inc1b.html</a>, <a href="p2-inc2.html">p2-inc2.html</a>.</figcaption></figure>
+<p><b>Both configurations, decode gain vs the AVX baseline</b> (cumulative &#x2014; every increment in
+the named build):</p>
+<table>
+<tr><th>configuration</th><th>1u/2K</th><th>1u/8K</th><th>8u/2K</th><th>8u/8K</th></tr>
+<tr><td>Default build (canonical-K: QK + PV on AMX)</td><td>+4.4%</td><td>+12.0%</td><td>+16.9%</td><td>+19.2%</td></tr>
+<tr><td>Opt-in mirror build (adds the K-mirror kernel)</td><td>+4.5%</td><td>+16.1%</td><td>+23.0%</td><td>+28.4%</td></tr>
+</table>
+
+<h2>3. What today added</h2>
+<ul>
+<li><b>PV on AMX (increment 1b) measured</b>: decode +4.4/+12.0/+16.9% over baseline at 1u/2K, 1u/8K,
+8u/2K &#x2014; roughly double the QK-only gains, as modeled.</li>
+<li><b>K-mirror orientation (increment 2) built and measured in one night</b>: adds up to +7.7% decode
+on top of increment 1b, and the advantage grows with attention share. Its two system costs are now
+quantified &#x2014; one third fewer KV pages in the same byte budget, and a slower AVX fallback caused
+by the 3-plane block layout alone (root-caused via a layout-only control build + decode-phase
+counters: LLC-miss driven, not TLB). A mitigation with a clear mechanism is queued: move the mirror
+plane to a separate arena, which should unlock the mirror kernel&#x27;s full &#x2248;14% same-layout gain.</li>
+<li><b>Formulation decision closed (Claude + Sol consensus)</b>: canonical-K stays the supported
+default; the mirror ships only as a documented opt-in for pinned AMX deployments &#x2014; its kill
+switch does not restore canonical-layout AVX performance, and it costs KV capacity.</li>
+<li><b>First full T1 numerics pass, on qwen, against an HF fp32 reference</b>: AMX-vs-AVX max TVD
+0.054, median 0.0000, 1/148 steps above 0.05 &#x2014; inside the repo&#x27;s own tolerance criterion.
+Both arms sit at an identical distance from the HF reference: AMX adds no error on top of the
+engine&#x27;s existing gap. Reusable goldens + tooling now exist for future T1 runs.</li>
+<li><b>Test obligations advanced</b>: save_k&#x2192;mirror byte-equivalence tests written and passing
+(32K+ assertions); per-step logit A/B tool added (<code>t/t_amx_logit_ab.cpp</code>).</li>
+<li><b>Documentation</b>: doc 02 gained &#xA7;4b (the transpose in practice, with a three-panel figure)
+and &#xA7;6b (precision: what each engine computes, with a data-type diagram) &#x2014; both
+Sol-reviewed; all result pages now live in <code>rampup/</code> with a linked index.</li>
+</ul>
+
+
+<h2>4. Deep-dive: the mirror layout penalty &#x2014; why the design, the experiment, the fix</h2>
+
+<h3 style="font-size:15px;">4.1 Why the mirror layout exists (design motivation)</h3>
+<p>The canonical AMX kernel computes scores sideways and must transpose them back &#x2014; a structural
+cost of roughly 300 ns per page that cannot be removed within that orientation (doc 02
+<a href="02-tron-decode-amx-plan.html#transpose">&#xA7;4b</a> has the full story with figures). The
+mirror formulation removes the transpose entirely by keeping a second copy of K, pre-arranged the way
+the AMX tiles want to read it; measured at equal layout, the mirror kernel decodes
+<b>&#x2248;14% faster</b> than the canonical kernel. The first implementation put that copy inside each
+KV block &#x2014; the simplest correct design: one allocation, one offset table, and the single
+page-move funnel keeps it coherent through defragmentation. The price of that simplicity is the layout
+below. (Bill&#x27;s PR #2934 places its mirror the same way, inside each KV block &#x2014; verified in
+its source &#x2014; so this penalty class is expected to apply to it as well, though that was never
+measured on his models. The separate-arena fix in &#xA7;4.3 is new to both implementations.)</p>
+<figure><svg viewBox="0 0 980 270" width="980" height="270" role="img" aria-label="Two memory strips: the canonical two-plane block layout with an unbroken prefetch stream, and the mirror three-plane layout where the stream breaks at every mirror plane, raising the LLC miss rate from 50.8 to 84.6 percent" font-family="system-ui,sans-serif">
+<text x="14.0" y="22.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">Memory arrangement of KV block-pages (each cell = one 16 KB plane at head 128)</text>
+<text x="14.0" y="52.0" font-size="11.5" fill="#7570b3" text-anchor="start" font-weight="600">Today (canonical build): 2 planes, 32 KB block stride</text>
+<rect x="150.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="169.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="188.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="207.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="150.0" y1="62.0" x2="150.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="226.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="245.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="264.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="283.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="226.0" y1="62.0" x2="226.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="302.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="321.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="340.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="359.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="302.0" y1="62.0" x2="302.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="378.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="397.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="416.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="435.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="378.0" y1="62.0" x2="378.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="454.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="473.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="492.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="511.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="454.0" y1="62.0" x2="454.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="530.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="549.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="568.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="587.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="530.0" y1="62.0" x2="530.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<line x1="606.0" y1="62.0" x2="606.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<line x1="150.0" y1="108.0" x2="596.0" y2="108.0" stroke="#1b9e77" stroke-width="2.2"/>
+<path d="M 606.0 108.0 l -8 -3.5 v 7 z" fill="#1b9e77"/>
+<text x="378.0" y="124.0" font-size="10.5" fill="#1b9e77" text-anchor="middle">hardware prefetch streams run unbroken through the data the AVX path reads</text>
+<text x="14.0" y="162.0" font-size="11.5" fill="#e7298a" text-anchor="start" font-weight="600">Mirror build: 3 planes, 48 KB stride (+50%)</text>
+<rect x="150.0" y="172.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="169.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="188.0" y="172.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="207.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<rect x="226.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="245.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="150.0" y1="172.0" x2="150.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="264.0" y="172.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="283.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="302.0" y="172.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="321.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<rect x="340.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="359.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="264.0" y1="172.0" x2="264.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="378.0" y="172.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="397.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="416.0" y="172.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="435.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<rect x="454.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="473.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="378.0" y1="172.0" x2="378.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="492.0" y="172.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="511.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="530.0" y="172.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="549.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<rect x="568.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="587.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="492.0" y1="172.0" x2="492.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="606.0" y="172.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="625.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="644.0" y="172.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="663.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<rect x="682.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="701.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="606.0" y1="172.0" x2="606.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<line x1="720.0" y1="172.0" x2="720.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<line x1="150.0" y1="218.0" x2="224.0" y2="218.0" stroke="#1b9e77" stroke-width="2.2"/>
+<line x1="237.0" y1="212.0" x2="253.0" y2="224.0" stroke="#d03b3b" stroke-width="2.2"/>
+<line x1="237.0" y1="224.0" x2="253.0" y2="212.0" stroke="#d03b3b" stroke-width="2.2"/>
+<line x1="264.0" y1="218.0" x2="338.0" y2="218.0" stroke="#1b9e77" stroke-width="2.2"/>
+<line x1="351.0" y1="212.0" x2="367.0" y2="224.0" stroke="#d03b3b" stroke-width="2.2"/>
+<line x1="351.0" y1="224.0" x2="367.0" y2="212.0" stroke="#d03b3b" stroke-width="2.2"/>
+<line x1="378.0" y1="218.0" x2="452.0" y2="218.0" stroke="#1b9e77" stroke-width="2.2"/>
+<line x1="465.0" y1="212.0" x2="481.0" y2="224.0" stroke="#d03b3b" stroke-width="2.2"/>
+<line x1="465.0" y1="224.0" x2="481.0" y2="212.0" stroke="#d03b3b" stroke-width="2.2"/>
+<line x1="492.0" y1="218.0" x2="566.0" y2="218.0" stroke="#1b9e77" stroke-width="2.2"/>
+<line x1="579.0" y1="212.0" x2="595.0" y2="224.0" stroke="#d03b3b" stroke-width="2.2"/>
+<line x1="579.0" y1="224.0" x2="595.0" y2="212.0" stroke="#d03b3b" stroke-width="2.2"/>
+<line x1="606.0" y1="218.0" x2="680.0" y2="218.0" stroke="#1b9e77" stroke-width="2.2"/>
+<line x1="693.0" y1="212.0" x2="709.0" y2="224.0" stroke="#d03b3b" stroke-width="2.2"/>
+<line x1="693.0" y1="224.0" x2="709.0" y2="212.0" stroke="#d03b3b" stroke-width="2.2"/>
+<text x="435.0" y="240.0" font-size="10.5" fill="#d03b3b" text-anchor="middle">the stream breaks at every M plane: the AVX path never reads it, but must jump over it</text>
+<text x="435.0" y="255.0" font-size="10.5" fill="#d03b3b" text-anchor="middle" font-weight="600">measured effect: LLC-load miss rate 50.8% &#x2192; 84.6% in the decode phase</text>
+<rect x="640.0" y="44.0" width="0.0" height="0.0" fill="#fff" stroke="#fff" stroke-width="1.2"/>
+<rect x="640.0" y="44.0" width="0.0" height="0.0" fill="#fff" stroke="#fff" stroke-width="1.2"/>
+<rect x="640.0" y="44.0" width="0.0" height="0.0" fill="#fff" stroke="#fff" stroke-width="1.2"/>
+<rect x="688.0" y="44.0" width="13.0" height="13.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="707.0" y="55.0" font-size="10.5" fill="#52514e" text-anchor="start">keys</text>
+<rect x="688.0" y="64.0" width="13.0" height="13.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="707.0" y="75.0" font-size="10.5" fill="#52514e" text-anchor="start">values</text>
+<rect x="688.0" y="84.0" width="13.0" height="13.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="707.0" y="95.0" font-size="10.5" fill="#52514e" text-anchor="start">K mirror: read ONLY by the AMX mirror kernel</text>
+</svg><figcaption>Each cell is one 16 KB plane. The mirror plane M is real data for the AMX mirror kernel
+&#x2014; but for the AVX path (and for the canonical-kernel parts of the AMX path) it is a dead 16 KB
+gap between every K/V pair, and blocks sit 1.5&#xD7; farther apart.</figcaption></figure>
+
+<h3 style="font-size:15px;">4.2 The experiment: proving the layout alone is the penalty</h3>
+<p>The suspicious observation: the mirror build ran slower <i>even with AMX switched off and zero
+mirror writes happening</i>. Zero writes rules out write bandwidth &#x2014; but not the cause. So a
+control build was made: <b>the 3-plane layout with none of the mirror code</b> (no writes, canonical
+kernels). If the control reproduces the slowdown, the layout alone carries it.</p>
+<figure><svg viewBox="0 0 980 360" width="980" height="360" role="img" aria-label="Six bars: on the AVX path, the layout-only control build matches the mirror build exactly at about minus 7.7 percent versus canonical; on the AMX path the same layout costs 9.2 percent and the mirror kernel wins it back plus more; side panel shows LLC miss rate 50.8 versus 84.6 percent and TLB misses near zero in both arms" font-family="system-ui,sans-serif">
+<line x1="60.0" y1="300.0" x2="660.0" y2="300.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="52.0" y="304.0" font-size="10" fill="#898781" text-anchor="end">0</text>
+<line x1="60.0" y1="214.3" x2="660.0" y2="214.3" stroke="#e8e8e6" stroke-width="1"/>
+<text x="52.0" y="218.3" font-size="10" fill="#898781" text-anchor="end">50</text>
+<line x1="60.0" y1="128.6" x2="660.0" y2="128.6" stroke="#e8e8e6" stroke-width="1"/>
+<text x="52.0" y="132.6" font-size="10" fill="#898781" text-anchor="end">100</text>
+<text x="52.0" y="32.0" font-size="11" fill="#52514e" text-anchor="start">decode tok/s, 1 user / ctx 8192 (the worst-penalty case)</text>
+<rect x="95.0" y="113.3" width="56.0" height="186.7" fill="#eae9f4" stroke="#7570b3" stroke-width="1.6"/>
+<text x="123.0" y="107.3" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">108.9</text>
+<text x="123.0" y="314.0" font-size="10" fill="#52514e" text-anchor="middle">canonical</text>
+<text x="123.0" y="326.0" font-size="9.5" fill="#898781" text-anchor="middle">2-plane</text>
+<rect x="170.0" y="127.5" width="56.0" height="172.5" fill="#fcebdd" stroke="#d95f02" stroke-width="1.6"/>
+<text x="198.0" y="121.5" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">100.6</text>
+<text x="198.0" y="314.0" font-size="10" fill="#52514e" text-anchor="middle">layout-only</text>
+<text x="198.0" y="326.0" font-size="9.5" fill="#898781" text-anchor="middle">3-plane</text>
+<rect x="245.0" y="127.7" width="56.0" height="172.3" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.6"/>
+<text x="273.0" y="121.7" font-size="11" fill="#e7298a" text-anchor="middle" font-weight="600">100.5</text>
+<text x="273.0" y="314.0" font-size="10" fill="#52514e" text-anchor="middle">mirror build</text>
+<text x="273.0" y="326.0" font-size="9.5" fill="#898781" text-anchor="middle">3-plane</text>
+<rect x="415.0" y="90.9" width="56.0" height="209.1" fill="#eae9f4" stroke="#7570b3" stroke-width="1.6"/>
+<text x="443.0" y="84.9" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">122.0</text>
+<text x="443.0" y="314.0" font-size="10" fill="#52514e" text-anchor="middle">canonical</text>
+<text x="443.0" y="326.0" font-size="9.5" fill="#898781" text-anchor="middle">2-plane</text>
+<rect x="490.0" y="110.1" width="56.0" height="189.9" fill="#fcebdd" stroke="#d95f02" stroke-width="1.6"/>
+<text x="518.0" y="104.1" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">110.8</text>
+<text x="518.0" y="314.0" font-size="10" fill="#52514e" text-anchor="middle">layout-only</text>
+<text x="518.0" y="326.0" font-size="9.5" fill="#898781" text-anchor="middle">3-plane</text>
+<rect x="565.0" y="83.1" width="56.0" height="216.9" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.6"/>
+<text x="593.0" y="77.1" font-size="11" fill="#e7298a" text-anchor="middle" font-weight="600">126.5</text>
+<text x="593.0" y="314.0" font-size="10" fill="#52514e" text-anchor="middle">mirror kernel</text>
+<text x="593.0" y="326.0" font-size="9.5" fill="#898781" text-anchor="middle">3-plane</text>
+<text x="198.0" y="344.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-weight="600">AVX path (kill switch on)</text>
+<text x="518.0" y="344.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-weight="600">AMX path</text>
+<line x1="198.0" y1="105.5" x2="273.0" y2="105.7" stroke="#52514e" stroke-width="1.2"/>
+<text x="235.0" y="99.5" font-size="10" fill="#52514e" text-anchor="middle">identical (-7.6% / -7.8%)</text>
+<text x="235.0" y="85.5" font-size="10" fill="#52514e" text-anchor="middle" font-weight="600">the layout ALONE is the whole penalty</text>
+<text x="518.0" y="43.1" font-size="10" fill="#52514e" text-anchor="middle">same 3-plane layout: mirror kernel is +14.2% over</text>
+<text x="518.0" y="57.1" font-size="10" fill="#52514e" text-anchor="middle">the canonical kernel (126.5 vs 110.8)</text>
+<text x="720.0" y="80.0" font-size="11.5" fill="#0b0b0b" text-anchor="start" font-weight="600">Decode-phase counters (perf attach)</text>
+<text x="720.0" y="112.0" font-size="10.5" fill="#52514e" text-anchor="start">2-plane</text>
+<rect x="782.0" y="100.0" width="86.4" height="16.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="872.4" y="112.0" font-size="10" fill="#7570b3" text-anchor="start">50.8% LLC-load misses</text>
+<text x="720.0" y="158.0" font-size="10.5" fill="#52514e" text-anchor="start">3-plane</text>
+<rect x="782.0" y="146.0" width="143.8" height="16.0" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="929.8" y="158.0" font-size="10" fill="#d95f02" text-anchor="start">84.6% LLC-load misses</text>
+<text x="720.0" y="210.0" font-size="10.5" fill="#52514e" text-anchor="start" font-weight="600">dTLB-load misses: &#x2248;0.00% in BOTH arms</text>
+<text x="720.0" y="226.0" font-size="10.5" fill="#52514e" text-anchor="start">&#x2192; cache/prefetch locality, not TLB reach</text>
+</svg><figcaption>It does: on the AVX path the control matches the mirror build to within noise
+(&#x2212;7.6% vs &#x2212;7.8%). The same comparison on the AMX path showed the canonical kernel losing &#x2212;9.2% on the fat
+layout; increment 3 later proved that tax belonged to the canonical kernel only &#x2014; the mirror
+kernel&#x27;s own arm is unchanged by the layout (see &#xA7;4.3).
+The counters point at the mechanism: LLC-load misses jump while TLB misses stay at zero in both arms
+&#x2014; broken prefetch streams, not address-translation pressure. Measured: 2 reps per bar, 15 s
+decode-phase counter windows; raw data in <code>exec/results/slot1/</code>.</figcaption></figure>
+
+<h3 style="font-size:15px;">4.3 The plan to remove the penalty</h3>
+<figure><svg viewBox="0 0 980 226" width="980" height="226" role="img" aria-label="Two strips: a dense two-plane K V arena with an unbroken prefetch stream, and a separate arena holding only mirror planes, allocated only when AMX is on" font-family="system-ui,sans-serif">
+<text x="14.0" y="22.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">Planned fix: move the mirror planes into their own arena (QUEUE row 15 mitigation)</text>
+<text x="14.0" y="52.0" font-size="11" fill="#7570b3" text-anchor="start" font-weight="600">K/V arena: back to dense 2-plane blocks</text>
+<rect x="150.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="169.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="188.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="207.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="150.0" y1="62.0" x2="150.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="226.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="245.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="264.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="283.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="226.0" y1="62.0" x2="226.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="302.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="321.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="340.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="359.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="302.0" y1="62.0" x2="302.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="378.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="397.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="416.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="435.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="378.0" y1="62.0" x2="378.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="454.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="473.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="492.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="511.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="454.0" y1="62.0" x2="454.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="530.0" y="62.0" width="38.0" height="30.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<text x="549.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">K</text>
+<rect x="568.0" y="62.0" width="38.0" height="30.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.2"/>
+<text x="587.0" y="81.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">V</text>
+<line x1="530.0" y1="62.0" x2="530.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<line x1="606.0" y1="62.0" x2="606.0" y2="92.0" stroke="#52514e" stroke-width="1.6"/>
+<line x1="150.0" y1="108.0" x2="596.0" y2="108.0" stroke="#1b9e77" stroke-width="2.2"/>
+<path d="M 606.0 108.0 l -8 -3.5 v 7 z" fill="#1b9e77"/>
+<text x="378.0" y="124.0" font-size="10.5" fill="#1b9e77" text-anchor="middle">prefetch streams unbroken again &#x2014; fallback penalty and AMX layout tax expected to vanish</text>
+<text x="14.0" y="162.0" font-size="11" fill="#e7298a" text-anchor="start" font-weight="600">Mirror arena: separate allocation</text>
+<rect x="150.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="169.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="150.0" y1="172.0" x2="150.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="188.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="207.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="188.0" y1="172.0" x2="188.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="226.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="245.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="226.0" y1="172.0" x2="226.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="264.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="283.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="264.0" y1="172.0" x2="264.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="302.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="321.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="302.0" y1="172.0" x2="302.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<rect x="340.0" y="172.0" width="38.0" height="30.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<text x="359.0" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">M</text>
+<line x1="340.0" y1="172.0" x2="340.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<line x1="378.0" y1="172.0" x2="378.0" y2="202.0" stroke="#52514e" stroke-width="1.6"/>
+<text x="392.0" y="186.0" font-size="10.5" fill="#52514e" text-anchor="start">allocated ONLY when AMX is on; the mirror kernel</text>
+<text x="392.0" y="200.0" font-size="10.5" fill="#52514e" text-anchor="start">streams it sequentially (prefetch-friendly on its own)</text>
+</svg><figcaption>Design change queued for the next window (code exists only as a plan &#x2014; outcomes
+below are expected, not measured): K/V blocks return to today&#x27;s dense 2-plane layout; the mirror
+planes live in a parallel arena keyed by the same (slot, head, page) identity.</figcaption></figure>
+<ul>
+<li><b>MEASURED the same day (increment 3 built and A/B&#x27;d; A7 tests pass on the new design)</b>:
+prediction (a) CONFIRMED &#x2014; the fallback penalty is gone (kill-switch arm within &#xB1;1.3% of the
+clean binary on three workloads, +3.3% on the fourth) and the kill switch is a true rollback again;
+mirror memory is now allocated only when AMX actually runs. Prediction (b) REFUTED &#x2014; the AMX
+arm is unchanged (within &#xB1;1.1% of the in-block mirror): the &#x2248;9% &quot;layout tax on the
+AMX path&quot; belonged to the canonical kernel reading through fat blocks, and the mirror
+kernel&#x27;s own access pattern never paid it. Increment 3&#x27;s value is safety and capacity
+economics, not extra speed. And the capacity economics turned out better than first framed:
+the arena allocates from ordinary RAM (32 GB here, on a 1.58 TB machine), not from the
+hugepage budget that sets the KV page count &#x2014; so the arena build&#x27;s page capacity
+EQUALS canonical&#x27;s. Verified at the edge: both binaries admit 48 users at ctx 8192
+(&#x2248;58 of the 64 GB page budget) with zero failures, where the old in-block design would
+have stopped near 36; the arena-mirror is +6% aggregate even there.</li>
+<li><b>What stays the same</b>: save_k writes through to the mirror at the same single site; page
+moves rebuild it at the same single funnel (<code>copy_storage_slot</code>); the byte-equivalence
+tests carry over.</li>
+<li><b>What it costs</b>: a second allocation and offset table, and the mirror arena must grow/shrink
+with the book &#x2014; the added complexity the first design avoided. That trade is now justified by
+measurement.</li>
+</ul>
+
+
+<h2>5. Gate 5 in full: shape coverage and replication</h2>
+<p>Gate 5 asked two questions. Does the gain <b>generalize</b> beyond qwen to another model with the
+fast path&#x27;s shape (head size 128, 4 queries per KV head)? And is there <b>no regression</b> on a
+model whose shape the fast path cannot serve &#x2014; where every request must silently take the
+unchanged AVX route? llama-3.1-8b-tp2 answers the first; gpt-oss-20b-tp2 (different attention
+geometry) answers the second. Both ran the same same-binary kill-switch A/B on the arena binary,
+2 repeats each; replication then re-ran the headline qwen workloads to 8 repeats per cell.</p>
+<figure><svg viewBox="0 0 980 476" width="980" height="476" role="img" aria-label="Panel A: llama decode and prefill gains of 15 to 90 percent where the AMX shape is eligible, and gpt-oss within minus 0.3 to minus 1.6 percent where it is not; panel B: replicated decode gains with 95 percent confidence whiskers, canonical 15.3 and 17.7 percent, arena-mirror 19.7 and 27.8 percent" font-family="system-ui,sans-serif">
+<text x="14.0" y="22.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">A &#x2014; Shape coverage: gains where the fast path engages, nothing where it cannot</text>
+<line x1="370.9" y1="34.0" x2="370.9" y2="248.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="370.9" y="262.0" font-size="10" fill="#898781" text-anchor="middle">0</text>
+<line x1="498.2" y1="34.0" x2="498.2" y2="248.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="498.2" y="262.0" font-size="10" fill="#898781" text-anchor="middle">+25%</text>
+<line x1="625.5" y1="34.0" x2="625.5" y2="248.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="625.5" y="262.0" font-size="10" fill="#898781" text-anchor="middle">+50%</text>
+<line x1="752.7" y1="34.0" x2="752.7" y2="248.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="752.7" y="262.0" font-size="10" fill="#898781" text-anchor="middle">+75%</text>
+<line x1="880.0" y1="34.0" x2="880.0" y2="248.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="880.0" y="262.0" font-size="10" fill="#898781" text-anchor="middle">+100%</text>
+<line x1="370.9" y1="34.0" x2="370.9" y2="248.0" stroke="#52514e" stroke-width="1.4"/>
+<text x="14.0" y="51.0" font-size="11" fill="#1b9e77" text-anchor="start" font-weight="600">llama-3.1-8b (eligible shape)</text>
+<text x="310.0" y="51.0" font-size="10" fill="#52514e" text-anchor="end">decode 1u/8K</text>
+<rect x="370.9" y="40.0" width="76.4" height="15.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.3"/>
+<text x="453.3" y="52.0" font-size="10.5" fill="#1b9e77" text-anchor="start" font-weight="600">+15.0%</text>
+<text x="310.0" y="77.0" font-size="10" fill="#52514e" text-anchor="end">decode 8u/2K</text>
+<rect x="370.9" y="66.0" width="100.3" height="15.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.3"/>
+<text x="477.2" y="78.0" font-size="10.5" fill="#1b9e77" text-anchor="start" font-weight="600">+19.7%</text>
+<text x="310.0" y="103.0" font-size="10" fill="#52514e" text-anchor="end">prefill 1u/8K</text>
+<rect x="370.9" y="92.0" width="456.1" height="15.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.3"/>
+<text x="833.1" y="104.0" font-size="10.5" fill="#1b9e77" text-anchor="start" font-weight="600">+89.6%</text>
+<text x="310.0" y="129.0" font-size="10" fill="#52514e" text-anchor="end">prefill 8u/2K</text>
+<rect x="370.9" y="118.0" width="148.7" height="15.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.3"/>
+<text x="525.6" y="130.0" font-size="10.5" fill="#1b9e77" text-anchor="start" font-weight="600">+29.2%</text>
+<text x="14.0" y="155.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="600">gpt-oss-20b (ineligible shape)</text>
+<text x="310.0" y="155.0" font-size="10" fill="#52514e" text-anchor="end">decode 1u/8K</text>
+<rect x="368.9" y="144.0" width="2.0" height="15.0" fill="#f4f3ef" stroke="#898781" stroke-width="1.3"/>
+<text x="362.9" y="156.0" font-size="10.5" fill="#898781" text-anchor="end" font-weight="600">-0.4%</text>
+<text x="310.0" y="181.0" font-size="10" fill="#52514e" text-anchor="end">decode 8u/2K</text>
+<rect x="369.4" y="170.0" width="1.5" height="15.0" fill="#f4f3ef" stroke="#898781" stroke-width="1.3"/>
+<text x="363.4" y="182.0" font-size="10.5" fill="#898781" text-anchor="end" font-weight="600">-0.3%</text>
+<text x="310.0" y="207.0" font-size="10" fill="#52514e" text-anchor="end">prefill 1u/8K</text>
+<rect x="368.4" y="196.0" width="2.5" height="15.0" fill="#f4f3ef" stroke="#898781" stroke-width="1.3"/>
+<text x="362.4" y="208.0" font-size="10.5" fill="#898781" text-anchor="end" font-weight="600">-0.5%</text>
+<text x="310.0" y="233.0" font-size="10" fill="#52514e" text-anchor="end">prefill 8u/2K</text>
+<rect x="362.8" y="222.0" width="8.1" height="15.0" fill="#f4f3ef" stroke="#898781" stroke-width="1.3"/>
+<text x="356.8" y="234.0" font-size="10.5" fill="#898781" text-anchor="end" font-weight="600">-1.6%</text>
+<text x="14.0" y="302.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">B &#x2014; Replication: decode gain vs the clean binary, 8 repeats per cell, 95% confidence whiskers</text>
+<line x1="320.0" y1="322.0" x2="320.0" y2="448.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="320.0" y="462.0" font-size="10" fill="#898781" text-anchor="middle">+0%</text>
+<line x1="495.0" y1="322.0" x2="495.0" y2="448.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="495.0" y="462.0" font-size="10" fill="#898781" text-anchor="middle">+10%</text>
+<line x1="670.0" y1="322.0" x2="670.0" y2="448.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="670.0" y="462.0" font-size="10" fill="#898781" text-anchor="middle">+20%</text>
+<line x1="845.0" y1="322.0" x2="845.0" y2="448.0" stroke="#e8e8e6" stroke-width="1"/>
+<text x="845.0" y="462.0" font-size="10" fill="#898781" text-anchor="middle">+30%</text>
+<text x="310.0" y="339.0" font-size="10.5" fill="#52514e" text-anchor="end">canonical, 1u/8K</text>
+<rect x="320.0" y="328.0" width="267.8" height="15.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.3"/>
+<line x1="580.8" y1="335.5" x2="594.8" y2="335.5" stroke="#0b0b0b" stroke-width="2"/>
+<line x1="580.8" y1="331.0" x2="580.8" y2="340.0" stroke="#0b0b0b" stroke-width="2"/>
+<line x1="594.8" y1="331.0" x2="594.8" y2="340.0" stroke="#0b0b0b" stroke-width="2"/>
+<text x="602.8" y="340.0" font-size="10.5" fill="#7570b3" text-anchor="start" font-weight="600">+15.3% &#xB1; 0.4</text>
+<text x="310.0" y="369.0" font-size="10.5" fill="#52514e" text-anchor="end">canonical, 8u/8K</text>
+<rect x="320.0" y="358.0" width="309.8" height="15.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.3"/>
+<line x1="626.2" y1="365.5" x2="633.2" y2="365.5" stroke="#0b0b0b" stroke-width="2"/>
+<line x1="626.2" y1="361.0" x2="626.2" y2="370.0" stroke="#0b0b0b" stroke-width="2"/>
+<line x1="633.2" y1="361.0" x2="633.2" y2="370.0" stroke="#0b0b0b" stroke-width="2"/>
+<text x="641.2" y="370.0" font-size="10.5" fill="#7570b3" text-anchor="start" font-weight="600">+17.7% &#xB1; 0.2</text>
+<text x="310.0" y="399.0" font-size="10.5" fill="#52514e" text-anchor="end">arena-mirror, 1u/8K</text>
+<rect x="320.0" y="388.0" width="344.8" height="15.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.3"/>
+<line x1="659.5" y1="395.5" x2="670.0" y2="395.5" stroke="#0b0b0b" stroke-width="2"/>
+<line x1="659.5" y1="391.0" x2="659.5" y2="400.0" stroke="#0b0b0b" stroke-width="2"/>
+<line x1="670.0" y1="391.0" x2="670.0" y2="400.0" stroke="#0b0b0b" stroke-width="2"/>
+<text x="678.0" y="400.0" font-size="10.5" fill="#e7298a" text-anchor="start" font-weight="600">+19.7% &#xB1; 0.3</text>
+<text x="310.0" y="429.0" font-size="10.5" fill="#52514e" text-anchor="end">arena-mirror, 8u/8K</text>
+<rect x="320.0" y="418.0" width="486.5" height="15.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.3"/>
+<line x1="792.5" y1="425.5" x2="820.5" y2="425.5" stroke="#0b0b0b" stroke-width="2"/>
+<line x1="792.5" y1="421.0" x2="792.5" y2="430.0" stroke="#0b0b0b" stroke-width="2"/>
+<line x1="820.5" y1="421.0" x2="820.5" y2="430.0" stroke="#0b0b0b" stroke-width="2"/>
+<text x="828.5" y="430.0" font-size="10.5" fill="#e7298a" text-anchor="start" font-weight="600">+27.8% &#xB1; 0.8</text>
+</svg><figcaption>Panel A: axis starts at &#x2212;10% so the gpt-oss bars are visible; they sit
+at &#x2212;0.3% to &#x2212;1.6%, within run-to-run noise &#x2014; the dispatch costs nothing when it
+does not fire. Panel B: whiskers are 95% confidence intervals from 8 repeats (3 from the morning
+symmetric suite + 5 from the evening replication campaign); every interval excludes zero by a wide
+margin. Raw data: <code>exec/results/t4/t4-shapes.txt</code>, <code>t4-reps.txt</code>,
+<code>t4-suite.txt</code>.</figcaption></figure>
+<p><b>Shape coverage, exact numbers</b> (decode aggregate tok/s; prefill per-user tok/s; AMX off
+&#x2192; on):</p>
+<table>
+<tr><th>model / workload</th><th>decode off</th><th>decode on</th><th>&#x394;</th><th>prefill off</th><th>prefill on</th><th>&#x394;</th></tr>
+<tr><td>llama-3.1-8b-tp2, 1u/ctx 8192</td><td>111.8</td><td>128.6</td><td><b>+15.0%</b></td><td>541.8</td><td>1027.1</td><td><b>+89.6%</b></td></tr>
+<tr><td>llama-3.1-8b-tp2, 8u/ctx 2048</td><td>372.3</td><td>445.6</td><td><b>+19.7%</b></td><td>158.1</td><td>204.2</td><td><b>+29.2%</b></td></tr>
+<tr><td>gpt-oss-20b-tp2, 1u/ctx 8192</td><td>199.2</td><td>198.4</td><td>&#x2212;0.4%</td><td>1010.0</td><td>1004.6</td><td>&#x2212;0.5%</td></tr>
+<tr><td>gpt-oss-20b-tp2, 8u/ctx 2048</td><td>666.4</td><td>664.2</td><td>&#x2212;0.3%</td><td>270.1</td><td>265.7</td><td>&#x2212;1.6%</td></tr>
+</table>
+<p><b>Replication, exact numbers</b> (decode tok/s, mean of 8 repeats &#xB1; 95% CI; run-to-run
+variation 0.1&#x2013;0.7% of the mean):</p>
+<table>
+<tr><th>arm</th><th>1u/ctx 8192</th><th>8u/ctx 8192 (aggregate)</th></tr>
+<tr><td>clean binary</td><td>105.7 &#xB1; 0.2</td><td>115.9 &#xB1; 0.2</td></tr>
+<tr><td>canonical-AMX</td><td>121.9 &#xB1; 0.4 (<b>+15.3% &#xB1; 0.4</b>)</td><td>136.4 &#xB1; 0.1 (<b>+17.7% &#xB1; 0.2</b>)</td></tr>
+<tr><td>arena-mirror</td><td>126.5 &#xB1; 0.2 (<b>+19.7% &#xB1; 0.3</b>)</td><td>148.0 &#xB1; 0.8 (<b>+27.8% &#xB1; 0.8</b>)</td></tr>
+</table>
+<p>Why gpt-oss shows nothing by design: its attention geometry is not the head-128 / 4-queries-per-KV
+shape the fast path serves, so the shape gate (&#xA7;4 of the <a href="pr-rampup.html">PR
+ramp-up</a>) routes every page to the unchanged AVX code. The &#xB1;1.6%-or-less deltas are the
+measured price of carrying the dispatch in the binary: effectively zero.</p>
+
+<h2>6. Next (in order)</h2>
+<ul>
+<li>DONE same day: parallel-arena mirror (increment 3) &#x2014; see &#xA7;4.3; remaining code work moves to P4 batching and P5 experiments.</li>
+<li>Finish gate 3: beyond-page-budget admission/eviction semantics (56-user probe running) + mixed-context workloads.</li>
+<li>T1 batching variations + predeclared-criteria text; T2/T3 fallback-path tests (the AMD/non-AMX host check needs a named machine). A7-into-CI removed from this list: remote task handled elsewhere.</li>
+<li>T4 end-to-end A/B &#x2014; waiting on the quiet-machine slot (Rhys).</li>
+</ul>
+
+<h2>Sources</h2>
+<ul class="links">
+<li>Living plan + dated record: <a href="04-amx-action-plan.html">04-amx-action-plan.html</a>;
+task queue: <code>exec/QUEUE.md</code></li>
+<li>Results pages: <a href="p2-inc1b.html">increments 1+1b</a> &#xB7;
+<a href="p2-inc2.html">increment 2 + costs</a> &#xB7;
+<a href="fused-sweep.html">P0 kernel grid</a> &#xB7;
+<a href="p0-baseline.html">P0 baseline</a></li>
+<li>Design docs: <a href="02-tron-decode-amx-plan.html">doc 02</a> (&#xA7;4b transpose,
+&#xA7;6b precision) &#xB7; <a href="index.html">index</a></li>
+<li>Raw data: <code>exec/results/slot1/</code> (txt, logs, logit dumps); T1 goldens:
+<code>/scratch/jhan/t1-goldens</code></li>
+</ul>
+<p style="font-size:12px;color:#898781">Compiled 2026-08-19 &#x2248;02:30 UTC from consensus-reviewed
+results (Claude Fable 5 + GPT-5.6-Sol via PAL). Mirror naming: the formulation originates from
+Bill&#x27;s PR #2934; every implementation and number here is ours (worktree <code>jhan-amx-p0</code>).</p>

@@ -1,0 +1,1510 @@
+<meta charset="utf-8">
+<title>Tron Decode AMX Plan</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --s1: #2a78d6;   /* blue  - FPGA */
+    --s2: #eb6834;   /* orange - CPU attention workers */
+    --s3: #1baf7a;   /* aqua  - CPU main+helpers */
+    --s4: #eda100;
+    --crit: #d03b3b;
+    --good: #0ca30c;
+    --chip-bg: #eef3fa;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--page); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.55; margin: 0; }
+  main { max-width: 1000px; margin: 0 auto; padding: 40px 28px 80px; }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  h2 { font-size: 21px; margin: 48px 0 12px; letter-spacing: -0.01em; border-bottom: 1px solid var(--grid); padding-bottom: 8px;}
+  h3 { font-size: 16px; margin: 26px 0 8px; }
+  p, li { font-size: 15px; }
+  .sub { color: var(--ink-2); font-size: 15px; margin-bottom: 20px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin: 16px 0; }
+  .consensus { border-left: 3px solid var(--good); }
+  .takeaway { border-left: 3px solid var(--s1); padding-left: 14px; color: var(--ink-2); font-size: 14px; margin: 10px 0 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  .tablewrap { overflow-x: auto; }
+  th { text-align: left; color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--baseline); padding: 6px 10px 6px 0; }
+  td { border-bottom: 1px solid var(--grid); padding: 6px 10px 6px 0; vertical-align: top; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; background: #f1f0ec; border-radius: 4px; padding: 1px 5px; }
+  pre { background: #f1f0ec; border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .cite { font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; background: var(--chip-bg); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+  .est { font-size: 11px; color: var(--s2); font-weight: 600; }
+  .ok { color: var(--good); font-weight: 600; }
+  .warn { color: var(--crit); font-weight: 600; }
+  figure { margin: 20px 0; }
+  figcaption { font-size: 12.5px; color: var(--ink-2); margin-top: 8px; }
+  svg text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .svgwrap { overflow-x: auto; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .toc { font-size: 14px; columns: 2; }
+  .toc a { color: var(--s1); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  dl.gloss dt { font-weight: 600; font-size: 14px; margin-top: 10px; }
+  dl.gloss dd { margin: 0 0 4px; font-size: 14px; color: var(--ink-2); }
+  .pill { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 9px; margin-right: 6px; }
+  .pill.meas { background: #e8f5e8; color: #006300; }
+  .pill.rev { background: #fdeeee; color: #a12e2e; }
+  .phase { font-weight: 700; color: #1c5cab; }
+</style>
+<main>
+
+<h1>Tron Decode AMX Plan</h1>
+<p class="sub">Where Intel AMX can replace code in tron's <b>software attention</b> to speed up decode of
+<code>ingested-qwen-3-4b-instruct-2507-tp2</code> on Xeon 6 6962P &#x2014; architecture walkthrough, replacement
+points, kernel design, implementation &amp; test plan, and system configuration.
+Companion primer: <a href="01-amx-rampup.html">doc 01 &#x2014; Intel AMX ramp-up</a>.
+Citations: tron <span class="cite">file:line</span> at commit <code>1407f48dd</code> (main), Intel refs as in doc 01.</p>
+
+<div class="card consensus">
+<strong>Consensus statement.</strong> This plan was co-designed by Claude (Fable&nbsp;5) and GPT-5.6-Sol via PAL in
+adversarial review rounds. Sol's round-1 review <b>rejected two of Claude's original design points</b> &#x2014; cross-user
+tile batching and tile-resident cross-page accumulation &#x2014; and both were withdrawn/corrected; the resolution log is
+in <a href="#consensus">&#xA7;10</a>. Everything below is the agreed v2 design.
+<br><br><b>Gate note:</b> this document is preserved unmodified as the pre-PoC independent plan. Post-gate
+amendments informed by Bill's PoC (notably: prefill-first framing, the measured FPGA-pipeline decode ceiling,
+a blocked-AVX-512 middle tier, independent QK/PV thresholds, and 4+4-vs-6+2 PV blocking as an A/B) are in
+<a href="03-bill-poc-gap-analysis.html">doc 03 &#xA7;6</a> and supersede this document where they conflict.
+</div>
+
+<div class="card">
+<strong>TL;DR</strong>
+<ul>
+  <li>tron decode: FPGAs do all weight matmuls; the CPU does RoPE, norms, SiLU &#x2014; and, in software-attention mode,
+      the whole attention over the KV cache. The pending portion of that CPU attention sits <b>between the FPGA's WV
+      and WO matmuls on the per-layer critical path</b>, and the attention path is assigned roughly half the worker
+      pool; its measured CPU-time share is still a P0 item. (P0 = phase 0 of this plan's
+      <a href="#plan">implementation phases P0&#x2013;P5, &#xA7;7</a>: the measure-first microbenchmark/profiling step
+      that runs before any code changes.)</li>
+  <li>Two inner loops are written as one-dot-product-at-a-time vector code, but the math they compute is a
+      small matrix multiply &#x2014; which is what makes them the AMX replacement points:
+      <b>Q&#xB7;K&#x1D40; scores</b> (<code>dotter</code>, one dot per K token today) and <b>P&#xB7;V weighted sum</b>
+      (<code>scaled_v_expr</code>).</li>
+  <li>The KV layouts are already AMX-native: K pages load as A tiles unchanged; V pages are byte-identical to the
+      AMX B-operand format. <b>No stored-layout change is needed or wanted</b> (the FPGA DMA path shares these pages).</li>
+  <li>The honest catch: guaranteed tile width at decode is only <b>4</b> (the GQA head group). Wider batching is legal
+      only for queries sharing the same physical KV page (shared prefixes, token-tree/speculative decode). The first
+      milestone is a fused-page microbenchmark at width 4 &#x2014; <b>no speedup is claimed before that measurement</b>.</li>
+  <li>System side: no BIOS/kernel changes needed; the code must request AMX per process
+      (<code>arch_prctl</code>), manage tile state around waits, and keep one AMX worker per physical core.</li>
+</ul>
+</div>
+
+<h2 id="toc">Contents</h2>
+<div class="toc">
+<a href="#arch">1. Decode architecture: who does what</a><br>
+<a href="#swattn">2. Inside software attention</a><br>
+<a href="#pairs">2b. The interleaved pair, concretely</a><br>
+<a href="#targets">3. The replacement points</a><br>
+<a href="#design">4. The AMX kernel design (consensus v2)</a><br>
+<a href="#transpose">4b. The transpose in practice</a><br>
+<a href="#batching">5. Tile utilization &amp; the batching rule</a><br>
+<a href="#perf">6. Honest performance model</a><br>
+<a href="#precision">6b. Precision: what each engine computes</a><br>
+<a href="#plan">7. Implementation plan</a><br>
+<a href="#tests">8. Test plan</a><br>
+<a href="#sysconf">9. System configuration changes</a><br>
+<a href="#consensus">10. Consensus log</a><br>
+<a href="#glossary">11. Glossary</a> &#xB7; <a href="#sources">12. Sources</a>
+</div>
+
+<h2 id="arch">1. Decode architecture: who does what</h2>
+<p>One decode step = one forward pass over 36 layers for a minibatch of tokens (typically 8 users &#x2192;
+two minibatches of 4; the lone-chunk split exists to let FPGA and CPU work overlap
+<span class="cite">model.hpp:199-249</span>). Per layer, the plugin schedule is
+<code>wq &#x2192; rope_q &#x2192; attention &#x2192; wo &#x2192; w1,w3 &#x2192; SiLU&#xB7;gate &#x2192; w2 &#x2192; rmsnorm</code> with placement
+<b>FPGA / CPU / CPU / FPGA / FPGA / CPU / FPGA / CPU</b> <span class="cite">llama.hpp:1332-1338</span>.
+K and V come back from the FPGA; the per-card driver <b>RX workers</b> run K's normalization + RoPE and save K
+plus unchanged V into host-DRAM KV pages, as the Wk/Wv DMA-completion callbacks
+(<span class="cite">llama.hpp launch_kv_jobs; pos/worker.cpp:605-616; model.hpp:2752-2862</span>) &#x2014;
+attention then reads those pages on the CPU. RoPE on Q runs on the attention workers themselves.
+<code>tp2</code> means each weight matmul is split across 2 FPGA cards
+(<span class="cite">common.hpp:91; ptensor.hpp:610-611</span>); CPU attention is not sharded &#x2014; it sees all 8 KV heads.</p>
+
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 980 368" width="980" height="368" role="img" aria-label="Wall-clock lanes: one decode layer across five actors - CPU main and helpers, per-card TX workers, FPGA, per-card RX workers, CPU attention workers - two minibatches interleaved">
+  <text x="10" y="18" font-size="13" font-weight="600" fill="#0b0b0b">One decode step, layer &#x2113; &#x2014; wall-clock lanes (schematic)</text>
+  <!-- legend: solid = minibatch A, pale = minibatch B -->
+  <g font-size="10.5" fill="#52514e">
+    <rect x="460" y="8" width="12" height="10" fill="#2a78d6"/><rect x="474" y="8" width="12" height="10" fill="#9ec5f4"/><text x="490" y="17">FPGA: minibatch A / minibatch B</text>
+    <rect x="690" y="8" width="12" height="10" fill="#1baf7a"/><rect x="704" y="8" width="12" height="10" fill="#a8e3cd"/><text x="720" y="17">CPU main+helpers: A / B</text>
+    <rect x="460" y="24" width="12" height="10" fill="#eb6834"/><rect x="474" y="24" width="12" height="10" fill="#f7c4ad"/><text x="490" y="33">CPU attention workers: A / B</text>
+    <rect x="690" y="24" width="12" height="10" fill="#4a3aa7"/><rect x="704" y="24" width="12" height="10" fill="#9085e9"/><text x="720" y="33">driver TX/RX workers: A / B</text>
+    <rect x="460" y="40" width="12" height="10" fill="none" stroke="#898781" stroke-dasharray="3 2"/><text x="476" y="49">waiting (idle or spin)</text>
+    <rect x="620" y="40" width="12" height="10" fill="none" stroke="#d03b3b" stroke-width="2"/><text x="636" y="49">AMX target</text>
+  </g>
+
+  <!-- lane labels -->
+  <g font-size="11" font-weight="600" fill="#0b0b0b">
+    <text x="10" y="82">CPU main + helpers</text>
+    <text x="10" y="128">TX workers (2, per card)</text>
+    <text x="10" y="172">FPGA (2 cards, tp2)</text>
+    <text x="10" y="226">RX workers (2, per card)</text>
+    <text x="10" y="280">CPU attention workers</text>
+  </g>
+  <g font-size="9.5" fill="#898781">
+    <text x="10" y="96">norms, SiLU, launches</text>
+    <text x="10" y="140">DMA operand submit</text>
+    <text x="10" y="186">all weight matmuls</text>
+    <text x="10" y="240">completion callbacks</text>
+    <text x="10" y="294">rope Q + attention</text>
+  </g>
+
+  <!-- lane baselines -->
+  <g stroke="#e1e0d9">
+    <line x1="160" y1="106" x2="960" y2="106"/>
+    <line x1="160" y1="144" x2="960" y2="144"/>
+    <line x1="160" y1="198" x2="960" y2="198"/>
+    <line x1="160" y1="252" x2="960" y2="252"/>
+    <line x1="160" y1="306" x2="960" y2="306"/>
+  </g>
+
+  <!-- MAIN lane (y 64..102): aqua A #1baf7a, pale B #a8e3cd -->
+  <g font-size="9.5">
+    <rect x="160" y="64" width="56" height="38" rx="3" fill="#1baf7a"/><text x="165" y="86" fill="#fff">rms A</text>
+    <rect x="220" y="64" width="56" height="38" rx="3" fill="#a8e3cd"/><text x="225" y="86" fill="#0b0b0b">rms B</text>
+    <rect x="280" y="64" width="104" height="38" rx="3" fill="#1baf7a"/><text x="286" y="80" fill="#fff">launch matmuls</text><text x="286" y="94" fill="#fff">A and B (fill+enqueue)</text>
+    <rect x="388" y="64" width="116" height="38" rx="3" fill="none" stroke="#898781" stroke-dasharray="3 2"/><text x="394" y="80" fill="#898781">wait vo(A), then</text><text x="394" y="94" fill="#898781">launch Wo A</text>
+    <rect x="508" y="64" width="90" height="38" rx="3" fill="none" stroke="#898781" stroke-dasharray="3 2"/><text x="514" y="86" fill="#898781">wait W1&#xB7;W3</text>
+    <rect x="602" y="64" width="70" height="38" rx="3" fill="#1baf7a"/><text x="608" y="86" fill="#fff">SiLU&#xB7;gate A</text>
+    <rect x="676" y="64" width="80" height="38" rx="3" fill="#1baf7a"/><text x="682" y="86" fill="#fff">residual+rms A</text>
+    <rect x="760" y="64" width="70" height="38" rx="3" fill="#a8e3cd"/><text x="766" y="86" fill="#0b0b0b">SiLU&#xB7;gate B</text>
+    <rect x="834" y="64" width="86" height="38" rx="3" fill="#a8e3cd"/><text x="840" y="86" fill="#0b0b0b">residual+rms B</text>
+  </g>
+
+  <!-- TX lane (y 118..140): violet slivers, one before each FPGA matmul -->
+  <g>
+    <rect x="146" y="118" width="12" height="22" rx="2" fill="#4a3aa7"/>
+    <rect x="240" y="118" width="12" height="22" rx="2" fill="#9085e9"/>
+    <rect x="408" y="118" width="12" height="22" rx="2" fill="#4a3aa7"/>
+    <rect x="472" y="118" width="12" height="22" rx="2" fill="#4a3aa7"/>
+    <rect x="556" y="118" width="12" height="22" rx="2" fill="#9085e9"/>
+    <rect x="620" y="118" width="12" height="22" rx="2" fill="#4a3aa7"/>
+    <rect x="684" y="118" width="12" height="22" rx="2" fill="#9085e9"/>
+    <rect x="768" y="118" width="12" height="22" rx="2" fill="#9085e9"/>
+    <rect x="832" y="118" width="12" height="22" rx="2" fill="#4a3aa7"/>
+    <text x="262" y="133" font-size="9.5" fill="#898781">one sliver per matmul: spin on the input latch, then DMA the operands to the card</text>
+  </g>
+
+  <!-- FPGA lane (y 156..194): blue A #2a78d6, pale B #9ec5f4 -->
+  <g font-size="9.5">
+    <rect x="160" y="156" width="90" height="38" rx="3" fill="#2a78d6"/><text x="167" y="178" fill="#fff">Wq&#xB7;Wk&#xB7;Wv A</text>
+    <rect x="254" y="156" width="90" height="38" rx="3" fill="#9ec5f4"/><text x="261" y="178" fill="#0b0b0b">Wq&#xB7;Wk&#xB7;Wv B</text>
+    <rect x="348" y="156" width="70" height="38" rx="3" fill="none" stroke="#898781" stroke-dasharray="3 2"/><text x="353" y="172" fill="#898781">idle &#x2014; vo(A)</text><text x="353" y="186" fill="#898781">not ready</text>
+    <rect x="422" y="156" width="60" height="38" rx="3" fill="#2a78d6"/><text x="429" y="178" fill="#fff">Wo A</text>
+    <rect x="486" y="156" width="80" height="38" rx="3" fill="#2a78d6"/><text x="493" y="178" fill="#fff">W1&#xB7;W3 A</text>
+    <rect x="570" y="156" width="60" height="38" rx="3" fill="#9ec5f4"/><text x="577" y="178" fill="#0b0b0b">Wo B</text>
+    <rect x="634" y="156" width="60" height="38" rx="3" fill="#2a78d6"/><text x="641" y="178" fill="#fff">W2 A</text>
+    <rect x="698" y="156" width="80" height="38" rx="3" fill="#9ec5f4"/><text x="705" y="178" fill="#0b0b0b">W1&#xB7;W3 B</text>
+    <rect x="782" y="156" width="60" height="38" rx="3" fill="#9ec5f4"/><text x="789" y="178" fill="#0b0b0b">W2 B</text>
+    <rect x="846" y="156" width="106" height="38" rx="3" fill="#2a78d6"/><text x="853" y="178" fill="#fff">Wq&#xB7;Wk&#xB7;Wv A (&#x2113;+1)</text>
+  </g>
+
+  <!-- RX lane (y 210..248): completion callbacks; big blocks = rope K + save K/V -->
+  <g font-size="9.5">
+    <rect x="254" y="210" width="110" height="38" rx="3" fill="#4a3aa7"/><text x="260" y="226" fill="#fff">rope K &#xB7; save K/V A</text><text x="260" y="240" fill="#fff">(Wk/Wv completion cb)</text>
+    <rect x="368" y="210" width="100" height="38" rx="3" fill="#9085e9"/><text x="374" y="226" fill="#0b0b0b">rope K &#xB7; save</text><text x="374" y="240" fill="#0b0b0b">K/V B</text>
+    <rect x="486" y="210" width="12" height="38" rx="2" fill="#4a3aa7"/>
+    <rect x="570" y="210" width="12" height="38" rx="2" fill="#4a3aa7"/>
+    <rect x="634" y="210" width="12" height="38" rx="2" fill="#9085e9"/>
+    <rect x="698" y="210" width="12" height="38" rx="2" fill="#4a3aa7"/>
+    <rect x="782" y="210" width="12" height="38" rx="2" fill="#9085e9"/>
+    <rect x="846" y="210" width="12" height="38" rx="2" fill="#9085e9"/>
+    <text x="862" y="228" font-size="9.5" fill="#898781">slivers: publish</text>
+    <text x="862" y="241" font-size="9.5" fill="#898781">result channels</text>
+  </g>
+
+  <!-- ATTENTION lane (y 264..302): orange A #eb6834, pale B #f7c4ad -->
+  <g font-size="9.5">
+    <rect x="160" y="264" width="46" height="38" rx="3" fill="none" stroke="#898781" stroke-dasharray="3 2"/><text x="164" y="286" fill="#898781">wait Q</text>
+    <rect x="210" y="264" width="60" height="38" rx="3" fill="#eb6834"/><text x="216" y="286" fill="#fff">rope Q A</text>
+    <rect x="274" y="264" width="120" height="38" rx="3" fill="#eb6834" stroke="#d03b3b" stroke-width="2.5"/><text x="280" y="279" fill="#fff">attention A: ready</text><text x="280" y="294" fill="#fff">pages (old KV)</text>
+    <rect x="398" y="264" width="46" height="38" rx="3" fill="none" stroke="#898781" stroke-dasharray="3 2"/><text x="401" y="279" fill="#898781">wait</text><text x="401" y="293" fill="#898781">K/V &#x2113;</text>
+    <rect x="448" y="264" width="90" height="38" rx="3" fill="#eb6834" stroke="#d03b3b" stroke-width="2.5"/><text x="454" y="279" fill="#fff">pending pages</text><text x="454" y="294" fill="#fff">+ join &#x2192; vo(A)</text>
+    <rect x="542" y="264" width="56" height="38" rx="3" fill="#f7c4ad"/><text x="547" y="286" fill="#0b0b0b">rope Q B</text>
+    <rect x="602" y="264" width="120" height="38" rx="3" fill="#f7c4ad" stroke="#d03b3b" stroke-width="2.5"/><text x="608" y="279" fill="#0b0b0b">attention B: ready</text><text x="608" y="294" fill="#0b0b0b">+ pending</text>
+    <rect x="726" y="264" width="60" height="38" rx="3" fill="#f7c4ad"/><text x="731" y="279" fill="#0b0b0b">join &#x2192;</text><text x="731" y="293" fill="#0b0b0b">vo(B)</text>
+    <rect x="790" y="264" width="162" height="38" rx="3" fill="none" stroke="#898781" stroke-dasharray="3 2"/><text x="796" y="286" fill="#898781">idle until layer &#x2113;+1 Q arrives</text>
+  </g>
+
+  <!-- critical path arrows -->
+  <g stroke="#d03b3b" fill="none" stroke-width="1.6">
+    <path d="M 250 194 C 253 201 257 205 261 209" marker-end="url(#arrR)"/>
+    <path d="M 310 248 C 335 258 380 260 402 262" marker-end="url(#arrR)"/>
+    <path d="M 542 292 C 640 300 640 182 488 176" marker-end="url(#arrR)"/>
+  </g>
+  <text x="160" y="326" font-size="11" fill="#d03b3b" font-weight="600">critical chain: Wk/Wv (FPGA) &#x2192; rope K &#xB7; save K/V (RX worker) &#x2192; attention pending (attn workers) &#x2192; vo &#x2192; launch Wo (main) &#x2192; Wo (FPGA)</text>
+  <defs><marker id="arrR" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#d03b3b"/></marker></defs>
+  <text x="10" y="346" font-size="10.5" fill="#898781">Schematic: block order and dependencies from llama.hpp:1332-1338 / model.hpp:1878-1896 / driver.cpp:493-568 (the driver's 5-stage pipeline: app thread &#x2192; TX worker &#x2192; FPGA &#x2192; RX worker &#x2192; consumer); durations NOT to scale &#x2014; no measured trace yet (P0).</text>
+  <text x="10" y="362" font-size="10.5" fill="#898781">Red-outlined blocks are where the AMX kernels go. "CPU main + helpers" merges the main thread and its helper workers; TX/RX are the pos driver's per-device threads, pinned on the separate dev cpu set (system.hpp: dev_set_cpu_list).</text>
+</svg>
+</div>
+<figcaption>Software-attention decode, one layer, five actors (matching the function-to-thread matrix in the
+tron_threads notebook and the driver's stage documentation). The ready/pending split lets attention over old KV
+overlap the FPGA computing this layer's K/V <span class="cite">model.hpp:1878-1896</span>; the <b>pending</b> part &#x2014;
+attention over K/V freshly saved by the RX workers &#x2014; sits serially between the Wk/Wv completion and the
+Wo launch. Shrinking the red blocks shortens every layer of every decode step; note the RX workers are also on
+that critical chain.</figcaption>
+</figure>
+
+<h3>When is attention on the CPU at all?</h3>
+<ul>
+  <li><b>Forced software</b>: <code>USE_HW_ATTN=0</code>, or the model/op is ineligible (sliding window,
+      non-standard geometry, EAGLE draft) <span class="cite">hw_attn_config.cpp:10-31; self_attention.hpp:519-527</span>.</li>
+  <li><b>Even with FPGA attention on</b> (the default for ingested qwen-3-4b: <code>force_hw_attn=true</code>
+      <span class="cite">ingest/src/TronCpp.hs:233</span>): every query below position 127 and the causal tail past the
+      last complete 1024-token HBM shard still run in software and join with the FPGA partials on the CPU
+      <span class="cite">model.hpp:2529-2547; libpos.hpp:79</span>.</li>
+</ul>
+<p class="takeaway">Consensus caveat (Sol): benchmark runs must set <code>USE_HW_ATTN=0</code> explicitly for the
+primary software-kernel result &#x2014; the deployed default for this model would otherwise measure mostly FPGA attention
+plus a software tail.</p>
+
+<h2 id="swattn">2. Inside software attention</h2>
+<p>The kernel is a paged, streaming-softmax ("Rabe&#x2013;Staats monoid") attention
+<span class="cite">self_attention.hpp:125-193</span>. KV lives in host DRAM as 64-token pages per
+(layer, kv_head) <span class="cite">kv_cache.hpp:1145, 1843</span>. Work is split across dedicated attention
+workers by <code>kv_section</code> = (kv_head, page range) <span class="cite">model.hpp:2296-2360</span>;
+each worker keeps a private (m*, s*, v*) scratchpad, merged afterwards by a parallel join
+<span class="cite">self_attention.hpp:1039-1113, 1520-1563</span>.</p>
+
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 980 250" width="980" height="250" role="img" aria-label="Zoom into one page iteration of the attention kernel showing which spans AMX replaces">
+  <text x="10" y="18" font-size="13" font-weight="600" fill="#0b0b0b">Zoom: one (page, kv_head) iteration inside apply_page_tok &#x2014; today vs. with AMX</text>
+
+  <text x="10" y="52" font-size="11.5" font-weight="600" fill="#0b0b0b">today</text>
+  <g font-size="10">
+    <rect x="70" y="34" width="330" height="30" rx="3" fill="#eb6834" stroke="#d03b3b" stroke-width="2"/>
+    <text x="78" y="53" fill="#fff">Q&#xB7;K&#x1D40;: 64 tokens &#xD7; 4 heads = 256 dot+reduce chains (dotter)</text>
+    <rect x="404" y="34" width="90" height="30" rx="3" fill="#1baf7a"/><text x="411" y="53" fill="#fff">scale &#xB7; softcap</text>
+    <rect x="498" y="34" width="120" height="30" rx="3" fill="#1baf7a"/><text x="505" y="53" fill="#fff">max &#xB7; exp &#xB7; rescale v*</text>
+    <rect x="622" y="34" width="210" height="30" rx="3" fill="#eb6834" stroke="#d03b3b" stroke-width="2"/>
+    <text x="630" y="53" fill="#fff">P&#xB7;V: scaled_v, 8 accums &#xD7; 32 pairs</text>
+    <rect x="836" y="34" width="60" height="30" rx="3" fill="#1baf7a"/><text x="843" y="53" fill="#fff">next page</text>
+  </g>
+
+  <text x="10" y="112" font-size="11.5" font-weight="600" fill="#0b0b0b">with AMX</text>
+  <g font-size="10">
+    <rect x="70" y="94" width="120" height="30" rx="3" fill="#fdf0ea" stroke="#d03b3b" stroke-width="2"/>
+    <text x="78" y="113" fill="#a12e2e">S&#x1D40; = K&#xB7;Q&#x1D40;: 16 TDPs</text>
+    <rect x="194" y="94" width="80" height="30" rx="3" fill="#f7f6f3" stroke="#c3c2b7"/><text x="200" y="113" fill="#52514e">transpose 64&#xD7;4</text>
+    <rect x="278" y="94" width="90" height="30" rx="3" fill="#1baf7a"/><text x="285" y="113" fill="#fff">scale &#xB7; softcap</text>
+    <rect x="372" y="94" width="120" height="30" rx="3" fill="#1baf7a"/><text x="379" y="113" fill="#fff">max &#xB7; exp &#xB7; rescale v*</text>
+    <rect x="496" y="94" width="120" height="30" rx="3" fill="#fdf0ea" stroke="#d03b3b" stroke-width="2"/>
+    <text x="504" y="113" fill="#a12e2e">P&#xB7;V: 16 TDPs (6+2)</text>
+    <rect x="620" y="94" width="86" height="30" rx="3" fill="#f7f6f3" stroke="#c3c2b7"/><text x="626" y="113" fill="#52514e">store + v* add</text>
+    <rect x="710" y="94" width="60" height="30" rx="3" fill="#1baf7a"/><text x="717" y="113" fill="#fff">next page</text>
+  </g>
+  <g font-size="10.5" fill="#52514e">
+    <text x="70" y="152">&#x2022; green spans are unchanged AVX-512 code &#x2014; softmax bookkeeping is not a matmul and stays put.</text>
+    <text x="70" y="170">&#x2022; red spans are the two GEMMs; at width 4 they perform 65,536 scalar MACs &#x2014; today via 1,280 AVX-512 BF16 dot instructions (1,024 QK + 256 PV), proposed via 32 TDPs; measured cycles, not instruction counts, decide profitability.</text>
+    <text x="70" y="188">&#x2022; new gray spans are AMX-specific overhead (score transpose, tile stores) &#x2014; they are IN the P0 benchmark gate.</text>
+    <text x="70" y="206">&#x2022; per-page skip logic (visibility mask, sliding window) becomes dense-compute-then-mask on the fast path (&#xA7;4, D4).</text>
+  </g>
+  <text x="10" y="238" font-size="11" fill="#898781">Span widths schematic, not measured. Today's kernel: self_attention.hpp:1400-1518 (QK+softmax), kv_cache.hpp:1642-1789 (PV).</text>
+</svg>
+</div>
+<figcaption>The replacement is kernel-internal: the page loop, worker plan, scratchpads, and the join are untouched.</figcaption>
+</figure>
+
+<h3>Why the layouts make this cheap</h3>
+<ul>
+  <li><b>K page = ready-made A operand.</b> <code>kv_block.k</code> is a contiguous 64&#xD7;128 bf16 row-major block,
+      64-B aligned, row stride 256 B <span class="cite">kv_cache.hpp:1843-1846</span> &#x2014; loadable as a 4&#xD7;4 grid of
+      AMX tiles with plain <code>TILELOADD</code>, unchanged.</li>
+  <li><b>V page = ready-made B operand.</b> V is stored token-pair-interleaved <code>[p/2][dim][p%2]</code>
+      <span class="cite">kv_cache.hpp:1848-1850</span> &#x2014; byte-identical to the AMX/VNNI B layout (doc 01 &#xA7;5).
+      Zero repacking. (Consensus note: one research report suggested V might need de-interleaving; that was
+      reviewed and rejected &#x2014; the stored layout matches the tile operand exactly.)</li>
+  <li><b>Everything is bf16-in / fp32-accumulate</b> already &#x2014; the exact <code>TDPBF16PS</code> contract, so the port
+      changes accumulation order only (tolerance tests, not bit-equality).</li>
+  <li><b>Layouts must not change:</b> the same pages are DMA'd to FPGA HBM when hardware attention is active
+      <span class="cite">model.hpp:2752-2862</span> &#x2014; a shared contract, and the reason the design keeps K on the
+      A side instead of repacking it (&#xA7;4, D1).</li>
+</ul>
+
+
+<h2 id="pairs">2b. The interleaved pair, concretely (addendum 2026-08-19)</h2>
+<p>The bf16 dot-product instructions (AVX-512&#x27;s VDPBF16PS and AMX&#x27;s TDPBF16PS) never
+multiply single numbers &#x2014; the smallest unit they consume is a <b>pair of adjacent bf16
+values</b>: each fp32 accumulator lane takes two matching reduction-axis values from each operand and adds both products at
+once. For a matrix used as the B operand, those two values must appear side by side in the
+pair-interleaved (&quot;VNNI&quot;) layout; the A operand needs only ordinary row-major adjacency
+along its reduction dimension.
+Doc 01 covers the instruction-set view; this section shows what it means for tron&#x27;s data, with
+example numbers.</p>
+<figure><svg viewBox="0 0 980 516" width="980" height="516" role="img" aria-label="Three panels with example numbers: V pair-interleaving places each dim&#x27;s even and odd token values side by side; one bf16 dot-product instruction step multiplies a weight pair by that token pair into one fp32 lane; the K mirror instead pairs adjacent dims for each token column" font-family="system-ui,sans-serif">
+<text x="14.0" y="24.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">Panel 1 &#x2014; V storage: the pair spans two adjacent TOKENS (example: V[token][dim] = 10&#xB7;token + dim)</text>
+<text x="180.0" y="52.0" font-size="11" fill="#52514e" text-anchor="middle" font-weight="600">V as you think of it</text>
+<text x="111.0" y="70.0" font-size="10" fill="#898781" text-anchor="middle">d0</text>
+<text x="157.0" y="70.0" font-size="10" fill="#898781" text-anchor="middle">d1</text>
+<text x="203.0" y="70.0" font-size="10" fill="#898781" text-anchor="middle">d2</text>
+<text x="249.0" y="70.0" font-size="10" fill="#898781" text-anchor="middle">d3</text>
+<text x="78.0" y="93.0" font-size="10" fill="#898781" text-anchor="end">t0</text>
+<rect x="88.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="134.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">1</text>
+<rect x="180.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="203.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">2</text>
+<rect x="226.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="249.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">3</text>
+<text x="78.0" y="119.0" font-size="10" fill="#898781" text-anchor="end">t1</text>
+<rect x="88.0" y="102.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="119.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">10</text>
+<rect x="134.0" y="102.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="119.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">11</text>
+<rect x="180.0" y="102.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="203.0" y="119.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">12</text>
+<rect x="226.0" y="102.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="249.0" y="119.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">13</text>
+<text x="78.0" y="145.0" font-size="10" fill="#898781" text-anchor="end">t2</text>
+<rect x="88.0" y="128.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="145.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">20</text>
+<rect x="134.0" y="128.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="145.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">21</text>
+<rect x="180.0" y="128.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="203.0" y="145.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">22</text>
+<rect x="226.0" y="128.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="249.0" y="145.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">23</text>
+<text x="78.0" y="171.0" font-size="10" fill="#898781" text-anchor="end">t3</text>
+<rect x="88.0" y="154.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="171.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">30</text>
+<rect x="134.0" y="154.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="171.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">31</text>
+<rect x="180.0" y="154.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="203.0" y="171.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">32</text>
+<rect x="226.0" y="154.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="249.0" y="171.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">33</text>
+<line x1="286.0" y1="128.0" x2="342.0" y2="128.0" stroke="#52514e" stroke-width="1.8"/>
+<path d="M 348.0 128.0 l -8 -3.5 v 7 z" fill="#52514e"/>
+<text x="317.0" y="110.0" font-size="10.5" fill="#52514e" text-anchor="middle" font-weight="600">save_v</text>
+<text x="317.0" y="152.0" font-size="10" fill="#52514e" text-anchor="middle">pair-</text>
+<text x="317.0" y="165.0" font-size="10" fill="#52514e" text-anchor="middle">interleave</text>
+<text x="370.0" y="52.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="600">V as stored: one row per token PAIR; each dim holds (even, odd) side by side</text>
+<text x="362.0" y="93.0" font-size="10" fill="#898781" text-anchor="end">v[0]</text>
+<rect x="370.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="393.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="416.0" y="76.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="439.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">10</text>
+<rect x="462.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="485.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">1</text>
+<rect x="508.0" y="76.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="531.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">11</text>
+<rect x="554.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="577.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">2</text>
+<rect x="600.0" y="76.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="623.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">12</text>
+<rect x="646.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="669.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">3</text>
+<rect x="692.0" y="76.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="715.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">13</text>
+<rect x="370.0" y="76.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="416.0" y="70.0" font-size="9.5" fill="#0b0b0b" text-anchor="middle">d0 pair</text>
+<rect x="462.0" y="76.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="508.0" y="70.0" font-size="9.5" fill="#0b0b0b" text-anchor="middle">d1 pair</text>
+<rect x="554.0" y="76.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="600.0" y="70.0" font-size="9.5" fill="#0b0b0b" text-anchor="middle">d2 pair</text>
+<rect x="646.0" y="76.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="692.0" y="70.0" font-size="9.5" fill="#0b0b0b" text-anchor="middle">d3 pair</text>
+<text x="362.0" y="141.0" font-size="10" fill="#898781" text-anchor="end">v[1]</text>
+<rect x="370.0" y="124.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="393.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">20</text>
+<rect x="416.0" y="124.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="439.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">30</text>
+<rect x="462.0" y="124.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="485.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">21</text>
+<rect x="508.0" y="124.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="531.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">31</text>
+<rect x="554.0" y="124.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="577.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">22</text>
+<rect x="600.0" y="124.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="623.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">32</text>
+<rect x="646.0" y="124.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="669.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">23</text>
+<rect x="692.0" y="124.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="715.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">33</text>
+<rect x="370.0" y="124.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<rect x="462.0" y="124.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<rect x="554.0" y="124.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<rect x="646.0" y="124.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="370.0" y="186.0" font-size="10" fill="#52514e" text-anchor="start">even write fills the low slot and clears its partner; the LATER odd write merges in &#x2014; kv_cache.hpp set_v</text>
+<text x="14.0" y="236.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">Panel 2 &#x2014; what one instruction step does with a pair (VDPBF16PS / TDPBF16PS; attention weights from softmax: P[t0]=0.50, P[t1]=0.25)</text>
+<rect x="88.0" y="258.0" width="46.0" height="26.0" fill="#fcebdd" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="275.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0.50</text>
+<rect x="134.0" y="258.0" width="46.0" height="26.0" fill="#fcebdd" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="275.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0.25</text>
+<rect x="88.0" y="258.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="134.0" y="297.0" font-size="9.5" fill="#898781" text-anchor="middle">attention-weight pair (bf16)</text>
+<text x="196.0" y="275.0" font-size="15" fill="#0b0b0b" text-anchor="middle" font-weight="600">&#xD7;</text>
+<rect x="212.0" y="258.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="235.0" y="275.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="258.0" y="258.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="281.0" y="275.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">10</text>
+<rect x="212.0" y="258.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="258.0" y="297.0" font-size="9.5" fill="#898781" text-anchor="middle">B pair = d0 of (t0, t1)</text>
+<text x="322.0" y="275.0" font-size="15" fill="#0b0b0b" text-anchor="middle" font-weight="600">&#x2192;</text>
+<text x="342.0" y="275.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-family="ui-monospace,Menlo,monospace">C[d0] += 0.50&#xD7;0 + 0.25&#xD7;10 = 2.50</text>
+<rect x="88.0" y="316.0" width="46.0" height="26.0" fill="#fcebdd" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="333.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0.50</text>
+<rect x="134.0" y="316.0" width="46.0" height="26.0" fill="#fcebdd" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="333.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0.25</text>
+<rect x="88.0" y="316.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="134.0" y="355.0" font-size="9.5" fill="#898781" text-anchor="middle"></text>
+<text x="196.0" y="333.0" font-size="15" fill="#0b0b0b" text-anchor="middle" font-weight="600">&#xD7;</text>
+<rect x="212.0" y="316.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="235.0" y="333.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">1</text>
+<rect x="258.0" y="316.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="281.0" y="333.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">11</text>
+<rect x="212.0" y="316.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="258.0" y="355.0" font-size="9.5" fill="#898781" text-anchor="middle">B pair = d1 of (t0, t1)</text>
+<text x="322.0" y="333.0" font-size="15" fill="#0b0b0b" text-anchor="middle" font-weight="600">&#x2192;</text>
+<text x="342.0" y="333.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-family="ui-monospace,Menlo,monospace">C[d1] += 0.50&#xD7;1 + 0.25&#xD7;11 = 3.25</text>
+<text x="672.0" y="275.0" font-size="10.5" fill="#52514e" text-anchor="start">one step covers every output lane in the current</text>
+<text x="672.0" y="290.0" font-size="10.5" fill="#52514e" text-anchor="start">vector/tile fragment; the next step adds the</text>
+<text x="672.0" y="305.0" font-size="10.5" fill="#52514e" text-anchor="start">(t2, t3) pair, accumulating in fp32</text>
+<text x="14.0" y="386.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">Panel 3 &#x2014; the K mirror pairs adjacent DIMS instead (example: K[t5][dim] = 50 + dim)</text>
+<text x="180.0" y="412.0" font-size="10.5" fill="#52514e" text-anchor="middle">K row of token t5, as stored today</text>
+<rect x="88.0" y="420.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="437.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">50</text>
+<text x="111.0" y="458.0" font-size="9.5" fill="#898781" text-anchor="middle">d0</text>
+<rect x="134.0" y="420.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="437.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">51</text>
+<text x="157.0" y="458.0" font-size="9.5" fill="#898781" text-anchor="middle">d1</text>
+<rect x="180.0" y="420.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="203.0" y="437.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">52</text>
+<text x="203.0" y="458.0" font-size="9.5" fill="#898781" text-anchor="middle">d2</text>
+<rect x="226.0" y="420.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="249.0" y="437.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">53</text>
+<text x="249.0" y="458.0" font-size="9.5" fill="#898781" text-anchor="middle">d3</text>
+<line x1="286.0" y1="433.0" x2="342.0" y2="433.0" stroke="#52514e" stroke-width="1.8"/>
+<path d="M 348.0 433.0 l -8 -3.5 v 7 z" fill="#52514e"/>
+<text x="317.0" y="414.0" font-size="10" fill="#52514e" text-anchor="middle">save_k writes</text>
+<text x="317.0" y="454.0" font-size="10" fill="#52514e" text-anchor="middle">the mirror</text>
+<text x="416.0" y="412.0" font-size="10.5" fill="#52514e" text-anchor="start">mirror: t5&#x27;s column, one dim PAIR per row</text>
+<rect x="370.0" y="420.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="393.0" y="437.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">50</text>
+<rect x="416.0" y="420.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="439.0" y="437.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">51</text>
+<rect x="370.0" y="420.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="416.0" y="459.0" font-size="9.5" fill="#898781" text-anchor="middle">dim pair (d0, d1)</text>
+<rect x="370.0" y="468.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="393.0" y="485.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">52</text>
+<rect x="416.0" y="468.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="439.0" y="485.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">53</text>
+<rect x="370.0" y="468.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="416.0" y="507.0" font-size="9.5" fill="#898781" text-anchor="middle">dim pair (d2, d3)</text>
+<text x="482.0" y="437.0" font-size="11.5" fill="#0b0b0b" text-anchor="start" font-family="ui-monospace,Menlo,monospace">S[t5] += Q[d0]&#xD7;50 + Q[d1]&#xD7;51   (Q = [2, 1] &#x2192; 151)</text>
+<text x="482.0" y="485.0" font-size="11.5" fill="#0b0b0b" text-anchor="start" font-family="ui-monospace,Menlo,monospace">next step: += Q[d2]&#xD7;52 + Q[d3]&#xD7;53</text>
+</svg><figcaption>Colors follow the tokens (panel 1) or dims (panel 3) that form each pair; heavy outlines
+mark one pair as the instruction sees it. Example values are chosen exactly representable in bf16, so
+the arithmetic shown is exact.</figcaption></figure>
+<p><b>Reading panel 2 (two common stumbles):</b> First, the P values are <b>attention weights</b>
+&#x2014; the softmax outputs of the QK step (&quot;this new token attends 50% to t0, 25% to
+t1&quot;) &#x2014; not model parameters; no model parameter appears anywhere in this kernel.
+Second, the pair (0, 10) in the C[d0] line is dim d0 of two <i>different tokens</i>, and adding
+them into one accumulator is not a mix-up: the PV output at each dim is defined as a sum over
+tokens, O[d0] = P[t0]&#xB7;V[t0][d0] + P[t1]&#xB7;V[t1][d0] + &#x2026;, so the instruction step is
+adding two consecutive <i>terms of that sum</i> (0.50&#xD7;0 + 0.25&#xD7;10), and the next step
+adds the (t2, t3) terms. Blending tokens per dim is exactly what attention&#x27;s weighted sum
+does.</p>
+<p><b>What plain row-major V would compute (why the interleave is mandatory):</b> the bf16 units
+reuse the fp32 datapath, so the hardware never addresses a lone 16-bit value &#x2014; it reads
+32-bit lanes, and its per-lane contract is fixed:
+<code>C[lane] += A.lo&#xD7;B.lo + A.hi&#xD7;B.hi</code>, with both halves of a B lane feeding the
+<i>same</i> accumulator and no stride or gather mode to change that. Store V plainly (one row per
+token) and t0&#x27;s first lane holds (V[t0][d0], V[t0][d1]) = (0, 1); the instruction would
+blindly compute C[lane0] += 0.50&#xD7;0 + 0.25&#xD7;1 = 0.25 instead of 2.50 &#x2014; token
+t1&#x27;s weight applied to token t0&#x27;s d1 value, and a d1 value accumulated into d0&#x27;s
+output &#x2014; silently wrong in every lane, no fault raised. The layout is the only way to tell
+the instruction what the reduction pairs are. Geometry says which operand needs the fix: the bf16
+reduction is 32 deep but a tile has 16 rows; A&#x27;s reduction axis runs <i>along</i> its row, so
+consecutive pairs are already adjacent in memory, while B&#x27;s reduction axis runs <i>down</i>
+the rows, so a consecutive pair straddles two logical rows &#x2014; software must fold rows 2k and
+2k+1 into one physical row beforehand, and that fold is the pair-interleave.</p>
+<p><b>The rule that makes sense of it:</b> in these dot-product layouts, each pair is two adjacent
+elements of the reduction axis. In the B operand&#x27;s pair-interleaved layout, PV (which sums over
+<i>tokens</i>) therefore pairs adjacent tokens, while QK (which sums over <i>dims</i>) pairs adjacent
+dims when K is the B operand. tron&#x27;s V is already stored
+token-paired (it was designed for VDPBF16PS), which is why the AMX PV kernel consumes it with zero
+repacking. K is stored plain, so the canonical kernel sidesteps the requirement by making K the A
+operand &#x2014; at the price of the transposed output (&#xA7;4b) &#x2014; while the mirror
+formulation pays with the pre-paired K copy instead.</p>
+<p><b>A common misreading, spelled out:</b> &quot;K became the A operand, so does Q get
+token-paired?&quot; No &#x2014; token pairs never appear in QK at all. Tokens and queries are the
+<i>output</i> axes of QK; only dims are summed away, so every pair in QK is a <b>dim</b> pair.
+K&#x27;s dim pairs come free (a stored K row is 128 contiguous dims &#x2014; enough for an A operand);
+Q&#x27;s must be built, because the B layout wants each query&#x27;s two dim values side by side per
+dim pair. Example with Q[query][dim] = 100&#xB7;query + dim: the packed B row for dim pair (d0, d1)
+reads (0,1) (100,101) (200,201) (300,301) &#x2014; one bracket per query &#x2014; and one instruction
+step computes S[t5][q] += K[t5][d0]&#xB7;Q[q][d0] + K[t5][d1]&#xB7;Q[q][d1] for all four queries at
+once (with the K row (50, 51, &#x2026;): q0 gets 50&#xD7;0 + 51&#xD7;1 = 51). The pack is cheap
+because Q is tiny (4&#xD7;128 per GQA group) and packed once per (token, kv-head), reused across
+every page; K is the big per-page operand &#x2014; which is exactly why the canonical design
+rearranges Q and not K.</p>
+<figure><svg viewBox="0 0 980 366" width="980" height="366" role="img" aria-label="Q pack with example numbers: the logical 4 by 4 Q matrix is rearranged into one B row per dim pair holding each query&#x27;s two dim values side by side; one instruction step multiplies K&#x27;s dim pair 50,51 by each query&#x27;s dim pair, producing 51 for query 0 and 10151 for query 1" font-family="system-ui,sans-serif">
+<text x="14.0" y="22.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">Q&#x27;s pack (canonical QK): the pair spans two adjacent DIMS (example: Q[query][dim] = 100&#xB7;query + dim)</text>
+<text x="180.0" y="52.0" font-size="11" fill="#52514e" text-anchor="middle" font-weight="600">Q as you think of it</text>
+<text x="111.0" y="70.0" font-size="10" fill="#898781" text-anchor="middle">d0</text>
+<text x="157.0" y="70.0" font-size="10" fill="#898781" text-anchor="middle">d1</text>
+<text x="203.0" y="70.0" font-size="10" fill="#898781" text-anchor="middle">d2</text>
+<text x="249.0" y="70.0" font-size="10" fill="#898781" text-anchor="middle">d3</text>
+<text x="78.0" y="93.0" font-size="10" fill="#898781" text-anchor="end">q0</text>
+<rect x="88.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="134.0" y="76.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">1</text>
+<rect x="180.0" y="76.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="203.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">2</text>
+<rect x="226.0" y="76.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="249.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">3</text>
+<text x="78.0" y="119.0" font-size="10" fill="#898781" text-anchor="end">q1</text>
+<rect x="88.0" y="102.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="119.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">100</text>
+<rect x="134.0" y="102.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="119.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">101</text>
+<rect x="180.0" y="102.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="203.0" y="119.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">102</text>
+<rect x="226.0" y="102.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="249.0" y="119.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">103</text>
+<text x="78.0" y="145.0" font-size="10" fill="#898781" text-anchor="end">q2</text>
+<rect x="88.0" y="128.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="145.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">200</text>
+<rect x="134.0" y="128.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="145.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">201</text>
+<rect x="180.0" y="128.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="203.0" y="145.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">202</text>
+<rect x="226.0" y="128.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="249.0" y="145.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">203</text>
+<text x="78.0" y="171.0" font-size="10" fill="#898781" text-anchor="end">q3</text>
+<rect x="88.0" y="154.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="171.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">300</text>
+<rect x="134.0" y="154.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="171.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">301</text>
+<rect x="180.0" y="154.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="203.0" y="171.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">302</text>
+<rect x="226.0" y="154.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="249.0" y="171.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">303</text>
+<line x1="286.0" y1="128.0" x2="342.0" y2="128.0" stroke="#52514e" stroke-width="1.8"/>
+<path d="M 348.0 128.0 l -8 -3.5 v 7 z" fill="#52514e"/>
+<text x="317.0" y="110.0" font-size="10.5" fill="#52514e" text-anchor="middle" font-weight="600">pack_q_</text>
+<text x="317.0" y="152.0" font-size="10" fill="#52514e" text-anchor="middle">dim-pair</text>
+<text x="317.0" y="165.0" font-size="10" fill="#52514e" text-anchor="middle">interleave</text>
+<text x="370.0" y="52.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="600">Q as packed (the B operand): one row per dim pair; each query&#x27;s two dim values side by side</text>
+<text x="362.0" y="93.0" font-size="9.5" fill="#898781" text-anchor="end">(d0,d1)</text>
+<rect x="370.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="393.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="416.0" y="76.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="439.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">1</text>
+<rect x="462.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="485.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">100</text>
+<rect x="508.0" y="76.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="531.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">101</text>
+<rect x="554.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="577.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">200</text>
+<rect x="600.0" y="76.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="623.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">201</text>
+<rect x="646.0" y="76.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="669.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">300</text>
+<rect x="692.0" y="76.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="715.0" y="93.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">301</text>
+<rect x="370.0" y="76.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="416.0" y="70.0" font-size="9.5" fill="#0b0b0b" text-anchor="middle">q0</text>
+<rect x="462.0" y="76.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="508.0" y="70.0" font-size="9.5" fill="#0b0b0b" text-anchor="middle">q1</text>
+<rect x="554.0" y="76.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="600.0" y="70.0" font-size="9.5" fill="#0b0b0b" text-anchor="middle">q2</text>
+<rect x="646.0" y="76.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="692.0" y="70.0" font-size="9.5" fill="#0b0b0b" text-anchor="middle">q3</text>
+<text x="362.0" y="141.0" font-size="9.5" fill="#898781" text-anchor="end">(d2,d3)</text>
+<rect x="370.0" y="124.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="393.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">2</text>
+<rect x="416.0" y="124.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="439.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">3</text>
+<rect x="462.0" y="124.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="485.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">102</text>
+<rect x="508.0" y="124.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="531.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">103</text>
+<rect x="554.0" y="124.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="577.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">202</text>
+<rect x="600.0" y="124.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="623.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">203</text>
+<rect x="646.0" y="124.0" width="46.0" height="26.0" fill="#eae9f4" stroke="#52514e" stroke-width="1.2"/>
+<text x="669.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">302</text>
+<rect x="692.0" y="124.0" width="46.0" height="26.0" fill="#d3d0ea" stroke="#52514e" stroke-width="1.2"/>
+<text x="715.0" y="141.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">303</text>
+<rect x="370.0" y="124.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<rect x="462.0" y="124.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<rect x="554.0" y="124.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<rect x="646.0" y="124.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="370.0" y="186.0" font-size="10" fill="#52514e" text-anchor="start">packed ONCE per (token, kv-head), then reused for every page of the sequence &#x2014; the cheap operand to rearrange</text>
+<text x="14.0" y="236.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">One instruction step, using K row of token t5 = (50, 51, &#x2026;) as the A pair (K needs no rearranging):</text>
+<rect x="88.0" y="258.0" width="46.0" height="26.0" fill="#fcebdd" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="275.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">50</text>
+<rect x="134.0" y="258.0" width="46.0" height="26.0" fill="#fcebdd" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="275.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">51</text>
+<rect x="88.0" y="258.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="134.0" y="297.0" font-size="9.5" fill="#898781" text-anchor="middle">A pair = K[t5] dims (d0,d1)</text>
+<text x="196.0" y="275.0" font-size="15" fill="#0b0b0b" text-anchor="middle" font-weight="600">&#xD7;</text>
+<rect x="212.0" y="258.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="235.0" y="275.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="258.0" y="258.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="281.0" y="275.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">1</text>
+<rect x="212.0" y="258.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="258.0" y="297.0" font-size="9.5" fill="#898781" text-anchor="middle">B pair = q0&#x27;s (d0,d1)</text>
+<text x="322.0" y="275.0" font-size="15" fill="#0b0b0b" text-anchor="middle" font-weight="600">&#x2192;</text>
+<text x="342.0" y="275.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-family="ui-monospace,Menlo,monospace">S[t5][q0] += 50&#xD7;0 + 51&#xD7;1 = 51</text>
+<rect x="88.0" y="316.0" width="46.0" height="26.0" fill="#fcebdd" stroke="#52514e" stroke-width="1.2"/>
+<text x="111.0" y="333.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">50</text>
+<rect x="134.0" y="316.0" width="46.0" height="26.0" fill="#fcebdd" stroke="#52514e" stroke-width="1.2"/>
+<text x="157.0" y="333.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">51</text>
+<rect x="88.0" y="316.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="196.0" y="333.0" font-size="15" fill="#0b0b0b" text-anchor="middle" font-weight="600">&#xD7;</text>
+<rect x="212.0" y="316.0" width="46.0" height="26.0" fill="#e4f2ed" stroke="#52514e" stroke-width="1.2"/>
+<text x="235.0" y="333.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">100</text>
+<rect x="258.0" y="316.0" width="46.0" height="26.0" fill="#bfe3d6" stroke="#52514e" stroke-width="1.2"/>
+<text x="281.0" y="333.0" font-size="11.5" fill="#0b0b0b" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">101</text>
+<rect x="212.0" y="316.0" width="92.0" height="26.0" fill="none" stroke="#0b0b0b" stroke-width="2"/>
+<text x="258.0" y="355.0" font-size="9.5" fill="#898781" text-anchor="middle">B pair = q1&#x27;s (d0,d1)</text>
+<text x="322.0" y="333.0" font-size="15" fill="#0b0b0b" text-anchor="middle" font-weight="600">&#x2192;</text>
+<text x="342.0" y="333.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-family="ui-monospace,Menlo,monospace">S[t5][q1] += 50&#xD7;100 + 51&#xD7;101 = 10151</text>
+<text x="700.0" y="275.0" font-size="10.5" fill="#52514e" text-anchor="start">all four query lanes are computed</text>
+<text x="700.0" y="290.0" font-size="10.5" fill="#52514e" text-anchor="start">in the same step; the next step</text>
+<text x="700.0" y="305.0" font-size="10.5" fill="#52514e" text-anchor="start">adds dim pair (d2, d3)</text>
+</svg>
+<figcaption>Same visual language as the V figure above, with the paired axis
+flipped: colors follow the DIMS (columns) that form each pair, and heavy outlines mark one
+pair as the instruction sees it. Note the symmetry: V&#x27;s storage does for tokens exactly
+what this pack does for dims &#x2014; each builds the B-operand pair layout along its
+multiply&#x27;s summed axis. All values exactly representable in bf16.</figcaption></figure>
+<div class="tablewrap">
+<table>
+<tr><th>Where a pair layout appears</th><th>Pair spans</th><th>Written by</th><th>Consumed by</th></tr>
+<tr><td>V storage (today&#x27;s tron, unchanged)</td><td>tokens (2r, 2r+1)</td><td><code>set_v</code> at save_v <span class="cite">kv_cache.hpp:1938</span></td><td>AVX <code>scaled_v</code> and AMX <code>pv_128x4</code>, as-is</td></tr>
+<tr><td>Q pack (canonical QK kernel)</td><td>dims (2k, 2k+1)</td><td><code>pack_q_group_128x4</code> per (token, kv-head)</td><td><code>qk_st_128x4</code> B operand</td></tr>
+<tr><td>K mirror (mirror builds only)</td><td>dims (2k, 2k+1)</td><td><code>set_k_mirror</code> at save_k</td><td><code>qk_mirror_128x4</code> B operand</td></tr>
+</table>
+</div>
+
+<h2 id="targets">3. The replacement points</h2>
+<div class="tablewrap">
+<table>
+<tr><th>#</th><th>What</th><th>Where today</th><th>Replaced by</th><th>Risk</th></tr>
+<tr><td>R1</td><td>Q&#xB7;K&#x1D40; scores: per K token, <code>dotter&lt;bf16,128&gt;</code> dot + horizontal reduce, &#xD7;64 tokens &#xD7;4 heads</td><td><span class="cite">self_attention.hpp:1429-1479</span> &#x2192; <span class="cite">dotter.hpp:176-226</span></td><td>AMX <b>S&#x1D40; = K_page&#xB7;Q_pack&#x1D40;</b>: 16 TDPBF16PS per page + 64&#xD7;Nq transpose</td><td>low &#x2014; layout unchanged</td></tr>
+<tr><td>R2</td><td>P&#xB7;V weighted sum: <code>scaled_v_expr</code>, 8 ZMM accumulators over pair-interleaved V</td><td><span class="cite">kv_cache.hpp:1642-1789</span></td><td>AMX <b>O += P_bf16&#xB7;V_page</b>: 16 TDPBF16PS per page (6+2 output blocks), V loaded as-is</td><td>low &#x2014; layout identical</td></tr>
+<tr><td>R3</td><td>Per-token mask/window skip logic inside the QK loop</td><td><span class="cite">self_attention.hpp:1455-1474</span></td><td>Dense page compute + &#x2212;inf overwrite on the fast path; existing loop stays as fallback</td><td>medium &#x2014; needs density heuristic</td></tr>
+<tr><td>R4</td><td>v* cross-page accumulator round-trips through bf16</td><td><span class="cite">self_attention.hpp:271-274</span></td><td>Optional, separately gated: fp32 memory scratchpad (better numerics; changes goldens)</td><td>medium &#x2014; numerics policy</td></tr>
+<tr><td>&#x2014;</td><td><b>Not replaced</b>: RoPE, qk-norm, softmax bookkeeping, monoid join, rmsnorm, SiLU (not matmul-shaped); all FPGA matmuls; the FPGA hw-attention path</td><td colspan="3"><span class="cite">rope.hpp:340-409; self_attention.hpp:1498-1563</span> &#x2014; stay AVX-512</td></tr>
+</table>
+</div>
+
+<h2 id="design">4. The AMX kernel design (consensus v2)</h2>
+
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 980 440" width="980" height="440" role="img" aria-label="Kernel design: QK uses the K page as A tiles producing transposed scores; PV uses stored V as B tiles with 6 plus 2 output blocking">
+  <text x="10" y="20" font-size="13" font-weight="600" fill="#0b0b0b">R1 &#x2014; scores:  S&#x1D40;[64&#xD7;Nq] = K_page[64&#xD7;128] &#xB7; Q_pack&#x1D40;     (per page, per kv_head)</text>
+  <!-- K page as A -->
+  <rect x="30" y="40" width="200" height="128" fill="#eef3fa" stroke="#2a78d6"/>
+  <g stroke="#c9dcf5"><line x1="30" y1="72" x2="230" y2="72"/><line x1="30" y1="104" x2="230" y2="104"/><line x1="30" y1="136" x2="230" y2="136"/>
+  <line x1="80" y1="40" x2="80" y2="168"/><line x1="130" y1="40" x2="130" y2="168"/><line x1="180" y1="40" x2="180" y2="168"/></g>
+  <text x="34" y="60" font-size="10.5" fill="#1c5cab">4&#xD7;4 grid of A tiles</text>
+  <text x="30" y="186" font-size="11" fill="#52514e">K page: 64 tokens &#xD7; 128 dims</text>
+  <text x="30" y="202" font-size="11" fill="#52514e">bf16, stored row-major &#x2014;</text>
+  <text x="30" y="218" font-size="11" fill="#52514e">loaded AS-IS,</text>
+  <text x="30" y="234" font-size="11" fill="#52514e">TILELOADD stride 256 B</text>
+
+  <text x="248" y="110" font-size="16" fill="#0b0b0b">&#xD7;</text>
+
+  <!-- Q packed as B -->
+  <rect x="270" y="40" width="60" height="128" fill="#e9f7f1" stroke="#1baf7a"/>
+  <g stroke="#c5ead9"><line x1="270" y1="72" x2="330" y2="72"/><line x1="270" y1="104" x2="330" y2="104"/><line x1="270" y1="136" x2="330" y2="136"/></g>
+  <text x="252" y="186" font-size="11" fill="#52514e">Q&#x1D40; pair-packed</text>
+  <text x="252" y="202" font-size="11" fill="#52514e">per group: 128 dims</text>
+  <text x="252" y="218" font-size="11" fill="#52514e">&#xD7; Nq queries; Nq=4</text>
+  <text x="252" y="234" font-size="11" fill="#52514e">guaranteed. &#x2264;2 KB,</text>
+  <text x="252" y="250" font-size="11" fill="#52514e">packed once</text>
+
+  <text x="348" y="110" font-size="16" fill="#0b0b0b">&#x2192;</text>
+
+  <!-- S^T -->
+  <rect x="370" y="40" width="60" height="128" fill="#fdf0ea" stroke="#eb6834"/>
+  <g stroke="#f5d5c4"><line x1="370" y1="72" x2="430" y2="72"/><line x1="370" y1="104" x2="430" y2="104"/><line x1="370" y1="136" x2="430" y2="136"/></g>
+  <text x="362" y="186" font-size="11" fill="#52514e">S&#x1D40;: 64 tokens &#xD7; Nq</text>
+  <text x="362" y="202" font-size="11" fill="#52514e">fp32 in 4 C tiles &#x2192;</text>
+  <text x="362" y="218" font-size="11" fill="#52514e">AVX-512 16&#xD7;4/16&#xD7;8</text>
+  <text x="362" y="234" font-size="11" fill="#52514e">transpose &#x2192; s_pages</text>
+
+  <!-- annotation box -->
+  <rect x="470" y="40" width="480" height="128" rx="8" fill="#f7f6f3" stroke="#c3c2b7"/>
+  <text x="484" y="62" font-size="11.5" font-weight="600" fill="#0b0b0b">Why this orientation (D1):</text>
+  <text x="484" y="82" font-size="11" fill="#52514e">&#x2022; M = 64 K-token rows &#x2014; tiles always full on the M axis</text>
+  <text x="484" y="100" font-size="11" fill="#52514e">&#x2022; K page layout untouched &#x2192; FPGA DMA contract safe</text>
+  <text x="484" y="118" font-size="11" fill="#52514e">&#x2022; only the tiny Q operand is packed (VNNI pairs) per group</text>
+  <text x="484" y="136" font-size="11" fill="#52514e">&#x2022; 16 TDPs/page; tile budget 4 C + 2 A (dbl-buffered) + 1 B = 7 of 8</text>
+  <text x="484" y="154" font-size="11" fill="#52514e">&#x2022; rejected: S=Q&#xB7;K&#x1D40; &#x2014; would force a pair-packed-transposed K cache</text>
+
+  <text x="10" y="280" font-size="13" font-weight="600" fill="#0b0b0b">R2 &#x2014; output:  O[Nq&#xD7;128] += P_bf16[Nq&#xD7;64] &#xB7; V_page[64&#xD7;128]     (V loaded as stored &#x2014; zero repack)</text>
+  <!-- P as A -->
+  <rect x="30" y="300" width="130" height="36" fill="#eef3fa" stroke="#2a78d6"/>
+  <text x="30" y="354" font-size="11" fill="#52514e">P: exp-weights, fp32&#x2192;bf16</text>
+  <text x="30" y="370" font-size="11" fill="#52514e">pairs (existing conversion),</text>
+  <text x="30" y="386" font-size="11" fill="#52514e">Nq rows &#xD7; 64 tokens</text>
+  <text x="178" y="324" font-size="16" fill="#0b0b0b">&#xD7;</text>
+  <!-- V as B -->
+  <rect x="200" y="300" width="200" height="80" fill="#e9f7f1" stroke="#1baf7a"/>
+  <g stroke="#c5ead9"><line x1="250" y1="300" x2="250" y2="380"/><line x1="300" y1="300" x2="300" y2="380"/><line x1="350" y1="300" x2="350" y2="380"/></g>
+  <text x="206" y="318" font-size="10.5" fill="#0d7a52">V page: already pair-interleaved = B format</text>
+  <text x="200" y="398" font-size="11" fill="#52514e">64 tokens &#xD7; 128 dims; 2 K-steps &#xD7; 8 column-tiles</text>
+  <text x="418" y="324" font-size="16" fill="#0b0b0b">&#x2192;</text>
+  <!-- O 6+2 -->
+  <g>
+    <rect x="440" y="300" width="180" height="36" fill="#fdf0ea" stroke="#eb6834"/>
+    <rect x="624" y="300" width="60" height="36" fill="#fdf0ea" stroke="#eb6834" stroke-dasharray="4 2"/>
+    <text x="446" y="322" font-size="10.5" fill="#a12e2e">block 1: dims 0&#x2013;95 (6 C tiles)</text>
+    <text x="634" y="322" font-size="10.5" fill="#a12e2e">96&#x2013;127</text>
+  </g>
+  <text x="440" y="354" font-size="11" fill="#52514e">6+2 output blocking: 6 C + 1 A + 1 B tiles,</text>
+  <text x="440" y="370" font-size="11" fill="#52514e">then a 2-tile second block (dims 96&#x2013;127) &#x2014;</text>
+  <text x="440" y="386" font-size="11" fill="#52514e">Intel's 1D-accumulator scheme for variable-M</text>
+  <text x="440" y="402" font-size="11" fill="#52514e">self-attention (opt-manual:31719-31758)</text>
+
+  <rect x="710" y="300" width="240" height="86" rx="8" fill="#f7f6f3" stroke="#c3c2b7"/>
+  <text x="724" y="320" font-size="11.5" font-weight="600" fill="#0b0b0b">Per page, after PV:</text>
+  <text x="724" y="338" font-size="11" fill="#52514e">TILESTORED &#x2192; fp32 buffer, then</text>
+  <text x="724" y="354" font-size="11" fill="#52514e">AVX-512 rescale-and-add into the v*</text>
+  <text x="724" y="370" font-size="11" fill="#52514e">memory scratchpad. Tiles are NEVER</text>
+  <text x="724" y="384" font-size="11" fill="#52514e">live across pages/calls/waits (D6).</text>
+
+  <text x="10" y="428" font-size="11" fill="#898781">Tile geometry: 16 rows &#xD7; 64 B, TDPBF16PS C[16&#xD7;16]+=A[16&#xD7;32]&#xB7;B[32&#xD7;16]; head_dim 128 = 4 K-steps (QK) / dims split 8 ways (PV); page 64 tokens = 2 K-steps (PV).</text>
+</svg>
+</div>
+<figcaption>The two AMX kernels. Both consume the KV cache exactly as stored today.</figcaption>
+</figure>
+
+<h3>Design decisions (with the consensus corrections baked in)</h3>
+<div class="tablewrap">
+<table>
+<tr><th>ID</th><th>Decision</th><th>Detail / rationale</th></tr>
+<tr><td>D1</td><td>QK as S&#x1D40; = K&#xB7;Q&#x1D40;</td><td>K page is the A operand unchanged; Q packed per (minibatch, kv_head); scores come out transposed &#x2192; dedicated 16&#xD7;4 / 16&#xD7;8 / 16&#xD7;16 transpose-store paths into the existing <code>s_pages</code> row layout (a transposed softmax was evaluated and rejected: it would stride the contiguous 64-lane max/exp code). <b>What P0&#x2013;P2 then learned about this transpose is consolidated in &#xA7;4b below.</b></td></tr>
+<tr><td>D2 <span class="pill rev">amended</span></td><td>PV with stored V as B</td><td>6+2 output blocking; P converted fp32&#x2192;bf16 pairs exactly as <code>interleave_bf16_ps</code> does today <span class="cite">kv_cache.hpp:1784</span>. <b>Amended by measurement: the P0 A/B chose 4+4 blocking over 6+2 (doc 04, P0 status), and the in-tree conversion uses round-to-nearest-even, not the chop (&#xA7;6b).</b></td></tr>
+<tr><td>D3 <span class="pill rev">revised</span></td><td>Batching only by shared physical KV</td><td>Original cross-user batching withdrawn (&#xA7;10). Grouping key = immutable physical page identity + kv_head + compatible attention math/configuration; each grouped query retains its independently representable visibility mask. Guaranteed width: the 4-head GQA group. See &#xA7;5.</td></tr>
+<tr><td>D4</td><td>Dense compute, then mask</td><td>Compute all 64 columns, overwrite masked lanes with &#x2212;inf before softmax (the buffer's existing convention <span class="cite">self_attention.hpp:1416-1422</span>). Garbage in dead lanes is discarded, and <code>kv_block</code> is zero-initialized at construction anyway <span class="cite">kv_cache.hpp:1732,1806</span>. Existing skip-loop kept as the low-density/sliding-window fallback, chosen by a measured density heuristic (qwen3-4b is full-causal, so the dense path dominates).</td></tr>
+<tr><td>D5</td><td>Softmax &amp; friends stay AVX-512</td><td>Port-5 open/close stalls between TDP blocks and vector blocks are real (up to 20% for 100&#x2013;300-instruction vector blocks <span class="cite">opt-manual:32519-32530</span>); TILEZERO-cadence mitigation is a measured experiment only, on a scratch tile, never a live accumulator.</td></tr>
+<tr><td>D6 <span class="pill rev">revised</span></td><td>v* lives in memory, not tiles</td><td>Rolling softmax rescales v* by exp(m_old&#x2212;m_new) after any page that raises the max &#x2014; AMX has no tile-elementwise-scale and tiles are ABI-volatile, so per page: TILESTORED &#x2192; AVX-512 rescale/add. The fp32 (vs today's bf16 <span class="cite">self_attention.hpp:271-274</span>) scratchpad widening is a <b>separately gated numerics policy</b> with the legacy bf16 mode preserved.</td></tr>
+<tr><td>D7</td><td>Isolated build unit + runtime dispatch</td><td>AMX kernels in their own translation unit/object lib &#x2014; only it gets <code>-mamx-tile -mamx-bf16</code>; the rest of tron keeps today's flags. Runtime predicate: CPUID AMX-TILE/BF16 + OSXSAVE + XCR0[18:17] + <code>arch_prctl</code> success (+ leaf 1DH/1EH shape check). Fallback = today's kernels, always compiled.</td></tr>
+<tr><td>D8</td><td>Tile lifecycle</td><td><code>arch_prctl(ARCH_REQ_XCOMP_PERM, XTILEDATA)</code> once per process before the pool spawns; LDTILECFG once per uninterrupted AMX region; TILERELEASE before any wait (mwaitx spin, channel wait) and on every exit path (RAII); no live tiles across non-inlined calls; reload config after waits.</td></tr>
+</table>
+</div>
+
+<h2 id="transpose">4b. The transpose in practice (addendum 2026-08-19): optimizations, measured cost, and the alternative that removes it</h2>
+<p>Section 4 is the consensus-v2 design, frozen as reviewed. This addendum consolidates what P0&#x2013;P2
+then learned about the transposing store, which was previously scattered across the results pages and
+status entries.</p>
+<figure>
+<svg viewBox="0 0 980 903" width="980" height="903" role="img" aria-label="Three panels: A - canonical orientation produces scores as 64 token rows by 4 query columns needing a transposing store into 4 by 64 s_pages, while the mirror orientation comes out 4 query rows by 64 token columns and stores directly; B - the two-stage lane transpose where stage 1 is shared and width 4 emits only 4 of 16 stage-2 output rows; C - measured cost ladder 1263 to 1006 to 982 ns per page for canonical variants versus 686 for the mirror kernel, an about 300 ns gap" font-family="system-ui,sans-serif">
+<text x="14.0" y="24.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">A &#x2014; Why the canonical orientation must transpose, and why the mirror does not</text>
+<text x="14.0" y="48.0" font-size="12" fill="#7570b3" text-anchor="start" font-weight="600">Canonical (D1): S&#x1D40; = K page &#xB7; Q&#x1D40;</text>
+<rect x="96.0" y="62.0" width="52.0" height="256.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<line x1="109.0" y1="62" x2="109.0" y2="318.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="122.0" y1="62" x2="122.0" y2="318.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="135.0" y1="62" x2="135.0" y2="318.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="96" y1="126.0" x2="148.0" y2="126.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="96" y1="190.0" x2="148.0" y2="190.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="96" y1="254.0" x2="148.0" y2="254.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="96" y1="126.0" x2="148.0" y2="126.0" stroke="#52514e" stroke-width="1.4"/>
+<line x1="96" y1="190.0" x2="148.0" y2="190.0" stroke="#52514e" stroke-width="1.4"/>
+<line x1="96" y1="254.0" x2="148.0" y2="254.0" stroke="#52514e" stroke-width="1.4"/>
+<rect x="122.0" y="210.0" width="13.0" height="4.0" fill="#d95f02" stroke="#0b0b0b" stroke-width="1"/>
+<text x="102.5" y="57.0" font-size="9" fill="#52514e" text-anchor="middle">q0</text>
+<text x="115.5" y="57.0" font-size="9" fill="#52514e" text-anchor="middle">q1</text>
+<text x="128.5" y="57.0" font-size="9" fill="#52514e" text-anchor="middle">q2</text>
+<text x="141.5" y="57.0" font-size="9" fill="#52514e" text-anchor="middle">q3</text>
+<text x="86.0" y="190.0" font-size="10" fill="#52514e" text-anchor="middle" transform="rotate(-90 86 190)">64 token rows (4 C tiles of 16)</text>
+<text x="122.0" y="330.0" font-size="10" fill="#52514e" text-anchor="middle">tiles hold: rows = tokens,</text>
+<text x="122.0" y="343.0" font-size="10" fill="#52514e" text-anchor="middle">columns = queries</text>
+<line x1="156.0" y1="190.0" x2="234.0" y2="190.0" stroke="#d95f02" stroke-width="2.2"/>
+<line x1="234.0" y1="190.0" x2="226.1" y2="185.7" stroke="#d95f02" stroke-width="2.2"/>
+<line x1="234.0" y1="190.0" x2="226.1" y2="194.3" stroke="#d95f02" stroke-width="2.2"/>
+<text x="195.0" y="168.0" font-size="10.5" fill="#d95f02" text-anchor="middle" font-weight="600">transposing</text>
+<text x="195.0" y="181.0" font-size="10.5" fill="#d95f02" text-anchor="middle" font-weight="600">store</text>
+<text x="195.0" y="206.0" font-size="9.5" fill="#d95f02" text-anchor="middle">two-stage</text>
+<text x="195.0" y="218.0" font-size="9.5" fill="#d95f02" text-anchor="middle">lane shuffle</text>
+<text x="240.0" y="154.0" font-size="10" fill="#52514e" text-anchor="start">s_pages: 4 query rows &#xD7; 64 token columns</text>
+<rect x="240.0" y="162.0" width="320.0" height="56.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<line x1="320.0" y1="162" x2="320.0" y2="218.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="400.0" y1="162" x2="400.0" y2="218.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="480.0" y1="162" x2="480.0" y2="218.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="240" y1="176.0" x2="560.0" y2="176.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="240" y1="190.0" x2="560.0" y2="190.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="240" y1="204.0" x2="560.0" y2="204.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<rect x="425.0" y="190.0" width="5.0" height="14.0" fill="#d95f02" stroke="#0b0b0b" stroke-width="1"/>
+<text x="240.0" y="240.0" font-size="10" fill="#52514e" text-anchor="start">the highlighted score moves from (token 37, query 2)</text>
+<text x="240.0" y="253.0" font-size="10" fill="#52514e" text-anchor="start">to (query 2, token 37) &#x2014; every score changes address</text>
+<text x="600.0" y="48.0" font-size="12" fill="#e7298a" text-anchor="start" font-weight="600">Mirror (inc 2): S = Q &#xB7; K&#x1D40;</text>
+<text x="600.0" y="70.0" font-size="10" fill="#52514e" text-anchor="start">C tiles: rows already = queries (4 of 16 used)</text>
+<rect x="600.0" y="78.0" width="320.0" height="80.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<line x1="680.0" y1="78" x2="680.0" y2="158.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="760.0" y1="78" x2="760.0" y2="158.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="840.0" y1="78" x2="840.0" y2="158.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="83.0" x2="920.0" y2="83.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="88.0" x2="920.0" y2="88.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="93.0" x2="920.0" y2="93.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="98.0" x2="920.0" y2="98.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="103.0" x2="920.0" y2="103.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="108.0" x2="920.0" y2="108.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="113.0" x2="920.0" y2="113.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="118.0" x2="920.0" y2="118.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="123.0" x2="920.0" y2="123.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="128.0" x2="920.0" y2="128.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="133.0" x2="920.0" y2="133.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="138.0" x2="920.0" y2="138.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="143.0" x2="920.0" y2="143.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="148.0" x2="920.0" y2="148.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="153.0" x2="920.0" y2="153.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<rect x="600.0" y="98.0" width="320.0" height="60.0" fill="#f4f3ef" stroke="#e7298a" stroke-width="0.6"/>
+<rect x="600.0" y="78.0" width="320.0" height="20.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<line x1="680.0" y1="78" x2="680.0" y2="98.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="760.0" y1="78" x2="760.0" y2="98.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="840.0" y1="78" x2="840.0" y2="98.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="83.0" x2="920.0" y2="83.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="88.0" x2="920.0" y2="88.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="93.0" x2="920.0" y2="93.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<rect x="785.0" y="88.0" width="5.0" height="5.0" fill="#d95f02" stroke="#0b0b0b" stroke-width="1"/>
+<text x="925.0" y="90.0" font-size="9" fill="#e7298a" text-anchor="start">rows 0-3</text>
+<text x="925.0" y="133.0" font-size="9" fill="#898781" text-anchor="start">zero rows</text>
+<line x1="760.0" y1="164.0" x2="760.0" y2="194.0" stroke="#e7298a" stroke-width="2.2"/>
+<line x1="760.0" y1="194.0" x2="764.3" y2="186.1" stroke="#e7298a" stroke-width="2.2"/>
+<line x1="760.0" y1="194.0" x2="755.7" y2="186.1" stroke="#e7298a" stroke-width="2.2"/>
+<text x="772.0" y="182.0" font-size="10.5" fill="#e7298a" text-anchor="start" font-weight="600">plain tile stores &#x2014; no transpose</text>
+<rect x="600.0" y="200.0" width="320.0" height="56.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.2"/>
+<line x1="680.0" y1="200" x2="680.0" y2="256.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="760.0" y1="200" x2="760.0" y2="256.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="840.0" y1="200" x2="840.0" y2="256.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="214.0" x2="920.0" y2="214.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="228.0" x2="920.0" y2="228.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<line x1="600" y1="242.0" x2="920.0" y2="242.0" stroke="#e7298a" stroke-width="0.5" opacity="0.5"/>
+<rect x="785.0" y="228.0" width="5.0" height="14.0" fill="#d95f02" stroke="#0b0b0b" stroke-width="1"/>
+<text x="600.0" y="272.0" font-size="10" fill="#52514e" text-anchor="start">the score stays at (query 2, token 37): stored as-is</text>
+<text x="600.0" y="285.0" font-size="10" fill="#52514e" text-anchor="start">(the reorientation was pre-paid at save_k, in the K mirror layout)</text>
+<text x="14.0" y="385.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">B &#x2014; Inside the transposing store: two stages, and what width 4 skips</text>
+<text x="70.0" y="407.0" font-size="10" fill="#52514e" text-anchor="start">one C tile (16&#xD7;16 fp32)</text>
+<rect x="70.0" y="415.0" width="144.0" height="144.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.2"/>
+<line x1="79.0" y1="415" x2="79.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="88.0" y1="415" x2="88.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="97.0" y1="415" x2="97.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="106.0" y1="415" x2="106.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="115.0" y1="415" x2="115.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="124.0" y1="415" x2="124.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="133.0" y1="415" x2="133.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="142.0" y1="415" x2="142.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="151.0" y1="415" x2="151.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="160.0" y1="415" x2="160.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="169.0" y1="415" x2="169.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="178.0" y1="415" x2="178.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="187.0" y1="415" x2="187.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="196.0" y1="415" x2="196.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="205.0" y1="415" x2="205.0" y2="559.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="424.0" x2="214.0" y2="424.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="433.0" x2="214.0" y2="433.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="442.0" x2="214.0" y2="442.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="451.0" x2="214.0" y2="451.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="460.0" x2="214.0" y2="460.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="469.0" x2="214.0" y2="469.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="478.0" x2="214.0" y2="478.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="487.0" x2="214.0" y2="487.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="496.0" x2="214.0" y2="496.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="505.0" x2="214.0" y2="505.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="514.0" x2="214.0" y2="514.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="523.0" x2="214.0" y2="523.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="532.0" x2="214.0" y2="532.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="541.0" x2="214.0" y2="541.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="550.0" x2="214.0" y2="550.0" stroke="#7570b3" stroke-width="0.5" opacity="0.5"/>
+<line x1="70" y1="451.0" x2="214.0" y2="451.0" stroke="#52514e" stroke-width="1.4"/>
+<line x1="70" y1="487.0" x2="214.0" y2="487.0" stroke="#52514e" stroke-width="1.4"/>
+<line x1="70" y1="523.0" x2="214.0" y2="523.0" stroke="#52514e" stroke-width="1.4"/>
+<text x="58.0" y="437.0" font-size="9" fill="#52514e" text-anchor="middle">g0</text>
+<text x="58.0" y="473.0" font-size="9" fill="#52514e" text-anchor="middle">g1</text>
+<text x="58.0" y="509.0" font-size="9" fill="#52514e" text-anchor="middle">g2</text>
+<text x="58.0" y="545.0" font-size="9" fill="#52514e" text-anchor="middle">g3</text>
+<line x1="220.0" y1="487.0" x2="260.0" y2="487.0" stroke="#52514e" stroke-width="1.8"/>
+<line x1="260.0" y1="487.0" x2="252.1" y2="482.7" stroke="#52514e" stroke-width="1.8"/>
+<line x1="260.0" y1="487.0" x2="252.1" y2="491.3" stroke="#52514e" stroke-width="1.8"/>
+<rect x="266.0" y="449.0" width="240.0" height="76.0" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.5" rx="6"/>
+<text x="386.0" y="467.0" font-size="11" fill="#0b0b0b" text-anchor="middle" font-weight="600">stage 1 &#x2014; SHARED</text>
+<text x="386.0" y="483.0" font-size="10" fill="#52514e" text-anchor="middle">unpack at 32-bit, then 64-bit,</text>
+<text x="386.0" y="496.0" font-size="10" fill="#52514e" text-anchor="middle">within each 4-row group</text>
+<text x="386.0" y="512.0" font-size="10" fill="#52514e" text-anchor="middle">reads all 16 input rows</text>
+<line x1="512.0" y1="487.0" x2="552.0" y2="487.0" stroke="#52514e" stroke-width="1.8"/>
+<line x1="552.0" y1="487.0" x2="544.1" y2="482.7" stroke="#52514e" stroke-width="1.8"/>
+<line x1="552.0" y1="487.0" x2="544.1" y2="491.3" stroke="#52514e" stroke-width="1.8"/>
+<text x="558.0" y="407.0" font-size="10.5" fill="#52514e" text-anchor="start" font-weight="600">stage 2 &#x2014; per OUTPUT row (shuffle_f32x4)</text>
+<rect x="558.0" y="415.0" width="150.0" height="7.4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.3"/>
+<rect x="558.0" y="424.4" width="150.0" height="7.4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.3"/>
+<text x="718.0" y="431.4" font-size="10" fill="#1b9e77" text-anchor="start" font-weight="600">rows 0-3 emitted</text>
+<rect x="558.0" y="433.8" width="150.0" height="7.4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.3"/>
+<rect x="558.0" y="443.2" width="150.0" height="7.4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1.3"/>
+<text x="718.0" y="450.2" font-size="10" fill="#1b9e77" text-anchor="start">(queries 0-3)</text>
+<rect x="558.0" y="452.6" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<rect x="558.0" y="462.0" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<rect x="558.0" y="471.4" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<rect x="558.0" y="480.8" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<rect x="558.0" y="490.2" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<rect x="558.0" y="499.6" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<text x="718.0" y="506.6" font-size="10" fill="#898781" text-anchor="start">rows 4-15: paths not</text>
+<rect x="558.0" y="509.0" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<rect x="558.0" y="518.4" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<text x="718.0" y="525.4" font-size="10" fill="#898781" text-anchor="start">emitted at width 4</text>
+<rect x="558.0" y="527.8" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<rect x="558.0" y="537.2" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<rect x="558.0" y="546.6" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<rect x="558.0" y="556.0" width="150.0" height="7.4" fill="#ffffff" stroke="#898781" stroke-width="0.9" stroke-dasharray="3 3"/>
+<text x="70.0" y="587.0" font-size="10.5" fill="#52514e" text-anchor="start">Width-4 saving: a quarter of the stage-2 paths; stage-1 work is shared and remains.</text>
+<text x="14.0" y="635.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="600">C &#x2014; Measured cost ladder, width 4, L2-resident (whole-path ns/page; fused-sweep grid v2)</text>
+<line x1="40.0" y1="649" x2="40.0" y2="817" stroke="#e1e0d9" stroke-width="1"/>
+<text x="40.0" y="831.0" font-size="10" fill="#898781" text-anchor="middle">0</text>
+<line x1="354.3" y1="649" x2="354.3" y2="817" stroke="#e1e0d9" stroke-width="1"/>
+<text x="354.3" y="831.0" font-size="10" fill="#898781" text-anchor="middle">500</text>
+<line x1="668.6" y1="649" x2="668.6" y2="817" stroke="#e1e0d9" stroke-width="1"/>
+<text x="668.6" y="831.0" font-size="10" fill="#898781" text-anchor="middle">1000</text>
+<text x="728.6" y="831.0" font-size="10" fill="#898781" text-anchor="middle">ns/page</text>
+<text x="40.0" y="654.0" font-size="10.5" fill="#52514e" text-anchor="start">canonical, first version</text>
+<rect x="40.0" y="657.0" width="793.9" height="20.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.6"/>
+<text x="841.9" y="671.0" font-size="11" fill="#7570b3" text-anchor="start" font-weight="600">1263</text>
+<text x="40.0" y="696.0" font-size="10.5" fill="#52514e" text-anchor="start">+ width-4 stage 2 + merged transpose&#xB7;scale (harness epilogue)</text>
+<rect x="40.0" y="699.0" width="632.3" height="20.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.6"/>
+<text x="680.3" y="713.0" font-size="11" fill="#7570b3" text-anchor="start" font-weight="600">1006</text>
+<text x="40.0" y="738.0" font-size="10.5" fill="#52514e" text-anchor="start">+ double-buffered score rings (measured, not adopted: only ~2%)</text>
+<rect x="40.0" y="741.0" width="617.3" height="20.0" fill="#eae9f4" stroke="#7570b3" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="665.3" y="755.0" font-size="11" fill="#7570b3" text-anchor="start" font-weight="600">982</text>
+<text x="40.0" y="780.0" font-size="10.5" fill="#52514e" text-anchor="start">mirror kernel &#x2014; no transposing store (formulation from Bill&#x27;s PR #2934, our implementation)</text>
+<rect x="40.0" y="783.0" width="431.2" height="20.0" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.6"/>
+<text x="479.2" y="797.0" font-size="11" fill="#e7298a" text-anchor="start" font-weight="600">686</text>
+<line x1="471.2" y1="859.0" x2="657.3" y2="859.0" stroke="#d95f02" stroke-width="2"/>
+<line x1="471.2" y1="854.0" x2="471.2" y2="864.0" stroke="#d95f02" stroke-width="2"/>
+<line x1="657.3" y1="854.0" x2="657.3" y2="864.0" stroke="#d95f02" stroke-width="2"/>
+<text x="564.2" y="874.0" font-size="10" fill="#d95f02" text-anchor="middle" font-weight="600">&#x2248;300 ns/page end-to-end kernel gap (982&#x2212;686)</text>
+<text x="436.9" y="889.0" font-size="10" fill="#52514e" text-anchor="middle">transpose + score round-trip expected to account for much of it (not isolated)</text>
+</svg>
+<figcaption>Panel A tracks one score value (orange cell): the canonical orientation computes it at
+(token row, query column) and the transposing store moves it to (query row, token column); the mirror
+kernel computes it already in the final orientation because the reorientation was pre-paid when
+save_k wrote the K mirror. Panel B: stage 1 of the 16&#xD7;16 lane transpose is shared; at width 4
+only a quarter of the stage-2 output paths are emitted. Panel C: measured whole-path costs
+(fused-sweep grid v2); the double-buffered bar is drawn dashed because the variant was not adopted;
+the &#x2248;300 ns gap is an end-to-end kernel delta, not an isolated transpose measurement
+(&#xA7;4b text, Sol round 4).</figcaption>
+</figure>
+
+<ul>
+<li><b>Why a transpose exists at all</b>: with the canonical orientation (D1, S&#x1D40; = K&#xB7;Q&#x1D40;),
+the C tiles hold scores as 64 token rows &#xD7; Nq query columns, but the epilogue (max/exp over the
+64-token axis) needs them as Nq rows &#xD7; 64 columns. The mirror orientation avoids this by consuming a
+pre-interleaved K copy instead (see the last bullet).</li>
+<li><b>Optimization 1 &#x2014; width-specialized transposing store (shipped in increment 1)</b>: a full
+16&#xD7;16 fp32 lane transpose takes two stages (stage 1: unpacklo/unpackhi at 32-bit then 64-bit
+granularity per 4-row group; stage 2: shuffle_f32x4 combinations). At the guaranteed decode width 4,
+only output rows 0&#x2013;3 are needed, so only their output-specific stage-2 paths are emitted &#x2014;
+a quarter of the full transpose&#x27;s stage-2 paths, while the shared stage-1 work remains
+(<code>qk_st_128x4</code>, src/tron/kernels/amx_attn.cpp). The first transpose implementation had a
+wrong permutation; the harness&#x27;s runtime self-check against a scalar reference caught it, which is
+why the harness runs that self-check for every kernel variant.</li>
+<li><b>Optimization 2 &#x2014; merged transpose + scale (harness only)</b>: the P0 harness merged the
+softmax scale into the transposing store (one combined pass). The in-tree increment 1 deliberately kept
+the store UNSCALED with the existing epilogue untouched, trading a little speed for a byte-identical
+scoring epilogue.</li>
+<li><b>Optimization 3 &#x2014; pipelined double-buffering (measured, rejected)</b>: hypothesis was that
+the tile-store &#x2192; vector-load round-trip stalls the transpose; alternating score buffers across an
+8-page ring improved throughput by only &#x2248;2% (982 vs 1006 ns/page at width 4), showing the
+store&#x2192;load round trip was not the dominant bottleneck under these measured conditions; the
+variant was not adopted.</li>
+<li><b>The measured floor</b>: the best experimental canonical result in the grid remained
+&#x2248;300 ns/page slower than the mirror kernel at width 4 (982 vs 686 ns, fused-sweep.html grid v2;
+an earlier note said &#x2248;200 ns &#x2014; arithmetic corrected 2026-08-19). The canonical path&#x27;s
+transpose and score-memory round-trip are expected to account for much of this gap, but the end-to-end
+kernel comparison does not isolate their exact contribution. The layout mismatch is inherent to this
+orientation under the current epilogue contract, although its implementation cost may still be
+reducible; eliminating the reorientation requires changing the formulation or the downstream
+contract.</li>
+<li><b>The remover &#x2014; the mirror formulation (increment 2)</b>: S = Q&#xB7;K&#x1D40; read from a
+VNNI-interleaved K copy needs no transposing store at all (the formulation originates from Bill&#x27;s
+PR #2934; the implementation and numbers are ours). In-tree verdict (p2-inc2.html): the mirror kernel
+gains &#x2248;14% decode at equal layout, netting +3.7/+5.2% after the 3-plane layout tax; canonical-K
+remains the default and the mirror is a gated opt-in (formulation decision, doc 04).</li>
+</ul>
+<p>Reading order for the full transpose story: this section &#x2192; fused-sweep.html (the measured
+grid and variants) &#x2192; p2-inc2.html (the in-tree mirror verdict and layout costs) &#x2192;
+doc 04 P0/P2 status entries (dated record).</p>
+
+<h2 id="batching">5. Tile utilization &amp; the batching rule</h2>
+<p>The width-4 problem: at decode, one query token engages 4 query heads per KV head (GQA 32/8). In R1 those
+4 queries fill only 4 of 16 output columns; in R2, 4 of 16 A rows. A TDP costs its full slot regardless
+(doc 01 &#xA7;7.1). The consensus rule for widening:</p>
+<div class="card">
+<b>Queries may share one GEMM only if they multiply the same physical KV page.</b> Independent decode users own
+disjoint pages &#x2014; batching them multiplies memory traffic, not arithmetic intensity, and is <b>not</b> a valid
+utilization strategy (this was the original plan's central error; withdrawn in round 1, see &#xA7;10).
+The consensus grouping condition: <b>same immutable physical K/V page and KV head, compatible attention
+math/configuration, and independently representable per-query visibility masks</b> &#x2014; queries sharing a page may keep
+distinct visibility (dense QK + per-query masking handles it); pointer identity must hold for the duration of the
+kernel invocation; logical page numbers, common ancestry, or equal contents are insufficient.
+Legal width sources, in order of reliability:
+<ol>
+  <li>The 4-head GQA group (always, width 4). "Private decode pages guarantee only QK N=4 and PV M=4 for
+      qwen3-4b GQA."</li>
+  <li>Multiple in-flight tokens of the <b>same sequence</b> (speculative / token-tree decode) attending shared pages.</li>
+  <li>Different users over <b>physically shared prefix pages</b> &#x2014; tron dedups shared prefixes via the token tree
+      (<span class="cite">full.hpp:1600-1724</span>; <code>--shared-system-prompt-length</code> in tronperf), and the
+      per-query visibility machinery (<span class="cite">ranged_mask.hpp:97-182</span>) exists precisely because several
+      query jobs can legally attend one page. Real but workload-dependent coverage; the incidence is unmeasured &#x2014;
+      P1 instruments it as <b>weighted work coverage</b> (a few hot shared-prefix pages can carry a large share of
+      QK/PV work), and any batching restructure (P4) is gated on that measurement.</li>
+</ol>
+</div>
+
+<h2 id="perf">6. Honest performance model</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Quantity (per decode step)</th><th class="num">Value</th><th>Basis</th></tr>
+<tr><td>Work per (page, kv_head, query-group): QK + PV</td><td class="num">131&nbsp;072 flops</td><td>two GEMMs (QK and PV), each M&#xB7;N&#xB7;K = 4&#xD7;64&#xD7;128 = 32&nbsp;768 MACs &#x2192; 65&nbsp;536 MACs; &#xD7; 2 flops/MAC = 131&nbsp;072</td></tr>
+<tr><td>KV bytes streamed per (page, kv_head)</td><td class="num">32&nbsp;KiB</td><td>64 tok &#xD7; 128 dims &#xD7; 2 B/bf16 &#xD7; 2 arrays {K,V} = 32&nbsp;768 B</td></tr>
+<tr><td>Arithmetic intensity (width 4, unshared)</td><td class="num">4 flops/byte</td><td>row 1 &#xF7; row 2 = 131&nbsp;072 / 32&nbsp;768</td></tr>
+<tr><td>KV traffic, 1 user, context 2048</td><td class="num">&#x2248; 302&nbsp;MB (288&nbsp;MiB)</td><td>= 9&nbsp;216 (page, kv_head) units &#xD7; 32 KiB: 36 layers &#xD7; 8 kv_heads &#xD7; 32 pages (2048/64)</td></tr>
+<tr><td>DRAM floor for that read <span class="est">est.</span></td><td class="num">&#x2248; 0.49&nbsp;ms</td><td>row 4 &#xF7; bandwidth: 302 MB / 614 GB/s (12ch DDR5-6400 theoretical, unmeasured) &#x2014; the shortest possible time to stream those bytes, a lower bound on the step regardless of compute speed</td></tr>
+<tr><td>8 users, context 2048</td><td class="num">&#x2248; 2.42&nbsp;GB (2.25&nbsp;GiB) &#x2192; &#x2248; 3.9&nbsp;ms floor <span class="est">est.</span></td><td>rows 4&#x2013;5 &#xD7; 8: independent users own disjoint pages, so traffic and floor scale linearly while intensity (row 3) stays 4 flops/byte</td></tr>
+</table>
+</div>
+
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 980 270" width="980" height="270" role="img" aria-label="Wall-clock lanes: the memory lane (DRAM floor 0.49 ms) versus three compute alternatives for one decode step of attention">
+  <text x="10" y="20" font-size="13" font-weight="600" fill="#0b0b0b">The table as wall-clock lanes: one decode step, attention only &#x2014; 1 user, context 2048 (all values est.)</text>
+  <text x="10" y="38" font-size="11" fill="#52514e">Memory and compute run concurrently, so the step takes &#x2248; max(lanes). "Unit" = one (page, kv_head) GEMM pair = table rows 1&#x2013;2; there are 9,216 units; ~17 attention workers (half of a 36-CPU tp2 instance pool).</text>
+
+  <!-- lane labels -->
+  <g font-size="11.5" font-weight="600" fill="#0b0b0b">
+    <text x="10" y="76">DRAM: stream 302 MB of KV</text>
+    <text x="10" y="116">compute &#x2014; today's dotter</text>
+    <text x="10" y="156">compute &#x2014; width-4 dispatch</text>
+    <text x="10" y="196">compute &#x2014; full-tile AMX</text>
+  </g>
+  <g font-size="10" fill="#898781">
+    <text x="10" y="90">614 GB/s theoretical</text>
+    <text x="10" y="130">2.51 &#xB5;s/unit measured</text>
+    <text x="10" y="170">1.64 &#xB5;s/unit measured</text>
+    <text x="10" y="210">0.27 &#xB5;s/unit, hypothetical</text>
+  </g>
+
+  <!-- bars: x0=240, scale 0.515 px/us -->
+  <rect x="240" y="62" width="252" height="24" rx="3" fill="#2a78d6"/>
+  <text x="500" y="79" font-size="11" fill="#52514e">&#x2248; 0.49 ms &#x2014; row 5's floor: no kernel can beat this if the bytes come from DRAM</text>
+
+  <rect x="240" y="102" width="700" height="24" rx="3" fill="#eb6834" stroke="#d03b3b" stroke-width="2.5"/>
+  <text x="800" y="119" font-size="11" fill="#fcfcfb" font-weight="600">&#x2248; 1.36 ms</text>
+  <text x="248" y="119" font-size="10.5" fill="#fcfcfb">9,216 units &#xD7; 2.51 &#xB5;s &#xF7; 17 workers &#x2014; today's critical path</text>
+
+  <rect x="240" y="142" width="459" height="24" rx="3" fill="#eb6834"/>
+  <text x="707" y="159" font-size="11" fill="#52514e">&#x2248; 0.89 ms &#x2014; ~1.5&#xD7; better, still compute-bound (0.89 &gt; 0.49)</text>
+
+  <rect x="240" y="182" width="76" height="24" rx="3" fill="#eb6834"/>
+  <text x="324" y="199" font-size="11" fill="#52514e">&#x2248; 0.15 ms &#x2014; under the floor: memory now binds, extra compute speed buys nothing</text>
+
+  <!-- DRAM floor reference line across compute lanes -->
+  <line x1="492" y1="96" x2="492" y2="212" stroke="#898781" stroke-dasharray="4 3"/>
+  <text x="497" y="224" font-size="10" fill="#898781">DRAM floor (0.49 ms)</text>
+
+  <text x="10" y="250" font-size="11.5" fill="#0b0b0b" font-weight="600">Takeaway: the width-4 kernel swap helps but leaves attention compute-bound; only wider tiles (verified shared queries) reach the memory floor. With 8 users, every lane scales &#xD7;8 (row 6).</text>
+  <text x="10" y="266" font-size="10.5" fill="#898781">Durations to scale. Per-unit compute times = PoC dispatcher microbenchmark on Granite Rapids (commit c09ecf01b: M=4 dotter 2,508 ns, dispatch 1,644 ns; full-tile 271 ns theoretical), measured cache-resident &#x2014; while the DRAM lane assumes zero cache residency; the two extremes bracket reality. Assumes one instance per socket; real decode adds FPGA channel waits not shown (doc 03 &#xA7;3).</text>
+</svg>
+</div>
+<figcaption>Rows 4&#x2013;6 of the table, drawn as concurrent lanes: step time &#x2248; max(memory lane, compute lane). The three compute lanes are alternatives, not concurrent stages.</figcaption>
+</figure>
+<ul>
+  <li><b>Where AMX can win:</b> when the working set sits in cache (small users&#xD7;context products relative to the
+      432 MB/socket L3 &#x2014; parameterize, don't assume) or when the current instruction-inefficient kernel
+      (256 dot+reduce chains per page) is compute-limited below the bandwidth floor. Where the kernel is already
+      DRAM-bound, AMX &#x2248; AVX-512 and the win is limited to freeing vector-port headroom for the softmax/norm work
+      sharing those cores.</li>
+  <li><b>No speedup or crossover claim is made before fused-kernel and end-to-end delphi measurements.</b> Intel
+      publishes no AMX-vs-AVX-512 crossover (<span class="cite">opt-manual &#x2014; absent; confirmed by search</span>);
+      the guaranteed shapes are width 4; and SPR-era instruction timings are unverified on GNR. AMX dispatch will be
+      enabled only for measured-profitable shapes &#x2014; the expected candidate is verified shared-KV width &#x2265; 8, while
+      width 4 stays on AVX-512 unless the fused-kernel measurement demonstrates a gain. QK and PV profitability may
+      differ and may use <b>separate measured dispatch thresholds</b>. A default-off AMX path for plain private-page
+      width-4 decode is a successful, evidence-based outcome &#x2014; it identifies the profitable shared-prefix/speculative
+      workloads and prevents a regression in the dominant case.</li>
+  <li><b>Attention's share of decode time for qwen-3-4b-tp2 is unmeasured</b> (Insufficient data): needs one
+      <code>tronperf --gen</code> perfetto trace with <code>USE_HW_ATTN=0</code> on delphi-3bda
+      (categories <code>model</code>/<code>scheduler</code>; spans "Attention Ready/Pending", "attention: join").
+      delphi-3bda was under load (loadavg &#x2248; 125) on 2026-08-16, so this measurement is queued as the first P0 action
+      rather than done.</li>
+</ul>
+
+<h2 id="precision">6b. Precision: what each engine computes (addendum 2026-08-19)</h2>
+<p>This section answers a review question from Jeremy: do AVX and AMX use different floating-point
+formats, and if so what does the AMX plan do about it? Short answer: <b>both attention dot-product
+implementations use bf16 operands with fp32 accumulation, so no datatype conversion is needed to move
+QK/PV from AVX-512 BF16 to AMX-BF16</b> &#x2014; there is no format mismatch to bridge. For ordinary
+finite values, the expected numeric differences between the two arms are one rounding-mode choice and
+the fp32 reduction order (details and caveats below). This section also corrects an
+earlier claim of ours (in the increment-1b notes) that the AVX PV path multiplied with fp32 weights
+&#x2014; it does not; it rounds them to bf16 too.</p>
+
+<h3>What each engine supports on the Xeon 6 6962P</h3>
+<div class="tablewrap">
+<table>
+<tr><th>Engine</th><th>fp32</th><th>bf16</th><th>fp16</th><th>int8</th></tr>
+<tr><td>AVX-512</td><td>native</td><td>AVX512_BF16: VDPBF16PS dot product + converts
+(isa-extensions-progref.txt:944, 1402)</td><td>AVX512_FP16 (isa-extensions-progref.txt:1370)</td>
+<td>VNNI</td></tr>
+<tr><td>AMX</td><td>accumulators only: bf16/fp16 tile dot products accumulate into fp32, int8 into
+int32; there is no general fp32 tile multiply</td>
+<td>TDPBF16PS (sdm-vol-1-253665.txt:8002)</td><td>TDPFP16PS / AMX-FP16, Granite Rapids
+(isa-extensions-progref.txt:616, 968; CPUID 7.1:EAX bit 21, line 1427). Present on the 6962P; not
+reported in <code>/proc/cpuinfo</code> on the tested delphi-3bda software stack (a kernel/tooling
+matter, not architectural) and verified separately through CPUID</td><td>TDPB*D</td></tr>
+</table>
+</div>
+<p>So the common statement &quot;AMX is bf16/int8 only&quot; describes Sapphire/Emerald Rapids;
+Granite Rapids adds AMX-FP16. Neither fp16 unit matters here: tron&#x27;s KV cache stores K and V as
+bf16, and no fp16 appears anywhere in software attention.</p>
+
+<h3>What tron&#x27;s two attention paths actually compute</h3>
+<ul>
+<li><b>AVX QK</b>: the dotter multiplies bf16 Q against bf16 K with VDPBF16PS
+(<code>_mm512_dpbf16_ps</code>, dotter.hpp:167, 218), accumulating fp32.</li>
+<li><b>AVX PV</b>: <code>scaled_v_expr</code> converts the fp32 softmax weights to bf16 by
+<b>truncation</b> &#x2014; a 16-bit right shift that simply drops the low mantissa bits
+(kv_cache.hpp:1795&#x2013;1800) &#x2014; interleaves them into pairs, and multiplies against the bf16 V
+with VDPBF16PS (kv_cache.hpp:1678, 1682), accumulating fp32.</li>
+<li><b>AMX QK/PV</b> (increments 1 and 1b): TDPBF16PS on the same bf16 K/V data; the PV weights are
+converted fp32&#x2192;bf16 with VCVTNE2PS2BF16, which <b>rounds to nearest even</b> (RNE) instead of
+truncating; all accumulation fp32 in the tile registers.</li>
+<li>Everything around the multiplies (scale, softcap, max, exp, the deferred-softmax v*/s*/m* updates)
+is the identical fp32 code in both paths.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 980 496" width="980" height="496" role="img" aria-label="Data types at each stage of software attention in the AVX-512 and AMX paths: bf16 inputs and multiplies, fp32 accumulation and softmax, and the one fp32 to bf16 weight conversion where AVX chops and AMX rounds to nearest even" font-family="system-ui,sans-serif">
+<rect x="0" y="0" width="980" height="496" fill="#ffffff"/>
+<rect x="14" y="16" width="13" height="13" rx="3" fill="#e4f2ed" stroke="#1b9e77" stroke-width="2"/>
+<text x="33.0" y="27.0" font-size="11.5" fill="#26241f" text-anchor="start" >bf16 data</text>
+<rect x="115.69999999999999" y="16" width="13" height="13" rx="3" fill="#eae9f4" stroke="#7570b3" stroke-width="2"/>
+<text x="134.7" y="27.0" font-size="11.5" fill="#26241f" text-anchor="start" >fp32 data</text>
+<rect x="217.39999999999998" y="16" width="13" height="13" rx="3" fill="#fcebdd" stroke="#d95f02" stroke-width="2"/>
+<text x="236.4" y="27.0" font-size="11.5" fill="#26241f" text-anchor="start" >fp32&#x2192;bf16 conversion (the rounding-mode difference)</text>
+<text x="966.0" y="27.0" font-size="11" fill="#57554f" text-anchor="end" >&#x2020; = same math, different fp32 summation order</text>
+<text x="14.0" y="74.0" font-size="12" fill="#26241f" text-anchor="start" font-weight="600" >AVX-512 path (today&#x27;s code)</text>
+<text x="14.0" y="182.0" font-size="12" fill="#26241f" text-anchor="start" font-weight="600" >AMX path (increments 1 + 1b)</text>
+<rect x="14.0" y="88.0" width="90.0" height="52.0" rx="5" fill="#e4f2ed" stroke="#1b9e77" stroke-width="2"/>
+<text x="59.0" y="111.0" font-size="11.5" fill="#26241f" text-anchor="middle" font-weight="600" >Q, K</text>
+<text x="59.0" y="125.0" font-size="11.5" fill="#26241f" text-anchor="middle" >(bf16 cache)</text>
+<line x1="104.0" y1="114.0" x2="113.0" y2="114.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 118.0 114.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="118.0" y="88.0" width="96.0" height="52.0" rx="5" fill="#e4f2ed" stroke="#1b9e77" stroke-width="2"/>
+<text x="166.0" y="104.7" font-size="10.5" fill="#26241f" text-anchor="middle" >VDPBF16PS &#x2020;</text>
+<text x="166.0" y="117.7" font-size="10.5" fill="#26241f" text-anchor="middle" >bf16&#xD7;bf16</text>
+<text x="166.0" y="130.7" font-size="10.5" fill="#26241f" text-anchor="middle" >&#x2192; fp32 acc</text>
+<line x1="214.0" y1="114.0" x2="223.0" y2="114.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 228.0 114.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="228.0" y="88.0" width="70.0" height="52.0" rx="5" fill="#eae9f4" stroke="#7570b3" stroke-width="2"/>
+<text x="263.0" y="111.0" font-size="11.5" fill="#26241f" text-anchor="middle" font-weight="600" >scores S</text>
+<text x="263.0" y="125.0" font-size="11.5" fill="#26241f" text-anchor="middle" >(fp32)</text>
+<line x1="298.0" y1="114.0" x2="307.0" y2="114.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 312.0 114.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<line x1="432.0" y1="114.0" x2="477.0" y2="114.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 482.0 114.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<text x="457.0" y="109.0" font-size="10" fill="#57554f" text-anchor="middle" >P (fp32)</text>
+<rect x="482.0" y="88.0" width="132.0" height="52.0" rx="5" fill="#fcebdd" stroke="#d95f02" stroke-width="2"/>
+<text x="548.0" y="104.7" font-size="10.5" fill="#26241f" text-anchor="middle" font-weight="600" >chop: &gt;&gt;16</text>
+<text x="548.0" y="117.7" font-size="10.5" fill="#26241f" text-anchor="middle" >drop low 16 bits</text>
+<text x="548.0" y="130.7" font-size="10.5" fill="#26241f" text-anchor="middle" >(toward zero)</text>
+<line x1="614.0" y1="114.0" x2="623.0" y2="114.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 628.0 114.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="628.0" y="88.0" width="70.0" height="52.0" rx="5" fill="#e4f2ed" stroke="#1b9e77" stroke-width="2"/>
+<text x="663.0" y="111.0" font-size="11.5" fill="#26241f" text-anchor="middle" font-weight="600" >P</text>
+<text x="663.0" y="125.0" font-size="11.5" fill="#26241f" text-anchor="middle" >(bf16)</text>
+<line x1="698.0" y1="114.0" x2="707.0" y2="114.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 712.0 114.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="712.0" y="88.0" width="96.0" height="52.0" rx="5" fill="#e4f2ed" stroke="#1b9e77" stroke-width="2"/>
+<text x="760.0" y="104.7" font-size="10.5" fill="#26241f" text-anchor="middle" >VDPBF16PS &#x2020;</text>
+<text x="760.0" y="117.7" font-size="10.5" fill="#26241f" text-anchor="middle" >&#xD7; V (bf16)</text>
+<text x="760.0" y="130.7" font-size="10.5" fill="#26241f" text-anchor="middle" >&#x2192; fp32 acc</text>
+<line x1="808.0" y1="114.0" x2="817.0" y2="114.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 822.0 114.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="14.0" y="196.0" width="90.0" height="52.0" rx="5" fill="#e4f2ed" stroke="#1b9e77" stroke-width="2"/>
+<text x="59.0" y="219.0" font-size="11.5" fill="#26241f" text-anchor="middle" font-weight="600" >Q, K</text>
+<text x="59.0" y="233.0" font-size="11.5" fill="#26241f" text-anchor="middle" >(bf16 cache)</text>
+<line x1="104.0" y1="222.0" x2="113.0" y2="222.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 118.0 222.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="118.0" y="196.0" width="96.0" height="52.0" rx="5" fill="#e4f2ed" stroke="#1b9e77" stroke-width="2"/>
+<text x="166.0" y="212.7" font-size="10.5" fill="#26241f" text-anchor="middle" >TDPBF16PS &#x2020;</text>
+<text x="166.0" y="225.7" font-size="10.5" fill="#26241f" text-anchor="middle" >bf16&#xD7;bf16 tiles</text>
+<text x="166.0" y="238.7" font-size="10.5" fill="#26241f" text-anchor="middle" >&#x2192; fp32 acc</text>
+<line x1="214.0" y1="222.0" x2="223.0" y2="222.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 228.0 222.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="228.0" y="196.0" width="70.0" height="52.0" rx="5" fill="#eae9f4" stroke="#7570b3" stroke-width="2"/>
+<text x="263.0" y="219.0" font-size="11.5" fill="#26241f" text-anchor="middle" font-weight="600" >scores S</text>
+<text x="263.0" y="233.0" font-size="11.5" fill="#26241f" text-anchor="middle" >(fp32)</text>
+<line x1="298.0" y1="222.0" x2="307.0" y2="222.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 312.0 222.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<line x1="432.0" y1="222.0" x2="477.0" y2="222.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 482.0 222.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<text x="457.0" y="217.0" font-size="10" fill="#57554f" text-anchor="middle" >P (fp32)</text>
+<rect x="482.0" y="196.0" width="132.0" height="52.0" rx="5" fill="#fcebdd" stroke="#d95f02" stroke-width="2"/>
+<text x="548.0" y="212.7" font-size="10.5" fill="#26241f" text-anchor="middle" font-weight="600" >VCVTNE2PS2BF16</text>
+<text x="548.0" y="225.7" font-size="10.5" fill="#26241f" text-anchor="middle" >round to nearest</text>
+<text x="548.0" y="238.7" font-size="10.5" fill="#26241f" text-anchor="middle" >even (RNE)</text>
+<line x1="614.0" y1="222.0" x2="623.0" y2="222.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 628.0 222.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="628.0" y="196.0" width="70.0" height="52.0" rx="5" fill="#e4f2ed" stroke="#1b9e77" stroke-width="2"/>
+<text x="663.0" y="219.0" font-size="11.5" fill="#26241f" text-anchor="middle" font-weight="600" >P</text>
+<text x="663.0" y="233.0" font-size="11.5" fill="#26241f" text-anchor="middle" >(bf16)</text>
+<line x1="698.0" y1="222.0" x2="707.0" y2="222.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 712.0 222.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="712.0" y="196.0" width="96.0" height="52.0" rx="5" fill="#e4f2ed" stroke="#1b9e77" stroke-width="2"/>
+<text x="760.0" y="212.7" font-size="10.5" fill="#26241f" text-anchor="middle" >TDPBF16PS &#x2020;</text>
+<text x="760.0" y="225.7" font-size="10.5" fill="#26241f" text-anchor="middle" >&#xD7; V (bf16)</text>
+<text x="760.0" y="238.7" font-size="10.5" fill="#26241f" text-anchor="middle" >&#x2192; fp32 acc</text>
+<line x1="808.0" y1="222.0" x2="817.0" y2="222.0" stroke="#7a786f" stroke-width="1.6"/>
+<path d="M 822.0 222.0 l -7 -3.6 v 7.2 z" fill="#7a786f"/>
+<rect x="312.0" y="80.0" width="120.0" height="176.0" rx="5" fill="#eae9f4" stroke="#7570b3" stroke-width="2"/>
+<text x="372.0" y="139.2" font-size="10.5" fill="#26241f" text-anchor="middle" font-weight="600" >softmax epilogue</text>
+<text x="372.0" y="152.2" font-size="10.5" fill="#26241f" text-anchor="middle" >scale, softcap,</text>
+<text x="372.0" y="165.2" font-size="10.5" fill="#26241f" text-anchor="middle" >max, exp</text>
+<text x="372.0" y="178.2" font-size="10.5" fill="#26241f" text-anchor="middle" >(fp32)</text>
+<text x="372.0" y="191.2" font-size="10.5" fill="#26241f" text-anchor="middle" >identical code</text>
+<text x="372.0" y="204.2" font-size="10.5" fill="#26241f" text-anchor="middle" >in both paths</text>
+<rect x="822.0" y="80.0" width="122.0" height="176.0" rx="5" fill="#eae9f4" stroke="#7570b3" stroke-width="2"/>
+<text x="883.0" y="139.2" font-size="10.5" fill="#26241f" text-anchor="middle" font-weight="600" >O (fp32) &#x2192;</text>
+<text x="883.0" y="152.2" font-size="10.5" fill="#26241f" text-anchor="middle" >v*, s*, m* update</text>
+<text x="883.0" y="165.2" font-size="10.5" fill="#26241f" text-anchor="middle" >(deferred softmax,</text>
+<text x="883.0" y="178.2" font-size="10.5" fill="#26241f" text-anchor="middle" >fp32)</text>
+<text x="883.0" y="191.2" font-size="10.5" fill="#26241f" text-anchor="middle" >identical code</text>
+<text x="883.0" y="204.2" font-size="10.5" fill="#26241f" text-anchor="middle" >in both paths</text>
+<text x="14.0" y="290.0" font-size="12" fill="#26241f" text-anchor="start" font-weight="600" >Why the conversion matters: fp32 &#x2192; bf16 keeps only the top 16 bits</text>
+<rect x="120.0" y="304" width="33.9" height="24" fill="#ffffff" stroke="#57554f" stroke-width="1.5"/>
+<text x="137.0" y="320.0" font-size="10.5" fill="#26241f" text-anchor="middle" >sign</text>
+<rect x="153.9" y="304" width="135.8" height="24" fill="#f4f3ef" stroke="#57554f" stroke-width="1.5"/>
+<text x="221.8" y="320.0" font-size="10.5" fill="#26241f" text-anchor="middle" >exponent 8</text>
+<rect x="289.7" y="304" width="390.3" height="24" fill="#ffffff" stroke="#57554f" stroke-width="1.5"/>
+<text x="484.8" y="320.0" font-size="10.5" fill="#26241f" text-anchor="middle" >fraction 23 bits</text>
+<text x="112.0" y="320.0" font-size="11.5" fill="#26241f" text-anchor="end" font-weight="600" >fp32</text>
+<line x1="120" y1="336" x2="400.0" y2="336" stroke="#1b9e77" stroke-width="2.5"/>
+<line x1="400.0" y1="336" x2="680.0" y2="336" stroke="#d95f02" stroke-width="2.5" stroke-dasharray="5 3"/>
+<text x="260.0" y="350.0" font-size="10.5" fill="#1b9e77" text-anchor="middle" >top 16 bits = the bf16 value</text>
+<text x="540.0" y="350.0" font-size="10.5" fill="#d95f02" text-anchor="middle" >low 16 bits: chop drops them; RNE uses them to pick the neighbor</text>
+<text x="14.0" y="372.0" font-size="11.5" fill="#26241f" text-anchor="start" >Between two adjacent bf16 values (one step &#x2248; 0.78% apart for normal values):</text>
+<line x1="160" y1="406" x2="700" y2="406" stroke="#7a786f" stroke-width="1.6"/>
+<line x1="160" y1="399" x2="160" y2="413" stroke="#26241f" stroke-width="2"/>
+<text x="160.0" y="428.0" font-size="10.5" fill="#57554f" text-anchor="middle" >bf16 neighbor below</text>
+<line x1="700" y1="399" x2="700" y2="413" stroke="#26241f" stroke-width="2"/>
+<text x="700.0" y="428.0" font-size="10.5" fill="#57554f" text-anchor="middle" >bf16 neighbor above</text>
+<circle cx="538.0" cy="406" r="4.5" fill="#7570b3"/>
+<text x="526.0" y="372.0" font-size="10.5" fill="#7570b3" text-anchor="end" >fp32 weight (nonnegative)</text>
+<path d="M 538.0 414 C 418.0 450, 250.0 450, 164.0 416" fill="none" stroke="#d95f02" stroke-width="2"/>
+<path d="M 162.0 414 l 1.2 8.6 l 6.8 -5.4 z" fill="#d95f02"/>
+<text x="349.0" y="458.0" font-size="10.5" fill="#d95f02" text-anchor="middle" >chop: always to the lower neighbor (AVX today)</text>
+<path d="M 538.0 398 C 598.0 370, 640.0 370, 696.0 396" fill="none" stroke="#1b9e77" stroke-width="2"/>
+<path d="M 698.0 398 l -1.2 -8.6 l -6.8 5.4 z" fill="#1b9e77"/>
+<text x="649.0" y="366.0" font-size="10.5" fill="#1b9e77" text-anchor="middle" >RNE: to the nearest (AMX)</text>
+<text x="160.0" y="480.0" font-size="10.5" fill="#57554f" text-anchor="start" >A weight exactly halfway goes to whichever neighbor has an even last bit (&quot;ties to even&quot;).</text>
+</svg>
+<figcaption>Data types through one page of attention. Teal = bf16, purple = fp32, orange = the
+fp32&#x2192;bf16 weight conversion &#x2014; the one rounding-mode difference between the paths
+(AVX chops toward zero, kv_cache.hpp:1795&#x2013;1800; AMX rounds to nearest even). The two
+purple mid-lane blocks are the same fp32 code executed by both paths. &#x2020;: the multiplies
+compute the same bf16&#xD7;bf16&#x2192;fp32 math but sum partial products in a different order
+&#x2014; the second expected delta for finite, non-subnormal values (caveats above).</figcaption>
+</figure>
+
+<p>Plain words: bf16 has 8 bits of significand precision (7 stored fraction bits plus the implicit
+leading bit). Within one power-of-two range, adjacent representable values are spaced about 0.78%
+of that range&#x27;s base apart (&quot;1 ULP&quot;). Chopping the low 16 fp32 bits rounds toward zero
+&#x2014; for these nonnegative weights that means downward &#x2014; with error below 1 ULP.
+<b>Round to nearest even</b> picks the nearest representable value, with error at most 0.5 ULP for
+ordinary finite values, and avoids truncation&#x27;s systematic downward tendency. (The AVX
+conversion, <code>_mm512_srli_epi32(..., 16)</code>, is a bit-level chop, not an IEEE conversion
+instruction.)</p>
+
+<h3>The resulting A/B differences and the decision</h3>
+<ul>
+<li>Numeric deltas between the AVX and AMX arms &#x2014; for finite, non-subnormal inputs and
+identical softmax update sequencing and padding: (1) the PV-weight conversion (chop vs RNE);
+(2) fp32 accumulation/reduction order (non-associative; this heading also covers VDPBF16PS&#x27;s
+two-product grouping vs the tile FMA topology). Exceptional and subnormal behavior (DAZ/FTZ,
+NaN/infinity) is outside this comparison and should be ruled out or tested separately in T1.</li>
+<li>Measured effect (t1-quick, 2026-08-18, greedy + seeded + <code>--pay-for-determinism</code>;
+control: two AVX runs byte-identical): AMX output byte-identical at ctx 8192; one argmax flip about
+20 tokens in at ctx 2048, after which the continuations diverge by construction. One prompt per
+context &#x2014; a sample, not a verdict. The P0 harness observed a worst-case relative error of
+8&#xD7;10<sup>-5</sup> on the normalized outputs (denominator floored at 10<sup>-3</sup>) against its
+scalar reference on the tested cases &#x2014; an observation, not a proven bound. Note the reference
+itself rounds the softmax weights to bf16 (amx_fused_bench.cpp:439, matching all fast paths), so that
+figure measures the score-path and reduction-order effects, not the weight quantization.</li>
+<li><b>Decision (2026-08-19, approved by jhan)</b>: keep RNE &#x2014; the locally more accurate
+conversion for ordinary finite values &#x2014; and let the formal T1 logit-tolerance test judge both
+arms against an fp32 reference (T1 should compare pre-sampling logits with a predeclared
+absolute-plus-relative criterion; byte-identical generated text is a nondeterminism check, not an
+accuracy test). If T1&#x27;s owners prefer minimum divergence from the shipped AVX behavior instead,
+switching the AMX conversion to the same chop is a one-line change in <code>pv_128x4</code>, making
+the PV weight operands bit-identical between the arms; for the tested finite, non-subnormal domain
+the remaining expected numerical delta would be the reduction order.</li>
+</ul>
+
+<h2 id="plan">7. Implementation plan</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Phase</th><th>Work</th><th>Gate to proceed</th></tr>
+<tr><td class="phase">P0<br>microbenchmark</td><td>Standalone fused-page kernel on delphi-3bda vs today's exact code: QK N &#x2208; {1,4,8,16}, PV M &#x2208; {1,4,8,16}; complete + partial pages; L2/LLC/DRAM-resident variants; includes Q pack, tile loads/TDPs, score store+transpose, masking, softmax, P conversion, 6+2 PV, fp32 rescale/add, LDTILECFG/TILERELEASE and <code>arch_prctl</code> first-use costs; 1 AMX thread/core vs SMT-oversubscribed. Also capture the missing tronperf baseline trace (attention share of decode).</td><td><b>Primary baseline decision: does fused-page AMX beat AVX-512 at guaranteed width 4?</b> Gate for integration: at least one legally shareable measured shape wins without end-to-end regression; width 4 may remain AVX-512 while profitable width 8/16 shapes proceed.</td></tr>
+<tr><td class="phase">P1<br>instrument sharing</td><td>Add counters to the attention planner: physical-page pointer equality across in-flight tokens; <b>weighted work coverage</b> of shared pages (share of total QK/PV flops on shared pages, not just distinct-page counts); valid-rows-per-page distribution; density under HW-on/off; legal N/M distribution per GEMM.</td><td>Data decides whether P4 exists. No kernel work blocked on this.</td></tr>
+<tr><td class="phase">P2<br>kernels</td><td>AMX QK (D1) + PV (D2) in an isolated TU behind the D7 runtime guard, integrated in <code>apply_page_tok</code>'s dense fast path; AVX-512 retained for: unsupported geometry, low-density pages, permission failure, unprofitable shapes, non-AMX hosts. Unit tests vs existing kernels.</td><td>T1&#x2013;T3 green; measured kernel-level win on the shapes P0 said win.</td></tr>
+<tr><td class="phase">P3<br>numerics policy</td><td>fp32 v* scratchpad as a separate, independently benchmarked change (not coupled to AMX enablement); legacy bf16 mode kept.</td><td>Model-quality owners accept the numerics diff, or it ships off by default.</td></tr>
+<tr><td class="phase">P4<br>shared-KV batching</td><td>Only if P1 shows meaningful sharing: group queries by immutable physical page identity, kv_head, and compatible attention math/configuration &#x2014; carrying visibility as per-query metadata &#x2014; to raise N/M toward 16 for shared-prefix/speculative workloads.</td><td>P1 incidence data justifies the restructure.</td></tr>
+<tr><td class="phase">P5<br>tuning experiments</td><td>Software prefetch to L2 (Intel's 100&#x2013;500-TDP-op guidance is generic GEMM advice &#x2014; may not transfer to this short kernel); TILELOADDT1 A/B; TILEZERO cadence; attention-worker count re-tune (AMX may need fewer workers &#x2192; more main helpers); TPAUSE C0.2 on HT siblings; <b>two-pass-per-section softmax</b>: pass 1 computes all QK scores for a section into an L2 buffer tracking a running <i>per-query</i> maximum, pass 2 does one exp pass then PV with C tiles legally live across the section (no page-dependent rescale exists once the maximum is fixed). Qualifications agreed in consensus: sections must not cross the ready/pending wait, ABI-visible calls, or any TILERELEASE boundary; all-masked queries handled explicitly (no &#x2212;inf&#x2212;(&#x2212;inf)); algorithmic K/V bytes are unchanged but <i>observed</i> cache/DRAM traffic may increase (K/V adjacency in kv_block, prefetch of unused V in pass 1, probability reread for 6+2 blocking) and must be measured; keep distance between the bf16-probability conversion stores and the tile loads that read them (store&#x2192;TILELOADD forwarding hazard <span class="cite">opt-manual:32753-32758</span>); this variant belongs to the fp32 numerics policy (P3), not the bit-compatibility path. Comparison matrix: rolling AVX-512 vs one-pass AMX vs two-pass AMX &#xD7; section length {1,2,4,8,16} &#xD7; width {4,8,16} &#xD7; {L2, LLC, DRAM}-resident KV.</td><td>Each experiment ships only with a measured win on the T4 matrix.</td></tr>
+</table>
+</div>
+
+<h2 id="tests">8. Test plan</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Layer</th><th>Content</th></tr>
+<tr><td>T1 unit / numeric</td><td>New <code>t/</code> tests: AMX QK &amp; PV vs scalar reference and vs today's kernels. Tolerance-based (different reduction trees), bit-exact only on crafted exactly-representable inputs. Edge matrix: random bf16, large magnitudes, NaN/Inf in masked <i>and</i> visible rows, subnormals (DAZ!), all-masked page, single valid token, 15/16/17 and 31/32/33 valid rows, max changing every page, max constant, extreme rescale factors, softcap on/off.</td></tr>
+<tr><td>T2 dispatch / OS</td><td>AMX absent; present-but-permission-denied; XCR0 incomplete; <code>arch_prctl</code> failure; repeated enable/disable; worker early-return cleanup (TILERELEASE on all paths); signal delivery with live tile state; sigaltstack &#x2265; <code>AT_MINSIGSTKSZ</code>; behavior when affinity is missing.</td></tr>
+<tr><td>T3 CI strategy (AMD build host)</td><td>(1) baseline non-AMX build + fallback tests on alpha; (2) AMX cross-build on alpha to catch compile/link breaks; (3) Intel SDE for focused kernel/dispatch functional tests; (4) nightly real-hardware functional + perf on delphi-3bda. SDE is never trusted for performance or XFD lifecycle subtleties.</td></tr>
+<tr><td>T4 performance</td><td><code>tronperf --gen</code>, model <code>ingested-qwen-3-4b-instruct-2507-tp2</code>, users &#x2208; {1,4,8,16} &#xD7; context &#x2208; {256, 2048, 8192}, <b>USE_HW_ATTN=0 primary</b> + default-mode secondary. Metrics: per-request tok/s log <span class="cite">stream_generate.hpp:236-253</span>, scheduler aggregate throughput, p50/p95/p99 inter-token latency, fairness; perfetto attention spans; PMU: DRAM BW, LLC misses, local/remote NUMA, APERF/MPERF effective clock &#x2014; sampled per core, explicitly including <b>non-AMX cores</b> (main helpers, FPGA driver threads) to quantify any cross-core frequency impact of AMX via the shared package power budget (per Intel the license mechanism itself is per-core and does not affect other license levels &#x2014; doc 01 &#xA7;7.3); package RAPL power; license residency (<code>CORE_POWER.LVL*_TURBO_LICENSE</code>), <code>AMX_OPS_RETIRED</code> (GP counter 0 <span class="cite">sdm-vol-3b:15024</span>); AMX fast-path coverage %; page-sharing ratio; per-stage time split (pack/transpose/mask/softmax/PV).</td></tr>
+<tr><td>T5 regression / determinism</td><td>Non-AMX build byte-identical behavior; fallback path exercised (sliding-window/sparse cases); two test classes maintained: semantic logit-tolerance AND exact deterministic replay under the legacy kernel with fixed scheduling (the codebase already documents that attention-plan changes move exact logits <span class="cite">model.hpp:2004-2009</span>). Goldens are never silently regenerated &#x2014; fp32-v* acceptance is an explicit owner decision (P3).</td></tr>
+</table>
+</div>
+
+<h2 id="sysconf">9. System configuration changes</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Item</th><th>Change</th><th>Status on delphi-3bda</th></tr>
+<tr><td>Kernel / BIOS</td><td><b>None required.</b> AMX needs Linux &#x2265; 5.16; XCR0/XFD flow is standard.</td><td class="ok">6.8.0-124; AMX flags visible <span class="pill meas">measured</span></td></tr>
+<tr><td>Process opt-in (code)</td><td><code>arch_prctl(ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA)</code> once per process, before app-pool threads spawn; verify success; runtime-disable AMX path on failure.</td><td>new code (D7/D8)</td></tr>
+<tr><td>Thread placement</td><td>One AMX attention worker per physical core; HT sibling idle or TPAUSE C0.2. tron's CPU-set plumbing already supports this (<code>app_set_cpu_list</code>, <code>peer_of()</code>, exclusive <code>app_pin_thread</code> <span class="cite">system.hpp:90-131</span>) &#x2014; this is deployment cpu-list configuration, not new mechanism. <b>Driver-core separation:</b> attention/AMX workers live on the app cpu set and must not overlap the dev cpu set that hosts the per-card TX/RX driver threads &#x2014; the RX workers execute rope&nbsp;K + save&nbsp;K/V on the per-layer critical chain (&#xA7;1), so stealing their cycles delays every layer. The HT-sibling rule extends to them: no AMX or other heavy work on the HT siblings of TX/RX cores either (they are latency-critical mwaitx spinners, and a busy sibling contends for the physical core exactly as in Intel's SMT guidance <span class="cite">opt-manual:33199-33213</span>).</td><td>config at rollout; P0 audits app/dev/helper cpu lists for overlap, incl. <code>peer_of()</code> siblings of both attention and dev cores</td></tr>
+<tr><td>NUMA co-location</td><td><b>Prerequisite for meaningful measurement</b>: attention workers and the KV arena (1 GB hugepages) on the same socket; verify allocation node vs worker cpu-list.</td><td>verify at P0</td></tr>
+<tr><td>Signal stacks</td><td>Audit any <code>sigaltstack</code> against <code>AT_MINSIGSTKSZ</code> (XSAVE frame grows &gt; 8 KB).</td><td>audit at P2</td></tr>
+<tr><td>L2 AMP prefetcher (BIOS)</td><td>Record the BIOS setting; test only if present. (The ~7% AMX regression report is Emerald-Rapids-era &#x2014; no recommendation for GNR without measurement <span class="cite">opt-manual:32739-32750</span>.)</td><td>record at P0</td></tr>
+<tr><td>SNC</td><td>Keep <b>off</b> for the baseline (current state: 2 NUMA nodes = 1/socket <span class="pill meas">measured</span>). SNC3 only after the allocator/worker pool can form explicit NUMA domains.</td><td class="ok">already off</td></tr>
+<tr><td>Hugepages</td><td>No change &#x2014; existing tron requirement (512 &#xD7; 1 GB configured).</td><td class="ok">configured <span class="pill meas">measured</span></td></tr>
+</table>
+</div>
+
+<h2 id="consensus">10. Consensus log (Claude &#x21C4; GPT-5.6-Sol via PAL)</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Round</th><th>Point of contention</th><th>Resolution</th></tr>
+<tr><td>1</td><td><b>Cross-user tile batching</b> (Claude's original D3: fill tiles with B users' tokens &#xD7; 4 heads)</td><td><b>Sol refuted it</b>: independent users own disjoint physical KV pages; batching them into one GEMM is mathematically invalid, and reading B private pages multiplies traffic, not intensity. Withdrawn. Replaced by the shared-physical-page grouping rule (&#xA7;5) + P1 instrumentation.</td></tr>
+<tr><td>1</td><td><b>Tile-resident v* across pages</b> (Claude's original D6)</td><td><b>Sol refuted it</b>: rolling softmax rescales v* whenever the running max moves; AMX has no tile-elementwise multiply and tiles are ABI-volatile. Corrected to per-page TILESTORED + AVX-512 rescale/add into a memory scratchpad; fp32 widening split out as P3.</td></tr>
+<tr><td>1</td><td>Terminology &amp; budgets</td><td>Sol's fixes adopted: M vs N naming in D1; 4C+2A+1B tile budget; 6+2 PV blocking; partial transposes; MAC-based comparisons; zero-init demoted; TILEZERO as experiment; isolated -mamx TU; lifecycle rules; USE_HW_ATTN=0 for primary benchmarks; no speedup claims pre-measurement.</td></tr>
+<tr><td>2</td><td>Page-sharing exists in tron (Claude's evidence: token tree, shared system prompts, ranged-mask visibility)</td><td><b>Sol agreed</b>, with refinements adopted: visibility is per-query metadata inside a legal group (not an equality requirement); pointer identity must be stable across the kernel; P1 reports weighted work coverage, not distinct-page fractions.</td></tr>
+<tr><td>2</td><td>Two-pass-per-section softmax (Claude's proposal)</td><td><b>Sol agreed</b> as a P5 measured experiment with qualifications (per-query maxima, section boundary rules, honest traffic accounting, store&#x2192;tile-load hazard, fp32-policy scope) &#x2014; all folded into the P5 row above.</td></tr>
+<tr><td>2</td><td>Honest outcome framing</td><td><b>Sol agreed</b>: dispatch only on measured-profitable shapes; expected candidate is shared-KV width &#x2265; 8 but the threshold is not promised before P0; separate QK/PV thresholds allowed; default-off AMX for private width-4 decode is a successful outcome, not failure. Final verdict: "CONSENSUS v2 CONFIRMED".</td></tr>
+<tr><td>3 (2026-08-19)</td><td>Precision addendum &#xA7;6b (prompted by Jeremy&#x27;s question: do AVX and
+AMX use different float formats?)</td><td><b>Sol: ENDORSE-WITH-EDITS</b>, 7 corrections, all applied:
+narrowed the &quot;same formats&quot; claim to the dot-product operations actually used; per-type AMX
+accumulator statement; /proc/cpuinfo absence framed as a software-stack observation, not architectural;
+bf16 ULP spacing corrected to &#x2248;0.78% of the binade base (8-bit significand, 7 stored); chop is
+toward-zero (downward only because weights are nonnegative) and RNE&#x27;s &quot;unbiased&quot; claim
+removed; deltas list qualified to finite non-subnormal inputs with DAZ/FTZ + NaN/inf deferred to T1;
+&quot;LSB-level&quot; bound removed; harness 8&#xD7;10<sup>-5</sup> reframed as an observation with its
+metric stated and the reference&#x27;s own bf16 weight rounding disclosed; T1 defined as pre-sampling
+logit comparison with a predeclared absolute-plus-relative criterion.</td></tr>
+<tr><td>4 (2026-08-19)</td><td>Transpose addendum &#xA7;4b (prompted by jhan&#x27;s question: is &#xA7;4
+still the best place to understand the transpose optimization?)</td><td><b>Sol: ENDORSE-WITH-EDITS</b>,
+5 corrections, all applied: the canonical-vs-mirror gap is &#x2248;300 ns/page (982&#x2212;686 = 296; the
+earlier &#x2248;200 ns note was an arithmetic error, also fixed in the queue record) and is an end-to-end
+kernel delta, not an isolated transpose measurement; &quot;cannot be optimized away&quot; softened to the
+layout mismatch being inherent under the current epilogue contract while implementation cost may still be
+reducible; the &#x2248;2% double-buffering result rejects the hazard as the dominant bottleneck under the
+measured conditions, not categorically; width-4 saves a quarter of the stage-2 paths while stage-1 work
+remains shared; the scalar self-check runs in the harness, not inside production kernels.</td></tr>
+<tr><td>5 (2026-08-19)</td><td>Interleaved-pair addendum &#xA7;2b (prompted by jhan&#x27;s request for a
+visual, example-data explanation)</td><td><b>Sol: ENDORSE-WITH-EDITS</b>, 6 corrections, all applied:
+the pair requirement stated precisely (both operands consume reduction-axis pairs; only the B operand
+needs the pair-interleaved layout &#x2014; A uses ordinary row-major adjacency); the &quot;pair spans the
+reduction axis&quot; rule narrowed to the B-operand layouts under discussion; the even/odd V write
+described as ordered (even initializes and clears, the LATER odd merges); &quot;every dim lane at
+once&quot; corrected to the current vector/tile fragment; figcaption moved inside figure (an invalid
+nesting also found and fixed in three other generated pages); doc-04 increment jargon removed from the
+table. Sol confirmed the example arithmetic (2.50, 3.25, 151) and the three-row layout table.</td></tr>
+<tr><td>6 (2026-08-19)</td><td>&#xA7;2b clarity pass (prompted by jhan&#x27;s three questions: are
+the P values model weights; how can C[d0] legitimately combine values from two tokens; what would
+go wrong if the B operand were stored as plain rows)</td><td>Clarification only &#x2014; no
+arithmetic or layout claim changed, and none was found wrong. Added: P identified as attention
+weights (softmax outputs), not model parameters, in the panel-2 title, pair label, and a new prose
+paragraph; the same paragraph spells out that a (t0, t1) pair in one accumulator is two
+consecutive terms of the per-dim sum O[d0] = &#x3A3;&#x209C; P[t]&#xB7;V[t][d0], not a mix-up; a
+second new paragraph gives the fixed per-lane contract (both halves of a B lane feed one
+accumulator), the concrete wrong result plain rows would produce (0.25 instead of 2.50), and the
+16-row-tile vs 32-deep-reduction geometry that makes B, not A, the operand needing the fold.</td></tr>
+</table>
+</div>
+
+<h2 id="glossary">11. Glossary</h2>
+<dl class="gloss">
+  <dt>Canonical-K / mirror-K</dt><dd>Our own shorthand, not a standard term. Canonical-K = K stored the
+  way tron stores it today: one copy, original layout, byte-for-byte unchanged; the canonical kernel reads
+  those existing bytes directly (and therefore needs the transposing store, &#xA7;4b). Mirror-K = a second,
+  rearranged copy of K kept next to the original so the kernel can skip the transpose (the formulation from
+  Bill&#x27;s PR #2934; costs measured in rampup/p2-inc2.html). &quot;Canonical&quot; is the software word
+  for &quot;the standard/official version&quot;.</dd>
+  <dt>KV block layout / layout penalty</dt><dd>&quot;Layout&quot; = how one <code>kv_block</code> (the
+  storage unit for one layer-slot &#xD7; kv-head &#xD7; 64-token page) arranges its data planes in
+  memory. Default: two planes, K then V (32 KB at head 128), blocks packed back-to-back. The mirror
+  build adds a third plane (the rearranged K copy) inside each block (48 KB). The &quot;layout
+  penalty&quot; is the slowdown from that fatter arrangement by itself: pages sit 1.5&#xD7; farther
+  apart and a 16 KB plane the AVX path never reads sits between every K and V, breaking hardware
+  prefetch streams. Proven by a layout-only control build (3-plane blocks, zero mirror code) that
+  reproduced the mirror build&#x27;s fallback penalty exactly, with decode-phase counters showing
+  LLC-load misses 50.8%&#x2192;84.6% and TLB misses &#x2248;0 in both arms (rampup/p2-inc2.html,
+  &quot;The costs&quot;).</dd>
+  <dt>Software attention / hw attention</dt><dd>Attention computed on the host CPU over DRAM KV pages vs. on the FPGA over HBM-resident KV shards. This project targets the CPU path only.</dd>
+  <dt>Page</dt><dd>64 contiguous tokens of one (layer, kv_head)'s K and V, stored as one contiguous block in host DRAM. The unit of attention work and of parallel reduction.</dd>
+  <dt>kv_section</dt><dd>A (kv_head, page-range) chunk of work assigned to one attention worker for one attention operation.</dd>
+  <dt>Minibatch</dt><dd>The tokens of one forward pass are split into 1&#x2013;2 chunks (&#x2264;128 tokens) so FPGA and CPU stages of different chunks overlap.</dd>
+  <dt>Ready / pending pages</dt><dd>Pages already filled before this pass (attendable immediately) vs. pages receiving this pass's K/V (attendable only after save_k/save_v).</dd>
+  <dt>Rabe&#x2013;Staats monoid / (m*, s*, v*)</dt><dd>The streaming-softmax bookkeeping: running max, running exp-sum, running weighted V sum &#x2014; lets pages be processed in any order/parallel and merged ("join").</dd>
+  <dt>Join / "pink work"</dt><dd>The parallel merge of per-worker (m*, s*, v*) partials into the final attention output (nicknamed for its Perfetto color).</dd>
+  <dt>dotter / scaled_v</dt><dd>Today's AVX-512 kernels: the Q&#xB7;K dot product object and the P&#xB7;V accumulation expression.</dd>
+  <dt>GQA group / kv_mul</dt><dd>The 4 query heads sharing one KV head in qwen3-4b (32 Q / 8 KV heads).</dd>
+  <dt>tp2</dt><dd>The executor variant that splits each FPGA weight matmul across 2 cards. CPU attention is unaffected by tp-degree.</dd>
+  <dt>Ingested model</dt><dd>A model whose C++ plugin was generated by the ingest pipeline (torch.export trace &#x2192; generated header) rather than handwritten. qwen-3-4b runs as <code>ingested-qwen-3-4b-instruct-2507-tp2</code>.</dd>
+  <dt>GOF</dt><dd>The host&#x2192;FPGA DMA machinery that ships KV pages to HBM for hardware attention &#x2014; the reason stored KV layouts are a shared contract.</dd>
+  <dt>ranged_mask / visibility</dt><dd>Per-query-job bitmask machinery deciding which KV tokens a query may attend (causality, trees, windows).</dd>
+  <dt>USE_HW_ATTN / force_hw_attn</dt><dd>Env override (0 = force software) / the per-plugin default (true for all ingested plugins).</dd>
+  <dt>P0&#x2013;P5 / T1&#x2013;T5 / D1&#x2013;D8 / R1&#x2013;R4 / G, A</dt><dd>This plan's label families: P = implementation phases
+  (<a href="#plan">&#xA7;7</a>; P0 is the measure-first microbenchmark step), T = test layers (<a href="#tests">&#xA7;8</a>),
+  D = design decisions (<a href="#design">&#xA7;4</a>), R = replacement points (<a href="#targets">&#xA7;3</a>),
+  G/A = gaps and amendments from the PoC comparison (doc 03 &#xA7;6).</dd>
+  <dt>AMX terms</dt><dd>Tile, TMUL, TDPBF16PS, palette, VNNI pairing, XFD, frequency license &#x2014; see <a href="01-amx-rampup.html#glossary">doc 01 glossary</a>. Performance units (MAC, MAC/cycle/core, flop, throughput vs latency, M/N/K, arithmetic intensity) &#x2014; see <a href="01-amx-rampup.html#terms">doc 01 &#xA7;0 terminology</a>.</dd>
+</dl>
+
+<h2 id="sources">12. Sources</h2>
+<div class="tablewrap">
+<table>
+<tr><th>Reference</th><th>What was taken from it</th></tr>
+<tr><td class="mono">/home/jhan/workspace/tron @ 1407f48dd (main)</td><td>All tron facts; key files: h/tron/models/self_attention.hpp, h/tron/models/kv_cache.hpp, h/tron/kernels/dotter.hpp, h/tron/plugins/llama.hpp, h/tron/models/model.hpp, h/tron/scheduler/full.hpp, h/system/system.hpp, config/models.yaml:710-723</td></tr>
+<tr><td class="mono">/scratch/jhan/Intel_vs_AMD/refs/*</td><td>All Intel AMX facts (see doc 01 &#xA7;10 for the per-document map)</td></tr>
+<tr><td>delphi-3bda probes, 2026-08-16 <span class="pill meas">measured</span></td><td>CPU/AMX CPUID, topology, NUMA, hugepages, kernel, DDR5-6400, governor</td></tr>
+<tr><td>HF <span class="mono">Qwen/Qwen3-4B-Instruct-2507 config.json</span></td><td>Model geometry (36L / 2560 / 32Q / 8KV / 128 hd) &#x2014; the generated tron plugin is built at ingest time and absent from the source tree; geometry must be re-confirmed against a built tree (open verification item)</td></tr>
+<tr><td>PAL consensus thread, GPT-5.6-Sol, 2026-08-16</td><td>Round-1 review (2 design refutations + corrections), round-2 confirmations (&#xA7;10)</td></tr>
+</table>
+</div>
+<p class="takeaway">Open verification items (tracked, not blocking): confirm the generated qwen-3-4b plugin's
+compile-time geometry and <code>TRON_AVX512_ENABLED</code> in the production build tree; measure attention's share
+of decode wall-clock (first P0 action); confirm GNR TMUL timings vs the SPR-era table.</p>
+
+</main>

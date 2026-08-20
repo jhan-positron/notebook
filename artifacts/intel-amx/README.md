@@ -44,3 +44,29 @@ copies during the next handoff run.
   The raw benchmark result trees and logs remain only at the canonical path.
 - Related handoff:
   handoffs/codex_2026-08-02_benchmark-pr-2934-on-3af6.md
+
+## 2026-08-19 preservation batch (claude-alpha handoff run)
+
+Registered by the 2026-08-19 SCOPE:auto handoff run on claude-alpha. Compact
+registry format: one bullet per file — repo path, canonical location, what it
+is, related handoff. Mirrors follow the canonical->repo rule: edit the
+canonical file, refresh here on the next run.
+- `exec/lib-guard.sh` — canonical `claude-alpha:/home/jhan/workspace/intel-AMX/exec/lib-guard.sh` — CI-lease + campaign-lock guard library for delphi-3bda (v3, dynamic fd). (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+- `exec/QUEUE.md` — canonical `claude-alpha:/home/jhan/workspace/intel-AMX/exec/QUEUE.md` — task queue, isolation rules, formulation end-state, rows 1-17 with results. (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+- `rampup/02-tron-decode-amx-plan.html` — canonical `claude-alpha:/home/jhan/workspace/intel-AMX/rampup/02-tron-decode-amx-plan.html` — consensus design doc (kernel design, layouts, transpose, precision). (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/rampup/02-tron-decode-amx-plan.html
+- `rampup/2026-08-19-amx-status.html` — canonical `claude-alpha:/home/jhan/workspace/intel-AMX/rampup/2026-08-19-amx-status.html` — dated status report with full Gate-5 measured results. (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/rampup/2026-08-19-amx-status.html
+- `rampup/pr-rampup.html` — canonical `claude-alpha:/home/jhan/workspace/intel-AMX/rampup/pr-rampup.html` — reviewer onboarding doc for PR #3879. (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/rampup/pr-rampup.html
+- `rampup/gptoss-estimate.html` — canonical `claude-alpha:/home/jhan/workspace/intel-AMX/rampup/gptoss-estimate.html` — gpt-oss extension feasibility + payoff estimate. (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/rampup/gptoss-estimate.html
+- `generators/gen_pr_rampup.py` — canonical `claude-alpha:/tmp/claude-0/-home-jhan-workspace-intel-AMX/3a96feab-43b5-493a-97f2-e9a59a459e74/scratchpad/gen_pr_rampup.py` — generator that builds pr-rampup.html (build-time transplant from doc 01). (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+- `generators/gen_pr_walkthrough.py` — canonical `claude-alpha:/tmp/claude-0/-home-jhan-workspace-intel-AMX/3a96feab-43b5-493a-97f2-e9a59a459e74/scratchpad/gen_pr_walkthrough.py` — generator that builds pr-walkthrough.html (9-invariant checklist). (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+- `generators/gen_gptoss_estimate.py` — canonical `claude-alpha:/tmp/claude-0/-home-jhan-workspace-intel-AMX/3a96feab-43b5-493a-97f2-e9a59a459e74/scratchpad/gen_gptoss_estimate.py` — generator that builds gptoss-estimate.html with computed estimate math. (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+- `generators/gen_status_report.py` — canonical `claude-alpha:/tmp/claude-0/-home-jhan-workspace-intel-AMX/3a96feab-43b5-493a-97f2-e9a59a459e74/scratchpad/gen_status_report.py` — generator that builds the daily status report. (handoff: claude_20260816-20260819_list-available-models-with-pal.md)
+
+Note: the four `generators/gen_*.py` canonicals live on a VOLATILE /tmp
+scratchpad (session 3a96feab on claude-alpha). Once that scratchpad is
+reaped, the repo copies become repo-primary — do not raise the
+canonical-missing alarm for them; update this note instead.

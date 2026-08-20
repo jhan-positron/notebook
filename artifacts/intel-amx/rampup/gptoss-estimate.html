@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adding gpt-oss to the AMX fast path: an estimate</title>
+<style>
+body { font-family: system-ui, sans-serif; color: #0b0b0b; background: #ffffff;
+       max-width: 1010px; margin: 24px auto; padding: 0 16px; line-height: 1.55; }
+h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 30px; }
+table { border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+th, td { border: 1px solid #d8d6d0; padding: 5px 10px; text-align: left; vertical-align: top; }
+th { background: #f4f3ef; }
+code, pre { background: #f4f3ef; border-radius: 4px; font-size: 13px; }
+code { padding: 1px 5px; } pre { padding: 10px 14px; overflow-x: auto; }
+figure { margin: 16px 0; } figcaption { font-size: 12.5px; color: #52514e; margin-top: 6px; }
+.take { background: #e4f2ed; border: 1.5px solid #1b9e77; border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+.warn { background: #fcebdd; border: 1.5px solid #d95f02; border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+.meta { color: #898781; font-size: 12.5px; }
+svg { max-width: 100%; height: auto; }
+dl dt { font-weight: 600; margin-top: 8px; } dl dd { margin-left: 0; color: #52514e; }
+</style>
+</head>
+<body>
+<h1>Adding gpt-oss to the AMX fast path: what it takes, what it buys</h1>
+<p class="meta">2026-08-19 &#xB7; estimate on top of draft PR #3879 &#xB7; repo facts verified against
+branch jhan-amx-p0 (file:line citations inline) &#xB7; companion docs:
+<a href="pr-rampup.html">PR ramp-up</a>, <a href="pr-rampup.html#geometry">geometry audit &#xA7;4.1</a></p>
+
+<div class="take"><b>Verdict in three sentences.</b> Feasible and clean: gpt-oss&#x27;s attention shape
+(8 query heads sharing each 64-wide K/V head) fills an AMX tile exactly as well as today&#x27;s
+supported shape, and the two hard-looking features &#x2014; attention sinks and sliding windows
+&#x2014; already live <i>outside</i> the code the AMX path replaces, so they need <b>zero</b> changes
+(verified in code, &#xA7;4). The work is one new kernel family plus a two-shape gate: est. about one
+engineering week plus one or two measurement nights. The payoff is modest: est. <b>+4 to +7% decode</b>
+at 1 user / ctx 8192 in the all-software mode (vs +19.7% measured on qwen), because gpt-oss reads
+5.9&#xD7; fewer KV bytes per token, leaving attention an est. 20% slice of its
+decode step (vs the measured 64% on qwen); in production FPGA-attention mode the gain is
+est. &#x2248;0. Measure before committing: a one-slot decode profile pins the real
+attention share (&#xA7;6).</div>
+
+<h2>1. What gpt-oss looks like inside tron today</h2>
+<p>Both gpt-oss models run in tron now (registry level &quot;working&quot;, tagged production+test)
+and both have the same attention geometry: <b>64 query heads, 8 K/V heads, heads 64 numbers wide</b>
+&#x2014; so 8 query heads share each K/V head (ratio 8), where the current fast path requires 4 sharing
+a 128-wide head. The 20b has 24 layers (12 window + 12 full), the 120b has 36 (18 + 18, verified in
+its plugin). The kernel and gate work below applies to both models unchanged; the traffic and payoff
+numbers are computed for the 20b &#x2014; the 120b would need its own payoff arithmetic on its own
+baseline.</p>
+<figure><svg viewBox="0 0 980 188" width="980" height="188" role="img" aria-label="gpt-oss-20b has 24 layers alternating sliding-window-128 attention on even layers, which are software only, and full attention on odd layers, which are FPGA capable" font-family="system-ui,sans-serif">
+<text x="14.0" y="20.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">gpt-oss-20b: 24 layers, two kinds of attention, strictly alternating</text>
+<rect x="14.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="32.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">0</text>
+<text x="32.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="53.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="71.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">1</text>
+<text x="71.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="93.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="111.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">2</text>
+<text x="111.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="132.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="150.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">3</text>
+<text x="150.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="172.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="190.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">4</text>
+<text x="190.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="211.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="229.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">5</text>
+<text x="229.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="251.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="269.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">6</text>
+<text x="269.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="290.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="308.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">7</text>
+<text x="308.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="330.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="348.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">8</text>
+<text x="348.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="369.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="387.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">9</text>
+<text x="387.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="409.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="427.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">10</text>
+<text x="427.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="448.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="466.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">11</text>
+<text x="466.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="488.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="506.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">12</text>
+<text x="506.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="527.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="545.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">13</text>
+<text x="545.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="567.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="585.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">14</text>
+<text x="585.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="606.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="624.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">15</text>
+<text x="624.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="646.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="664.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">16</text>
+<text x="664.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="685.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="703.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">17</text>
+<text x="703.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="725.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="743.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">18</text>
+<text x="743.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="764.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="782.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">19</text>
+<text x="782.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="804.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="822.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">20</text>
+<text x="822.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="843.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="861.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">21</text>
+<text x="861.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="883.0" y="36.0" width="36.0" height="46.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="901.0" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">22</text>
+<text x="901.0" y="71.0" font-size="11" fill="#d95f02" text-anchor="middle" font-weight="600">W</text>
+<rect x="922.5" y="36.0" width="36.0" height="46.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="940.5" y="55.0" font-size="10" fill="#52514e" text-anchor="middle">23</text>
+<text x="940.5" y="71.0" font-size="11" fill="#7570b3" text-anchor="middle" font-weight="600">F</text>
+<rect x="14.0" y="98.0" width="14.0" height="14.0" rx="4" fill="#fcebdd" stroke="#d95f02" stroke-width="1.4"/>
+<text x="36.0" y="109.0" font-size="10.5" fill="#52514e" text-anchor="start">W = sliding window 128: reads at most the last 128 tokens; marked software_only (always runs on the CPU, even in FPGA mode)</text>
+<rect x="14.0" y="122.0" width="14.0" height="14.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<text x="36.0" y="133.0" font-size="10.5" fill="#52514e" text-anchor="start">F = full attention: reads the whole context (8,192 tokens in our test point); FPGA-capable in production, CPU when USE_HW_ATTN=0</text>
+<text x="14.0" y="158.0" font-size="10.5" fill="#898781" text-anchor="start">Every layer also carries learned attention sinks (one value per query head) and scale 0.125 = 1/&#x221A;64.</text>
+</svg><figcaption>Layer plan read from the generated plugin
+(<code>gen/src/tron/h/tron/plugins/ingested_gpt_oss_20b.hpp</code>): window size 128 and
+<code>software_only</code> on even layers, full attention on odd layers, per-layer sink tensors
+(<code>tensor&lt;64&gt; self_attn_sinks</code>).</figcaption></figure>
+<p>Today, with the current PR in the tree, gpt-oss simply never enters the fast path &#x2014; the shape
+gate routes every page to the unchanged AVX code. That is the measured &#x2212;0.3% to &#x2212;1.6%
+(within noise) in the <a href="pr-rampup.html">PR ramp-up &#xA7;5.1</a>.</p>
+
+<h2>2. Why the current kernels do not fire: two compile-time numbers</h2>
+<pre>constexpr bool amx_shape_ok =
+    geometry.kv.head_size == 128 &amp;&amp; geometry.kv_mul() == 4;   // self_attention.hpp:1356
+...
+if constexpr (operation_kv_mul == 4 &amp;&amp; operation_head_size == 128) // :1534, the page-loop twin</pre>
+<p>Those two sites are the <i>only</i> places that hard-code the shape. Everything else in the dispatch
+&#x2014; the build flag, the CPUID/OS check, the kill switch, the full-page check, the visibility check,
+and (already!) the sliding-window check &#x2014; is shape-independent.</p>
+
+<h2>3. Why the gpt-oss shape fits AMX just as well</h2>
+<figure><svg viewBox="0 0 980 314" width="980" height="314" role="img" aria-label="One 16-row AMX tile shown twice: sliced as 4 query heads of 128 numbers, todays shape, and as 8 query heads of 64 numbers, the gpt-oss shape; both fill the tile exactly" font-family="system-ui,sans-serif">
+<text x="14.0" y="20.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">The same full AMX tile (16 rows &#xD7; 64 bytes = 512 bf16), sliced two ways</text>
+<text x="14.0" y="44.0" font-size="11.5" fill="#0b0b0b" text-anchor="start" font-weight="600">today: 4 query heads &#xD7; 128 numbers</text>
+<rect x="14.0" y="54.0" width="320.0" height="11.5" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="67.0" width="320.0" height="11.5" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="80.0" width="320.0" height="11.5" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="93.0" width="320.0" height="11.5" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1"/>
+<text x="344.0" y="84.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 0</text>
+<rect x="14.0" y="106.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="119.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="132.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="145.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#7570b3" stroke-width="1"/>
+<text x="344.0" y="136.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 1</text>
+<rect x="14.0" y="158.0" width="320.0" height="11.5" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="171.0" width="320.0" height="11.5" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="184.0" width="320.0" height="11.5" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="197.0" width="320.0" height="11.5" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1"/>
+<text x="344.0" y="188.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 2</text>
+<rect x="14.0" y="210.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="223.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="236.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#7570b3" stroke-width="1"/>
+<rect x="14.0" y="249.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#7570b3" stroke-width="1"/>
+<text x="344.0" y="240.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 3</text>
+<text x="14.0" y="278.0" font-size="10" fill="#898781" text-anchor="start">4 heads &#xD7; 4 rows each (128 numbers = 4 chunks of 32)</text>
+<text x="510.0" y="44.0" font-size="11.5" fill="#0b0b0b" text-anchor="start" font-weight="600">gpt-oss: 8 query heads &#xD7; 64 numbers</text>
+<rect x="510.0" y="54.0" width="320.0" height="11.5" rx="4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1"/>
+<rect x="510.0" y="67.0" width="320.0" height="11.5" rx="4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1"/>
+<text x="840.0" y="71.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 0</text>
+<rect x="510.0" y="80.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#1b9e77" stroke-width="1"/>
+<rect x="510.0" y="93.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#1b9e77" stroke-width="1"/>
+<text x="840.0" y="97.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 1</text>
+<rect x="510.0" y="106.0" width="320.0" height="11.5" rx="4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1"/>
+<rect x="510.0" y="119.0" width="320.0" height="11.5" rx="4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1"/>
+<text x="840.0" y="123.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 2</text>
+<rect x="510.0" y="132.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#1b9e77" stroke-width="1"/>
+<rect x="510.0" y="145.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#1b9e77" stroke-width="1"/>
+<text x="840.0" y="149.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 3</text>
+<rect x="510.0" y="158.0" width="320.0" height="11.5" rx="4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1"/>
+<rect x="510.0" y="171.0" width="320.0" height="11.5" rx="4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1"/>
+<text x="840.0" y="175.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 4</text>
+<rect x="510.0" y="184.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#1b9e77" stroke-width="1"/>
+<rect x="510.0" y="197.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#1b9e77" stroke-width="1"/>
+<text x="840.0" y="201.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 5</text>
+<rect x="510.0" y="210.0" width="320.0" height="11.5" rx="4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1"/>
+<rect x="510.0" y="223.0" width="320.0" height="11.5" rx="4" fill="#e4f2ed" stroke="#1b9e77" stroke-width="1"/>
+<text x="840.0" y="227.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 6</text>
+<rect x="510.0" y="236.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#1b9e77" stroke-width="1"/>
+<rect x="510.0" y="249.0" width="320.0" height="11.5" rx="4" fill="#f4f3ef" stroke="#1b9e77" stroke-width="1"/>
+<text x="840.0" y="253.0" font-size="9.5" fill="#52514e" text-anchor="start">query head 7</text>
+<text x="510.0" y="278.0" font-size="10" fill="#898781" text-anchor="start">8 heads &#xD7; 2 rows each (64 numbers = 2 chunks of 32)</text>
+<text x="14.0" y="300.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="600">Both slicings fill the tile exactly: head width &#xD7; heads sharing one K/V head = 512 in both models. No padding, no wasted rows.</text>
+</svg><figcaption>The packed query group for one K/V head: today 4 heads &#xD7; 4 chunk-rows,
+for gpt-oss 8 heads &#xD7; 2 chunk-rows. Head width &#xD7; sharing ratio = 512 in both, so the same
+16-row &#xD7; 64-byte tile budget holds with no padding.</figcaption></figure>
+<p>The arithmetic carries through the whole kernel recipe: the reduction over the 64 head numbers is
+2 chunks of 32 instead of 4, so each (K/V head, page) costs <b>8 tile multiplies instead of 16</b>
+&#x2014; exactly matching the halved bytes. The score tile even gets <i>wider</i> use (8 query columns
+instead of 4). New kernels <code>qk_st_64x8</code> and <code>pv_64x8</code> follow the same recipe as
+the existing <code>qk_st_128x4</code> / <code>pv_128x4</code> (transposing store and all); the V
+storage is consumed as-is because its token-pair interleave does not depend on head width.</p>
+
+<h2>4. What needs NO change (code-verified, this is the good news)</h2>
+<table>
+<tr><th>feature</th><th>where it lives</th><th>why the AMX path never sees it</th></tr>
+<tr><td><b>attention sinks</b> (a learned &quot;always there&quot; score per query head)</td>
+<td><code>attention_sink_update_for</code> (self_attention.hpp:77) applied by
+<code>apply_attn_sinks</code> (:1184) on the final running totals</td>
+<td>applied once per token <i>after</i> the page loop, in the fp32 epilogue the AMX path leaves
+untouched &#x2014; the kernels only fill raw scores and multiply weights by values</td></tr>
+<tr><td><b>sliding window</b> (recent-128 masking on even layers)</td>
+<td>whole-page skip at :1386; the dense-path predicate <i>already</i> contains
+<code>q_position &#x2212; k_position &lt; sliding_window_size</code> (:1537); per-token skip in the
+AVX loop at :1578</td>
+<td>window handling happens in page selection, before any multiply; a page fully inside the window
+takes the fast path, a page straddling the window edge falls back to the AVX loop &#x2014; the same
+partial-page fallback that exists today</td></tr>
+<tr><td><b>mirror scatter for 64-wide heads</b> (only relevant if the opt-in mirror were wanted)</td>
+<td><code>scatter_k_mirror&lt;page_size, head_size&gt;</code>, already a template</td>
+<td>the PR&#x27;s byte-equivalence test (t/t_amx_mirror.cpp) already instantiates and passes head
+width 64</td></tr>
+<tr><td><b>MoE / MXFP4 experts</b></td><td>FFN, on the FPGA</td>
+<td>not attention; the KV cache the CPU reads is plain bf16 like every other model</td></tr>
+</table>
+
+<h2>5. The work list (est.)</h2>
+<table>
+<tr><th>#</th><th>piece</th><th>file (same map as the PR)</th><th>size (est.)</th></tr>
+<tr><td>1</td><td>kernels <code>pack_q_group_64x8</code>, <code>qk_st_64x8</code>,
+<code>pv_64x8</code> + a second tile-configuration constant chosen in
+<code>begin_region</code> by shape (one process serves one model, so no switching cost)</td>
+<td>amx_attn.cpp / amx_attn_iface.hpp</td><td>200&#x2013;300 lines, 2&#x2013;3 days incl. kernel unit
+tests</td></tr>
+<tr><td>2</td><td>generalize the two gate sites to a two-shape list and template the pack-buffer
+size (today <code>amx_qpack.resize(items.size() * (4*16*32))</code>)</td>
+<td>self_attention.hpp</td><td>&lt;50 lines, half a day</td></tr>
+<tr><td>3</td><td>byte-equivalence + AVX-vs-AMX A/B unit tests for the 64x8 shape (clones of the
+existing tests)</td><td>t/</td><td>1 day</td></tr>
+<tr><td>4</td><td>T1 numerics chain for gpt-oss: HF fp32/bf16 reference logits (the MXFP4 experts
+dequantize in HF), then the same TVD comparison used for qwen</td><td>exec harness</td>
+<td>1 day setup + reruns</td></tr>
+<tr><td>5</td><td>kill-switch A/B measurement campaign (existing T4 harness, new model)</td>
+<td>exec scripts</td><td>1 machine night</td></tr>
+</table>
+<p><b>Deliberately out of scope for v1</b>: a 64x8 mirror. The mirror&#x27;s edge grows with attention
+share, and gpt-oss&#x27;s share is small (&#xA7;6) &#x2014; canonical-only keeps the work at one week.
+The mirror formulation traces to Bill&#x27;s PR #2934; the implementation and every number in these
+docs are ours.</p>
+
+<h2>6. What it buys (est.) &#x2014; and the measurement that would firm this up</h2>
+<figure><svg viewBox="0 0 980 162" width="980" height="162" role="img" aria-label="KV bytes read per generated token: qwen 1208 megabytes versus gpt-oss 204 megabytes, of which only 3 megabytes come from the twelve sliding window layers" font-family="system-ui,sans-serif">
+<text x="14.0" y="20.0" font-size="12.5" fill="#0b0b0b" text-anchor="start" font-weight="600">KV bytes the CPU must read per generated token (ctx 8192, USE_HW_ATTN=0, computed from the geometry)</text>
+<text x="240.0" y="58.0" font-size="10.5" fill="#52514e" text-anchor="end">qwen-3-4b (36 layers, head 128)</text>
+<rect x="250.0" y="44.0" width="576.1" height="20.0" rx="4" fill="#fdeaf3" stroke="#e7298a" stroke-width="1.4"/>
+<text x="834.1" y="58.0" font-size="11" fill="#e7298a" text-anchor="start" font-weight="600">1208 MB</text>
+<text x="240.0" y="98.0" font-size="10.5" fill="#52514e" text-anchor="end">gpt-oss-20b (12 F + 12 W layers)</text>
+<rect x="250.0" y="84.0" width="96.0" height="20.0" rx="4" fill="#eae9f4" stroke="#7570b3" stroke-width="1.4"/>
+<rect x="346.0" y="84.0" width="1.5" height="20.0" rx="4" fill="#d95f02" stroke="#d95f02" stroke-width="1.4"/>
+<text x="355.5" y="98.0" font-size="11" fill="#7570b3" text-anchor="start" font-weight="600">204 MB (201 full-attn + 3.1 window)</text>
+<text x="14.0" y="132.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="600">gpt-oss reads 5.9&#xD7; fewer KV bytes per token &#x2014; attention is a much thinner slice of its decode step (est. &#x2248;20% vs the measured 64% on qwen).</text>
+<text x="14.0" y="150.0" font-size="10" fill="#898781" text-anchor="start">Bars computed from layer geometry; the qwen 64% share is measured; the gpt-oss share is est. (byte-ratio scaling).</text>
+</svg><figcaption>Computed from layer geometry: 36 &#xD7; 8 &#xD7; 8192 &#xD7; 128 numbers
+&#xD7; K+V &#xD7; 2 bytes for qwen vs (12 &#xD7; 8192 + 12 &#xD7; 128) &#xD7; 8 &#xD7; 64 &#xD7; K+V
+&#xD7; 2 bytes for gpt-oss.</figcaption></figure>
+<p>Chain of reasoning, each step labeled:</p>
+<ul>
+<li>On qwen at 1u/8K, attention is 64% of the decode step (<b>measured</b>) and AMX cut attention
+time by 26% (<b>derived</b> from the measured step times 9.46 &#x2192;
+7.91 ms and the measured 64% share, assuming the non-attention remainder is
+unchanged).</li>
+<li>gpt-oss reads 5.9&#xD7; fewer KV bytes per token (<b>computed</b> from geometry, bars
+above). Scaling qwen&#x27;s measured attention time by that byte ratio puts gpt-oss attention at
+&#x2248;1.0 ms of its 5.02 ms step &#x2014; a 20% share (<b>est.</b>).
+This rests on TWO assumptions: equal effective memory bandwidth, and that attention stays
+bandwidth-bound the way qwen&#x27;s decode-phase counters showed (LLC-miss-dominated). The
+multiply arithmetic shrinks only &#x2248;3&#xD7;, not 5.9&#xD7; (12 vs 36 full layers; per-layer
+multiply work per attended token is equal: 32 heads &#xD7; 128 = 64 heads &#xD7; 64 = 4,096 query
+numbers) &#x2014; so in the compute-bound worst case the share would be nearer 40% and
+the estimate nearer +12%.</li>
+<li>Applying the same 26% attention cut to that slice (assumes the 64x8 kernels achieve
+the same relative cut): <b>decode +5.5% (est.)</b> at 1u/8K; if the true share is &#xB1;30% off, the range is +3.8% to +7.3%. At short contexts
+the share shrinks further &#x2014; expect low single digits or nothing.</li>
+<li><b>Production FPGA-attention mode: est. &#x2248;0.</b> There the CPU only runs the 12 window
+layers (they are <code>software_only</code>) plus queries at positions below 127, and the window work is the
+3&#x2005;MB orange sliver in the chart &#x2014; those full in-window pages WOULD take the fast
+path, but scaled through the same model that is under 0.1% of a step. The practical case for
+gpt-oss support is the all-software operating mode.</li>
+<li>Prefill: <code>Insufficient data</code> &#x2014; the full-attention layers should benefit the way
+qwen prefill did (+29% to +105% measured there), but we have no gpt-oss attention-share profile for
+prefill; the same one-slot measurement below resolves it.</li>
+</ul>
+<div class="warn"><b>Before committing the week: spend one machine slot first.</b> A decode-phase
+<code>perf</code> attach on a gpt-oss run with USE_HW_ATTN=0 (same method as the layout deep-dive in
+the <a href="2026-08-19-amx-status.html">status report &#xA7;4</a>) pins the real attention share.
+If it comes back &#x2248;20% as estimated, the estimate stands at the
++3.8%&#x2013;7.3% above and the priority call is a product question; if it comes back near
+the compute-bound case (&#x2248;40%), the estimate rises to &#x2248;+12%.</div>
+
+<h2>7. Where the same generalization leads (one paragraph, no commitment)</h2>
+<p>The tile identity &quot;head width &#xD7; sharing ratio = 512&quot; has a third member in the
+registry: <b>256-wide heads with ratio 2</b> &#x2014; gemma-2-2b/9b, gemma-3-4b, gemma-4-12b. The same
+kernel recipe (2 heads &#xD7; 8 chunk-rows) would serve them; gemma&#x27;s score softcap, like the
+sinks, lives in the untouched epilogue. And qwen-3-32b / qwen-3-30b-a3b / the 70b llamas (128-wide,
+ratio 8) need <i>two</i> tiles per query group &#x2014; doable but a different, heavier recipe. Worth a
+separate estimate only if one of those models becomes a priority.</p>
+
+<h2>8. Glossary (plain words)</h2>
+<dl>
+<dt>Attention sink</dt><dd>A learned per-head score that always participates in the softmax, as if
+there were one extra token every query can attend to. Keeps the distribution stable when a window
+hides old tokens.</dd>
+<dt>Sliding window</dt><dd>The layer only looks at the most recent N tokens (N=128 here) instead of
+the whole history.</dd>
+<dt>software_only</dt><dd>The plugin marks these layers as always computed on the CPU, even when FPGA
+attention is enabled.</dd>
+<dt>Query group</dt><dd>The query heads that share one stored K/V head and are therefore multiplied
+against the same page together: 4 heads today, 8 for gpt-oss.</dd>
+<dt>Chunk</dt><dd>32 numbers &#x2014; the slice of a head that fits one 64-byte tile row as bf16.</dd>
+<dt>Mirror</dt><dd>The opt-in pre-rearranged second copy of K (formulation from Bill&#x27;s PR #2934;
+implementation and numbers ours). Not proposed for gpt-oss v1.</dd>
+</dl>
+<p class="meta">Estimate method: geometry bytes computed by script; qwen anchors are measured
+(replicated, 95% CIs in the <a href="2026-08-19-amx-status.html">status report</a>); every derived
+number is labeled est. or derived and traced to its assumption. Code citations refer to branch
+jhan-amx-p0.</p>
+</body>
+</html>
