@@ -348,16 +348,24 @@ repo so accidental workspace deletion cannot destroy them.
   Artifacts line with `(preserved: artifacts/<topic>/<file>)`.
 - HTML artifacts: GitHub's normal blob view does not render standalone
   HTML. When preserving or generating an `.html` file in this notebook
-  repo, add a convenient rendered-view link using this exact pattern,
-  after substituting the final repo-relative path:
-  `https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/<repo-relative-path>`.
-  Put the URL in a line-2 source comment immediately after
-  `<!doctype html>` / `<!DOCTYPE html>`, for example
-  `<!-- Rendered view: <url> -->`, and add a visible top-of-page
-  `Open rendered view` link to the same URL. If an artifact README links
-  to that HTML file, include the rendered-view URL there too so GitHub
-  readers can open the page directly. If the file later MOVES within the
-  repo, update both the comment and the visible link to the new path.
+  repo, add rendered-view links using this exact pattern (updated
+  2026-08-19 to match the deployed files, e.g.
+  artifacts/common-knowledge/*.html), after substituting the final
+  repo-relative path — a comment block placed ABOVE the doctype, no
+  visible in-page link needed:
+
+      <!--
+        Rendered page (open in browser):
+        https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/<repo-relative-path>
+        Backup renderer:
+        https://raw.githack.com/jhan-positron/notebook/main/<repo-relative-path>
+      -->
+      <!DOCTYPE html>
+
+  If an artifact README links to that HTML file, include the primary
+  rendered-view URL there too so GitHub readers can open the page
+  directly. If the file later MOVES within the repo, update both URLs in
+  the comment to the new path.
 - Do NOT place artifacts in handoffs/ — the SCOPE auto scan parses every
   file there as a handoff.
 
