@@ -1,10 +1,28 @@
 # Prompt: generate a Codex handoff file and push to notebook
 
-Paste this entire prompt into a Codex Windows app chat. It needs filesystem
-and git access, so run it in the Codex app with Default permissions unless the
-repo or transcript paths require narrower approvals. Edit the Config block
-first if needed. For a multi-item SCOPE, run it in the most recent involved
-chat, or in a fresh Codex app chat on the same machine.
+Paste this entire prompt into a Codex session on any surface with filesystem
+and git access: the Codex Windows app, or the Codex CLI on a Linux server. Use
+permissions that allow the repo and transcript paths needed by the run. Edit
+the Config block first if needed. For a multi-item SCOPE, run it in the most
+recent involved chat, or in a fresh session on the machine that holds the
+transcripts in SCOPE.
+
+## Platforms (added 2026-08-19)
+
+Two platform types actively produce chats, and this prompt runs on both:
+- Windows app on `DESKTOP-CI2JA7M`: Projects and chats are listed in the app
+  sidebar; Codex home is normally `C:/Users/jibin/.codex/`.
+- Codex CLI on any Linux machine: chats are listed by `codex resume`; Codex
+  home is normally `~/.codex/`. Do not assume a hostname; detect it at run
+  time. (`claude-alpha` is one example, not the only Linux host.)
+
+Both use `sessions/YYYY/MM/DD/rollout-*.jsonl` transcripts and
+`session_index.jsonl` title records under Codex home (verified on
+`claude-alpha` 2026-08-19). Detect the current platform and Codex home from the
+environment at run time; honor `CODEX_HOME` when set. Each machine's local
+store contains only the chats recorded there. Handoffs whose `Transcript:` host
+is another machine and is not reachable are frozen for this run (rule under
+`SCOPE: auto` below).
 
 ## Triggering by reference (no paste needed)
 
@@ -18,7 +36,7 @@ directly. If my message names no specific chats, run with the Config below
 as-is (`SCOPE: auto`). If my message includes `add chats:` or older
 `add threads:`, treat the quoted items as the explicit active scope for this
 run, even though the phrase says "add". Treat quoted items as exact chat names
-unless they include ` / `, in which case the left side is a Codex app Project
+unless they include ` / `, in which case the left side is a Codex Project
 name or project path hint and the right side is the chat name.
 
 ## Config
@@ -26,9 +44,12 @@ name or project path hint and the right side is the chat name.
 - TARGET_DIR: handoffs/     # dir inside the repo; create if missing; "." = repo root
 - SCOPE: auto
    - auto (the default): derive the scope from Codex itself, not from GitHub.
-     Use the Codex app's Project/chat inventory as the source of truth: list
-     Codex Projects and chats across the local host and connected remote hosts,
-     including projectless chats and any extra host/cwd groups Codex returns.
+     Use the current Codex surface and its local state as the source of truth.
+     On the Windows app, list Projects and chats across the local host and any
+     connected remote hosts the app returns. On the Linux CLI, enumerate every
+     non-helper rollout under the current Codex home and reconcile it with
+     `session_index.jsonl` (the `codex resume` inventory). Include projectless
+     chats and every host/cwd group visible from the current surface.
      For every chat, collect the visible Project name when available, host,
      cwd, exact chat title, thread id, app link, and transcript path when
      readable. This inventory step determines scope and identity only; it is
@@ -40,6 +61,12 @@ name or project path hint and the right side is the chat name.
      UPDATED per Step 5; chats without an existing handoff get their first
      handoff. A chat with no new activity since its handoff's Activity END date
      is skipped (report it as unchanged; no commit churn).
+   - FROZEN-handoff rule (added 2026-08-19): a handoff whose `Transcript:` host
+     is NOT this machine and is not reachable is frozen for this run -- no
+     update and no questions. List it in the run report as "not checkable from
+     this machine". With chats on multiple machines this is a normal
+     cross-machine case, not an error; the canonical-missing alarm applies only
+     to artifacts (Step 4b), never to transcripts.
    - If I list items under SCOPE, or invoke the URL with `add chats:` /
      `add threads:`, use those listed items as the explicit active scope for
      this run instead of the full auto-discovered Codex list. This is how I ask
@@ -57,29 +84,31 @@ name or project path hint and the right side is the chat name.
          (not stored in local Codex state -- Codex will ask me to paste content)
 - GRANULARITY: per-chat  # how many handoff FILES a multi-item SCOPE yields:
   - consolidated = ONE file covering all items
-  - per-project   = one file per Codex app Project, covering its listed chats
+  - per-project   = one file per Codex Project, covering its listed chats
   - per-chat      = one file per listed Codex chat or external chat
   - GRANULARITY as a whole is ignored when SCOPE is `this chat only`.
 - PRESERVE_ARTIFACTS: auto  # auto = maintain artifacts/ mirrors (Step 4b); off = skip
 - LOCAL_CLONE: auto         # auto = reuse an existing local clone if found; else clone
 
 ## Terminology: Project vs chat vs thread id
-- A **Project** is the visible grouping in the Codex app sidebar. It is usually
-  a local or remote project folder, repo, or worktree. The app shows chat titles
-  underneath each Project. The transcript metadata records the working directory
-  as `session_meta.payload.cwd`; use that path as evidence for the Project when
-  the UI name is ambiguous.
-- A **chat** is the visible conversation row under a Project in the Codex app
-  sidebar, such as `root cause flat freq not working`. Use "chat" for
-  user-facing names and handoff headers.
+- A **Project** is the working-directory grouping (Windows app: the visible
+  grouping in the sidebar; Linux CLI: the cwd). It is usually a local or remote
+  project folder, repo, or worktree. The transcript metadata records the
+  working directory as `session_meta.payload.cwd`; use that path as evidence
+  for the Project when the UI name is ambiguous or no UI Project name exists.
+- A **chat** is one visible conversation (Windows app: a row under a Project in
+  the sidebar; Linux CLI: an entry in `codex resume`), such as
+  `root cause flat freq not working`. Use "chat" for user-facing names and
+  handoff headers.
 - A **thread** is Codex's internal/manual/API term for that same conversation
   unit. Keep it when referring to machine identifiers, transcript metadata,
   app-server APIs, deep links, or manual terminology. Do not use "thread" as the
-  primary user-facing label when a Codex app sidebar name is meant.
-- A **transcript** is the local Codex JSONL rollout file for a chat/thread. On the
-  Windows app, Codex home is normally `%USERPROFILE%\.codex` unless `CODEX_HOME`
-  is set. Local transcripts are typically under:
-  `%CODEX_HOME%\sessions\YYYY\MM\DD\rollout-<timestamp>-<thread-id>.jsonl`
+  primary user-facing label when a Codex display name is meant.
+- A **transcript** is the local Codex JSONL rollout file for a chat/thread. Codex
+  home is normally `%USERPROFILE%\.codex` on Windows or `~/.codex` on Linux,
+  unless `CODEX_HOME` is set. Local transcripts are typically under
+  `<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-<timestamp>-<thread-id>.jsonl`
+  (with native path separators).
 - A **thread id** is the UUID-like internal id used by Codex to resume/open a
   chat. It appears in transcript metadata and can be opened with
   `codex://threads/<id>`.
@@ -91,6 +120,25 @@ name or project path hint and the right side is the chat name.
   are needed as evidence or artifacts for the main chat. In transcript
   metadata, helper threads may have `thread_source: "subagent"` or a
   `parent_thread_id`.
+
+## Terminology: local vs remote chat state
+
+What matters to this prompt is where the TRANSCRIPT lives, not where the work
+ran:
+
+1. **Local chat** -- the current machine's Codex process wrote the transcript
+   under its Codex home. This is fully automatic on both platforms: discovery,
+   titles, dates, content, and rename detection.
+2. **Connected remote chat visible from the Windows app** -- the app may show a
+   remote host/cwd group, while the rollout lives under that remote host's Codex
+   home. Use app inventory for identity, but read the remote transcript only
+   when it is reachable from the current environment. The Environment and
+   Artifacts sections must name the host on which each path and command lives.
+3. **Chat on another machine, not visible or reachable here** -- nothing about
+   it is available in the current local store. `SCOPE: auto` cannot discover a
+   new one. An existing handoff for it is frozen by the rule above; creating a
+   new handoff requires running this prompt on that machine or supplying the
+   transcript/content explicitly.
 
 ## Goal
 Produce markdown handoff file(s) covering ALL items in SCOPE -- file count per
@@ -105,7 +153,7 @@ file covers). The Step 5 approval gate is shown ONCE listing all files.
 
 ## Quality bar -- no inventory-only stubs
 Every generated handoff must contain meaningful, transcript-backed content about
-what happened in the chat. Codex app inventory, `session_index.jsonl`, thread
+what happened in the chat. Codex inventory, `session_index.jsonl`, thread
 ids, app links, titles, cwd, and timestamps are identity/date evidence; they are
 not sufficient to write Objective, Timeline, Artifacts, Current state, or Next
 steps.
@@ -136,7 +184,8 @@ Filename dates are when the work actually happened; it may span several days.
   evidence is usually UTC; convert to Pacific before deriving the
   calendar date.
 - Evidence priority:
-  1. Codex transcript timestamps under `%CODEX_HOME%\sessions\`
+  1. Codex transcript timestamps under the current
+     `<CODEX_HOME>/sessions/` (with native path separators)
   2. `session_index.jsonl` `updated_at` timestamps for title/chat updates
   3. Git commit timestamps from work done in the chat
   4. mtimes of files created/edited during the work
@@ -149,30 +198,32 @@ Filename dates are when the work actually happened; it may span several days.
 - If dates cannot be established from evidence: ask me. Do not guess.
 
 ## Step 2 -- Determine Project and chat names
-- Find this chat's exact display name (the title shown under its Project in the
-  Codex app sidebar). Try in order:
-  1. `%CODEX_HOME%\session_index.jsonl`: match by thread id, then use the newest
+- Find this chat's exact display name (Windows app: the title shown under its
+  Project in the sidebar; Linux CLI: the title shown by `codex resume`). Try in
+  order:
+  1. `<CODEX_HOME>/session_index.jsonl`: match by thread id, then use the newest
      `thread_name`. Multiple lines for the same id indicate renames; keep that
      history.
-  2. The session JSONL under `%CODEX_HOME%\sessions\...`: match on
+  2. The session JSONL under `<CODEX_HOME>/sessions/...`: match on
      `session_meta.payload.session_id` / `id`, `cwd`, timestamps, and distinctive
      user prompt text. Use this to find the thread id and transcript path.
-  3. Codex app UI: if local state cannot verify the display name, ask me for the
-     exact name as shown in the sidebar. Offer to accept a screenshot.
-- Resolve the Project name from the Codex app UI when visible, from an explicit
-  SCOPE prefix, or from the transcript `cwd`/remote host when the UI name is not
-  otherwise available. If the UI Project name matters and cannot be verified,
-  ask me.
+  3. If local state cannot verify the display name, ask me for the exact name.
+     On the Windows app, offer to accept a sidebar screenshot. On the Linux CLI,
+     ask me to type the title as `codex resume` shows it.
+- Resolve the Project name from the Windows app UI when visible, from an
+  explicit SCOPE prefix, or from the transcript `cwd`/remote host. On the Linux
+  CLI, the cwd is the Project. If a friendlier Windows UI Project name matters
+  and cannot be verified, ask me.
 - For the current chat, use native context plus local transcript evidence. If
   the current thread id is not directly visible, find the newest non-helper
   rollout file whose `cwd` matches the current Project/workspace and whose content
   contains the current user request or recent distinctive prompt text.
-- For other local Codex app chats, resolve their names the same way. If a title
-  is ambiguous, use the Project/cwd hint if provided; otherwise ask me.
+- For other local Codex chats, resolve their names the same way. If a title is
+  ambiguous, use the Project/cwd hint if provided; otherwise ask me.
 - For remote SSH-host Codex chats, the transcript lives on the remote host's
-  Codex home, not necessarily the Windows host. Inspect that remote only if it is
-  already accessible in the current environment or I authorize it; otherwise ask
-  me for the transcript or a pasted summary.
+  Codex home, not necessarily the current host. Inspect that remote only if it
+  is already accessible in the current environment or I authorize it;
+  otherwise ask me for the transcript or a pasted summary.
 - For cloud chats or external chats that are not readable locally, ask me to
   paste the relevant content or provide an export. Include only what I provide.
 - If any name cannot be verified: ask me. Never paraphrase or invent a name.
@@ -220,12 +271,12 @@ Open with this header block. Keep the labels verbatim:
 
     # Handoff: <one-line descriptive title>
 
-    > Generated by Codex (Windows app) on <YYYY-MM-DD>.
+    > Generated by Codex (<Windows app | Linux CLI>) on <YYYY-MM-DD>.
 
     - Activity dates: <YYYY-MM-DD> to <YYYY-MM-DD>
       (source: Codex transcript timestamps | session index | git log | file mtimes; timezone: <timezone>)
     - Codex chat: "<full exact chat name>"
-      (Project: <exact Project name or "projectless">; cwd: <host>:<absolute cwd or "projectless">; source: local Windows app | WSL | SSH remote | cloud/pasted)
+      (Project: <exact Project name or "projectless">; cwd: <host>:<absolute cwd or "projectless">; source: local Windows app | local Linux CLI | WSL | SSH remote | cloud/pasted)
       - Thread id: <uuid>
       - Transcript: <host>:<absolute path to the rollout .jsonl>
         (machine-readable pointer so future `SCOPE: auto` runs can match this
@@ -247,10 +298,11 @@ If SCOPE covers multiple chats, repeat the `Codex chat:` /
 
 Body sections (omit empty ones):
 1. Objective
-2. Environment -- hostname(s), OS/shells, Projects, cwd/project directories, worktrees, and
-   remote hosts where the work ran. State the host for every machine touched
-   (local Windows vs WSL vs SSH remote vs cloud); this is required whenever any
-   file path or command appears later in the file.
+2. Environment -- hostname(s), OS/shells, Projects, cwd/project directories,
+   worktrees, and remote hosts where the work ran. State the host for every
+   machine touched (local Windows app host vs local Linux CLI host vs WSL vs SSH
+   remote vs cloud); this is required whenever any file path or command appears
+   later in the file.
 3. Timeline -- what was done, by date
 4. Artifacts -- full host-qualified locations and file names of everything the
    chat produced or that a resumer needs: generated reports, summaries,
@@ -307,15 +359,24 @@ accidental workspace deletion cannot destroy them.
   them in the topic README, and annotate the handoff's Artifacts line with
   `(preserved: artifacts/<topic>/<file>)`.
 - HTML artifacts: GitHub's normal blob view does not render standalone HTML.
-  When preserving or generating an `.html` file in this notebook repo, add a
-  convenient rendered-view link using this exact pattern, after substituting the
-  final repo-relative path:
-  `https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/<repo-relative-path>`.
-  Put the URL in a line-2 source comment immediately after `<!doctype html>` /
-  `<!DOCTYPE html>`, for example `<!-- Rendered view: <url> -->`, and add a
-  visible top-of-page `Open rendered view` link to the same URL. If an
-  artifact README links to that HTML file, include the rendered-view URL there
-  too so GitHub readers can open the page directly.
+  When preserving or generating an `.html` file in this notebook repo, add
+  rendered-view links using this exact pattern (updated 2026-08-19 to match the
+  deployed files, e.g. `artifacts/common-knowledge/*.html`), after substituting
+  the final repo-relative path -- a comment block placed ABOVE the doctype, no
+  visible in-page link needed:
+
+      <!--
+        Rendered page (open in browser):
+        https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/<repo-relative-path>
+        Backup renderer:
+        https://raw.githack.com/jhan-positron/notebook/main/<repo-relative-path>
+      -->
+      <!DOCTYPE html>
+
+  If an artifact README links to that HTML file, include the primary
+  rendered-view URL there too so GitHub readers can open the page directly. If
+  the file later MOVES within the repo, update both URLs in the comment to the
+  new path.
 - Commit wording for artifact-only changes should be `Preserve artifact:
   <topic>/<file>` or `Refresh artifact: <topic>/<file>`. If artifact changes
   are bundled with an approved Codex handoff update, the approval gate must say
@@ -325,11 +386,12 @@ accidental workspace deletion cannot destroy them.
 
 ## Step 5 -- Git workflow with approval gate
 1. Locate or clone the repo per LOCAL_CLONE; `git pull` before adding the file.
-   If `git` is unavailable on PATH in the Windows app, use the bundled Codex Git
-   if visible in the current runtime, or ask me before installing tools.
+   If `git` is unavailable on PATH, use the bundled Codex Git when running in
+   the Windows app if it is visible in the current runtime; otherwise ask me
+   before installing tools.
 2. For each output file, first check TARGET_DIR for an existing handoff already
    covering the same chat(s). Do not start with filenames or chat titles; first
-   resolve each scoped chat to a stable identity from the Codex app/thread list,
+   resolve each scoped chat to a stable identity from the Codex chat/thread list,
    session index, transcript metadata, or my confirmation. Then match existing
    handoffs by identity in this order:
    1. `Thread id:` line
