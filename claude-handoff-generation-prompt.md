@@ -12,8 +12,10 @@ machine that holds the transcripts in SCOPE.
 Two platforms actively produce sessions, and this prompt runs on both:
 - Windows app on `DESKTOP-CI2JA7M`: sessions listed in the app sidebar;
   store under `C:/Users/jibin/.claude/projects/`.
-- Claude Code CLI on Linux (`claude-alpha`): session titles shown by
-  `/resume`; store under `~/.claude/projects/`.
+- Claude Code CLI on any Linux machine (identify with `hostname`; one
+  example is `claude-alpha`, but do not assume it — more Linux machines
+  may exist): session titles shown by `/resume`; store under
+  `~/.claude/projects/`.
 
 The session store layout, the title records, and every step below are
 identical on both (verified on claude-alpha 2026-08-19: same
@@ -132,8 +134,8 @@ work ran:
    itself (or a different laptop). Nothing about it is in this machine's
    store: `SCOPE: auto` cannot see it; it must be listed under SCOPE, and
    names/dates/content must come from that machine or from me. With both
-   the Windows app and claude-alpha active, each machine's sessions are
-   case 3 from the other machine's viewpoint; their existing handoffs are
+   the Windows app and one or more Linux machines active, each machine's
+   sessions are case 3 from every other machine's viewpoint; their existing handoffs are
    frozen per the SCOPE: auto rule, and generating a NEW handoff for them
    from here needs the content supplied (run the prompt on the machine
    that holds the transcript instead, when possible).
@@ -275,7 +277,8 @@ Body sections (omit empty ones):
 1. Objective
 2. Environment — hostname(s) and working directories where the work ran.
    State the host for every machine touched (ssh remote vs the local
-   machine, whether that is the Windows laptop or claude-alpha);
+   machine, whether that is the Windows laptop or a Linux machine —
+   always the actual `hostname`);
    different projects live on different remote machines, so this is required
    whenever any file path or command appears later in the file.
 3. Timeline — what was done, by date
