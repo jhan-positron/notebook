@@ -1,0 +1,131 @@
+diff --git a/h/common/perfetto.hpp b/h/common/perfetto.hpp
+index b94d09e11..12d5a08ee 100644
+--- a/h/common/perfetto.hpp
++++ b/h/common/perfetto.hpp
+@@ -8,6 +8,8 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ 
++#include "common/trace_gate.hpp"
++
+ namespace tron {
+ bool application_track_events_enabled() noexcept;
+ void set_application_tracing_enabled(bool enabled) noexcept;
+@@ -38,7 +40,8 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+     if (::PERFETTO_TRACK_EVENT_NAMESPACE::internal::IsDynamicCategory(category)) {     \
+       tns::TrackEvent::CallIfEnabled(                                                  \
+           [&](uint32_t instances) PERFETTO_NO_THREAD_SAFETY_ANALYSIS {                 \
+-            if (::tron::application_track_events_enabled()) {                          \
++            if (::tron::application_track_events_enabled() &&                          \
++                ::tron::trace_gate_open()) {                                           \
+               tns::TrackEvent::method(                                                 \
+                   instances, category, name __VA_OPT__(, ) __VA_ARGS__);               \
+             }                                                                          \
+@@ -47,7 +50,8 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+       tns::TrackEvent::CallIfCategoryEnabled(                                          \
+           PERFETTO_UID(kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_),         \
+           [&](uint32_t instances) PERFETTO_NO_THREAD_SAFETY_ANALYSIS {                 \
+-            if (::tron::application_track_events_enabled()) {                          \
++            if (::tron::application_track_events_enabled() &&                          \
++                ::tron::trace_gate_open()) {                                           \
+               tns::TrackEvent::method(instances,                                       \
+                   PERFETTO_UID(kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_), \
+                   name __VA_OPT__(, ) __VA_ARGS__);                                    \
+@@ -68,7 +72,7 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+                  ::perfetto::DynamicCategory(category))                                \
+            : PERFETTO_TRACK_EVENT_NAMESPACE::TrackEvent::IsCategoryEnabled(            \
+                  PERFETTO_GET_CATEGORY_INDEX(category))) &&                            \
+-      ::tron::application_track_events_enabled())
++      ::tron::application_track_events_enabled() && ::tron::trace_gate_open())
+ #else  // !PERFETTO_BUILDFLAG(PERFETTO_COMPILER_GCC)
+ #define PERFETTO_INTERNAL_CATEGORY_ENABLED(category)                                   \
+   [&]() -> bool {                                                                      \
+@@ -80,7 +84,7 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+                    ? TrackEvent::IsDynamicCategoryEnabled(                             \
+                          ::perfetto::DynamicCategory(category))                        \
+                    : TrackEvent::IsCategoryEnabled(PERFETTO_UID(index))) &&            \
+-           ::tron::application_track_events_enabled();                                 \
++           ::tron::application_track_events_enabled() && ::tron::trace_gate_open();    \
+   }()
+ #endif  // !PERFETTO_BUILDFLAG(PERFETTO_COMPILER_GCC)
+ 
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index c29f66783..25d7cc233 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -27,6 +27,7 @@
+ #include "common/indexed.hpp"
+ #include "common/numerics/std.hpp"
+ #include "common/top_k_accum.hpp"
++#include "common/trace_gate.hpp"
+ #include "pos/device.hpp"
+ #include "pos/dma_tracker.hpp"
+ #include "spdlog/fmt/bundled/core.h"
+@@ -1936,6 +1937,14 @@ public:
+     // Note [Plugin-owned worker launch].)
+     void finalize_minibatches() {
+       TRACE_EVENT("model", "finalize_minibatches");
++      // pfgate: defensive CLOSE — a parse batch (items.size() > 8) must not
++      // run with the window gate left open by a preceding decode step whose
++      // layer-0 close (decode-conditioned) never fired.
++      for (auto& q_batch : q_batches)
++        if (q_batch->items.size() > 8) {
++          trace_gate_set(false);
++          break;
++        }
+       plugin_state.make_latches(latches);
+ 
+       // Compute dependencies of q_batches on each other.
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 4b2a2cd83..d547cb419 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -12,6 +12,7 @@
+ 
+ #include "common/assert.hpp"
+ #include "common/numerics/fp16.hpp"
++#include "common/trace_gate.hpp"
+ #include "common/util.hpp"
+ #include "libpos.hpp"
+ #include "spdlog/spdlog.h"
+@@ -839,6 +840,11 @@ struct self_attention {
+       const model_layer_id layer = binding.model_layer;
+       uint64_t attn_elapsed = 0;
+ 
++      // pfgate: CLOSE the inter-fwd-pass trace window at the entry of the
++      // next step's first attention op. Decode batches only (items.size()
++      // <= 8); redundant stores across attention workers are harmless.
++      if (layer.i == 0 && outer_batch->items.size() <= 8) trace_gate_set(false);
++
+       query_channel.start_reading(worker_ix);
+       // One token is enough to wait on the fallback latch.
+       query_channel.start_reading_at(0);
+@@ -879,6 +885,11 @@ struct self_attention {
+ 
+       // Sync all the attention workers so worker 0 measures the whole operation.
+       outer_batch->attn_done_barrier.arrive_and_wait(n_attn_workers);
++      // pfgate: OPEN the inter-fwd-pass trace window at the end of the last
++      // layer's attention. Decode batches only; see CLOSE at layer-0 entry
++      // above and the defensive close in model.hpp finalize_minibatches.
++      if (layer.i + 1 == n_layers && outer_batch->items.size() <= 8)
++        trace_gate_set(true);
+       attn_elapsed += hardware::system::rdtsc();
+       return attn_elapsed;
+     }
+diff --git a/src/pos/worker.cpp b/src/pos/worker.cpp
+index 2f3382dbc..c0c36288d 100644
+--- a/src/pos/worker.cpp
++++ b/src/pos/worker.cpp
+@@ -2237,6 +2237,12 @@ void tx_launch(PosDevice* dev, struct wqentry* workreq) noexcept {
+         dev->rx_head);
+ 
+     workreq->act_ready.wait();
++    // PDJN (Mike's suggestion, 2026-08-10): mark the instant activations became
++    // ready on the TX thread, so fast/slow captures can compare the wait-for-
++    // activations edge per launch.
++    TRACE_EVENT_INSTANT("driver", "data ready", "B", workreq->B, "label",
++        workreq->debug_label ? workreq->debug_label : "unknown", "req",
++        workreq->request_id);
+ 
+ #ifdef CHECK_ACTIVATIONS_FOR_NANS
+     // Check activations for NANs.

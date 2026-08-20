@@ -1,0 +1,328 @@
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index c29f66783..660c140a8 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -1693,8 +1693,14 @@ public:
+             in_listener_notifications,
+         ranged_mask const& query_mask_in) noexcept {
+       MODEL_DEBUG("{}", __PRETTY_FUNCTION__);
+-      TRACE_EVENT("scheduler", "forward", "n_token_jobs", in_token_jobs.size(),
+-          "n_tokens", in_tokens.size());
++      // PDJN: monotonically increasing forward-pass sequence number so fast and
++      // slow captures can be aligned cycle-by-cycle even under trace loss
++      // (Ben's suggestion, 2026-08-10). Same-token equivalence across draws
++      // additionally requires u1 + --pay-for-determinism; see status report 07.
++      static std::atomic<uint64_t> forward_seq{0};
++      TRACE_EVENT("scheduler", "forward", "seq",
++          forward_seq.fetch_add(1, std::memory_order_relaxed), "n_token_jobs",
++          in_token_jobs.size(), "n_tokens", in_tokens.size());
+ 
+       with_latch_arena latches_guard(latches);
+ 
+diff --git a/src/pos/worker.cpp b/src/pos/worker.cpp
+index 2f3382dbc..2cb8d1cf7 100644
+--- a/src/pos/worker.cpp
++++ b/src/pos/worker.cpp
+@@ -39,6 +39,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
++#include <cstdio>
+ #include <cstdlib>
+ #include <functional>
+ #include <mutex>
+@@ -69,6 +70,70 @@
+ #include "system/mwaitx.hpp"
+ #include "system/system.hpp"
+ 
++// PDJN dispatch-latency probe. When TRON_TXLAT_FILE is set, accumulate per-device
++// per-component latency aggregates (count/sum/max + log2 histogram of TSC deltas)
++// for the host->device dispatch path, dumped once at process exit:
++//   slot  = tx_wait_for_slots wait on act_slots_free
++//   cmd   = wait on mm_in_flight
++//   wcmd  = wait on wcmd FIFO words
++//   launch= tx_launch body (ring writes + doorbell)
++//   devlat= tx_launch end -> RX completion (device execute + completion path)
++// TX accumulators are written only by the device's TX thread, devlat only by its
++// RX thread; no synchronization needed. Off = one cached null check per call.
++namespace txlat {
++constexpr int kSlot = 0, kCmd = 1, kWcmd = 2, kLaunch = 3, kDevlat = 4;
++struct comp_agg {
++  uint64_t n, sum, mx;
++  uint64_t hist[40];
++};
++struct state_t {
++  comp_agg agg[8][5];
++  uint64_t t_launch_end[8][4096];
++  uint64_t rid[8][4096];
++};
++inline state_t* state() noexcept {
++  static state_t* s = [racy = 0]() -> state_t* {
++    (void)racy;
++    const char* p = std::getenv("TRON_TXLAT_FILE");
++    if (!p) return nullptr;
++    auto* st = new state_t();
++    static const char* path = p;
++    std::atexit([] {
++      FILE* f = std::fopen(path, "a");
++      if (!f) return;
++      static const char* names[5] = {"slot", "cmd", "wcmd", "launch", "devlat"};
++      state_t* st2 = state();
++      for (int d = 0; d < 8; ++d)
++        for (int c = 0; c < 5; ++c) {
++          comp_agg& a = st2->agg[d][c];
++          if (!a.n) continue;
++          std::fprintf(f, "dev%d %s n=%llu sum=%llu max=%llu hist=", d, names[c],
++              (unsigned long long)a.n, (unsigned long long)a.sum,
++              (unsigned long long)a.mx);
++          for (int b = 0; b < 40; ++b)
++            std::fprintf(f, "%s%llu", b ? "," : "", (unsigned long long)a.hist[b]);
++          std::fprintf(f, "\n");
++        }
++      std::fclose(f);
++    });
++    return st;
++  }();
++  return s;
++}
++inline void add(int dev, int comp, uint64_t dt) noexcept {
++  state_t* s = state();
++  if (!s || dev < 0 || dev >= 8) return;
++  comp_agg& a = s->agg[dev][comp];
++  ++a.n;
++  a.sum += dt;
++  if (dt > a.mx) a.mx = dt;
++  int b = 0;
++  while (dt > 1 && b < 39) { dt >>= 1; ++b; }
++  ++a.hist[b];
++}
++}  // namespace txlat
++
++
+ namespace tron {
+ 
+ using namespace tron::hardware;
+@@ -501,6 +566,12 @@ void do_rx_inplace(PosDevice* dev) noexcept {
+           release_prepared_metadata(dev, rx_entry);
+         }
+         dev->mm_in_flight->fetch_sub(1);
++        if (txlat::state_t* s = txlat::state(); s && dev->idx >= 0 && dev->idx < 8) {
++          uint32_t slot = rx_entry.request_id & 4095;
++          if (s->rid[dev->idx][slot] == rx_entry.request_id)
++            txlat::add(dev->idx, txlat::kDevlat,
++                hardware::system::rdtsc() - s->t_launch_end[dev->idx][slot]);
++        }
+ 
+         dbg_rx_inplace_log(
+             "RX WORKER {}:{} rxentries[{}] completed {} out of {} blocks "
+@@ -1986,12 +2057,14 @@ void dump_rx_state(PosDevice* dev) {
+ }
+ 
+ TRON(inline)
++
+ void tx_wait_for_slots(PosDevice* dev,
+     uint64_t slots_to_use,
+     tron_maybe_unused uint64_t request_id,
+     bool attn_req,
+     uint32_t wcmd_words_needed) noexcept {
+   TRACE_EVENT("driver-detail", "tx waiting for slots");
++  uint64_t txlat_t0 = hardware::system::rdtsc();
+   TRON_ASSERT_LE(wcmd_words_needed, dev->mm_cmd_fifo_depth);
+   // Log the host counters on the first tx_wait_for_slots call for this
+   // device, to verify init values. Include the DMA pointer addresses so
+@@ -2048,6 +2121,8 @@ void tx_wait_for_slots(PosDevice* dev,
+         dev->act_slots_free, act_slots_free, timeout_ns);
+     act_slots_free = dev->act_slots_free->load();
+   }
++  uint64_t txlat_t1 = hardware::system::rdtsc();
++  txlat::add(dev->idx, txlat::kSlot, txlat_t1 - txlat_t0);
+   // It's fine to wait for these conditions in order, because this thread is the
+   // only one that can reserve either resource once it becomes available.
+   int64_t cmds_in_flight = dev->mm_in_flight->load();
+@@ -2073,6 +2148,8 @@ void tx_wait_for_slots(PosDevice* dev,
+         dev->mm_in_flight, cmds_in_flight, timeout_ns);
+     cmds_in_flight = dev->mm_in_flight->load();
+   }
++  uint64_t txlat_t2 = hardware::system::rdtsc();
++  txlat::add(dev->idx, txlat::kCmd, txlat_t2 - txlat_t1);
+ 
+   uint64_t wcmd_words_in_flight =
+       dev->wcmd_words_in_flight.load(std::memory_order_acquire);
+@@ -2092,6 +2169,7 @@ void tx_wait_for_slots(PosDevice* dev,
+         &dev->wcmd_words_in_flight, wcmd_words_in_flight, timeout_ns);
+     wcmd_words_in_flight = dev->wcmd_words_in_flight.load(std::memory_order_acquire);
+   }
++  txlat::add(dev->idx, txlat::kWcmd, hardware::system::rdtsc() - txlat_t2);
+ 
+   dbg_tx_log("TX WORKER {}:{} aslots_free {} cmds_in_flight {} wcmd_words_in_flight {}",
+       dev->addr(), request_id, act_slots_free, cmds_in_flight, wcmd_words_in_flight);
+@@ -2121,6 +2199,7 @@ inline void release_prepared_metadata(
+ // for activation/slot/FIFO readiness, kicks the activation DMA, and
+ // advances `launch_tail`.
+ void tx_launch(PosDevice* dev, struct wqentry* workreq) noexcept {
++  uint64_t txlat_t3 = hardware::system::rdtsc();
+   thread_local uint64_t last_req_id = 0;
+   if ((workreq->request_id <= last_req_id) && (workreq->request_id != 0)) {
+     spdlog::error(
+@@ -2237,6 +2316,12 @@ void tx_launch(PosDevice* dev, struct wqentry* workreq) noexcept {
+         dev->rx_head);
+ 
+     workreq->act_ready.wait();
++    // PDJN (Mike's suggestion, 2026-08-10): mark the instant activations became
++    // ready on the TX thread, so fast/slow captures can compare the wait-for-
++    // activations edge per launch.
++    TRACE_EVENT_INSTANT("driver", "data ready", "B", workreq->B, "label",
++        workreq->debug_label ? workreq->debug_label : "unknown", "req",
++        workreq->request_id);
+ 
+ #ifdef CHECK_ACTIVATIONS_FOR_NANS
+     // Check activations for NANs.
+@@ -2300,6 +2385,13 @@ void tx_launch(PosDevice* dev, struct wqentry* workreq) noexcept {
+     dev->launch_tail += 1;
+     workreq->in_flight.store(false, std::memory_order_release);
+   });
++  uint64_t txlat_t4 = hardware::system::rdtsc();
++  txlat::add(dev->idx, txlat::kLaunch, txlat_t4 - txlat_t3);
++  if (txlat::state_t* s = txlat::state(); s && dev->idx >= 0 && dev->idx < 8) {
++    uint32_t slot = workreq->request_id & 4095;
++    s->rid[dev->idx][slot] = workreq->request_id;
++    s->t_launch_end[dev->idx][slot] = txlat_t4;
++  }
+ }
+ 
+ // TX worker.  See Note [Worker Thread Architecture]
+diff --git a/src/system/memory.cpp b/src/system/memory.cpp
+index 07572307c..534aa5bb1 100644
+--- a/src/system/memory.cpp
++++ b/src/system/memory.cpp
+@@ -1,8 +1,10 @@
+ #include <array>
+ #include <atomic>
+ #include <cstdint>
++#include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
++#include <sys/syscall.h>
+ #include <filesystem>
+ #include <memory>
+ #include <mutex>
+@@ -367,6 +369,33 @@ void pos_heap_set_host_target_hugepages(int64_t target) noexcept {
+ // both of which assume a single contiguous chunk. pos_heap_setup() only
+ // calls expand() once, and VFIO/IOMMU runtime growth is explicitly out
+ // of scope for v1 (see doc/pos_heap_v2.md §"Pool initialization").
++// PDJN launch-layout probe. When TRON_DMA_MAP_FILE is set, every DMA-heap
++// allocate/deallocate appends one line: seq tid op size alignment va.
++// Purpose: decide whether the per-launch allocation layout is deterministic
++// and whether hot-object offsets correlate with the decode-speed lottery.
++// Off = one cached null-pointer check per call.
++namespace {
++FILE* dma_map_file() noexcept {
++  static FILE* const f = [] {
++    const char* p = std::getenv("TRON_DMA_MAP_FILE");
++    return p ? std::fopen(p, "a") : nullptr;
++  }();
++  return f;
++}
++
++void dma_map_log(char op, size_t sz, size_t alignment, void* p) noexcept {
++  FILE* f = dma_map_file();
++  if (!f) return;
++  static std::atomic<uint64_t> dma_map_seq{0};
++  static std::mutex dma_map_mu;
++  uint64_t s = dma_map_seq.fetch_add(1, std::memory_order_relaxed);
++  std::lock_guard<std::mutex> lock(dma_map_mu);
++  std::fprintf(f, "%llu %ld %c %zu %zu %p\n", static_cast<unsigned long long>(s),
++      static_cast<long>(syscall(SYS_gettid)), op, sz, alignment, p);
++  std::fflush(f);
++}
++}  // namespace
++
+ // v2's internal `pool.chunks` vector and `slab_for()` walk *do* support
+ // multiple chunks for address-to-slab lookup, but the heap_start /
+ // heap_size / pos_get_device_addr surface does not.
+@@ -393,26 +422,35 @@ size_t heap_size() noexcept {
+ }
+ 
+ void* pos_allocate(size_t sz) noexcept {
++  void* p;
+   if (use_arena_allocator) {
+     auto* h = v2_heap.load(std::memory_order_relaxed);
+     TRON_ASSERT(h != nullptr, "pos_allocate called before pos_heap_setup");
+-    return h->allocate(sz);
++    p = h->allocate(sz);
++  } else {
++    TRON_ASSERT(heap != nullptr, "pos_allocate called before pos_heap_setup");
++    p = heap->allocate(sz);
+   }
+-  TRON_ASSERT(heap != nullptr, "pos_allocate called before pos_heap_setup");
+-  return heap->allocate(sz);
++  dma_map_log('a', sz, 0, p);
++  return p;
+ }
+ 
+ void* pos_allocate_aligned(size_t sz, size_t alignment) noexcept {
++  void* p;
+   if (use_arena_allocator) {
+     auto* h = v2_heap.load(std::memory_order_relaxed);
+     TRON_ASSERT(h != nullptr, "pos_allocate_aligned called before pos_heap_setup");
+-    return h->allocate(sz, alignment);
++    p = h->allocate(sz, alignment);
++  } else {
++    TRON_ASSERT(heap != nullptr, "pos_allocate_aligned called before pos_heap_setup");
++    p = heap->allocate(sz, alignment);
+   }
+-  TRON_ASSERT(heap != nullptr, "pos_allocate_aligned called before pos_heap_setup");
+-  return heap->allocate(sz, alignment);
++  dma_map_log('a', sz, alignment, p);
++  return p;
+ }
+ 
+ void pos_deallocate(void* p, size_t sz) noexcept {
++  dma_map_log('f', sz, 0, p);
+   if (use_arena_allocator) {
+     auto* h = v2_heap.load(std::memory_order_relaxed);
+     TRON_ASSERT(h != nullptr, "pos_deallocate called before pos_heap_setup");
+@@ -443,28 +481,37 @@ namespace tron::hardware {
+ // pos_heap_active_allocations above.
+ TRON(weak)
+ void* dma_allocate(size_t sz) noexcept {
++  void* p;
+   if (use_arena_allocator) {
+     auto* h = v2_heap.load(std::memory_order_relaxed);
+     TRON_ASSERT(h != nullptr, "dma_allocate called before pos_heap_setup");
+-    return h->allocate(sz);
++    p = h->allocate(sz);
++  } else {
++    TRON_ASSERT(heap != nullptr, "dma_allocate called before pos_heap_setup");
++    p = heap->allocate(sz);
+   }
+-  TRON_ASSERT(heap != nullptr, "dma_allocate called before pos_heap_setup");
+-  return heap->allocate(sz);
++  dma_map_log('A', sz, 0, p);
++  return p;
+ }
+ 
+ TRON(weak)
+ void* dma_allocate_aligned(size_t sz, size_t alignment) noexcept {
++  void* p;
+   if (use_arena_allocator) {
+     auto* h = v2_heap.load(std::memory_order_relaxed);
+     TRON_ASSERT(h != nullptr, "dma_allocate_aligned called before pos_heap_setup");
+-    return h->allocate(sz, alignment);
++    p = h->allocate(sz, alignment);
++  } else {
++    TRON_ASSERT(heap != nullptr, "dma_allocate_aligned called before pos_heap_setup");
++    p = heap->allocate(sz, alignment);
+   }
+-  TRON_ASSERT(heap != nullptr, "dma_allocate_aligned called before pos_heap_setup");
+-  return heap->allocate(sz, alignment);
++  dma_map_log('A', sz, alignment, p);
++  return p;
+ }
+ 
+ TRON(weak)
+ void dma_deallocate(void* p, size_t sz) noexcept {
++  dma_map_log('F', sz, 0, p);
+   if (use_arena_allocator) {
+     auto* h = v2_heap.load(std::memory_order_relaxed);
+     TRON_ASSERT(h != nullptr, "dma_deallocate called before pos_heap_setup");

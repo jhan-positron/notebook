@@ -1,0 +1,675 @@
+diff --git a/h/common/perfetto.hpp b/h/common/perfetto.hpp
+index 3196030fa..c8494f3f7 100644
+--- a/h/common/perfetto.hpp
++++ b/h/common/perfetto.hpp
+@@ -8,6 +8,8 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ 
++#include "common/trace_gate.hpp"
++
+ namespace tron {
+ bool application_track_events_enabled() noexcept;
+ void set_application_tracing_enabled(bool enabled) noexcept;
+@@ -38,7 +40,8 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+     if (::PERFETTO_TRACK_EVENT_NAMESPACE::internal::IsDynamicCategory(category)) {     \
+       tns::TrackEvent::CallIfEnabled(                                                  \
+           [&](uint32_t instances) PERFETTO_NO_THREAD_SAFETY_ANALYSIS {                 \
+-            if (::tron::application_track_events_enabled()) {                          \
++            if (::tron::application_track_events_enabled() &&                          \
++                ::tron::trace_gate_open()) {                                           \
+               tns::TrackEvent::method(                                                 \
+                   instances, category, name __VA_OPT__(, ) __VA_ARGS__);               \
+             }                                                                          \
+@@ -47,7 +50,8 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+       tns::TrackEvent::CallIfCategoryEnabled(                                          \
+           PERFETTO_UID(kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_),         \
+           [&](uint32_t instances) PERFETTO_NO_THREAD_SAFETY_ANALYSIS {                 \
+-            if (::tron::application_track_events_enabled()) {                          \
++            if (::tron::application_track_events_enabled() &&                          \
++                ::tron::trace_gate_open()) {                                           \
+               tns::TrackEvent::method(instances,                                       \
+                   PERFETTO_UID(kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_), \
+                   name __VA_OPT__(, ) __VA_ARGS__);                                    \
+@@ -68,7 +72,7 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+                  ::perfetto::DynamicCategory(category))                                \
+            : PERFETTO_TRACK_EVENT_NAMESPACE::TrackEvent::IsCategoryEnabled(            \
+                  PERFETTO_GET_CATEGORY_INDEX(category))) &&                            \
+-      ::tron::application_track_events_enabled())
++      ::tron::application_track_events_enabled() && ::tron::trace_gate_open())
+ #else  // !PERFETTO_BUILDFLAG(PERFETTO_COMPILER_GCC)
+ #define PERFETTO_INTERNAL_CATEGORY_ENABLED(category)                                   \
+   [&]() -> bool {                                                                      \
+@@ -80,7 +84,7 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+                    ? TrackEvent::IsDynamicCategoryEnabled(                             \
+                          ::perfetto::DynamicCategory(category))                        \
+                    : TrackEvent::IsCategoryEnabled(PERFETTO_UID(index))) &&            \
+-           ::tron::application_track_events_enabled();                                 \
++           ::tron::application_track_events_enabled() && ::tron::trace_gate_open();    \
+   }()
+ #endif  // !PERFETTO_BUILDFLAG(PERFETTO_COMPILER_GCC)
+ 
+diff --git a/h/common/trace_gate.hpp b/h/common/trace_gate.hpp
+new file mode 100644
+index 000000000..e540cc461
+--- /dev/null
++++ b/h/common/trace_gate.hpp
+@@ -0,0 +1,23 @@
++#pragma once
++
++#include <atomic>
++
++namespace tron {
++
++// Window gate for the perfetto-gated inter-fwd-pass capture (deep-dive
++// runbook, 2026-08-12). ANDed into the emission macro overrides in
++// common/perfetto.hpp on top of application_track_events_enabled(), so
++// track events are emitted only between the last layer's post-attention
++// OPEN and the next step's layer-0 entry CLOSE, decode batches only.
++// Redundant stores from concurrent attention workers are intentional.
++inline std::atomic<bool> g_trace_gate{false};
++
++inline bool trace_gate_open() noexcept {
++  return g_trace_gate.load(std::memory_order_relaxed);
++}
++
++inline void trace_gate_set(bool open) noexcept {
++  g_trace_gate.store(open, std::memory_order_relaxed);
++}
++
++}  // namespace tron
+diff --git a/h/libpos.hpp b/h/libpos.hpp
+index 710e3c627..2016465a6 100644
+--- a/h/libpos.hpp
++++ b/h/libpos.hpp
+@@ -2,6 +2,7 @@
+ 
+ // Interface to the device driver for one FPGA
+ 
++#include "system/kvwait_probe.hpp"
+ #include <cmath>
+ #include <functional>
+ #include <string>
+@@ -206,6 +207,10 @@ struct stream_result_t {
+   uint32_t blocks;
+   uint32_t block_ix;
+   bf16* begin;
++  // deep-dive probe v8: set true only for wcls (lm-head) streams; when the
++  // TRON_KVWAIT_FILE probe is enabled, try_consume records one stamp per
++  // consumed block (tag 7500 + block index) to time stream delivery.
++  bool kvwait_probe_tag = false;
+ 
+   void prepare() noexcept {
+     // Set the last 8 bytes of each result block to nans.
+@@ -230,6 +235,9 @@ struct stream_result_t {
+           begin + std::min<size_t>(result_size, (block_ix + 1) * res_elts_per_block);
+       uint16_t* latch = reinterpret_cast<uint16_t*>(block_end) - 1;
+       if (*latch == nans) return false;  // yield
++      if (kvwait_probe_tag && kvwait_probe::state().enabled)
++        kvwait_probe::state().add(
++            kvwait_probe::state_t::now(), 0, 7500 + (block_ix & 255));
+       size_t col = block_ix * res_elts_per_block;
+       bf16* block_begin = begin + block_ix * res_elts_per_block;
+       consume_block(col, block_begin, block_end);
+diff --git a/h/pos/metrics.hpp b/h/pos/metrics.hpp
+index c7ec3e1a9..eb8df2675 100644
+--- a/h/pos/metrics.hpp
++++ b/h/pos/metrics.hpp
+@@ -128,6 +128,9 @@ struct fpga_tracer_data {
+   bool fetcher0_read_done;
+   uint16_t mm_results_accum;
+   uint32_t rmem_depth;
++  // matmul-FSM compute phase from tracer bits [29:28]:
++  // 0=idle, 1=matmul, 2=attention K, 3=attention V
++  uint8_t compute_phase;
+ 
+   fpga_tracer_data() {
+     full_value = 0;
+@@ -141,6 +144,7 @@ struct fpga_tracer_data {
+     fetcher0_read_done = false;
+     mm_results_accum = 0;
+     rmem_depth = 0;
++    compute_phase = 0;
+   }
+ 
+   // Convenience function of debug purposes, lets us grab a string of the values to log.
+@@ -162,4 +166,11 @@ struct fpga_tracer_data {
+ struct fpga_tracer_data decode_tracer(uint32_t value) noexcept;
+ std::thread tracer_start(int corenum) noexcept;  // start up the tracer thread.
+ 
++// fpga_use fence-flip experiment (TRON_FPGA_USE_FENCE=1): called by the model
++// scheduler thread at Fence 1 and Fence 3 to close/reopen the chip metrics
++// window, yielding PER-TOKEN fpga_use counters for the inter-pass window
++// [F1->F3] and the intra-pass span [F3->next F1] separately. closing_fence is
++// 1 or 3 (which fence closes the current window). No-op when the env is unset.
++void fpga_use_fence_flip(int closing_fence) noexcept;
++
+ }  // namespace tron::hardware::metrics
+diff --git a/h/system/kvwait_probe.hpp b/h/system/kvwait_probe.hpp
+new file mode 100644
+index 000000000..058423b4a
+--- /dev/null
++++ b/h/system/kvwait_probe.hpp
+@@ -0,0 +1,45 @@
++#pragma once
++// deep-dive K/V-wait / station probe (2026-08-11). When TRON_KVWAIT_FILE is
++// set, records (tsc, dur, tag) triples into a file-backed mmap (survives
++// SIGKILL). Tags: 0xx Q-channel wait (layer), 1xxx KV latch, 2xxx attn done
++// barrier, 3xxx tx_launch dispatch instant (3000+dev idx), 4xxx rx completion
++// instant (4000+dev idx). Dormant when the env var is unset.
++#include <atomic>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <fcntl.h>
++#include <new>
++#include <sys/mman.h>
++#include <unistd.h>
++#include <x86intrin.h>
++
++namespace kvwait_probe {
++struct state_t {
++  static constexpr size_t kMax = size_t{1} << 24;
++  struct rec { uint64_t t0, dur, tag; };
++  rec* recs = nullptr;
++  std::atomic<uint64_t>* count = nullptr;
++  bool enabled = false;
++  state_t() noexcept {
++    const char* path = std::getenv("TRON_KVWAIT_FILE");
++    if (!path) return;
++    int fd = ::open(path, O_CREAT | O_RDWR | O_TRUNC, 0644);
++    if (fd < 0) return;
++    size_t bytes = sizeof(uint64_t) + kMax * sizeof(rec);
++    if (::ftruncate(fd, static_cast<off_t>(bytes)) != 0) { ::close(fd); return; }
++    void* m = ::mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
++    ::close(fd);
++    if (m == MAP_FAILED) return;
++    count = new (m) std::atomic<uint64_t>(0);
++    recs = reinterpret_cast<rec*>(static_cast<char*>(m) + sizeof(uint64_t));
++    enabled = true;
++  }
++  static uint64_t now() noexcept { return __rdtsc(); }
++  void add(uint64_t t0, uint64_t dur, uint64_t tag) noexcept {
++    uint64_t i = count->fetch_add(1, std::memory_order_relaxed);
++    if (i < kMax) recs[i] = rec{t0, dur, tag};
++  }
++};
++inline state_t& state() noexcept { static state_t s; return s; }
++}  // namespace kvwait_probe
+diff --git a/h/tron/hardware/ptensor.hpp b/h/tron/hardware/ptensor.hpp
+index 4b7cf887e..eb0c76aec 100644
+--- a/h/tron/hardware/ptensor.hpp
++++ b/h/tron/hardware/ptensor.hpp
+@@ -200,10 +200,15 @@ struct ptensor<ResultTiles, ResultTileSize, ContractTileSize, MinTileSize, M, N>
+     // See comments in tron::hardware::stream_result_t in libpos.hpp.
+     struct stream_result_t {
+       std::array<tron::hardware::stream_result_t, all_result_tiles> result_tiles;
++      // deep-dive probe v8: propagated to tiles so per-block consume stamps
++      // fire only for streams tagged at the wcls prepare site.
++      bool kvwait_probe_tag = false;
+ 
+       void prepare() noexcept {
+-        for (auto& tile : result_tiles)
++        for (auto& tile : result_tiles) {
++          tile.kvwait_probe_tag = kvwait_probe_tag;
+           tile.prepare();
++        }
+       }
+ 
+       void start() noexcept {
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index 4cbff813e..72ff0e524 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -2,6 +2,7 @@
+ 
+ // The common parts of all tron models, that do not vary across plugins.
+ 
++#include "system/kvwait_probe.hpp"
+ #include <algorithm>  // For std::find, std::remove_if
+ #include <atomic>     // For gof_coop_outstanding_
+ #include <cerrno>
+@@ -27,8 +28,10 @@
+ #include "common/indexed.hpp"
+ #include "common/numerics/std.hpp"
+ #include "common/top_k_accum.hpp"
++#include "common/trace_gate.hpp"
+ #include "pos/device.hpp"
+ #include "pos/dma_tracker.hpp"
++#include "pos/metrics.hpp"
+ #include "spdlog/fmt/bundled/core.h"
+ #include "spdlog/spdlog.h"
+ #include "system/fuse_stats.hpp"
+@@ -1941,6 +1944,14 @@ public:
+     // Note [Plugin-owned worker launch].)
+     void finalize_minibatches() {
+       TRACE_EVENT("model", "finalize_minibatches");
++      // pfgate: defensive CLOSE — a parse batch (items.size() > 8) must not
++      // run with the window gate left open by a preceding decode step whose
++      // layer-0 close (decode-conditioned) never fired.
++      for (auto& q_batch : q_batches)
++        if (q_batch->items.size() > 8) {
++          trace_gate_set(false);
++          break;
++        }
+       plugin_state.make_latches(latches);
+ 
+       // Compute dependencies of q_batches on each other.
+@@ -3041,6 +3052,9 @@ public:
+ 
+     void run_logits(size_t logits_chunk_size) {
+       MODEL_DEBUG("{}", __PRETTY_FUNCTION__);
++      // fpga_use fence-flip: run_logits begins just after run() returned, i.e.
++      // at Fence 1 -- close the [F3->F1] intra-pass-span metrics window.
++      tron::hardware::metrics::fpga_use_fence_flip(1);
+       // Note: LogitsMode::ALL in testutil.hpp relies on the logits listeners being
+       // called in series, and in the order in which they were registered; otherwise, we
+       // will race or save logits out of order, respectively.
+@@ -3084,7 +3098,19 @@ public:
+         logits_done[logit_chk].wait();
+       }
+       // This is the main thread waiting for all of the callbacks to be done.
+-      listeners_notified.wait();
++      if (kvwait_probe::state().enabled) {
++        const uint64_t f3_t0 = kvwait_probe::state_t::now();
++        listeners_notified.wait();
++        kvwait_probe::state().add(f3_t0,
++            kvwait_probe::state_t::now() - f3_t0, 7600);  // site 7600: Fence 3
++      } else {
++        listeners_notified.wait();
++      }
++      // Fence 3: all logits listeners acknowledged; a definitive sync point
++      // (owner default 2026-08-13: always emitted in perfetto builds).
++      TRACE_EVENT_INSTANT("model", "fence 3");
++      // fpga_use fence-flip: close the [F1->F3] inter-pass metrics window.
++      tron::hardware::metrics::fpga_use_fence_flip(3);
+ 
+       // Write eagle_x_out for ALL tokens with allocated output pointers.
+       // The scheduler allocates eagle_x_out for all tokens in an edge, but
+@@ -3121,11 +3147,26 @@ public:
+         size_t chunk_end = std::min(
+             n_empty_listeners + (logit_chk + 1) * logits_chunk_size, n_listeners);
+         if constexpr (launch_wcls_t::can_stream_result) {
+-          logits_allocated[logit_chk].wait();
++          if (worker_ix == 0 && kvwait_probe::state().enabled) {
++            const uint64_t la_t0 = hardware::system::rdtsc();
++            logits_allocated[logit_chk].wait();
++            kvwait_probe::state().add(
++                la_t0, hardware::system::rdtsc() - la_t0, 7100);  // site 7100: alloc wait
++          } else {
++            logits_allocated[logit_chk].wait();
++          }
+           for (size_t offset = worker_ix; offset < chunk_end - chunk_start;
+               offset += logits_chunk_size) {
+             TRACE_EVENT("model", "prepare streams", "listener", chunk_start + offset);
+-            wcls_streams[offset].prepare();
++            wcls_streams[offset].kvwait_probe_tag = true;
++            if (kvwait_probe::state().enabled) {
++              const uint64_t pr_t0 = hardware::system::rdtsc();
++              wcls_streams[offset].prepare();
++              kvwait_probe::state().add(
++                  pr_t0, hardware::system::rdtsc() - pr_t0, 7200);  // site 7200: stream prepare
++            } else {
++              wcls_streams[offset].prepare();
++            }
+             logits_prepared[logit_chk].count_down();
+           }
+         } else {
+@@ -3145,11 +3186,25 @@ public:
+               // logging is coded to just read the output buffer.
+               logits_done[logit_chk].wait();
+             }
+-            fill_logits_buffer(listener_id(chunk_start + offset), offset, buf);
++            if (kvwait_probe::state().enabled) {
++              const uint64_t fl_t0 = hardware::system::rdtsc();
++              fill_logits_buffer(listener_id(chunk_start + offset), offset, buf);
++              kvwait_probe::state().add(
++                  fl_t0, hardware::system::rdtsc() - fl_t0, 7000);  // site 7: logits consume
++            } else {
++              fill_logits_buffer(listener_id(chunk_start + offset), offset, buf);
++            }
+           }
+           // This is the line of code that actually calls the callback that
+           // had been passed to `sequence_prompt`.
+-          listener_notifications[listener_id(chunk_start + offset)]();
++          if (kvwait_probe::state().enabled) {
++            const uint64_t cb_t0 = kvwait_probe::state_t::now();
++            listener_notifications[listener_id(chunk_start + offset)]();
++            kvwait_probe::state().add(cb_t0,
++                kvwait_probe::state_t::now() - cb_t0, 7400);  // site 7400: listener callback
++          } else {
++            listener_notifications[listener_id(chunk_start + offset)]();
++          }
+         }
+         logits_free[logit_chk].count_down();
+       }
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 4b2a2cd83..1d4c32a69 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -9,9 +9,17 @@
+ #include <span>
+ #include <string>
+ #include <vector>
++#include <atomic>
++#include "system/kvwait_probe.hpp"
++#include <cstdio>
++#include <cstdlib>
++#include <fcntl.h>
++#include <sys/mman.h>
++#include <unistd.h>
+ 
+ #include "common/assert.hpp"
+ #include "common/numerics/fp16.hpp"
++#include "common/trace_gate.hpp"
+ #include "common/util.hpp"
+ #include "libpos.hpp"
+ #include "spdlog/spdlog.h"
+@@ -31,6 +39,7 @@
+ 
+ namespace tron {
+ 
++
+ constexpr bool hardware_attention_scale_representable(float scale) noexcept {
+   const float device_scale = fp16(scale);
+   return device_scale > 0.0f && device_scale < std::numeric_limits<float>::infinity();
+@@ -839,9 +848,21 @@ struct self_attention {
+       const model_layer_id layer = binding.model_layer;
+       uint64_t attn_elapsed = 0;
+ 
++      // pfgate: CLOSE the inter-fwd-pass trace window at the entry of the
++      // next step's first attention op. Decode batches only (items.size()
++      // <= 8); redundant stores across attention workers are harmless.
++      if (layer.i == 0 && outer_batch->items.size() <= 8) trace_gate_set(false);
++
+       query_channel.start_reading(worker_ix);
+       // One token is enough to wait on the fallback latch.
+-      query_channel.start_reading_at(0);
++      if (worker_ix == 0 && kvwait_probe::state().enabled) {
++        const uint64_t q_t0 = hardware::system::rdtsc();
++        query_channel.start_reading_at(0);
++        kvwait_probe::state().add(
++            q_t0, hardware::system::rdtsc() - q_t0, uint64_t(layer.i));  // site 0: Q wait
++      } else {
++        query_channel.start_reading_at(0);
++      }
+       for (size_t task_ix = worker_ix; task_ix < outer_batch->items.size();
+           task_ix += n_attn_workers) {
+         token_job_id ix = outer_batch->items[task_ix];
+@@ -858,7 +879,14 @@ struct self_attention {
+ 
+       // Wait for upstream K/V before running pending attention.
+       // See Note [Minibatch Dependency Tracking].
+-      outer_batch->upstream_kvs_ready[binding.kv_slot].wait();
++      if (worker_ix == 0 && kvwait_probe::state().enabled) {
++        const uint64_t kv_t0 = hardware::system::rdtsc();
++        outer_batch->upstream_kvs_ready[binding.kv_slot].wait();
++        kvwait_probe::state().add(
++            kv_t0, hardware::system::rdtsc() - kv_t0, 1000 + uint64_t(layer.i));  // site 1: KV latch
++      } else {
++        outer_batch->upstream_kvs_ready[binding.kv_slot].wait();
++      }
+ 
+       attn_elapsed -= hardware::system::rdtsc();
+       compute_elapsed -= hardware::system::rdtsc();
+@@ -878,7 +906,19 @@ struct self_attention {
+       post_attention();
+ 
+       // Sync all the attention workers so worker 0 measures the whole operation.
+-      outer_batch->attn_done_barrier.arrive_and_wait(n_attn_workers);
++      if (worker_ix == 0 && kvwait_probe::state().enabled) {
++        const uint64_t b_t0 = hardware::system::rdtsc();
++        outer_batch->attn_done_barrier.arrive_and_wait(n_attn_workers);
++        kvwait_probe::state().add(
++            b_t0, hardware::system::rdtsc() - b_t0, 2000 + uint64_t(layer.i));  // site 2: done barrier
++      } else {
++        outer_batch->attn_done_barrier.arrive_and_wait(n_attn_workers);
++      }
++      // pfgate: OPEN the inter-fwd-pass trace window at the end of the last
++      // layer's attention. Decode batches only; see CLOSE at layer-0 entry
++      // above and the defensive close in model.hpp finalize_minibatches.
++      if (layer.i + 1 == n_layers && outer_batch->items.size() <= 8)
++        trace_gate_set(true);
+       attn_elapsed += hardware::system::rdtsc();
+       return attn_elapsed;
+     }
+diff --git a/src/pos/driver.cpp b/src/pos/driver.cpp
+index ed3791387..da251ffac 100644
+--- a/src/pos/driver.cpp
++++ b/src/pos/driver.cpp
+@@ -1,3 +1,4 @@
++#include "system/kvwait_probe.hpp"
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+@@ -900,6 +901,8 @@ hbm_address_t alloc_kv_weights(PosDevice* dev, size_t qlen) noexcept {
+ #pragma GCC diagnostic pop
+ 
+   hbm_address_t start_addr = dev->allocator_.allocate(qlen, caller_pc, caller_pc_2);
++  if (kvwait_probe::state().enabled)  // v9: HBM alloc audit (addr, size)
++    kvwait_probe::state().add(start_addr, qlen, 7900 + uint64_t(dev->idx));
+   dbg_wload_log("{} {}> allocating {}B ({:#016x}) per fetcher at HW address {:#016x}",
+       __FUNCTION__, dev->addr(), qlen, qlen, start_addr);
+ 
+@@ -952,6 +955,8 @@ hbm_address_t alloc_hardware_weights(PosDevice* dev, size_t iqlen) noexcept {
+   [[maybe_unused]] void* caller_pc_2 = __builtin_return_address(1);
+ #pragma GCC diagnostic pop
+   hbm_address_t start_addr = dev->allocator_.allocate(qlen, caller_pc, caller_pc_2);
++  if (kvwait_probe::state().enabled)  // v9: HBM alloc audit (addr, size)
++    kvwait_probe::state().add(start_addr, qlen, 7900 + uint64_t(dev->idx));
+ 
+   // Check to make sure that we're not too large to fit in the remaining space.
+   // TODO Fix length check to get HBM length from the cap reg.
+diff --git a/src/pos/metrics.cpp b/src/pos/metrics.cpp
+index 5057c4c5a..f6a44dec8 100644
+--- a/src/pos/metrics.cpp
++++ b/src/pos/metrics.cpp
+@@ -10,6 +10,7 @@
+ #include "pos/device.hpp"
+ #include "pos/lib.hpp"
+ #include "pos/metrics.hpp"
++#include "system/kvwait_probe.hpp"
+ #include "system/metrics.hpp"
+ #include "system/mwaitx.hpp"
+ #include "system/system.hpp"
+@@ -58,6 +59,7 @@ struct fpga_tracer_data decode_tracer(uint32_t value) noexcept {
+   tracer.fetcher16_read_done = (value >> 19) & 1;
+   tracer.fetcher0_read_done = (value >> 18) & 1;
+   tracer.mm_results_accum = (value >> 16) & 3;
++  tracer.compute_phase = (value >> 28) & 3;
+ 
+   return tracer;
+ }
+@@ -116,6 +118,10 @@ void compare_and_update_perfetto(
+       TRACE_COUNTER("driver-detail", (addr + "_mm_results_accum_bits").c_str(),
+           current.mm_results_accum);
+     }
++    if (current.compute_phase != prior.compute_phase) {
++      TRACE_COUNTER(
++          "driver-detail", (addr + "_compute_phase").c_str(), current.compute_phase);
++    }
+   }
+ }
+ 
+@@ -152,6 +158,41 @@ void fpga_state_tracer(int corenum) noexcept {
+   }
+ }
+ 
++// fpga_use fence-flip experiment: see declaration in pos/metrics.hpp.
++// Tag scheme (kvwait records, t0 = flip instant, dur = counter value):
++//   8000 + dev*100 + 20 + field  -> window closed at Fence 3 = [F1->F3]
++//   8000 + dev*100 + 40 + field  -> window closed at Fence 1 = [F3->next F1]
++//   field: 0=hbm_timer 1=hbm_read 2=mm_timer 3=mm_bp 4=mm_in_prog
++//          5=mm_rmem_bp 6=mm_wmem_bp
++// The first window of a run has no matching start; analysis drops the first
++// record set per draw. Mutually exclusive with the 1 s poller (worker.cpp).
++void fpga_use_fence_flip(int closing_fence) noexcept {
++  static const bool on = [] {
++    const char* s = std::getenv("TRON_FPGA_USE_FENCE");
++    return s != nullptr && *s == '1';
++  }();
++  if (!on) return;
++  auto devices = pos_list_devices();
++  const uint64_t t0 = kvwait_probe::state_t::now();
++  const uint64_t seg = (closing_fence == 3) ? 20 : 40;
++  for (auto& dev : *devices) {
++    dev->stop_fpga_use_metric_capture();
++    dev->readout_fpga_use_metrics();
++    if (kvwait_probe::state().enabled) {
++      const auto& f = dev->metrics.fpga_use;
++      const uint64_t base = 8000 + uint64_t(dev->idx) * 100 + seg;
++      kvwait_probe::state().add(t0, f.hbm_timer, base + 0);
++      kvwait_probe::state().add(t0, f.hbm_read_cycles, base + 1);
++      kvwait_probe::state().add(t0, f.mm_timer, base + 2);
++      kvwait_probe::state().add(t0, f.mm_bp_cycles, base + 3);
++      kvwait_probe::state().add(t0, f.mm_in_prog_cycles, base + 4);
++      kvwait_probe::state().add(t0, f.mm_rmem_bp_cycles, base + 5);
++      kvwait_probe::state().add(t0, f.mm_wmem_bp_cycles, base + 6);
++    }
++    dev->start_fpga_use_metric_capture();
++  }
++}
++
+ // visible call used to spin up the FPGA tracer thread.
+ std::thread tracer_start(int corenum) noexcept {
+   std::thread tracer(fpga_state_tracer, corenum);
+diff --git a/src/pos/worker.cpp b/src/pos/worker.cpp
+index 5ab231f4f..da4de920e 100644
+--- a/src/pos/worker.cpp
++++ b/src/pos/worker.cpp
+@@ -59,6 +59,7 @@
+  * branch once the FPGA ordering defect is resolved.
+  *
+  */
++#include "system/kvwait_probe.hpp"
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+@@ -96,6 +97,51 @@ namespace tron {
+ 
+ using namespace tron::hardware;
+ using namespace tron::hardware::system;
++
++// fpga_use poller experiment (TRON_FPGA_USE_POLL_MS): windowed capture of the
++// chip's fpga_use metrics (HBM read duty, matmul-FSM busy/backpressure incl.
++// weight-memory stalls) via the existing start/stop/readout register API,
++// recorded as kvwait-probe records with tags 8000 + dev*100 + field. Windows
++// must stay short: the chip counters are 32-bit cycle counters. 0/unset = off.
++static uint64_t fpga_use_poll_ms() noexcept {
++  static const uint64_t v = [] {
++    const char* s = std::getenv("TRON_FPGA_USE_POLL_MS");
++    return s ? std::strtoull(s, nullptr, 10) : uint64_t{0};
++  }();
++  return v;
++}
++
++static void fpga_use_poller(PosDevice* dev) noexcept {
++  // Keep the poller off the tron partition (core 5 is a platform core on the
++  // delphi resource map); 3 MMIO round trips per window per device.
++  tron::hardware::system::pin_to_cpu(5);
++  tron::hardware::system::set_thread_name(
++      "FpgaUse-" + fmt::format("{:02x}", dev->pci_bus));
++  const uint64_t win_ns = fpga_use_poll_ms() * 1000000ULL;
++  while (true) {
++    dev->start_fpga_use_metric_capture();
++    tron::hardware::mwaitx::delay_ns(win_ns);
++    dev->stop_fpga_use_metric_capture();
++    dev->readout_fpga_use_metrics();
++    if (kvwait_probe::state().enabled) {
++      const uint64_t t0 = kvwait_probe::state_t::now();
++      const auto& f = dev->metrics.fpga_use;
++      const uint64_t base = 8000 + uint64_t(dev->idx) * 100;
++      kvwait_probe::state().add(t0, f.hbm_timer, base + 0);
++      kvwait_probe::state().add(t0, f.hbm_read_cycles, base + 1);
++      kvwait_probe::state().add(t0, f.mm_timer, base + 2);
++      kvwait_probe::state().add(t0, f.mm_bp_cycles, base + 3);
++      kvwait_probe::state().add(t0, f.mm_in_prog_cycles, base + 4);
++      kvwait_probe::state().add(t0, f.mm_rmem_bp_cycles, base + 5);
++      kvwait_probe::state().add(t0, f.mm_wmem_bp_cycles, base + 6);
++      // Instantaneous per-window snapshots (raw 64-bit register values):
++      // cb_stat = command-queue occupancy (host-starvation discriminator);
++      // rmem_ctrl = upper/lower results-FIFO depths (real backpressure FIFO).
++      kvwait_probe::state().add(t0, cb_stat_reg(dev).read(), base + 7);
++      kvwait_probe::state().add(t0, rmem_ctrl_reg(dev).read(), base + 8);
++    }
++  }
++}
+ using namespace perfetto;
+ 
+ inline void release_prepared_metadata(PosDevice* dev, struct rxinfo& rx_entry) noexcept;
+@@ -643,6 +689,9 @@ void do_rx_inplace(PosDevice* dev) noexcept {
+         }
+       }
+ 
++      if (kvwait_probe::state().enabled)
++        kvwait_probe::state().add(kvwait_probe::state_t::now(), 0,
++            4000 + uint64_t(dev->idx));  // site 4: completion instant
+       // handle our pointer for the rx_entries array
+       dev->rx_head += 1;
+     }
+@@ -2148,6 +2197,9 @@ inline void release_prepared_metadata(
+ // for activation/slot/FIFO readiness, kicks the activation DMA, and
+ // advances `launch_tail`.
+ void tx_launch(PosDevice* dev, struct wqentry* workreq) noexcept {
++  if (kvwait_probe::state().enabled)
++    kvwait_probe::state().add(kvwait_probe::state_t::now(), 0,
++        3000 + uint64_t(dev->idx));  // site 3: dispatch instant
+   thread_local uint64_t last_req_id = 0;
+   if ((workreq->request_id <= last_req_id) && (workreq->request_id != 0)) {
+     spdlog::error(
+@@ -2263,6 +2315,12 @@ void tx_launch(PosDevice* dev, struct wqentry* workreq) noexcept {
+     if (!workreq->defer_wcmd_until_launch) publish_staged_wcmds();
+ 
+     workreq->act_ready.wait();
++    // PDJN (Mike's suggestion, 2026-08-10): mark the instant activations became
++    // ready on the TX thread, so fast/slow captures can compare the wait-for-
++    // activations edge per launch.
++    TRACE_EVENT_INSTANT("driver", "data ready", "B", workreq->B, "label",
++        workreq->debug_label ? workreq->debug_label : "unknown", "req",
++        workreq->request_id);
+ 
+ #ifdef CHECK_ACTIVATIONS_FOR_NANS
+     // Check activations for NANs.
+@@ -2354,6 +2412,15 @@ void worker_main(PosDevice* dev) noexcept {
+     std::thread rx_worker(do_rx_inplace, dev);
+     rx_worker.detach();
+ 
++    // fpga_use poller experiment: one windowed-metrics poller per device.
++    // Mutually exclusive with the fence-flip mode (both drive the same
++    // per-device metrics FSM).
++    const char* fence_env = std::getenv("TRON_FPGA_USE_FENCE");
++    if (fpga_use_poll_ms() != 0 && !(fence_env != nullptr && *fence_env == '1')) {
++      std::thread fpga_use_thread(fpga_use_poller, dev);
++      fpga_use_thread.detach();
++    }
++
+     std::string s = "TX-" + fmt::format("{:02x}", dev->pci_bus);
+     tron::hardware::system::set_thread_name(s);
+ 
+diff --git a/src/tron/generation/speculate.cpp b/src/tron/generation/speculate.cpp
+index 9a1359eb4..fc09cd84a 100644
+--- a/src/tron/generation/speculate.cpp
++++ b/src/tron/generation/speculate.cpp
+@@ -1,3 +1,4 @@
++#include "system/kvwait_probe.hpp"
+ #include <algorithm>
+ #include <atomic>
+ #include <cstdlib>
+@@ -534,7 +535,16 @@ void speculation_context::loop() noexcept {
+   // whose draft and exact logits have been computed during prompt parsing;
+   // thereafter the draft_tree is repeatedly consumed and rebuilt.
+   SPECULATE_LOG("phase={}, num_tokens_seen={}", (int)phase, num_tokens_seen);
+-  if (phase == phase_t::sampling) sample();
++  if (phase == phase_t::sampling) {
++    if (kvwait_probe::state().enabled) {
++      const uint64_t s_t0 = kvwait_probe::state_t::now();
++      sample();
++      kvwait_probe::state().add(
++          s_t0, kvwait_probe::state_t::now() - s_t0, 7300);  // site 7300: sampler
++    } else {
++      sample();
++    }
++  }
+   if (phase == phase_t::drafting) draft_step();
+   if (phase == phase_t::verifying) verify();
+   if (phase == phase_t::stopping) {

@@ -1,0 +1,405 @@
+diff --git a/h/common/perfetto.hpp b/h/common/perfetto.hpp
+index b94d09e11..12d5a08ee 100644
+--- a/h/common/perfetto.hpp
++++ b/h/common/perfetto.hpp
+@@ -8,6 +8,8 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ 
++#include "common/trace_gate.hpp"
++
+ namespace tron {
+ bool application_track_events_enabled() noexcept;
+ void set_application_tracing_enabled(bool enabled) noexcept;
+@@ -38,7 +40,8 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+     if (::PERFETTO_TRACK_EVENT_NAMESPACE::internal::IsDynamicCategory(category)) {     \
+       tns::TrackEvent::CallIfEnabled(                                                  \
+           [&](uint32_t instances) PERFETTO_NO_THREAD_SAFETY_ANALYSIS {                 \
+-            if (::tron::application_track_events_enabled()) {                          \
++            if (::tron::application_track_events_enabled() &&                          \
++                ::tron::trace_gate_open()) {                                           \
+               tns::TrackEvent::method(                                                 \
+                   instances, category, name __VA_OPT__(, ) __VA_ARGS__);               \
+             }                                                                          \
+@@ -47,7 +50,8 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+       tns::TrackEvent::CallIfCategoryEnabled(                                          \
+           PERFETTO_UID(kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_),         \
+           [&](uint32_t instances) PERFETTO_NO_THREAD_SAFETY_ANALYSIS {                 \
+-            if (::tron::application_track_events_enabled()) {                          \
++            if (::tron::application_track_events_enabled() &&                          \
++                ::tron::trace_gate_open()) {                                           \
+               tns::TrackEvent::method(instances,                                       \
+                   PERFETTO_UID(kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_), \
+                   name __VA_OPT__(, ) __VA_ARGS__);                                    \
+@@ -68,7 +72,7 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+                  ::perfetto::DynamicCategory(category))                                \
+            : PERFETTO_TRACK_EVENT_NAMESPACE::TrackEvent::IsCategoryEnabled(            \
+                  PERFETTO_GET_CATEGORY_INDEX(category))) &&                            \
+-      ::tron::application_track_events_enabled())
++      ::tron::application_track_events_enabled() && ::tron::trace_gate_open())
+ #else  // !PERFETTO_BUILDFLAG(PERFETTO_COMPILER_GCC)
+ #define PERFETTO_INTERNAL_CATEGORY_ENABLED(category)                                   \
+   [&]() -> bool {                                                                      \
+@@ -80,7 +84,7 @@ void set_application_tracing_enabled(bool enabled) noexcept;
+                    ? TrackEvent::IsDynamicCategoryEnabled(                             \
+                          ::perfetto::DynamicCategory(category))                        \
+                    : TrackEvent::IsCategoryEnabled(PERFETTO_UID(index))) &&            \
+-           ::tron::application_track_events_enabled();                                 \
++           ::tron::application_track_events_enabled() && ::tron::trace_gate_open();    \
+   }()
+ #endif  // !PERFETTO_BUILDFLAG(PERFETTO_COMPILER_GCC)
+ 
+diff --git a/h/libpos.hpp b/h/libpos.hpp
+index 584010920..f3565da14 100644
+--- a/h/libpos.hpp
++++ b/h/libpos.hpp
+@@ -2,6 +2,7 @@
+ 
+ // Interface to the device driver for one FPGA
+ 
++#include "system/kvwait_probe.hpp"
+ #include <cmath>
+ #include <functional>
+ #include <string>
+@@ -206,6 +207,10 @@ struct stream_result_t {
+   uint32_t blocks;
+   uint32_t block_ix;
+   bf16* begin;
++  // deep-dive probe v8: set true only for wcls (lm-head) streams; when the
++  // TRON_KVWAIT_FILE probe is enabled, try_consume records one stamp per
++  // consumed block (tag 7500 + block index) to time stream delivery.
++  bool kvwait_probe_tag = false;
+ 
+   void prepare() noexcept {
+     // Set the last 8 bytes of each result block to nans.
+@@ -230,6 +235,9 @@ struct stream_result_t {
+           begin + std::min<size_t>(result_size, (block_ix + 1) * res_elts_per_block);
+       uint16_t* latch = reinterpret_cast<uint16_t*>(block_end) - 1;
+       if (*latch == nans) return false;  // yield
++      if (kvwait_probe_tag && kvwait_probe::state().enabled)
++        kvwait_probe::state().add(
++            kvwait_probe::state_t::now(), 0, 7500 + (block_ix & 255));
+       size_t col = block_ix * res_elts_per_block;
+       bf16* block_begin = begin + block_ix * res_elts_per_block;
+       consume_block(col, block_begin, block_end);
+diff --git a/h/tron/hardware/ptensor.hpp b/h/tron/hardware/ptensor.hpp
+index a58392b6f..2a249660b 100644
+--- a/h/tron/hardware/ptensor.hpp
++++ b/h/tron/hardware/ptensor.hpp
+@@ -194,10 +194,15 @@ struct ptensor<ResultTiles, ResultTileSize, ContractTileSize, MinTileSize, M, N>
+     // See comments in tron::hardware::stream_result_t in libpos.hpp.
+     struct stream_result_t {
+       std::array<tron::hardware::stream_result_t, all_result_tiles> result_tiles;
++      // deep-dive probe v8: propagated to tiles so per-block consume stamps
++      // fire only for streams tagged at the wcls prepare site.
++      bool kvwait_probe_tag = false;
+ 
+       void prepare() noexcept {
+-        for (auto& tile : result_tiles)
++        for (auto& tile : result_tiles) {
++          tile.kvwait_probe_tag = kvwait_probe_tag;
+           tile.prepare();
++        }
+       }
+ 
+       void start() noexcept {
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index c29f66783..3884b6ffd 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -2,6 +2,7 @@
+ 
+ // The common parts of all tron models, that do not vary across plugins.
+ 
++#include "system/kvwait_probe.hpp"
+ #include <algorithm>  // For std::find, std::remove_if
+ #include <atomic>     // For gof_coop_outstanding_
+ #include <cerrno>
+@@ -27,6 +28,7 @@
+ #include "common/indexed.hpp"
+ #include "common/numerics/std.hpp"
+ #include "common/top_k_accum.hpp"
++#include "common/trace_gate.hpp"
+ #include "pos/device.hpp"
+ #include "pos/dma_tracker.hpp"
+ #include "spdlog/fmt/bundled/core.h"
+@@ -1936,6 +1938,14 @@ public:
+     // Note [Plugin-owned worker launch].)
+     void finalize_minibatches() {
+       TRACE_EVENT("model", "finalize_minibatches");
++      // pfgate: defensive CLOSE — a parse batch (items.size() > 8) must not
++      // run with the window gate left open by a preceding decode step whose
++      // layer-0 close (decode-conditioned) never fired.
++      for (auto& q_batch : q_batches)
++        if (q_batch->items.size() > 8) {
++          trace_gate_set(false);
++          break;
++        }
+       plugin_state.make_latches(latches);
+ 
+       // Compute dependencies of q_batches on each other.
+@@ -3079,7 +3089,17 @@ public:
+         logits_done[logit_chk].wait();
+       }
+       // This is the main thread waiting for all of the callbacks to be done.
+-      listeners_notified.wait();
++      if (kvwait_probe::state().enabled) {
++        const uint64_t f3_t0 = kvwait_probe::state_t::now();
++        listeners_notified.wait();
++        kvwait_probe::state().add(f3_t0,
++            kvwait_probe::state_t::now() - f3_t0, 7600);  // site 7600: Fence 3
++      } else {
++        listeners_notified.wait();
++      }
++      // Fence 3: all logits listeners acknowledged; a definitive sync point
++      // (owner default 2026-08-13: always emitted in perfetto builds).
++      TRACE_EVENT_INSTANT("model", "fence 3");
+ 
+       // Write eagle_x_out for ALL tokens with allocated output pointers.
+       // The scheduler allocates eagle_x_out for all tokens in an edge, but
+@@ -3116,11 +3136,26 @@ public:
+         size_t chunk_end = std::min(
+             n_empty_listeners + (logit_chk + 1) * logits_chunk_size, n_listeners);
+         if constexpr (launch_wcls_t::can_stream_result) {
+-          logits_allocated[logit_chk].wait();
++          if (worker_ix == 0 && kvwait_probe::state().enabled) {
++            const uint64_t la_t0 = hardware::system::rdtsc();
++            logits_allocated[logit_chk].wait();
++            kvwait_probe::state().add(
++                la_t0, hardware::system::rdtsc() - la_t0, 7100);  // site 7100: alloc wait
++          } else {
++            logits_allocated[logit_chk].wait();
++          }
+           for (size_t offset = worker_ix; offset < chunk_end - chunk_start;
+               offset += logits_chunk_size) {
+             TRACE_EVENT("model", "prepare streams", "listener", chunk_start + offset);
+-            wcls_streams[offset].prepare();
++            wcls_streams[offset].kvwait_probe_tag = true;
++            if (kvwait_probe::state().enabled) {
++              const uint64_t pr_t0 = hardware::system::rdtsc();
++              wcls_streams[offset].prepare();
++              kvwait_probe::state().add(
++                  pr_t0, hardware::system::rdtsc() - pr_t0, 7200);  // site 7200: stream prepare
++            } else {
++              wcls_streams[offset].prepare();
++            }
+             logits_prepared[logit_chk].count_down();
+           }
+         } else {
+@@ -3140,11 +3175,25 @@ public:
+               // logging is coded to just read the output buffer.
+               logits_done[logit_chk].wait();
+             }
+-            fill_logits_buffer(listener_id(chunk_start + offset), offset, buf);
++            if (kvwait_probe::state().enabled) {
++              const uint64_t fl_t0 = hardware::system::rdtsc();
++              fill_logits_buffer(listener_id(chunk_start + offset), offset, buf);
++              kvwait_probe::state().add(
++                  fl_t0, hardware::system::rdtsc() - fl_t0, 7000);  // site 7: logits consume
++            } else {
++              fill_logits_buffer(listener_id(chunk_start + offset), offset, buf);
++            }
+           }
+           // This is the line of code that actually calls the callback that
+           // had been passed to `sequence_prompt`.
+-          listener_notifications[listener_id(chunk_start + offset)]();
++          if (kvwait_probe::state().enabled) {
++            const uint64_t cb_t0 = kvwait_probe::state_t::now();
++            listener_notifications[listener_id(chunk_start + offset)]();
++            kvwait_probe::state().add(cb_t0,
++                kvwait_probe::state_t::now() - cb_t0, 7400);  // site 7400: listener callback
++          } else {
++            listener_notifications[listener_id(chunk_start + offset)]();
++          }
+         }
+         logits_free[logit_chk].count_down();
+       }
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 4b2a2cd83..1d4c32a69 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -9,9 +9,17 @@
+ #include <span>
+ #include <string>
+ #include <vector>
++#include <atomic>
++#include "system/kvwait_probe.hpp"
++#include <cstdio>
++#include <cstdlib>
++#include <fcntl.h>
++#include <sys/mman.h>
++#include <unistd.h>
+ 
+ #include "common/assert.hpp"
+ #include "common/numerics/fp16.hpp"
++#include "common/trace_gate.hpp"
+ #include "common/util.hpp"
+ #include "libpos.hpp"
+ #include "spdlog/spdlog.h"
+@@ -31,6 +39,7 @@
+ 
+ namespace tron {
+ 
++
+ constexpr bool hardware_attention_scale_representable(float scale) noexcept {
+   const float device_scale = fp16(scale);
+   return device_scale > 0.0f && device_scale < std::numeric_limits<float>::infinity();
+@@ -839,9 +848,21 @@ struct self_attention {
+       const model_layer_id layer = binding.model_layer;
+       uint64_t attn_elapsed = 0;
+ 
++      // pfgate: CLOSE the inter-fwd-pass trace window at the entry of the
++      // next step's first attention op. Decode batches only (items.size()
++      // <= 8); redundant stores across attention workers are harmless.
++      if (layer.i == 0 && outer_batch->items.size() <= 8) trace_gate_set(false);
++
+       query_channel.start_reading(worker_ix);
+       // One token is enough to wait on the fallback latch.
+-      query_channel.start_reading_at(0);
++      if (worker_ix == 0 && kvwait_probe::state().enabled) {
++        const uint64_t q_t0 = hardware::system::rdtsc();
++        query_channel.start_reading_at(0);
++        kvwait_probe::state().add(
++            q_t0, hardware::system::rdtsc() - q_t0, uint64_t(layer.i));  // site 0: Q wait
++      } else {
++        query_channel.start_reading_at(0);
++      }
+       for (size_t task_ix = worker_ix; task_ix < outer_batch->items.size();
+           task_ix += n_attn_workers) {
+         token_job_id ix = outer_batch->items[task_ix];
+@@ -858,7 +879,14 @@ struct self_attention {
+ 
+       // Wait for upstream K/V before running pending attention.
+       // See Note [Minibatch Dependency Tracking].
+-      outer_batch->upstream_kvs_ready[binding.kv_slot].wait();
++      if (worker_ix == 0 && kvwait_probe::state().enabled) {
++        const uint64_t kv_t0 = hardware::system::rdtsc();
++        outer_batch->upstream_kvs_ready[binding.kv_slot].wait();
++        kvwait_probe::state().add(
++            kv_t0, hardware::system::rdtsc() - kv_t0, 1000 + uint64_t(layer.i));  // site 1: KV latch
++      } else {
++        outer_batch->upstream_kvs_ready[binding.kv_slot].wait();
++      }
+ 
+       attn_elapsed -= hardware::system::rdtsc();
+       compute_elapsed -= hardware::system::rdtsc();
+@@ -878,7 +906,19 @@ struct self_attention {
+       post_attention();
+ 
+       // Sync all the attention workers so worker 0 measures the whole operation.
+-      outer_batch->attn_done_barrier.arrive_and_wait(n_attn_workers);
++      if (worker_ix == 0 && kvwait_probe::state().enabled) {
++        const uint64_t b_t0 = hardware::system::rdtsc();
++        outer_batch->attn_done_barrier.arrive_and_wait(n_attn_workers);
++        kvwait_probe::state().add(
++            b_t0, hardware::system::rdtsc() - b_t0, 2000 + uint64_t(layer.i));  // site 2: done barrier
++      } else {
++        outer_batch->attn_done_barrier.arrive_and_wait(n_attn_workers);
++      }
++      // pfgate: OPEN the inter-fwd-pass trace window at the end of the last
++      // layer's attention. Decode batches only; see CLOSE at layer-0 entry
++      // above and the defensive close in model.hpp finalize_minibatches.
++      if (layer.i + 1 == n_layers && outer_batch->items.size() <= 8)
++        trace_gate_set(true);
+       attn_elapsed += hardware::system::rdtsc();
+       return attn_elapsed;
+     }
+diff --git a/src/pos/driver.cpp b/src/pos/driver.cpp
+index 3570af216..e2676f46b 100644
+--- a/src/pos/driver.cpp
++++ b/src/pos/driver.cpp
+@@ -1,3 +1,4 @@
++#include "system/kvwait_probe.hpp"
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+@@ -877,6 +878,8 @@ hbm_address_t alloc_kv_weights(PosDevice* dev, size_t qlen) noexcept {
+ #pragma GCC diagnostic pop
+ 
+   hbm_address_t start_addr = dev->allocator_.allocate(qlen, caller_pc, caller_pc_2);
++  if (kvwait_probe::state().enabled)  // v9: HBM alloc audit (addr, size)
++    kvwait_probe::state().add(start_addr, qlen, 7900 + uint64_t(dev->idx));
+   dbg_wload_log("{} {}> allocating {}B ({:#016x}) per fetcher at HW address {:#016x}",
+       __FUNCTION__, dev->addr(), qlen, qlen, start_addr);
+ 
+@@ -929,6 +932,8 @@ hbm_address_t alloc_hardware_weights(PosDevice* dev, size_t iqlen) noexcept {
+   [[maybe_unused]] void* caller_pc_2 = __builtin_return_address(1);
+ #pragma GCC diagnostic pop
+   hbm_address_t start_addr = dev->allocator_.allocate(qlen, caller_pc, caller_pc_2);
++  if (kvwait_probe::state().enabled)  // v9: HBM alloc audit (addr, size)
++    kvwait_probe::state().add(start_addr, qlen, 7900 + uint64_t(dev->idx));
+ 
+   // Check to make sure that we're not too large to fit in the remaining space.
+   // TODO Fix length check to get HBM length from the cap reg.
+diff --git a/src/pos/worker.cpp b/src/pos/worker.cpp
+index 2f3382dbc..ca11ea140 100644
+--- a/src/pos/worker.cpp
++++ b/src/pos/worker.cpp
+@@ -36,6 +36,7 @@
+  * launches happen in the same sequence as their prepares.
+  *
+  */
++#include "system/kvwait_probe.hpp"
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+@@ -620,6 +621,9 @@ void do_rx_inplace(PosDevice* dev) noexcept {
+         }
+       }
+ 
++      if (kvwait_probe::state().enabled)
++        kvwait_probe::state().add(kvwait_probe::state_t::now(), 0,
++            4000 + uint64_t(dev->idx));  // site 4: completion instant
+       // handle our pointer for the rx_entries array
+       dev->rx_head += 1;
+     }
+@@ -2121,6 +2125,9 @@ inline void release_prepared_metadata(
+ // for activation/slot/FIFO readiness, kicks the activation DMA, and
+ // advances `launch_tail`.
+ void tx_launch(PosDevice* dev, struct wqentry* workreq) noexcept {
++  if (kvwait_probe::state().enabled)
++    kvwait_probe::state().add(kvwait_probe::state_t::now(), 0,
++        3000 + uint64_t(dev->idx));  // site 3: dispatch instant
+   thread_local uint64_t last_req_id = 0;
+   if ((workreq->request_id <= last_req_id) && (workreq->request_id != 0)) {
+     spdlog::error(
+@@ -2237,6 +2244,12 @@ void tx_launch(PosDevice* dev, struct wqentry* workreq) noexcept {
+         dev->rx_head);
+ 
+     workreq->act_ready.wait();
++    // PDJN (Mike's suggestion, 2026-08-10): mark the instant activations became
++    // ready on the TX thread, so fast/slow captures can compare the wait-for-
++    // activations edge per launch.
++    TRACE_EVENT_INSTANT("driver", "data ready", "B", workreq->B, "label",
++        workreq->debug_label ? workreq->debug_label : "unknown", "req",
++        workreq->request_id);
+ 
+ #ifdef CHECK_ACTIVATIONS_FOR_NANS
+     // Check activations for NANs.
+diff --git a/src/tron/generation/speculate.cpp b/src/tron/generation/speculate.cpp
+index 9a1359eb4..fc09cd84a 100644
+--- a/src/tron/generation/speculate.cpp
++++ b/src/tron/generation/speculate.cpp
+@@ -1,3 +1,4 @@
++#include "system/kvwait_probe.hpp"
+ #include <algorithm>
+ #include <atomic>
+ #include <cstdlib>
+@@ -534,7 +535,16 @@ void speculation_context::loop() noexcept {
+   // whose draft and exact logits have been computed during prompt parsing;
+   // thereafter the draft_tree is repeatedly consumed and rebuilt.
+   SPECULATE_LOG("phase={}, num_tokens_seen={}", (int)phase, num_tokens_seen);
+-  if (phase == phase_t::sampling) sample();
++  if (phase == phase_t::sampling) {
++    if (kvwait_probe::state().enabled) {
++      const uint64_t s_t0 = kvwait_probe::state_t::now();
++      sample();
++      kvwait_probe::state().add(
++          s_t0, kvwait_probe::state_t::now() - s_t0, 7300);  // site 7300: sampler
++    } else {
++      sample();
++    }
++  }
+   if (phase == phase_t::drafting) draft_step();
+   if (phase == phase_t::verifying) verify();
+   if (phase == phase_t::stopping) {

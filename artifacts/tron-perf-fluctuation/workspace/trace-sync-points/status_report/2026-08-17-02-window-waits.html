@@ -1,0 +1,249 @@
+<title>Host Handoff Waits</title>
+<style>
+  :root{
+    --bg:#FBFBF8; --panel:#FFFFFF; --ink:#20242A; --muted:#6A7076;
+    --chip:#0E7C86; --host:#C05621; --host-soft:#F7E8DC; --acc2:#7A5CA8;
+    --bad:#B3261E; --grid:#E5E3DC; --line:#D8D6CE;
+    --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  }
+  html{background:var(--bg)}
+  body{background:var(--bg);color:var(--ink);margin:0;
+       font:16px/1.55 -apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif}
+  main{max-width:920px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:27px;line-height:1.25;margin:0 0 4px;text-wrap:balance}
+  h2{font-size:19px;margin:44px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 22px}
+  .verdict{background:var(--host-soft);border-left:4px solid var(--host);
+           padding:14px 18px;border-radius:0 6px 6px 0;margin:20px 0;font-size:16.5px}
+  .verdict b{color:var(--host)}
+  ul{padding-left:22px;margin:10px 0}
+  li{margin:5px 0}
+  table{border-collapse:collapse;font-size:14px;margin:12px 0;font-variant-numeric:tabular-nums}
+  .tablewrap{overflow-x:auto}
+  th{text-align:left;border-bottom:2px solid var(--ink);padding:5px 12px 5px 0;
+     font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+  td{border-bottom:1px solid var(--grid);padding:5px 12px 5px 0}
+  td.n,th.n{text-align:right;font-family:var(--mono);font-size:13.5px}
+  .mono{font-family:var(--mono);font-size:.92em}
+  figure{margin:22px 0;background:var(--panel);border:1px solid var(--line);
+         border-radius:8px;padding:16px 16px 8px;overflow-x:auto}
+  figcaption{color:var(--muted);font-size:13px;margin-top:8px;line-height:1.45}
+  .glossary dt{font-weight:600;margin-top:10px}
+  .glossary dd{margin:2px 0 0 0;color:var(--muted);font-size:14.5px}
+  .k{font-family:var(--mono);font-size:13.5px;background:#F1F0EA;padding:1px 5px;border-radius:4px;white-space:nowrap}
+  svg text{font-family:-apple-system,'Segoe UI',Roboto,sans-serif}
+  svg .num{font-family:var(--mono)}
+  a{color:var(--chip)}
+</style>
+<main>
+
+<h1>Rest-of-cycle mining: the fluctuation is in host thread handoffs</h1>
+<p class="sub">Report 05 &#x00B7; mined from campaign <span class="mono">fpgastat-armB-20260817T114401Z</span>
+(no new machine time) &#x00B7; 16 draws &#x00D7; 4,095 decode tokens, qwen-3-4b tp4 on delphi-3bda &#x00B7; 2026-08-17</p>
+
+<div class="verdict">
+<b>Verdict: the draw-level TPS fluctuation is carried by three host-side waits
+in the inter-pass window &#x2014; the worker join, the wcls block-arrival tail
+inside fill_logits_buffer, and the listener-notify wait &#x2014; all of which
+slow together as a per-draw level shift.</b> Chip work (report 04) and
+per-request chip turnaround (this report: median 20 &#x00B5;s, slow&#x2212;fast delta
++0.0 &#x00B5;s) are constant. 82% of the fast4&#x2192;slow4 period delta sits in the
+window, 18% in the 36-layer span; within a draw, token-to-token noise is 77%
+span. The named suspect [open&#x2192;F1] is confirmed as one of the three
+handoffs, not the sole carrier.
+</div>
+
+<h2>1. TL;DR</h2>
+<ul>
+<li>Serial time budget of the fast4&#x2192;slow4 delta (+360 &#x00B5;s/token):
+    [open&#x2192;F1] +112 &#x00B5;s (31%) &#x00B7; [F1&#x2192;listeners-notified]
+    +159 &#x00B5;s (44%) &#x00B7; [notify&#x2192;window end] +23 &#x00B5;s (7%) &#x00B7;
+    36-layer span +65 &#x00B5;s (18%).</li>
+<li>The waits that grow (direct duration measurements, overlapping in time):
+    <span class="k">fill_logits_buffer</span> +147 &#x00B5;s (corr with TPS &#x2212;0.70),
+    <span class="k">listeners_notified</span> +110 &#x00B5;s (&#x2212;0.64),
+    <span class="k">workers_done</span> join +70 &#x00B5;s (&#x2212;0.79).
+    Alloc and callback are flat (+2, +8 &#x00B5;s).</li>
+<li>Inside fill: the growth is <b>entirely the wcls block-arrival tail</b> &#x2014;
+    fill-start to last-block-consumed runs 489 &#x00B5;s in the fastest draw vs
+    897 &#x00B5;s in the slowest, while post-arrival processing is constant at
+    ~30 &#x00B5;s.</li>
+<li>The chip is ruled out at request granularity too: tx-dispatch&#x2192;rx-completion
+    turnaround is 19.9&#x2013;20.2 &#x00B5;s median (p99 73&#x2013;84 &#x00B5;s) in every draw,
+    fast or slow. The span&#x2019;s +65 &#x00B5;s appears as host inter-dispatch gap
+    growth, not turnaround growth.</li>
+<li><b>Level shift, not per-token contention</b>: within a draw the three waits
+    do not co-move token-to-token (pairwise corr &#x2264; 0.14). Something set
+    per draw slows every scheduler-thread handoff by a near-constant amount.</li>
+</ul>
+
+<h2>2. Glossary</h2>
+<dl class="glossary">
+<dt>Handoff wait</dt>
+<dd>A scheduler-thread wait on other host threads: workers finishing the
+    forward pass (join), RX threads delivering wcls result blocks (consumed
+    inside fill_logits_buffer), listener threads acknowledging new logits.</dd>
+<dt>[open&#x2192;F1] / F1F3 / F3end (fence3_dump convention)</dt>
+<dd>Serial slices of the inter-pass window: layer-35 barrier end &#x2192;
+    workers_done end (contains the join wait); &#x2192; listeners_notified end
+    (contains alloc, fill, callback, notify); &#x2192; next layer-0 start.
+    Report 04&#x2019;s narrower &#x201C;[F1&#x2192;F3] 0.29 ms&#x201D; equals this F1F3 minus
+    the listeners wait; the two views reconcile exactly.</dd>
+<dt>Chip turnaround</dt>
+<dd>Time from a tx-dispatch stamp (tag 3000) to the matching rx-completion
+    stamp (tag 4000), paired in order per device <span class="mono">(est.:
+    assumes in-order completion)</span>.</dd>
+<dt>Level shift</dt>
+<dd>A per-draw offset: every token in a slow draw pays roughly the same extra
+    wait, rather than a few tokens paying large stalls.</dd>
+</dl>
+
+<h2>3. Where the 360 &#x00B5;s/token goes</h2>
+<figure>
+<svg width="860" height="150" viewBox="0 0 860 150" role="img" aria-label="Budget of the fast-to-slow period delta by segment">
+  <text x="10" y="18" font-size="13" font-weight="600">fast4 &#x2192; slow4 period delta, +360 &#x00B5;s/token &#x2014; widths to scale</text>
+  <!-- scale: 360us -> 720px, x0=70 -->
+  <rect x="70"  y="40" width="224" height="34" fill="#C05621"/>
+  <rect x="294" y="40" width="318" height="34" fill="#E08A4C"/>
+  <rect x="612" y="40" width="46"  height="34" fill="#D9C09F"/>
+  <rect x="658" y="40" width="130" height="34" fill="#7A5CA8"/>
+  <text x="74"  y="62" font-size="12" fill="#fff" font-weight="600">[open&#x2192;F1] +112</text>
+  <text x="298" y="62" font-size="12" fill="#fff" font-weight="600">[F1&#x2192;listeners-notified] +159</text>
+  <text x="612" y="94" font-size="11" fill="#6A7076">[notify&#x2192;end] +23</text>
+  <line x1="635" y1="76" x2="635" y2="86" stroke="#6A7076"/>
+  <text x="662" y="62" font-size="12" fill="#fff" font-weight="600">span +65</text>
+  <text x="70" y="116" font-size="12.5" fill="#C05621" font-weight="600">window (host handoffs): 295 &#x00B5;s = 82%</text>
+  <text x="658" y="116" font-size="12.5" fill="#7A5CA8" font-weight="600">span: 18%</text>
+  <line x1="70" y1="122" x2="658" y2="122" stroke="#C05621" stroke-width="2"/>
+  <line x1="662" y1="122" x2="788" y2="122" stroke="#7A5CA8" stroke-width="2"/>
+  <text x="70" y="142" font-size="11.5" fill="#6A7076">chip work in every slice: constant (report 04); chip turnaround: constant (&#x00A7;4)</text>
+</svg>
+<figcaption>Serial segment budget from per-token fence anchors
+(fence3_dump convention), 16 draws, fast4 = d02/09/16/03 (mean 170.1 tok/s),
+slow4 = d10/04/07/01 (mean 160.3 tok/s).</figcaption>
+</figure>
+
+<div class="tablewrap">
+<table>
+<tr><th>serial segment (per token)</th><th class="n">fast4 mean</th><th class="n">slow4 mean</th><th class="n">delta</th><th class="n">share</th><th class="n">corr(mean, TPS)</th></tr>
+<tr><td>[open&#x2192;F1] (contains worker join)</td><td class="n">223 &#x00B5;s</td><td class="n">335 &#x00B5;s</td><td class="n">+112</td><td class="n">31%</td><td class="n">&#x2212;0.82</td></tr>
+<tr><td>[F1&#x2192;listeners-notified] (alloc, fill, callback, notify)</td><td class="n">641 &#x00B5;s</td><td class="n">800 &#x00B5;s</td><td class="n">+159</td><td class="n">44%</td><td class="n">&#x2212;0.75</td></tr>
+<tr><td>[notify&#x2192;window end]</td><td class="n">276 &#x00B5;s</td><td class="n">299 &#x00B5;s</td><td class="n">+23</td><td class="n">7%</td><td class="n">&#x2212;0.10</td></tr>
+<tr><td>36-layer span</td><td class="n">4,741 &#x00B5;s</td><td class="n">4,806 &#x00B5;s</td><td class="n">+65</td><td class="n">18%</td><td class="n">&#x2212;0.40</td></tr>
+<tr><td><b>period</b></td><td class="n">5,880 &#x00B5;s</td><td class="n">6,240 &#x00B5;s</td><td class="n">+360</td><td class="n">100%</td><td class="n">&#x2212;1.00</td></tr>
+</table>
+</div>
+
+<h2>4. The three waits that grow &#x2014; and the chip that doesn&#x2019;t</h2>
+<figure>
+<svg width="860" height="240" viewBox="0 0 860 240" role="img" aria-label="Fast vs slow dumbbells per wait">
+  <text x="10" y="18" font-size="13" font-weight="600">fast4 vs slow4 mean duration per wait (&#x00B5;s) &#x2014; dumbbells, x to scale</text>
+  <!-- x scale: 0..700us -> 120..820px  (x = 120 + us) -->
+  <g font-size="12">
+    <text x="112" y="62"  text-anchor="end">fill_logits_buffer</text>
+    <text x="112" y="102" text-anchor="end">listeners_notified</text>
+    <text x="112" y="142" text-anchor="end">workers_done join</text>
+    <text x="112" y="182" text-anchor="end">chip turnaround (median)</text>
+  </g>
+  <g stroke="#B9B6AD" stroke-width="2">
+    <line x1="653" y1="58" x2="800" y2="58"/>
+    <line x1="494" y1="98" x2="604" y2="98"/>
+    <line x1="242" y1="138" x2="312" y2="138"/>
+  </g>
+  <g fill="#0E7C86">
+    <circle cx="653" cy="58" r="6"/><circle cx="494" cy="98" r="6"/>
+    <circle cx="242" cy="138" r="6"/><circle cx="140" cy="178" r="6"/>
+  </g>
+  <g fill="#B3261E">
+    <circle cx="800" cy="58" r="6"/><circle cx="604" cy="98" r="6"/>
+    <circle cx="312" cy="138" r="6"/><circle cx="140" cy="178" r="6" stroke="#B3261E" fill="none" stroke-width="2"/>
+  </g>
+  <g font-size="11.5" class="num">
+    <text x="647" y="46" text-anchor="end" fill="#0E7C86">533</text><text x="806" y="46" fill="#B3261E">680 (+147)</text>
+    <text x="488" y="86" text-anchor="end" fill="#0E7C86">374</text><text x="610" y="86" fill="#B3261E">484 (+110)</text>
+    <text x="236" y="126" text-anchor="end" fill="#0E7C86">122</text><text x="318" y="126" fill="#B3261E">192 (+70)</text>
+    <text x="152" y="182" fill="#6A7076">20.0 = 20.0 &#x2014; identical dots: delta +0.0 &#x00B5;s (p99 74 vs 81)</text>
+  </g>
+  <text x="120" y="215" font-size="12" fill="#0E7C86">&#x25CF; fast4</text>
+  <text x="190" y="215" font-size="12" fill="#B3261E">&#x25CF; slow4</text>
+  <text x="260" y="215" font-size="11.5" fill="#6A7076">waits overlap in time (fill spans the join); they are parallel measurements, not additive slices</text>
+</svg>
+<figcaption>Only the host-side dots move. The chip-turnaround dumbbell has no
+gap &#x2014; the two dots coincide.</figcaption>
+</figure>
+
+<ul>
+<li><b>fill_logits_buffer +147 &#x00B5;s</b>: split by the per-block consume
+    stamps, fill-start&#x2192;last-block is 489 &#x00B5;s (fastest draw d02) vs
+    897 &#x00B5;s (slowest d10); last-block&#x2192;fill-end is 29 vs 32 &#x00B5;s. The
+    entire growth is waiting for wcls result blocks to be consumed &#x2014; with
+    dispatch cadence, chip work, and turnaround all constant, the stretch is
+    in the RX-thread&#x2192;scheduler delivery path or the consume pacing, not
+    in the chip. (Same direction as the bypass verdict, which removed the
+    hardware and kept the jitter.)</li>
+<li><b>listeners_notified +110 &#x00B5;s</b>: waiting for listener threads to pick
+    up the new logits.</li>
+<li><b>workers_done join +70 &#x00B5;s</b>: waiting for the last worker thread to
+    arrive at the pass-end barrier &#x2014; this is the [open&#x2192;F1] join wait
+    named by the fence-3 report, now measured across 16 draws
+    (corr with TPS &#x2212;0.79, the strongest of the three).</li>
+<li><b>Span +65 &#x00B5;s</b>: appears as inter-dispatch gap growth on the TX
+    stream (slow4&#x2212;fast4: +66 &#x00B5;s/token in-span, dev0), i.e. the host
+    issues requests slightly later; per-request chip turnaround unchanged.</li>
+</ul>
+
+<h2>5. Level shift, not contention events</h2>
+<ul>
+<li>Within a draw, the three waits are uncorrelated token-to-token: pairwise
+    corr (join, fill) = 0.00&#x2013;0.02, (join, notify) = &#x2212;0.01&#x2013;0.14,
+    (fill, notify) = &#x2212;0.01&#x2013;0.02 (checked on d10/d04/d02/d09). A slow
+    draw is not a normal draw plus occasional stalls; every token pays a
+    roughly constant surcharge on every handoff.</li>
+<li>Token-level variance within a draw is a separate pool: 77% of per-token
+    period variance is the span (range 69&#x2013;90% across draws), consistent
+    with the two-pools structure from the bypass report. That pool does not
+    move draw TPS; the handoff level shift does.</li>
+<li>This localizes the earlier &#x201C;window level-shift mode&#x201D; (wadefix A/B,
+    both arms): the shifted quantity is host handoff latency, set once per
+    draw (= per engine bring-up).</li>
+</ul>
+
+<h2>6. What can set a per-draw handoff latency? (hypotheses, each with its measurement)</h2>
+<ul>
+<li><b>Thread placement drift</b>: worker/RX/listener threads may land on
+    different cores each bring-up (relative to each other, to IRQs, or to
+    NUMA); a bad draw = a bad placement. <i>Measurement</i>: per-draw
+    <span class="k">ps -T -o tid,psr,comm</span> snapshot of runtron
+    (trivial harness addition) &#x2014; compare placements of fast vs slow
+    draws. TRON&#x2019;s pinned threads (TX 3&#x2013;6 etc.) are fixed; the
+    question is the unpinned ones.</li>
+<li><b>Wakeup path cost</b>: futex/condition-variable wakeup latency between
+    the involved cores (cpuidle depth, IPI path, sibling load).
+    <i>Measurement</i>: perfetto <span class="k">linux.ftrace</span>
+    sched_wakeup/sched_switch for one campaign &#x2014; wakeup-to-run latency
+    of the scheduler/RX/listener threads, fast vs slow draws. Not yet
+    captured (track_event scheduler category is TRON spans, not kernel
+    sched).</li>
+<li><b>Memory/NUMA placement of run allocations</b>: logits buffer or queue
+    pages landing remote in some bring-ups. <i>Measurement</i>: per-draw
+    <span class="k">numa_maps</span> snapshot of the relevant mappings.</li>
+</ul>
+<p>All three are cheap to instrument in the existing harness; none needs new
+probe code in tron. Not excluded but de-prioritized by this data: anything
+per-token or chip-side.</p>
+
+<h2>7. Run facts and data</h2>
+<div class="tablewrap">
+<table>
+<tr><th>item</th><th>value</th></tr>
+<tr><td>Source data</td><td class="mono">fpgastat-armB-20260817T114401Z (report 04 campaign; kvwait tags 0/2035/3000/4000/7000/7100/7400/7500/7600/7601)</td></tr>
+<tr><td>Segments</td><td class="mono">fence3_dump.py per draw (4,095 decode gaps each); waits = direct (t0,dur) records</td></tr>
+<tr><td>Fast4 / slow4</td><td class="mono">d02 171.8, d09 170.3, d16 169.5, d03 168.8 / d10 157.4, d04 158.7, d07 161.4, d01 163.7 tok/s (all freeze-clean beyond the token 4&#x2013;8 startup boundary)</td></tr>
+<tr><td>Turnaround pairing</td><td>ordinal 3000&#x2192;4000 per device (est.: in-order completion assumption); dev0 shown, 219.2 requests/token</td></tr>
+<tr><td>Archive</td><td class="mono">data/fpgastat-armB.tgz (raw manifest inside); segment CSVs regenerable via tools listed in the runbook</td></tr>
+<tr><td>Related</td><td class="mono">report 04 (2026-08-17-01-fpgastat.html) &#x00B7; wcls-bypass report 03 &#x00B7; fence-3 report 01</td></tr>
+</table>
+</div>
+<p class="sub">Context and exclusion ledger: <span class="mono">../../intra-pass/CONTEXT.md</span> &#x00A7;5e</p>
+
+</main>
