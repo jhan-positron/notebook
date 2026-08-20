@@ -1,9 +1,28 @@
 # Prompt: generate a Claude handoff file and push to notebook
 
-Paste this entire prompt into a Claude Code session (Code tab — it needs
-filesystem and git access, so not the Chat tab). Edit the Config block
-first if needed. For a multi-item SCOPE, run it in the most recent
-involved session, or in a fresh Code session on the same machine.
+Paste this entire prompt into a Claude Code session — any surface with
+filesystem and git access: the Windows app's Code tab, or the Claude Code
+CLI on a Linux server. (claude.ai chats / the app's Chat tab cannot run
+it.) Edit the Config block first if needed. For a multi-item SCOPE, run
+it in the most recent involved session, or in a fresh session on the
+machine that holds the transcripts in SCOPE.
+
+## Platforms (added 2026-08-19)
+
+Two platforms actively produce sessions, and this prompt runs on both:
+- Windows app on `DESKTOP-CI2JA7M`: sessions listed in the app sidebar;
+  store under `C:/Users/jibin/.claude/projects/`.
+- Claude Code CLI on Linux (`claude-alpha`): session titles shown by
+  `/resume`; store under `~/.claude/projects/`.
+
+The session store layout, the title records, and every step below are
+identical on both (verified on claude-alpha 2026-08-19: same
+projects/JSONL layout, same `ai-title` records, same
+`~/.claude/sessions/<pid>.json` derived-name trap). Detect the current
+platform from the environment at run time. Each machine sees ONLY its own
+store: the other machine's sessions are case 3 under "local vs remote"
+below, and handoffs whose `Transcript:` host is the other machine are
+frozen for this run (rule under SCOPE: auto).
 
 ## Triggering by reference (no paste needed)
 
@@ -25,19 +44,26 @@ of spacing around the `/`).
    - auto (the default): scan BOTH sides and reconcile them.
      (a) Scan every handoff file already in TARGET_DIR and collect their
      `Claude session:` / `Claude chat:` header lines. (b) Enumerate every
-     local Code-tab session on this machine — every session JSONL in every
-     project folder under `~/.claude/projects/` — reading each session's
+     local Claude Code session on this machine — every session JSONL in
+     every project folder under `~/.claude/projects/` — reading each session's
      display name from its `custom-title` record (fallback: `ai-title`;
      see Step 2). Then: a session that already has a handoff gets it
      UPDATED per Step 5 (skipped and reported as unchanged if it has no
      new activity since the handoff's Activity END date — no commit
-     churn); a session with NO handoff gets a NEW one. Sessions with no
+     churn); a session with NO handoff gets a NEW one. FROZEN-handoff rule
+     (added 2026-08-19): a handoff whose `Transcript:` host is NOT this
+     machine and is not reachable is frozen for this run — no update, no
+     questions; list it in the run report as "not checkable from this
+     machine". With two active machines this is the normal cross-machine
+     case, not an error; the canonical-missing alarm applies only to
+     artifacts (Step 4b), never to transcripts. Sessions with no
      substantive work (aborted starts, a few messages, pure meta-runs of
      this prompt) are not silently skipped — list them at the approval
      gate as proposed skips so I can override.
    - If I ALSO list items under SCOPE, they are ADDED to the scanned set.
-     Listing is only needed for items auto cannot see: Chat-tab chats,
-     sessions on other machines — or to supply/override a name.
+     Listing is only needed for items auto cannot see: claude.ai chats
+     (the app's Chat tab), sessions on other machines — or to
+     supply/override a name.
    - `this session only`: cover just the current session; skip the scan.
    - Whatever appears as the value IS the active scope — Claude must cover
      every item, and must not treat a list as illustrative.
@@ -47,7 +73,7 @@ of spacing around the `/`).
        - Claude session: "story2814:GOF staging buffer / Wade's review comment"
        - Claude session: "debug_3bda_flat_freq / run CI tests"
        - Claude chat: "<chat title>"
-         (Chat-tab chat: not on disk — Claude will ask me to paste content)
+         (claude.ai chat: not on disk — Claude will ask me to paste content)
 - GRANULARITY: per-session  # how many handoff FILES a multi-item SCOPE yields:
   -   consolidated = ONE file covering all items
   -   per-project  = one file per project, covering its listed sessions
@@ -57,17 +83,19 @@ of spacing around the `/`).
 - LOCAL_CLONE: auto         # auto = reuse an existing local clone if found; else clone
 
 ## Terminology: project vs session
-- A **project** is the working-directory grouping shown as the small header
-  line in the Claude app sidebar. One project = one working directory = one
-  folder under `~/.claude/projects/`. Example: project `debug_3bda_flat_freq`
-  (cwd `C:\Users\jibin\Documents\claude_debug_3bda_flat_freq`).
+- A **project** is the working-directory grouping (Windows app: the small
+  header line in the sidebar; Linux CLI: simply the cwd). One project = one
+  working directory = one folder under `~/.claude/projects/`. Examples:
+  project `debug_3bda_flat_freq` (Windows cwd
+  `C:\Users\jibin\Documents\claude_debug_3bda_flat_freq`); project folder
+  `-home-jhan-workspace-notebook` (Linux cwd `/home/jhan/workspace/notebook`).
 - A **session** is one conversation inside a project — normally one JSONL
   transcript file in that project's folder. Example: project
   `debug_3bda_flat_freq` contains three sessions: "debug flat freq on CI
   machine", "explore best freq combo", and "run CI tests".
   CAUTION: resuming a conversation can create a SECOND JSONL (new
   sessionId) that replays the earlier history and continues from there —
-  that is still ONE session (one sidebar entry, one handoff). Detect the
+  that is still ONE session (one display entry, one handoff). Detect the
   split by identical `custom-title` records and/or identical opening user
   messages; the handoff's `Transcript:` line points at the newest file and
   notes the earlier one(s).
@@ -80,11 +108,14 @@ What matters to this prompt is where the TRANSCRIPT lives, not where the
 work ran:
 
 1. **Local session** — cwd on this machine; project folder name is derived
-   from the cwd (e.g. `C--Users-jibin-Documents-...`). Fully automatic:
+   from the cwd (`C--Users-jibin-Documents-...` on Windows,
+   `-home-jhan-workspace-...` on Linux). Fully automatic:
    discovery, titles, dates, rename detection.
 2. **Remote-cwd session driven from this machine** — the `ssh-<uuid>`
    project folders: the work ran on an ssh host, but the Claude app on
-   this machine wrote the transcript locally. **This counts as LOCAL** —
+   this machine wrote the transcript locally. (A Windows-app usage
+   pattern; none observed in the claude-alpha store as of 2026-08-19.)
+   **This counts as LOCAL** —
    `SCOPE: auto` discovers it and title/date evidence is local. Honor the
    differences:
    - The project folder name is an opaque `ssh-<uuid>`; the REMOTE cwd is
@@ -100,7 +131,12 @@ work ran:
 3. **Session on another machine** — Claude Code running on the remote box
    itself (or a different laptop). Nothing about it is in this machine's
    store: `SCOPE: auto` cannot see it; it must be listed under SCOPE, and
-   names/dates/content must come from that machine or from me.
+   names/dates/content must come from that machine or from me. With both
+   the Windows app and claude-alpha active, each machine's sessions are
+   case 3 from the other machine's viewpoint; their existing handoffs are
+   frozen per the SCOPE: auto rule, and generating a NEW handoff for them
+   from here needs the content supplied (run the prompt on the machine
+   that holds the transcript instead, when possible).
 
 ## Goal
 Produce markdown handoff file(s) covering ALL items in SCOPE — file count
@@ -132,11 +168,12 @@ Filename dates are when the work actually happened; it may span several days.
 - If dates cannot be established from evidence: ask me. Do not guess.
 
 ## Step 2 — Determine session and chat names
-- Find each session's exact display name (the title shown in the app
-  sidebar under the project header — see Terminology above). Try in order:
+- Find each session's exact display name (the session's display title —
+  Windows app: the sidebar entry under the project header; Linux CLI: the
+  title shown by `/resume` — see Terminology above). Try in order:
   1. The session JSONL under `~/.claude/projects/<project-dir>/` — the
      `custom-title` record (`{"type":"custom-title","customTitle":"..."}`,
-     near the top of the file) IS the sidebar display name when I have
+     near the top of the file) IS the display name when I have
      named/renamed the session; the `ai-title` record is the auto-generated
      title used when I have not. Newest record wins. (Titles ARE stored on
      disk — verified 2026-07-10; this supersedes the older observation
@@ -147,10 +184,11 @@ Filename dates are when the work actually happened; it may span several days.
      `claude-debug-3bda-flat-freq-76`), NOT the display title. Never use a
      derived name as the session name.
   3. If a transcript has neither title record (old sessions predating the
-     feature), ask me for the exact name as shown in the sidebar. Offer to
-     accept a screenshot of the sidebar: the small grey header is the
-     project, the list items under it are the sessions, and the
-     highlighted item is the current session.
+     feature), ask me for the exact display name. On the Windows app,
+     offer to accept a screenshot of the sidebar: the small grey header is
+     the project, the list items under it are the sessions, and the
+     highlighted item is the current session. On the Linux CLI there is
+     no sidebar — ask me to type the title as `/resume` shows it.
 - If SCOPE includes other Claude Code sessions, resolve their names the same
   way. For claude.ai chats (not readable locally), ask me for the exact title.
 - If any name cannot be verified: ask me. Never paraphrase or invent a name.
@@ -169,23 +207,25 @@ Filename dates are when the work actually happened; it may span several days.
   - Fast path: if an existing handoff in TARGET_DIR has a `Transcript:`
     header line, use that path directly — no matching or asking needed.
     This is the normal case for `SCOPE: auto` refresh runs.
-  - Other Claude Code sessions (no Transcript line yet): match the sidebar
+  - Other Claude Code sessions (no Transcript line yet): match the display
     title against the transcripts' `custom-title`/`ai-title` records. For
     old transcripts with no title records, fall back to content evidence:
     grep for distinctive terms from the title, then verify by reading the
     opening user request. If a match is uncertain or a title matches no
     transcript, ask me.
-  - Claude chats (Chat tab) are cloud-side and not readable from Claude
-    Code: ask me to paste the relevant content; include only what I paste.
+  - claude.ai chats (the app's Chat tab) are cloud-side and not readable
+    from Claude Code: ask me to paste the relevant content; include only
+    what I paste.
 - What Claude can and cannot discover on its own: Claude CAN enumerate and
   content-scan every local transcript under `~/.claude/projects/` (all
-  projects, all sessions on this machine), including their sidebar display
+  projects, all sessions on this machine), including their display
   titles (`custom-title`/`ai-title` records) — I do not need to list paths
   or names for anything local. What is NOT in the local store at all:
-  sessions from other machines, and Chat-tab chats. Project display names
-  shown in the sidebar are also not on disk (only the cwd-derived folder
-  name is); use the cwd path and ask me if a friendlier project name
-  matters for the header.
+  sessions from other machines, and claude.ai chats. Windows-app project
+  display names shown in the sidebar are also not on disk (only the
+  cwd-derived folder name is); on the Linux CLI the cwd IS the project
+  name. Use the cwd path and ask me if a friendlier project name matters
+  for the header.
 
 ## Step 3 — Filename
 - Pattern: `claude_<START>-<END>_<slug>.md`, dates as YYYYMMDD.
@@ -234,7 +274,8 @@ If SCOPE covers multiple sessions/chats, repeat the `Claude session:` /
 Body sections (omit empty ones):
 1. Objective
 2. Environment — hostname(s) and working directories where the work ran.
-   State the host for every machine touched (ssh remote vs local Windows);
+   State the host for every machine touched (ssh remote vs the local
+   machine, whether that is the Windows laptop or claude-alpha);
    different projects live on different remote machines, so this is required
    whenever any file path or command appears later in the file.
 3. Timeline — what was done, by date
