@@ -133,7 +133,11 @@ canonical one changes.
   rinzler/talos/foreign-runtron appearance, or deadline. TODO: add a
   Runner.Worker (GitHub job) trigger.
 - apply_tron84_rinzler_AB.sh
-  - Canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/apply_tron84_rinzler_AB.sh
+  - REPO-PRIMARY (as of 2026-08-19): the canonical below was checked on
+  delphi-3bda and is ABSENT — consistent with "installation pending user
+  go", i.e. it was never installed. The repo copy is the only copy; if the
+  script is ever installed, restore the canonical line and mirror rule.
+  - Former canonical: delphi-3bda:/scratch/jhan/flat_freq_tests/scripts/apply_tron84_rinzler_AB.sh
   (drafted 2026-07-11; installation pending user go)
   - What it is: delayed applier for the rinzler-boost nightly A/B — waits
   for 02:55 UTC (post runner-stop), preflights (no Runner.Worker, strict
@@ -301,3 +305,11 @@ canonical one changes.
 - Rendered view:
   https://htmlpreview.github.io/?https://raw.githubusercontent.com/jhan-positron/notebook/refs/heads/main/artifacts/delphi-flat-freq/docs/bystander-probe.html
 - Related handoff: handoffs/claude_20260702-20260729_debug-3bda-flat-freq-run-ci-tests.md (PHASE 2)
+
+- CLAUDE-HANDOFF-O1A-FORWARD-ARGS-NEXT-STEP-2026-08-09.html
+  - Registered 2026-08-19 (file was present in docs/ but unregistered —
+    found by the SCOPE:auto artifact check). Canonical unknown; treat as
+    REPO-PRIMARY unless a workspace canonical is identified.
+  - Rendered view:
+    https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/delphi-flat-freq/docs/CLAUDE-HANDOFF-O1A-FORWARD-ARGS-NEXT-STEP-2026-08-09.html
+  - What it is: O1a forward-args next-step handoff note dated 2026-08-09.
