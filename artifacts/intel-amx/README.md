@@ -70,3 +70,11 @@ Note: the four `generators/gen_*.py` canonicals live on a VOLATILE /tmp
 scratchpad (session 3a96feab on claude-alpha). Once that scratchpad is
 reaped, the repo copies become repo-primary — do not raise the
 canonical-missing alarm for them; update this note instead.
+
+## 2026-08-25 archive: doc/intel-amx.md from tron PR #3879
+
+- `intel-amx.md` — canonical: none (repo-primary). The AMX software-attention
+  design/measurement write-up that lived in the PR as `doc/intel-amx.md` until
+  tron commit a5ef65761; removed from the PR in 234c02bde and kept here.
+  Sections: hardware facts (Xeon 6 6962P AMX), throughput reality, numerics,
+  where the speedup comes from, measured models, mirror layout, geometry gate.
