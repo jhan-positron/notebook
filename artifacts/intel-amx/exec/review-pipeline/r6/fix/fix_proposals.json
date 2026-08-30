@@ -1,0 +1,77 @@
+{
+ "R1-10": {
+  "file": "h/tron/kernels/amx_attn_iface.hpp",
+  "lines": [
+   55,
+   59
+  ],
+  "text": "// TILESTORED always writes ALL 16 configured tile rows, no matter how many\n// carry real data: a width-4 result still stores 16 rows. The two kernels\n// that store a tile straight into the caller's buffer - weights_times_v_128x4\n// (`o`) and qk_mirror_128x4 (`s`) - therefore need 16-row buffers; a\n// \"4 x N\" buffer is a silent stack overrun (rows 4..15 land past its end).\n// Rows 4..15 of those buffers receive zeros (the A-operand rows 4..15 are\n// zero padding); only rows 0..3 are the result. qk_canonical_128x4 stores\n// its tiles into a kernel-local buffer, transposes, and writes exactly 4 rows\n// into `s`, so its `s` is 4 x 64.",
+  "claims": [
+   "weights_times_v_128x4 and qk_mirror_128x4 are the only kernels whose _tile_stored targets a caller buffer (amx_attn.cpp:220-223 `o`, :255-258 `s`)",
+   "qk_canonical_128x4 tile-stores into its local s_transposed (:142-145) and writes only 4 rows of `s` (the transpose loop k = 0..3)",
+   "rows 4..15 of `o` and of mirror `s` are zero because the A-operand rows 4..15 (P rows / Qpad rows) are zero padding",
+   "t_amx_numerics hands qk_canonical_128x4 a 4-row s buffer (alignas(64) float s_amx[NQ][PAGE], NQ=4)"
+  ]
+ },
+ "R3-02": {
+  "file": "h/tron/kernels/amx_attn_iface.hpp",
+  "lines": [
+   72,
+   75
+  ],
+  "text": "// The one attention shape these kernels serve - the tile identity of\n// Note [AMX attention dispatch]: a 64-token KV page, 128-dim heads, and 4\n// query heads per KV head (4 x 128 bf16 = one full tile operand). shape_ok\n// and the kernel buffer sizes are written in terms of these three; the\n// literals inside amx_attn.cpp (DIM_STEP, the panel and store offsets) are\n// AMX tile geometry - 16 rows x 64 bytes - not model shape.",
+  "claims": [
+   "shape_ok (iface:91-92) and the buffer-size constants (Q_PACK_ELEMS_2048 = TILE_ROWS_16 * HEAD_SIZE_128, iface:83) are written in terms of the named constants",
+   "DIM_STEP = 32 (amx_attn.cpp:35) is the bf16 K-depth of one TDPBF16PS step (a 64-byte tile row = 32 bf16 pairs), PANEL_ELEMS = 16*16*2 (:243), the pack index 16s (:105), the store offsets 0/16/32/48 (:220-223, :255-258) and scatter_k_mirror's 16 and 32 (kv_cache.hpp:626-631) all follow from the 16-row x 64-byte tile, not from head_size / kv_mul / page size",
+   "R3-02's own replacement sentence was 's/Every shape literal in the AMX code derives from these three/`shape_ok` and the kernel buffer sizes are written in terms of these/'"
+  ]
+ },
+ "R2-06": {
+  "file": "h/tron/kernels/amx_attn_iface.hpp",
+  "lines": [
+   88,
+   90
+  ],
+  "text": "// Note [AMX attention dispatch]). Evaluated by the dispatch, the save_k\n// write-through and the mirror-arena allocation; the page-move and\n// fill_random rebuilds do not test it - they rebuild whatever plane exists.\n// So for a book the scheduler creates (an arena only when the plugin passes\n// this gate) the reader and the writers agree on which models take the AMX\n// path; a book built with amx_mirror_eligible=true by hand gets planes for\n// every slot, gate or no gate.",
+  "claims": [
+   "the dispatch (self_attention.hpp:1358-1359, :1499-1500), the save_k write-through (model.hpp:2769-2771) and the arena allocation (kv_cache.hpp:182-190 via amx_mirror_eligible, gate at :1057) evaluate shape_ok",
+   "copy_storage_slot's rebuild (kv_cache.hpp:1881-1889) and fill_storage_slot's rebuild (:1309-1318) only null-check mirror_at_storage - no shape_ok",
+   "the scheduler creates books with amx_mirror_eligible(model_t::plugin_t::attention_kernels) (full.hpp:833-834, :1457), so a scheduler book has an arena only if some kernel passes shape_ok",
+   "a test constructing book<2,1,64,0>(4,2,false,true) (t_amx_arena_leak.cpp:134-135) gets an arena for a head-64 geometry - planes for every slot regardless of the gate"
+  ]
+ },
+ "R1-12": {
+  "file": "h/tron/models/self_attention.hpp",
+  "lines": [
+   1361,
+   1373
+  ],
+  "text": "      // One 4 KB pack slot per batch_job_ix, 64B-aligned as the pack contracts\n      // require and bounded like the mask below; zero-initialized once per\n      // thread, and the packers write only the 4 live columns/rows of a slot,\n      // so the padding they rely on stays zero for the thread's lifetime.\n      // Geometries the AMX kernels do not serve get a 1-element placeholder.\n      constexpr size_t amx_qpack_elems =\n          amx_shape_ok ? max_minibatch_size * amx_attn::Q_PACK_ELEMS_2048 : 1;\n      alignas(64) thread_local uint16_t amx_qpack[amx_qpack_elems] = {};\n      // Bitmap with one bit per batch_job_ix, meaning \"this token's Q group\n      // is already packed into amx_qpack\": word batch_job_ix / 64, bit\n      // batch_job_ix % 64. Sized for the largest legal minibatch\n      // (items.size() <= max_minibatch_size).\n      uint64_t amx_packed_mask[(max_minibatch_size + 63) / 64] = {};\n      if (amx_on) {\n        TRON_ASSERT_LE(items.size(), max_minibatch_size);\n        amx_attn::begin_region();\n      }",
+  "claims": [
+   "`max_minibatch_size` and `amx_shape_ok` are constexpr in scope at self_attention.hpp:1361 (mask at :1366 already uses max_minibatch_size; amx_shape_ok at :1358)",
+   "the only uses of amx_qpack are the declaration, the resize at :1371 and the slice at :1416; nothing else reads .data()/.size()",
+   "a thread_local array with `= {}` is zero-initialized once per thread, satisfying the pack contracts' 'padding already zero' precondition, like the P buffer precedent in amx_attn.cpp",
+   "TLS cost: llama.hpp max_minibatch_size = 128 -> 128 * 4 KB = 512 KB reserved per thread per eligible-geometry instantiation (pages committed only when written); mock.hpp = 1024 but its geometry fails shape_ok so it gets the 1-element placeholder - verify mock.hpp's attention geometry against shape_ok",
+   "TRON_ASSERT_LE exists and is used at self_attention.hpp:290 with the same operands; adding it at the prologue answers R1-32",
+   "end_region at :1468 stays `if (amx_on) amx_attn::end_region();` and needs no change"
+  ],
+  "hunks": [
+   {
+    "file": "h/tron/models/self_attention.hpp",
+    "lines": [
+     1361,
+     1373
+    ],
+    "text": "      // One 4 KB pack slot per batch_job_ix, 64B-aligned as the pack contracts\n      // require and bounded like the mask below; zero-initialized once per\n      // thread, and the packers write only the 4 live columns/rows of a slot,\n      // so the padding they rely on stays zero for the thread's lifetime.\n      // Geometries the AMX kernels do not serve get a 1-element placeholder.\n      constexpr size_t amx_qpack_elems =\n          amx_shape_ok ? max_minibatch_size * amx_attn::Q_PACK_ELEMS_2048 : 1;\n      alignas(64) thread_local uint16_t amx_qpack[amx_qpack_elems] = {};\n      // Bitmap with one bit per batch_job_ix, meaning \"this token's Q group\n      // is already packed into amx_qpack\": word batch_job_ix / 64, bit\n      // batch_job_ix % 64. Sized for the largest legal minibatch\n      // (items.size() <= max_minibatch_size).\n      uint64_t amx_packed_mask[(max_minibatch_size + 63) / 64] = {};\n      if (amx_on) {\n        TRON_ASSERT_LE(items.size(), max_minibatch_size);\n        amx_attn::begin_region();\n      }"
+   },
+   {
+    "file": "h/tron/models/self_attention.hpp",
+    "lines": [
+     1415,
+     1416
+    ],
+    "text": "              uint16_t* q_packed = amx_qpack + batch_job_ix * amx_attn::Q_PACK_ELEMS_2048;"
+   }
+  ]
+ }
+}

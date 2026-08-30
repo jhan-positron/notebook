@@ -1,0 +1,149 @@
+diff --git a/doc/intel-amx.md b/doc/intel-amx.md
+index 1019134d0..7bbb6ece0 100644
+--- a/doc/intel-amx.md
++++ b/doc/intel-amx.md
+@@ -35,9 +35,11 @@ back-to-back cycles/op):
+ | `TILEZERO` | zero one tile | 16 / 0 | 0.5 |
+ | `TDPBF16PS` | the matmul | 52 / 16 | 16.2-16.4 |
+ 
+-One `LDTILECFG`/`TILERELEASE` pair per work region (Intel guidance; ~229
+-cycles measured between `begin_region()`/`end_region()`). 6962P also has AMX-INT8
+-and AMX-FP16; tron's KV cache is bf16, so only `TDPBF16PS` is used.
++One `LDTILECFG`/`TILERELEASE` pair per work region, where a work region is one
++`apply_page_range` call (per attention worker, kv_head and page-range section,
++and again for the pending pass); the pair itself costs ~229 cycles measured
++(`begin_region()`/`end_region()`). 6962P also has AMX-INT8 and AMX-FP16; tron's
++KV cache is bf16, so only `TDPBF16PS` is used.
+ 
+ ### Throughput reality
+ - A full TDP has ~16-cycle reciprocal throughput; a same-C accumulation
+@@ -87,8 +89,10 @@ HF fp32 references.
+   from whichever thread first calls available()
+ - 8 KB XTILEDATA per thread in the XSAVE area once used; `TILERELEASE` when
+   leaving a region re-enables the XSAVE init optimization.
+-- One AMX thread per physical core (Intel guidance); tron already pins one
+-  attention worker per CPU from an explicit core list.
++- One AMX thread per physical core (Intel guidance). tron pins one attention
++  worker per logical CPU from an explicit core list, so this holds only when the
++  configured list contains no two SMT siblings of one physical core; tron does
++  not check that.
+ - Toolchain: `-mamx-tile -mamx-bf16` confined to one translation unit
+   (`src/tron/kernels/amx_attn.cpp`); the interface header is intrinsics-free.
+ 
+@@ -98,8 +102,10 @@ HF fp32 references.
+ 
+ Software attention - the `apply_page_tok` QK and PV inner loops. The main
+ target is forced software attention (`USE_HW_ATTN=0`), where attention
+-compute is the decode wall at long context (a measurement based estimation
+-put attention at ~64% of the decode step on the primary model at ctx 8192).
++compute is the decode wall at long context (a linear fit of the pre-AMX decode
++step time against context length - 3.43 ms + 0.734 us x tokens, qwen-3-4b tp2
++on delphi-3bda, 2026-08-18 - attributes 6.0 of 9.4 ms per step at ctx 8192 to
++the context-proportional term, i.e. ~64%).
+ The FPGA-attention flow benefits too, with no additional code: the dispatch
+ sits inside the software page loop, which hardware mode still uses for its
+ software-required subset (positions below 127, sliding-window and software-only
+@@ -116,13 +122,10 @@ predicate. Everything that fails any gate runs the unchanged AVX path.
+ ### Model
+ 
+ Primary: `ingested-qwen-3-4b-instruct-2507-tp2`. All comparisons are
+-same-binary kill-switch A/Bs against the true clean binary. Decode
+-(replicated, 8 reps/cell, 95% CI): +15.3..+17.7% (canonical) /
+-+19.7..+27.8% (mirror) at 1u/8K..8u/8K. Prefill (3-rep suite): up to +105%.
+-Energy per token (separate power capture at 8u/8K): -14.5% / -21.6%.
+-Generalization: llama-3.1-8b decode +15.0% (1u/8K) / +19.7% (8u/2K);
+-mixtral-8x7b +9.4% canonical / +18.6% mirror (8u/8K); gpt-oss (ineligible
+-geometry) -0.3..-1.6% = no regression when the gate does not fire.
++same-binary kill-switch A/Bs against the true clean binary. The test results
++could fluctuate a little from run to run, please check the related PR for 
++latest. gpt-oss (ineligible geometry) -0.3..-1.6% = no regression when the
++gate does not fire.
+ 
+ ### Mirror layout
+ 
+@@ -142,9 +145,11 @@ The mirror copy lives in a book-owned PARALLEL ARENA, not inside `kv_block`
+ (`Note [K mirror parallel arena]`): an in-block third plane measurably broke
+ prefetch streams (LLC miss 51%->85%, AVX fallback -4..-8%, ~9% tax on the
+ canonical path) and cost 33% KV page capacity. The arena is ordinary RAM
+-(`kv_bytes/2`), allocated only when AMX is available at runtime, fail-soft
+-to null; page capacity is identical with and without it. Coherence
+-(`Note [K mirror coherence]`): the mirror is a pure derived view with
++(`kv_bytes/2`), allocated only for a model with an AMX-eligible attention shape
++(`amx_mirror_eligible` over the plugin's attention kernels - the same
++`amx_attn::shape_ok` gate as the dispatch) on a host where AMX is available at
++runtime, fail-soft to null; page capacity is identical with and without it.
++Coherence (`Note [K mirror coherence]`): the mirror is a pure derived view with
+ exactly two production write sites - the `save_k` write-through on the RX
+ worker, and the `copy_storage_slot` rebuild - the one function every page move
+ (defrag, append) goes through. Byte-equivalence is tested at both levels.
+@@ -164,13 +169,16 @@ Reopen only if a card consumes VNNI K natively or an FPGA-free build ships.
+ 
+ ### Geometry
+ 
+-The fast path engages only for one attention shape. The whole gate is one
+-line of compile-time arithmetic plus the runtime check
+-(`h/tron/models/self_attention.hpp`):
++The fast path engages only for one attention shape. The gate is one function,
++`amx_attn::shape_ok` (`h/tron/kernels/amx_attn_iface.hpp`), evaluated at
++compile time wherever the shape matters - the dispatch and both fast-path
++blocks in `h/tron/models/self_attention.hpp`, the `save_k` write-through in
++`h/tron/models/model.hpp`, and (through `amx_mirror_eligible`) the mirror-arena
++allocation - plus the runtime check:
+ 
+ ```c++
+ constexpr bool amx_shape_ok =
+-    geometry.kv.head_size == 128 && geometry.kv_mul() == 4;
++    amx_attn::shape_ok(geometry.kv.head_size, geometry.kv_mul());
+ const bool amx_on = amx_shape_ok && amx_attn::available();
+ ```
+ 
+@@ -179,7 +187,7 @@ Why this shape: one query group of 4 x 128 = 512 bf16 = 1,024 bytes packs as
+ exactly one full AMX tile operand, no padding waste. The kernel names carry
+ it: `qk_canonical_128x4`, `weights_times_v_128x4`, `qk_mirror_128x4`.
+ 
+-The following 8 models match the gate: qwen-3-4b-2507, llama-3-8b, llama-3.1-8b,
++The following models match the gate: qwen-3-4b-2507, llama-3-8b, llama-3.1-8b,
+ mistral-7b, ministral-8b, mixtral-8x7b. Three are measured (qwen,
+ llama-3.1-8b, mixtral). Every other family runs the unchanged AVX path. In
+ the canonical build no AMX code is compiled into its instantiation; in the
+diff --git a/t/CMakeLists.txt b/t/CMakeLists.txt
+index 25411baf7..4a15636ce 100644
+--- a/t/CMakeLists.txt
++++ b/t/CMakeLists.txt
+@@ -186,8 +186,14 @@ if(BUILD_INGEST_MODELS)
+     set_property(TEST t_generate_ingest_1_${model} APPEND PROPERTY
+       LABELS ${TEST_LABELS})
+   endforeach()
++  # AMX-vs-AVX per-step logit dump. A tool, not a test: it REQUIREs the
++  # AMX_LOGIT_OUT path and asserts nothing about AMX, so it is DISABLED (like
++  # t_clearhbm): ctest lists it as "Not Run (Disabled)" and bin/slice (behind
++  # `make test` and the CI lanes) drops DISABLED entries. Run the binary by
++  # hand; the recipe is in t_amx_logit_ab.cpp. Defaults to
++  # ingested-llama-3.1-8b, hence inside BUILD_INGEST_MODELS.
++  add_catch_test(NAME t_amx_logit_ab FILES t_amx_logit_ab.cpp force_generate.cpp LIBRARIES tron full_scheduler PROPERTIES RESOURCE_LOCK fpga LABELS fpga DISABLED TRUE)
+ endif()
+-add_catch_test(NAME t_amx_logit_ab FILES t_amx_logit_ab.cpp force_generate.cpp LIBRARIES tron full_scheduler PROPERTIES RESOURCE_LOCK fpga LABELS fpga)
+ add_catch_test(NAME t_generate_mock FILES t_generate_mock.cpp testutil.cpp force_generate.cpp LIBRARIES tron pos_fake mock_scheduler PROPERTIES main LABELS fake)
+ add_catch_test(NAME t_generate_mock_plugin FILES t_generate_mock_plugin.cpp force_generate.cpp LIBRARIES tron fake_scheduler PROPERTIES main LABELS fake)
+ add_catch_test(NAME t_token_tree_stress FILES t_token_tree_stress.cpp LIBRARIES tron fake_scheduler PROPERTIES main LABELS fake)
+diff --git a/t/t_amx_logit_ab.cpp b/t/t_amx_logit_ab.cpp
+index e2a766e87..c9b1a6a98 100644
+--- a/t/t_amx_logit_ab.cpp
++++ b/t/t_amx_logit_ab.cpp
+@@ -1,7 +1,13 @@
+ // AMX-vs-AVX A/B logit dump: run force_generate on a LONG synthetic token
+-// sequence
+-// and dump every recorded step's logits to the file named by AMX_LOGIT_OUT.
+-// Run the binary twice (TRON_AMX_DISABLE=1 then =0) and compare offline.
++// sequence and dump every recorded step's logits to the file named by
++// AMX_LOGIT_OUT. This is a tool, not a test - it asserts nothing about AMX -
++// so its ctest entry is DISABLED (t/CMakeLists.txt) and nothing in CI runs it.
++// Run the binary by hand, twice, and compare the two dumps offline:
++//   AMX_LOGIT_OUT=/tmp/avx.bin TRON_AMX_DISABLE=1 gen/t_amx_logit_ab
++//   AMX_LOGIT_OUT=/tmp/amx.bin TRON_AMX_DISABLE=0 gen/t_amx_logit_ab
++// Optional: AMX_MODEL=<model id> (default ingested-llama-3.1-8b, so the
++// binary exists only with BUILD_INGEST_MODELS=ON) and AMX_TOKENS=<file> in
++// extract_logits --save-tokens format to align steps with an HF reference.
+ // The long sequence matters: the AMX fast path engages only on full 64-token
+ // pages, which the 21-token canned-prompt golden tests never reach.
+ #include <cstdint>

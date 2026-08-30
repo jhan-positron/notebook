@@ -1,0 +1,374 @@
+diff --git a/h/tron/kernels/amx_attn_iface.hpp b/h/tron/kernels/amx_attn_iface.hpp
+index 79c480132..7982bc447 100644
+--- a/h/tron/kernels/amx_attn_iface.hpp
++++ b/h/tron/kernels/amx_attn_iface.hpp
+@@ -93,16 +93,18 @@ constexpr bool shape_ok(size_t model_head_size, size_t model_kv_mul) noexcept {
+ }
+ 
+ // True when the CPU, the OS, and the per-process permission all allow AMX,
+-// and TRON_AMX_DISABLE is not set. See Note [AMX attention dispatch].
++// and TRON_AMX_DISABLE is not `1`. See Note [AMX attention dispatch].
+ bool available() noexcept;
+ 
+ // Pack one query group (4 query heads x 128 dims, contiguous bf16) into the
+ // tile B-operand (VNNI pair-interleaved) layout consumed by
+ // qk_canonical_128x4.
+-// `packed` must hold Q_PACK_ELEMS_2048 bf16 (4 KB), 64B-aligned.
++// `packed` must hold Q_PACK_ELEMS_2048 bf16 (4 KB), 64B-aligned, with
++// columns 4..15 of every panel already zero: this call writes columns 0..3
++// only, so a buffer zeroed once at allocation stays valid for every pack.
+ // `packed` layout: 4 panels, one per 32-dim step of the head; each panel is
+ // 16 dim-pair rows x 16 query columns (columns 0..3 = the 4 heads, columns
+-// 4..15 zero) x 2 paired values:
++// 4..15 zero padding) x 2 paired values:
+ //   packed[((step * 16 + dim_pair) * 16 + q_head) * 2 + j]
+ //     == q_group[q_head * 128 + step * 32 + 2 * dim_pair + j]
+ void pack_q_group_128x4(const uint16_t* q_group, uint16_t* packed) noexcept;
+@@ -148,13 +150,15 @@ void weights_times_v_128x4(const uint16_t* v_page,
+ // cannot simply REPLACE canonical K, see Note [Why not replace canonical K]
+ // there too). Both ship:
+ // canonical-K is the supported default; the mirror is opt-in
+-// (TRON_AMX_K_MIRROR) for pinned AMX deployments. Precedent: the mirror
+-// formulation is PR #2934's k_vnni idea; this arena implementation is ours.
++// (TRON_AMX_K_MIRROR) for builds that will only run on AMX hosts - anywhere
++// else the arena RAM is wasted. The mirror formulation is PR #2934's k_vnni.
+ 
+ // Pack one query group (4 heads x 128 dims, contiguous bf16) as a zero-padded
+-// A operand: rows 0..3 = the 4 heads' rows, rows 4..15 zeroed by this call.
+-// `padded` must hold 16 * 128 bf16 (= Q_PACK_ELEMS_2048, 4 KB, 64B-aligned) -
+-// same size as the canonical pack, so callers can reuse the same buffer.
++// A operand: rows 0..3 = the 4 heads' rows; rows 4..15 are padding this call
++// leaves untouched, so they must already be zero (a buffer zeroed once at
++// allocation stays valid for every pack). `padded` must hold 16 * 128 bf16
++// (= Q_PACK_ELEMS_2048, 4 KB, 64B-aligned) - same size as the canonical pack,
++// so callers can reuse the same buffer.
+ void pack_q_rows_128x4(const uint16_t* q_group, uint16_t* padded) noexcept;
+ 
+ // Dense QK for one page, mirror orientation: S = Q . K^T, no transposing
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index 07fba43bc..efabc5c21 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -761,14 +761,15 @@ struct alignas(64) book final
+     return uniform_kv_slot(layer);
+   }
+ 
+-  // Legacy form: keeps today's behavior (mirror arena allocated whenever AMX
+-  // is available) for tests and callers that carry no model information.
++  // Legacy form for callers that carry no model information (tests): no
++  // mirror arena. The default is the direction that allocates nothing; a test
++  // that exercises the mirror says so through the 4-argument constructor.
+   book(size_t n_pages,
+       size_t storage_slot_count = n_slots,
+       bool support_eagle = false) noexcept
+-  : book(n_pages, storage_slot_count, support_eagle, /*amx_mirror_eligible=*/true) {}
++  : book(n_pages, storage_slot_count, support_eagle, /*amx_mirror_eligible=*/false) {}
+ 
+-  // The only constructor that carries the mirror-eligibility decision: the
++  // The constructor that carries the mirror-eligibility decision: the
+   // scheduler passes amx_mirror_eligible(plugin::attention_kernels), so a
+   // model without an AMX-eligible attention shape allocates no mirror arena.
+   book(size_t n_pages,
+@@ -977,11 +978,12 @@ public:
+       size_t storage_slot_count = n_slots,
+       bool support_eagle = false) noexcept {
+     return try_create(n_pages, storage_slot_count, support_eagle,
+-        /*amx_mirror_eligible=*/true);
++        /*amx_mirror_eligible=*/false);
+   }
+ 
+   // Same, carrying the mirror-eligibility decision (see the 4-argument
+-  // constructor); the scheduler's production path.
++  // constructor); the scheduler's production path. The 3-argument form above
++  // allocates no mirror arena.
+   TRON(nodiscard)
+   static std::shared_ptr<book> try_create(size_t n_pages,
+       size_t storage_slot_count,
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 37cc9bdd4..fb526cba7 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -1365,6 +1365,9 @@ struct self_attention {
+       // (items.size() <= max_minibatch_size).
+       uint64_t amx_packed_mask[(max_minibatch_size + 63) / 64] = {};
+       if (amx_on) {
++        // resize() zero-fills new slots and the packers write only the 4
++        // live columns/rows of each slot, so the padding they rely on stays
++        // zero for the thread's lifetime (see the pack contracts).
+         amx_qpack.resize(items.size() * amx_attn::Q_PACK_ELEMS_2048);
+         amx_attn::begin_region();
+       }
+@@ -1411,11 +1414,8 @@ struct self_attention {
+             if (amx_on) {
+               uint16_t* q_packed =
+                   amx_qpack.data() + batch_job_ix * amx_attn::Q_PACK_ELEMS_2048;
+-              // Pack lazily: select the token's mask word (batch_job_ix / 64
+-              // via >> 6), shift its bit (batch_job_ix % 64 via & 63) down to
+-              // bit 0, and test it. Bit clear = this token's Q group is not
+-              // packed yet; pack it once and set the bit, so every later
+-              // page in the range reuses the pack.
++              // Pack this token's Q group once; later pages in the range
++              // reuse it.
+               if (!((amx_packed_mask[batch_job_ix >> 6] >> (batch_job_ix & 63)) & 1)) {
+ #ifdef TRON_AMX_K_MIRROR
+                 // Mirror orientation: Q is the A operand - plain zero-padded
+@@ -1507,7 +1507,6 @@ struct self_attention {
+       int relevant_k_tokens = 0;
+       bool did_amx = false;
+       {
+-        // share the bf16 -> fp32 conversion across the page
+         using scalar_t = typename btensor_t<operation_head_size>::element;
+         for (size_t offset = 0; offset < operation_kv_mul; ++offset)
+           s_pages[offset] = constant<page::page_size>(-1.0f / 0.0f);
+@@ -1619,14 +1618,9 @@ struct self_attention {
+       // product for all four grouped heads in one tile call (see
+       // Note [AMX attention dispatch]). Pass 1 mirrors the per-head
+       // scale/max/exp math below exactly; pass 2 applies the same v*/s*/m*
+-      // updates, but from the AMX PV output instead of scaled_v.
+-      //
+-      // The if-constexpr is runtime-redundant with did_amx (which is only
+-      // ever set under the same condition, in the QK block above) but
+-      // deliberate: without it this 4-head/128-dim softmax-update block would still be
+-      // COMPILED into every other geometry's instantiation as dead code,
+-      // and its group-width assumptions would no longer be pinned to the
+-      // same compile-time gate that guards the QK side.
++      // updates, but from the AMX PV output instead of scaled_v. The
++      // `if constexpr` keeps this 4-head/128-dim block out of every other
++      // geometry's instantiation.
+       if constexpr (amx_shape_ok) {
+         if (did_amx) {
+           float corr_arr[operation_kv_mul], m_new_arr[operation_kv_mul],
+diff --git a/h/tron/scheduler/full.hpp b/h/tron/scheduler/full.hpp
+index 5560fd9a8..d6a80f0e0 100644
+--- a/h/tron/scheduler/full.hpp
++++ b/h/tron/scheduler/full.hpp
+@@ -306,8 +306,9 @@ struct node_base : std::enable_shared_from_this<node_base> {
+   bool support_eagle = false;
+   // Whether the model has an AMX-eligible attention shape (see
+   // amx_mirror_eligible in kv_cache.hpp); handed to every KV book this tree
+-  // creates so ineligible models allocate no K mirror arena.
+-  bool amx_mirror_eligible = true;
++  // creates so ineligible models allocate no K mirror arena. Every
++  // constructor sets it; the default is the direction that allocates nothing.
++  bool amx_mirror_eligible = false;
+ 
+   node_base(tron::token_pos_ht abs_ht,
+       uint32_t logical_kv_slots,
+diff --git a/src/tron/CMakeLists.txt b/src/tron/CMakeLists.txt
+index 000bf5459..4cd820187 100644
+--- a/src/tron/CMakeLists.txt
++++ b/src/tron/CMakeLists.txt
+@@ -167,6 +167,10 @@ add_library(tron STATIC
+ # isolated translation unit that alone receives the -mamx-* flags; the rest of
+ # the tree sees only the intrinsics-free interface header plus the
+ # TRON_AMX_DISPATCH definition that enables the fast-path call sites.
++# TODO(jhan): no CI configuration compiles or runs the code behind these two
++# options (https://github.com/positron-ai/tron/issues/3997). Until the CI team
++# adds one, verify both configurations on an AMX host before pushing; the
++# recipe is in the issue.
+ option(TRON_AMX_DISPATCH "Enable AMX software-attention dispatch (Granite Rapids)" OFF)
+ # Keeps a second, VNNI-interleaved copy of K in a parallel arena owned by the
+ # book (ordinary non-DMA RAM sized kv_bytes/2; see
+diff --git a/src/tron/kernels/amx_attn.cpp b/src/tron/kernels/amx_attn.cpp
+index c826e7317..d96d069bb 100644
+--- a/src/tron/kernels/amx_attn.cpp
++++ b/src/tron/kernels/amx_attn.cpp
+@@ -1,11 +1,7 @@
+ // AMX software-attention kernels. See Note [AMX attention dispatch]
+ // (in amx_attn_iface.hpp). The ONLY translation unit compiled with
+-// -mamx-tile/-mamx-bf16. Kernel design and constants were validated with a
+-// stand-alone whole-path benchmark (scores, softmax and PV of one page,
+-// self-checked against a scalar reference), since removed from the tree
+-// (git history up to d176c88b3).
++// -mamx-tile/-mamx-bf16.
+ 
+-#include <atomic>
+ #include <cstdlib>
+ #include <cstring>
+ #include <immintrin.h>
+@@ -33,13 +29,6 @@ constexpr int N_TILES = 8;
+ constexpr int TILE_ROWS = int(TILE_ROWS_16);
+ constexpr int TILE_ROW_BYTES = int(TILE_ROW_BYTES_64);
+ // One stored tile's worth of fp32 scores (16 rows x 16 values).
+-// sizeof(float) rather than a literal 4: the constant converts tile bytes
+-// into elements of the float arrays it indexes, so the element size belongs
+-// to that type. C++ does not formally fix sizeof(float), but every tron
+-// target does (the AVX-512 *_ps intrinsics and the fp32 tile accumulators
+-// require IEEE 32-bit float); the static_assert pins the assumption.
+-// (C++23 has std::float32_t, but tron's kernel convention is plain float
+-// for fp32 throughout.)
+ static_assert(sizeof(float) == 4, "AMX/AVX fp32 kernels assume 32-bit float");
+ constexpr int TILE_FP32S = TILE_ROWS * TILE_ROW_BYTES / int(sizeof(float));
+ // TDPBF16PS consumes the head dim in 32-dim steps (16 bf16 pairs per step).
+@@ -64,8 +53,9 @@ struct tile_config {
+ 
+ bool detect_and_request() noexcept {
+   // Runtime kill switch for same-binary A/B tests and emergency disable.
++  // Exactly "1" disables, the same rule as TRON_NO_RTM.
+   const char* off = std::getenv("TRON_AMX_DISABLE");
+-  if (off && off[0] == '1') return false;
++  if (off != nullptr && std::strcmp(off, "1") == 0) return false;
+   unsigned a, b, c, d;
+   // CPUID leaf 7.0 EDX: bit 22 AMX-BF16, bit 24 AMX-TILE
+   __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(7), "c"(0));
+@@ -106,8 +96,9 @@ void end_region() noexcept {
+ }
+ 
+ void pack_q_group_128x4(const uint16_t* q_group, uint16_t* packed) noexcept {
+-  std::memset(packed, 0, Q_PACK_ELEMS_2048 * sizeof(uint16_t));
+-  // One panel per 32-dim step; see the layout contract at the declaration.
++  // Writes columns 0..3 of every panel; columns 4..15 are padding the caller
++  // keeps zero (see the contract at the declaration). One panel per 32-dim
++  // step.
+   for (int step = 0; step < HEAD_SIZE / DIM_STEP; step++) {
+     for (int dim_pair = 0; dim_pair < DIM_STEP / 2; dim_pair++) {
+       for (int q_head = 0; q_head < GROUP_HEADS; q_head++) {
+@@ -200,6 +191,8 @@ void weights_times_v_128x4(const uint16_t* v_page,
+     for (int c = 0; c < PAGE; c += 32) {
+       __m512 lo = _mm512_loadu_ps(exp_rows + q * row_stride_floats + c);
+       __m512 hi = _mm512_loadu_ps(exp_rows + q * row_stride_floats + c + 16);
++      // cvtne2ps_pbh(a, b) puts b in the low 16 lanes, so (hi, lo) keeps the
++      // tokens in order.
+       _mm512_storeu_si512(P[q] + c, (__m512i)_mm512_cvtne2ps_pbh(hi, lo));
+     }
+   }
+@@ -232,9 +225,8 @@ void weights_times_v_128x4(const uint16_t* v_page,
+ }
+ 
+ void pack_q_rows_128x4(const uint16_t* q_group, uint16_t* padded) noexcept {
++  // Rows 0..3 only; rows 4..15 are padding the caller keeps zero.
+   std::memcpy(padded, q_group, GROUP_HEADS * HEAD_SIZE * sizeof(uint16_t));
+-  std::memset(padded + GROUP_HEADS * HEAD_SIZE, 0,
+-      (TILE_ROWS - GROUP_HEADS) * HEAD_SIZE * sizeof(uint16_t));
+ }
+ 
+ // See Note [Mirror orientation]. S[16 q][64 tok] = Q . K^T, no transposing
+diff --git a/t/t_amx_arena_leak.cpp b/t/t_amx_arena_leak.cpp
+index c4a5e6fcd..fdecc6f73 100644
+--- a/t/t_amx_arena_leak.cpp
++++ b/t/t_amx_arena_leak.cpp
+@@ -75,8 +75,10 @@ TEST_CASE("K mirror arena memory is released with the book", "[amx_mirror][kv_da
+   long long allocs_alive = 0;
+   {
+     // The small uniform book shape t_llama_unit uses (2 layers, 1 KV head,
+-    // head size 128); 4 pages keeps the arena real but tiny.
+-    tron::book<2, 1, 128, 0> cache(/*n_pages=*/4);
++    // head size 128); 4 pages keeps the arena real but tiny. Eligible, so the
++    // arena is allocated (the 3-argument form allocates none).
++    tron::book<2, 1, 128, 0> cache(/*n_pages=*/4, /*storage_slot_count=*/2,
++        /*support_eagle=*/false, /*amx_mirror_eligible=*/true);
+     allocs_alive = aligned_array_allocs.load() - allocs_before;
+   }
+   const long long alloc_delta = aligned_array_allocs.load() - allocs_before;
+@@ -124,12 +126,13 @@ TEST_CASE("K mirror arena is not allocated for an ineligible model",
+         /*support_eagle=*/false, /*amx_mirror_eligible=*/false);
+     REQUIRE(aligned_array_allocs.load() - before_ineligible == 0);
+   }
+-  // Control: the same book through the legacy constructor (eligible by
+-  // default) does allocate when AMX is available - so it is the flag, not
+-  // the geometry, that the arena decision follows.
++  // Control: the same book with amx_mirror_eligible=true does allocate when
++  // AMX is available - so it is the flag, not the geometry, that the arena
++  // decision follows.
+   if (tron::amx_attn::available()) {
+     const long long before_control = aligned_array_allocs.load();
+-    tron::book<2, 1, 64, 0> control(/*n_pages=*/4);
++    tron::book<2, 1, 64, 0> control(/*n_pages=*/4, /*storage_slot_count=*/2,
++        /*support_eagle=*/false, /*amx_mirror_eligible=*/true);
+     REQUIRE(aligned_array_allocs.load() - before_control == 1);
+   } else {
+     WARN("AMX unavailable on this host - the eligible control cannot allocate here");
+diff --git a/t/t_amx_numerics.cpp b/t/t_amx_numerics.cpp
+index b58a152c4..b16f9a477 100644
+--- a/t/t_amx_numerics.cpp
++++ b/t/t_amx_numerics.cpp
+@@ -82,7 +82,7 @@ TEST_CASE("AMX QK does not digress from the AVX dotter", "[amx_numerics][kv_data
+   for (uint32_t seed : {11u, 12u, 13u, 14u}) {
+     fill_qk(*in, seed);
+ 
+-    alignas(64) uint16_t q_packed[tron::amx_attn::Q_PACK_ELEMS_2048];
++    alignas(64) uint16_t q_packed[tron::amx_attn::Q_PACK_ELEMS_2048] = {};
+     tron::amx_attn::pack_q_group_128x4(in->q, q_packed);
+     alignas(64) float s_amx[NQ][PAGE];
+     tron::amx_attn::begin_region();
+@@ -122,7 +122,7 @@ TEST_CASE(
+   auto in = std::make_unique<qk_inputs>();
+   fill_qk(*in, 21);
+ 
+-  alignas(64) uint16_t q_packed[tron::amx_attn::Q_PACK_ELEMS_2048];
++  alignas(64) uint16_t q_packed[tron::amx_attn::Q_PACK_ELEMS_2048] = {};
+   alignas(64) float s_canon[NQ][PAGE];
+   tron::amx_attn::pack_q_group_128x4(in->q, q_packed);
+   tron::amx_attn::begin_region();
+@@ -135,7 +135,7 @@ TEST_CASE(
+         reinterpret_cast<tron::bf16*>(plane.data()), t,
+         reinterpret_cast<const tron::bf16*>(in->k + t * HD));
+   }
+-  alignas(64) uint16_t q_rows[ROWS * HD];
++  alignas(64) uint16_t q_rows[ROWS * HD] = {};
+   tron::amx_attn::pack_q_rows_128x4(in->q, q_rows);
+   alignas(64) float s_mirror[ROWS * PAGE];  // See Note [Tile stores write 16 rows]
+   tron::amx_attn::begin_region();
+@@ -143,10 +143,8 @@ TEST_CASE(
+   tron::amx_attn::end_region();
+ 
+   // Both orientations reduce the head dim in the same 4x32 step order with
+-  // the same dim pairing, so TDPBF16PS produces the identical fp32 sums -
+-  // the system-level regression check (mirror greedy output byte-identical
+-  // to canonical-AMX) rests on this. A failure here means the orientations'
+-  // accumulation orders diverged, which invalidates that equivalence.
++  // the same dim pairing, so TDPBF16PS produces identical fp32 sums; a
++  // failure here means the orientations' accumulation orders diverged.
+   for (size_t qi = 0; qi < NQ; ++qi) {
+     for (size_t t = 0; t < PAGE; ++t) {
+       REQUIRE(s_mirror[qi * PAGE + t] == s_canon[qi][t]);
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index a4824c79e..c687e5aae 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -269,7 +269,8 @@ TEST_CASE("EAGLE shifts storage without shifting logical KV completion", "[kv_da
+   using book_t = book<1, 1, 128, 16>;
+   constexpr size_t storage_slots =
+       book_t::storage_slot_count_for_layers(/*max_model_layers=*/1, true);
+-  book_t cache(/*n_pages=*/1, storage_slots, /*support_eagle=*/true);
++  book_t cache(/*n_pages=*/1, storage_slots, /*support_eagle=*/true,
++      /*amx_mirror_eligible=*/true);
+   auto* page = cache.page_of(0);
+   const kv_slot_id slot = book_t::kv_slot(model_layer_id(0));
+ 
+@@ -335,7 +336,8 @@ TEST_CASE("K mirror stays coherent for both physical slots under the EAGLE view"
+   constexpr kv_geometry geometry{1, 128};
+   constexpr size_t storage_slots =
+       book_t::storage_slot_count_for_layers(/*max_model_layers=*/1, true);
+-  book_t cache(/*n_pages=*/1, storage_slots, /*support_eagle=*/true);
++  book_t cache(/*n_pages=*/1, storage_slots, /*support_eagle=*/true,
++      /*amx_mirror_eligible=*/true);
+   auto* page = cache.page_of(0);
+   const kv_slot_id slot = book_t::kv_slot(model_layer_id(0));
+   if (page->template k_mirror_data<geometry>(slot, 0) == nullptr) {
+@@ -473,8 +475,10 @@ TEST_CASE("fixed KV layout addresses each slot geometry", "[kv_data][book append
+   STATIC_REQUIRE_FALSE((page_k_accepts_geometry<page_t, undeclared_geometry>));
+   STATIC_REQUIRE_FALSE(page_supports_uniform_kv_access<page_t>);
+ 
+-  cache_t destination(/*n_pages=*/2);
+-  cache_t source(/*n_pages=*/2);
++  cache_t destination(/*n_pages=*/2, cache_t::n_slots, /*support_eagle=*/false,
++      /*amx_mirror_eligible=*/true);
++  cache_t source(/*n_pages=*/2, cache_t::n_slots, /*support_eagle=*/false,
++      /*amx_mirror_eligible=*/true);
+   std::mt19937 gen(42);
+   destination.fill_random(gen);
+   source.fill_random(gen);
+@@ -1073,8 +1077,10 @@ TEST_CASE("heterogeneous EAGLE append preserves both views and embeddings",
+   using cache_t = heterogeneous_eagle_cache;
+   constexpr size_t storage_slots = cache_t::storage_slot_count_for_layers(2, true);
+   constexpr size_t destination_tokens = cache_t::page_size - 1;
+-  cache_t destination(/*n_pages=*/2, storage_slots, /*support_eagle=*/true);
+-  cache_t source(/*n_pages=*/1, storage_slots, /*support_eagle=*/true);
++  cache_t destination(/*n_pages=*/2, storage_slots, /*support_eagle=*/true,
++      /*amx_mirror_eligible=*/true);
++  cache_t source(/*n_pages=*/1, storage_slots, /*support_eagle=*/true,
++      /*amx_mirror_eligible=*/true);
+   destination.increment_tokens_used(destination_tokens);
+   source.increment_tokens_used(2);
+ 

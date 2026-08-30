@@ -1,0 +1,143 @@
+[
+ {
+  "id": "R1-17",
+  "file": "h/tron/kernels/page_share_counters.hpp",
+  "line": 6,
+  "snip": [
+   2,
+   13
+  ],
+  "text": "Is this instrumentation still needed?  Its conclusion (width 4 is the guaranteed decode width) is already baked into the kernel shape, nothing in CMake defines `TRON_PAGE_SHARE_COUNTERS`, and it adds a third flag family plus an exit-time printer under `kernels/` for something that instruments `models/`.  I'd record the histogram in the PR description and drop the code; if we want a live counter, the `TRACE_EVENT` args two lines above the page loop are the existing place.  Also, the guard is `#ifdef`, so `=0` enables it too; and with the flag on there is an increment per (page, token) inside the loop, so \"Zero hot-loop cost\" isn't what the code does.  With the histogram's home gone from the PR, the PR description is where its conclusion belongs; the question whether the code stays is unchanged.",
+  "tag": "A1/A9/A3",
+  "blocker": false,
+  "r5_note": "round 1 (R1-17), not addressed | text edited in round 5: the proposed home of the histogram is now the PR description | evidence: file unchanged since d176c88b3",
+  "reply_to": null,
+  "fix": null,
+  "triage": null
+ },
+ {
+  "id": "R2-08",
+  "file": "h/tron/models/model.hpp",
+  "line": 2764,
+  "snip": [
+   2763,
+   2771
+  ],
+  "text": "\"Mirror writes exist only for the shape the AMX kernels serve\" is true of this write site, not of mirror writes: `copy_storage_slot` (`kv_cache.hpp:1857`) and `fill_storage_slot` (`:1286`) scatter for any geometry whose plane exists, and a head-64 book from the legacy constructor has one (your own control case).  Scope the sentence to \"the `save_k` write-through is compiled out for ineligible geometries\", which is what the `if constexpr` below does.",
+  "tag": "A3",
+  "blocker": false,
+  "r5_note": "round 2 (R2-08), not addressed | evidence: file unchanged since d176c88b3",
+  "reply_to": null,
+  "fix": null,
+  "triage": null
+ },
+ {
+  "id": "R1-28",
+  "file": "h/tron/models/model.hpp",
+  "line": 2771,
+  "snip": [
+   2769,
+   2775
+  ],
+  "text": "This gates the write-through on `available()` only, but the only reader is behind `head_size == 128 && kv_mul == 4`.  On an AMX host running any other geometry (or any non-matching slot of a mixed layout) the RX worker pays the scatter (and `copy_storage_slot` the rebuild) and the book the `kv_bytes/2`, for planes nobody reads.  Gate the write, the rebuild, and the arena on the same predicate as the reader.  Also, `set_k_mirror` already no-ops on a null plane, so as written `k_mirror_on` is redundant with the arena condition rather than a correctness guard; the comment should say which it is.  And `model.hpp` calls `amx_attn::available()` without including its header.  Good on the gate.  Inside the `if constexpr`, `k_mirror_on` is just `available()`, and that is still redundant with the null check in `set_k_mirror`; say it is an early-out, or drop it.  Also, for an ineligible geometry `k_mirror_on` is now an unused local in a K_MIRROR build - `has_legacy_hardware_binding` two lines down needed `tron_maybe_unused` for exactly this shape; move the bool inside the `if constexpr`.  And `model.hpp` still doesn't include `amx_attn_iface.hpp` itself.",
+  "tag": "A1/A8/B7",
+  "blocker": false,
+  "r5_note": "round 1 (R1-28), not addressed | evidence: file unchanged since d176c88b3",
+  "reply_to": null,
+  "fix": null,
+  "triage": null
+ },
+ {
+  "id": "R1-58",
+  "file": "t/CMakeLists.txt",
+  "line": 365,
+  "snip": [
+   363,
+   367
+  ],
+  "text": "In the default build all three of these are a single `SUCCEED(\"...skipped\")`, and even with the options on they `WARN` and return on a non-AMX host - so after merge nothing in CI compiles or runs the flagged code.  How was this validated, given `make test` has no coverage for it?  At minimum a compile-only configuration with both options ON (precedent: `heterogeneous_scheduler_compile`, :351) so the `#ifdef`'d code can't rot silently; the run log from the 6962P host in the PR would also help.",
+  "tag": "A4/A10/B14",
+  "blocker": true,
+  "r5_note": "round 1 (R1-58), not addressed | evidence: file unchanged since d176c88b3",
+  "reply_to": null,
+  "fix": {
+   "plan": [
+    "Add an OBJECT library next to `heterogeneous_scheduler_compile` (:356-359) that compiles the AMX code with both flags defined for that library alone, whatever the build's options are: one TU that instantiates the full scheduler for an eligible shape, plus the kernel TU with its `-mamx-*` flags. It is part of `all` like the precedent, so every CI build compiles the dispatch, the `save_k` write-through, the mirror arena and the kernels; no CTest entry.",
+    "That covers the 'can't rot silently' half. The other half of the comment stands: record in the PR how the three AMX tests were run on the 6962P host (the `ctest -R 't_amx_'` log from delphi-3bda with `-DTRON_AMX_DISPATCH=ON -DTRON_AMX_K_MIRROR=ON`), since no CI host has AMX."
+   ],
+   "hunks": [
+    {
+     "file": "t/CMakeLists.txt",
+     "lines": [
+      356,
+      359
+     ],
+     "what": "keep the precedent block and add the AMX one after it",
+     "text": "# Compile-time coverage for scheduler/cache capability boundaries. This target\n# deliberately has no CTest entry: it instantiates templates but runs no model.\nadd_library(heterogeneous_scheduler_compile OBJECT heterogeneous_scheduler_compile.cpp)\ntarget_link_libraries(heterogeneous_scheduler_compile PRIVATE tron full_scheduler)\n\n# Compile-time coverage for the AMX software-attention paths (see\n# Note [AMX attention dispatch]): both flags defined for this object library\n# alone, so the #ifdef'd dispatch, save_k write-through, mirror arena and the\n# kernel TU compile in every configuration, including the default with the\n# options OFF. No CTest entry: it instantiates templates and runs no model.\nadd_library(amx_attention_compile OBJECT amx_attention_compile.cpp\n  ../src/tron/kernels/amx_attn.cpp)\ntarget_compile_definitions(amx_attention_compile PRIVATE TRON_AMX_DISPATCH TRON_AMX_K_MIRROR)\nset_source_files_properties(../src/tron/kernels/amx_attn.cpp PROPERTIES\n  COMPILE_OPTIONS \"-mamx-tile;-mamx-bf16;-mavx512f;-mavx512bw;-mavx512vl;-mavx512dq;-mavx512bf16;-mavx2;-mfma\")\ntarget_link_libraries(amx_attention_compile PRIVATE tron full_scheduler)"
+    },
+    {
+     "file": "t/amx_attention_compile.cpp",
+     "lines": null,
+     "what": "new file",
+     "text": "// Compile-time coverage for the AMX software-attention paths (see\n// Note [AMX attention dispatch] in tron/kernels/amx_attn_iface.hpp): this\n// object library is built with TRON_AMX_DISPATCH and TRON_AMX_K_MIRROR defined\n// whatever the build's options are, so the #ifdef'd dispatch, the save_k\n// write-through and the mirror arena cannot rot in the default (OFF) build.\n// Instantiates the full scheduler for one attention shape the kernels serve\n// (llama-3.1-8b: 32 query heads / 8 KV heads / 128 dims). No CTest entry: it\n// runs no model.\n#include \"tron/kernels/amx_attn_iface.hpp\"\n#include \"tron/plugins/llama.hpp\"\n#include \"tron/scheduler/full.hpp\"\n\nnamespace tron {\n\nstatic_assert(amx_attn::shape_ok(named_llama_configs::llama_3p1_8b.head_size,\n    named_llama_configs::llama_3p1_8b.n_heads / named_llama_configs::llama_3p1_8b.n_kv_heads));\nstatic_assert(amx_mirror_eligible(llama_3p1_8b<tp1>::plugin_model::attention_kernels));\n\ntemplate struct full_scheduler<model<llama_3p1_8b<tp1>::plugin_model>>;\n\n}  // namespace tron"
+    }
+   ],
+   "note": "The TU was syntax-checked against the tree (`clang++-19 -fsyntax-only` with the flags heterogeneous_scheduler_compile.cpp is built with, i.e. -DTRON_AMX_DISPATCH -DTRON_AMX_K_MIRROR): 0 errors in 26 s, and both static_asserts hold (llama-3.1-8b is 32/8/128, ratio 4). The CMake hunk was NOT configured or built - no cmake run was made in your build directory; check it with `cmake --preset native && cmake --build gen --target amx_attention_compile` in a build with both options OFF. Assumptions to confirm at that step: `set_source_files_properties` here applies to the target defined in this directory (CMake 3.19 minimum, so `TARGET_DIRECTORY` is also available if preferred); with the options ON the kernel TU is compiled twice (once into `tron`, once here) - harmless for an object library nothing links; the duplicate -D flags are identical. `heterogeneous_scheduler_compile.cpp.o` is in `ninja -t targets all`, so the precedent (and this target) build in CI without a test entry. Source: exec/review-pipeline/r5/fix/amx_attention_compile.cpp, syntax_compile_tu.log."
+  },
+  "triage": {
+   "decision": "defer",
+   "reason": "Accepted for now: CMakeLists.txt records that no CI configuration builds the AMX options; tracked in #3997 with the interim verify-on-an-AMX-host process.",
+   "commit": "298dbad0f",
+   "date": "2026-08-25",
+   "by": "jhan"
+  }
+ },
+ {
+  "id": "R4-01",
+  "file": "t/t_amx_logit_ab.cpp",
+  "line": 6,
+  "snip": [
+   1,
+   12
+  ],
+  "text": "Both commands run the AVX path on a default build - `TRON_AMX_DISPATCH` is OFF (`src/tron/CMakeLists.txt:170`) and the dispatch site is `#ifdef`'d (`self_attention.hpp:1352`) - so the two dumps agree for the wrong reason.  Let's start the recipe with the `-DTRON_AMX_DISPATCH=ON` configure (and `-DTRON_AMX_K_MIRROR=ON` for the mirror arm).",
+  "tag": "B17/A3",
+  "blocker": false,
+  "r5_note": "round 4 (R4-01), not addressed | evidence: file unchanged since d176c88b3",
+  "reply_to": null,
+  "fix": null,
+  "triage": null
+ },
+ {
+  "id": "R1-61",
+  "file": "t/t_amx_mirror.cpp",
+  "line": 28,
+  "snip": [
+   26,
+   33
+  ],
+  "text": "The reference here is the implementation's own index formula, so a layout change applied to both passes; the only test that ties the plane to its consumer (`qk_mirror_128x4`) is hardware-gated.  A scalar model of the kernel's panel addressing would pin the layout to the reader on any host.  Also, this is the fourth copy of the formula (Note, `scatter_k_mirror`, here, `t_llama_unit.cpp:440`); a `require_mirror_matches` in a `t/` header used by both tests would leave two.  Now six full copies plus two hand-expanded column forms (`t_llama_unit.cpp:370`, `:1128`, `:1135`, `:1140`), and two lambdas that are `require_mirror_matches` again.  `testutil.hpp` is already included there; a whole-plane and a one-token overload in it would serve `t_amx_mirror`, `:522`, `:360` and `:1118`.",
+  "tag": "A11/B6/B8",
+  "blocker": false,
+  "r5_note": "round 1 (R1-61), not addressed | evidence: file unchanged since d176c88b3",
+  "reply_to": null,
+  "fix": null,
+  "triage": null
+ },
+ {
+  "id": "R1-62",
+  "file": "t/t_amx_mirror.cpp",
+  "line": 80,
+  "snip": [
+   78,
+   81
+  ],
+  "text": "Which consumer reads a head-64 plane?  Dispatch requires head 128, so this is 8192 `REQUIRE`s guarding data nobody reads - the same point as the write-through gate in `model.hpp`: don't maintain planes no kernel consumes, and this case goes away.  Still here.  Through the scheduler a head-64 book no longer has a plane at all, so this case now tests a layout only the legacy constructor can produce - one more reason to flush that constructor.",
+  "tag": "B18",
+  "blocker": false,
+  "r5_note": "round 1 (R1-62), not addressed | evidence: file unchanged since d176c88b3",
+  "reply_to": null,
+  "fix": null,
+  "triage": null
+ }
+]

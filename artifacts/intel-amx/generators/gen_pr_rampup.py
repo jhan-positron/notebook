@@ -311,6 +311,110 @@ matrix = ('<table>\n<tr><th>queries per K/V head</th><th>head width 64</th>'
           '<th>head width 128</th><th>head width 256</th></tr>\n'
           + '\n'.join(mrows) + '\n</table>')
 
+# ---- 4.1.1 why kv_mul 3/5/8 are not served + forced-gate failure diagram ----
+def gate_fail_411():
+    HB, HH = 34, 22
+    X0 = 168
+    rows = [
+        ("kv_mul 4", "qwen-3-4b / llama-3.1-8b / mixtral", 4,
+         "served: the window IS the group"),
+        ("kv_mul 3", "llama-3.2-3b", 3,
+         "window overshoots into the NEXT group&#x27;s head"),
+        ("kv_mul 5", "qwen-2.5-32b", 5,
+         "5th head left out: never computed, never updated"),
+        ("kv_mul 8", "llama-3.3-70b", 8, "half the group left out"),
+    ]
+    parts = []
+    y = 46
+    for name, models, km, verdict in rows:
+        parts.append(f'<text x="8" y="{y+15}" font-size="11.5" font-weight="600" fill="#0b0b0b">{name}</text>')
+        parts.append(f'<text x="8" y="{y+29}" font-size="9.5" fill="#898781">{models}</text>')
+        for i in range(2 * km):
+            x = X0 + i * (HB + 2)
+            grp = i // km
+            in_window = i < 4
+            if in_window and grp == 0:
+                fill, stroke = "#e4f2ed", "#1b9e77"   # correctly this group
+            elif in_window and grp > 0:
+                fill, stroke = "#fbe3d5", "#d95f02"   # wrong-group read
+            elif grp == 0:
+                fill, stroke = "#eeedea", "#898781"   # this group, skipped
+            else:
+                fill, stroke = "#ffffff", "#d8d6d0"
+            parts.append(f'<rect x="{x}" y="{y}" width="{HB}" height="{HH}" fill="{fill}" stroke="{stroke}"/>')
+            parts.append(f'<text x="{x+HB/2:.0f}" y="{y+15}" font-size="10" fill="#52514e" text-anchor="middle">q{i}</text>')
+        xdiv = X0 + km * (HB + 2) - 1
+        parts.append(f'<line x1="{xdiv}" y1="{y-6}" x2="{xdiv}" y2="{y+HH+6}" stroke="#0b0b0b" stroke-width="1.6"/>')
+        parts.append(f'<text x="{X0}" y="{y-8}" font-size="9.5" fill="#898781">K/V head 0&#x27;s group</text>')
+        parts.append(f'<text x="{xdiv+6}" y="{y-8}" font-size="9.5" fill="#898781">K/V head 1&#x27;s group</text>')
+        parts.append(f'<rect x="{X0-3}" y="{y-3}" width="{4*(HB+2)+2}" height="{HH+6}" fill="none" stroke="#7570b3" stroke-width="2.4"/>')
+        parts.append(f'<text x="{X0 + 16*(HB+2) + 14}" y="{y+15}" font-size="10.5" fill="#0b0b0b">{verdict}</text>')
+        y += 62
+    parts.append(f'<text x="{X0-3}" y="{y-14}" font-size="10.5" fill="#7570b3" font-weight="600">violet frame = the 128x4 kernels&#x27; fixed 4-head window (pack, tiles, epilogue)</text>')
+    y += 16
+    parts.append(f'<text x="8" y="{y+14}" font-size="11.5" font-weight="600" fill="#0b0b0b">and the epilogue&#x27;s stride:</text>')
+    parts.append(f'<text x="8" y="{y+28}" font-size="9.5" fill="#898781">sp[kv_head * 4 + offset]</text>')
+    SB = 17
+    for i in range(24):
+        x = X0 + i * (SB + 1)
+        parts.append(f'<rect x="{x}" y="{y}" width="{SB}" height="18" fill="#ffffff" stroke="#d8d6d0"/>')
+    for i in range(24, 32):
+        x = X0 + i * (SB + 1)
+        parts.append(f'<rect x="{x}" y="{y}" width="{SB}" height="18" fill="none" stroke="#d95f02" stroke-dasharray="3,2"/>')
+    parts.append(f'<rect x="{X0+28*(SB+1)}" y="{y}" width="{4*(SB+1)-1}" height="18" fill="#fbe3d5" stroke="#d95f02"/>')
+    parts.append(f'<text x="{X0}" y="{y+32}" font-size="9.5" fill="#898781">llama-3.2-3b has 24 query heads = 24 scratchpad entries</text>')
+    parts.append(f'<text x="{X0+22*(SB+1)}" y="{y+32}" font-size="10" fill="#d95f02">K/V head 7 &#x2192; slots 28&#x2013;31: past the end (out-of-bounds write)</text>')
+    h = y + 46
+    svg = ('<figure><svg viewBox="0 0 980 ' + str(h) + '" width="980" height="' + str(h) + '" role="img" '
+           'aria-label="What the fixed 4-head kernel window would read for kv_mul 4, 3, 5 and 8, and where the epilogue stride would write" '
+           'font-family="system-ui,sans-serif">'
+           '<text x="8" y="20" font-size="12.5" font-weight="600" fill="#0b0b0b">If the gate were forced open: what the fixed 4-head window would touch</text>'
+           + "".join(parts) + '</svg>'
+           '<figcaption>Two K/V groups shown per geometry. Green = heads the kernel would compute'
+           ' correctly; orange = a NEIGHBORING group&#x27;s head read as if it were ours; grey ='
+           ' heads of this group the kernel would silently skip. Bottom strip: the epilogue&#x27;s'
+           ' hard-coded &#xD7;4 stride against llama-3.2-3b&#x27;s 24-entry scratchpad.</figcaption></figure>')
+
+    text_a = """
+<h3 id="gate-fail" style="font-size:14px;">4.1.1 Why the kv_mul 3 / 5 / 8 models are not served
+&#x2014; and what would break if the gate were simply forced open</h3>
+<p>From the nightly-CI list, llama-3.2-3b (3 query heads per K/V head), qwen-2.5-32b (5) and
+llama-3.3-70b (8) all have 128-wide heads but fail the <code>kv_mul() == 4</code> half of the
+gate. <b>As shipped, nothing fails on them</b>: the gate is compile-time
+(<code>if constexpr</code>), so for these models the AMX branch is not even compiled into their
+plugin instantiation &#x2014; they run the unchanged AVX path (that is the measured
+&quot;ineligible shape&quot; class: gpt-oss showed &#x2212;0.3..&#x2212;1.6%, run-to-run noise).</p>
+<p>The interesting question is what the gate is protecting against. The <code>*_128x4</code>
+kernels hard-code the number 4 in three load-bearing places: the Q pack reads exactly 4
+consecutive query heads starting at <code>kv_head &#xD7; kv_mul &#xD7; 128</code>; the tile
+kernels compute exactly those 4 rows; and the epilogue writes exactly scratchpad entries
+<code>sp[kv_head &#xD7; 4 + offset]</code>, then returns early so the AVX loop never revisits the
+page. Run that machinery on a group that is not 4 heads wide and, per geometry:</p>
+"""
+    text_b = """
+<ul>
+<li><b>kv_mul 3 (llama-3.2-3b):</b> the 4-head window reads one head PAST the group &#x2014; the
+next K/V head&#x27;s first query is scored against the wrong K/V data (silently wrong attention),
+and for the last K/V head the pack reads past the end of the query tensor while the &#xD7;4
+epilogue stride writes scratchpad slots 28&#x2013;31 of a 24-entry array: out-of-bounds read AND
+write, i.e. memory corruption, not just wrong numbers.</li>
+<li><b>kv_mul 5 (qwen-2.5-32b):</b> the window covers 4 of the 5 heads; the 5th head is never
+computed &#x2014; and because the AMX branch returns early, the AVX loop never fills it either, so
+1 in 5 heads remains uncomputed and its scratchpad entry is not updated. From the second group on,
+the &#xD7;4 stride (correct would be
+&#xD7;5) lands every update on the WRONG head&#x27;s scratchpad entry: in-bounds, silent, wrong.</li>
+<li><b>kv_mul 8 (llama-3.3-70b):</b> half of every group is skipped, and the &#xD7;4-vs-&#xD7;8
+stride mis-addresses every group after the first. (This shape could use TWO full query tiles
+rather than one, but it requires a width-8 kernel variant and a generalized stride &#x2014; it
+cannot be enabled by loosening the shape check.)</li>
+</ul>
+<p>That is the design point: the gate makes the unsupported case <i>impossible by construction</i>
+rather than checked at runtime, and the failure modes above are why widening support means new
+per-width kernels plus a <code>kv_mul</code>-derived stride (the planned actual-width bucketing),
+never just deleting the check.</p>
+"""
+    return text_a + svg + text_b
+
 geo = f'''
 <h3 id="geometry" style="font-size:15px;">4.1 The attention geometry we support &#x2014; exactly,
 and which models have it</h3>
@@ -325,7 +429,7 @@ fewer K/V heads than query heads to shrink the KV cache). Why this exact shape: 
 4 heads &#xD7; 128 numbers = 512 bf16 values = 1,024 bytes; the kernel packs those as
 16 rows &#xD7; 32 values &#x2014; <b>exactly one full AMX tile</b> (16 rows &#xD7; 64 bytes),
 no padding waste. The kernel
-names carry the shape: <code>qk_st_128x4</code>, <code>pv_128x4</code>, <code>qk_mirror_128x4</code>.</p>
+names carry the shape: <code>qk_canonical_128x4</code>, <code>weights_times_v_128x4</code>, <code>qk_mirror_128x4</code>.</p>
 <p><b>Is tensor-parallel (tp1/tp2/tp4) part of the geometry? No.</b> The gate reads two compile-time
 model constants (head width, sharing ratio). The tp mode is a separate build parameter that decides
 how work is split across FPGA devices; it changes neither constant (and it divides query and K/V
@@ -341,17 +445,22 @@ sharing ratio (4) but 64-wide heads, so it stays on AVX. phi-4 matches with 40 q
 &#x2014; the ratio is what the gate reads (40 &#xF7; 10 = 4); the kernel loops over K/V heads, so
 their count is free.</p>
 <p>Honest status of the {len(matches)} matching families &#x2014; a gate pass means the fast path
-<i>engages</i>; gains and numerics are <i>measured</i> so far on two of them:</p>
+<i>engages</i>; gains and numerics are <i>measured</i> so far on three of them:</p>
 <table>
 <tr><th>status</th><th>models</th></tr>
 <tr><td>matched, measured</td><td>qwen-3-4b-instruct-2507 (decode +15&#x2013;28%),
-llama-3.1-8b (decode +15.0% / +19.7%)</td></tr>
-<tr><td>matched, not yet measured</td><td>llama-3-8b, mistral-7b, ministral-8b, mixtral-8x7b,
+llama-3.1-8b (decode +15.0% / +19.7%),
+mixtral-8x7b (vs kill-switch baseline at 8 users: decode ctx 2048 +2.3% canonical / +1.2%
+mirror; decode ctx 8192 +9.4% / +18.6%; prefill ctx 8192 +56% / +55% &#x2014;
+results/ci-models/mixtral-ab.txt, 2026-08-21)</td></tr>
+<tr><td>matched, not yet measured</td><td>llama-3-8b, mistral-7b, ministral-8b,
 phi-4, granite-3.3-8b (registry marks its plugin as not end-to-end yet)</td></tr>
 <tr><td>not matched, measured no-regression</td><td>gpt-oss-20b (&#x2212;0.3% to &#x2212;1.6%,
 within run-to-run noise; see 5.1)</td></tr>
 </table>
 '''
+geo += gate_fail_411()
+
 # ---- 4.2 FPGA-mode composition (jhan question 2026-08-19) ----
 hwmode = '''
 <h3 id="hwmode" style="font-size:15px;">4.2 Does FPGA attention bypass AMX? No &#x2014; the two
@@ -397,9 +506,66 @@ and a numerics comparison &quot;passes&quot; without ever testing the AMX path. 
 canned 21-token prompts do exactly this. Any meaningful test must push the total sequence past 64
 tokens (the measured campaigns use ctx 2048 and 8192).</p>
 '''
+# ---- 4.3 why two copies of K (Bill's question 2026-08-20) ----
+billq = '''
+<h3 id="why-two-k" style="font-size:15px;">4.3 Why keep two copies of K instead of just storing K
+transposed? (Bill&#x27;s question)</h3>
+<p>The mirror stores a second, rearranged copy of K next to the original. A fair question: why not
+store K in the rearranged form <i>once</i> and drop the original? tron already does exactly that
+for V &#x2014; V is stored in the tile-friendly interleaved form natively, every consumer reads it
+that way, and V needs no mirror. The difference is that V has one layout every reader wants, while
+the original K layout is a shared interface with three consumers that need the row form:</p>
+<table>
+<tr><th>who reads original K</th><th>why it needs rows</th><th>if K were stored transposed</th></tr>
+<tr><td><b>FPGA attention</b>. The save path stores each roped K row into the page &quot;so HW sees
+the latest K values&quot; (comment at the store, <code>model.hpp:2779</code>); hardware offload
+then ships completed 4-token groups of those page bytes to the card as they fill
+(<code>gof.hpp:33</code>, <code>full.hpp:2382</code>). The KV pages live in DMA-visible hugepage
+memory; the mirror arena is deliberately ordinary RAM the card never sees.</td>
+<td>the card&#x27;s layout is a hardware contract; the pages are shipped byte-for-byte with no
+conversion step anywhere</td>
+<td>the FPGA reads a layout it does not understand. The fix is either an FPGA-side change or a
+convert-and-stage copy at the DMA boundary &#x2014; the transpose work does not disappear, it moves
+to the transfer path and brings a staging buffer with it</td></tr>
+<tr><td><b>The AVX-512 fallback</b>. <code>dotter&lt;bf16,128&gt;</code>
+(<code>dotter.hpp:176</code>) consumes one K row as one contiguous 128-value vector &#x2014; the QK
+reduction runs along the head dimension, which is contiguous within a row.</td>
+<td>this path is not legacy; it serves everything AMX declines: group widths below the crossover,
+partial and young pages (every page until its 64 tokens complete, including the partial tails of
+early-position software queries in FPGA mode &#x2014; &#xA7;4.2), non-matching geometries, hosts
+without AMX, and the kill switch</td>
+<td>one token&#x27;s 128 values are scattered across the transposed panels 32 bytes apart (the
+layout formula: <code>kv_cache.hpp</code>, mirror scatter comment), so the single-token dot product
+loses its contiguous-row loads and needs strided or gather-style loads plus rearrangement instead,
+unless a new family of narrow kernels is written for the transposed form</td></tr>
+<tr><td><b>The rollback story</b>. <code>TRON_AMX_DISABLE</code> currently returns to the unchanged
+code path at clean-binary speed (measured &#x2212;1.3% to +3.3% of a build with no AMX code at
+all).</td>
+<td>a reviewer can reason: flag off = old engine</td>
+<td>there is no unchanged path left to return to &#x2014; disabling AMX would strand the AVX code
+on a layout it was never written for</td></tr>
+</table>
+<p>What replacing would actually save, honestly: (a) the arena&#x27;s memory &#x2014; about half the
+KV cache&#x27;s size in <i>ordinary</i> RAM (&#x2264;32 GB on this machine&#x27;s 64 GB KV
+configuration, out of 1.58 TB installed &#x2014; small next to both budgets, though its traffic and
+placement are still real; the scarce DMA page budget is untouched: in the measured capacity probe,
+both builds admitted 32 and 48 users at ctx 8192 with no failures); (b) the mirror&#x27;s moving
+parts &#x2014; the allocation/lifetime plumbing and null-check fallbacks, the defrag rebuild, the
+two-copy consistency invariant across writes and page moves, and the byte-equivalence tests that
+guard it all; (c) almost nothing on the write side &#x2014; the 70 ns/token-row scatter would
+remain as the <i>primary</i> K store, replacing only a cheap contiguous row write.</p>
+<p class="take"><b>So the two copies are not an accident:</b> the original K plane is the interface
+the FPGA and every narrow/partial CPU case consume, and the transposed plane is a private view for
+one kernel. Replacing rather than mirroring is a cross-stack layout migration (FPGA contract, new
+narrow-width CPU kernels, loss of the rollback) purchased with savings the arena design already
+made small relative to the machine&#x27;s memory and page budgets. The V cache shows when
+replacement <i>is</i> right: when every consumer wants the
+rearranged form. If a future card consumed transposed K natively &#x2014; or an FPGA-free build
+existed &#x2014; this question should be reopened.</p>
+'''
 anchor = '<h2>5. The evidence (all measured, 2026-08-18/19)</h2>'
 assert html.count(anchor) == 1
-html = html.replace(anchor, geo + '\n' + hwmode + '\n' + anchor)
+html = html.replace(anchor, geo + '\n' + hwmode + '\n' + billq + '\n' + anchor)
 old = 'has a different attention geometry the fast path cannot serve'
 assert html.count(old) == 1
 html = html.replace(old, 'has a different <a href="#geometry">attention geometry</a> (64-wide heads, 8 query heads per K/V head) that the fast path cannot serve')

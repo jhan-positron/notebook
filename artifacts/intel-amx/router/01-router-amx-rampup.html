@@ -1,0 +1,592 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/router/01-router-amx-rampup.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/router/01-router-amx-rampup.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MoE router x AMX: ramp-up and scoping</title>
+<style>
+  body { background: #ffffff; color: #1a1a1a; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         max-width: 980px; margin: 24px auto; padding: 0 24px; line-height: 1.55; }
+  h1 { font-size: 1.6em; border-bottom: 3px solid #2166ac; padding-bottom: 8px; }
+  h2 { font-size: 1.25em; margin-top: 2em; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  h3 { font-size: 1.05em; margin-top: 1.5em; }
+  code { background: #f2f4f7; padding: 1px 5px; border-radius: 3px; font-size: 0.92em; }
+  pre { background: #f6f8fa; border: 1px solid #d8dee4; border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 0.85em; line-height: 1.45; }
+  table { border-collapse: collapse; margin: 14px 0; font-size: 0.92em; }
+  th, td { border: 1px solid #c9d1d9; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #eef2f6; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; font-size: 0.72em; font-weight: 700; border-radius: 9px; padding: 1px 8px; vertical-align: middle; }
+  .meas { background: #d3eadd; color: #1a6b3c; }
+  .est  { background: #fdebd0; color: #9c5700; }
+  .hyp  { background: #e8daf0; color: #6b3fa0; }
+  .code-verified { background: #d6e4f0; color: #1f4e79; }
+  .tldr { background: #eef6ee; border-left: 5px solid #2e8b57; padding: 12px 16px; margin: 16px 0; }
+  .warn { background: #fdf2e3; border-left: 5px solid #d4880f; padding: 10px 14px; margin: 14px 0; }
+  .rec  { background: #e8f0fe; border-left: 5px solid #2166ac; padding: 12px 16px; margin: 16px 0; }
+  figcaption { font-size: 0.85em; color: #555; margin-top: 6px; }
+  figure { margin: 18px 0; }
+  .takeaway { font-weight: 600; margin-top: 6px; }
+  .lineage { font-size: 0.85em; color: #555; }
+  a { color: #2166ac; }
+</style>
+</head>
+<body>
+
+<h1>MoE router x AMX: ramp-up and scoping</h1>
+<p>
+Written 2026-08-23. Question (from <code>input-2-ai/router-amx.md</code>): TRON's router matrix
+calculation was suggested as an AMX use case, to speed up prefill and decode for MoE models such
+as gpt-oss. (1)&nbsp;Ramp up on what the MoE router is and where it lives in tron;
+(2)&nbsp;decide how this relates to the ongoing AMX attention project, given that project's
+attention kernels do not support gpt-oss geometry.
+</p>
+<p>
+Legend: <span class="pill code-verified">code</span> = verified in source (file:line cited);
+<span class="pill meas">meas</span> = number from a measurement artifact;
+<span class="pill est">est</span> = computed estimate (script:
+<code>router/router_cost_model.py</code>); <span class="pill hyp">hyp</span> = hypothesis, paired
+with the measurement that would settle it. Source trees: <code>~/workspace/tron</code> (main,
+1407f48dd) and the generated-plugin snapshot <code>~/workspace/tron/gen_sst_round4_ingest/</code>.
+</p>
+
+<div class="tldr">
+<b>TL;DR</b>
+<ul>
+<li><b>What the router is:</b> a per-layer scorer in every MoE block: one small matmul
+    (<code>[tokens x 2880] x [2880 x n_experts]</code> for gpt-oss) + bias + top-k + softmax.
+    It picks which 4 of 128 experts (gpt-oss-120b) run for each token. It is approximately 0.4%
+    of the selected-expert FFN arithmetic, but it is on the critical dependency path: this
+    batch's expert selection, routing build, and expert launches cannot proceed until its router
+    result is available.</li>
+<li><b>Scope:</b> the routing machinery is tron framework code; the per-model instantiation is
+    <i>generated from ingest</i> for gpt-oss (not hand-coded). Two execution paths exist today:
+    hand-written plugins (mixtral) compute router logits <b>on CPU</b> (fp32, serial loop);
+    ingest-generated plugins (gpt-oss) compute them <b>on the FPGA</b>, adding a small-matmul
+    round trip between two CPU steps in every MoE layer.</li>
+<li><b>MoE-only:</b> dense models have no router and, in production executors, zero CPU matmuls
+    at all &mdash; a router/AMX kernel gives dense models nothing.</li>
+<li><b>Recommendation:</b> neither option (a) nor (b) as posed. Router kernels and gpt-oss
+    attention kernels are technically independent. They should share the AMX availability,
+    tile-region, isolated-TU, build, and kill-switch pattern currently implemented on
+    <code>jhan-amx-p0</code>, but router work should not be stacked on the attention kernels
+    themselves. If PR #3879 is not landing first, extract or land the model-agnostic AMX
+    plumbing as a small prerequisite, then develop router and gpt-oss attention support as
+    independent increments (option c below), starting with a measurement: how much decode time
+    the FPGA router round trip actually costs. Do not sequence router work behind gpt-oss
+    attention kernels &mdash; those are ~1 week of work with an estimated ~0 production payoff
+    (production gpt-oss runs FPGA attention).</li>
+</ul>
+</div>
+
+<h2 id="what">1. What a MoE router is</h2>
+<p>
+A dense transformer block runs one feed-forward network (FFN) on every token. A
+mixture-of-experts (MoE) block instead holds <code>n_experts</code> separate FFNs
+(&ldquo;experts&rdquo;) and runs only <code>k</code> of them per token
+(&ldquo;top-k routing&rdquo;). The <b>router</b> (also called the <b>gate</b>) is the component
+that chooses:
+</p>
+<pre>
+logits[t] = x[t] &middot; W_router^T (+ bias)     // x: [dim], W_router: [n_experts x dim]
+chosen[t] = top-k(logits[t])                 // k expert indices
+scales[t] = softmax(logits[t][chosen])       // blend weights (gpt-oss: softmax over the top-4)
+out[t]    = sum_j scales[t][j] * expert_{chosen[t][j]}(x[t])
+</pre>
+<p>
+This runs in <b>every MoE layer, for every token, in both prefill and decode</b>. Two properties
+matter for kernel work:
+</p>
+<ul>
+<li>The router weight is <b>one shared matrix per layer</b> &mdash; unlike attention KV pages,
+    which are per-user. Batching the router matmul across all tokens of a scheduling batch
+    (including different users) is always valid.
+    <span class="pill code-verified">code</span> (the framework already does this:
+    <code>run_gate</code> batches over <code>q_batch-&gt;items</code>,
+    feed_forward.hpp:479-492; generated code fills one matmul template over
+    <code>q_batch-&gt;items</code>, ingested_gpt_oss_120b.hpp:2046).</li>
+<li>Everything downstream <b>waits on it</b>: the per-expert matmuls cannot even be
+    <i>prepared</i> (templates filled, hardware slots reserved) until top-k output exists,
+    because the per-expert token lists come from the routing
+    (<code>moe_routing.per_expert</code>, mixture_of_experts.hpp:411-431).
+    <span class="pill code-verified">code</span></li>
+</ul>
+
+<h3 id="geometry">1.1 Geometry of the models in question</h3>
+<p>Dims measured from HF <code>config.json</code> files on this machine and the generated plugin
+headers. <span class="pill meas">meas</span></p>
+<table>
+<tr><th>model</th><th>layers (all MoE)</th><th>dim (K)</th><th>n_experts (N)</th><th>top-k</th>
+    <th>expert FFN dims</th><th>router weight, bf16 / layer</th><th>all layers</th></tr>
+<tr><td>gpt-oss-20b</td><td class="num">24</td><td class="num">2880</td><td class="num">32</td>
+    <td class="num">4</td><td>gate_up 2880&rarr;5760, down 2880&rarr;2880</td>
+    <td class="num">180 KB</td><td class="num">4.2 MB</td></tr>
+<tr><td>gpt-oss-120b</td><td class="num">36</td><td class="num">2880</td><td class="num">128</td>
+    <td class="num">4</td><td>same shapes, 128 experts</td>
+    <td class="num">720 KB</td><td class="num">25.3 MB</td></tr>
+<tr><td>mixtral-8x7b</td><td class="num">32</td><td class="num">4096</td><td class="num">8</td>
+    <td class="num">2</td><td>w1/w3 4096&rarr;14336, w2 14336&rarr;4096</td>
+    <td class="num">64 KB</td><td class="num">2.0 MB</td></tr>
+</table>
+<p>
+AMX tile fit is clean for the router shape: K=2880 = 90 pair-steps of 32; N=128 = 8 column tiles
+of 16 (N=32 = 2 tiles; mixtral's N=8 pads half a tile). No geometry problem exists here &mdash;
+the &ldquo;gpt-oss geometry does not fit&rdquo; constraint belongs entirely to the
+<i>attention</i> kernels (their gate is <code>head_size==128 &amp;&amp; kv_mul()==4</code>,
+self_attention.hpp:1358; gpt-oss attention is 64Q/8KV/head-64). The router never touches that
+code. <span class="pill code-verified">code</span>
+</p>
+
+<h2 id="where">2. Where the router lives in tron</h2>
+<p><b>Answer to the scope question: both, in layers.</b> The machinery is framework; the
+instantiation is per-model; for gpt-oss the per-model part is generated from ingest, not
+hard-coded.</p>
+
+<table>
+<tr><th>layer</th><th>what it holds</th><th>where</th></tr>
+<tr><td>Framework machinery<br>(model-agnostic templates)</td>
+    <td>routing bookkeeping (<code>moe_routing</code>, per-expert token lists), top-k +
+        scale computation (<code>build_moe_routing</code>, <code>compute_moe_scales</code>),
+        routing-from-indices (<code>build_moe_routing_from_indices</code>), per-expert matmul
+        launchers (<code>expert_weights</code>, <code>expert_matmul_launcher</code>), expert
+        output blend (<code>blend_expr</code>), top-k kernel (<code>topk_fixed</code>),
+        routing stats (<code>expert_stats</code>)</td>
+    <td><code>h/tron/models/mixture_of_experts.hpp</code>,
+        <code>h/tron/models/feed_forward.hpp</code>,
+        <code>h/tron/kernels/topk.hpp</code>,
+        <code>h/tron/models/expert_*.hpp</code></td></tr>
+<tr><td>Hand-written plugin path</td>
+    <td><code>mixture_of_experts&lt;model&gt;</code> per-layer struct: router weight + the
+        <code>run_gate</code>/<code>build_routing</code>/expert-launch orchestration; used by
+        the hand-authored llama.hpp plugin family &mdash; MoE members: mixtral_8x7b,
+        mixtral_8x22b (<code>ingest.source: hand_authored</code> in config/models.yaml)</td>
+    <td><code>feed_forward.hpp:93-543</code>, instantiated via
+        <code>h/tron/plugins/llama.hpp</code></td></tr>
+<tr><td>Ingest-generated plugin path</td>
+    <td>gpt-oss-20b/120b (and ingested_mixtral, etc., <code>source: generated</code>): a
+        torch.export trace (<code>ingest/export/</code>) is translated by the Haskell ingest
+        pipeline (<code>ingest/src/LoopyTron.hs</code> &rarr; <code>TronCpp.hs</code>) into a
+        C++ plugin header written into the <b>build tree</b>
+        (<code>${CMAKE_BINARY_DIR}/src/tron/h/tron/plugins/ingested_*.hpp</code>) &mdash; there
+        is no gpt-oss file in the source tree. The generated code calls the framework machinery
+        (<code>build_moe_routing_from_indices&lt;128,4&gt;</code>,
+        <code>expert_weights::prepare_and_launch</code>).</td>
+    <td>generator: <code>ingest/</code>; a built example:
+        <code>gen_sst_round4_ingest/src/tron/h/tron/plugins/ingested_gpt_oss_120b.hpp</code></td></tr>
+</table>
+
+<h3 id="two-paths">2.1 The two execution paths differ where it matters most</h3>
+<table>
+<tr><th></th><th>hand-written path (mixtral)</th><th>ingest-generated path (gpt-oss)</th></tr>
+<tr><td>router weight</td>
+    <td>host fp32 <code>tensor&lt;n_experts, dim&gt;</code> (feed_forward.hpp:114)</td>
+    <td>device <code>dtensor_t&lt;128, 2880&gt;</code> + host fp32 bias
+        <code>tensor&lt;128&gt;</code> (ingested_gpt_oss_120b.hpp:52-53)</td></tr>
+<tr><td>router matmul engine</td>
+    <td><b>CPU</b>: <code>tensor::matmul</code> with <code>serialize=true</code> &mdash; a plain
+        serial double loop of AVX <code>dot()</code> calls on the calling worker, then a blocking
+        <code>gate_ready.wait()</code> (feed_forward.hpp:486-493, tensor.hpp:387-406)</td>
+    <td><b>FPGA</b>: <code>L.Matmul</code> unconditionally promotes its weight to device memory
+        (LoopyTron.hs:800-802 <code>promoteToDeviceMemory</code>); the launcher is the async
+        hardware matmul job path (ingested_gpt_oss_120b.hpp:2046-2061)</td></tr>
+<tr><td>top-k + scales</td>
+    <td>CPU worker 0: <code>std::partial_sort</code> over fp32 logits + softmax/sigmoid scalar
+        loops (mixture_of_experts.hpp:306-321, 264-287)</td>
+    <td>CPU helper workers: <code>kernel_add_topk_softmax</code> = bias add +
+        <code>tron::topk_fixed&lt;4&gt;</code> (hand-optimized AVX-512 kernel, comment says
+        &ldquo;used by MoE router codegen&rdquo;) + softmax over the top-4
+        (ingested_gpt_oss_120b.hpp:2067 + kernel body)</td></tr>
+<tr><td>routing build</td>
+    <td>worker 0, <code>build_moe_routing</code></td>
+    <td>worker 0, <code>build_moe_routing_from_indices&lt;128,4&gt;</code>
+        (ingested_gpt_oss_120b.hpp:2077)</td></tr>
+<tr><td>expert matmuls</td>
+    <td colspan="2">FPGA in both paths; weights resident on the cards, placed at load time
+        (placer strategies); nothing streamed per token</td></tr>
+</table>
+<p>
+All rows <span class="pill code-verified">code</span>, adversarially re-verified against the
+cited lines. Note the asymmetry: the suggestion &ldquo;router matmul is a good AMX use
+case&rdquo; means different things per path. For mixtral it means &ldquo;replace a serial fp32
+CPU loop&rdquo;; for gpt-oss it means <b>&ldquo;move a small matmul off the FPGA to remove a
+round trip&rdquo;</b> &mdash; and gpt-oss is the model that motivates the ask.
+</p>
+
+<h2 id="dataflow">3. The per-layer dataflow, and what a CPU router changes</h2>
+<figure>
+<svg viewBox="0 0 940 400" width="940" height="400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Who-does-what-when schematic of one gpt-oss MoE layer, decode">
+  <style>
+    .lane { font: 700 12px sans-serif; fill: #333; }
+    .blk  { font: 11px sans-serif; fill: #111; }
+    .sm   { font: 10px sans-serif; fill: #555; }
+    .red  { fill: #b2182b; font-weight: 700; }
+  </style>
+  <!-- title -->
+  <text x="8" y="16" class="lane">TODAY (generated gpt-oss path) &mdash; one MoE layer, decode. Schematic order; durations NOT to scale.</text>
+
+  <!-- lane labels -->
+  <text x="8" y="52"  class="lane">CPU worker 0</text>
+  <text x="8" y="102" class="lane">CPU helpers</text>
+  <text x="8" y="152" class="lane">FPGA card(s)</text>
+
+  <!-- lane lines -->
+  <line x1="120" y1="46"  x2="930" y2="46"  stroke="#ddd"/>
+  <line x1="120" y1="96"  x2="930" y2="96"  stroke="#ddd"/>
+  <line x1="120" y1="146" x2="930" y2="146" stroke="#ddd"/>
+
+  <!-- FPGA lane: o_proj, router mm, experts -->
+  <rect x="130" y="134" width="80" height="24" fill="#9ecae1" stroke="#3182bd"/>
+  <text x="136" y="150" class="blk">o_proj mm</text>
+  <rect x="360" y="134" width="56" height="24" fill="#fcae91" stroke="#b2182b"/>
+  <text x="362" y="150" class="blk">router mm</text>
+  <rect x="700" y="134" width="110" height="24" fill="#9ecae1" stroke="#3182bd"/>
+  <text x="706" y="150" class="blk">gate_up experts</text>
+  <rect x="820" y="134" width="100" height="24" fill="#9ecae1" stroke="#3182bd"/>
+  <text x="826" y="150" class="blk">down experts</text>
+
+  <!-- CPU w0 lane -->
+  <rect x="220" y="34" width="90" height="24" fill="#a1d99b" stroke="#31a354"/>
+  <text x="226" y="50" class="blk">add+rmsnorm</text>
+  <rect x="316" y="34" width="180" height="24" fill="none" stroke="#b2182b" stroke-dasharray="5,3"/>
+  <text x="322" y="50" class="blk red">wait: logits round trip</text>
+  <rect x="560" y="34" width="80" height="24" fill="#a1d99b" stroke="#31a354"/>
+  <text x="562" y="50" class="blk">build routing</text>
+  <rect x="644" y="34" width="120" height="24" fill="#a1d99b" stroke="#31a354"/>
+  <text x="648" y="50" class="blk">prepare experts (serial)</text>
+
+  <!-- helpers lane -->
+  <rect x="500" y="84" width="88" height="24" fill="#a1d99b" stroke="#31a354"/>
+  <text x="504" y="100" class="blk">topk+softmax</text>
+
+  <!-- dependency arrows -->
+  <line x1="310" y1="46" x2="360" y2="140" stroke="#888" marker-end="url(#arr)"/>
+  <line x1="416" y1="140" x2="500" y2="100" stroke="#b2182b" marker-end="url(#arr)"/>
+  <line x1="588" y1="96"  x2="600" y2="58"  stroke="#888" marker-end="url(#arr)"/>
+  <line x1="764" y1="46"  x2="770" y2="132" stroke="#888" marker-end="url(#arr)"/>
+  <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+    <path d="M0,0 L8,3 L0,6 z" fill="#888"/></marker></defs>
+
+  <text x="130" y="185" class="sm">Red slice = the routing decision chain: FPGA round trip for a [B x 2880] x [2880 x 128] matmul, then CPU top-k, then routing build +</text>
+  <text x="130" y="199" class="sm">per-expert template fill (up to 4B experts active) on one core &mdash; the FPGA runs nothing for this batch between router mm and gate_up.</text>
+
+  <!-- proposed -->
+  <text x="8" y="240" class="lane">WITH CPU ROUTER (AMX or AVX-512) &mdash; dependency order only; horizontal box widths are not durations</text>
+  <text x="8" y="276"  class="lane">CPU worker 0</text>
+  <text x="8" y="326" class="lane">CPU helpers</text>
+  <text x="8" y="376" class="lane">FPGA card(s)</text>
+  <line x1="120" y1="270" x2="930" y2="270" stroke="#ddd"/>
+  <line x1="120" y1="320" x2="930" y2="320" stroke="#ddd"/>
+  <line x1="120" y1="370" x2="930" y2="370" stroke="#ddd"/>
+
+  <rect x="130" y="358" width="80" height="24" fill="#9ecae1" stroke="#3182bd"/>
+  <text x="136" y="374" class="blk">o_proj mm</text>
+  <rect x="650" y="358" width="110" height="24" fill="#9ecae1" stroke="#3182bd"/>
+  <text x="656" y="374" class="blk">gate_up experts</text>
+  <rect x="770" y="358" width="100" height="24" fill="#9ecae1" stroke="#3182bd"/>
+  <text x="776" y="374" class="blk">down experts</text>
+
+  <rect x="220" y="258" width="90" height="24" fill="#a1d99b" stroke="#31a354"/>
+  <text x="226" y="274" class="blk">add+rmsnorm</text>
+  <rect x="316" y="258" width="95" height="24" fill="#ffd92f" stroke="#a08000"/>
+  <text x="320" y="274" class="blk">router mm (CPU)</text>
+  <rect x="517" y="258" width="115" height="24" fill="#a1d99b" stroke="#31a354"/>
+  <text x="521" y="274" class="blk">routing + prepare</text>
+
+  <rect x="417" y="308" width="94" height="24" fill="#a1d99b" stroke="#31a354"/>
+  <text x="421" y="324" class="blk">topk+softmax</text>
+
+  <line x1="411" y1="270" x2="417" y2="316" stroke="#888" marker-end="url(#arr)"/>
+  <line x1="511" y1="320" x2="517" y2="274" stroke="#888" marker-end="url(#arr)"/>
+  <line x1="632" y1="270" x2="655" y2="356" stroke="#888" marker-end="url(#arr)"/>
+  <text x="130" y="398" class="sm">The router input (post-norm activations) is produced on the CPU anyway; the FPGA round trip disappears and expert launch moves earlier.</text>
+</svg>
+<figcaption>Who-does-what-when schematic of one gpt-oss MoE layer in decode (generated path,
+worker-0 statement stream at ingested_gpt_oss_120b.hpp:2036-2110). Dependency ordering is
+code-verified for the current path and preserved in the proposed path; <b>all box widths and
+gaps are schematic, not timing estimates</b> &mdash; the size of the red slice is exactly the
+unmeasured quantity (P0 below). Overlap from other in-flight batches exists in steady state; the
+per-token latency chain still includes the red slice.</figcaption>
+</figure>
+
+<p>Supporting evidence that gpt-oss-120b is sensitive to CPU&harr;FPGA synchronization and
+serial expert dispatch, motivating direct measurement of the router chain:</p>
+<ul>
+<li><code>Note [Expert matmuls]</code> (common.hpp:55-71): matmul prepare/launch overhead
+    &ldquo;is shouldered by a single core &hellip; In practice, this resulted in FPGA starvation
+    under GPT-OSS-120b as the core dispatching matmuls could not keep up.&rdquo; The router
+    round trip feeds this exact single-core chain. <span class="pill code-verified">code</span></li>
+<li>On gpt-oss-tp4 decode, waiting on a different FPGA matmul channel
+    (<code>qs_for_attn_channel.start_reading</code>) measured 73% of attention-worker time in
+    the Aug-3 capture (PR #2934 dataset). This demonstrates sensitivity to FPGA waits in that
+    configuration, but does not measure the router channel or establish the router's end-to-end
+    contribution. <span class="pill meas">meas</span></li>
+<li>The framework instruments routing (perfetto spans <code>kernel_add_topk_softmax</code>,
+    <code>&ldquo;Assign tokens to experts&rdquo;</code>, per-expert
+    <code>&ldquo;MoE matmul&rdquo;</code> events, FUSE <code>expert_stats</code>) but has <b>no
+    span around the router matmul itself</b> &mdash; the round trip is currently invisible in
+    traces except as channel-wait gaps. <span class="pill code-verified">code</span></li>
+</ul>
+
+<h2 id="cost">4. Cost model: why this is a latency play, not a FLOPs play</h2>
+<p>Computed by <code>router/router_cost_model.py</code> from the measured dims.
+<span class="pill est">est</span> where marked.</p>
+<table>
+<tr><th>model</th><th>router MACs / token / layer</th><th>expert-FFN MACs / token / layer</th>
+    <th>router MACs / selected-expert-FFN MACs</th></tr>
+<tr><td>gpt-oss-20b</td><td class="num">92,160</td><td class="num">99.5 M</td><td class="num">0.09%</td></tr>
+<tr><td>gpt-oss-120b</td><td class="num">368,640</td><td class="num">99.5 M</td><td class="num">0.37%</td></tr>
+<tr><td>mixtral-8x7b</td><td class="num">32,768</td><td class="num">352.3 M</td><td class="num">0.01%</td></tr>
+</table>
+<p class="takeaway">Moving the router to any engine cannot win by saving arithmetic; the
+candidate wins are (1) deleting the per-layer FPGA round trip + earlier expert dispatch, and
+(2) freeing FPGA queue slots in a workload that is already FPGA-wait-bound.</p>
+
+<p>On the CPU side, the router is weight-bandwidth-bound at decode widths
+<span class="pill est">est</span>: the kernel reads the whole 720 KB (120b, bf16) weight per
+layer regardless of M. Napkin bounds for M x 2880 x 128 on one 6962P core (from measured
+per-instruction numbers, amx-overhead-20260821.txt):</p>
+<table>
+<tr><th>M (tokens in batch)</th><th>AMX bf16 instruction bound / L3 lower bound <span class="pill est">est</span></th>
+    <th>AVX-512, weights in L2 <span class="pill est">est</span></th>
+    <th>AVX-512, weights in L3 <span class="pill est">est</span></th></tr>
+<tr><td class="num">1</td><td class="num">~6.9 &micro;s instr; &ge;10.9 &micro;s if L3-served</td><td class="num">~4.3 &micro;s</td><td class="num">~10.9 &micro;s</td></tr>
+<tr><td class="num">4</td><td class="num">~6.9 &micro;s instr; &ge;10.9 &micro;s if L3-served</td><td class="num">~4.3 &micro;s</td><td class="num">~10.9 &micro;s</td></tr>
+<tr><td class="num">8</td><td class="num">~6.9 &micro;s instr; &ge;10.9 &micro;s if L3-served</td><td class="num">~8.5 &micro;s</td><td class="num">~10.9 &micro;s</td></tr>
+<tr><td class="num">16</td><td class="num">~6.9 &micro;s instr; &ge;10.9 &micro;s if L3-served</td><td class="num">~17.1 &micro;s</td><td class="num">~17.1 &micro;s</td></tr>
+</table>
+<ul>
+<li>The ~6.9 &micro;s AMX number is an instruction/tile-issue bound, not an L3-served wall-time
+    estimate. AMX and AVX-512 both read the same 720 KB bf16 weight, so at the assumed 25 B/c
+    per-core L3 rate both have a common lower bound of ~10.9 &micro;s per layer. In this napkin
+    model AMX separates from AVX-512 only once AVX computation exceeds that common bandwidth
+    floor; <b>the crossover is therefore not established at M&asymp;4 and must be measured</b>.
+    The honest framing stands: the win may come mostly from &ldquo;CPU instead of FPGA round
+    trip&rdquo;, with AMX the right engine only once M is batched (which the router allows
+    across users). <span class="pill hyp">hyp</span> &mdash; settled by the P0 microbenchmark
+    below.</li>
+<li>All-layer bf16 router weights for 120b total 25.3 MB, well below 3bda's 432 MB/socket
+    aggregate L3 capacity. They can therefore be capacity-resident if execution and allocation
+    remain on the same socket, but actual L3 residency and bandwidth are unmeasured and may be
+    reduced by competing model/runtime traffic. The P0 benchmark should include warm
+    cyclic-all-layer and cache-disrupted cases. A single layer's 720 KB does not survive a full
+    decode step in L2, so the L3 column is the realistic single-core decode case.
+    <span class="pill est">est</span></li>
+<li>These bounds ignore multi-core splitting (the framework's non-serialized CPU matmul path
+    already tbb-parallelizes, tensor.hpp:397-403) and the AMX license clock; both belong to the
+    microbenchmark, not to this table.</li>
+</ul>
+
+<div class="warn">
+<b>Insufficient data (the deciding number):</b> the wall-clock cost of the FPGA router round
+trip per MoE layer in decode (launch &rarr; logits back on host &rarr; topk start), and the M
+distribution per <code>q_batch</code> in decode. Neither is derivable from source. Measurement:
+one perfetto trace of ingested-gpt-oss-120b (or 20b) decode on delphi-3bda; the gap on worker
+0/helpers between <code>mlp_router_weight_launcher</code> dispatch and
+<code>kernel_add_topk_softmax</code> span start, per layer, at 1u and 8u. Until then, every
+end-to-end payoff number for the router work is a hypothesis.
+</div>
+
+<h2 id="relation">5. Relationship to the ongoing AMX attention project</h2>
+<p>Inventory of the jhan-amx-p0 branch (13 files, +1975/-27 vs main), verified 2026-08-23:</p>
+<table>
+<tr><th>reusable by a router kernel (model-agnostic plumbing)</th>
+    <th>attention-specific (irrelevant to router)</th></tr>
+<tr><td>
+<ul>
+<li><code>amx_attn::available()</code>: CPUID 7.0 EDX bits 22/24 + XCR0[18:17] +
+    per-process <code>arch_prctl(ARCH_REQ_XCOMP_PERM)</code>, cached; one grant serves any AMX
+    kernel in the process</li>
+<li><code>begin_region()/end_region()</code> per-thread tile-config bracket (max-shape config,
+    TILERELEASE)</li>
+<li>isolated single-TU <code>-mamx</code> compile pattern + intrinsics-free interface header</li>
+<li>cmake option + <code>TRON_AMX_DISABLE</code> kill switch (same-binary A/B, measured at
+    clean-binary speed)</li>
+<li>standalone self-validating bench pattern (<code>amx_fused_bench.cpp</code>) and the
+    numerics-pin test pattern (<code>t_amx_numerics.cpp</code>)</li>
+</ul></td>
+<td>
+<ul>
+<li>QK/PV kernels, Q-group packing, transpose epilogue, rolling-softmax integration</li>
+<li>K mirror parallel arena in kv_cache.hpp + coherence write sites
+    <span class="lineage">(lineage: &ldquo;mirror&rdquo; = the S=Q&middot;K<sup>T</sup>
+    formulation from Bill's PR #2934; the arena implementation is ours)</span></li>
+<li>the attention geometry gate (head 128, kv_mul 4) and its twins</li>
+</ul></td></tr>
+</table>
+<p>
+<b>Coupling: none that forces an ordering between the kernels.</b> One delivery-level
+dependency exists: the reusable plumbing lives on <code>jhan-amx-p0</code> (PR #3879, open), not
+on main &mdash; router work either waits for that PR to land or extracts the model-agnostic
+plumbing as a small prerequisite change. At the kernel level, the router path
+(<code>feed_forward.hpp</code> / generated plugin FFN section) never touches
+<code>self_attention.hpp</code>, <code>kv_cache.hpp</code>, or the KV cache. Three soft
+interaction points, none blocking: the shared kill switch (would want a router-specific one),
+per-thread tile-config state (a same-thread mix of router and future shape-specific attention
+configs must re-issue <code>LDTILECFG</code>; today both would use the max config), and dtype
+(hand-written-path router weights are fp32; AMX multiplies bf16/int8, so that path would need a
+one-time bf16 conversion with a numerics note &mdash; the generated path's weights are already
+device bf16).
+</p>
+<p>
+What &ldquo;adding gpt-oss support to the current AMX implementation&rdquo; actually means, per
+the existing estimate (rampup/gptoss-estimate.html, Sol-reviewed): new
+<code>qk_st_64x8</code>/<code>pv_64x8</code> attention kernels + two-shape gate, ~1 week + tests,
+payoff <b>+4&hellip;+7% decode at 1u/8K in all-software mode
+<span class="pill est">est</span>, ~0 in production FPGA-attention mode
+<span class="pill est">est</span></b>. That work item neither contains nor enables any router
+work.
+</p>
+
+<h2 id="options">6. Options and recommendation</h2>
+<table>
+<tr><th>option</th><th>what it is</th><th>assessment</th></tr>
+<tr><td><b>(a)</b> add router/AMX into the current AMX implementation</td>
+    <td>graft router kernels into the attention PR (#3879) / its dispatch</td>
+    <td>Wrong packaging. The shared surface is small and lives on <code>jhan-amx-p0</code>
+        (PR #3879, open and unreviewed &mdash; not yet on main); the router work needs ingest
+        changes (placement) that attention never touches, and growing an open attention PR
+        raises review cost for both. Reuse the plumbing, not the PR.</td></tr>
+<tr><td><b>(b)</b> gpt-oss attention support first, then router on top</td>
+    <td>build qk/pv 64x8 attention kernels, then start router work</td>
+    <td>Sequencing without a dependency: the router never passes the attention geometry gate,
+        so nothing in it waits on 64x8 kernels. And (b)'s first stage has ~0 estimated payoff in
+        production mode (FPGA attention). Only worth doing on its own merits for all-software
+        deployments.</td></tr>
+<tr><td><b>(c) recommended:</b> router/CPU acceleration as an independent increment, after the
+        shared AMX plumbing is available on its base branch</td>
+    <td>own work item, own gate/kill switch, phases below; does not depend on gpt-oss QK/PV
+        attention kernel support. If PR #3879 is not landing first, extract or land the
+        model-agnostic plumbing as a small prerequisite change.</td>
+    <td>Matches the actual kernel dependency graph and directly tests whether eliminating the
+        generated router's FPGA round trip materially improves gpt-oss decode. P0 is required
+        because the existing measurements do not establish that this particular round trip is
+        significant.</td></tr>
+<tr><td><b>(d)</b> hand-written-path (mixtral) gate only</td>
+    <td>AMX-accelerate <code>run_gate</code>'s serial loop</td>
+    <td>Negligible: 64 KB weights, N=8, 0.01% of block arithmetic; the serial fp32 loop is
+        already cheap at mixtral's size. Fix only if it falls out of (c) for free.</td></tr>
+<tr><td><b>(e)</b> FPGA-side pipeline fusion instead</td>
+    <td>investigate whether post-attention residual add + rmsnorm and the router matmul can be
+        fused or kept card-side so router logits return without a separate host&rarr;card
+        router-input transfer</td>
+    <td>Attacks the same synchronization boundary without AMX, but it is a larger cross-stage
+        FPGA change than router-matmul fusion alone: today the router input is produced by CPU
+        add + rmsnorm, so the router cannot simply piggyback the o_proj DMA. Feasibility,
+        ownership, numerical behavior, and expected latency must be priced before P1. The
+        router-round-trip measurement is useful to both options, but this alternative also needs
+        a feasibility estimate for migrating or fusing add + rmsnorm.</td></tr>
+</table>
+
+<div class="rec">
+<b>Recommended plan (option c):</b>
+<ol>
+<li><b>P0 &mdash; measure (low code risk, one quiet slot on 3bda):</b>
+    (i) first verify that existing trace events identify router dispatch, logits readiness,
+    top-k start/end, routing completion, and first expert launch; if they do not, add narrowly
+    scoped perfetto markers around those boundaries. Then capture ingested-gpt-oss decode at 1u
+    and 8u and report separately: (a) router dispatch &rarr; logits ready / topk start, which a
+    CPU router can replace; (b) topk/routing/prepare &rarr; first expert launch, which remains
+    unless separately optimized; (c) the combined critical-chain interval &mdash; plus the
+    decode M distribution. The segmentation matters for the stop/go decision: the entire red
+    slice is not the achievable router-matmul saving.
+    (ii) standalone microbenchmark (amx_fused_bench pattern): router shape M x 2880 x {32,128},
+    arms = current-style AVX fp32 dot loop / AVX-512 bf16 / AMX bf16, M in {1,2,4,8,16},
+    weights warm cyclic-all-layer (L3) and cache-disrupted as well as L2-pinned. Together these
+    bound the achievable end-to-end win before any integration work. Also share the P0 trace
+    with the FPGA team to price option (e).</li>
+<li><b>P1 &mdash; prototype behind a switch:</b> ingest change: leave the router weight
+    host-resident (today <code>promoteToDeviceMemory</code> is unconditional for
+    <code>L.Matmul</code>, LoopyTron.hs:800-802 &mdash; add a router/size-aware placement or an
+    explicit MoeGate marker) + a CPU router kernel (AMX with AVX fallback via the existing
+    <code>available()</code> chain, new <code>TRON_AMX_ROUTER</code>-style toggle so
+    attention and router A/B independently). The buffers the CPU needs (post-norm activations
+    in, logits out) are host-visible already.</li>
+<li><b>P2 &mdash; A/B + numerics:</b> same-binary A/B at 1u/8u, 2K/8K on
+    ingested-gpt-oss-20b/120b; numerics pin per the t_amx_numerics pattern: compare router
+    logits against the device-matmul reference, record the margin between ranks k and k+1,
+    require exact expert-set agreement away from a defined near-tie tolerance, and apply the
+    established T1 treatment to top-k-cutoff near-tie cases (selection changes alter expert
+    dispatch discontinuously, so record the cutoff margin rather than treating every mismatch
+    uniformly); then the standard suite.</li>
+</ol>
+Decision points: if P0(i) segment (a) &mdash; the part a CPU router can actually replace &mdash;
+is &lt;1% of decode step time, stop: write the number down and close the item. If P0(ii) shows
+AVX-512 within noise of AMX at measured M, ship the CPU router without AMX first and add the AMX
+kernel when batching justifies it.
+</div>
+
+<h2 id="dense">7. Does any of this help dense models?</h2>
+<p>
+No. The router exists only in MoE blocks. Beyond it, a code sweep found <b>exactly one</b>
+production CPU matmul in tron (the hand-written-path router gate itself); every other matmul
+&mdash; QKV/O, expert FFNs, lm_head/logits &mdash; is a device tensor executed on the FPGA under
+all production executors (tp1/tp2/tp4). Dense models therefore have zero production CPU matmuls
+for a router-shaped kernel to serve. (The <code>host</code> executor family runs everything on
+CPU, but those are test/emulation targets with large-N shapes &mdash; a different kernel class.)
+<span class="pill code-verified">code</span>
+</p>
+<p>
+The honest generalization statement: a router AMX kernel is a <b>skinny-M GEMM against a small,
+shared, host-resident weight matrix</b>. Today the MoE router is the only production site with
+that shape. If future models or executor changes move other small matmuls onto the CPU, the
+kernel generalizes; nothing in the current tree needs it.
+</p>
+
+<h2 id="glossary">8. Glossary</h2>
+<table>
+<tr><td><b>MoE / expert</b></td><td>mixture-of-experts: a block holding many FFNs, running only
+    the top-k per token</td></tr>
+<tr><td><b>router / gate</b></td><td>the scorer choosing which experts run; &ldquo;gate&rdquo; is
+    the older name used in the hand-written path and mixtral weight names
+    (<code>block_sparse_moe.gate.weight</code>)</td></tr>
+<tr><td><b>logits (router)</b></td><td>the n_experts raw scores per token, before top-k</td></tr>
+<tr><td><b>M / K / N</b></td><td>GEMM sizes: M = tokens in the batch, K = model dim (2880),
+    N = n_experts</td></tr>
+<tr><td><b>dtensor / btensor</b></td><td>tron tensor families: device-resident weights (FPGA)
+    vs host DMA-visible bf16 activations; plain <code>tensor</code> = host fp32</td></tr>
+<tr><td><b>worker 0</b></td><td>the scheduler thread running the plugin's per-layer statement
+    stream; helper workers run the ParKernel loops (norms, topk, swiglu, blend)</td></tr>
+<tr><td><b>channel / latch / waitable</b></td><td>tron's producer-consumer synchronization
+    between CPU kernels and FPGA jobs; a &ldquo;round trip&rdquo; = launch an FPGA job, DMA the
+    result back, wake the waiting CPU reader</td></tr>
+<tr><td><b>prepare / launch</b></td><td>two-step FPGA matmul dispatch: fill a job template +
+    reserve per-device slots, then fire; per-expert in MoE (the single-core cost in
+    Note [Expert matmuls])</td></tr>
+<tr><td><b>ingest</b></td><td>tron's model importer: torch.export trace &rarr; Haskell pipeline
+    &rarr; generated C++ plugin header in the build tree</td></tr>
+<tr><td><b>AMX / tile / TDPBF16PS</b></td><td>Intel Advanced Matrix Extensions: 1KB tile
+    registers + a matmul unit; TDPBF16PS multiplies bf16 pairs into fp32 accumulators (see
+    rampup/01-amx-rampup.html)</td></tr>
+<tr><td><b>VNNI pair-interleave</b></td><td>the B-operand layout AMX requires (pairs of K rows
+    interleaved); router weights are constant, so packing happens once at load, unlike the
+    attention K mirror</td></tr>
+</table>
+
+<h2 id="consensus">9. Consensus log</h2>
+<p>Process: every deliverable in this project is reviewed by GPT-5.6-Sol (PAL bridge) before it
+is considered done.</p>
+<ul>
+<li>2026-08-23: draft v1 produced from a 5-way parallel code survey with adversarial
+    verification of all load-bearing claims (30 claims checked: 24 confirmed, 6 citation-level
+    corrections applied, 0 refuted).</li>
+<li>2026-08-23: Sol round 1 &mdash; ENDORSE-WITH-EDITS, 10 defects, ALL APPLIED with Sol's
+    suggested wording. Key corrections: the AMX napkin number was an instruction bound missing
+    the common L3 weight-delivery floor (the M&asymp;4 crossover claim was withdrawn &mdash;
+    crossover must be measured); L3 &ldquo;residency&rdquo; downgraded to capacity-fit;
+    73%-FPGA-wait evidence rescoped (different channel, motivates measurement, proves nothing
+    about the router); the delivery dependency on the jhan-amx-p0 branch made explicit; option
+    (e) corrected (router input is post-add+rmsnorm, so o_proj-DMA piggybacking alone is not
+    feasible); P0 relabeled low-code-risk with a 3-segment decomposition; the proposed-path
+    diagram fixed to show true dependency order; MACs ratio label matched to its formula;
+    numerics plan restated as top-k-cutoff near-tie margins; &ldquo;100% of control flow&rdquo;
+    replaced with the supported critical-path statement. Consensus CLOSED (edits applied
+    verbatim, per project practice).</li>
+</ul>
+
+</body>
+</html>

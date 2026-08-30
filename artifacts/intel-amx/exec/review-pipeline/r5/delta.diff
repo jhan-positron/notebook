@@ -1,0 +1,920 @@
+diff --git a/doc/intel-amx.md b/doc/intel-amx.md
+index 1019134d0..73e8da4ac 100644
+--- a/doc/intel-amx.md
++++ b/doc/intel-amx.md
+@@ -35,9 +35,11 @@ back-to-back cycles/op):
+ | `TILEZERO` | zero one tile | 16 / 0 | 0.5 |
+ | `TDPBF16PS` | the matmul | 52 / 16 | 16.2-16.4 |
+ 
+-One `LDTILECFG`/`TILERELEASE` pair per work region (Intel guidance; ~229
+-cycles measured between `begin_region()`/`end_region()`). 6962P also has AMX-INT8
+-and AMX-FP16; tron's KV cache is bf16, so only `TDPBF16PS` is used.
++One `LDTILECFG`/`TILERELEASE` pair per work region, where a work region is one
++`apply_page_range` call (per attention worker, kv_head and page-range section,
++and again for the pending pass); the pair itself costs ~229 cycles measured
++(`begin_region()`/`end_region()`). 6962P also has AMX-INT8 and AMX-FP16; tron's
++KV cache is bf16, so only `TDPBF16PS` is used.
+ 
+ ### Throughput reality
+ - A full TDP has ~16-cycle reciprocal throughput; a same-C accumulation
+@@ -87,8 +89,10 @@ HF fp32 references.
+   from whichever thread first calls available()
+ - 8 KB XTILEDATA per thread in the XSAVE area once used; `TILERELEASE` when
+   leaving a region re-enables the XSAVE init optimization.
+-- One AMX thread per physical core (Intel guidance); tron already pins one
+-  attention worker per CPU from an explicit core list.
++- One AMX thread per physical core (Intel guidance). tron pins one attention
++  worker per logical CPU from an explicit core list, so this holds only when the
++  configured list contains no two SMT siblings of one physical core; tron does
++  not check that.
+ - Toolchain: `-mamx-tile -mamx-bf16` confined to one translation unit
+   (`src/tron/kernels/amx_attn.cpp`); the interface header is intrinsics-free.
+ 
+@@ -98,8 +102,10 @@ HF fp32 references.
+ 
+ Software attention - the `apply_page_tok` QK and PV inner loops. The main
+ target is forced software attention (`USE_HW_ATTN=0`), where attention
+-compute is the decode wall at long context (a measurement based estimation
+-put attention at ~64% of the decode step on the primary model at ctx 8192).
++compute is the decode wall at long context (a linear fit of the pre-AMX decode
++step time against context length - 3.43 ms + 0.734 us x tokens, qwen-3-4b tp2
++on delphi-3bda, 2026-08-18 - attributes 6.0 of 9.4 ms per step at ctx 8192 to
++the context-proportional term, i.e. ~64%).
+ The FPGA-attention flow benefits too, with no additional code: the dispatch
+ sits inside the software page loop, which hardware mode still uses for its
+ software-required subset (positions below 127, sliding-window and software-only
+@@ -116,24 +122,21 @@ predicate. Everything that fails any gate runs the unchanged AVX path.
+ ### Model
+ 
+ Primary: `ingested-qwen-3-4b-instruct-2507-tp2`. All comparisons are
+-same-binary kill-switch A/Bs against the true clean binary. Decode
+-(replicated, 8 reps/cell, 95% CI): +15.3..+17.7% (canonical) /
+-+19.7..+27.8% (mirror) at 1u/8K..8u/8K. Prefill (3-rep suite): up to +105%.
+-Energy per token (separate power capture at 8u/8K): -14.5% / -21.6%.
+-Generalization: llama-3.1-8b decode +15.0% (1u/8K) / +19.7% (8u/2K);
+-mixtral-8x7b +9.4% canonical / +18.6% mirror (8u/8K); gpt-oss (ineligible
+-geometry) -0.3..-1.6% = no regression when the gate does not fire.
++same-binary kill-switch A/Bs against the true clean binary. The measured
++numbers (qwen decode/prefill/energy, and the llama-3.1-8b, mixtral-8x7b and
++gpt-oss generalization runs, gpt-oss being the ineligible-geometry control)
++are in the PR #3879 description.
+ 
+ ### Mirror layout
+ 
+ Two QK formulations ship (`Note [Mirror orientation]`):
+ 
+ - **canonical-K** (default): `S^T = K . Q^T`, K consumed exactly as stored;
+-  the score tile round-trips through memory and is transposed. The best
+-  measured canonical whole path was ~300 ns/page slower than the mirror at
+-  width 4 (982 vs 686 ns); the gap includes transpose work and score
+-  traffic, was not component-isolated, and is NOT a raw
+-  tile-store-to-vector-load forwarding stall (measured directly).
++  the score tile round-trips through memory and is transposed: 1250 ns/page
++  against 686 ns for the mirror at width 4 (one L2-resident page, 6962P,
++  2026-08-19); the gap includes transpose work and score traffic, was not
++  component-isolated, and is NOT a raw tile-store-to-vector-load forwarding
++  stall (measured directly).
+ - **mirror** (opt-in, `TRON_AMX_K_MIRROR`): `S = Q . K^T` with no
+   transposing store; needs K in the VNNI B-operand layout - a second,
+   derived copy of K (`k_vnni`).
+@@ -142,9 +145,11 @@ The mirror copy lives in a book-owned PARALLEL ARENA, not inside `kv_block`
+ (`Note [K mirror parallel arena]`): an in-block third plane measurably broke
+ prefetch streams (LLC miss 51%->85%, AVX fallback -4..-8%, ~9% tax on the
+ canonical path) and cost 33% KV page capacity. The arena is ordinary RAM
+-(`kv_bytes/2`), allocated only when AMX is available at runtime, fail-soft
+-to null; page capacity is identical with and without it. Coherence
+-(`Note [K mirror coherence]`): the mirror is a pure derived view with
++(`kv_bytes/2`), allocated only for a model with an AMX-eligible attention shape
++(`amx_mirror_eligible` over the plugin's attention kernels - the same
++`amx_attn::shape_ok` gate as the dispatch) on a host where AMX is available at
++runtime, fail-soft to null; page capacity is identical with and without it.
++Coherence (`Note [K mirror coherence]`): the mirror is a pure derived view with
+ exactly two production write sites - the `save_k` write-through on the RX
+ worker, and the `copy_storage_slot` rebuild - the one function every page move
+ (defrag, append) goes through. Byte-equivalence is tested at both levels.
+@@ -164,13 +169,16 @@ Reopen only if a card consumes VNNI K natively or an FPGA-free build ships.
+ 
+ ### Geometry
+ 
+-The fast path engages only for one attention shape. The whole gate is one
+-line of compile-time arithmetic plus the runtime check
+-(`h/tron/models/self_attention.hpp`):
++The fast path engages only for one attention shape. The gate is one function,
++`amx_attn::shape_ok` (`h/tron/kernels/amx_attn_iface.hpp`), evaluated at
++compile time wherever the shape matters - the dispatch and both fast-path
++blocks in `h/tron/models/self_attention.hpp`, the `save_k` write-through in
++`h/tron/models/model.hpp`, and (through `amx_mirror_eligible`) the mirror-arena
++allocation - plus the runtime check:
+ 
+ ```c++
+ constexpr bool amx_shape_ok =
+-    geometry.kv.head_size == 128 && geometry.kv_mul() == 4;
++    amx_attn::shape_ok(geometry.kv.head_size, geometry.kv_mul());
+ const bool amx_on = amx_shape_ok && amx_attn::available();
+ ```
+ 
+@@ -179,7 +187,7 @@ Why this shape: one query group of 4 x 128 = 512 bf16 = 1,024 bytes packs as
+ exactly one full AMX tile operand, no padding waste. The kernel names carry
+ it: `qk_canonical_128x4`, `weights_times_v_128x4`, `qk_mirror_128x4`.
+ 
+-The following 8 models match the gate: qwen-3-4b-2507, llama-3-8b, llama-3.1-8b,
++The following models match the gate: qwen-3-4b-2507, llama-3-8b, llama-3.1-8b,
+ mistral-7b, ministral-8b, mixtral-8x7b. Three are measured (qwen,
+ llama-3.1-8b, mixtral). Every other family runs the unchanged AVX path. In
+ the canonical build no AMX code is compiled into its instantiation; in the
+diff --git a/h/tron/kernels/amx_attn_iface.hpp b/h/tron/kernels/amx_attn_iface.hpp
+index d978dc30f..79c480132 100644
+--- a/h/tron/kernels/amx_attn_iface.hpp
++++ b/h/tron/kernels/amx_attn_iface.hpp
+@@ -134,10 +134,10 @@ void weights_times_v_128x4(const uint16_t* v_page,
+ // ~~~~~~~~~~~~~~~~~~~~~~~~~
+ // Two QK formulations exist. The canonical-K kernel computes S^T = K . Q^T
+ // (K consumed exactly as stored) and must then round-trip the score tile
+-// through memory and transpose it - a ~300 ns/page whole-path cost at
+-// width 4 (982 vs 686 ns, measured with the fused-page benchmark,
+-// src/amx_fused_bench.cpp; transpose work + score traffic combined, not
+-// isolated). NOT a store-forwarding stall: 64-byte
++// through memory and transpose it - a ~560 ns/page whole-path cost at
++// width 4 (1250 vs 686 ns per L2-resident page, 6962P, 2026-08-19;
++// transpose work + score traffic combined, not isolated). NOT a
++// store-forwarding stall: 64-byte
+ // tile-store -> vector-load forwarding is supported (opt manual 20.15) and
+ // a 6962P microbench measured no stall on that path; the hard restriction
+ // is the opposite direction, any store -> TILELOADD cannot forward.
+diff --git a/src/amx_fused_bench.cpp b/src/amx_fused_bench.cpp
+deleted file mode 100644
+index 594fb1b0f..000000000
+--- a/src/amx_fused_bench.cpp
++++ /dev/null
+@@ -1,732 +0,0 @@
+-// amx_fused_bench.cpp — fused-page software-attention benchmark.
+-//
+-// Self-contained (no tron includes; compiles with plain g++), but uses the
+-// EXACT tron kv_block layouts so numbers transfer:
+-//   K page: [64 tokens][128 dims] bf16 row-major, row stride 256 B
+-//   V page: [32 pairs][128 dims][2] bf16 token-pair-interleaved (AMX B format)
+-// and replicates the shipping kernels' instruction patterns for the AVX
+-// baseline (dotter: 4x vdpbf16ps + hreduce per (token, query);
+-// scaled_v: 8 fp32 accumulators, vdpbf16ps over pair-interleaved V).
+-//
+-// The canonical-K AMX formulation (see Note [Mirror orientation] in
+-// h/tron/kernels/amx_attn_iface.hpp):
+-//   QK:  S^T[64 x Nq] = K_page[64x128] . Q_pack^T   (K consumed AS STORED)
+-//   PV:  O[Nq x 128] += P[Nq x 64] . V_page          (V consumed AS STORED)
+-// Fused per page: QK tiles -> store S^T -> transpose(+scale) -> running max
+-// -> exp -> P pack (bf16) -> PV tiles -> store O -> v* rescale/add.
+-//
+-// Tile policy: ONE max-shape LDTILECFG per bench region (all tiles 16x64B);
+-// query width is handled by zero-padding Q columns / P rows (a padded lane
+-// costs nothing extra in the fixed TDP slot). TILERELEASE on exit.
+-//
+-// Variants:
+-//   avx     : dotter-pattern QK + shared softmax + scaled_v-pattern PV
+-//   amx44   : our fused AMX path, PV output blocking 4+4
+-//   amx62   : our fused AMX path, PV output blocking 6+2
+-// Usage: amx_fused_bench [Nq] [iters] [variant] [pages]
+-//   pages = ring size for residency control (1 = L2-resident page,
+-//           512 = ~16 MB > L2, 32768 = ~1 GB > LLC slice share)
+-//
+-// Correctness: every variant is checked against a scalar reference once
+-// (rel tol 2e-2, matching t_amx_attention practice) before timing.
+-
+-#include <algorithm>
+-#include <cmath>
+-#include <cstdint>
+-#include <cstdio>
+-#include <cstdlib>
+-#include <cstring>
+-#include <ctime>
+-#include <immintrin.h>
+-#include <string>
+-#include <unistd.h>
+-#include <vector>
+-
+-#include <sys/syscall.h>
+-
+-#ifndef ARCH_REQ_XCOMP_PERM
+-#define ARCH_REQ_XCOMP_PERM 0x1023
+-#endif
+-#define XFEATURE_XTILEDATA 18
+-
+-static constexpr int PAGE = 64;               // tokens per page
+-static constexpr int HD = 128;                // head_dim
+-static constexpr int MAXQ = 16;               // max query width (one tile)
+-static constexpr float SCALE = 0.088388347f;  // 1/sqrt(128), matches qwen log
+-
+-using bf16 = uint16_t;
+-
+-// ---------- scalar helpers ----------
+-static inline float b2f(bf16 v) {
+-  uint32_t u = (uint32_t)v << 16;
+-  float f;
+-  std::memcpy(&f, &u, 4);
+-  return f;
+-}
+-static inline bf16 f2b(float f) {  // round-to-nearest-even, like cvtne
+-  uint32_t u;
+-  std::memcpy(&u, &f, 4);
+-  uint32_t lsb = (u >> 16) & 1;
+-  u += 0x7fff + lsb;
+-  return (bf16)(u >> 16);
+-}
+-
+-// fast exp used IDENTICALLY by all variants (so softmax cost is comparable):
+-// exp(x) via exp2(x * log2e), 2^i * poly(f). Max rel err ~2e-7, fine at tol 2e-2.
+-static inline __m512 vexp(__m512 x) {
+-  const __m512 log2e = _mm512_set1_ps(1.442695041f);
+-  const __m512 c0 = _mm512_set1_ps(1.0f);
+-  const __m512 c1 = _mm512_set1_ps(0.6931472f);
+-  const __m512 c2 = _mm512_set1_ps(0.2402265f);
+-  const __m512 c3 = _mm512_set1_ps(0.0555041f);
+-  const __m512 c4 = _mm512_set1_ps(0.0096181f);
+-  const __m512 c5 = _mm512_set1_ps(0.0013333f);
+-  __m512 t = _mm512_mul_ps(x, log2e);
+-  __m512 r = _mm512_roundscale_ps(t, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+-  __m512 f = _mm512_sub_ps(t, r);  // |f| <= 0.5
+-  // 2^f polynomial evaluated directly on f (coefficients already include ln2 powers)
+-  __m512 p = _mm512_fmadd_ps(c5, f, c4);
+-  p = _mm512_fmadd_ps(p, f, c3);
+-  p = _mm512_fmadd_ps(p, f, c2);
+-  p = _mm512_fmadd_ps(p, f, c1);
+-  p = _mm512_fmadd_ps(p, f, c0);
+-  return _mm512_scalef_ps(p, r);  // p * 2^r
+-}
+-
+-// ---------- AMX plumbing ----------
+-struct tile_config {
+-  uint8_t palette, start_row;
+-  uint8_t reserved[14];
+-  uint16_t column_bytes[16];
+-  uint8_t rows[16];
+-};
+-
+-static bool amx_request() {
+-  return syscall(SYS_arch_prctl, ARCH_REQ_XCOMP_PERM, XFEATURE_XTILEDATA) == 0;
+-}
+-#ifdef __AMX_BF16__
+-static void amx_config_maxshape() {
+-  tile_config c{};
+-  c.palette = 1;
+-  for (int i = 0; i < 8; i++) {
+-    c.rows[i] = 16;
+-    c.column_bytes[i] = 64;
+-  }
+-  _tile_loadconfig(&c);
+-}
+-#endif
+-
+-// ---------- 16x16 fp32 transpose (validated against reference below) ----------
+-static inline void transpose16x16(
+-    const float* src, int src_stride_f, float* dst, int dst_stride_f) {
+-  // Stage 1: within each 4-row group g, build u[g][k] whose 128-bit lane l
+-  // holds column (4l+k) of rows 4g..4g+3.
+-  __m512 u[4][4];
+-  for (int g = 0; g < 4; g++) {
+-    __m512 r0 = _mm512_loadu_ps(src + (4 * g + 0) * src_stride_f);
+-    __m512 r1 = _mm512_loadu_ps(src + (4 * g + 1) * src_stride_f);
+-    __m512 r2 = _mm512_loadu_ps(src + (4 * g + 2) * src_stride_f);
+-    __m512 r3 = _mm512_loadu_ps(src + (4 * g + 3) * src_stride_f);
+-    __m512 t0 = _mm512_unpacklo_ps(r0, r1);
+-    __m512 t1 = _mm512_unpackhi_ps(r0, r1);
+-    __m512 t2 = _mm512_unpacklo_ps(r2, r3);
+-    __m512 t3 = _mm512_unpackhi_ps(r2, r3);
+-    u[g][0] = _mm512_castpd_ps(
+-        _mm512_unpacklo_pd(_mm512_castps_pd(t0), _mm512_castps_pd(t2)));
+-    u[g][1] = _mm512_castpd_ps(
+-        _mm512_unpackhi_pd(_mm512_castps_pd(t0), _mm512_castps_pd(t2)));
+-    u[g][2] = _mm512_castpd_ps(
+-        _mm512_unpacklo_pd(_mm512_castps_pd(t1), _mm512_castps_pd(t3)));
+-    u[g][3] = _mm512_castpd_ps(
+-        _mm512_unpackhi_pd(_mm512_castps_pd(t1), _mm512_castps_pd(t3)));
+-  }
+-  // Stage 2: output row j = 4l+k gathers lane l from u[0..3][k].
+-  for (int k = 0; k < 4; k++) {
+-    __m512 p = _mm512_shuffle_f32x4(u[0][k], u[1][k], 0x88);  // l0,l2 of g0,g1
+-    __m512 q = _mm512_shuffle_f32x4(u[2][k], u[3][k], 0x88);
+-    __m512 r = _mm512_shuffle_f32x4(u[0][k], u[1][k], 0xdd);  // l1,l3 of g0,g1
+-    __m512 s = _mm512_shuffle_f32x4(u[2][k], u[3][k], 0xdd);
+-    _mm512_storeu_ps(dst + (k + 0) * dst_stride_f, _mm512_shuffle_f32x4(p, q, 0x88));
+-    _mm512_storeu_ps(dst + (k + 4) * dst_stride_f, _mm512_shuffle_f32x4(r, s, 0x88));
+-    _mm512_storeu_ps(dst + (k + 8) * dst_stride_f, _mm512_shuffle_f32x4(p, q, 0xdd));
+-    _mm512_storeu_ps(dst + (k + 12) * dst_stride_f, _mm512_shuffle_f32x4(r, s, 0xdd));
+-  }
+-}
+-
+-// scalar fallback transpose used to VALIDATE the vector one at startup
+-static void transpose16x16_ref(const float* s, int ss, float* d, int ds) {
+-  for (int i = 0; i < 16; i++) {
+-    for (int j = 0; j < 16; j++) {
+-      d[j * ds + i] = s[i * ss + j];
+-    }
+-  }
+-}
+-
+-// ---------- shared per-page softmax state ----------
+-struct accum {  // rolling softmax state per query
+-  float m[MAXQ], s[MAXQ];
+-  alignas(64) float v[MAXQ][HD];  // fp32 v* (harness policy)
+-  void reset(int nq) {
+-    for (int q = 0; q < nq; q++) {
+-      m[q] = -1e30f;
+-      s[q] = 0.f;
+-      for (int d = 0; d < HD; d++) {
+-        v[q][d] = 0.f;
+-      }
+-    }
+-  }
+-};
+-
+-// S[q][64] fp32 (already scaled) -> update m,s, produce P bf16 [16][64]
+-// (pad rows zeroed once by caller), and per-query rescale factor applied to v*.
+-static inline void softmax_page(
+-    float S[MAXQ][PAGE], int nq, accum& ac, bf16 P[MAXQ][PAGE]) {
+-  for (int q = 0; q < nq; q++) {
+-    __m512 mx = _mm512_loadu_ps(S[q]);
+-    for (int c = 16; c < PAGE; c += 16) {
+-      mx = _mm512_max_ps(mx, _mm512_loadu_ps(S[q] + c));
+-    }
+-    float pm = _mm512_reduce_max_ps(mx);
+-    bool max_moved = pm > ac.m[q];
+-    float m_new = max_moved ? pm : ac.m[q];
+-    __m512 vm = _mm512_set1_ps(m_new);
+-    __m512 acc = _mm512_setzero_ps();
+-    for (int c = 0; c < PAGE; c += 16) {
+-      __m512 e = vexp(_mm512_sub_ps(_mm512_loadu_ps(S[q] + c), vm));
+-      acc = _mm512_add_ps(acc, e);
+-      __m256i eb = (__m256i)_mm512_cvtneps_pbh(e);
+-      _mm256_storeu_si256((__m256i*)(P[q] + c), eb);
+-    }
+-    if (max_moved) {  // rescale needed only when the running max moved
+-      float corr = std::exp(ac.m[q] - m_new);
+-      ac.m[q] = m_new;
+-      ac.s[q] = ac.s[q] * corr + _mm512_reduce_add_ps(acc);
+-      __m512 vc = _mm512_set1_ps(corr);
+-      for (int d = 0; d < HD; d += 16) {
+-        __m512 v = _mm512_loadu_ps(ac.v[q] + d);
+-        _mm512_storeu_ps(ac.v[q] + d, _mm512_mul_ps(v, vc));
+-      }
+-    } else {
+-      ac.s[q] += _mm512_reduce_add_ps(acc);
+-    }
+-  }
+-}
+-
+-// ---------- AVX baseline (shipping-kernel instruction patterns) ----------
+-// dotter<bf16,128> pattern: Q row preloaded in 4 zmm, per K token 4x dpbf16 + reduce
+-static void qk_avx(const bf16* K, const bf16* Q, int nq, float S[MAXQ][PAGE]) {
+-  for (int q = 0; q < nq; q++) {
+-    __m512i q0 = _mm512_loadu_si512(Q + q * HD);
+-    __m512i q1 = _mm512_loadu_si512(Q + q * HD + 32);
+-    __m512i q2 = _mm512_loadu_si512(Q + q * HD + 64);
+-    __m512i q3 = _mm512_loadu_si512(Q + q * HD + 96);
+-    for (int t = 0; t < PAGE; t++) {
+-      const bf16* k = K + t * HD;
+-      __m512 a0 = _mm512_dpbf16_ps(
+-          _mm512_setzero_ps(), (__m512bh)q0, (__m512bh)_mm512_loadu_si512(k));
+-      __m512 a1 = _mm512_dpbf16_ps(
+-          _mm512_setzero_ps(), (__m512bh)q1, (__m512bh)_mm512_loadu_si512(k + 32));
+-      a0 = _mm512_dpbf16_ps(a0, (__m512bh)q2, (__m512bh)_mm512_loadu_si512(k + 64));
+-      a1 = _mm512_dpbf16_ps(a1, (__m512bh)q3, (__m512bh)_mm512_loadu_si512(k + 96));
+-      S[q][t] = _mm512_reduce_add_ps(_mm512_add_ps(a0, a1)) * SCALE;
+-    }
+-  }
+-}
+-// scaled_v pattern: 8 fp32 accumulators over dims, dpbf16 per token pair
+-static void pv_avx(const bf16* V, const bf16 P[MAXQ][PAGE], int nq, accum& ac) {
+-  for (int q = 0; q < nq; q++) {
+-    __m512 acc[8];
+-    for (int i = 0; i < 8; i++) {
+-      acc[i] = _mm512_setzero_ps();
+-    }
+-    for (int p = 0; p < PAGE / 2; p++) {
+-      uint32_t pair;
+-      std::memcpy(&pair, &P[q][2 * p], 4);
+-      __m512i pb = _mm512_set1_epi32((int)pair);
+-      const bf16* v = V + p * HD * 2;  // [pair][dim][2]
+-      for (int i = 0; i < 8; i++) {
+-        acc[i] = _mm512_dpbf16_ps(
+-            acc[i], (__m512bh)pb, (__m512bh)_mm512_loadu_si512(v + i * 32));
+-      }
+-    }
+-    for (int i = 0; i < 8; i++) {
+-      __m512 v = _mm512_loadu_ps(ac.v[q] + i * 16);
+-      _mm512_storeu_ps(ac.v[q] + i * 16, _mm512_add_ps(v, acc[i]));
+-    }
+-  }
+-}
+-
+-#ifdef __AMX_BF16__
+-// ---------- our AMX kernels ----------
+-// Q pack: Q[nq][128] bf16 -> 4 B panels, each 16 rows x 64 B:
+-// panel s, row dp (dim pair), lane q: { Q[q][s*32+2dp], Q[q][s*32+2dp+1] },
+-// lanes q>=nq zeroed (padding).
+-static void pack_q(const bf16* Q, int nq, bf16* Bp /*4*16*64 bf16? bytes*/) {
+-  std::memset(Bp, 0, 4 * 16 * 64);
+-  for (int s = 0; s < 4; s++) {
+-    for (int dp = 0; dp < 16; dp++) {
+-      for (int q = 0; q < nq; q++) {
+-        bf16* dst = Bp + ((s * 16 + dp) * 32 + q * 2);
+-        dst[0] = Q[q * HD + s * 32 + 2 * dp];
+-        dst[1] = Q[q * HD + s * 32 + 2 * dp + 1];
+-      }
+-    }
+-  }
+-}
+-
+-// --- mirror-orientation (Bill's formulation) support ---
+-// K mirror pack: K[64][128] -> per (k-step s, token-block c) B panel of
+-// 16 dim-pair rows x 16 tokens x 2 bf16.  Cost is EXCLUDED from the page loop
+-// (write-through-at-save_k model); charged separately in system-level runs.
+-static void pack_k_mirror(const bf16* K, bf16* M /*4*4*16*32 bf16*/) {
+-  for (int s = 0; s < 4; s++) {
+-    for (int c = 0; c < 4; c++) {
+-      for (int dp = 0; dp < 16; dp++) {
+-        for (int t = 0; t < 16; t++) {
+-          bf16* dst = M + (((s * 4 + c) * 16 + dp) * 16 + t) * 2;
+-          dst[0] = K[(c * 16 + t) * HD + s * 32 + 2 * dp];
+-          dst[1] = K[(c * 16 + t) * HD + s * 32 + 2 * dp + 1];
+-        }
+-      }
+-    }
+-  }
+-}
+-
+-// QK row-major (mirror orientation): S[16 q][64 tok] = Q . K^T, no transpose.
+-// A = Q padded rows (stride 256 B); B = K mirror panels; C tiles per token block.
+-static void qk_amx_rowmajor(const bf16* Qp, const bf16* M, float S[MAXQ][PAGE]) {
+-  _tile_zero(0);
+-  _tile_zero(1);
+-  _tile_zero(2);
+-  _tile_zero(3);
+-  for (int s = 0; s < 4; s++) {
+-    _tile_loadd(4, Qp + s * 32, 256);
+-    _tile_loadd(5, M + ((s * 4 + 0) * 16 * 16) * 2, 64);
+-    _tile_dpbf16ps(0, 4, 5);
+-    _tile_loadd(6, M + ((s * 4 + 1) * 16 * 16) * 2, 64);
+-    _tile_dpbf16ps(1, 4, 6);
+-    _tile_loadd(5, M + ((s * 4 + 2) * 16 * 16) * 2, 64);
+-    _tile_dpbf16ps(2, 4, 5);
+-    _tile_loadd(6, M + ((s * 4 + 3) * 16 * 16) * 2, 64);
+-    _tile_dpbf16ps(3, 4, 6);
+-  }
+-  _tile_stored(0, &S[0][0], PAGE * 4);
+-  _tile_stored(1, &S[0][16], PAGE * 4);
+-  _tile_stored(2, &S[0][32], PAGE * 4);
+-  _tile_stored(3, &S[0][48], PAGE * 4);
+-}
+-
+-// QK: S^T[64][16] = K_page . Q^T ; C tiles tmm0-3 (16 tokens each)
+-static void qk_amx(const bf16* K, const bf16* Bp, float* St /*64x16, stride 16f*/) {
+-  _tile_zero(0);
+-  _tile_zero(1);
+-  _tile_zero(2);
+-  _tile_zero(3);
+-  for (int s = 0; s < 4; s++) {
+-    _tile_loadd(6, Bp + s * 16 * 32, 64);
+-    _tile_loadd(4, K + 0 * 16 * HD + s * 32, 256);
+-    _tile_dpbf16ps(0, 4, 6);
+-    _tile_loadd(5, K + 1 * 16 * HD + s * 32, 256);
+-    _tile_dpbf16ps(1, 5, 6);
+-    _tile_loadd(4, K + 2 * 16 * HD + s * 32, 256);
+-    _tile_dpbf16ps(2, 4, 6);
+-    _tile_loadd(5, K + 3 * 16 * HD + s * 32, 256);
+-    _tile_dpbf16ps(3, 5, 6);
+-  }
+-  _tile_stored(0, St + 0 * 16 * 16, 64);
+-  _tile_stored(1, St + 1 * 16 * 16, 64);
+-  _tile_stored(2, St + 2 * 16 * 16, 64);
+-  _tile_stored(3, St + 3 * 16 * 16, 64);
+-}
+-
+-// transpose St(64x16) -> S(nq x 64) with the scale applied during the store
+-// (one combined pass), producing only the nq rows that are actually needed.
+-static void st_to_s(const float* St, float S[MAXQ][PAGE], int nq) {
+-  const __m512 sc = _mm512_set1_ps(SCALE);
+-  for (int r = 0; r < 4; r++) {  // r = 16-token block
+-    const float* src = St + r * 256;
+-    __m512 u[4][4];
+-    for (int g = 0; g < 4; g++) {
+-      __m512 r0 = _mm512_loadu_ps(src + (4 * g + 0) * 16);
+-      __m512 r1 = _mm512_loadu_ps(src + (4 * g + 1) * 16);
+-      __m512 r2 = _mm512_loadu_ps(src + (4 * g + 2) * 16);
+-      __m512 r3 = _mm512_loadu_ps(src + (4 * g + 3) * 16);
+-      __m512 t0 = _mm512_unpacklo_ps(r0, r1);
+-      __m512 t1 = _mm512_unpackhi_ps(r0, r1);
+-      __m512 t2 = _mm512_unpacklo_ps(r2, r3);
+-      __m512 t3 = _mm512_unpackhi_ps(r2, r3);
+-      u[g][0] = _mm512_castpd_ps(
+-          _mm512_unpacklo_pd(_mm512_castps_pd(t0), _mm512_castps_pd(t2)));
+-      u[g][1] = _mm512_castpd_ps(
+-          _mm512_unpackhi_pd(_mm512_castps_pd(t0), _mm512_castps_pd(t2)));
+-      u[g][2] = _mm512_castpd_ps(
+-          _mm512_unpacklo_pd(_mm512_castps_pd(t1), _mm512_castps_pd(t3)));
+-      u[g][3] = _mm512_castpd_ps(
+-          _mm512_unpackhi_pd(_mm512_castps_pd(t1), _mm512_castps_pd(t3)));
+-    }
+-    for (int k = 0; k < 4; k++) {
+-      __m512 p = _mm512_shuffle_f32x4(u[0][k], u[1][k], 0x88);
+-      __m512 q = _mm512_shuffle_f32x4(u[2][k], u[3][k], 0x88);
+-      _mm512_storeu_ps(
+-          &S[k][r * 16], _mm512_mul_ps(_mm512_shuffle_f32x4(p, q, 0x88), sc));
+-      if (nq > 4) {
+-        _mm512_storeu_ps(&S[k + 4][r * 16],
+-            _mm512_mul_ps(
+-                _mm512_shuffle_f32x4(_mm512_shuffle_f32x4(u[0][k], u[1][k], 0xdd),
+-                    _mm512_shuffle_f32x4(u[2][k], u[3][k], 0xdd), 0x88),
+-                sc));
+-      }
+-      if (nq > 8) {
+-        __m512 rr = _mm512_shuffle_f32x4(u[0][k], u[1][k], 0xdd);
+-        __m512 ss = _mm512_shuffle_f32x4(u[2][k], u[3][k], 0xdd);
+-        _mm512_storeu_ps(
+-            &S[k + 8][r * 16], _mm512_mul_ps(_mm512_shuffle_f32x4(p, q, 0xdd), sc));
+-        _mm512_storeu_ps(
+-            &S[k + 12][r * 16], _mm512_mul_ps(_mm512_shuffle_f32x4(rr, ss, 0xdd), sc));
+-      }
+-    }
+-  }
+-}
+-
+-// PV: O[16][128] += P[16][64] . V_page, output blocking 4+4 or 6+2.
+-// A = P rows (flat, stride 128 B); B = V as stored ([pair][dim][2], pair-row
+-// stride 512 B, dim-block offset c*64 B).
+-static void pv_amx(
+-    const bf16* V, const bf16 P[MAXQ][PAGE], float* O /*16x128*/, bool six_two) {
+-  if (!six_two) {  // 4+4: tiles 0-3 = C, 4 = A, 5 = B
+-    for (int half = 0; half < 2; half++) {
+-      _tile_zero(0);
+-      _tile_zero(1);
+-      _tile_zero(2);
+-      _tile_zero(3);
+-      for (int s = 0; s < 2; s++) {
+-        _tile_loadd(4, &P[0][s * 32], 128);
+-        for (int c = 0; c < 4; c++) {
+-          _tile_loadd(5, V + s * 16 * HD * 2 + (half * 4 + c) * 32, 512);
+-          switch (c) {
+-          case 0:
+-            _tile_dpbf16ps(0, 4, 5);
+-            break;
+-          case 1:
+-            _tile_dpbf16ps(1, 4, 5);
+-            break;
+-          case 2:
+-            _tile_dpbf16ps(2, 4, 5);
+-            break;
+-          case 3:
+-            _tile_dpbf16ps(3, 4, 5);
+-            break;
+-          }
+-        }
+-      }
+-      _tile_stored(0, O + half * 64 + 0, 512);  // stride 512 B = one O row
+-      _tile_stored(1, O + half * 64 + 16, 512);
+-      _tile_stored(2, O + half * 64 + 32, 512);
+-      _tile_stored(3, O + half * 64 + 48, 512);
+-    }
+-  } else {  // 6+2: tiles 0-5 = C, 6 = A, 7 = B
+-    // block 1: dims 0-95 (6 tiles)
+-    _tile_zero(0);
+-    _tile_zero(1);
+-    _tile_zero(2);
+-    _tile_zero(3);
+-    _tile_zero(4);
+-    _tile_zero(5);
+-    for (int s = 0; s < 2; s++) {
+-      _tile_loadd(6, &P[0][s * 32], 128);
+-      for (int c = 0; c < 6; c++) {
+-        _tile_loadd(7, V + s * 16 * HD * 2 + c * 32, 512);
+-        switch (c) {
+-        case 0:
+-          _tile_dpbf16ps(0, 6, 7);
+-          break;
+-        case 1:
+-          _tile_dpbf16ps(1, 6, 7);
+-          break;
+-        case 2:
+-          _tile_dpbf16ps(2, 6, 7);
+-          break;
+-        case 3:
+-          _tile_dpbf16ps(3, 6, 7);
+-          break;
+-        case 4:
+-          _tile_dpbf16ps(4, 6, 7);
+-          break;
+-        case 5:
+-          _tile_dpbf16ps(5, 6, 7);
+-          break;
+-        }
+-      }
+-    }
+-    _tile_stored(0, O + 0, 512);
+-    _tile_stored(1, O + 16, 512);
+-    _tile_stored(2, O + 32, 512);
+-    _tile_stored(3, O + 48, 512);
+-    _tile_stored(4, O + 64, 512);
+-    _tile_stored(5, O + 80, 512);
+-    // block 2: dims 96-127 (2 tiles)
+-    _tile_zero(0);
+-    _tile_zero(1);
+-    for (int s = 0; s < 2; s++) {
+-      _tile_loadd(6, &P[0][s * 32], 128);
+-      for (int c = 0; c < 2; c++) {
+-        _tile_loadd(7, V + s * 16 * HD * 2 + (6 + c) * 32, 512);
+-        if (c == 0) {
+-          _tile_dpbf16ps(0, 6, 7);
+-        } else {
+-          _tile_dpbf16ps(1, 6, 7);
+-        }
+-      }
+-    }
+-    _tile_stored(0, O + 96, 512);
+-    _tile_stored(1, O + 112, 512);
+-  }
+-}
+-#endif  // __AMX_BF16__
+-
+-// ---------- scalar reference ----------
+-static void reference(const std::vector<bf16>& Kv,
+-    const std::vector<bf16>& Vv,
+-    const bf16* Q,
+-    int nq,
+-    int npages,
+-    accum& ac) {
+-  ac.reset(nq);
+-  for (int pg = 0; pg < npages; pg++) {
+-    const bf16* K = Kv.data() + (size_t)pg * PAGE * HD;
+-    const bf16* V = Vv.data() + (size_t)pg * PAGE * HD;
+-    for (int q = 0; q < nq; q++) {
+-      float s_row[PAGE];
+-      for (int t = 0; t < PAGE; t++) {
+-        float acc = 0;
+-        for (int d = 0; d < HD; d++) {
+-          acc += b2f(Q[q * HD + d]) * b2f(K[t * HD + d]);
+-        }
+-        s_row[t] = acc * SCALE;
+-      }
+-      float pm = *std::max_element(s_row, s_row + PAGE);
+-      float m_new = std::max(pm, ac.m[q]);
+-      float corr = std::exp(ac.m[q] - m_new);
+-      float ssum = 0;
+-      float pv[HD] = {0};
+-      for (int t = 0; t < PAGE; t++) {
+-        float e = std::exp(s_row[t] - m_new);
+-        e = b2f(f2b(e));  // P is bf16 in all fast paths
+-        ssum += e;
+-        for (int d = 0; d < HD; d++) {
+-          pv[d] += e * b2f(V[(t / 2) * HD * 2 + d * 2 + (t & 1)]);
+-        }
+-      }
+-      ac.m[q] = m_new;
+-      ac.s[q] = ac.s[q] * corr + ssum;
+-      for (int d = 0; d < HD; d++) {
+-        ac.v[q][d] = ac.v[q][d] * corr + pv[d];
+-      }
+-    }
+-  }
+-}
+-
+-int main(int argc, char** argv) {
+-  int nq = argc > 1 ? atoi(argv[1]) : 4;
+-  long iters = argc > 2 ? atol(argv[2]) : 50000;
+-  std::string variant = argc > 3 ? argv[3] : "amx44";
+-  int npages = argc > 4 ? atoi(argv[4]) : 1;
+-  if (nq < 1 || nq > 16) {
+-    fprintf(stderr, "Nq in 1..16\n");
+-    return 1;
+-  }
+-  bool is_qk_mirror = variant == "amxqk";
+-  bool is_pipelined = variant == "amxpl";  // our orientation, score handling lags
+-                                           // one page behind the tile stores
+-  bool is_amx =
+-      variant == "amx44" || variant == "amx62" || is_qk_mirror || is_pipelined;
+-#ifndef __AMX_BF16__
+-  if (is_amx) {
+-    fprintf(stderr, "not an AMX build\n");
+-    return 1;
+-  }
+-#endif
+-  if (is_amx && !amx_request()) {
+-    fprintf(stderr, "arch_prctl failed\n");
+-    return 1;
+-  }
+-
+-  // buffers (page ring)
+-  std::vector<bf16> K((size_t)npages * PAGE * HD), V((size_t)npages * PAGE * HD);
+-  std::vector<bf16> Q(MAXQ * HD, 0);
+-  srand(7);
+-  auto rnd = [] { return f2b(((float)rand() / RAND_MAX - 0.5f) * 0.6f); };
+-  for (auto& x : K) {
+-    x = rnd();
+-  }
+-  for (auto& x : V) {
+-    x = rnd();
+-  }
+-  for (int q = 0; q < nq; q++) {
+-    for (int d = 0; d < HD; d++) {
+-      Q[q * HD + d] = rnd();
+-    }
+-  }
+-
+-  alignas(64) static float S[MAXQ][PAGE];
+-  alignas(64) static bf16 P[MAXQ][PAGE];
+-  std::memset(P, 0, sizeof(P));  // pad rows stay zero
+-  alignas(64) static float St[PAGE * 16];
+-  alignas(64) static float St2[2][PAGE * 16];  // double buffer for amxpl
+-  alignas(64) static float O[16 * HD];
+-  alignas(64) static bf16 Bp[4 * 16 * 32];
+-  alignas(64) static bf16 Qpad[MAXQ * HD];  // zero-padded Q for mirror orientation
+-  std::vector<bf16> Kmir;                   // K mirror ring (amxqk only)
+-  accum ac, ref;
+-
+-  // validate the vector transpose once
+-  {
+-    alignas(64) float a[256], b[256], c[256];
+-    for (int i = 0; i < 256; i++) {
+-      a[i] = (float)i * 0.5f - 31.f;
+-    }
+-    transpose16x16(a, 16, b, 16);
+-    transpose16x16_ref(a, 16, c, 16);
+-    for (int i = 0; i < 256; i++) {
+-      if (b[i] != c[i]) {
+-        fprintf(stderr, "transpose16x16 BROKEN at %d\n", i);
+-        return 1;
+-      }
+-    }
+-  }
+-
+-#ifdef __AMX_BF16__
+-  if (is_qk_mirror) {  // build the K mirror once (write-through model)
+-    Kmir.resize((size_t)npages * 4 * 4 * 16 * 32);
+-    for (int pg = 0; pg < npages; pg++) {
+-      pack_k_mirror(K.data() + (size_t)pg * PAGE * HD,
+-          Kmir.data() + (size_t)pg * 4 * 4 * 16 * 32);
+-    }
+-    std::memset(Qpad, 0, sizeof(Qpad));
+-    std::memcpy(Qpad, Q.data(), (size_t)nq * HD * sizeof(bf16));
+-  }
+-#endif
+-
+-  auto run_pages = [&](accum& a2) {
+-#ifdef __AMX_BF16__
+-    if (is_amx) {
+-      amx_config_maxshape();
+-      if (!is_qk_mirror) pack_q(Q.data(), nq, Bp);
+-    }
+-#endif
+-    a2.reset(nq);
+-    for (int pg = 0; pg < npages; pg++) {
+-      const bf16* Kp = K.data() + (size_t)pg * PAGE * HD;
+-      const bf16* Vp = V.data() + (size_t)pg * PAGE * HD;
+-      if (!is_amx) {
+-        qk_avx(Kp, Q.data(), nq, S);
+-        softmax_page(S, nq, a2, P);
+-        pv_avx(Vp, P, nq, a2);
+-      }
+-#ifdef __AMX_BF16__
+-      else if (is_qk_mirror) {
+-        qk_amx_rowmajor(Qpad, Kmir.data() + (size_t)pg * 4 * 4 * 16 * 32, S);
+-        const __m512 sc = _mm512_set1_ps(SCALE);  // scale pass (no transpose)
+-        for (int q2 = 0; q2 < nq; q2++) {
+-          for (int c = 0; c < PAGE; c += 16) {
+-            __m512 v = _mm512_mul_ps(_mm512_loadu_ps(&S[q2][c]), sc);
+-            _mm512_storeu_ps(&S[q2][c], v);
+-          }
+-        }
+-        softmax_page(S, nq, a2, P);
+-        pv_amx(Vp, P, O, false);  // 4+4 (the adopted blocking)
+-        for (int q2 = 0; q2 < nq; q2++) {
+-          for (int d = 0; d < HD; d += 16) {
+-            __m512 v = _mm512_loadu_ps(a2.v[q2] + d);
+-            v = _mm512_add_ps(v, _mm512_loadu_ps(O + q2 * HD + d));
+-            _mm512_storeu_ps(a2.v[q2] + d, v);
+-          }
+-        }
+-      } else if (is_pipelined) {
+-        // page pg: tile-compute scores into buffer pg%2; then handle the
+-        // PREVIOUS page's scores (stored one iteration ago - no store-to-load
+-        // stall) and its PV. The final page is drained after the loop.
+-        qk_amx(Kp, Bp, St2[pg & 1]);
+-        if (pg > 0) {
+-          const bf16* Vprev = V.data() + (size_t)(pg - 1) * PAGE * HD;
+-          st_to_s(St2[(pg - 1) & 1], S, nq);
+-          softmax_page(S, nq, a2, P);
+-          pv_amx(Vprev, P, O, false);
+-          for (int q2 = 0; q2 < nq; q2++) {
+-            for (int d = 0; d < HD; d += 16) {
+-              __m512 v = _mm512_loadu_ps(a2.v[q2] + d);
+-              v = _mm512_add_ps(v, _mm512_loadu_ps(O + q2 * HD + d));
+-              _mm512_storeu_ps(a2.v[q2] + d, v);
+-            }
+-          }
+-        }
+-        if (pg == npages - 1) {  // drain the last page
+-          const bf16* Vlast = Vp;
+-          st_to_s(St2[pg & 1], S, nq);
+-          softmax_page(S, nq, a2, P);
+-          pv_amx(Vlast, P, O, false);
+-          for (int q2 = 0; q2 < nq; q2++) {
+-            for (int d = 0; d < HD; d += 16) {
+-              __m512 v = _mm512_loadu_ps(a2.v[q2] + d);
+-              v = _mm512_add_ps(v, _mm512_loadu_ps(O + q2 * HD + d));
+-              _mm512_storeu_ps(a2.v[q2] + d, v);
+-            }
+-          }
+-        }
+-      } else {
+-        qk_amx(Kp, Bp, St);
+-        st_to_s(St, S, nq);
+-        softmax_page(S, nq, a2, P);
+-        pv_amx(Vp, P, O, variant == "amx62");
+-        for (int q = 0; q < nq; q++) {
+-          for (int d = 0; d < HD; d += 16) {
+-            __m512 v = _mm512_loadu_ps(a2.v[q] + d);
+-            v = _mm512_add_ps(v, _mm512_loadu_ps(O + q * HD + d));
+-            _mm512_storeu_ps(a2.v[q] + d, v);
+-          }
+-        }
+-      }
+-#endif
+-    }
+-#ifdef __AMX_BF16__
+-    if (is_amx) _tile_release();
+-#endif
+-  };
+-
+-  // correctness vs scalar reference (skipped for huge rings; correctness is
+-  // width/variant-dependent, not ring-size-dependent)
+-  double worst = 0;
+-  if (npages <= 64) {
+-    reference(K, V, Q.data(), nq, npages, ref);
+-    run_pages(ac);
+-    for (int q = 0; q < nq; q++) {
+-      for (int d = 0; d < HD; d++) {
+-        double a = ac.v[q][d] / ac.s[q], b = ref.v[q][d] / ref.s[q];
+-        double rel = std::fabs(a - b) / (std::fabs(b) + 1e-3);
+-        worst = std::max(worst, rel);
+-      }
+-    }
+-    if (worst > 2e-2) {
+-      fprintf(stderr, "CORRECTNESS FAIL: worst rel err %.4g\n", worst);
+-      return 1;
+-    }
+-  }
+-
+-  // timing
+-  for (int w = 0; w < 3; w++) {
+-    run_pages(ac);  // warmup
+-  }
+-  struct timespec t0, t1;
+-  clock_gettime(CLOCK_MONOTONIC, &t0);
+-  for (long i = 0; i < iters; i++) {
+-    run_pages(ac);
+-  }
+-  clock_gettime(CLOCK_MONOTONIC, &t1);
+-  double ns = (t1.tv_sec - t0.tv_sec) * 1e9 + (t1.tv_nsec - t0.tv_nsec);
+-  double per_page = ns / ((double)iters * npages);
+-  double macs = 2.0 * nq * PAGE * HD;  // QK + PV per page (useful MACs)
+-  printf("Nq=%d variant=%s pages=%d iters=%ld per_page_ns=%.1f useful_GFLOPS=%.1f "
+-         "worst_rel_err=%.2e\n",
+-      nq, variant.c_str(), npages, iters, per_page, 2.0 * macs / per_page, worst);
+-  return 0;
+-}
+diff --git a/src/tron/kernels/amx_attn.cpp b/src/tron/kernels/amx_attn.cpp
+index cc684622a..c826e7317 100644
+--- a/src/tron/kernels/amx_attn.cpp
++++ b/src/tron/kernels/amx_attn.cpp
+@@ -1,8 +1,9 @@
+ // AMX software-attention kernels. See Note [AMX attention dispatch]
+ // (in amx_attn_iface.hpp). The ONLY translation unit compiled with
+-// -mamx-tile/-mamx-bf16. Kernel design and constants validated in
+-// src/amx_fused_bench.cpp (whole-path benchmark, self-checked against a
+-// scalar reference).
++// -mamx-tile/-mamx-bf16. Kernel design and constants were validated with a
++// stand-alone whole-path benchmark (scores, softmax and PV of one page,
++// self-checked against a scalar reference), since removed from the tree
++// (git history up to d176c88b3).
+ 
+ #include <atomic>
+ #include <cstdlib>
+@@ -153,8 +154,8 @@ void qk_canonical_128x4(const uint16_t* k_page,
+   _tile_stored(3, s_transposed + 3 * TILE_FP32S, TILE_ROW_BYTES);
+ 
+   // Transpose s_transposed(64x16) -> s rows 0..3 only (width-4
+-  // specialization from the fused-page benchmark, src/amx_fused_bench.cpp;
+-  // only the k-loop stage-2 paths for output rows 0-3 are emitted).
++  // specialization: only the k-loop stage-2 paths for output rows 0-3 are
++  // emitted).
+   for (int r = 0; r < 4; r++) {
+     const float* src = s_transposed + r * TILE_FP32S;
+     __m512 u[4][4];
+@@ -236,8 +237,8 @@ void pack_q_rows_128x4(const uint16_t* q_group, uint16_t* padded) noexcept {
+       (TILE_ROWS - GROUP_HEADS) * HEAD_SIZE * sizeof(uint16_t));
+ }
+ 
+-// See Note [Mirror orientation]. Kernel validated as the "amxqk" variant in
+-// src/amx_fused_bench.cpp: S[16 q][64 tok] = Q . K^T, no transposing store.
++// See Note [Mirror orientation]. S[16 q][64 tok] = Q . K^T, no transposing
++// store.
+ // A = padded Q rows (stride 256 B); B = the page's VNNI K mirror panels
+ // (16 dim-pair rows x 16 tokens, 64 B stride); C tiles 0..3 = token blocks.
+ void qk_mirror_128x4(

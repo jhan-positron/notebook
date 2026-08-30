@@ -1,0 +1,39 @@
+--- h/tron/models/self_attention.hpp	2026-08-25 22:47:54.937423702 -0700
++++ /tmp/claude-0/-home-jhan-workspace-intel-AMX/72fd1ccd-f69f-4237-958c-0f9519541d9b/scratchpad/pr3879/r6/fixE/h/tron/models/self_attention.hpp	2026-08-26 22:29:58.151188942 -0700
+@@ -1358,17 +1358,21 @@
+       constexpr bool amx_shape_ok =
+           amx_attn::shape_ok(geometry.kv.head_size, geometry.kv_mul());
+       const bool amx_on = amx_shape_ok && amx_attn::available();
+-      thread_local std::vector<uint16_t> amx_qpack;
++      // One 4 KB pack slot per batch_job_ix, 64B-aligned as the pack contracts
++      // require and bounded like the mask below; zero-initialized once per
++      // thread, and the packers write only the 4 live columns/rows of a slot,
++      // so the padding they rely on stays zero for the thread's lifetime.
++      // Geometries the AMX kernels do not serve get a 1-element placeholder.
++      constexpr size_t amx_qpack_elems =
++          amx_shape_ok ? max_minibatch_size * amx_attn::Q_PACK_ELEMS_2048 : 1;
++      alignas(64) thread_local uint16_t amx_qpack[amx_qpack_elems] = {};
+       // Bitmap with one bit per batch_job_ix, meaning "this token's Q group
+       // is already packed into amx_qpack": word batch_job_ix / 64, bit
+       // batch_job_ix % 64. Sized for the largest legal minibatch
+       // (items.size() <= max_minibatch_size).
+       uint64_t amx_packed_mask[(max_minibatch_size + 63) / 64] = {};
+       if (amx_on) {
+-        // resize() zero-fills new slots and the packers write only the 4
+-        // live columns/rows of each slot, so the padding they rely on stays
+-        // zero for the thread's lifetime (see the pack contracts).
+-        amx_qpack.resize(items.size() * amx_attn::Q_PACK_ELEMS_2048);
++        TRON_ASSERT_LE(items.size(), max_minibatch_size);
+         amx_attn::begin_region();
+       }
+ #endif
+@@ -1412,8 +1416,7 @@
+ #ifdef TRON_AMX_DISPATCH
+           if constexpr (amx_shape_ok) {
+             if (amx_on) {
+-              uint16_t* q_packed =
+-                  amx_qpack.data() + batch_job_ix * amx_attn::Q_PACK_ELEMS_2048;
++              uint16_t* q_packed = amx_qpack + batch_job_ix * amx_attn::Q_PACK_ELEMS_2048;
+               // Pack this token's Q group once; later pages in the range
+               // reuse it.
+               if (!((amx_packed_mask[batch_job_ix >> 6] >> (batch_job_ix & 63)) & 1)) {
