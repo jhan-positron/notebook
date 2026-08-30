@@ -79,3 +79,19 @@ Repo copies are mirrors: edit the canonical file, not these.
 - What it is: companion decoder-only transformer pipeline diagram shared by
   the software-attention and Attention-on-FPGA ramp-up notes.
 - Related handoff: handoffs/codex_2026-07-28_generate-ramp-up-html-files.md.
+
+## single-thread-assessment.html
+
+- Rendered view:
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/tron/single-thread-assessment.html
+- Canonical: claude-agentsrv:/home/jhan/workspace/tron-rampup/from-claude/single-thread-assessment.html
+- What it is: source-reading assessment of the "single thread per core"
+  proposal for tron (verdicts: A measure-first, B recommended, C not viable),
+  with a 176-claim verification log.
+- Related handoff: handoffs/claude_20260824_input-2-ai-single-thread-md-instructions.md
+
+## single-thread.md
+
+- Canonical: claude-agentsrv:/home/jhan/workspace/tron-rampup/input-2-ai/single-thread.md
+- What it is: the user-written proposal document the assessment above answers.
+- Related handoff: handoffs/claude_20260824_input-2-ai-single-thread-md-instructions.md

@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# claude-box [enter|start|recreate] — manage the claude-dev container.
+# Same script on every host (shared NFS home); runs on alpha, sw-dev-01 and agentsrv.
+#   enter    (default) start container if needed, open a shell inside
+#   start    start container only, no shell; used at boot and by the
+#            sshd ForceCommand hook
+#   recreate delete and re-create the container (picks up a new image;
+#            kills tmux sessions running inside, but NO LONGER destroys
+#            /nix, the tron build tree, or the codex home — those are
+#            bind-mounted from /var/tmp/jhan/persist since 2026-08-14)
+# Inside you appear as root, which maps to jhan on the host.
+set -euo pipefail
+
+# bash sets HOSTNAME itself, so this works under the systemd user unit too.
+HOST=${HOSTNAME%%.*}
+
+# Per-host podman storage config. ~/.config/containers/storage.conf is on
+# the shared NFS home and written for alpha (podman 3.4.4,
+# mount_program=/usr/bin/fuse-overlayfs). sw-dev-01 (podman 5.8.2, native
+# overlay, admin-provided graphroot) uses its own file. ~/sw-dev-01-setup.sh
+# exports the same variable for interactive shells (see jibin.bashrc.positron.dev).
+case "$HOST" in
+    sw-dev-01)
+        export CONTAINERS_STORAGE_CONF=/home/jhan/.config/containers/storage-sw-dev-01.conf
+        ;;
+    agentsrv)
+        # No system podman and no sudo on agentsrv: rootless podman-static
+        # 5.8.4 lives in the NFS home, deliberately off the shared PATH so
+        # alpha/sw-dev-01 keep using their own podman. ~/agentsrv-setup.sh
+        # sets the same variables for interactive shells. / is ~97% full
+        # there, so only the image store is local; /nix and tron-main are
+        # empty on agentsrv by decision (2026-08-28).
+        PODMAN_STATIC=/home/jhan/.local/opt/podman-static-5.8.4
+        export PATH=$PODMAN_STATIC/usr/local/bin:$PATH
+        export CONTAINERS_STORAGE_CONF=/home/jhan/.config/containers/storage-agentsrv.conf
+        export CONTAINERS_CONF=/home/jhan/.config/containers/containers-agentsrv.conf
+        export CONTAINERS_REGISTRIES_CONF=$PODMAN_STATIC/etc/containers/registries.conf
+        ;;
+esac
+
+if ! command -v podman >/dev/null 2>&1; then
+    echo "podman not found — claude-box only works on alpha, sw-dev-01 or agentsrv" >&2
+    exit 1
+fi
+
+NAME=claude-dev
+IMAGE=localhost/claude-dev:latest
+PERSIST=/var/tmp/jhan/persist
+# Container hostname is per host (claude-alpha, claude-sw-dev-01) so that
+# tmux-resurrect's per-hostname save dir under the shared ~/.tmux does not
+# collide between the two containers. The codex-home mount target must
+# match CODEX_HOME as computed inside the container by jibin.bashrc.positron
+# (/home/$USER/codex-home-$HOSTNAME with USER unset -> /home//codex-home-<hostname>).
+CONTAINER_HOSTNAME=claude-$HOST
+
+ensure_running() {
+    if ! podman container exists "$NAME" 2>/dev/null; then
+        # seccomp=unconfined is required by the nix build sandbox: podman's
+        # default seccomp profile (3.4.4 and 5.8.2 alike) returns EPERM for
+        # sethostname/setdomainname without CAP_SYS_ADMIN, and nix's sandbox
+        # child calls sethostname("localhost") in every sandboxed build.
+        # keep-groups: on sw-dev-01 the subgid userns has setgroups=allow, so
+        # without it crun drops jhan's host groups (engineering, fte-us) and
+        # group-only NFS paths become unreadable. No-op on alpha
+        # (single-uid userns, setgroups=deny keeps the host groups anyway).
+        podman run -d --name "$NAME" --hostname "$CONTAINER_HOSTNAME" \
+            --group-add keep-groups \
+            --security-opt seccomp=unconfined \
+            -v /home/jhan:/home/jhan \
+            -v /scratch:/scratch \
+            -v "$PERSIST/nix":/nix \
+            -v "$PERSIST/tron-main":/var/tmp/tron-main \
+            -v "$PERSIST/codex-home":/home/codex-home-"$CONTAINER_HOSTNAME" \
+            -v "$PERSIST/etc-nix":/etc/nix \
+            -w /home/jhan \
+            "$IMAGE" sleep infinity >/dev/null
+    elif [[ "$(podman inspect -f '{{.State.Status}}' "$NAME")" != "running" ]]; then
+        podman start "$NAME" >/dev/null
+    fi
+}
+
+case "${1:-enter}" in
+    start)
+        ensure_running
+        ;;
+    recreate)
+        podman rm -f "$NAME" >/dev/null 2>&1 || true
+        ensure_running
+        echo "recreated $NAME"
+        ;;
+    enter)
+        ensure_running
+        # IS_SANDBOX=1 lets claude accept --dangerously-skip-permissions
+        # as container-root when you want unattended runs.
+        exec podman exec -it -e IS_SANDBOX=1 -w /home/jhan "$NAME" bash -l
+        ;;
+    *)
+        echo "usage: claude-box [enter|start|recreate]" >&2
+        exit 1
+        ;;
+esac
