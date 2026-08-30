@@ -6,7 +6,7 @@
   (source: transcript timestamps; UTC 18:53–22:41 = 11:53–15:41 US Pacific)
 - Claude session: "Compare draw_01 and draw_06 TPS variance"
   (project: /home/jhan/workspace/perf-fluctuation/trace-sync-points)
-  - Transcript: claude-alpha:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-trace-sync-points/9af9b977-8e14-40d6-92b7-45b263fa0f3a.jsonl
+  - Transcript: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-trace-sync-points/9af9b977-8e14-40d6-92b7-45b263fa0f3a.jsonl
     (machine-readable pointer so future SCOPE: auto runs can match
     this handoff to its session and check for new activity)
 

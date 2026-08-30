@@ -6,7 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "Execute runbook and generate status report"
   (project: /home/jhan/workspace/perf-fluctuation/trace-sync-points)
-  - Transcript: claude-alpha:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-trace-sync-points/83d26449-93cf-496b-9888-799a25b30cf1.jsonl
+  - Transcript: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-trace-sync-points/83d26449-93cf-496b-9888-799a25b30cf1.jsonl
     (machine-readable pointer so future SCOPE: auto runs can match
     this handoff to its session and check for new activity)
 

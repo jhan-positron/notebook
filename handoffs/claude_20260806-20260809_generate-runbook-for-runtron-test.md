@@ -6,7 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "Generate runbook for runtron test"
   (project: /home/jhan/workspace/perf-fluctuation)
-  - Transcript: claude-alpha:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation/74078f4f-b0c7-4721-9967-b0af1173844d.jsonl
+  - Transcript: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation/74078f4f-b0c7-4721-9967-b0af1173844d.jsonl
     (machine-readable pointer so future SCOPE: auto runs can match
     this handoff to its session and check for new activity)
 
@@ -56,7 +56,7 @@
 ### 2026-08-09 (morning, session end)
 
 - Persistence audit before container recreate: confirmed `/home/jhan` and `/scratch` (NFS) survive; only regenerable scaffolding (`/nix`, the `/var/tmp/tron-main` checkout) is ephemeral. Copied build logs, working `nix.conf`, and a one-command resume script to `~/workspace/alpha-build-scaffold/`; refreshed the persistent tron mirror `/scratch/jhan/tron-src` to `12804a8` so a fresh container can clone without GitHub auth.
-- Handed the user exact steps to relaunch claude-box with `--security-opt seccomp=unconfined` (edit `ensure_running()` in `/home/jhan/claude-container/claude-box`, then `claude-box recreate` + `claude-box enter` from the alpha host). The classifier blocked Claude from editing the launcher directly; a backup `claude-box.bak-preseccomp` was left (verified present 2026-08-19). Session ended with the plan: fresh session runs `bash ~/workspace/alpha-build-scaffold/resume-build.sh`, then build -> install -> wait out nightly CI -> the three campaigns.
+- Handed the user exact steps to relaunch claude-box with `--security-opt seccomp=unconfined` (edit `ensure_running()` in `/home/jhan/claude-container/claude-box`, then `claude-box recreate` + `claude-box enter` from the alpha host). The classifier blocked Claude from editing the launcher directly; a backup `claude-box.bak-preseccomp` was left (verified present 2026-08-19). Session ended with the plan: fresh session runs `bash ~/workspace/alpha-build-scaffold/resume-build.sh`, then build -> install -> wait out nightly CI -> the three campaigns. (preserved: artifacts/dev-machines/claude-box)
 
 ## Results
 
@@ -109,7 +109,7 @@ Shared-NFS paths (visible on claude-alpha and delphi-3bda):
 - claude-alpha:/home/jhan/workspace/tron-build-fail-alpha.md — alpha container build-failure writeup (both blockers, syscall probe evidence, ranked remediation).
 - claude-alpha:/home/jhan/workspace/alpha-build-scaffold/ — resume-build.sh (probes fchmodat2 first, then rebuilds), build logs, saved nix.conf, models.local.yaml.
 - claude-alpha:/scratch/jhan/tron-src — persistent tron git mirror, refreshed to main commit `12804a8`.
-- claude-alpha:/home/jhan/claude-container/claude-box.bak-preseccomp — pre-change backup of the container launcher (the seccomp edit itself was left for the user).
+- claude-alpha:/home/jhan/claude-container/claude-box.bak-preseccomp — pre-change backup of the container launcher (the seccomp edit itself was left for the user). (preserved: artifacts/dev-machines/claude-box)
 - Project memory files written: claude-alpha:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation/memory/ — `perfetto-fill-policy-ring-buffer.md`, `perfetto-write-into-file-required.md`, `delphi-nightly-ci-timer.md`, `alpha-claude-box-build-limits.md`.
 - Analysis scratch (SQL + extracted CSVs) at claude-alpha:/scratch/jhan/perf-fluctuation/ (gap-extract*.sql/.csv, mem-check*.sql, sys-check.sql); report-builder scripts were in the session scratchpad `/tmp/claude-0/...` (ephemeral, likely gone).
 

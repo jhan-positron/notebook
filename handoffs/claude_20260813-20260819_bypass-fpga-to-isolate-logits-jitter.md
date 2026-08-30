@@ -6,7 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "Bypass FPGA to isolate logits jitter"
   (project: /home/jhan/workspace/perf-fluctuation/trace-sync-points)
-  - Transcript: claude-alpha:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-trace-sync-points/c3decbb2-b8e1-4307-a220-9b8d10aa4a75.jsonl
+  - Transcript: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-trace-sync-points/c3decbb2-b8e1-4307-a220-9b8d10aa4a75.jsonl
     (machine-readable pointer so future SCOPE: auto runs can match
     this handoff to its session and check for new activity)
 

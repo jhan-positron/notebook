@@ -6,7 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "Execute runbook"
   (project: /home/jhan/workspace/perf-fluctuation/ingested-llama8b)
-  - Transcript: claude-alpha:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-ingested-llama8b/9f1afb37-7598-4802-84e8-20ddf79aa104.jsonl
+  - Transcript: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-ingested-llama8b/9f1afb37-7598-4802-84e8-20ddf79aa104.jsonl
     (machine-readable pointer so future SCOPE: auto runs can match
     this handoff to its session and check for new activity)
 

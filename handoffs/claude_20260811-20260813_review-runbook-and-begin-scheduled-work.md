@@ -6,7 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "Review runbook and begin scheduled work"
   (project: /home/jhan/workspace/perf-fluctuation/deep-dive-3bda)
-  - Transcript: claude-alpha:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-deep-dive-3bda/453bd91c-e321-4a0b-a7f7-4234acb7f379.jsonl
+  - Transcript: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-deep-dive-3bda/453bd91c-e321-4a0b-a7f7-4234acb7f379.jsonl
     (machine-readable pointer so future SCOPE: auto runs can match
     this handoff to its session and check for new activity)
 

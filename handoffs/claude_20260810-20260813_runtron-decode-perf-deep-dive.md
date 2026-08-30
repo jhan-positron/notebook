@@ -6,7 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "runtron-decode-perf-deep-dive"
   (project: /home/jhan/workspace/perf-fluctuation/deep-dive)
-  - Transcript: claude-alpha:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-deep-dive/5ee916d1-2043-45d5-bd14-dd7a7610c42f.jsonl
+  - Transcript: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-deep-dive/5ee916d1-2043-45d5-bd14-dd7a7610c42f.jsonl
     (machine-readable pointer so future SCOPE: auto runs can match
     this handoff to its session and check for new activity)
 

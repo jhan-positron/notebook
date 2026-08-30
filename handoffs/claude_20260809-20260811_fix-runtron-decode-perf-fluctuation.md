@@ -6,7 +6,7 @@
   (source: transcript timestamps)
 - Claude session: "Fix runtron decode perf fluctuation"
   (project: /home/jhan/workspace/perf-fluctuation/project-PDJN)
-  - Transcript: claude-alpha:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-project-PDJN/b2755a27-84f8-4630-87d0-7095595b6736.jsonl
+  - Transcript: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-perf-fluctuation-project-PDJN/b2755a27-84f8-4630-87d0-7095595b6736.jsonl
     (machine-readable pointer so future SCOPE: auto runs can match
     this handoff to its session and check for new activity)
 
