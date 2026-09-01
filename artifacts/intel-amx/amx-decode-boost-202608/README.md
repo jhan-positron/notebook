@@ -40,3 +40,11 @@ TSC base clock 2.7 GHz. Fence definitions: tron-perf-fluctuation project, stall-
   partial tail page only (72,576 = 252 tokens x 36 layers x 8 KV heads at every ctx); prefill
   fallback = causal-mask range cut only. Whole-run coverage 92.19% at 2K / 97.77% at 8K matches the
   08-31 counter-summary (92.2% / 97.8%) exactly.
+- single-attn-20260901/: the single-attention phase probe (page section 7.2.1). kvwait files
+  (gzipped) with tags 7600-7605 plus 7606-7627 = worker-0 per-token phase counters (tag table in
+  scripts/extract-sa.py: unit counts AMX/dotter/empty, cycles for QK / softmax / PV / state on both
+  paths, Q pack, tile region, page-range wall, run_sections, upstream wait, joins, barrier). Three
+  arms (canon / mirror / disable = kill switch) x ctx {256,2048,8192} x 2 reps, 1u; branch
+  jhan-amx-fence commit 8fd1e7798d (probe gated on TRON_ATTN_PHASE=1). phases-*.json = per-cell
+  medians, summary.json = per-unit split + speedups. Binaries built in tron-fence-amx/gen as
+  runtron.samirror / runtron.sacanon (sha256 in single-attn.txt).
