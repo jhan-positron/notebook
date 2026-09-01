@@ -24,3 +24,7 @@ TSC base clock 2.7 GHz. Fence definitions: tron-perf-fluctuation project, stall-
   decode token 400 read from the stamp records), brace groups <=3 GP; cache ladder + DRAM locality
   + dTLB + core + msr + uncore + turbostat; 4 of 54 windows flagged RUN-ENDED-DURING (excluded).
   Raw perf text + parsed.json.
+
+- ctxfill2-20260901/: curve extension - commit-pinned clean vs mirror at ctx {2048, 8192, 32768},
+  8 reps, Latin-square order; same builds as ctxfill-20260901 (/var/tmp worktrees). curve2.json
+  medians. Result: +5.0 / +18.0 / +27.6%.
