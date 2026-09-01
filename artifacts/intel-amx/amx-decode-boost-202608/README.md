@@ -34,3 +34,9 @@ TSC base clock 2.7 GHz. Fence definitions: tron-perf-fluctuation project, stall-
   x 3 reps (kvwait gz), Part B phase-locked counters (thp.txt). Result: 4K walks -98%, wall time
   unchanged (<0.4%). Note: the AnonHugePages lines in thp.txt read the timeout wrapper's process
   (script bug), not runtron - disregard them; the walk counters are the proof.
+
+- fallback-20260901/: per-cause AMX dense-path fallback counters (TRON_AMX_FALLBACK_COUNTERS build
+  of the fence branch at 3cd2670df1), mirror arm, ctx {256,2048,8192} x 2 runs. Decode fallback =
+  partial tail page only (72,576 = 252 tokens x 36 layers x 8 KV heads at every ctx); prefill
+  fallback = causal-mask range cut only. Whole-run coverage 92.19% at 2K / 97.77% at 8K matches the
+  08-31 counter-summary (92.2% / 97.8%) exactly.
