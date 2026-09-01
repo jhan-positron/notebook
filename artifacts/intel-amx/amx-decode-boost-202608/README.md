@@ -28,3 +28,9 @@ TSC base clock 2.7 GHz. Fence definitions: tron-perf-fluctuation project, stall-
 - ctxfill2-20260901/: curve extension - commit-pinned clean vs mirror at ctx {2048, 8192, 32768},
   8 reps, Latin-square order; same builds as ctxfill-20260901 (/var/tmp worktrees). curve2.json
   medians. Result: +5.0 / +18.0 / +27.6%.
+
+- thp-20260901/: THP experiment on the K mirror arena - same stamped mirror binary, arms base vs
+  TRON_AMX_MIRROR_THP=1 (2 MiB-aligned + madvise(MADV_HUGEPAGE)); Part A fence grid ctx {2048,8192}
+  x 3 reps (kvwait gz), Part B phase-locked counters (thp.txt). Result: 4K walks -98%, wall time
+  unchanged (<0.4%). Note: the AnonHugePages lines in thp.txt read the timeout wrapper's process
+  (script bug), not runtron - disregard them; the walk counters are the proof.
