@@ -17,3 +17,10 @@ Model: ingested-qwen-3-4b-instruct-2507-tp2. Host: delphi-3bda (2x Xeon 6962P).
   exactly one 7602; TSC at 2.7 GHz).
 
 TSC base clock 2.7 GHz. Fence definitions: tron-perf-fluctuation project, stall-map section 3.6.
+
+- fence3-20260901/: THREE stamped arms (canonical-config 0148c218 / mirror-config 376db1c9 /
+  kill switch on the mirror binary), ctx {256,2048,8192} x 2 reps, tags 7600-7605.
+- perfstat3-20260901/: perf-stat round 3, phase-locked (fresh workload per measurement, window at
+  decode token 400 read from the stamp records), brace groups <=3 GP; cache ladder + DRAM locality
+  + dTLB + core + msr + uncore + turbostat; 4 of 54 windows flagged RUN-ENDED-DURING (excluded).
+  Raw perf text + parsed.json.
