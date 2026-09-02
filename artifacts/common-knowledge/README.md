@@ -16,3 +16,7 @@ REPO-PRIMARY (no external canonical): edit them here.
   Qwen/Qwen2.5-32B (numbers generated from the model's config.json).
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/common-knowledge/weights-bytes-qwen2.5-32b.html
   (handoff: claude_20260823_kv-head-vs-query-head-token-axis-dimensions.md)
+- `tron-book-page-token-kv.html` — Tron KV-cache concepts book / page / token /
+  K / V and how they relate, with Qwen3-4B-Instruct-2507 byte arithmetic
+  (computed from the source's size formulas, not measured).
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/common-knowledge/tron-book-page-token-kv.html
