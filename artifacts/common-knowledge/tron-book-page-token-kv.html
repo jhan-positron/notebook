@@ -97,7 +97,10 @@ every layer and every KV head. For Qwen3-4B that is 144&nbsp;KiB per token,
 <li><a href="#s2">2&nbsp;&middot;&nbsp;Token: one word piece, five integers</a></li>
 <li><a href="#s3">3&nbsp;&middot;&nbsp;K and V: what is stored for one token</a></li>
 <li><a href="#s4">4&nbsp;&middot;&nbsp;Page: 64 slots and a live count</a></li>
+<li style="padding-left:18px"><a href="#s4b">4b&nbsp;&middot;&nbsp;Inside a kv_block: K rows and V pairs</a></li>
 <li><a href="#s5">5&nbsp;&middot;&nbsp;Book: the memory owner</a></li>
+<li style="padding-left:18px"><a href="#s5a">5a&nbsp;&middot;&nbsp;How the arena is laid out</a></li>
+<li style="padding-left:18px"><a href="#s5b">5b&nbsp;&middot;&nbsp;How big a book is, and how many there are</a></li>
 <li><a href="#s6">6&nbsp;&middot;&nbsp;How they connect at run time</a></li>
 <li><a href="#s7">7&nbsp;&middot;&nbsp;Qwen3-4B numbers</a></li>
 <li><a href="#s8">8&nbsp;&middot;&nbsp;Things that are easy to get wrong</a></li>
@@ -597,11 +600,6 @@ are:</p>
 array (<code>pageno()</code>), and reaches its K/V bytes by asking the book:
 <code>book.kv_block(layer_slot, kv_head, pageno())</code>. So "the page's K for
 token <i>o</i>" is really "the book's block for (layer, head, page), row <i>o</i>".</p>
-<p>K is stored as one 256&nbsp;B row per token. Under AVX-512 (Intel's 512-bit
-vector instructions, the normal build) V is stored as interleaved token pairs:
-tokens 2<i>j</i> and 2<i>j</i>+1 share one row, which is why a page's even and
-odd tokens must be written by the same thread. The page size must be a multiple
-of the vector chunk size, 16 bf16 values under AVX-512.</p>
 
 <div class="callout">
 <div class="t">Capacity vs valid vs live, in one page</div>
@@ -616,6 +614,250 @@ filled. A page whose later slots belong to a branch that is not being computed
 this pass is also partly live.
 </div>
 
+<h3 id="s4b">4b&nbsp;&middot;&nbsp;Inside a kv_block: K rows and V pairs</h3>
+<p>The kv_block is the 32&nbsp;KiB unit that a page's accessors point into: K
+and V for the 64 tokens of one page, for one KV head in one layer slot. K and V
+are laid out differently inside it.</p>
+<ul class="tight">
+<li><b>K: one row per token.</b> Row <i>p</i> holds token <i>p</i>'s 128 bf16
+values in order, 256&nbsp;B, as 8 chunks of 16 values (32&nbsp;B each). The
+Q&middot;K step reads one row as four 64&nbsp;B loads.</li>
+<li><b>V: one row per token pair.</b> Under AVX-512 (Intel's 512-bit vector
+instructions, the normal build) row <i>j</i> holds tokens 2<i>j</i> and
+2<i>j</i>+1 together, 512&nbsp;B, as 8 tiles of 64&nbsp;B. Inside a tile, each
+32-bit lane holds one dimension of both tokens: the even token in the low 16
+bits, the odd token in the high 16 bits.</li>
+</ul>
+
+<div class="fig">
+<svg width="860" height="470" viewBox="0 0 860 470" font-family="Segoe UI, Arial, sans-serif" font-size="12">
+  <text x="10" y="16" font-size="12" fill="#54565c">One kv_block (Qwen3-4B): K and V for the 64 tokens of one page, one KV head, one layer slot &middot; 32 KiB, 64 B aligned, no padding</text>
+  <text x="10" y="40" font-weight="600" font-size="13" fill="#b94a1e">k: 64 rows, one row per token</text>
+  <text x="54" y="63" text-anchor="end" font-size="10" fill="#54565c">p = 0</text>
+  <rect x="60" y="50" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="79.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">0&ndash;15</text>
+  <rect x="100" y="50" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="119.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">16&ndash;31</text>
+  <rect x="140" y="50" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="159.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">32&ndash;47</text>
+  <rect x="180" y="50" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="199.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">48&ndash;63</text>
+  <rect x="220" y="50" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="239.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">64&ndash;79</text>
+  <rect x="260" y="50" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="279.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">80&ndash;95</text>
+  <rect x="300" y="50" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="319.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">96&ndash;111</text>
+  <rect x="340" y="50" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="359.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">112&ndash;127</text>
+  <text x="54" y="83" text-anchor="end" font-size="10" fill="#54565c">p = 1</text>
+  <rect x="60" y="70" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="100" y="70" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="140" y="70" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="180" y="70" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="220" y="70" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="260" y="70" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="300" y="70" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="340" y="70" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="54" y="103" text-anchor="end" font-size="10" fill="#54565c">p = 2</text>
+  <rect x="60" y="90" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="100" y="90" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="140" y="90" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="180" y="90" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="220" y="90" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="260" y="90" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="300" y="90" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="340" y="90" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="54" y="123" text-anchor="end" font-size="10" fill="#54565c">p = 3</text>
+  <rect x="60" y="110" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="100" y="110" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="140" y="110" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="180" y="110" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="220" y="110" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="260" y="110" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="300" y="110" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="340" y="110" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="54" y="144" text-anchor="end" font-size="10" fill="#54565c">&hellip;</text>
+  <text x="220" y="144" text-anchor="middle" font-size="12" fill="#8b8d93">&hellip;</text>
+  <text x="54" y="163" text-anchor="end" font-size="10" fill="#54565c">p = 63</text>
+  <rect x="60" y="150" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="100" y="150" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="140" y="150" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="180" y="150" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="220" y="150" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="260" y="150" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="300" y="150" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <rect x="340" y="150" width="39" height="18" fill="#fbe4d9" stroke="#eb6834" stroke-width="0.8"/>
+  <text x="60" y="186" font-size="10" fill="#54565c">row p = token p's K vector, dims 0..127 in order</text>
+  <text x="60" y="200" font-size="10" fill="#54565c">8 chunks &times; 16 bf16 (32 B) = 256 B; q&middot;k reads a row as four 64 B loads</text>
+  <text x="60" y="216" font-size="11" font-weight="600" fill="#1a1b1e">64 rows &times; 256 B = 16,384 B = 16 KiB</text>
+  <text x="440" y="40" font-weight="600" font-size="13" fill="#157a69">v: 32 rows, one row per token pair (2j, 2j+1)</text>
+  <text x="484" y="63" text-anchor="end" font-size="10" fill="#54565c">pair 0</text>
+  <rect x="490" y="50" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="509.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">0&ndash;15</text>
+  <rect x="530" y="50" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="549.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">16&ndash;31</text>
+  <rect x="570" y="50" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="589.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">32&ndash;47</text>
+  <rect x="610" y="50" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="629.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">48&ndash;63</text>
+  <rect x="650" y="50" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="669.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">64&ndash;79</text>
+  <rect x="690" y="50" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="709.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">80&ndash;95</text>
+  <rect x="730" y="50" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="749.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">96&ndash;111</text>
+  <rect x="770" y="50" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="789.5" y="63" text-anchor="middle" font-size="9" fill="#1a1b1e">112&ndash;127</text>
+  <text x="484" y="83" text-anchor="end" font-size="10" fill="#54565c">pair 1</text>
+  <rect x="490" y="70" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="530" y="70" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="570" y="70" width="39" height="18" fill="#a8dccf" stroke="#157a69" stroke-width="2.2"/>
+  <rect x="610" y="70" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="650" y="70" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="690" y="70" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="730" y="70" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="770" y="70" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="484" y="103" text-anchor="end" font-size="10" fill="#54565c">pair 2</text>
+  <rect x="490" y="90" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="530" y="90" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="570" y="90" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="610" y="90" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="650" y="90" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="690" y="90" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="730" y="90" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="770" y="90" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="484" y="123" text-anchor="end" font-size="10" fill="#54565c">pair 3</text>
+  <rect x="490" y="110" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="530" y="110" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="570" y="110" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="610" y="110" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="650" y="110" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="690" y="110" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="730" y="110" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="770" y="110" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="484" y="144" text-anchor="end" font-size="10" fill="#54565c">&hellip;</text>
+  <text x="650" y="144" text-anchor="middle" font-size="12" fill="#8b8d93">&hellip;</text>
+  <text x="484" y="163" text-anchor="end" font-size="10" fill="#54565c">pair 31</text>
+  <rect x="490" y="150" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="530" y="150" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="570" y="150" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="610" y="150" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="650" y="150" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="690" y="150" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="730" y="150" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <rect x="770" y="150" width="39" height="18" fill="#d6f0ea" stroke="#1f9e89" stroke-width="0.8"/>
+  <text x="490" y="186" font-size="10" fill="#54565c">row j = tokens 2j and 2j+1 interleaved: 8 tiles &times; 64 B = 512 B</text>
+  <text x="490" y="200" font-size="10" fill="#54565c">tile c holds dims 16c..16c+15 of both tokens (zoom below)</text>
+  <text x="490" y="216" font-size="11" font-weight="600" fill="#1a1b1e">32 rows &times; 512 B = 16,384 B = 16 KiB</text>
+  <text x="90" y="262" font-size="11" fill="#157a69" font-weight="600">one 64 B tile (the dark tile above: pair 1 = tokens 2 and 3, tile 2 = dims 32..47) = one 512-bit word = 16 lanes &times; 32 bits</text>
+  <rect x="90" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="113" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d32</text>
+  <rect x="90" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="113" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d32</text>
+  <rect x="137" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="160" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d33</text>
+  <rect x="137" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="160" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d33</text>
+  <rect x="184" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="207" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d34</text>
+  <rect x="184" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="207" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d34</text>
+  <rect x="231" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="254" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d35</text>
+  <rect x="231" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="254" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d35</text>
+  <rect x="278" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="301" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d36</text>
+  <rect x="278" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="301" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d36</text>
+  <rect x="325" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="348" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d37</text>
+  <rect x="325" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="348" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d37</text>
+  <rect x="372" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="395" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d38</text>
+  <rect x="372" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="395" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d38</text>
+  <rect x="419" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="442" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d39</text>
+  <rect x="419" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="442" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d39</text>
+  <rect x="466" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="489" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d40</text>
+  <rect x="466" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="489" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d40</text>
+  <rect x="513" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="536" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d41</text>
+  <rect x="513" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="536" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d41</text>
+  <rect x="560" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="583" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d42</text>
+  <rect x="560" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="583" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d42</text>
+  <rect x="607" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="630" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d43</text>
+  <rect x="607" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="630" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d43</text>
+  <rect x="654" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="677" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d44</text>
+  <rect x="654" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="677" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d44</text>
+  <rect x="701" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="724" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d45</text>
+  <rect x="701" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="724" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d45</text>
+  <rect x="748" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="771" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d46</text>
+  <rect x="748" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="771" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d46</text>
+  <rect x="795" y="270" width="46" height="25" fill="#a8dccf" stroke="#157a69" stroke-width="0.8"/>
+  <text x="818" y="287" text-anchor="middle" font-size="9" fill="#1a1b1e">t3 d47</text>
+  <rect x="795" y="295" width="46" height="25" fill="#d6f0ea" stroke="#157a69" stroke-width="0.8"/>
+  <text x="818" y="312" text-anchor="middle" font-size="9" fill="#1a1b1e">t2 d47</text>
+  <text x="86" y="287" text-anchor="end" font-size="9" fill="#54565c">high 16 bits</text>
+  <text x="86" y="312" text-anchor="end" font-size="9" fill="#54565c">low 16 bits</text>
+  <text x="90" y="336" font-size="10" fill="#54565c">lane d: low 16 bits = even token (2), dim d &middot; high 16 bits = odd token (3), dim d &middot; one bf16 each</text>
+  <text x="10" y="362" font-size="11" font-weight="600" fill="#1a1b1e">Write: set_v</text>
+  <text x="10" y="377" font-size="10" fill="#54565c">even token (2): cvtepu16_epi32 zero-extends each 16-bit value,</text>
+  <text x="10" y="391" font-size="10" fill="#54565c">filling the low halves and zeroing the high halves;</text>
+  <text x="10" y="405" font-size="10" fill="#54565c">odd token (3): shifted left 16 bits and merged into the high halves.</text>
+  <text x="10" y="419" font-size="10" fill="#54565c">So every even write zeroes its odd partner (Note [Zero-Initialized V Slots]).</text>
+  <text x="440" y="362" font-size="11" font-weight="600" fill="#1a1b1e">Read: scaled_v (P&middot;V)</text>
+  <text x="440" y="377" font-size="10" fill="#54565c">one _mm512_dpbf16_ps per tile: for 16 dims at once,</text>
+  <text x="440" y="391" font-size="10" fill="#54565c">acc[d] += p&#8322; &middot; v&#8322;[d] + p&#8323; &middot; v&#8323;[d], with the two softmax weights</text>
+  <text x="440" y="405" font-size="10" fill="#54565c">interleaved the same way; 8 instructions finish a token pair.</text>
+  <text x="440" y="419" font-size="10" fill="#54565c">This is the "better utilization of the SIMD registers" the code notes.</text>
+  <text x="10" y="445" font-size="10" fill="#8b8d93">Rules that follow: a page's even and odd offsets are saved by the same thread (minibatch grains never split a pair); an odd live count reads</text>
+  <text x="10" y="459" font-size="10" fill="#8b8d93">one padding slot, kept zero so that NaN &times; 0 = NaN cannot poison the sum. The AVX2 build (chunk size 8) stores V like K, one row per token.</text>
+</svg>
+<p class="cap">One kv_block for Qwen3-4B, drawn to structure (not to byte
+scale). Orange = K, one row per token. Teal = V, one row per token pair; the
+dark teal tile is expanded into its 16 lanes. Sizes come from the code's
+static assert: 2 &times; 64 &times; 128 &times; 2&nbsp;B = 32,768&nbsp;B.</p>
+</div>
+
+<p>The reason for the V layout is the P&middot;V step of attention, which
+multiplies every cached V row by a softmax weight and sums them. With two tokens
+in each 32-bit lane, one <code>_mm512_dpbf16_ps</code> instruction multiplies both
+tokens of a pair by their two weights and adds them, for 16 dimensions at once.
+The K layout stays one row per token because the Q&middot;K step needs one dot
+product per token.</p>
+<p>Four rules follow from the pair layout:</p>
+<ul class="tight">
+<li>A page's even and odd offsets are written by the same thread. The scheduler
+adjusts minibatch boundaries so a pair is never split between threads.</li>
+<li>Every write of an even token zeroes its odd partner's half. When a page has
+an odd live count, the read rounds up to the pair and touches one padding slot;
+the zero keeps NaN out, because NaN &times; 0 = NaN in IEEE 754.</li>
+<li>The page size must be a multiple of the vector chunk size, 16 bf16 values
+under AVX-512. 64 is.</li>
+<li>Copying tokens between pages copies K with one memcpy per head but must
+copy V one token at a time, to keep the pairs right.</li>
+</ul>
+<p>The AVX2 build (chunk size 8, used only when AVX-512 is unavailable) stores V
+exactly like K, one row per token. Byte sizes are the same in both builds.</p>
+
 <h2 id="s5">5&nbsp;&middot;&nbsp;Book: the memory owner</h2>
 <p>A book is the object that owns KV memory. When a book is created it allocates
 one contiguous DMA arena (memory the FPGA can read directly) sized for a fixed
@@ -623,7 +865,7 @@ number of pages, plus a vector of that many page objects. Nothing about its
 size changes afterwards; when the cache needs more room, the scheduler creates
 another book.</p>
 
-<h3>How the arena is laid out</h3>
+<h3 id="s5a">5a&nbsp;&middot;&nbsp;How the arena is laid out</h3>
 <p>The arena is an array of <code>kv_block</code>s. One block holds K and V for
 the 64 tokens of one page, for one KV head in one layer: 64 &times; 128 &times;
 2&nbsp;B = 16&nbsp;KiB of K followed by 16&nbsp;KiB of V, 32&nbsp;KiB in total.
@@ -701,7 +943,7 @@ KV head; section 6) reads them in.</p>
 picture is drawn to structure, not to byte scale.</p>
 </div>
 
-<h3>How big a book is, and how many there are</h3>
+<h3 id="s5b">5b&nbsp;&middot;&nbsp;How big a book is, and how many there are</h3>
 <ul class="tight">
 <li><b>Sizing is the scheduler's decision, not the book's.</b> A request for
 <i>N</i> tokens needs &lceil;<i>N</i> / 64&rceil; pages. The first book of a
@@ -925,7 +1167,9 @@ are from that checkout.</p>
 (1162&ndash;1240, 1474&ndash;1508); book struct, arena, allocation sizes
 (598&ndash;720, 906&ndash;975); block index (1017&ndash;1024); slot byte offsets
 (522&ndash;540); <code>kv_block</code> layout and size assert (1037&ndash;1041,
-1862&ndash;1887); V pair interleave note (1731&ndash;1741); token capacity and
+1862&ndash;1887); V pair interleave note (1731&ndash;1741), <code>set_v</code>
+(1945&ndash;1975), <code>scaled_v_expr</code> (1750&ndash;1790), interleaved V
+rationale (1291&ndash;1297); token capacity and
 <code>tok_ct</code> (701&ndash;716, 767&ndash;791).</li>
 <li><code>h/tron/scheduler/token_tree.hpp</code>: edge holds <code>kv_book</code>
 and <code>kv_first_entry_nr</code> (65&ndash;70); token to (page, offset) mapping
@@ -937,7 +1181,7 @@ walk emitting tokens and pages (2094&ndash;2132).</li>
 (90&ndash;118). <code>src/tron/scheduler/token_cache.cpp</code>: eviction
 (279&ndash;300), cache size target (405&ndash;408).</li>
 <li><code>h/tron/models/model.hpp</code>: <code>save_k_impl</code> /
-<code>save_v_impl</code> (2774&ndash;2905); ready vs pending pages
+<code>save_v_impl</code> (2774&ndash;2905); even/odd pair grains (207&ndash;213); ready vs pending pages
 (1900&ndash;1911).</li>
 <li><code>h/tron/models/self_attention.hpp</code>: attention definition
 (135&ndash;143); GQA mapping <code>kv_mul</code> (212, 1430&ndash;1435); page
