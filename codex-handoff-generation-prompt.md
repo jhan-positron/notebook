@@ -42,6 +42,17 @@ name or project path hint and the right side is the chat name.
 ## Config
 - REPO_URL: https://github.com/jhan-positron/notebook
 - TARGET_DIR: handoffs/     # dir inside the repo; create if missing; "." = repo root
+- EXCLUDE_CWDS: [~/self/ai]
+  - Exclude chats whose recorded working directory is `~/self/ai` or any of
+    its subdirectories. Expand `~` using the user's home on the machine where
+    the work ran, and compare normalized path components.
+  - Apply this filter to every SCOPE mode, including explicit chat lists and
+    `this chat only`, unless I explicitly override the exclusion for that run.
+    Use Project/cwd metadata before reading substantive transcript content;
+    the exclusion follows the recorded cwd even if the transcript has moved.
+  - Report these chats as `SKIPPED — excluded cwd`. Leave their existing
+    handoffs unchanged and unstaged, and omit their content and new artifact
+    proposals from the run.
 - SCOPE: auto
    - auto (the default): derive the scope from Codex itself, not from GitHub.
      Use the current Codex surface and its local state as the source of truth.
@@ -49,7 +60,8 @@ name or project path hint and the right side is the chat name.
      connected remote hosts the app returns. On the Linux CLI, enumerate every
      non-helper rollout under the current Codex home and reconcile it with
      `session_index.jsonl` (the `codex resume` inventory). Include projectless
-     chats and every host/cwd group visible from the current surface.
+     chats and every host/cwd group visible from the current surface, subject
+     to EXCLUDE_CWDS above.
      For every chat, collect the visible Project name when available, host,
      cwd, exact chat title, thread id, app link, and transcript path when
      readable. This inventory step determines scope and identity only; it is
@@ -73,8 +85,9 @@ name or project path hint and the right side is the chat name.
      for only a specific subset of chats to be updated or created.
    - `this chat only`: cover just the current Codex chat; skip the scan.
      Accept `this thread only` as an older alias for the same thing.
-   - Whatever appears as the value IS the active scope -- Codex must cover every
-     item, and must not treat a list as illustrative.
+   - Whatever appears as the value IS the active scope after EXCLUDE_CWDS is
+     applied -- Codex must cover every remaining item, and must not treat a
+     list as illustrative.
    - List syntax for additions (example only, not active -- each line one item):
      - SCOPE: auto
        - Codex chat: "Generate Codex handoff prompt"
