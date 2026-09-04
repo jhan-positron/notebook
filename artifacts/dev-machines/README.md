@@ -13,3 +13,9 @@ copies during the next handoff run. All canonicals are on host claude-agentsrv.
 - `sw-dev-01-setup.sh` — canonical `claude-agentsrv:/home/jhan/sw-dev-01-setup.sh` — one-shot setup script for running the claude-dev container on sw-dev-01. (handoff: claude_20260827-20260828_claude-box-container-migration-to-sw-dev-01.md)
 - `claude-box` — canonical `claude-agentsrv:/home/jhan/claude-container/claude-box` — wrapper script that starts/enters the claude-dev podman container. (handoff: claude_20260827-20260828_claude-box-container-migration-to-sw-dev-01.md)
 - `storage-sw-dev-01.conf` — canonical `claude-agentsrv:/home/jhan/.config/containers/storage-sw-dev-01.conf` — podman storage configuration used for the sw-dev-01 variant. (handoff: claude_20260827-20260828_claude-box-container-migration-to-sw-dev-01.md)
+
+- `copy-container.md` — canonical `claude-agentsrv:/home/jhan/tmp/copy-container.md`
+  — verified Markdown guide to separate Codex app-connection startup failures
+  from the missing-bubblewrap warning; despite its filename, it is not a
+  container-copy recipe. Originally written on claude-alpha on 2026-08-25.
+  (handoff: `handoffs/codex_20260819-20260825_can-you-access-my-notion-pages.md`)
