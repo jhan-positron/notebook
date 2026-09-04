@@ -6,7 +6,7 @@ idempotent and also upgrades a header that already carries 7601-7605.
 Run after every cmake configure of the fence worktree, before ninja."""
 import sys
 P = sys.argv[1] if len(sys.argv) > 1 else \
-    "/home/jhan/workspace/tron-fence-amx/gen/src/tron/h/tron/plugins/qwen_3_4b_instruct_2507.hpp"
+    "/home/jhan/workspace/ai-runs/tron-fence-amx/gen/src/tron/h/tron/plugins/qwen_3_4b_instruct_2507.hpp"
 s = open(P).read()
 done = []
 

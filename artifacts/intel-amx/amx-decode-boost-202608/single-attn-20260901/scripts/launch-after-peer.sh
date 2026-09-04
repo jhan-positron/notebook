@@ -7,7 +7,7 @@
 set -u
 EXEC=~/workspace/intel-AMX/exec
 LOG=$EXEC/logs/single-attn-20260901.launcher.log
-WT=~/workspace/tron-fence-amx
+WT=~/workspace/ai-runs/tron-fence-amx
 PEER_MARKER=$EXEC/logs/fallback-20260901.done
 exec >>"$LOG" 2>&1
 echo "=== launcher start $(date -u +%FT%TZ) ==="

@@ -13,7 +13,7 @@ EXEC=~/workspace/intel-AMX/exec
 HERE=$EXEC/single-attn-20260901
 DIR=$EXEC/results/single-attn-20260901; OUT=$DIR/single-attn.txt
 LOG=$EXEC/logs/single-attn-20260901.log; MARKER=$EXEC/logs/single-attn-20260901.done
-WT=~/workspace/tron-fence-amx
+WT=~/workspace/ai-runs/tron-fence-amx
 PATCHER=$EXEC/fence-20260831/patch-gen-stamps.py
 EXTRACT=$HERE/extract-sa.py
 GENHDR=$WT/gen/src/tron/h/tron/plugins/qwen_3_4b_instruct_2507.hpp

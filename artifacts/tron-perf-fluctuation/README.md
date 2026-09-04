@@ -113,8 +113,8 @@ canonical file, refresh here on the next run.
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/tron-perf-fluctuation/workspace/from-claude/perfetto-gap-analysis-draw18-slowest.html
 - `workspace/from-claude/perfetto-gap-analysis-draw19-fastest.html` — canonical `claude-agentsrv:/home/jhan/workspace/perf-fluctuation/from-claude/perfetto-gap-analysis-draw19-fastest.html` — gap/O1a analysis report, fastest 20b draw + fast-vs-slow comparison. (handoff: claude_20260806-20260809_generate-runbook-for-runtron-test.md)
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/tron-perf-fluctuation/workspace/from-claude/perfetto-gap-analysis-draw19-fastest.html
-- `workspace/alpha-build/tron-build-fail-alpha.md` — canonical `claude-agentsrv:/home/jhan/workspace/tron-build-fail-alpha.md` — alpha container build-failure writeup (seccomp/overlayfs evidence + remediation). (handoff: claude_20260806-20260809_generate-runbook-for-runtron-test.md)
-- `workspace/alpha-build/resume-build.sh` — canonical `claude-agentsrv:/home/jhan/workspace/alpha-build-scaffold/resume-build.sh` — one-command tron build resume script (probes fchmodat2 first). (handoff: claude_20260806-20260809_generate-runbook-for-runtron-test.md)
+- `workspace/alpha-build/tron-build-fail-alpha.md` — canonical `claude-agentsrv:/home/jhan/workspace/ai-runs/tron-build-fail-alpha.md` — alpha container build-failure writeup (seccomp/overlayfs evidence + remediation). (handoff: claude_20260806-20260809_generate-runbook-for-runtron-test.md)
+- `workspace/alpha-build/resume-build.sh` — canonical `claude-agentsrv:/home/jhan/workspace/ai-runs/alpha-build-scaffold/resume-build.sh` — one-command tron build resume script (probes fchmodat2 first). (handoff: claude_20260806-20260809_generate-runbook-for-runtron-test.md)
 - `3bda-scratch/pdjn/tools-shape/perfetto-5cat-campaign-v4.sh` — canonical `delphi-3bda:/scratch/jhan/pdjn/tools-shape/perfetto-5cat-campaign-v4.sh` — parameterized campaign harness (users/gen-len/slice/model) with traffic gate v3, bitfile gate, USE_HW_ATTN gate. (handoff: claude_20260809-20260811_fix-runtron-decode-perf-fluctuation.md)
 - `3bda-scratch/pdjn/mine1/mine.py` — canonical `delphi-3bda:/scratch/jhan/pdjn/mine1/mine.py` — Perfetto trace-mining tool (per-draw span-duration extraction via trace_processor) used by mine1–mine6 analyses. (handoff: claude_20260809-20260811_fix-runtron-decode-perf-fluctuation.md)
 - `workspace/project-PDJN/HANDOFF-2026-08-11-suspended.md` — canonical `claude-agentsrv:/home/jhan/workspace/perf-fluctuation/project-PDJN/HANDOFF-2026-08-11-suspended.md` — suspended-track index: exclusions, resume traps, artifact map, resume plan. (handoff: claude_20260809-20260811_fix-runtron-decode-perf-fluctuation.md)
@@ -228,9 +228,9 @@ canonical file, refresh here on the next run.
 
 ### worktree-snapshots/ (uncommitted instrumentation, saved as diffs)
 
-- `worktree-snapshots/tron-kvprobe-tracked-12804a812.diff` — canonical `claude-agentsrv:/home/jhan/workspace/tron-kvprobe` (git diff vs trunk 12804a812) — TSC-probe patch series, tags P1-P6/7000-7900. (handoff: claude_20260810-20260813_runtron-decode-perf-deep-dive.md)
-- `worktree-snapshots/tron-kvprobe-untracked-kvwait_probe.hpp` — canonical `claude-agentsrv:/home/jhan/workspace/tron-kvprobe/h/system/kvwait_probe.hpp` (untracked) — probe header. (same handoff)
-- `worktree-snapshots/tron-kvprobe-untracked-trace_gate.hpp` — canonical `claude-agentsrv:/home/jhan/workspace/tron-kvprobe/h/common/trace_gate.hpp` (untracked) — perfetto window gate header. (same handoff)
+- `worktree-snapshots/tron-kvprobe-tracked-12804a812.diff` — canonical `claude-agentsrv:/home/jhan/workspace/ai-runs/tron-kvprobe` (git diff vs trunk 12804a812) — TSC-probe patch series, tags P1-P6/7000-7900. (handoff: claude_20260810-20260813_runtron-decode-perf-deep-dive.md)
+- `worktree-snapshots/tron-kvprobe-untracked-kvwait_probe.hpp` — canonical `claude-agentsrv:/home/jhan/workspace/ai-runs/tron-kvprobe/h/system/kvwait_probe.hpp` (untracked) — probe header. (same handoff)
+- `worktree-snapshots/tron-kvprobe-untracked-trace_gate.hpp` — canonical `claude-agentsrv:/home/jhan/workspace/ai-runs/tron-kvprobe/h/common/trace_gate.hpp` (untracked) — perfetto window gate header. (same handoff)
 - `worktree-snapshots/pdjn-wt-tracked-12804a812.diff` — canonical `claude-agentsrv:/scratch/jhan/pdjn-wt` (git diff vs trunk 12804a812) — txlat probes, seq marker, data-ready instant, DMA alloc logger, model overlay. (handoff: claude_20260809-20260811_fix-runtron-decode-perf-fluctuation.md)
 
 Deviation note: the worktrees themselves are directories; per the 2026-08-19
@@ -265,6 +265,6 @@ not directory copies. Untracked build logs excluded.
   and tp2, making the model unusable for the fluctuation study.
   (handoff: claude_20260809_resume-tron-build-and-campaigns.md)
 - `workspace/alpha-build/models.local.yaml` — canonical
-  `claude-agentsrv:/home/jhan/workspace/alpha-build-scaffold/models.local.yaml`
+  `claude-agentsrv:/home/jhan/workspace/ai-runs/alpha-build-scaffold/models.local.yaml`
   — gated-model overlay used by the container tron build.
   (handoff: claude_20260809_resume-tron-build-and-campaigns.md)

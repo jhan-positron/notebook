@@ -50,7 +50,9 @@ campaign_guard_acquire() {
     unset CAMPAIGN_LOCK_FD
     return 1
   fi
-  if pgrep -x runtron >/dev/null; then
+  # -x matches the whole comm as an ERE: also catch the renamed campaign
+  # binaries (runtron.canon, runtron.mirror, runtron.inc1b, ...).
+  if pgrep -x 'runtron(\.[a-z0-9]+)?' >/dev/null; then
     echo "GUARD: runtron already running"
     exec {CAMPAIGN_LOCK_FD}>&-
     unset CAMPAIGN_LOCK_FD

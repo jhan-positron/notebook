@@ -12,3 +12,22 @@ AMX kernel run outside Tron (tools/src/unit_bench.cpp).
   narrative.json.
 - tools/: run-perf-model.sh, run-book-sens.sh, launch.sh, parse.py, model.py, spans.py,
   gen_report.py and the C/C++ sources (unit_bench.cpp, memrate.c, latency.c, insn_loops.cpp).
+
+## Canonical paths for refresh (resolved 2026-09-04)
+
+The canonical workspace is `claude-agentsrv:/home/jhan/workspace/intel-AMX`,
+on the shared home filesystem. The following mappings were checked against
+the available files:
+
+| Repo directory | Canonical directory |
+|---|---|
+| `pages/` | `claude-agentsrv:/home/jhan/workspace/intel-AMX/perf-model/` |
+| `results/` | `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/perf-model-20260903/` |
+| `tools/` | `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/perf-model-20260903/` |
+
+The mirrored subset is fixed by the files already present here; new bulk
+results are not automatically added. Compressed captures are compared with
+their uncompressed canonical content when needed.
+
+- [Rendered report](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/perf-model-20260903/pages/index.html)
+- [Rendered plan](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/perf-model-20260903/pages/action-plan.html)

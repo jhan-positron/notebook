@@ -19,6 +19,7 @@ from pathlib import Path
 RES = Path.home() / "workspace/intel-AMX/exec/results"
 NEW = RES / "perf-round-20260830/perf-round.txt"
 REF = RES / "perf-round-20260825/perf-round.txt"
+EXT = RES / "perf-round-20260830/perf-round-ext.txt"  # reps 4-9 of the two 8u gpt-oss cells
 OUT = RES / "perf-round-20260830/perf-round.html"
 MD = RES / "perf-round-20260830/pr-summary.md"
 
@@ -40,23 +41,30 @@ INELIGIBLE = [  # arms canon/mirror/disable, baseline = disable
 ]
 
 
+INCOMPLETE = []  # (key, rep, decode lines seen, users expected)
+
 def parse_blocks(path):
     """{(label, ctx, users, arm): {'dec': [per-rep means], 'pre': [...], 'failed': n}}"""
     out = {}
     if not path.exists():
         return out
-    key = None; d = []; p = []
+    key = None; d = []; p = []; rep = None
     def flush():
         if key is None: return
         cell = out.setdefault(key, {"dec": [], "pre": [], "failed": 0})
         if d: cell["dec"].append(statistics.fmean(d))
         if p: cell["pre"].append(statistics.fmean(p))
+        # every user prints one decode line; fewer means a record was lost
+        # (or a straggler was cut off) - surface it instead of silently
+        # averaging the survivors.
+        if d and len(d) != key[2]:
+            INCOMPLETE.append((key, rep, len(d), key[2]))
     for line in path.read_text().splitlines():
         m = re.match(r"### (.*)", line)
         if m:
             flush()
             hdr = dict(kv.split("=", 1) for kv in m.group(1).split() if "=" in kv)
-            key = None; d = []; p = []
+            key = None; d = []; p = []; rep = hdr.get("rep")
             if "model" in hdr and "arm" in hdr and hdr.get("rep") != "0":
                 key = (MODELS.get(hdr["model"], hdr["model"]),
                        int(hdr["ctx"]), int(hdr["users"]), hdr["arm"])
@@ -133,6 +141,8 @@ fails = sum(r[a]["failed"] for r in brows for a in ("canon", "mirror")) + \
 reps = sorted({r[a]["n"] for r in brows for a in ("canon", "mirror")} |
               {r[a]["n"] for r in irows for a in ("canon", "mirror", "disable")})
 print(f"\nfailed runs: {fails}; reps per cell/arm: {reps}")
+for key, rep, got, want in INCOMPLETE:
+    print(f"INCOMPLETE BLOCK: {key} rep={rep} has {got} of {want} decode lines")
 
 def spread(vals):
     return "" if len(vals) < 2 else f"{min(vals):.1f}-{max(vals):.1f}"
@@ -146,12 +156,15 @@ def dumbbell_svg(rows, metric, title, unit, arms):
     y = 44; parts = []
     colors = {"canon": "#2a78d6", "mirror": "#eb6834", "disable": "#52514e"}
     names = {"canon": "canonical", "mirror": "mirror-on", "disable": "kill switch"}
+    has_ref = any(r[a].get("ref_" + metric) is not None for r in rows for a in arms)
+    row_h = 44 if len(arms) == 3 else 34
     parts.append(f'<text x="12" y="18" font-size="13" font-weight="600" fill="#0b0b0b">{html.escape(title)}</text>')
     x = left
     for a in arms:
         parts.append(f'<circle cx="{x}" cy="30" r="5" fill="{colors[a]}"/><text x="{x+10}" y="34" font-size="11" fill="#52514e">{names[a]} (new)</text>')
         x += 130
-    parts.append(f'<circle cx="{x}" cy="30" r="5" fill="none" stroke="#898781" stroke-width="1.6"/><text x="{x+10}" y="34" font-size="11" fill="#52514e">hollow = Aug-25 reference</text>')
+    if has_ref:
+        parts.append(f'<circle cx="{x}" cy="30" r="5" fill="none" stroke="#898781" stroke-width="1.6"/><text x="{x+10}" y="34" font-size="11" fill="#52514e">hollow = Aug-25 reference</text>')
     for model, grp in groups.items():
         vals = [v for r in grp for a in arms
                 for v in (r[a][metric], r[a].get("ref_" + metric)) if v is not None]
@@ -174,9 +187,11 @@ def dumbbell_svg(rows, metric, title, unit, arms):
                 v = r[a][metric]
                 if v is not None:
                     parts.append(f'<circle cx="{sx(v):.1f}" cy="{y}" r="5" fill="{colors[a]}" stroke="#fcfcfb" stroke-width="1.5"/>')
-                    dy = (-9, 15, -9)[i] if len(arms) == 3 else (-9 if a == "canon" else 15)
+                    # 3-arm rows are taller so the third label sits below the
+                    # second without colliding with the next row's labels.
+                    dy = (-9, 15, 27)[i] if len(arms) == 3 else (-9 if a == "canon" else 15)
                     parts.append(f'<text x="{sx(v):.1f}" y="{y+dy}" font-size="10" fill="#0b0b0b" text-anchor="middle">{v:.1f}</text>')
-            y += 34
+            y += row_h
         parts.append(f'<text x="{left+plot_w}" y="{y-6}" font-size="9.5" fill="#898781" text-anchor="end">{unit}, axis from 0</text>')
         y += 10
     return f'<svg viewBox="0 0 {W} {y}" width="{W}" height="{y}" font-family="system-ui,sans-serif" role="img" aria-label="{html.escape(title)}">' + "".join(parts) + "</svg>"
@@ -190,6 +205,41 @@ for r in brows:
         fpct(pct(m["dec"], c["dec"])), f"{c['n']}/{m['n']}"]) + "</tr>")
 btable.append("</tbody></table>")
 
+# ---- gpt-oss-120b 8u extension: 9 matched reps (3 from the round + 6 extra,
+# arm order rotated per rep in the extension). Per-rep matched deltas cancel
+# the machine drift the pooled means cannot. ----
+ext = parse_blocks(EXT)
+ext_html = []
+ext_text = []
+for (model, ctx, users) in INELIGIBLE:
+    if users != 8: continue
+    series = {}
+    for arm in ("canon", "mirror", "disable"):
+        k = (model, ctx, users, arm)
+        series[arm] = (new.get(k, {"dec": []})["dec"] + ext.get(k, {"dec": []})["dec"])
+    n = min(len(v) for v in series.values())
+    if n == 0: continue
+    ext_text.append(f"{model} {users}u/{ctx//1024}K, {n} matched reps:")
+    rows_h = [f'<h3>{model} {users}u/{ctx//1024}K decode, {n} matched reps (tok/s, per-user average)</h3>',
+              '<table><thead><tr><th>arm</th>' + "".join(f"<th>rep {i+1}</th>" for i in range(n)) +
+              '<th>mean</th></tr></thead><tbody>']
+    for arm in ("disable", "canon", "mirror"):
+        v = series[arm][:n]
+        rows_h.append(f"<tr><td>{arm}</td>" + "".join(f"<td>{x:.2f}</td>" for x in v) +
+                      f"<td>{statistics.fmean(v):.2f}</td></tr>")
+    for arm in ("canon", "mirror"):
+        dl = [100.0 * (series[arm][i] - series["disable"][i]) / series["disable"][i] for i in range(n)]
+        rows_h.append(f"<tr><td>{arm} vs kill switch</td>" +
+                      "".join(f"<td>{d:+.1f}%</td>" for d in dl) +
+                      f"<td>{statistics.fmean(dl):+.1f}%</td></tr>")
+        ext_text.append(f"  {arm:7} vs kill switch per-rep: " +
+                        " ".join(f"{d:+5.1f}%" for d in dl) + f"  mean {statistics.fmean(dl):+.1f}%")
+    rows_h.append("</tbody></table>")
+    ext_html.append("".join(rows_h))
+if ext_text:
+    print("\ngpt-oss-120b 8u extension (per-rep matched deltas, drift-cancelling):")
+    print("\n".join(ext_text))
+
 itable = ['<table><thead><tr><th>cell</th><th>kill switch tok/s</th><th>canonical tok/s</th><th>delta</th><th>mirror tok/s</th><th>delta</th><th>reps</th></tr></thead><tbody>']
 for r in irows:
     d, c, m = r["disable"], r["canon"], r["mirror"]
@@ -197,6 +247,13 @@ for r in irows:
         r["cell"], fmt(d["dec"]), fmt(c["dec"]), fpct(pct(c["dec"], d["dec"])),
         fmt(m["dec"]), fpct(pct(m["dec"], d["dec"])), f"{d['n']}/{c['n']}/{m['n']}"]) + "</tr>")
 itable.append("</tbody></table>")
+
+inc_note = ""
+if INCOMPLETE:
+    items = "; ".join(f"{k[0]} {k[2]}u/{k[1]//1024}K arm={k[3]} rep={rep}: {got} of {want} decode lines"
+                      for k, rep, got, want in INCOMPLETE)
+    inc_note = ('<p class="cite">Incomplete blocks (a user\'s decode line is missing from the log; '
+                'the block mean uses the lines that are present): ' + html.escape(items) + '</p>')
 
 page = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>AMX perf round 2026-08-30</title>
 <style>
@@ -214,7 +271,7 @@ same cells from the Aug-25 round, so filled-vs-hollow of the same color is "afte
 recent commits vs before". gpt-oss-120b (AMX-ineligible geometry, 64 query heads /
 8 KV heads / head size 64) has no Aug-25 reference; its baseline is the within-round
 <b>kill switch</b> arm (canonical binary run with TRON_AMX_DISABLE=1).</p>
-<h2>AMX-boosted models: decode (tok/s, per-user average; aggregate for 8 users)</h2>
+<h2>AMX-boosted models: decode (tok/s, per-user average &mdash; an 8-user cell shows the per-user rate, not the 8-user total)</h2>
 <div class="svgwrap">{dumbbell_svg(brows, "dec", "Decode throughput: new vs Aug-25 reference", "tok/s", ["canon", "mirror"])}</div>
 <h2>AMX-boosted models: prefill (prompt tokens/s)</h2>
 <div class="svgwrap">{dumbbell_svg(brows, "pre", "Prefill throughput: new vs Aug-25 reference", "tok/s", ["canon", "mirror"])}</div>
@@ -224,6 +281,19 @@ recent commits vs before". gpt-oss-120b (AMX-ineligible geometry, 64 query heads
 {''.join(btable)}
 <h2>Numbers: gpt-oss-120b (decode)</h2>
 {''.join(itable)}
+<h2>gpt-oss-120b 8-user cells: 9-rep extension</h2>
+<p>The two 8-user decode cells were noisy in the 3-rep round (the kill-switch arm alone
+varied 34% peak to peak across reps at 2K context), so six extra reps ran the same night
+with the arm order rotated per rep (exec/p2-perf-round-20260830-ext.sh). The per-rep rows
+below compare arms within the same rep, which cancels the rep-to-rep machine drift.</p>
+{''.join(ext_html)}
+<p>Arena gating check on the same binaries (the "KV cache footprint" log line reports the
+K mirror arena, printed when the total changes by TRON_LOG_KV_GRANULARITY, default 1 GiB):
+gpt-oss-120b on the mirror binary logs <b>0.00 GB K mirror in 10 books</b>
+(diag-gptoss-mirror.txt); qwen on the same binary logs <b>0.11 GB K mirror per 0.22 GB DMA
+book</b> (kv_bytes/2, as designed). The K mirror arena is not allocated for the
+AMX-ineligible geometry.</p>
+{inc_note}
 <p class="cite">exec/results/perf-round-20260830/perf-round.txt; reference exec/results/perf-round-20260825/perf-round.txt</p>
 </body></html>"""
 OUT.parent.mkdir(parents=True, exist_ok=True)

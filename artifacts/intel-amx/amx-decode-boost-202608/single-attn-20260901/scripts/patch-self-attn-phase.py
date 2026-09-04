@@ -5,7 +5,7 @@ Idempotent: exits 0 with 'already patched' if namespace attn_phase exists.
 Usage: patch-self-attn-phase.py [path]   (default: the fence worktree file)."""
 import sys
 P = sys.argv[1] if len(sys.argv) > 1 else \
-    "/home/jhan/workspace/tron-fence-amx/h/tron/models/self_attention.hpp"
+    "/home/jhan/workspace/ai-runs/tron-fence-amx/h/tron/models/self_attention.hpp"
 s = open(P).read()
 if "namespace attn_phase" in s:
     print("already patched"); sys.exit(0)

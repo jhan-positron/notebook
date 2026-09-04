@@ -9,7 +9,7 @@ Words used here:
 - AMX path / dotter path: `apply_page_tok` with `did_amx == true` (AMX QK and PV kernels) / `did_amx == false` (AVX-512 dotter loop for QK and `page.scaled_v` for PV).
 - fence round 3: `exec/results/fence3-20260901/`, the uninstrumented reference numbers (`medians-7605.json`).
 
-All line numbers refer to the current files in `/home/jhan/workspace/tron-fence-amx` (branch jhan-amx-fence, head 245502cb88) and were read on 2026-09-01. No repository file was edited; the two patch scripts were dry-run on copies only.
+All line numbers refer to the current files in `/home/jhan/workspace/ai-runs/tron-fence-amx` (branch jhan-amx-fence, head 245502cb88) and were read on 2026-09-01. No repository file was edited; the two patch scripts were dry-run on copies only.
 
 ## 1. Phases and cost
 

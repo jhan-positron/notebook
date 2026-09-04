@@ -48,3 +48,23 @@ TSC base clock 2.7 GHz. Fence definitions: tron-perf-fluctuation project, stall-
   jhan-amx-fence commit 8fd1e7798d (probe gated on TRON_ATTN_PHASE=1). phases-*.json = per-cell
   medians, summary.json = per-unit split + speedups. Binaries built in tron-fence-amx/gen as
   runtron.samirror / runtron.sacanon (sha256 in single-attn.txt).
+
+## Canonical paths for refresh (resolved 2026-09-04)
+
+`WS` below is `claude-agentsrv:/home/jhan/workspace/intel-AMX`, on the shared
+home filesystem used by the delphi-3bda campaigns. These roots were resolved
+from the campaign scripts and checked against the existing copies:
+
+- Result directories in this registry map to `WS/exec/results/<directory>/`.
+- `extract.py` maps to `WS/exec/fence-20260831/extract.py`.
+- `single-attn-20260901/scripts/` maps to `WS/exec/single-attn-20260901/`, except
+  `patch-gen-stamps.py`, which maps to `WS/exec/fence-20260831/patch-gen-stamps.py`.
+- The `.bin.gz` files are compressed archival copies of corresponding `.bin`
+  records; compare decompressed content when an uncompressed source exists.
+
+**Canonical-missing alert, 2026-09-04:** 63 capture files are absent from the
+shared canonical result directories: 19 in `fence-20260831`, 13 in
+`fence2-20260901`, 19 in `fence3-20260901`, and 12 in `thp-20260901`.
+The repo archives were retained and may be the only remaining copies. The
+complete per-file paths are in `logs/codex-handoff-20260904-review.md`.
+No new raw capture files were added by this refresh.
