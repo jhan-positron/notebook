@@ -118,3 +118,149 @@ result trees stay on the canonical storage):
 - `exec/results/ci-models/mixtral-ab.txt` — canonical `WS/exec/results/ci-models/mixtral-ab.txt` — mixtral-8x7b kill-switch A/B results (QUEUE.md row 18). (handoff: claude_20260820-20260823_repeated-crashes-today.md)
 - `exec/results/perf-round-20260825/perf-round.{txt,html}` — canonical `WS/exec/results/perf-round-20260825/` — 48/48 perf-round summary after review-feedback commits. (handoff: claude_20260824-20260825_tron-amx-pr3879-review-suggestions.md)
 - `exec/results/slot1/fused-sweep-v2.txt` — canonical `WS/exec/results/slot1/fused-sweep-v2.txt` — fused-kernel sweep record (sole surviving benchmark record for that sweep). (handoff: claude_20260828-20260829_tron-pr3879-amx-k-mirror-comment.md)
+
+## 2026-09-04 preservation batch (claude-agentsrv handoff run)
+
+Registered by the 2026-09-04 SCOPE:auto handoff run on claude-agentsrv. Same
+rules as the earlier batches: canonical -> repo mirrors, edit the canonical
+file first. `WS` = `claude-agentsrv:/home/jhan/workspace/intel-AMX` (shared NFS
+home, not a git repository). Repo path -> canonical path.
+
+### PR #3879 pages (group A)
+
+- `pr3879/make-sense-amx-vs-avx.html` -> `WS/PR3879/make-sense-amx-vs-avx.html` — the AMX-vs-AVX decode-boost analysis page (Q1/Q2, seven campaigns, sections 1-7.7)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/make-sense-amx-vs-avx.html
+- `pr3879/make-sense-amx-vs-avx/bench-map-report.md` -> `WS/PR3879/make-sense-amx-vs-avx/bench-map-report.md`
+- `pr3879/make-sense-amx-vs-avx/draft.md` -> `WS/PR3879/make-sense-amx-vs-avx/draft.md`
+- `pr3879/make-sense-amx-vs-avx/figA.svg` -> `WS/PR3879/make-sense-amx-vs-avx/figA.svg`
+- `pr3879/make-sense-amx-vs-avx/figB.svg` -> `WS/PR3879/make-sense-amx-vs-avx/figB.svg`
+- `pr3879/make-sense-amx-vs-avx/figC.svg` -> `WS/PR3879/make-sense-amx-vs-avx/figC.svg`
+- `pr3879/make-sense-amx-vs-avx/figD.svg` -> `WS/PR3879/make-sense-amx-vs-avx/figD.svg`
+- `pr3879/make-sense-amx-vs-avx/figE.svg` -> `WS/PR3879/make-sense-amx-vs-avx/figE.svg`
+- `pr3879/make-sense-amx-vs-avx/figF.svg` -> `WS/PR3879/make-sense-amx-vs-avx/figF.svg`
+- `pr3879/make-sense-amx-vs-avx/figG-single-attn.svg` -> `WS/PR3879/make-sense-amx-vs-avx/figG-single-attn.svg`
+- `pr3879/make-sense-amx-vs-avx/figH-single-attn-phases.svg` -> `WS/PR3879/make-sense-amx-vs-avx/figH-single-attn-phases.svg`
+- `pr3879/make-sense-amx-vs-avx/review-brief.md` -> `WS/PR3879/make-sense-amx-vs-avx/review-brief.md`
+- `pr3879/make-sense-amx-vs-avx/sol-reply.md` -> `WS/PR3879/make-sense-amx-vs-avx/sol-reply.md`
+- `pr3879/make-sense-amx-vs-avx/sol-review-campaigns.md` -> `WS/PR3879/make-sense-amx-vs-avx/sol-review-campaigns.md`
+- `pr3879/f9b678e.html` -> `WS/PR3879/f9b678e.html` — line-by-line unpack of PR #3879 commit f9b678e5d0 (K mirror arena RAM visibility)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/f9b678e.html
+- `pr3879/f9b678e/README.md` -> `WS/PR3879/f9b678e/README.md`
+- `pr3879/jeremy_comments.html` -> `WS/PR3879/jeremy_comments.html` — verdicts, measurements and posted replies for Jeremy's two review comments
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/jeremy_comments.html
+- `pr3879/jeremy_comments/README.md` -> `WS/PR3879/jeremy_comments/README.md`
+- `pr3879/unpack-mirror-write-ok/fig3.svg` -> `WS/PR3879/unpack-mirror-write-ok/fig3.svg` — scope diagram added 2026-08-30 to the mirror_write_ok unpack page
+- `pr3879/response-Ben-breaking-up-PR.md` -> `WS/PR3879/response-Ben-breaking-up-PR.md` — response to Ben's request to split PR #3879 (not posted)
+- `pr3879/more-testing/test-plan.md` -> `WS/PR3879/more-testing/test-plan.md` — test plan of the more-testing round 1 (nightly CI tests against PR #3879 rinzler)
+  (handoffs: claude_20260828-20260901_tron-pr3879-amx-k-mirror-comment.md, claude_20260830-20260831_tron-pr-3879-commit-walkthrough.md, claude_20260904_pr3879-breakup-request-from-ben.md, claude_20260904_input-2-ai-more-testing-md-instructions.md, claude_20260901_single-attention-avx-vs-amx-boost-in-pr3879.md)
+
+### campaign, bench and harness scripts (group B)
+
+- `exec/fence-20260831/run-fallback.sh` -> `WS/exec/fence-20260831/run-fallback.sh`
+- `exec/fence-20260831/run-fence.sh` -> `WS/exec/fence-20260831/run-fence.sh`
+- `exec/fence-20260831/run-fence2.sh` -> `WS/exec/fence-20260831/run-fence2.sh`
+- `exec/fence-20260831/run-fence3.sh` -> `WS/exec/fence-20260831/run-fence3.sh`
+- `exec/fence-20260831/run-thp.sh` -> `WS/exec/fence-20260831/run-thp.sh`
+- `exec/fence-20260831/extract.py` -> `WS/exec/fence-20260831/extract.py`
+- `exec/fence-20260831/extract7605.py` -> `WS/exec/fence-20260831/extract7605.py`
+- `exec/fence-20260831/patch-gen-stamps.py` -> `WS/exec/fence-20260831/patch-gen-stamps.py`
+- `exec/perfstat-20260831/chain-ps3-fence3.sh` -> `WS/exec/perfstat-20260831/chain-ps3-fence3.sh`
+- `exec/perfstat-20260831/run-perfstat.sh` -> `WS/exec/perfstat-20260831/run-perfstat.sh`
+- `exec/perfstat-20260831/run-perfstat2.sh` -> `WS/exec/perfstat-20260831/run-perfstat2.sh`
+- `exec/perfstat-20260831/run-perfstat3.sh` -> `WS/exec/perfstat-20260831/run-perfstat3.sh`
+- `exec/ctxfill-20260901/run-ctxfill.sh` -> `WS/exec/ctxfill-20260901/run-ctxfill.sh`
+- `exec/ctxfill-20260901/run-ctxfill2.sh` -> `WS/exec/ctxfill-20260901/run-ctxfill2.sh`
+- `exec/more-testing-r1/run_cell.sh` -> `WS/exec/more-testing-r1/run_cell.sh`
+- `exec/more-testing-r1/rz.sh` -> `WS/exec/more-testing-r1/rz.sh`
+- `exec/more-testing-r1/smoke.sh` -> `WS/exec/more-testing-r1/smoke.sh`
+- `exec/more-testing-r1/soak_cell.sh` -> `WS/exec/more-testing-r1/soak_cell.sh`
+- `exec/more-testing-r1/ci_reference.py` -> `WS/exec/more-testing-r1/ci_reference.py`
+- `exec/more-testing-r1/gen_status.py` -> `WS/exec/more-testing-r1/gen_status.py`
+- `exec/more-testing-r1/mmlu_diff.py` -> `WS/exec/more-testing-r1/mmlu_diff.py`
+- `exec/more-testing-r1/st_perf.py` -> `WS/exec/more-testing-r1/st_perf.py`
+- `exec/dd/dd-campaign-v3.sh` -> `WS/exec/dd/dd-campaign-v3.sh`
+- `exec/dd/dd-campaign.sh` -> `WS/exec/dd/dd-campaign.sh`
+- `exec/dd/dd-inc1b-check.sh` -> `WS/exec/dd/dd-inc1b-check.sh`
+- `exec/dd/dd-phase3-hf.sh` -> `WS/exec/dd/dd-phase3-hf.sh`
+- `exec/dd/dd_bin_score.py` -> `WS/exec/dd/dd_bin_score.py`
+- `exec/dd/dd_first_divergence.py` -> `WS/exec/dd/dd_first_divergence.py`
+- `exec/dd/dd_intermediates.py` -> `WS/exec/dd/dd_intermediates.py`
+- `exec/dd/dd_logits_step.py` -> `WS/exec/dd/dd_logits_step.py`
+- `exec/dd/dd_report.py` -> `WS/exec/dd/dd_report.py`
+- `exec/dd/dd_tokens.py` -> `WS/exec/dd/dd_tokens.py`
+- `exec/more-testing-r1/talos_stub/talos.py` -> `WS/exec/more-testing-r1/talos_stub/talos.py`
+- `exec/jeremy-measure-20260831.sh` -> `WS/exec/jeremy-measure-20260831.sh`
+- `exec/bench_qpack.cpp` -> `WS/exec/bench_qpack.cpp`
+- `exec/bench_qk_align.cpp` -> `WS/exec/bench_qk_align.cpp`
+- `exec/p2-perf-round-20260830-ext.sh` -> `WS/exec/p2-perf-round-20260830-ext.sh`
+- `exec/more-testing-r1.sh` -> `WS/exec/more-testing-r1.sh`
+- `exec/more-testing-r1-build.sh` -> `WS/exec/more-testing-r1-build.sh`
+- `exec/more-testing-r1-extra.sh` -> `WS/exec/more-testing-r1-extra.sh`
+- `exec/more-testing-r1-extra2.sh` -> `WS/exec/more-testing-r1-extra2.sh`
+  (handoffs: claude_20260828-20260901_tron-pr3879-amx-k-mirror-comment.md, claude_20260830-20260831_tron-pr-3879-commit-walkthrough.md, claude_20260830_amx-perf-regression-tests-for-pr3879.md, claude_20260904_input-2-ai-more-testing-md-instructions.md, claude_20260829-20260830_definitive-decode-md-brainstorm.md)
+
+### key result texts and reports (group C; bulk logs, JSON layer dumps and record files stay at the canonical path)
+
+- `exec/results/perf-round-20260830/diag-gptoss-mirror.txt` -> `WS/exec/results/perf-round-20260830/diag-gptoss-mirror.txt`
+- `exec/results/perf-round-20260830/diag-qwen-mirror.txt` -> `WS/exec/results/perf-round-20260830/diag-qwen-mirror.txt`
+- `exec/results/perf-round-20260830/perf-round-ext.txt` -> `WS/exec/results/perf-round-20260830/perf-round-ext.txt`
+- `exec/results/perf-round-20260830/perf-round.html` -> `WS/exec/results/perf-round-20260830/perf-round.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/results/perf-round-20260830/perf-round.html
+- `exec/results/perf-round-20260830/perf-round.txt` -> `WS/exec/results/perf-round-20260830/perf-round.txt`
+- `exec/results/perf-round-20260830/pr-summary.md` -> `WS/exec/results/perf-round-20260830/pr-summary.md`
+- `exec/results/jeremy-measure-20260831/bench-qk-align.txt` -> `WS/exec/results/jeremy-measure-20260831/bench-qk-align.txt`
+- `exec/results/jeremy-measure-20260831/bench-qpack.txt` -> `WS/exec/results/jeremy-measure-20260831/bench-qpack.txt`
+- `exec/results/jeremy-measure-20260831/counter-qwen-ctx2048-u1.txt` -> `WS/exec/results/jeremy-measure-20260831/counter-qwen-ctx2048-u1.txt`
+- `exec/results/jeremy-measure-20260831/counter-qwen-ctx2048-u8.txt` -> `WS/exec/results/jeremy-measure-20260831/counter-qwen-ctx2048-u8.txt`
+- `exec/results/jeremy-measure-20260831/counter-qwen-ctx32-u1-OFFGRID.txt` -> `WS/exec/results/jeremy-measure-20260831/counter-qwen-ctx32-u1-OFFGRID.txt`
+- `exec/results/jeremy-measure-20260831/counter-qwen-ctx8192-u8.txt` -> `WS/exec/results/jeremy-measure-20260831/counter-qwen-ctx8192-u8.txt`
+- `exec/results/jeremy-measure-20260831/counter-summary.txt` -> `WS/exec/results/jeremy-measure-20260831/counter-summary.txt`
+- `exec/results/jeremy-measure-20260831/tests-summary.txt` -> `WS/exec/results/jeremy-measure-20260831/tests-summary.txt`
+- `exec/results/jeremy-measure-20260831/tests-t_amx_arena_leak.txt` -> `WS/exec/results/jeremy-measure-20260831/tests-t_amx_arena_leak.txt`
+- `exec/results/jeremy-measure-20260831/tests-t_amx_dispatch_dtype.txt` -> `WS/exec/results/jeremy-measure-20260831/tests-t_amx_dispatch_dtype.txt`
+- `exec/results/jeremy-measure-20260831/tests-t_amx_mirror.txt` -> `WS/exec/results/jeremy-measure-20260831/tests-t_amx_mirror.txt`
+- `exec/results/jeremy-measure-20260831/tests-t_amx_numerics.txt` -> `WS/exec/results/jeremy-measure-20260831/tests-t_amx_numerics.txt`
+- `exec/results/jeremy-measure-20260831/tests-t_llama_unit.txt` -> `WS/exec/results/jeremy-measure-20260831/tests-t_llama_unit.txt`
+- `exec/results/dd/build-record.txt` -> `WS/exec/results/dd/build-record.txt`
+- `exec/results/dd/campaign.txt` -> `WS/exec/results/dd/campaign.txt`
+- `exec/results/dd/verdict.html` -> `WS/exec/results/dd/verdict.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/results/dd/verdict.html
+- `exec/results/dd/verdict-technical.html` -> `WS/exec/results/dd/verdict-technical.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/results/dd/verdict-technical.html
+- `exec/results/dd/codex-response.html` -> `WS/exec/results/dd/codex-response.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/results/dd/codex-response.html
+  (handoffs: claude_20260830_amx-perf-regression-tests-for-pr3879.md, claude_20260830-20260831_tron-pr-3879-commit-walkthrough.md, claude_20260829-20260830_definitive-decode-md-brainstorm.md)
+
+### one-page primer generators (group D)
+
+- `perf-model-20260903/primer/README.md` -> `WS/perf-model/primer/README.md`
+- `perf-model-20260903/primer/a4sim.py` -> `WS/perf-model/primer/a4sim.py`
+- `perf-model-20260903/primer/fig-setup.py` -> `WS/perf-model/primer/fig-setup.py`
+- `perf-model-20260903/primer/fig-setup.svg` -> `WS/perf-model/primer/fig-setup.svg`
+- `perf-model-20260903/primer/fig.py` -> `WS/perf-model/primer/fig.py`
+- `perf-model-20260903/primer/fig.svg` -> `WS/perf-model/primer/fig.svg`
+- `perf-model-20260903/primer/final.md` -> `WS/perf-model/primer/final.md`
+  (handoffs: claude_20260903_notion-generate-primer-doc.md)
+
+### definitive-decode pages (group E)
+
+- `definitive-decode/index.html` -> `WS/definitive-decode/index.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/definitive-decode/index.html
+- `definitive-decode/debug-plan.html` -> `WS/definitive-decode/debug-plan.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/definitive-decode/debug-plan.html
+- `definitive-decode/token30-results.html` -> `WS/definitive-decode/token30-results.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/definitive-decode/token30-results.html
+- `definitive-decode/HANDOFF.md` -> `WS/definitive-decode/HANDOFF.md`
+  (handoffs: claude_20260829-20260830_definitive-decode-md-brainstorm.md)
+
+### user-written instruction docs (group F)
+
+- `input-2-ai/code-review.md` -> `WS/input-2-ai/code-review.md`
+- `input-2-ai/definitive_decode.md` -> `WS/input-2-ai/definitive_decode.md`
+- `input-2-ai/generate-design.md` -> `WS/input-2-ai/generate-design.md`
+- `input-2-ai/make-sense-amx-vs-avx.md` -> `WS/input-2-ai/make-sense-amx-vs-avx.md`
+- `input-2-ai/more-testing.md` -> `WS/input-2-ai/more-testing.md`
+- `input-2-ai/perf-model.md` -> `WS/input-2-ai/perf-model.md`
+- `input-2-ai/rampup.md` -> `WS/input-2-ai/rampup.md`
+- `input-2-ai/router-amx.md` -> `WS/input-2-ai/router-amx.md`
+  (handoffs: claude_20260828-20260901_tron-pr3879-amx-k-mirror-comment.md, claude_20260902-20260903_perf-model-md-instructions.md, claude_20260904_input-2-ai-more-testing-md-instructions.md, claude_20260829-20260830_definitive-decode-md-brainstorm.md, claude_20260823-20260824_router-amx-md-instructions.md, claude_20260816-20260820_list-available-models-with-pal.md)
