@@ -83,6 +83,14 @@ of spacing around the `/`).
   - GRANULARITY as a whole is ignored when SCOPE is `this session only`.
 - PRESERVE_ARTIFACTS: auto  # auto = maintain artifacts/ mirrors (Step 4b); off = skip
 - LOCAL_CLONE: auto         # auto = reuse an existing local clone if found; else clone
+- EXCLUDE_PROJECTS (added 2026-09-04):
+  - `~/self/ai` (Linux project folder `-home-jhan-self-ai`)
+  Sessions whose cwd is at or under an excluded path are personal/meta and
+  are OUT of scope: `SCOPE: auto` neither creates nor updates handoffs for
+  them and does not list them as proposed skips. Handoffs written for such
+  sessions before the exclusion was added are left as-is (not deleted, not
+  refreshed); mention them in one line of the run report as "excluded
+  project". An explicit SCOPE listing overrides the exclusion for that item.
 
 ## Terminology: project vs session
 - A **project** is the working-directory grouping (Windows app: the small
