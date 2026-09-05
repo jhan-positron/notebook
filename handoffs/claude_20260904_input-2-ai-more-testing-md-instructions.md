@@ -113,15 +113,15 @@ existed at handoff time (Insufficient data for perf-per-watt).
 ## Artifacts
 
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/more-testing/test-plan.md
-  — the plan (words used, cells, arms, phases, additions).
+  — the plan (words used, cells, arms, phases, additions). (preserved: artifacts/intel-amx/pr3879/more-testing/test-plan.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/more-testing/round-1/status.md
   — the status report, regenerated after every cell by `gen_status.py`.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/more-testing-r1/ —
   rz.sh, run_cell.sh, soak_cell.sh, smoke.sh, st_perf.py, gen_status.py,
-  mmlu_diff.py, ci_reference.py, talos_stub/talos.py.
+  mmlu_diff.py, ci_reference.py, talos_stub/talos.py. (preserved: artifacts/intel-amx/exec/more-testing-r1/)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/more-testing-r1.sh,
   more-testing-r1-build.sh, more-testing-r1-extra.sh, more-testing-r1-extra2.sh
-  — campaign, build and queued-extra scripts.
+  — campaign, build and queued-extra scripts. (preserved: artifacts/intel-amx/exec/more-testing-r1.sh and the three sibling scripts)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/more-testing-r1/
   — per-cell directories (functional.xml, perf.json, mmlu.log,
   eval_results/, rinzler.log, meta.json), soak/, smoke/,
@@ -129,6 +129,8 @@ existed at handoff time (Insufficient data for perf-per-watt).
 - delphi-3bda:/var/tmp/jhan/st-venv — the systems_test virtual environment;
   delphi-3bda:~/workspace/tron-amx/gen/rinzler.canon and rinzler.mirror —
   the built arms.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/input-2-ai/more-testing.md —
+  the user's brief (preserved: artifacts/intel-amx/input-2-ai/more-testing.md)
 - Memory: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/more-testing-round1.md.
 
 ## Current state (as of 2026-09-04 15:10 Pacific)

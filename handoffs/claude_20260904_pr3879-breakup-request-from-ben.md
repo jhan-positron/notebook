@@ -76,6 +76,7 @@ final tree.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/response-Ben-breaking-up-PR.md
   — the response (12 sections; section 10 lists the decisions only the user
   can make; section 12 holds a draft Slack reply with a placeholder date).
+  (preserved: artifacts/intel-amx/pr3879/response-Ben-breaking-up-PR.md)
 - Memory: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ben-split-request-pr3879.md.
 
 ## Current state

@@ -114,17 +114,18 @@ and names the 5-line fallback if a future shape changes the arithmetic.
 ## Artifacts
 
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/f9b678e.html and
-  PR3879/f9b678e/ (README.md, facts.json, verdicts.json).
+  PR3879/f9b678e/ (README.md, facts.json, verdicts.json). (preserved: artifacts/intel-amx/pr3879/f9b678e.html, pr3879/f9b678e/README.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/jeremy_comments.html
   and PR3879/jeremy_comments/ (README.md, comment-verification.json,
-  page-verdicts.json).
+  page-verdicts.json). (preserved: artifacts/intel-amx/pr3879/jeremy_comments.html, pr3879/jeremy_comments/README.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/triage.json — two
   new entries (preserved: artifacts/intel-amx/pr3879/triage.json).
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/jeremy-measure-20260831.sh,
   exec/bench_qpack.cpp, exec/bench_qk_align.cpp — campaign and bench sources.
+  (preserved: artifacts/intel-amx/exec/jeremy-measure-20260831.sh, exec/bench_qpack.cpp, exec/bench_qk_align.cpp)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/jeremy-measure-20260831/
   — test logs, bench outputs, counter cell outputs (including the off-grid
-  prompt-32 counter log later cited by other sessions).
+  prompt-32 counter log later cited by other sessions). (preserved: artifacts/intel-amx/exec/results/jeremy-measure-20260831/)
 - tron `jhan-amx-p0`: commit `60d66d9c04` ("self_attention: give the Q pack
   buffer the 64B alignment its contract requires"), pushed; PR head since.
 - tron `jhan-dd-debug` (worktree now at

@@ -140,18 +140,19 @@ admissible perturbation flips.
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/definitive-decode/index.html — brainstorm page (artifact https://claude.ai/code/artifact/56c8e5b1-620c-448f-8a50-0e04d3083b17)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/definitive-decode/debug-plan.html — plan v2 (artifact https://claude.ai/code/artifact/848c1fba-7f33-4a1e-8524-6178a11926d8)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/definitive-decode/token30-results.html — results page (artifact https://claude.ai/code/artifact/5030e539-2ce3-406a-8f81-5e757b0b3e01)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/definitive-decode/HANDOFF.md — cold-start handoff for a follow-on agent (fresh-agent verified)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/dd/ — scripts: dd_tokens.py, dd_intermediates.py, dd_logits_step.py, dd_first_divergence.py, dd_bin_score.py, dd_report.py, dd-campaign.sh, dd-campaign-v3.sh (the corrected campaign), dd-phase3-hf.sh, dd-inc1b-check.sh
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/dd/ — campaign results, build-record.txt, campaign.txt, verdict.html, verdict-technical.html, codex-response.html, inc1b/
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/definitive-decode/index.html — brainstorm page (artifact https://claude.ai/code/artifact/56c8e5b1-620c-448f-8a50-0e04d3083b17) (preserved: artifacts/intel-amx/definitive-decode/index.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/definitive-decode/debug-plan.html — plan v2 (artifact https://claude.ai/code/artifact/848c1fba-7f33-4a1e-8524-6178a11926d8) (preserved: artifacts/intel-amx/definitive-decode/debug-plan.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/definitive-decode/token30-results.html — results page (artifact https://claude.ai/code/artifact/5030e539-2ce3-406a-8f81-5e757b0b3e01) (preserved: artifacts/intel-amx/definitive-decode/token30-results.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/definitive-decode/HANDOFF.md — cold-start handoff for a follow-on agent (fresh-agent verified) (preserved: artifacts/intel-amx/definitive-decode/HANDOFF.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/dd/ — scripts: dd_tokens.py, dd_intermediates.py, dd_logits_step.py, dd_first_divergence.py, dd_bin_score.py, dd_report.py, dd-campaign.sh, dd-campaign-v3.sh (the corrected campaign), dd-phase3-hf.sh, dd-inc1b-check.sh (preserved: artifacts/intel-amx/exec/dd/)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/dd/ — campaign results, build-record.txt, campaign.txt, verdict.html, verdict-technical.html, codex-response.html, inc1b/ (preserved: artifacts/intel-amx/exec/results/dd/, the five text and html files only)
 - claude-agentsrv:/home/jhan/workspace/tron-dd — git worktree, branch jhan-dd-debug, commits bd68d5cb50 and 2f268298e7, not pushed (jhan-amx-p0 untouched)
 - delphi-3bda:~/workspace/tron-dd/gen/ — binaries runtron.canon (sha256 prefix 043d7bb5), runtron.mirror (d56f459e), runtron.trunc (cc99ff5b)
 - delphi-3bda:/var/tmp/jhan/dd/ — 69 GB raw intermediates logs (deletable once no longer wanted)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ — runtron-determinism-recipe.md, token30-campaign.md, debug-code-new-branch.md, plain-english-default.md
 - claude-agentsrv:/home/jhan/.claude/CLAUDE.md — rewritten `# English` section (user approved)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/CLAUDE.md — new project term-definition list
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/input-2-ai/definitive_decode.md — the user's proposal (preserved: artifacts/intel-amx/input-2-ai/definitive_decode.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/index.html — edited to link the new page
 
 ## Current state

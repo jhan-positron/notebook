@@ -81,13 +81,13 @@ protocol, which has no power step).
 
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p2-perf-round-20260830.sh
   and exec/p2-perf-round-20260830-ext.sh — campaign scripts (preserved:
-  artifacts/intel-amx/exec/p2-perf-round-20260830.sh; the ext script is not
-  yet mirrored).
+  artifacts/intel-amx/exec/p2-perf-round-20260830.sh and
+  artifacts/intel-amx/exec/p2-perf-round-20260830-ext.sh).
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/perf-round-20260830-report.py
   — report generator (preserved: artifacts/intel-amx/exec/perf-round-20260830-report.py).
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/perf-round-20260830/
   — perf-round.txt (raw cell lines), perf-round.html (report with charts),
-  pr-summary.md, extension results.
+  pr-summary.md, extension results. (preserved: artifacts/intel-amx/exec/results/perf-round-20260830/, text and html)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/lib-guard.sh — guard
   fix for renamed binaries (preserved: artifacts/intel-amx/exec/lib-guard.sh).
 - PR comment: https://github.com/positron-ai/tron/pull/3879#issuecomment-5471901175

@@ -364,10 +364,11 @@ perf-per-watt reading).
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/make-sense-amx-vs-avx.html
   — the analysis page (sections 1-7.7); published at
   https://claude.ai/code/artifact/db6b18c8-0696-417a-ad22-21efa86544b7
+  (preserved: artifacts/intel-amx/pr3879/make-sense-amx-vs-avx.html)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/make-sense-amx-vs-avx/
   — draft.md, sol-reply.md, review-brief.md, sol-review-campaigns.md,
   bench-map-report.md, figA.svg to figH-single-attn-phases.svg, and
-  backup copies of the page.
+  backup copies of the page. (preserved: artifacts/intel-amx/pr3879/make-sense-amx-vs-avx/, svg and md files)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/unpack-mirror-write-ok.html
   (2026-08-30 Q&A and scope diagram added; `unpack-mirror-write-ok/fig3.svg`)
   — https://claude.ai/code/artifact/e5c4ae20-249d-4040-a519-c94daeba4807
@@ -378,12 +379,12 @@ perf-per-watt reading).
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/fence-20260831/
   — run-fence.sh, run-fence2.sh, run-fence3.sh, run-thp.sh, run-fallback.sh,
   patch-gen-stamps.py (stages 7601, 7603, 7604/7605, and the peer's
-  7606-7627), extract.py, extract7605.py.
+  7606-7627), extract.py, extract7605.py. (preserved: artifacts/intel-amx/exec/fence-20260831/)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/perfstat-20260831/
   — run-perfstat.sh (round 1), run-perfstat2.sh, run-perfstat3.sh,
-  chain-ps3-fence3.sh.
+  chain-ps3-fence3.sh. (preserved: artifacts/intel-amx/exec/perfstat-20260831/)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/ctxfill-20260901/
-  — run-ctxfill.sh (Sol-reviewed v2), run-ctxfill2.sh.
+  — run-ctxfill.sh (Sol-reviewed v2), run-ctxfill2.sh. (preserved: artifacts/intel-amx/exec/ctxfill-20260901/)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/{fence-20260831,
   fence2-20260901, fence3-20260901, perfstat-20260831, perfstat2-20260831,
   perfstat3-20260901, ctxfill-20260901, ctxfill2-20260901, thp-20260901,
@@ -404,6 +405,8 @@ perf-per-watt reading).
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/
   — amx-mirror-aware-cache-unpack.md, mirror-write-ok-unpack.md,
   prompt-not-ctx.md, and the campaign notes (standing approvals, traps).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/input-2-ai/make-sense-amx-vs-avx.md
+  — the user's brief for the brainstorm (preserved: artifacts/intel-amx/input-2-ai/make-sense-amx-vs-avx.md)
 - The 2026-08-28 unpack evidence directories
   `PR3879/unpack-amx-mirror-aware-cache/` and `PR3879/unpack-mirror-write-ok/`
   (claims, verdicts, g++ probes).

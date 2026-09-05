@@ -114,7 +114,7 @@ account for 83-98% of it. Power: not captured (Insufficient data).
   — section 7.2.1, table of contents and numbering (artifact
   https://claude.ai/code/artifact/db6b18c8-0696-417a-ad22-21efa86544b7);
   figures `PR3879/make-sense-amx-vs-avx/figG-single-attn.svg` and
-  `figH-single-attn-phases.svg`.
+  `figH-single-attn-phases.svg`. (preserved: artifacts/intel-amx/pr3879/make-sense-amx-vs-avx.html and pr3879/make-sense-amx-vs-avx/)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/single-attn-20260901/
   — run-single-attn.sh, launch-after-peer.sh, patch-self-attn-phase.py,
   extract-sa.py, instr-design-report.md (preserved:

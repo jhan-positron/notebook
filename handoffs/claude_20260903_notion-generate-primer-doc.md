@@ -79,7 +79,7 @@ with a figure; then revise the figure and text as the user edited the page.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/perf-model/primer/ —
   fig.py (values figure), fig-setup.py (values-free setup figure), their
   .svg/.png outputs, final.md (page source as first published), a4sim.py
-  (one-page fit estimate), README.md.
+  (one-page fit estimate), README.md. (preserved: artifacts/intel-amx/perf-model-20260903/primer/, py, svg and md files)
 - Memory: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/primer-one-page.md.
 
 ## Current state

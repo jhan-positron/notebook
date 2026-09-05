@@ -117,6 +117,8 @@ non-attention main-thread time as 62% FPGA waits, 22% launch bookkeeping,
   — campaign.log, m0-m8 raw files, medians.json, model.json, m8-spans.json,
   narrative.json, the Perfetto trace (preserved: artifacts/intel-amx/perf-model-20260903/results/,
   notebook commit `35b182c`).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/input-2-ai/perf-model.md — the
+  user's brief (preserved: artifacts/intel-amx/input-2-ai/perf-model.md)
 - Memory: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/perf-model-project.md.
 
 ## Current state
