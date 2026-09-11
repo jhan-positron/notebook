@@ -360,3 +360,49 @@ home, not a git repository). Repo path -> canonical path. Mirrors of
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/reviews/range_hint.html
 - `pr3879/PR1/andoria-AMD-machine-test.md` -> `WS/PR3879/new-PRs/PR1/andoria-AMD-machine-test.md`
   (handoffs: claude_20260907_pr-4267-page-share-counters-review.md, claude_20260908_try-apply-dense-amx-page-walkthrough-diagrams.md, claude_20260909_tron-pr-4267-review-comment.md, claude_20260909_fuse-integration-issue-for-pr-4267.md, claude_20260909_wade-review-comment-on-tron-pr-4265.md, claude_20260910_amx-qpack-vs-attn-accum-in-tron-pr-3879.md, claude_20260910_range-hint-handling-in-tron-pr-3879.md, claude_20260910_pr-3879-open-comment-responses.md, claude_20260910_pr3879-amx-review-findings-response.md, claude_20260911_andoria-09-vs-andoria-06-idle-status.md)
+
+### campaign and tool scripts (group C)
+
+- `exec/people-check.sh` -> `WS/exec/people-check.sh`
+- `exec/split-verify3.sh` -> `WS/exec/split-verify3.sh`
+- `exec/syn-check.sh` -> `WS/exec/syn-check.sh`
+- `exec/gptoss120b-pr1-half.sh` -> `WS/exec/gptoss120b-pr1-half.sh`
+- `exec/wade-exp-20260909.sh` -> `WS/exec/wade-exp-20260909.sh`
+- `exec/wade-exp-inner-20260909.sh` -> `WS/exec/wade-exp-inner-20260909.sh`
+- `exec/sunday-killer-20260906.sh` -> `WS/exec/sunday-killer-20260906.sh`
+- `exec/morning-launch-20260907.sh` -> `WS/exec/morning-launch-20260907.sh`
+- `exec/split-relaunch.sh` -> `WS/exec/split-relaunch.sh`
+- `exec/split-relaunch3.sh` -> `WS/exec/split-relaunch3.sh`
+- `exec/split-relaunch3b.sh` -> `WS/exec/split-relaunch3b.sh`
+- `exec/split-relaunch3c.sh` -> `WS/exec/split-relaunch3c.sh`
+- `exec/split-relaunch3d.sh` -> `WS/exec/split-relaunch3d.sh`
+- `exec/split-relaunch3e.sh` -> `WS/exec/split-relaunch3e.sh`
+- `exec/split-tools/make_trees.py` -> `WS/exec/split-tools/make_trees.py`
+- `exec/split-tools/subtract.py` -> `WS/exec/split-tools/subtract.py`
+- `exec/split-tools/threadmap_lines.sh` -> `WS/exec/split-tools/threadmap_lines.sh`
+- `exec/split-tools/chain_results.sh` -> `WS/exec/split-tools/chain_results.sh`
+- `exec/split-tools/make_topical.sh` -> `WS/exec/split-tools/make_topical.sh`
+- `exec/g1-20260908/launch.sh` -> `WS/exec/g1-20260908/launch.sh`
+- `exec/g1-20260908/g1-campaign.sh` -> `WS/exec/g1-20260908/g1-campaign.sh`
+- `exec/g1-20260908/rz.sh` -> `WS/exec/g1-20260908/rz.sh`
+- `exec/g1-20260908/g1-summary.py` -> `WS/exec/g1-20260908/g1-summary.py`
+- `exec/g1-20260908/g3-lite.sh` -> `WS/exec/g1-20260908/g3-lite.sh`
+- `exec/g1-20260908/g3-lite-waiter.sh` -> `WS/exec/g1-20260908/g3-lite-waiter.sh`
+- `exec/p0perf-20260911/campaign.sh` -> `WS/exec/p0perf-20260911/campaign.sh`
+- `exec/p0perf-20260911/rz.sh` -> `WS/exec/p0perf-20260911/rz.sh`
+- `exec/p0perf-20260911/launch.sh` -> `WS/exec/p0perf-20260911/launch.sh`
+- `exec/p0perf-20260911/summarize.py` -> `WS/exec/p0perf-20260911/summarize.py`
+- `exec/p0perf-20260911/gen_report.py` -> `WS/exec/p0perf-20260911/gen_report.py`
+- `exec/amd-amx-20260911/amxprobe.c` -> `WS/exec/amd-amx-20260911/amxprobe.c`
+- `exec/amd-amx-20260911/run-andoria06.sh` -> `WS/exec/amd-amx-20260911/run-andoria06.sh`
+- `exec/pr1-rebase-20260911/build-test.sh` -> `WS/exec/pr1-rebase-20260911/build-test.sh`
+- `pr3879/PR0b/ub-guard/CLAIMS.md` -> `WS/PR3879/new-PRs/PR0b/ub-guard/CLAIMS.md`
+- `pr3879/PR0b/ub-guard/matrix.sh` -> `WS/PR3879/new-PRs/PR0b/ub-guard/matrix.sh`
+- `pr3879/PR0b/ub-guard/run5.sh` -> `WS/PR3879/new-PRs/PR0b/ub-guard/run5.sh`
+- `pr3879/PR0b/ub-guard/probe3.sh` -> `WS/PR3879/new-PRs/PR0b/ub-guard/probe3.sh`
+- `pr3879/PR0b/ub-guard/probe4.sh` -> `WS/PR3879/new-PRs/PR0b/ub-guard/probe4.sh`
+- `pr3879/PR0b/ub-guard/probe5.sh` -> `WS/PR3879/new-PRs/PR0b/ub-guard/probe5.sh`
+- `pr3879/PR0b/ub-guard/probe.cpp` -> `WS/PR3879/new-PRs/PR0b/ub-guard/probe.cpp`
+- `pr3879/PR0b/ub-guard/repro.cpp` -> `WS/PR3879/new-PRs/PR0b/ub-guard/repro.cpp`
+- `pr3879/PR0b/ub-guard/t_kv_footprint_memorder.cpp` -> `WS/PR3879/new-PRs/PR0b/ub-guard/t_kv_footprint_memorder.cpp`
+  (handoffs: claude_20260904_breakup-pr3829-md-instructions.md, claude_20260905_delphi-3bda-machine-contention-handoff-doc.md, claude_20260906-20260907_pr3879-sunday-handoff.md, claude_20260907-20260908_post-ci-test-scope-beyond-pr0b.md, claude_20260907-20260908_pr0b-vs-pr1-separation.md, claude_20260908-20260909_pr-3879-description-wording.md, claude_20260909_wade-review-comment-on-tron-pr-4265.md, claude_20260910-20260911_amx-perf-test-on-jhan-amx-p0.md, claude_20260911_andoria-09-vs-andoria-06-idle-status.md, claude_20260911_pr3879-merge-conflicts.md)
