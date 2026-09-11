@@ -1,0 +1,432 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR0/Monday-report.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/pr3879/PR0/Monday-report.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR #4267 review answers, 2026-09-07</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #fafaf8; color: #1c1c1c; font: 15px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 28px 22px 64px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 20px; margin: 40px 0 10px; padding-top: 10px; border-top: 2px solid #e2e0d8; }
+  h3 { font-size: 16px; margin: 22px 0 6px; }
+  p, li { max-width: 900px; }
+  .sub { color: #555; margin: 0 0 18px; }
+  .short { background: #eef4fb; border-left: 5px solid #3b6ea5; padding: 12px 16px; margin: 18px 0; }
+  .note { background: #f3f7ee; border-left: 5px solid #5c8a3a; padding: 10px 14px; margin: 14px 0; }
+  .warn { background: #fdf5e6; border-left: 5px solid #d08a1f; padding: 10px 14px; margin: 14px 0; }
+  .ask { background: #f6eefb; border-left: 5px solid #7d4fa8; padding: 10px 14px; margin: 14px 0; }
+  table { border-collapse: collapse; margin: 10px 0 16px; font-size: 14px; }
+  th, td { border: 1px solid #d8d6ce; padding: 5px 9px; vertical-align: top; text-align: left; }
+  th { background: #efede6; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  code { background: #f0efea; padding: 1px 4px; border-radius: 3px; }
+  pre { background: #f0efea; padding: 10px 12px; border-radius: 4px; overflow-x: auto; line-height: 1.4; }
+  pre code { background: none; padding: 0; }
+  .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 14px 0 6px; }
+  .box { border: 1px solid #b9b6ab; background: #fff; border-radius: 5px; padding: 8px 10px; font-size: 13px; min-width: 150px; max-width: 220px; flex: 1 1 150px; }
+  .box b { display: block; font-size: 13px; margin-bottom: 3px; }
+  .arrow { align-self: center; font-size: 20px; color: #777; }
+  .cap { color: #555; font-size: 13px; margin: 0 0 14px; }
+  .kv td:first-child { white-space: nowrap; font-weight: 600; }
+  .ok { color: #2f6b1e; font-weight: 600; }
+  .pending { color: #a3600e; font-weight: 600; }
+  .toc li { margin: 2px 0; }
+  .small { font-size: 13px; color: #444; }
+</style>
+</head>
+<body>
+<main>
+<h1>PR #4267 (page-share counters): answers to jhan's review</h1>
+<p class="sub">Monday 2026-09-07. Answers to the twelve review comments, the code changes they led to, and how each change was verified. Written for an engineer who has not read the PR.</p>
+
+<div class="short">
+<b>Short version.</b> All twelve comments are answered below; ten led to code changes, which sit as one commit on a side branch (not pushed) that builds and passes both tests on delphi-3bda with the option on and off. An independent review of the diff and of these answers by gpt-6-astra found no blocker and two comment wordings to fix; both are applied. Two premises in the review turned out wrong and are explained with evidence: <code>n_visible</code> counts query tokens, not K tokens, and the requested member names <code>shared_visits</code>/<code>shared_tokens</code> cannot be applied as a plain rename because they would hide the process-wide counters of the same name inside <code>flush()</code>; jhan chose to give every process-wide counter a <code>total_</code> prefix instead, so no name is used twice in the file. All four decisions were taken in the follow-up the same day: names as in the branch, exit-time report kept, guard kept, and the commit (1deb17fc4d) pushed as the new head of PR #4267.
+</div>
+
+<h3>Words used here</h3>
+<ul>
+  <li><b>tron</b>: the inference program under test. <b>rinzler</b>: its production server. <b>runtron</b>: its command-line tool.</li>
+  <li><b>KV page</b>: a 64-token block of the attention key/value cache. <b>kv_head</b>: one key/value head. <b>minibatch</b>: the set of query tokens one attention call serves (the vector <code>items</code> in the code).</li>
+  <li><b>apply_page_range</b>: the loop in <code>h/tron/models/self_attention.hpp</code> that applies one range of KV pages, for one kv_head, to every query token of the minibatch. A <b>page visit</b> is one pass of that loop over one (page, kv_head) pair.</li>
+  <li><b>relevant K token</b>: a key on the page that a given query token attends to (it passes the visibility mask and the sliding window). The existing code returns that count per query as <code>relevant_k_tokens</code>.</li>
+  <li><b>pending pass</b>: the second attention pass of a step, over pages whose K and V are written during that same forward pass.</li>
+  <li><b>PR tip</b>: commit 8a867e03a3, the code the review was written against. <b>Revision</b>: the commit on branch <code>jhan-page-share-counters-rev1</code> (see section 13).</li>
+</ul>
+
+<h3>Contents</h3>
+<ol class="toc">
+  <li><a href="#s1">"width": what it counts, and whether tron uses the word that way</a></li>
+  <li><a href="#s2">Why the counters are behind the <code>TRON_PAGE_SHARE_COUNTERS</code> macro</a></li>
+  <li><a href="#s3">The three header comments to delete (and what else had to change)</a></li>
+  <li><a href="#s4">What "[0]=1, [1]=2, ... [6]=&gt;16" means</a></li>
+  <li><a href="#s5">The three counter comments in plain English</a></li>
+  <li><a href="#s6"><code>n_visible</code>: does it count K tokens? (no) and its new name</a></li>
+  <li><a href="#s7"><code>if (!v)</code> versus <code>if (v == 0)</code>: what tron does</a></li>
+  <li><a href="#s8">Names for the report's <code>v</code> and <code>t</code></a></li>
+  <li><a href="#s9">Is a report at process exit common in tron? What is <code>~dumper()</code> worth?</a></li>
+  <li><a href="#s10"><code>if (!visits)</code>: same rule as 7</a></li>
+  <li><a href="#s11">Names instead of <code>local</code></a></li>
+  <li><a href="#s12"><code>shared_v</code>/<code>shared_t</code> rename and the name-hiding trap</a></li>
+  <li><a href="#s13">What changed, where it is, how it was verified</a></li>
+  <li><a href="#s14">Decisions for you</a></li>
+  <li><a href="#s15">How these answers were checked</a></li>
+</ol>
+
+<h2 id="s1">1. "width"</h2>
+<p><b>Is "width" the number of query tokens served by a page visit?</b> Yes. The hook sits inside the loop over the minibatch's query tokens and adds one for each query token whose <code>relevant_k_tokens</code> is greater than zero, then records the total once per page visit. So the number is: how many query tokens of the minibatch had at least one relevant K token on that page, per (page, kv_head) visit. [self_attention.hpp at the PR tip: loop at 1303, increment at 1334, record at 1353; one call handles one kv_head, call site 983]</p>
+
+<div class="flow">
+  <div class="box"><b>apply_page_range call</b>one worker, one kv_head, one page range; creates one <code>page_visit_counts</code></div>
+  <div class="arrow">&rarr;</div>
+  <div class="box"><b>per page</b>for each query token of the minibatch: <code>relevant_k_tokens &gt; 0</code>? then count it</div>
+  <div class="arrow">&rarr;</div>
+  <div class="box"><b>record_page_visit(n, pending)</b>n = query tokens served; n = 0 is not a visit; histogram slot; shared if n &ge; 2</div>
+  <div class="arrow">&rarr;</div>
+  <div class="box"><b>flush()</b>once per call: adds the counts to the process-wide <code>totals</code> (atomics)</div>
+  <div class="arrow">&rarr;</div>
+  <div class="box"><b>exit report</b>four <code>[page-share]</code> lines to stderr when the process exits normally</div>
+</div>
+<p class="cap">The counting path after the revision (names are the new ones; the mechanism is unchanged).</p>
+
+<p><b>Does tron use "width" with this meaning?</b> No. A whole-word search over the C++ files under h/, src/ and t/ at the PR tip finds 142 uses of "width" outside this PR, and none means "query tokens sharing a page". The meanings that exist, with the ones closest to this code first:</p>
+<table>
+  <tr><th>Where</th><th>What "width" means there</th><th>Unit</th></tr>
+  <tr><td><code>kv_cache.hpp:149-154</code> <code>query_width()</code>, <code>kv_width()</code>; <code>model.hpp:723</code> <code>max_kernel_query_width</code>; <code>self_attention.hpp:222</code> <code>scratch_query_width</code></td><td>length of one token's query (or K/V) row: <code>n_query_heads * head_size</code>. The unit test pins it: <code>max_attention_query_width(kernels) == 16 * 256</code> [t_llama_unit.cpp:710]</td><td>bf16 elements</td></tr>
+  <tr><td><code>self_attention.hpp:1233</code> "SIMD width 8"; <code>kv_cache.hpp:66</code></td><td>number of lanes in one vector register</td><td>lanes</td></tr>
+  <tr><td><code>model.hpp:828</code> <code>template &lt;size_t width&gt;</code>, feed_forward.hpp, plugins/llama.hpp:534</td><td>element count of a tensor row (template parameter)</td><td>elements</td></tr>
+  <tr><td><code>h/pos/config.hpp:73</code> <code>hbm_word_width</code>, <code>rmem_width</code>, <code>h/pos/regs.hpp:341</code></td><td>hardware memory word size; register bit-field size</td><td>scalars, bytes, bits</td></tr>
+  <tr><td><code>golden_tokens.hpp:17</code> "captured width"; rinzler token code "zero width"</td><td>number of top-k entries kept per token; text width of a token</td><td>entries, characters</td></tr>
+  <tr><td><code>speculate.cpp:625</code> <code>draft_tree_max_width</code></td><td>new draft leaves per tree level (a branching factor)</td><td>draft tokens</td></tr>
+</table>
+<p>The collision matters inside the very file the hooks live in: there "query width" already means elements per query row, so a reader of <code>self_attention.hpp</code> meets "width = number of query tokens" a few hundred lines after "query width = 4096 elements".</p>
+<p><b>tron already has a name for this quantity.</b> The work estimator counts "relevant q tokens": <code>work_estimate_t::scaled_vs</code> is documented as "One per relevant q token per page per kv head" [common.hpp:688], and the perfetto trace point at the top of <code>apply_page_range</code> reports it under the label <code>"relevant q tokens"</code> [self_attention.hpp:1274]. The instrumentation's per-visit count is the measured form of that estimate for one (page, kv_head) visit. (Whether the two agree exactly is not verified; the estimator does not apply the EAGLE first-token exception the hook path applies, so they may differ on EAGLE models.)</p>
+<p><b>Change made.</b> The word "width" is gone from the header, the report lines and the test. The concept is written as "query tokens per page visit"; the per-visit counter is <code>n_relevant_query_tokens</code> (section 6); the histogram is <code>histogram</code> per call and <code>total_histogram</code> process-wide, with a comment naming the slots. The report line "avg width" is now "avg query tokens per visit". Note that this average is over visits that served at least one query token, because a visit with none is not counted [header, the early return in <code>record_page_visit</code>].</p>
+<p class="small">Alternatives if you prefer a shorter phrase: "queries per page visit" (shorter; a newcomer may read "queries" as query heads), "sharing degree" (matches the namespace name; degree 1 means no sharing, which reads oddly). "fan-in" is not recommended because tron already uses it for something else [full.cpp:99].</p>
+
+<h2 id="s2">2. Why guard with <code>TRON_PAGE_SHARE_COUNTERS</code> instead of always counting?</h2>
+<p>Both patterns exist in tron, so this is a judgment call. The facts, then the recommendation.</p>
+<h3>Reasons to keep the compile-time guard</h3>
+<ul>
+  <li><b>Cost is real and unmeasured.</b> The per-(page, query token) hook is one compare and one add of a stack variable, next to roughly 64 keys &times; 4 query heads &times; 128 elements of dot products (est. for a 128-wide head with GQA factor 4), so about 1 part in 30,000 and not measurable. The flush is different: once per <code>apply_page_range</code> call it does up to 12 relaxed atomic adds on process-wide counters that every attention worker writes (96 bytes, two or three cache lines, no padding). The call rate is roughly (kv_heads + attention workers) &times; 2 passes &times; layers &times; steps per second, which is on the order of 10<sup>4</sup> to 10<sup>5</sup> flushes per second and can exceed that for 64-layer models (est.; the header's old "a few tens of thousands at most" was not measured either). No ON-versus-OFF throughput run exists for this PR, and the PR carries the <code>Skip benchmarks</code> label, so CI will not supply one.</li>
+  <li><b>The report is automatic stderr output at every normal exit that counted a visit.</b> rinzler's systemd unit sends stderr to the journal [packaging/systemd/rinzler@.service:66-67], and rinzler's main returns normally after SIGTERM [rinzler.cpp:3947, 4618-4639], so an always-on build would print four raw lines at every stop of a server that ran software attention. spdlog's console sink is also stderr, so the difference from normal logging is not the destination but the form: no timestamp, no level, no copy in the rotating log file, no <code>TRON_LOG_LEVEL</code> filtering.</li>
+  <li><b>Precedent.</b> tron's debug-logging hooks are compile-time gated: <code>MODEL_DEBUG</code>/<code>CHANNEL_DEBUG</code> are empty unless <code>DEBUG_MODEL</code>/<code>DEBUG_CHANNELS</code> is defined and no CMake file defines them [common.hpp:20-25]; <code>DEBUG_HWATTN</code> is a commented-out <code>#define</code> in self_attention.hpp:27. The option-to-define-to-<code>#ifdef</code> mechanism is the same one <code>ENABLE_FUSE_STATS</code> and <code>AVX512</code> use. Always-compiled, runtime-gated instrumentation also exists (perfetto <code>TRACE_EVENT</code>; <code>log_intermediate</code> gated by <code>cfg.log_intermediates</code>), but those have production consumers.</li>
+  <li><b>Review history.</b> Wade's agent review on #3879 asked for the instrumentation to leave the tree; the option was the recorded compromise (PR body, "Review history").</li>
+</ul>
+<h3>Reasons to drop the guard</h3>
+<ul>
+  <li>A smaller tree: no CMake option, no PUBLIC define, no <code>DEFINES</code> clause on the test, no CI-lane flag (commit 8a867e03a3 exists only so the option-on build cannot rot unnoticed), no README.ci.md paragraph.</li>
+  <li>The numbers would be available from any binary without a rebuild.</li>
+</ul>
+<h3>What an always-on version would need instead</h3>
+<p>At minimum, one process-wide flag read once per <code>apply_page_range</code> call that skips the counting and the flush (tron's pattern is a <code>static const</code> latch that reads an environment variable, as in <code>log_kv_footprint</code> [kv_cache.hpp:442-449], or a relaxed atomic bool as in <code>trace_gate.cpp:11</code>). To keep the enabled cost low it would also want padded or per-worker counters instead of the shared cache lines, and to fit tron's logging it would route the report through spdlog or the FUSE stats tree instead of <code>fprintf(stderr)</code> at exit. Those two are implementation choices, not requirements, but together they make it a different, larger change than this PR.</p>
+<div class="note"><b>Recommendation.</b> Keep the guard for this PR. If you want the counters always available, measure decode throughput with the option ON and OFF in paired runs first, then do the runtime-switch version as a follow-up.</div>
+
+<h2 id="s3">3. The three comments to delete</h2>
+<p>All three are removed in the revision. What else referred to them:</p>
+<table>
+  <tr><th>Deleted text (PR tip lines)</th><th>Other places that referred to it</th><th>Done</th></tr>
+  <tr><td>"Low hot-loop cost when enabled: ... a few tens of thousands of flushes per second at most)." [header 14-18]</td><td>None. The flush cadence is still stated at the <code>flush()</code> comment ("call once per object; the hooks create a fresh object per apply_page_range call").</td><td>deleted</td></tr>
+  <tr><td>"The whole-workload average widths measured with this header on 2026-08-18 (prefill-heavy 110.9 ..., private decode 1.02, shared-prompt decode 5.06) show where ..." [header 21-24]</td><td>The test file's comment mentioned "the 2026-08-18 batching-width measurement" [t_page_share_counters.cpp:7]: trimmed. The PR description already carries the table with these three numbers ("Why keep it in the tree"); one sentence was added there saying the source code does not repeat them and the description is their record. The line "Dump: automatic at normal process exit to stderr, if any visit was counted." [header 20] was kept, reworded as "Report: ...".</td><td>deleted; PR body updated</td></tr>
+  <tr><td>"`inline` variables (C++17) have one definition shared by every translation unit that includes this header, so the instrumentation needs no .cpp file." [header 33-35]</td><td>The PR description's "Review history" said "the header now records the answer" to Ben's question. That clause is rewritten to say the thread on #3879 holds the answer and the header does not repeat it. The words "Process-wide totals" survive as the label of the totals struct.</td><td>deleted; PR body updated</td></tr>
+</table>
+<div class="warn"><b>One date to be aware of.</b> The measurement log is stamped 2026-08-18T19:12:55Z [exec/results/slot1/p1-sharing.txt, first line], so the header and the PR description were right to say 2026-08-18. The first commit message of the PR (c3e405b2b5) says 2026-08-19, which is the date the campaign was marked done in exec/QUEUE.md. Commit messages cannot change without rewriting the branch; the PR description keeps 2026-08-18.</div>
+
+<h2 id="s4">4. What "[0]=1, [1]=2, [2]=3, [3]=4, [4]=5-8, [5]=9-16, [6]=&gt;16" means</h2>
+<p>It maps each index of the histogram array to the range of the per-visit query-token count that lands there. The "=" is the separator between index and range; "[6]=&gt;16" is index 6 with the label "&gt;16", not "greater than or equal to 16". The code confirms: 16 goes to index 5, and only 17 and above go to index 6 (the chain of comparisons in <code>record_page_visit</code>; the test pins every edge: 4&rarr;3, 5&rarr;4, 8&rarr;4, 9&rarr;5, 16&rarr;5, 17&rarr;6).</p>
+<table>
+  <tr><th>Array index (slot)</th><th class="num">Query tokens served in the visit</th><th>Label in the report line</th></tr>
+  <tr><td>0</td><td class="num">exactly 1</td><td>1</td></tr>
+  <tr><td>1</td><td class="num">exactly 2</td><td>2</td></tr>
+  <tr><td>2</td><td class="num">exactly 3</td><td>3</td></tr>
+  <tr><td>3</td><td class="num">exactly 4</td><td>4</td></tr>
+  <tr><td>4</td><td class="num">5 to 8</td><td>5-8</td></tr>
+  <tr><td>5</td><td class="num">9 to 16</td><td>9-16</td></tr>
+  <tr><td>6</td><td class="num">17 or more</td><td>&gt;16</td></tr>
+</table>
+<p>A visit that served no query token increments no slot, because <code>record_page_visit</code> returns before choosing one. The revised header carries this table as the comment on the histogram member.</p>
+
+<h2 id="s5">5. The three counter comments in plain English</h2>
+<table>
+  <tr><th>Comment at the PR tip</th><th>In plain words</th><th>New comment (revision)</th></tr>
+  <tr><td><code>visible_tokens; // sum of n_visible = work weight</code></td><td>Add up, over all counted visits, how many query tokens each visit served; in other words, count the (query token, page visit) pairs. Every pair counts one, however many K tokens on the page were relevant to that query and however many query heads share the kv_head, so this is a coarse count of "passes over a page for one query", not a measure of arithmetic or time. The report calls the pairs "work units" in that coarse sense. Dividing by the number of visits gives the average number of query tokens per counted visit (the report's third number).</td><td>"Sum over the counted visits of the per-visit query-token count, i.e. the number of (query token, page visit) pairs. Each pair counts one, however many K tokens on the page were relevant to that query and whatever the number of query heads per kv_head; the report calls these pairs 'work units' in that coarse sense. relevant_query_tokens / page_visits is the average number of query tokens per counted visit."</td></tr>
+  <tr><td><code>shared_tokens; // work weight on shared visits</code></td><td>The same count of pairs, restricted to visits that served two or more query tokens. Divided by the total above, it is the fraction of all pairs that fell on visits where one load of the page could have served several queries (the report prints it as "% of work"). The counters record that opportunity; they do not observe page loads, so this is not a measurement of achieved reuse.</td><td>"The (query token, page visit) pairs that fell on shared visits. shared_tokens / relevant_query_tokens is the fraction of all pairs that a kernel serving several queries per page load could take from shared visits." (and on shared_visits: "visits where one load of the page could have served several queries. The counters record that opportunity; they do not observe page loads or any reuse.")</td></tr>
+  <tr><td><code>pending_visits; // visits in the pending phase</code></td><td>Attention for a minibatch runs in two passes. The first pass covers pages whose keys and values already exist. The second pass, called pending, covers the pages whose keys and values are being written during this same forward pass, and it waits for those writes to land [self_attention.hpp:804-816]. Those pages can belong to this minibatch or to another minibatch of the same forward pass [common.hpp, Note [Minibatch Dependency Tracking]: "that KV may be associated with a different minibatch"]. This counter says how many counted visits were in that second pass.</td><td>"Visits made in the second attention pass of a step (pending = true). That pass covers the pages whose K and V are written during this same forward pass, by this or another minibatch. See Note [Ready versus pending attention work] in model.hpp and Note [Minibatch Dependency Tracking] in common.hpp."</td></tr>
+</table>
+<div class="warn"><b>Correction to the PR description.</b> Its definition of the pending pass said "over the K and V of the minibatch's own tokens". That is too narrow: the pending page set is built from every token job of the forward pass that needs KV computation [model.hpp:1896-1897], then filtered only by visibility to this minibatch. The PR body now says "by this or another minibatch". Note also that <code>kv_cache.hpp</code> does not contain the word "pending"; the ready/pending split lives in model.hpp and self_attention.hpp.</div>
+
+<h2 id="s6">6. <code>n_visible</code>: does it count relevant K tokens? No.</h2>
+<p>The premise behind the proposed name <code>n_k_visible</code> is not what the code does. The evidence:</p>
+<ul>
+  <li>The variable is declared once per page and incremented inside the loop over <code>items</code>, which are the query tokens of the minibatch [self_attention.hpp:1300-1304].</li>
+  <li>The increment is <code>if (relevant_k_tokens &gt; 0) n_visible++;</code> [1334]: one per query token, whatever the number of relevant K tokens that query had. <code>relevant_k_tokens</code> is the per-query K count returned by <code>apply_page_tok</code> [1329-1331, 1364, 1442]; it is only the gate, it is never added.</li>
+  <li>Supporting evidence: a page holds 64 tokens [kv_cache.hpp:1164], and the prefill measurement averaged 110.9 per visit, which a count of distinct K tokens on one page could not reach. The increment location above is the decisive evidence; the average only agrees with it.</li>
+</ul>
+<p><b>New name: <code>n_relevant_query_tokens</code></b>, applied to the hook variable, the parameter of <code>record_page_visit</code> and the totals member (<code>relevant_query_tokens</code>, formerly <code>visible_tokens</code>). Reasons: it names the unit (query tokens), it mirrors the sibling <code>relevant_k_tokens</code> on the line above it, and it uses the word tron's own estimator and trace label use for this quantity ("relevant q tokens", section 1). The old word "visible" over-claims slightly: <code>visible()</code> is only the first of three gates a query passes before <code>apply_page_tok</code> runs, while the counter tests the final result.</p>
+<p class="small">Alternatives considered: <code>n_visible_queries</code> (keeps the PR's word), <code>n_queries_with_k_on_page</code> (most literal, longest), <code>relevant_q_tokens</code> (exact twin of <code>relevant_k_tokens</code>; "q_" is common in this file but is an abbreviation).</p>
+
+<h2 id="s7">7. <code>if (!v) return;</code> versus <code>if (v == 0) return;</code></h2>
+<p>Agreed, and it is what the codebase does. There is no written rule and no clang-tidy configuration in the repository (the nix dev shell installs the clang-tools package [flake.nix:736], but nothing configures or runs clang-tidy; the only style gate is clang-format, which checks layout). The convention is by usage:</p>
+<table>
+  <tr><th>Integer zero test, h/tron + src/tron (125 C++ files, PR tip, PR lines excluded)</th><th class="num">Count</th></tr>
+  <tr><td><code>if (x == 0)</code> on an integer count or index (live code)</td><td class="num">44</td></tr>
+  <tr><td>bare truth test on an integer, either polarity (<code>if (!n)</code> once at model.hpp:188; <code>if (num_persistent)</code>-style five times)</td><td class="num">6</td></tr>
+  <tr><td><code>if (!x)</code> on bools, pointers, <code>std::optional</code>, streams, error codes</td><td class="num">83</td></tr>
+</table>
+<p>The attention code the hooks live in uses only <code>== 0</code>, <code>!= 0</code> and <code>&gt; 0</code> on integers [self_attention.hpp:1449 <code>if (relevant_k_tokens == 0)</code>, 1336, 877, 1323], and so does the kernels directory [wide.hpp:512 <code>if (size == 0) return;</code>, topk.hpp:96]. The header at the PR tip was inconsistent with itself: line 49 wrote <code>if (n_visible == 0) return;</code> while lines 70, 72, 85 and 96 tested integers with <code>!visits</code>, <code>if (hist[i])</code>, <code>!v</code> and <code>t ? ... : 0.0</code>. The revision writes all four as <code>== 0</code> / <code>!= 0</code>.</p>
+
+<h2 id="s8">8. Names for <code>v</code> and <code>t</code></h2>
+<p>Now <code>n_visits</code> and <code>n_tokens</code>, one declaration per line: the two numbers the report is about to print, read once from the atomics <code>total_page_visits</code> and <code>total_relevant_query_tokens</code>. (My first version called them <code>total_visits</code> and <code>total_tokens</code>; once the atomics took the <code>total_</code> prefix in the follow-up, those names moved to the atomics.) The comma-chained declaration form <code>uint64_t v = ..., t = ...;</code> has one precedent in 125 files [full.hpp:387], so splitting it also matches the codebase. Single-letter locals as such are not against tron practice (the kernels use <code>q</code>, <code>x</code>, <code>s</code> for math operands), but these two are process-wide totals read for printing, and full words say so.</p>
+<p class="small">Alternative: no locals at all, reading the two atomics where needed (one extra load for the early return).</p>
+
+<h2 id="s9">9. Is a report at process exit common in tron? What is <code>~dumper()</code> worth?</h2>
+<p><b>Not a tron convention.</b> Facts from the tree at the PR tip:</p>
+<ul>
+  <li>No <code>atexit</code>, <code>_exit</code> or <code>quick_exit</code> call in h/ or src/ (three <code>std::atexit</code> calls in t/ remove temporary directories).</li>
+  <li><code>the_dumper</code> is the only namespace-scope <code>inline</code> object in h/ whose destructor prints. Seven destructors in h/ and src/ log something; all seven use spdlog, none prints counters. Three of them run at static destruction: the thread pool's <code>speedometer_t</code> prints "Worker speeds" [threading.hpp:663-665], rinzler's <code>completions_controller</code> prints "Rinzler shutting down. Removed PID file" [rinzler.cpp:2388], and <code>TokenStreamMonitor</code> logs on error paths.</li>
+  <li>tron's documented path for runtime counters is the FUSE stats tree, a virtual filesystem that rinzler and runtron mount so counters can be read as files [README.stats.md:3-5]; 61 <code>make_file</code> registrations exist, including a low-ceremony "casual stats" form [README.stats.md:223-232]. The closest existing analogue to these counters, the MoE expert routing statistics, publishes through that tree [expert_stats.hpp:22-27]. Whole-run summaries in runtron are explicit <code>spdlog::info</code> lines at the end of the run ("[Total over N iterations] ..." [stream_generate.hpp:995]; "Detected {} memory allocations" [runtron.cpp:359]).</li>
+  <li>tron does rely on static destruction for some teardown (thread joins, hwperf sampler), and three Notes describe ordering problems at that time [threading.hpp:891-906, proxy.cpp:161-164, system.cpp:1904-1907]. Those concern joining threads and freed memory; the report only reads six atomics and writes to stderr, so none of those hazards applies to it.</li>
+</ul>
+<p><b>What the destructor is worth.</b> It is the only path by which the counters leave the process; without it the instrumentation produces nothing. It fires on every normal exit: runtron returns from main on all generation paths [runtron.cpp:524-527; <code>exit(0)</code> only for --help/--version/--list-models], Catch2 test binaries return from main, and rinzler on SIGINT/SIGTERM sets a flag, quits the event loop and returns from main [rinzler.cpp:3947, 4438 <code>disableSigtermHandling</code>, 4618-4639]. The 2026-08-18 measurement and the four lines that <code>t_llama_unit</code> prints in the option-on CI lane both come from it.</p>
+<p><b>Its limits</b> (now stated in the header comment): no report after <code>abort()</code>, which is where every <code>TRON_ASSERT</code> failure ends [assert.hpp:59-72], after <code>quick_exit()</code>, after a crash, or after SIGKILL; stderr only, so no timestamp or level and no copy in the rotating log file; one total for the whole process, so a run that mixes prefill and decode cannot separate them (the three 2026-08-18 numbers are from three runs); and the four lines are read one atomic at a time, so they describe one moment only because the attention workers have stopped flushing by the time static destructors run.</p>
+<div class="ask"><b>Your call.</b> (a) Keep the destructor as it is for this default-OFF instrumentation (done in the revision, renamed <code>exit_reporter</code> / <code>report_at_exit</code>, with the limits in its comment). (b) Replace <code>fprintf(stderr)</code> with a named function that runtron's main calls before <code>shutdown_app_pool()</code> and logs through <code>spdlog::info</code>, in the style of the "[Total over N iterations]" line; the test would call it too. (c) Register the six counters as casual FUSE stats, readable live with <code>cat</code>; that ends the header-only design and adds a registration point after <code>stats::initialize()</code>.</div>
+
+<h2 id="s10">10. <code>if (!visits) return;</code></h2>
+<p>Same rule as section 7; now <code>if (page_visits == 0) return;</code>. The histogram flush loop's <code>if (hist[i])</code> is now <code>if (histogram[i] != 0)</code>, and the report's <code>t ? ... : 0.0</code> is now <code>total_tokens != 0 ? ... : 0.0</code>.</p>
+
+<h2 id="s11">11. A better name than <code>local</code></h2>
+<p>The object holds the counts of one <code>apply_page_range</code> call (one worker, one kv_head, one page range) as plain integers, and <code>flush()</code> adds them once to the process-wide atomics. Names that say that, in plain words:</p>
+<table>
+  <tr><th>Name</th><th>Why it fits</th><th>Drawback</th></tr>
+  <tr><td><b><code>page_visit_counts</code></b> (chosen)</td><td>Says what the object is: a set of counts about page visits. Pairs with the totals struct <code>page_visit_totals</code>, so the two sides read as counts versus totals. Precedent for plain count structs: <code>harvester_stats</code> [harvester.hpp:22], <code>expert_stats</code> (<code>counts{}</code>) [expert_stats.hpp:95].</td><td>Does not say "one per call" by itself; the comment does.</td></tr>
+  <tr><td><code>per_call_page_visit_counts</code></td><td>Encodes the lifetime (one object per call). <code>per_</code> prefix has precedent [common.hpp:938 <code>per_worker_mask_t</code>].</td><td>26 characters.</td></tr>
+  <tr><td><code>page_range_counters</code></td><td>Uses tron's own unit for the call: the <code>page_range</code> parameter [self_attention.hpp:1260].</td><td>Could be read as "counters about page ranges".</td></tr>
+  <tr><td><code>visit_tally</code></td><td>Shortest; "tally" is the plain word for a running count that is added up later.</td><td>"tally" appears in tron only in one comment [model.hpp:2469], never as an identifier.</td></tr>
+  <tr><td><code>page_visit_accumulator</code></td><td>Matches the "accumulate then flush" idea.</td><td>"accumulator" also names the attention math state (<code>attn_accum</code>) in the same file; a newcomer could confuse the two.</td></tr>
+  <tr><td><code>unflushed_counters</code></td><td>Describes the state relative to the totals.</td><td>Defined by what has not happened yet.</td></tr>
+</table>
+<p>The variable at the hook site is now <code>visit_counts</code> (was <code>share_counters</code>).</p>
+
+<h2 id="s12">12. <code>shared_v</code> to <code>shared_visits</code>, <code>shared_t</code> to <code>shared_tokens</code></h2>
+<p>Done, but not as a plain rename, because that does not compile. At the PR tip the namespace <code>tron::page_share</code> already has process-wide atomics named <code>shared_visits</code> and <code>shared_tokens</code>, and <code>flush()</code> adds into them by their bare names. C++ looks a bare name up in the member function's own scopes, then in the class, then in the enclosing namespaces, and stops at the first match. A member named <code>shared_visits</code> therefore hides the atomic inside <code>flush()</code>, and the line becomes <code>shared_visits.fetch_add(shared_visits, ...)</code> on a plain integer:</p>
+<pre><code>renamed.hpp:76:19: error: request for member 'fetch_add' in
+  '((tron::page_share::local*)this)->tron::page_share::local::shared_visits',
+  which is of non-class type 'uint64_t' {aka 'long unsigned int'}</code></pre>
+<p class="small">Reproduced with g++ 11.4 on a copy of the PR-tip header with only the two members renamed. The CI test build would catch it in every configuration, because the test target defines <code>TRON_PAGE_SHARE_COUNTERS</code> itself [t/CMakeLists.txt:271].</p>
+<p><b>Fix applied (after jhan's choice in the follow-up).</b> My first version grouped the six process-wide counters in a struct so that both sides could carry identical member names; jhan rejected identical names in one file. The final version keeps the six process-wide counters as plain inline atomics, as at the PR tip, and gives each the <code>total_</code> prefix: <code>total_page_visits</code>, <code>total_relevant_query_tokens</code>, <code>total_shared_visits</code>, <code>total_shared_tokens</code>, <code>total_pending_visits</code>, <code>total_histogram[7]</code>. The per-call struct <code>page_visit_counts</code> has the same names without the prefix, so <code>flush()</code> reads as a sentence: <code>total_shared_visits.fetch_add(shared_visits, ...)</code>. <code>total_</code> is tron's usual prefix for a process-lifetime sum [kv_cache.hpp:443-444 <code>total_bytes</code>, <code>total_books</code>; expert_stats.hpp:101 <code>total_passes</code>]. No identifier appears twice in the file, and no member can hide a namespace name.</p>
+<p class="small">Alternatives that were on the table: a totals struct with identical member names on both sides (rejected: same names in one file), or qualifying the two lines in <code>flush()</code> as <code>page_share::shared_visits.fetch_add(shared_visits, ...)</code> (rejected: leaves the trap for the next edit). If you ever want the unit in the token member, <code>shared_query_tokens</code> is the one-word variant.</p>
+
+<h2 id="s13">13. What changed, where it is, how it was verified</h2>
+<table class="kv">
+  <tr><td>Branch</td><td>One commit (1deb17fc4d) on top of the PR tip 8a867e03a3, prepared on the side branch <code>jhan-page-share-counters-rev1</code> in the worktree <code>~/workspace/ai-runs/tron-pr0-rev1</code>, then pushed as the new head of <code>jhan-page-share-counters</code> (fast-forward from 8a867e03a3) on jhan's go. Your checkout <code>~/workspace/tron</code> still has the local branch at 8a867e03a3; <code>git pull --ff-only</code> there brings it to the pushed commit. The commit id is in <code>PR0/review1.commit</code>; the diff is <code>PR0/review1.diff</code>.</td></tr>
+  <tr><td>Files</td><td><code>h/tron/kernels/page_share_counters.hpp</code> (rewritten comments and names), <code>h/tron/models/self_attention.hpp</code> (the five hook lines only), <code>t/t_page_share_counters.cpp</code> (names, test titles, comment). CMake files, the CI workflow and README.ci.md are unchanged: the option name, the define and the phrase "four <code>[page-share]</code> lines" all still hold.</td></tr>
+  <tr><td>Behaviour</td><td>Unchanged, except the wording of the four report lines ("width" replaced by "query tokens per visit").</td></tr>
+  <tr><td>PR body</td><td>Not edited on GitHub (jhan edits it). A draft <code>PR0/pr-body.md</code> is updated (the previous text is <code>pr-body.v4-20260907-before-review1.md</code>): "width" removed from the terms and the test paragraph, the pending pass redefined (section 5), the Review-history clause rewritten (section 3), one sentence added under "Why keep it in the tree". Its Verification paragraph now describes the 2026-09-07 ON and OFF runs of the revision, with the placeholder <code>REV1-TIP</code> where the pushed commit id goes (8dced57182 if the revision lands as it is); the GitHub body has not been edited.</td></tr>
+</table>
+
+<h3>Renames, old to new</h3>
+<table>
+  <tr><th>Old</th><th>New</th><th>Comment asked</th></tr>
+  <tr><td><code>struct local</code></td><td><code>struct page_visit_counts</code></td><td>11</td></tr>
+  <tr><td><code>page_visits</code>, <code>visible_tokens</code>, <code>shared_visits</code>, <code>shared_tokens</code>, <code>pending_visits</code>, <code>width_hist</code> (the process-wide atomics)</td><td><code>total_page_visits</code>, <code>total_relevant_query_tokens</code>, <code>total_shared_visits</code>, <code>total_shared_tokens</code>, <code>total_pending_visits</code>, <code>total_histogram</code></td><td>12 (frees the bare names for the per-call members)</td></tr>
+  <tr><td><code>hist</code> (per-call array)</td><td><code>histogram</code></td><td>1, 4</td></tr>
+  <tr><td><code>tokens</code> (per-call member)</td><td><code>relevant_query_tokens</code></td><td>6</td></tr>
+  <tr><td><code>shared_v</code>, <code>shared_t</code></td><td><code>shared_visits</code>, <code>shared_tokens</code></td><td>12</td></tr>
+  <tr><td><code>visits</code>, <code>pending</code> (per-call members)</td><td><code>page_visits</code>, <code>pending_visits</code> (the totals' names without <code>total_</code>)</td><td>12 (symmetry)</td></tr>
+  <tr><td><code>n_visible</code></td><td><code>n_relevant_query_tokens</code></td><td>6</td></tr>
+  <tr><td><code>local::page()</code></td><td><code>record_page_visit()</code></td><td>11 (a bare noun read as an accessor)</td></tr>
+  <tr><td><code>dumper</code>, <code>the_dumper</code></td><td><code>exit_reporter</code>, <code>report_at_exit</code></td><td>9 ("dump" in tron means JSON serialisation; <code>the_</code> has no precedent)</td></tr>
+  <tr><td><code>v</code>, <code>t</code></td><td><code>n_visits</code>, <code>n_tokens</code> (the numbers about to be printed; <code>total_</code> is taken by the atomics)</td><td>8</td></tr>
+  <tr><td><code>share_counters</code> (hook variable)</td><td><code>visit_counts</code></td><td>11</td></tr>
+</table>
+
+<h3>Verification</h3>
+<table>
+  <tr><th>Check</th><th>Where</th><th>Result</th></tr>
+  <tr><td>Revised header compiles with <code>-std=c++23 -Wall -Wextra -Wpedantic</code>; without the define it compiles to nothing</td><td>this container, g++ 11.4</td><td class="ok">passed</td></tr>
+  <tr><td>Revised test against the revised header, with a small stand-in for the Catch2 macros; the exit report prints after the last case</td><td>this container</td><td class="ok">All tests passed (61 assertions in 4 test cases, 0 failures)</td></tr>
+  <tr><td>Plain member rename <code>shared_v</code> to <code>shared_visits</code> on the PR-tip header</td><td>this container</td><td class="ok">fails to compile as described in section 12 (confirms the trap)</td></tr>
+  <tr><td>Full build of the revision with <code>-DTRON_PAGE_SHARE_COUNTERS=ON</code>, preset cross-avx512, fresh worktree, socket-1 cores, then both tests</td><td>delphi-3bda (Xeon 6962P), <code>exec/split-verify3.sh</code>, log <code>exec/logs/split-PR0-rev1-on.txt</code></td><td class="ok">build rc=0 in 117 s; <code>t_page_share_counters</code> All tests passed (61 assertions in 4 test cases); <code>t_llama_unit</code> All tests passed (120054 assertions in 27 test cases); <code>t_llama_unit</code> printed the four new report lines (4 visits, 28 work units, 7.000 average, all in slot 5-8)</td></tr>
+  <tr><td>clang-format-19 on the three changed files</td><td>delphi-3bda, inside <code>nix develop</code></td><td class="ok">one whitespace change (a TEST_CASE line break in the test); applied, commit amended to 4dd9f32fea</td></tr>
+  <tr><td>Rebuild of 4dd9f32fea with the option ON, both tests</td><td>delphi-3bda, log <code>split-PR0-rev1b-on.txt</code></td><td class="ok">build rc=0 in 127 s; both tests passed with the same summary lines as above; clang-format: no change</td></tr>
+  <tr><td>Rebuild of 4dd9f32fea with the option OFF (the default), both tests</td><td>delphi-3bda, log <code>split-PR0-rev1b-off.txt</code></td><td class="ok" id="reverify-b-off">build rc=0 in 128 s; <code>t_page_share_counters</code> All tests passed (61 assertions in 4 test cases); <code>t_llama_unit</code> All tests passed (120054 assertions in 27 test cases)</td></tr>
+  <tr><td>Independent review of the diff and of these answers by gpt-6-astra (PAL, thinking_mode max)</td><td><code>reviews/gpt-6-astra-prompt-14-pr0-review1.md</code>, <code>reviews/gpt-6-astra-reply-14-pr0-review1.md</code></td><td class="ok">no blocker; two should-fix comment wordings (section 15), applied; commit amended to 8dced57182 (comments only)</td></tr>
+  <tr><td>Rebuild of 8dced57182 (comment corrections from the gpt-6-astra review), option ON and option OFF, both tests</td><td>delphi-3bda, logs <code>split-PR0-rev1c-on.txt</code> / <code>split-PR0-rev1c-off.txt</code></td><td class="ok" id="reverify-c">ON: build rc=0 in 124 s; OFF: build rc=0 in 129 s; in both, <code>t_page_share_counters</code> All tests passed (61 assertions in 4 test cases) and <code>t_llama_unit</code> All tests passed (120054 assertions in 27 test cases); the ON binary printed the four report lines, the OFF binary printed none; clang-format-19: no change</td></tr>
+  <tr><td>Rebuild of the final commit 1deb17fc4d (jhan's naming choice, row 1: <code>total_</code> prefix on the atomics, no totals struct), option ON and option OFF, both tests, clang-format</td><td>delphi-3bda, logs <code>split-PR0-rev1d-on.txt</code> / <code>split-PR0-rev1d-off.txt</code></td><td class="ok" id="reverify-d">ON: build rc=0 in 131 s; OFF: build rc=0 in 131 s; in both, <code>t_page_share_counters</code> All tests passed (61 assertions in 4 test cases) and <code>t_llama_unit</code> All tests passed (120054 assertions in 27 test cases); the ON binary printed the four report lines, the OFF binary none; clang-format-19: no change</td></tr>
+  <tr><td>gpt-6-astra check of the row-1 revision (compile and semantic risk, comment truth, test identifiers)</td><td><code>reviews/gpt-6-astra-reply-15-pr0-review1b.md</code></td><td class="ok" id="pal2">six findings, all "fine": no name hiding left, the inline atomics start at zero, the destructor reads are valid given that the workers have stopped, the 14 format arguments match, no comment became false, no stale identifier in the test; no change required</td></tr>
+  <tr><td>Round 2 content (jhan's edits + <code>HISTOGRAM_SLOTS_7</code> + pairs labels; identical to 834d8346d5), option ON and OFF, both tests, clang-format</td><td>delphi-3bda, logs <code>split-PR0-jhan3-on.txt</code> / <code>split-PR0-jhan3-off.txt</code></td><td class="ok" id="reverify-r2">ON: build rc=0 in 129 s; OFF: build rc=0 in 134 s; in both, <code>t_page_share_counters</code> All tests passed (61 assertions in 4 test cases) and <code>t_llama_unit</code> All tests passed (120054 assertions in 27 test cases); the ON binary printed the four report lines with the new labels, the OFF binary none; clang-format-19: no change</td></tr>
+</table>
+
+<h3>The revised header</h3>
+<pre><code id="header-listing">#pragma once
+// Page-share instrumentation for the software attention loop.
+//
+// For every visit of one (KV page, kv_head) pair in apply_page_range, the hooks
+// count how many query tokens of the current minibatch had at least one
+// relevant K token on that page (n_relevant_query_tokens). That number is how
+// many queries a kernel could serve from one load of the page. It says nothing
+// about whether the page was dense (all 64 tokens visible) for any of those
+// queries; a query counts if at least one K token on the page is relevant to
+// it.
+//
+// Compiled in only by the CMake option TRON_PAGE_SHARE_COUNTERS (default OFF),
+// which defines TRON_PAGE_SHARE_COUNTERS. Without the define this header is
+// empty and the hooks in self_attention.hpp compile to nothing.
+//
+// Report: printed to stderr at normal process exit, if any visit was counted.
+
+#ifdef TRON_PAGE_SHARE_COUNTERS
+#include &lt;atomic&gt;
+#include &lt;cstdint&gt;
+#include &lt;cstdio&gt;
+
+namespace tron::page_share {
+
+// Process-wide totals, summed over every apply_page_range call of every
+// attention worker. Each has a per-call counterpart of the same name without
+// the total_ prefix in page_visit_counts below.
+//
+// Histogram of the per-visit query-token count, one slot per range:
+//   slot 0: exactly 1 query token    slot 4: 5 to 8
+//   slot 1: exactly 2                slot 5: 9 to 16
+//   slot 2: exactly 3                slot 6: 17 or more
+//   slot 3: exactly 4
+// The report prints the slots in this order, labelled 1 2 3 4 5-8 9-16 &gt;16.
+inline std::atomic&lt;uint64_t&gt; total_histogram[7];
+// Visits with at least one relevant query token. A (page, kv_head) visit in
+// which no query token had a relevant K token is not counted anywhere.
+inline std::atomic&lt;uint64_t&gt; total_page_visits;
+// Sum over the counted visits of the per-visit query-token count, i.e. the
+// number of (query token, page visit) pairs. Each pair counts one, however many
+// K tokens on the page were relevant to that query and whatever the number of
+// query heads per kv_head; the report calls these pairs &quot;work units&quot; in that
+// coarse sense. total_relevant_query_tokens / total_page_visits is the average
+// number of query tokens per counted visit.
+inline std::atomic&lt;uint64_t&gt; total_relevant_query_tokens;
+// Visits with two or more relevant query tokens: visits where one load of the
+// page could have served several queries. The counters record that
+// opportunity; they do not observe page loads or any reuse.
+inline std::atomic&lt;uint64_t&gt; total_shared_visits;
+// The (query token, page visit) pairs that fell on shared visits.
+// total_shared_tokens / total_relevant_query_tokens is the fraction of all
+// pairs that a kernel serving several queries per page load could take from
+// shared visits.
+inline std::atomic&lt;uint64_t&gt; total_shared_tokens;
+// Visits made in the second attention pass of a step (pending = true). That
+// pass covers the pages whose K and V are written during this same forward
+// pass, by this or another minibatch. See Note [Ready versus pending attention
+// work] in model.hpp and Note [Minibatch Dependency Tracking] in common.hpp.
+inline std::atomic&lt;uint64_t&gt; total_pending_visits;
+
+// Counts gathered by one apply_page_range call (one worker, one kv_head, one
+// page range) as plain integers, then added to the total_* atomics by flush().
+struct page_visit_counts {
+  uint64_t histogram[7] = {};
+  uint64_t page_visits = 0;
+  uint64_t relevant_query_tokens = 0;
+  uint64_t shared_visits = 0;
+  uint64_t shared_tokens = 0;
+  uint64_t pending_visits = 0;
+  // Records one (page, kv_head) visit in which n_relevant_query_tokens query
+  // tokens had a relevant K token on the page. A visit with none is not
+  // counted.
+  inline void record_page_visit(uint64_t n_relevant_query_tokens, bool is_pending) {
+    if (n_relevant_query_tokens == 0) return;
+    page_visits++;
+    relevant_query_tokens += n_relevant_query_tokens;
+    if (is_pending) pending_visits++;
+    if (n_relevant_query_tokens &gt;= 2) {
+      shared_visits++;
+      shared_tokens += n_relevant_query_tokens;
+    }
+    int slot = n_relevant_query_tokens == 1    ? 0
+               : n_relevant_query_tokens == 2  ? 1
+               : n_relevant_query_tokens == 3  ? 2
+               : n_relevant_query_tokens == 4  ? 3
+               : n_relevant_query_tokens &lt;= 8  ? 4
+               : n_relevant_query_tokens &lt;= 16 ? 5
+                                               : 6;
+    histogram[slot]++;
+  }
+  // Adds these counts to the total_* atomics. Call once per object (the hooks
+  // create a fresh object per apply_page_range call); the counts are not reset.
+  inline void flush() {
+    if (page_visits == 0) return;
+    for (int i = 0; i &lt; 7; i++) {
+      if (histogram[i] != 0)
+        total_histogram[i].fetch_add(histogram[i], std::memory_order_relaxed);
+    }
+    total_page_visits.fetch_add(page_visits, std::memory_order_relaxed);
+    total_relevant_query_tokens.fetch_add(
+        relevant_query_tokens, std::memory_order_relaxed);
+    total_shared_visits.fetch_add(shared_visits, std::memory_order_relaxed);
+    total_shared_tokens.fetch_add(shared_tokens, std::memory_order_relaxed);
+    total_pending_visits.fetch_add(pending_visits, std::memory_order_relaxed);
+  }
+};
+
+// Prints the totals to stderr when the process exits normally. Static destructors
+// run on a return from main and on exit(); they do not run on abort() (so not
+// after a TRON_ASSERT failure), quick_exit(), a crash, or SIGKILL, and no
+// report appears in those cases. The loads below are not one snapshot: the
+// four lines are consistent only because the attention workers have stopped
+// flushing by the time static destruction runs.
+struct exit_reporter {
+  ~exit_reporter() {
+    const uint64_t n_visits = total_page_visits.load();
+    const uint64_t n_tokens = total_relevant_query_tokens.load();
+    if (n_visits == 0) return;
+    std::fprintf(stderr,
+        &quot;\n[page-share] page visits=%llu  query-token work units=%llu  avg query &quot;
+        &quot;tokens per visit=%.3f\n&quot;
+        &quot;[page-share] visits with sharing (&gt;=2 query tokens)=%llu (%.2f%% of &quot;
+        &quot;visits, %.2f%% of work)\n&quot;
+        &quot;[page-share] pending-phase visits=%llu\n&quot;
+        &quot;[page-share] query tokens per visit: 1:%llu 2:%llu 3:%llu 4:%llu &quot;
+        &quot;5-8:%llu 9-16:%llu &gt;16:%llu\n&quot;,
+        (unsigned long long)n_visits, (unsigned long long)n_tokens,
+        (double)n_tokens / n_visits, (unsigned long long)total_shared_visits.load(),
+        100.0 * total_shared_visits.load() / n_visits,
+        n_tokens != 0 ? 100.0 * total_shared_tokens.load() / n_tokens : 0.0,
+        (unsigned long long)total_pending_visits.load(),
+        (unsigned long long)total_histogram[0].load(),
+        (unsigned long long)total_histogram[1].load(),
+        (unsigned long long)total_histogram[2].load(),
+        (unsigned long long)total_histogram[3].load(),
+        (unsigned long long)total_histogram[4].load(),
+        (unsigned long long)total_histogram[5].load(),
+        (unsigned long long)total_histogram[6].load());
+  }
+};
+inline exit_reporter report_at_exit;
+
+}  // namespace tron::page_share
+#endif  // TRON_PAGE_SHARE_COUNTERS
+</code></pre>
+
+<h2 id="s14">14. Decisions for you</h2>
+<ol>
+  <li><b>Names.</b> Settled: jhan chose row 1 of the follow-up naming table (per-call members as requested, <code>total_</code> prefix on the process-wide atomics, no totals struct), applied as commit 1deb17fc4d. The remaining one-word option, if ever wanted, is <code>shared_query_tokens</code> for the token member.</li>
+  <li><b>Exit-time report.</b> Decided: keep the destructor with its limits documented (section 9).</li>
+  <li><b>Compile-time guard.</b> Decided: keep (section 2).</li>
+  <li><b>Landing the revision.</b> Done: 1deb17fc4d pushed to <code>jhan-page-share-counters</code>; PR #4267 now points at it. The PR body was left for jhan to edit.</li>
+</ol>
+
+<h2 id="s15">15. How these answers were checked</h2>
+<p>Six survey agents each answered one factual question against the tree at the PR tip (word usage, exit-dump conventions, zero-test style, the guard's precedent and cost, the hook semantics and rename trap, the histogram comment), citing file and line for every claim. Each answer was then given to two independent refuting agents that re-read every cited line and re-ran every count; their corrections are folded in above. Two naming agents proposed identifiers from different angles (plain English; conformance with existing tron names) and a judge chose among them, with the choices re-checked against the code. Corrections the refuters made that changed the text: four line numbers in the hook citations; the pending pass covers pages written by any minibatch of the forward pass, not only this minibatch's own tokens; the style count is 44 versus 6, not 45 versus 1, because five positive-form bare integer tests exist; three destructors (not one) run at static destruction, though none prints counters; perfetto <code>TRACE_COUNTER</code> is used in five files under pos/, not two. Two facts in the answers remain hypotheses: the equality of summed <code>n_relevant_query_tokens</code> with the estimator's <code>scaled_vs</code>, and the per-second flush rate, which is a formula with estimated inputs, not a measurement.</p>
+<p><b>gpt-6-astra review</b> (the external model jhan asked to be used for every substantive step; prompt and reply in <code>reviews/gpt-6-astra-{prompt,reply}-14-pr0-review1.md</code>). Twelve findings, no blocker. The three it marked should-fix, and what changed: (1) the comments on <code>shared_visits</code> and <code>shared_tokens</code> said "one page load served several queries", which reads as measured reuse; the counters only record the opportunity, so the comments now say so. (2) "the amount of work done" overstated what the sum measures: every (query token, page visit) pair counts one regardless of how many K tokens were relevant or how many query heads share the kv_head; the comment now defines the coarse unit. (3) Section 2 overstated what a runtime switch would require and called the report "unconditional"; both softened. It also asked for "a query counts as soon as one of its K tokens is on the page" to become "if at least one K token on the page is relevant to it" (header and PR body changed), noted that <code>quick_exit</code> also skips the report and that the report is consistent only because the workers have stopped (added to the header comment), and confirmed the constant initialization of the atomics struct, the destruction order, the shadowing diagnosis, the histogram mapping and the chosen names. Everything it marked "not verifiable here" (repository-wide word counts, the style counts, the exit paths, the 2026-08-18 numbers) was verified against the tree by the survey and refuting agents described above, not by the diff alone.</p>
+<p><b>Follow-up (same day).</b> jhan rejected identical member names in one file and, from a table of five naming schemes, chose the <code>total_</code> prefix on the process-wide atomics (section 12). Commit 1deb17fc4d applies it; it was rebuilt ON and OFF on delphi-3bda and sent to gpt-6-astra for a compile and semantics check (rows at the end of the verification table).</p>
+
+<div class="note" id="round2"><b>Round 2 (2026-09-08, early UTC).</b> jhan edited the header and the test himself (shorter comments, blank lines between counter groups, braces on single-statement loops) and asked for two more changes, applied on his go after checks on copies: the literal 7 became the constant <code>HISTOGRAM_SLOTS_7</code>, used by the header and the test, with a <code>static_assert</code> tying it to the hand-written report format string; and the report labels became "query-token/page-visit pairs" and "% of pairs" in place of "work units" and "% of work", so no label needs a definition. Commit 834d8346d5, authored by jhan in his checkout, is the new head of <code>jhan-page-share-counters</code> and of PR #4267. Verification of that content on delphi-3bda: see the last row of the table (added when the build finished).</div>
+<div class="note" id="final-note"><b>Status at the end of the day (2026-09-07, about 22:40 UTC).</b> jhan decided all four items of section 14: the names as in the branch, the exit-time report as implemented, the guard kept, and the branch pushed. Commit 1deb17fc4d is now the head of <code>jhan-page-share-counters</code> and of draft PR #4267 (label <code>Skip benchmarks</code> unchanged). It built and passed both tests with the option ON and OFF on delphi-3bda, clang-format reports no change, and both gpt-6-astra reviews found no blocker. The PR body on GitHub was not edited, as jhan asked; the draft in <code>PR0/pr-body.md</code> is available if wanted.</div>
+</main>
+</body>
+</html>

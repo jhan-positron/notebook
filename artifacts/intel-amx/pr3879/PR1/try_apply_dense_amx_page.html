@@ -1,0 +1,556 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/try_apply_dense_amx_page.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/pr3879/PR1/try_apply_dense_amx_page.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>apply_dense_amx_page walk-through</title>
+<style>
+body { background:#ffffff; color:#0b0b0b; font-family:system-ui,sans-serif; max-width:1120px; margin:24px auto; padding:0 20px; line-height:1.5; }
+h1 { font-size:23px; margin-bottom:2px; }
+h2 { font-size:17px; margin-top:32px; border-bottom:1px solid #e1e0d9; padding-bottom:6px; }
+h3 { font-size:14.5px; margin:18px 0 6px 0; }
+p.sub { color:#52514e; margin-top:0; }
+figure { margin:14px 0 6px 0; overflow-x:auto; }
+figure svg { max-width:100%; height:auto; display:block; }
+figcaption { font-size:12.5px; color:#52514e; margin-top:6px; }
+table { border-collapse:collapse; font-size:13px; width:100%; }
+th,td { border:1px solid #d8d6d0; padding:5px 8px; text-align:left; vertical-align:top; }
+th { background:#f4f3ef; }
+code { background:#f4f3ef; padding:1px 4px; font-size:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+pre { background:#f4f3ef; padding:10px 12px; font-size:12px; overflow-x:auto; line-height:1.45; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+pre code { background:none; padding:0; }
+.take { background:#f4f3ef; border-left:4px solid #d95f02; padding:8px 12px; font-size:14px; margin:12px 0; }
+.lineage { background:#f4f3ef; border-left:4px solid #7570b3; padding:8px 12px; font-size:13px; margin:12px 0; }
+.ok { background:#e6f4ea; }
+.grey { background:#f0efeb; color:#52514e; }
+.warn { background:#fff4d6; }
+td.num { text-align:right; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+td.code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; white-space:pre; background:#fbfbf9; }
+dl dt { font-weight:600; margin-top:8px; } dl dd { margin-left:0; font-size:13.5px; }
+ul.plain { padding-left:18px; }
+svg text { font-family:system-ui,sans-serif; fill:#0b0b0b; }
+svg .box { fill:#ffffff; stroke:#0b0b0b; stroke-width:1.2; }
+svg .soft { fill:#f4f3ef; stroke:#8a8883; stroke-width:1; }
+svg .live { fill:#cfe8d6; stroke:#1b9e77; stroke-width:1; }
+svg .pad  { fill:#eeede8; stroke:#8a8883; stroke-width:1; }
+svg .kern { fill:#e8e6f3; stroke:#7570b3; stroke-width:1.2; }
+svg .bad  { fill:#fde8e7; stroke:#e34948; stroke-width:1.2; stroke-dasharray:4 3; }
+svg .arrow { stroke:#0b0b0b; stroke-width:1.3; fill:none; }
+svg .grid { stroke:#8a8883; stroke-width:0.7; }
+svg .cap { font-size:12px; fill:#52514e; }
+svg .lab { font-size:12.5px; }
+svg .tt  { font-size:11.5px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+svg .hd  { font-size:13px; font-weight:600; }
+</style>
+</head>
+<body>
+
+<h1><code>apply_dense_amx_page</code> (formerly <code>try_apply_dense_amx_page</code>): a walk-through with diagrams</h1>
+<p class="sub">Source: <code>h/tron/models/self_attention.hpp</code> in the tron worktree <code>~/workspace/tron-amx</code>, branch <code>jhan-amx-p0</code>, commit <code>866e588578</code> (2026-09-08). Line numbers below refer to that commit.</p>
+
+<div class="lineage">
+<b>Name note.</b> The pushed PR #3879 head (<code>55b2a56d2f</code>) still calls this function <code>try_apply_dense_amx_page</code>. Local commit <code>866e588578</code> (not pushed at the time of writing) splits it: the dense-page test moved to the caller as <code>is_dense_amx_page</code>, and the arithmetic part was renamed <code>apply_dense_amx_page</code> with seven parameters instead of fourteen. The math is unchanged. This page describes the split version and points out where the old version differed.
+</div>
+
+<h2>Short version</h2>
+<div class="take">
+The function computes attention between one query token and one full 64-token KV page for the 4 query heads that share one KV head, using two AMX tile kernels for the two matrix products (scores and weighted values) and ordinary vector code for the softmax step in between. It then folds the page's result into the running softmax state (<i>m*</i>, <i>s*</i>, <i>v*</i>) exactly as the existing AVX-512 code does. It is called only when the page is dense (all 64 tokens live, visible and inside the sliding window); every other page keeps the old per-token loop.
+</div>
+
+<h2>1. Words used here</h2>
+<dl>
+<dt>tron, runtron</dt><dd>tron is the inference program under test; runtron is its command-line tool. Not needed for this page beyond context.</dd>
+<dt>AMX, AVX-512</dt><dd>AMX (Intel Advanced Matrix Extensions) multiplies small matrices held in 8 "tile" registers of 16 rows &times; 64 bytes. AVX-512 is the 512-bit vector instruction set the existing attention code uses.</dd>
+<dt>bf16, fp32</dt><dd>bf16 (bfloat16) is a 2-byte floating-point format used for Q, K and V in storage. fp32 is ordinary 4-byte float; scores, softmax weights and the running state are fp32.</dd>
+<dt>KV page</dt><dd>A block of 64 consecutive tokens' K and V rows for one layer and one KV head (<code>page::page_size == 64</code>).</dd>
+<dt>kv_mul, GQA</dt><dd>GQA (grouped-query attention) lets several query heads share one KV head. kv_mul is that ratio; the AMX kernels serve kv_mul 4 and head size 128 only.</dd>
+<dt>QK, PV</dt><dd>QK is the score product (query dot key, one number per token per head). PV is the product of the softmax weights P with the value rows V.</dd>
+<dt>Online (deferred) softmax</dt><dd>Softmax needs the maximum over all tokens before any exponential can be normalized. The code avoids a second pass by keeping three running values per head: <i>m*</i> (largest scaled score seen so far), <i>s*</i> (sum of exp(score &minus; m*) so far), <i>v*</i> (the 128-dim sum of exp(score &minus; m*) &times; V so far). When a page raises the maximum, the old sums are rescaled by <i>c</i> = exp(m*<sub>old</sub> &minus; m*<sub>new</sub>). The final attention output is <i>v*</i>/<i>s*</i>, computed after the last page, not in this function.</dd>
+<dt>scratchpad, was_valid</dt><dd>The scratchpad is the per-(worker, token) storage of the running state for all heads. <code>was_valid</code> is true when it already holds a state for this KV head from earlier pages; false means this page starts the state.</dd>
+<dt>the dotter, the dotter loop</dt><dd>The existing AVX-512 code path: <code>dotter&lt;bf16,128&gt;</code> computes one q&middot;k dot product per token; the loop around it in <code>apply_page_tok</code> is "the dotter loop".</dd>
+<dt>VNNI layout, A / B operand</dt><dd>The AMX bf16 multiply <code>TDPBF16PS</code> computes C[m][n] += &Sigma;<sub>k</sub> A[m][2k]&middot;B[k][n][0] + A[m][2k+1]&middot;B[k][n][1]. A is row-major. B must be "pair-interleaved" (VNNI, Vector Neural Network Instructions layout): each B row holds one pair of the summed dimension for 16 columns.</dd>
+<dt>dense page</dt><dd>A (query, page) pair where all 64 tokens are live, one visibility range covers the whole page, the query may see it, and token 0 is inside the sliding window. Defined by <code>is_dense_amx_page</code>.</dd>
+</dl>
+
+<h2>2. Where the function sits</h2>
+<p>One attention worker handles one KV head. It walks every page in its range and, inside each page, every query token of the minibatch. Two cheap checks (visible, inside the window) and the Q packing happen in that loop. The per-(query, page) work is then handed to <code>apply_page_tok</code>, which decides between the AMX path and the dotter loop [self_attention.hpp:1342-1404, 1591-1598].</p>
+
+<figure>
+<svg viewBox="0 0 1140 372" role="img" aria-label="Call chain: apply_page_range loops over pages and tokens, applies two gates and packs Q, calls apply_page_tok, which sends dense pages with a packed Q to apply_dense_amx_page and everything else to the AVX-512 dotter loop.">
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0b0b0b"/></marker></defs>
+<!-- column 1 -->
+<rect x="20" y="20" width="330" height="332" rx="8" class="box"/>
+<text x="185" y="44" text-anchor="middle" class="hd">apply_page_range: one worker, one kv_head</text>
+<text x="40" y="70" class="tt">for each page in page_range:</text>
+<text x="40" y="88" class="tt">  for each query token in the minibatch:</text>
+<rect x="40" y="104" width="290" height="40" rx="4" class="soft"/>
+<text x="185" y="128" text-anchor="middle" class="lab">page visible to this token? else skip</text>
+<rect x="40" y="160" width="290" height="40" rx="4" class="soft"/>
+<text x="185" y="184" text-anchor="middle" class="lab">page inside the sliding window? else skip</text>
+<rect x="40" y="216" width="290" height="56" rx="4" class="soft"/>
+<text x="185" y="238" text-anchor="middle" class="lab">pack Q once per token: packed_amx_query</text>
+<text x="185" y="256" text-anchor="middle" class="cap">amx_qp is null when AMX is off or absent</text>
+<rect x="40" y="292" width="290" height="40" rx="4" class="box"/>
+<text x="185" y="316" text-anchor="middle" class="tt">apply_page_tok(was_valid, page, .., amx_qp)</text>
+<line x1="185" y1="144" x2="185" y2="158" class="arrow" marker-end="url(#arr)"/>
+<line x1="185" y1="200" x2="185" y2="214" class="arrow" marker-end="url(#arr)"/>
+<line x1="185" y1="272" x2="185" y2="290" class="arrow" marker-end="url(#arr)"/>
+<!-- column 2 -->
+<rect x="410" y="20" width="330" height="332" rx="8" class="box"/>
+<text x="575" y="44" text-anchor="middle" class="hd">apply_page_tok</text>
+<text x="430" y="70" class="cap">begin = 0 (1 for EAGLE's first token)</text>
+<text x="430" y="86" class="cap">end = page.count(); query_visible from the range hint</text>
+<rect x="430" y="262" width="290" height="70" rx="4" class="soft"/>
+<text x="575" y="284" text-anchor="middle" class="tt">amx_qp != nullptr</text>
+<text x="575" y="302" text-anchor="middle" class="tt">&amp;&amp; is_dense_amx_page(page, begin, end, ...)</text>
+<text x="575" y="322" text-anchor="middle" class="cap">(if constexpr: shape 128 x 4 and bf16 Q only)</text>
+<line x1="330" y1="312" x2="428" y2="297" class="arrow" marker-end="url(#arr)"/>
+<!-- column 3 -->
+<rect x="800" y="60" width="320" height="118" rx="8" class="live"/>
+<text x="960" y="84" text-anchor="middle" class="hd">apply_dense_amx_page</text>
+<text x="960" y="104" text-anchor="middle" class="lab">QK kernel &rarr; scale, max, exp &rarr; PV kernel</text>
+<text x="960" y="122" text-anchor="middle" class="lab">&rarr; fold into m*, s*, v*</text>
+<text x="960" y="142" text-anchor="middle" class="cap">whole page in one pass</text>
+<text x="960" y="160" text-anchor="middle" class="cap">returns {64 tokens, range_hint}</text>
+<rect x="800" y="230" width="320" height="118" rx="8" class="pad"/>
+<text x="960" y="254" text-anchor="middle" class="hd">dotter loop (AVX-512, unchanged)</text>
+<text x="960" y="274" text-anchor="middle" class="lab">one q&middot;k dot product per live, visible,</text>
+<text x="960" y="292" text-anchor="middle" class="lab">in-window token; then the same softmax</text>
+<text x="960" y="310" text-anchor="middle" class="lab">step with scaled_v</text>
+<text x="960" y="330" text-anchor="middle" class="cap">returns {relevant tokens, range_hint}</text>
+<!-- arrows from the gate -->
+<polyline points="575,262 575,120 798,120" class="arrow" marker-end="url(#arr)"/>
+<text x="590" y="112" class="lab" style="fill:#1b9e77">yes: both gates hold</text>
+<line x1="720" y1="297" x2="798" y2="290" class="arrow" marker-end="url(#arr)"/>
+<text x="745" y="282" class="lab">no</text>
+</svg>
+<figcaption>Figure 1. The unit of the decision is one (query token, page) pair. A query token runs its full pages on AMX and its partial tail page on the dotter loop. The two boxes on the right compute the same mathematical result for the tokens they cover [self_attention.hpp:1342-1404, 1591-1598].</figcaption>
+</figure>
+
+<h2>3. The dense-page test (<code>is_dense_amx_page</code>)</h2>
+<p>The AMX kernels always process 64 whole tokens; they cannot skip one. So the AMX path may be used only when the per-token loop would have used every one of the 64 tokens anyway. The predicate spells that out as five conditions, all on values the dotter loop would otherwise check token by token [self_attention.hpp:1440-1452].</p>
+
+<figure>
+<svg viewBox="0 0 1080 340" role="img" aria-label="A 64-token page strip annotated with the five dense-page conditions, and a second strip showing a 40-token partial page that goes to the dotter loop.">
+<defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0b0b0b"/></marker></defs>
+<text x="20" y="30" class="hd" style="fill:#1b9e77">dense page &rarr; AMX</text>
+<!-- strip A -->
+<rect x="180" y="62" width="704" height="36" class="live"/>
+<line x1="356" y1="62" x2="356" y2="98" class="grid"/><line x1="532" y1="62" x2="532" y2="98" class="grid"/><line x1="708" y1="62" x2="708" y2="98" class="grid"/>
+<text x="186" y="116" class="tt">token 0</text><text x="362" y="116" class="tt">16</text><text x="538" y="116" class="tt">32</text><text x="714" y="116" class="tt">48</text><text x="880" y="116" text-anchor="end" class="tt">63</text>
+<text x="532" y="86" text-anchor="middle" class="lab">64 live tokens, all used</text>
+<!-- condition labels above -->
+<text x="180" y="50" class="tt">begin == 0</text>
+<text x="884" y="50" text-anchor="end" class="tt">end == page.count() == 64</text>
+<!-- brackets below -->
+<polyline points="180,136 180,146 884,146 884,136" fill="none" stroke="#0b0b0b" stroke-width="1"/>
+<text x="532" y="166" text-anchor="middle" class="lab">query_visible, and one visibility range covers the whole page: page.at_offset(63) &lt; range.tok_hi</text>
+<polyline points="180,184 180,194 884,194 884,184" fill="none" stroke="#0b0b0b" stroke-width="1"/>
+<text x="532" y="214" text-anchor="middle" class="lab">token 0 inside the sliding window: q_position &minus; k_position &lt; sliding_window_size</text>
+<text x="532" y="232" text-anchor="middle" class="cap">later tokens are closer to the query, so they are inside too</text>
+<!-- strip B -->
+<text x="20" y="282" class="hd" style="fill:#52514e">not dense &rarr; dotter</text>
+<rect x="180" y="266" width="440" height="36" class="pad"/>
+<rect x="620" y="266" width="264" height="36" fill="none" stroke="#8a8883" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="400" y="290" text-anchor="middle" class="lab">40 live tokens (page.count() == 40)</text>
+<text x="752" y="290" text-anchor="middle" class="cap">not yet written</text>
+<text x="180" y="326" class="cap">also not dense: a visibility-range boundary inside the page, a query that cannot see the page, or token 0 outside the window.</text>
+</svg>
+<figcaption>Figure 2. The five conditions of <code>is_dense_amx_page</code>. When all hold, the dotter loop would have visited all 64 tokens, so the 64-token AMX kernels compute the same set of scores [self_attention.hpp:1440-1452; the caller's begin/end/visibility values at 1556-1580].</figcaption>
+</figure>
+
+<p>In the pushed PR head these checks are the first statement of <code>try_apply_dense_amx_page</code> and a failing check makes it return false without touching anything. In <code>866e588578</code> the caller runs the check and the function always applies the page.</p>
+
+<h2>4. The data the function touches</h2>
+<table>
+<tr><th>Name in code</th><th>Shape and type</th><th>Meaning</th><th>Where it comes from</th></tr>
+<tr><td><code>q_packed</code></td><td>2048 bf16 = 4096 bytes</td><td>The 4 query heads of this token for this KV head (4 &times; 128 bf16 = 1024 bytes of real data), rearranged into the B-operand layout with 12 zero padding columns per panel.</td><td><code>packed_amx_query</code> packs it once per token per call [self_attention.hpp:1414-1429; amx_attn.cpp:105-121]</td></tr>
+<tr><td><code>k0.data</code></td><td>64 rows &times; 128 bf16, 256 bytes per row</td><td>The K rows of the page's 64 tokens, exactly as stored. The kernel reads the 64 rows after <code>k0</code> as one block.</td><td><code>pg.k&lt;geometry.kv&gt;(slot, kv_head, 0)</code>; storage is <code>kv_block::k[64][128/16]</code> [kv_cache.hpp:1884]</td></tr>
+<tr><td><code>pg.v_data(...)</code></td><td>32 pair-rows &times; (128 dims &times; 2) bf16</td><td>The V rows of the same 64 tokens, stored with token pairs interleaved: for each dim, tokens 2p and 2p+1 sit next to each other. This is already the B-operand layout, so no copy is needed.</td><td><code>kv_block::v[32][2*128/16]</code> [kv_cache.hpp:1888, 1299-1303]</td></tr>
+<tr><td><code>s_pages</code></td><td><code>tensor&lt;4, 64&gt;</code> fp32 on the stack</td><td>First the raw scores q&middot;k per head per token; after step 2 the softmax weights P = exp(scaled score &minus; max).</td><td>Local variable [self_attention.hpp:1485]</td></tr>
+<tr><td><code>corr_arr, m_new_arr, sum_arr</code></td><td>4 floats each</td><td>Per head: the rescale factor <i>c</i> for the old state, the new maximum, and &Sigma;P over the page.</td><td>Local variables [1491-1492]</td></tr>
+<tr><td><code>amx_o</code></td><td>16 rows &times; 128 fp32 = 8192 bytes, 64-byte aligned</td><td>The PV kernel's output. Only rows 0..3 (one per head) hold data; rows 4..15 are written by the tile store and ignored.</td><td>Local variable [1511-1512]; see Note [Tile stores write 16 rows]</td></tr>
+<tr><td><code>head_sp.m_star, s_star, v_star</code></td><td>float, float, 128 fp32 view</td><td>The running softmax state for one head, read and written in place.</td><td><code>scratchpad[kv_head * 4 + offset]</code> [340-372, 1496-1497]</td></tr>
+</table>
+
+<figure>
+<svg viewBox="0 0 1120 500" role="img" aria-label="Data flow through apply_dense_amx_page: packed Q and the K page enter the QK kernel, which writes s_pages; the softmax step turns s_pages into P and produces m_new, sum and c per head; the PV kernel multiplies P by the V page into amx_o; the update folds amx_o, sum and c into the running state m*, s*, v*.">
+<defs><marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0b0b0b"/></marker></defs>
+<!-- inputs row -->
+<rect x="20" y="20" width="240" height="84" rx="6" class="box"/>
+<text x="140" y="42" text-anchor="middle" class="hd">packed Q (this token, this kv_head)</text>
+<text x="140" y="62" text-anchor="middle" class="lab">4 heads &times; 128 dims, bf16</text>
+<text x="140" y="80" text-anchor="middle" class="cap">4 VNNI panels, 4096 B, columns 4..15 zero</text>
+<rect x="300" y="20" width="240" height="84" rx="6" class="box"/>
+<text x="420" y="42" text-anchor="middle" class="hd">K page, as stored</text>
+<text x="420" y="62" text-anchor="middle" class="lab">64 tokens &times; 128 dims, bf16</text>
+<text x="420" y="80" text-anchor="middle" class="cap">one 256-byte row per token</text>
+<rect x="580" y="20" width="240" height="84" rx="6" class="box"/>
+<text x="700" y="42" text-anchor="middle" class="hd">V page, as stored</text>
+<text x="700" y="62" text-anchor="middle" class="lab">64 tokens &times; 128 dims, bf16</text>
+<text x="700" y="80" text-anchor="middle" class="cap">token pairs interleaved (B layout already)</text>
+<rect x="860" y="20" width="240" height="84" rx="6" class="box"/>
+<text x="980" y="42" text-anchor="middle" class="hd">running state, per head (&times;4)</text>
+<text x="980" y="62" text-anchor="middle" class="lab">m* max, s* sum, v*[128] weighted V</text>
+<text x="980" y="80" text-anchor="middle" class="cap">from earlier pages, if was_valid</text>
+<!-- step row -->
+<rect x="20" y="200" width="240" height="120" rx="6" class="kern"/>
+<text x="140" y="224" text-anchor="middle" class="hd">1. qk_rowmajor_128x4</text>
+<text x="140" y="244" text-anchor="middle" class="cap">AMX kernel, 16 tile multiplies</text>
+<text x="140" y="270" text-anchor="middle" class="tt">s_pages[4][64] = q &middot; k</text>
+<text x="140" y="290" text-anchor="middle" class="lab">raw fp32 scores, not yet scaled</text>
+<rect x="300" y="200" width="240" height="120" rx="6" class="box"/>
+<text x="420" y="224" text-anchor="middle" class="hd">2. scale, max, exp, sum</text>
+<text x="420" y="244" text-anchor="middle" class="cap">per head, AVX-512 tensor ops</text>
+<text x="420" y="266" text-anchor="middle" class="tt">s = s &middot; scale (or softcap)</text>
+<text x="420" y="284" text-anchor="middle" class="tt">m_new = max(m*, max s)</text>
+<text x="420" y="302" text-anchor="middle" class="tt">P = exp(s &minus; m_new); &Sigma;P; c = e^(m*&minus;m_new)</text>
+<rect x="580" y="200" width="240" height="120" rx="6" class="kern"/>
+<text x="700" y="224" text-anchor="middle" class="hd">3. weights_times_v_128x4</text>
+<text x="700" y="244" text-anchor="middle" class="cap">AMX kernel, 16 tile multiplies</text>
+<text x="700" y="270" text-anchor="middle" class="tt">amx_o[16][128] = bf16(P) &middot; V</text>
+<text x="700" y="290" text-anchor="middle" class="lab">rows 0..3 = O, one per head</text>
+<rect x="860" y="200" width="240" height="120" rx="6" class="box"/>
+<text x="980" y="224" text-anchor="middle" class="hd">4. fold into the state</text>
+<text x="980" y="244" text-anchor="middle" class="cap">per head, in place</text>
+<text x="980" y="268" text-anchor="middle" class="tt">v* = c &middot; v* + O</text>
+<text x="980" y="286" text-anchor="middle" class="tt">s* = c &middot; s* + &Sigma;P</text>
+<text x="980" y="304" text-anchor="middle" class="tt">m* = m_new</text>
+<!-- vertical arrows -->
+<line x1="140" y1="104" x2="140" y2="198" class="arrow" marker-end="url(#arr3)"/>
+<text x="150" y="150" class="cap">B operand</text>
+<polyline points="420,104 420,150 200,150 200,198" class="arrow" marker-end="url(#arr3)"/>
+<text x="240" y="142" class="cap">A operand (read in place)</text>
+<line x1="700" y1="104" x2="700" y2="198" class="arrow" marker-end="url(#arr3)"/>
+<text x="710" y="150" class="cap">B operand (read in place)</text>
+<polyline points="960,104 960,176 480,176 480,198" class="arrow" marker-end="url(#arr3)"/>
+<text x="500" y="168" class="cap">reads m* (old maximum)</text>
+<line x1="1030" y1="104" x2="1030" y2="198" class="arrow" marker-end="url(#arr3)"/>
+<text x="1038" y="150" class="cap">read, write</text>
+<!-- horizontal arrows -->
+<line x1="260" y1="260" x2="298" y2="260" class="arrow" marker-end="url(#arr3)"/>
+<line x1="540" y1="260" x2="578" y2="260" class="arrow" marker-end="url(#arr3)"/>
+<line x1="820" y1="260" x2="858" y2="260" class="arrow" marker-end="url(#arr3)"/>
+<!-- outputs row -->
+<rect x="300" y="380" width="240" height="60" rx="6" class="soft"/>
+<text x="420" y="404" text-anchor="middle" class="tt">s_pages now holds P[4][64]</text>
+<text x="420" y="424" text-anchor="middle" class="tt">m_new_arr[4], sum_arr[4], corr_arr[4]</text>
+<line x1="420" y1="320" x2="420" y2="378" class="arrow" marker-end="url(#arr3)"/>
+<polyline points="540,410 700,410 700,322" class="arrow" marker-end="url(#arr3)"/>
+<text x="560" y="402" class="cap">P as A operand</text>
+<polyline points="540,430 980,430 980,322" class="arrow" marker-end="url(#arr3)"/>
+<text x="740" y="450" class="cap">sum_arr, corr_arr, m_new_arr</text>
+<rect x="860" y="380" width="240" height="40" rx="6" class="soft"/>
+<text x="980" y="405" text-anchor="middle" class="cap">caller returns {64, range_hint}</text>
+<text x="20" y="480" class="cap">Boxes 1 and 3 (purple) run in the AMX tile unit; boxes 2 and 4 are ordinary AVX-512 code shared in form with the dotter path. Output v*/s* is divided later, after the last page.</text>
+</svg>
+<figcaption>Figure 3. The four steps of <code>apply_dense_amx_page</code> and the arrays that connect them. Everything except <i>m*</i>, <i>s*</i>, <i>v*</i> lives on the stack for the duration of one call [self_attention.hpp:1464-1532].</figcaption>
+</figure>
+
+<h2>5. Step 1: the QK kernel writes raw scores</h2>
+<pre><code>tensor&lt;operation_kv_mul, page::page_size&gt; s_pages;              // [4][64] fp32
+const auto k0 = pg.template k&lt;geometry.kv&gt;(slot, kv_head, 0);    // token 0's K row
+amx_attn_h128g4::qk_rowmajor_128x4(k0.data, q_packed, &amp;s_pages[0][0], page::page_size);</code></pre>
+<p>The kernel computes s_pages[h][t] = &Sigma;<sub>d=0..127</sub> Q[h][d] &middot; K[t][d] for h in 0..3 and t in 0..63 [amx_attn.cpp:124-187]. Two facts explain its shape.</p>
+<ul class="plain">
+<li><b>K is the A operand, Q is the B operand.</b> The tile multiply accepts a row-major matrix only on the left. K is stored row-major (one 256-byte row per token) and is the larger matrix, so K goes left and Q must be pre-arranged into the pair-interleaved B layout. The product therefore comes out transposed: S<sup>T</sup>[token][head] [amx_attn_iface.hpp:187-217, Note [QK orientation]].</li>
+<li><b>Only 4 of the 16 B columns are real.</b> A tile is 16 columns wide; the group has 4 heads. Columns 4..15 of the packed Q are zero, so 12 of every 16 result columns are wasted zeros. The kernel transposes only the 4 real columns back into <code>s_pages[4][64]</code>.</li>
+</ul>
+
+<figure>
+<svg viewBox="0 0 1120 440" role="img" aria-label="QK orientation: K page (64 tokens by 128 dims, 16 tiles) times packed Q (128 dims by 16 columns, 4 live) equals S transposed (64 by 16, 4 live columns), which is transposed into s_pages (4 rows by 64 tokens).">
+<defs><marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0b0b0b"/></marker></defs>
+<!-- K -->
+<text x="180" y="40" text-anchor="middle" class="hd">A operand: K page as stored</text>
+<text x="180" y="58" text-anchor="middle" class="cap">128 dims &rarr; (4 steps of 32)</text>
+<rect x="20" y="70" width="320" height="160" class="box"/>
+<line x1="100" y1="70" x2="100" y2="230" class="grid"/><line x1="180" y1="70" x2="180" y2="230" class="grid"/><line x1="260" y1="70" x2="260" y2="230" class="grid"/>
+<line x1="20" y1="110" x2="340" y2="110" class="grid"/><line x1="20" y1="150" x2="340" y2="150" class="grid"/><line x1="20" y1="190" x2="340" y2="190" class="grid"/>
+<rect x="20" y="70" width="80" height="40" class="live"/>
+<text x="60" y="94" text-anchor="middle" class="cap">1 tile</text>
+<text x="180" y="256" text-anchor="middle" class="cap">64 tokens down (4 slices of 16)</text>
+<text x="180" y="272" text-anchor="middle" class="cap">one tile = 16 tokens &times; 32 dims</text>
+<!-- times -->
+<text x="372" y="160" text-anchor="middle" font-size="22">&times;</text>
+<!-- Q packed -->
+<text x="470" y="40" text-anchor="middle" class="hd">B operand: packed Q</text>
+<text x="470" y="58" text-anchor="middle" class="cap">16 columns &rarr;</text>
+<rect x="410" y="70" width="120" height="160" class="pad"/>
+<rect x="410" y="70" width="30" height="160" class="live"/>
+<line x1="410" y1="110" x2="530" y2="110" class="grid"/><line x1="410" y1="150" x2="530" y2="150" class="grid"/><line x1="410" y1="190" x2="530" y2="190" class="grid"/>
+<text x="425" y="150" text-anchor="middle" class="tt" transform="rotate(-90 425 150)">heads 0..3</text>
+<text x="485" y="150" text-anchor="middle" class="cap" transform="rotate(-90 485 150)">columns 4..15 zero</text>
+<text x="470" y="256" text-anchor="middle" class="cap">128 dims down as 64 pairs;</text>
+<text x="470" y="272" text-anchor="middle" class="cap">one panel (16 pair-rows) per 32-dim step</text>
+<!-- equals -->
+<text x="566" y="160" text-anchor="middle" font-size="22">=</text>
+<!-- S^T -->
+<text x="662" y="40" text-anchor="middle" class="hd">S&#x1D40;: 64 tokens &times; 16</text>
+<text x="662" y="58" text-anchor="middle" class="cap">S transposed, fp32, 4 tiles</text>
+<rect x="602" y="70" width="120" height="160" class="pad"/>
+<rect x="602" y="70" width="30" height="160" class="live"/>
+<line x1="602" y1="110" x2="722" y2="110" class="grid"/><line x1="602" y1="150" x2="722" y2="150" class="grid"/><line x1="602" y1="190" x2="722" y2="190" class="grid"/>
+<text x="617" y="150" text-anchor="middle" class="tt" transform="rotate(-90 617 150)">S[t][h]</text>
+<text x="677" y="150" text-anchor="middle" class="cap" transform="rotate(-90 677 150)">zeros, discarded</text>
+<text x="662" y="256" text-anchor="middle" class="cap">stored to a kernel-local buffer</text>
+<!-- transpose arrow -->
+<line x1="740" y1="150" x2="790" y2="150" class="arrow" marker-end="url(#arr4)"/>
+<text x="765" y="134" text-anchor="middle" class="cap">transpose</text>
+<text x="765" y="176" text-anchor="middle" class="cap">(AVX-512,</text>
+<text x="765" y="190" text-anchor="middle" class="cap">4 rows only)</text>
+<!-- s_pages -->
+<text x="960" y="40" text-anchor="middle" class="hd">s_pages[4][64] in the caller</text>
+<text x="960" y="58" text-anchor="middle" class="cap">64 tokens &rarr;</text>
+<rect x="800" y="130" width="300" height="40" class="live"/>
+<line x1="800" y1="140" x2="1100" y2="140" class="grid"/><line x1="800" y1="150" x2="1100" y2="150" class="grid"/><line x1="800" y1="160" x2="1100" y2="160" class="grid"/>
+<text x="960" y="196" text-anchor="middle" class="cap">4 rows (heads), fp32, raw q&middot;k, unscaled</text>
+<text x="960" y="212" text-anchor="middle" class="cap">same array and layout the dotter loop fills</text>
+<!-- tile multiply explainer -->
+<rect x="20" y="300" width="1080" height="120" rx="6" class="soft"/>
+<text x="40" y="326" class="hd">One _tile_dpbf16ps call</text>
+<text x="40" y="348" class="lab">takes a K tile (16 tokens &times; 32 dims) and one Q panel (32 dims as 16 pairs &times; 16 columns); adds the 32-dim partial dots into a 16 &times; 16 fp32 tile.</text>
+<text x="40" y="370" class="lab">4 dim steps complete the 128-dim dot product for 16 tokens; 4 token slices cover the page: 16 tile multiplies per page.</text>
+<text x="40" y="392" class="lab">Tiles 0..3 accumulate, tiles 4/5 hold K, tile 6 holds the Q panel. Products bf16 &times; bf16 are exact in fp32; the adds are fp32.</text>
+<text x="40" y="412" class="cap">The AVX dotter does the same arithmetic in a different summation order [amx_attn_iface.hpp:70-86; amx_attn.cpp:130-157 multiply and store, 159-186 transpose]</text>
+</svg>
+<figcaption>Figure 4. Why the QK kernel is called "rowmajor" and why it transposes: K is consumed exactly as stored, at the price of computing 12 wasted zero columns and one 4-row transpose per page [amx_attn_iface.hpp:187-227; amx_attn.cpp:124-187].</figcaption>
+</figure>
+
+<h2>6. Step 2: scale, running maximum, exponentials</h2>
+<pre><code>float corr_arr[4], m_new_arr[4], sum_arr[4];
+for (size_t offset = 0; offset &lt; 4; ++offset) {
+  tensor&lt;64&gt;&amp; s_page = s_pages[offset];                      // this head's 64 raw scores
+  scratchpad_ref&lt;geometry&gt; head_sp = scratchpad[kv_head * 4 + offset];
+  if constexpr (softcapping) {
+    s_page = tanh(s_page * (operation_scale / softcap)) * softcap;
+  } else {
+    s_page = s_page * operation_scale;                        // usually 1/sqrt(128)
+  }
+  float m_page = max(s_page);                                 // page maximum
+  if (was_valid) m_page = std::max(head_sp.m_star, m_page);   // never below the old maximum
+  s_page = exp(s_page - m_page);                              // P: weights in (0, 1]
+  m_new_arr[offset] = m_page;
+  sum_arr[offset]   = sum(s_page);                            // sum of P over the page
+  corr_arr[offset]  = was_valid ? std::exp(head_sp.m_star - m_page) : 0.f;
+}</code></pre>
+<p>This loop is a line-for-line copy of the dotter epilogue [self_attention.hpp:1648-1677], run on the AMX scores instead of the dotter's. Per head it produces three scalars and turns the 64 raw scores into the 64 softmax weights P, in place. The corr value when <code>was_valid</code> is false is never read (see step 4).</p>
+
+<h3>6.1 The math in symbols</h3>
+<p>For one head, with <i>s</i><sub>t</sub> the scaled score of token t in this page and (<i>m*</i>, <i>s*</i>, <i>v*</i>) the state from earlier pages:</p>
+<table>
+<tr><th>Quantity</th><th>Definition</th><th>Code</th><th>Why</th></tr>
+<tr><td><i>m</i><sub>new</sub></td><td>max(<i>m*</i>, max<sub>t</sub> <i>s</i><sub>t</sub>)</td><td><code>m_page</code></td><td>Every exponential is taken relative to the largest score seen so far, so no exp argument is positive and nothing overflows.</td></tr>
+<tr><td>P<sub>t</sub></td><td>exp(<i>s</i><sub>t</sub> &minus; <i>m</i><sub>new</sub>)</td><td><code>s_page</code> after the exp</td><td>Unnormalized softmax weight of token t; the largest is 1 when this page holds the maximum.</td></tr>
+<tr><td>&Sigma;P</td><td>&Sigma;<sub>t</sub> P<sub>t</sub></td><td><code>sum_arr</code></td><td>This page's contribution to the normalizer.</td></tr>
+<tr><td><i>c</i></td><td>exp(<i>m*</i> &minus; <i>m</i><sub>new</sub>) &le; 1</td><td><code>corr_arr</code></td><td>The old state was computed relative to the old maximum. Multiplying it by <i>c</i> re-expresses it relative to the new maximum. When the maximum did not change, <i>c</i> = 1.</td></tr>
+</table>
+
+<h3>6.2 A toy example with real numbers</h3>
+<p>To make the update visible, shrink the shapes: one head, head size 2, pages of 4 tokens, scale 0.5, query q = (1, 2). The two pages below were run through the same formulas in Python and compared with an ordinary one-pass softmax over all 8 tokens. Both give the output (0.8419, 1.8375).</p>
+<table>
+<tr><th></th><th>Page 1 (was_valid = false)</th><th>Page 2 (was_valid = true)</th></tr>
+<tr><td>K rows (token 0..3)</td><td class="num">(1,0) (0,1) (1,1) (2,0)</td><td class="num">(0,2) (1,-1) (3,1) (0,0)</td></tr>
+<tr><td>V rows (token 0..3)</td><td class="num">(1,0) (0,1) (1,1) (2,2)</td><td class="num">(0,3) (3,0) (1,2) (2,1)</td></tr>
+<tr><td>scaled scores <i>s</i><sub>t</sub> = 0.5 &middot; q&middot;k</td><td class="num">0.5, 1.0, 1.5, 1.0</td><td class="num">2.0, &minus;0.5, 2.5, 0.0</td></tr>
+<tr><td><i>m</i><sub>new</sub></td><td class="num">1.5 (page max; no old state)</td><td class="num">max(1.5, 2.5) = 2.5</td></tr>
+<tr><td>P<sub>t</sub> = exp(<i>s</i><sub>t</sub> &minus; <i>m</i><sub>new</sub>)</td><td class="num">0.3679, 0.6065, 1.0, 0.6065</td><td class="num">0.6065, 0.0498, 1.0, 0.0821</td></tr>
+<tr><td>&Sigma;P</td><td class="num">2.5809</td><td class="num">1.7384</td></tr>
+<tr><td>O = &Sigma;<sub>t</sub> P<sub>t</sub> V<sub>t</sub> (the PV kernel's row)</td><td class="num">(2.5809, 2.8196)</td><td class="num">(1.3135, 3.9017)</td></tr>
+<tr><td><i>c</i> = exp(<i>m*</i><sub>old</sub> &minus; <i>m</i><sub>new</sub>)</td><td class="num">unused (0 in code)</td><td class="num">exp(1.5 &minus; 2.5) = 0.3679</td></tr>
+<tr class="ok"><td><i>v*</i> after</td><td class="num">O = (2.5809, 2.8196)</td><td class="num">0.3679 &middot; (2.5809, 2.8196) + (1.3135, 3.9017) = (2.2630, 4.9389)</td></tr>
+<tr class="ok"><td><i>s*</i> after</td><td class="num">2.5809</td><td class="num">0.3679 &middot; 2.5809 + 1.7384 = 2.6879</td></tr>
+<tr class="ok"><td><i>m*</i> after</td><td class="num">1.5</td><td class="num">2.5</td></tr>
+<tr><td>output <i>v*</i>/<i>s*</i> (after the last page)</td><td class="num"></td><td class="num">(0.8419, 1.8375) = one-pass softmax result</td></tr>
+</table>
+
+<figure>
+<svg viewBox="0 0 1080 250" role="img" aria-label="The state update for page 2 of the toy example: the old state is multiplied by c = 0.3679 and the page's own sums are added, giving the new state.">
+<defs><marker id="arr5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0b0b0b"/></marker></defs>
+<rect x="20" y="30" width="300" height="150" rx="6" class="box"/>
+<text x="170" y="56" text-anchor="middle" class="hd">state after page 1</text>
+<text x="170" y="84" text-anchor="middle" class="tt">m* = 1.5</text>
+<text x="170" y="106" text-anchor="middle" class="tt">s* = 2.5809</text>
+<text x="170" y="128" text-anchor="middle" class="tt">v* = (2.5809, 2.8196)</text>
+<text x="170" y="160" text-anchor="middle" class="cap">relative to maximum 1.5</text>
+<rect x="390" y="30" width="300" height="150" rx="6" class="kern"/>
+<text x="540" y="56" text-anchor="middle" class="hd">page 2 alone</text>
+<text x="540" y="84" text-anchor="middle" class="tt">m_new = max(1.5, 2.5) = 2.5</text>
+<text x="540" y="106" text-anchor="middle" class="tt">&Sigma;P = 1.7384</text>
+<text x="540" y="128" text-anchor="middle" class="tt">O = (1.3135, 3.9017)</text>
+<text x="540" y="160" text-anchor="middle" class="cap">relative to maximum 2.5</text>
+<rect x="760" y="30" width="300" height="150" rx="6" class="live"/>
+<text x="910" y="56" text-anchor="middle" class="hd">state after page 2</text>
+<text x="910" y="84" text-anchor="middle" class="tt">m* = 2.5</text>
+<text x="910" y="106" text-anchor="middle" class="tt">s* = 0.3679 &middot; 2.5809 + 1.7384</text>
+<text x="910" y="128" text-anchor="middle" class="tt">v* = 0.3679 &middot; v* + O</text>
+<text x="910" y="160" text-anchor="middle" class="cap">relative to maximum 2.5</text>
+<polyline points="170,180 170,215 830,215 830,182" class="arrow" marker-end="url(#arr5)"/>
+<text x="500" y="236" text-anchor="middle" class="lab">old state &times; c = exp(1.5 &minus; 2.5) = 0.3679 (shrunk to the new reference maximum)</text>
+<line x1="690" y1="105" x2="758" y2="105" class="arrow" marker-end="url(#arr5)"/>
+<text x="724" y="92" text-anchor="middle" class="cap">+ added</text>
+</svg>
+<figcaption>Figure 5. Step 4 for page 2 of the toy example. The factor <i>c</i> rescales everything computed under the old maximum; the page's own sums, already computed under the new maximum, are added as they are. Numbers from the Python check described above.</figcaption>
+</figure>
+
+<h2>7. Step 3: the PV kernel</h2>
+<pre><code>alignas(64) float amx_o[16 * 128];                 // 16 rows, not 4: see Note [Tile stores write 16 rows]
+amx_attn_h128g4::weights_times_v_128x4(
+    pg.template v_data&lt;geometry.kv&gt;(slot, kv_head),  // V page, pair-interleaved, read in place
+    &amp;s_pages[0][0],                                  // P[4][64] fp32
+    page::page_size,                                 // row stride of P, in floats
+    amx_o);</code></pre>
+<p>The kernel computes O[h][d] = &Sigma;<sub>t=0..63</sub> bf16(P[h][t]) &middot; V[t][d] [amx_attn.cpp:190-239]. Three facts explain its shape.</p>
+<ul class="plain">
+<li><b>P is converted to bf16 first, rounding to nearest even.</b> The tile multiply takes bf16 inputs. The kernel writes P into a thread-local 16 &times; 64 bf16 buffer whose rows 4..15 stay zero forever [amx_attn.cpp:199-207]. The AVX path truncates P to bf16 instead; this is one of the two numeric differences between the paths [amx_attn_iface.hpp:70-86].</li>
+<li><b>V is the B operand and is read as stored.</b> The KV cache stores V with token pairs interleaved (<code>v[p/2][dim][p%2]</code>) so that the AVX code can use <code>_mm512_dpbf16_ps</code>; the same layout is exactly the pair-interleaved B layout the tile multiply needs [kv_cache.hpp:1884-1892, 1299-1303].</li>
+<li><b>The output has 16 rows although only 4 are useful.</b> <code>TILESTORED</code> writes all 16 configured rows. The caller's buffer must therefore be 8192 bytes, and rows 4..15 (zeros, from the zero rows of P) are ignored [amx_attn_iface.hpp:90-112].</li>
+</ul>
+
+<figure>
+<svg viewBox="0 0 1120 470" role="img" aria-label="PV kernel: P (16 rows by 64 tokens, 4 live rows) times V as stored (32 token-pair rows by 128 dims, pairs interleaved) equals amx_o (16 rows by 128 dims); only rows 0..3 are read.">
+<defs><marker id="arr6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0b0b0b"/></marker></defs>
+<!-- P -->
+<text x="180" y="40" text-anchor="middle" class="hd">A operand: P, bf16 (round to nearest even)</text>
+<text x="180" y="58" text-anchor="middle" class="cap">64 tokens &rarr; (2 steps of 32)</text>
+<rect x="20" y="70" width="320" height="128" class="pad"/>
+<rect x="20" y="70" width="320" height="32" class="live"/>
+<line x1="180" y1="70" x2="180" y2="198" class="grid"/>
+<text x="180" y="91" text-anchor="middle" class="tt">rows 0..3: the 4 heads' weights P[h][t]</text>
+<text x="180" y="155" text-anchor="middle" class="cap">rows 4..15: zero, never written</text>
+<text x="180" y="222" text-anchor="middle" class="cap">16 rows down; thread-local buffer inside the kernel</text>
+<!-- times -->
+<text x="372" y="140" text-anchor="middle" font-size="22">&times;</text>
+<!-- V -->
+<text x="560" y="40" text-anchor="middle" class="hd">B operand: V page as stored</text>
+<text x="560" y="58" text-anchor="middle" class="cap">128 dims &rarr; (8 slices of 16)</text>
+<rect x="400" y="70" width="320" height="128" class="box"/>
+<line x1="440" y1="70" x2="440" y2="198" class="grid"/><line x1="480" y1="70" x2="480" y2="198" class="grid"/><line x1="520" y1="70" x2="520" y2="198" class="grid"/><line x1="560" y1="70" x2="560" y2="198" class="grid"/><line x1="600" y1="70" x2="600" y2="198" class="grid"/><line x1="640" y1="70" x2="640" y2="198" class="grid"/><line x1="680" y1="70" x2="680" y2="198" class="grid"/>
+<line x1="400" y1="134" x2="720" y2="134" class="grid"/>
+<rect x="400" y="70" width="40" height="64" class="live"/>
+<text x="420" y="106" text-anchor="middle" class="cap">1 tile</text>
+<text x="560" y="222" text-anchor="middle" class="cap">32 token-pair rows down (2 steps of 16); one tile = 16 pairs &times; 16 dims</text>
+<!-- pair inset -->
+<text x="400" y="262" class="lab">one V row in memory (tokens 2p and 2p+1 interleaved, 512 bytes):</text>
+<rect x="400" y="272" width="50" height="24" class="soft"/><text x="425" y="289" text-anchor="middle" class="tt">d0,2p</text>
+<rect x="450" y="272" width="66" height="24" class="soft"/><text x="483" y="289" text-anchor="middle" class="tt">d0,2p+1</text>
+<rect x="516" y="272" width="50" height="24" class="soft"/><text x="541" y="289" text-anchor="middle" class="tt">d1,2p</text>
+<rect x="566" y="272" width="66" height="24" class="soft"/><text x="599" y="289" text-anchor="middle" class="tt">d1,2p+1</text>
+<rect x="632" y="272" width="50" height="24" class="soft"/><text x="657" y="289" text-anchor="middle" class="tt">d2,2p</text>
+<rect x="682" y="272" width="66" height="24" class="soft"/><text x="715" y="289" text-anchor="middle" class="tt">d2,2p+1</text>
+<text x="756" y="289" class="tt">... d127,2p+1</text>
+<!-- equals -->
+<text x="752" y="140" text-anchor="middle" font-size="22">=</text>
+<!-- amx_o -->
+<text x="940" y="40" text-anchor="middle" class="hd">amx_o: 16 rows &times; 128 fp32</text>
+<text x="940" y="58" text-anchor="middle" class="cap">8192 bytes, 64-byte aligned</text>
+<rect x="780" y="70" width="320" height="128" class="bad"/>
+<rect x="780" y="70" width="320" height="32" class="live"/>
+<text x="940" y="91" text-anchor="middle" class="tt">rows 0..3: O[h][0..127], read by the caller</text>
+<text x="940" y="145" text-anchor="middle" class="cap" style="fill:#e34948">rows 4..15: written by TILESTORED (zeros),</text>
+<text x="940" y="161" text-anchor="middle" class="cap" style="fill:#e34948">read by nobody; a 4-row buffer would overflow</text>
+<text x="940" y="222" text-anchor="middle" class="cap">the caller copies row h into scratch[128]</text>
+<!-- explainer -->
+<rect x="20" y="320" width="1080" height="130" rx="6" class="soft"/>
+<text x="40" y="346" class="hd">One _tile_dpbf16ps call</text>
+<text x="40" y="368" class="lab">takes a P tile (16 rows &times; 32 tokens as 16 pairs) and a V tile (16 token-pairs &times; 16 dims) and adds &Sigma;<tspan baseline-shift="sub" font-size="9">t in those 32 tokens</tspan> P[h][t]&middot;V[t][d] into a 16 &times; 16 fp32 tile.</text>
+<text x="40" y="390" class="lab">2 token steps complete the 64-token sum for 16 dims; 8 dim slices cover the head, done as 2 halves of 4 accumulator tiles: 16 tile multiplies per page.</text>
+<text x="40" y="412" class="lab">Each half stores its 4 tiles straight into amx_o at column offset half &middot; 64 + tile &middot; 16, with a 512-byte row stride.</text>
+<text x="40" y="436" class="cap">[amx_attn.cpp:199-207 converts P; 209-238 loads, multiplies and stores]</text>
+</svg>
+<figcaption>Figure 6. The PV product. P sits on the left because its rows (heads) are what the output rows should be; V sits on the right because its stored layout is already the pair-interleaved layout the right operand needs [amx_attn.cpp:190-239; kv_cache.hpp:1881-1892].</figcaption>
+</figure>
+
+<h2>8. Step 4: fold the page into the running state</h2>
+<pre><code>for (size_t offset = 0; offset &lt; 4; ++offset) {
+  scratchpad_ref&lt;geometry&gt; head_sp = scratchpad[kv_head * 4 + offset];
+  tensor&lt;128&gt; scratch;
+  std::memcpy(&amp;scratch[0], amx_o + offset * 128, 128 * sizeof(float));  // row `offset` of amx_o = O for this head
+  if (was_valid) {
+    auto corr_ = constant&lt;page::page_size&gt;(corr_arr[offset]);            // c, broadcast to every lane
+    head_sp.v_star.set(fma(head_sp.v_star, corr_, scratch));            // v* = v* * c + O
+    head_sp.s_star = head_sp.s_star * corr_arr[offset] + sum_arr[offset]; // s* = s* * c + sum(P)
+  } else {
+    head_sp.v_star.set(scratch);                                         // v* = O
+    head_sp.s_star = sum_arr[offset];                                    // s* = sum(P)
+  }
+  head_sp.m_star = m_new_arr[offset];                                    // m* = m_new
+}</code></pre>
+<ul class="plain">
+<li><b>Which row of amx_o.</b> Output row i of a tile multiply comes from row i of the A operand, and row i of P is head i. So head <code>offset</code> reads <code>amx_o + offset * 128</code>.</li>
+<li><b>Why the constant is sized 64 while v* has 128 lanes.</b> <code>constant&lt;N&gt;</code> is an expression whose <code>chunk(i)</code> returns the same broadcast register for any i, and <code>fma</code> on tensors works chunk by chunk [expr.hpp:293-320, 523-549]. The N is therefore not used for the lane count; the dotter loop uses the identical <code>constant&lt;page::page_size&gt;</code> idiom [self_attention.hpp:1667]. The value is correct; the size parameter is a stylistic leftover, not a bug.</li>
+<li><b>The corr of 0 when not valid.</b> <code>corr_arr</code> is set to 0 when <code>was_valid</code> is false, and the else branch does not read it. It is a placeholder, not a formula.</li>
+<li><b>Validity is marked by the caller.</b> This function does not call <code>mark_valid_for</code>; the caller marks the scratchpad valid once <i>m*</i> has left &minus;&infin; for at least one head of the group [self_attention.hpp:1388-1402].</li>
+</ul>
+
+<h2>9. Same math as the dotter loop, two differences in arithmetic</h2>
+<p>The table compares the two paths step by step. Unshaded cells are identical in form; shaded cells are where the paths differ.</p>
+<table>
+<tr><th>Step</th><th>Dotter loop (AVX-512) [self_attention.hpp:1601-1679]</th><th>apply_dense_amx_page [1464-1532]</th></tr>
+<tr><td>which tokens</td><td class="warn">per token: skip if invisible or outside the window; <code>relevant_k_tokens</code> counts the rest</td><td class="warn">all 64, guaranteed by <code>is_dense_amx_page</code>; returns 64</td></tr>
+<tr><td>raw scores</td><td class="warn"><code>dotter&lt;bf16,128&gt;</code>: one 128-dim dot product per token per head, fp32 accumulate</td><td class="warn"><code>qk_rowmajor_128x4</code>: 16 tile multiplies per page, fp32 accumulate, different add order</td></tr>
+<tr><td>scale or softcap</td><td>s = s &middot; scale, or tanh softcap</td><td>identical code</td></tr>
+<tr><td>maximum</td><td>m = max(s); if was_valid, m = max(m*, m)</td><td>identical code</td></tr>
+<tr><td>weights</td><td>P = exp(s &minus; m), fp32, in place</td><td>identical code</td></tr>
+<tr><td>P to bf16 for the PV product</td><td class="warn">truncation (low 16 bits dropped) inside <code>scaled_v_expr</code> [kv_cache.hpp:1680-1800]</td><td class="warn">round to nearest even (<code>_mm512_cvtne2ps_pbh</code>) [amx_attn.cpp:206]</td></tr>
+<tr><td>O = P &middot; V</td><td class="warn"><code>_mm512_dpbf16_ps</code> over token pairs, 8 accumulators of 16 dims</td><td class="warn"><code>weights_times_v_128x4</code>: 16 tile multiplies, different add order</td></tr>
+<tr><td>state update</td><td>v* = fma(v*, c, O); s* = s*&middot;c + &Sigma;P; m* = m</td><td>identical formulas, O taken from amx_o row h</td></tr>
+</table>
+<p>Both paths multiply bf16 inputs and add in fp32. For finite, non-subnormal inputs their outputs differ for exactly the two shaded arithmetic reasons: the bf16 rounding of P and the order of the fp32 additions. The unit test <code>t/t_amx_numerics.cpp</code> checks that the kernels stay inside the error band those two causes allow [amx_attn_iface.hpp:70-86].</p>
+
+<h2>10. The whole function, line by line</h2>
+<table>
+<tr><th style="width:52%">Code [self_attention.hpp:1464-1532]</th><th>In plain words</th></tr>
+<tr><td class="code">void apply_dense_amx_page(bool was_valid, const page&amp; pg,
+    kv_slot_id slot, float operation_scale, size_t kv_head,
+    token_scratchpad_ref&lt;geometry&gt;&amp; scratchpad,
+    const bf16* q_packed) noexcept</td><td>One query token (its packed Q), one page, one KV head. <code>slot</code> selects the layer's K/V storage. <code>scratchpad</code> is the running state of this token for all heads.</td></tr>
+<tr><td class="code">static_assert(amx_attn_h128g4::eligible&lt;...&gt;(128, 4), ...);
+static_assert(PAGE_TOKENS_64 == page::page_size, ...);</td><td>Compile-time guards: this code exists only for head size 128, kv_mul 4, bf16 Q, and 64-token pages.</td></tr>
+<tr><td class="code">tensor&lt;4, 64&gt; s_pages;
+const auto k0 = pg.k&lt;geometry.kv&gt;(slot, kv_head, 0);
+qk_rowmajor_128x4(k0.data, q_packed, &amp;s_pages[0][0], 64);</td><td>Step 1. Point at token 0's K row; the kernel reads 64 consecutive rows and writes the 4 &times; 64 raw scores (Figure 4).</td></tr>
+<tr><td class="code">float corr_arr[4], m_new_arr[4], sum_arr[4];
+for (offset = 0..3) {
+  s_page = s_page * operation_scale;   // or tanh softcap
+  m_page = max(s_page);
+  if (was_valid) m_page = max(head_sp.m_star, m_page);
+  s_page = exp(s_page - m_page);
+  m_new_arr[offset] = m_page;
+  sum_arr[offset] = sum(s_page);
+  corr_arr[offset] = was_valid ? exp(head_sp.m_star - m_page) : 0;
+}</td><td>Step 2, per head. Scale the scores, find the new maximum (never below the old one), turn scores into weights P, and record the new maximum, the page's weight sum, and the rescale factor <i>c</i> for the old state (Section 6).</td></tr>
+<tr><td class="code">alignas(64) float amx_o[16 * 128];
+weights_times_v_128x4(pg.v_data&lt;geometry.kv&gt;(slot, kv_head),
+    &amp;s_pages[0][0], 64, amx_o);</td><td>Step 3. Multiply the weights by the stored V rows; the 4 useful output rows land in rows 0..3 of a 16-row buffer (Figure 6).</td></tr>
+<tr><td class="code">for (offset = 0..3) {
+  memcpy(&amp;scratch[0], amx_o + offset * 128, 512 bytes);
+  if (was_valid) {
+    v_star = v_star * c + scratch;
+    s_star = s_star * c + sum_arr[offset];
+  } else {
+    v_star = scratch;
+    s_star = sum_arr[offset];
+  }
+  m_star = m_new_arr[offset];
+}</td><td>Step 4, per head. Copy this head's O row out, then either start the state with it (first page) or rescale the old state by <i>c</i> and add it (Figure 5). Record the new maximum.</td></tr>
+</table>
+
+<h2>11. Facts used, with sources</h2>
+<ul class="plain">
+<li>Function body and comments: <code>h/tron/models/self_attention.hpp</code> 1453-1532 at <code>866e588578</code>; dense predicate 1432-1452; caller gates 1581-1598; dotter loop 1601-1679; validity marking 1388-1402; scratchpad types 328-372.</li>
+<li>Kernel contract, orientation, 16-row store rule, numerics: <code>h/tron/kernels/amx_attn_iface.hpp</code> 17-112, 187-234.</li>
+<li>Kernel implementation: <code>src/tron/kernels/amx_attn.cpp</code> 105-121 (pack), 124-187 (QK), 190-239 (PV).</li>
+<li>K/V storage layout: <code>h/tron/models/kv_cache.hpp</code> 1881-1917 (<code>kv_block</code>), 1291-1303 (<code>v_data</code>), 1680-1800 (<code>scaled_v_expr</code>, the AVX PV).</li>
+<li><code>constant</code> and <code>fma</code> expression templates: <code>h/tron/kernels/expr.hpp</code> 293-320, 523-549.</li>
+<li>Toy numbers in Section 6.2: computed with Python's <code>math.exp</code> from the formulas above; the online result matches a one-pass softmax to 1e-15.</li>
+<li>Rename history: commit <code>866e588578</code> message; pushed head <code>origin/jhan-amx-p0 = 55b2a56d2f</code> checked 2026-09-08.</li>
+</ul>
+
+</body>
+</html>

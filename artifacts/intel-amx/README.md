@@ -321,3 +321,42 @@ home, not a git repository). Repo path -> canonical path. Mirrors of
 - `pr3879/PR1/pr-body.md` -> `WS/PR3879/new-PRs/PR1/pr-body.md`
 - `pr3879/PR1/thread-map.md` -> `WS/PR3879/new-PRs/PR1/thread-map.md`
   (handoffs: claude_20260904_breakup-pr3829-md-instructions.md, claude_20260904-20260905_breakup-pr3879-md-instructions.md, claude_20260905-20260906_handoff-saturday-md-plan-after-ci.md, claude_20260906-20260907_pr3879-sunday-handoff.md, claude_20260907-20260908_post-ci-test-scope-beyond-pr0b.md, claude_20260907_pr-4267-page-share-counters-review.md, claude_20260908-20260909_pr-3879-description-wording.md)
+
+### review and response pages (group B)
+
+- `pr3879/PR-open-comments.html` -> `WS/PR3879/PR-open-comments.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR-open-comments.html
+- `pr3879/Bill-claude-review-response.html` -> `WS/PR3879/Bill-claude-review-response.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/Bill-claude-review-response.html
+- `pr3879/Bill-claude-review-response/gen.py` -> `WS/PR3879/Bill-claude-review-response/gen.py`
+- `pr3879/Bill-claude-review-response/apply_claimcheck.py` -> `WS/PR3879/Bill-claude-review-response/apply_claimcheck.py`
+- `pr3879/Bill-claude-review-response/apply_update_0911.py` -> `WS/PR3879/Bill-claude-review-response/apply_update_0911.py`
+- `pr3879/Bill-claude-review-response/build_f10_extra.py` -> `WS/PR3879/Bill-claude-review-response/build_f10_extra.py`
+- `pr3879/Bill-claude-review-response/build_data.py` -> `WS/PR3879/Bill-claude-review-response/build_data.py`
+- `pr3879/Bill-claude-review-response/f10_extra.html` -> `WS/PR3879/Bill-claude-review-response/f10_extra.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/Bill-claude-review-response/f10_extra.html
+- `pr3879/Bill-claude-review-response/issue-finding10-body.md` -> `WS/PR3879/Bill-claude-review-response/issue-finding10-body.md`
+- `pr3879/PR0/Monday-report.html` -> `WS/PR3879/new-PRs/PR0/Monday-report.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR0/Monday-report.html
+- `pr3879/PR0/respond-2-Wade-PR0.html` -> `WS/PR3879/new-PRs/PR0/respond-2-Wade-PR0.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR0/respond-2-Wade-PR0.html
+- `pr3879/PR0/codex-benchmark-artifact.html` -> `WS/PR3879/new-PRs/PR0/codex-benchmark-artifact.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR0/codex-benchmark-artifact.html
+- `pr3879/PR0/wade-fuse-question-20260909.md` -> `WS/PR3879/new-PRs/PR0/wade-fuse-question-20260909.md`
+- `pr3879/PR0/issue-4303-body.md` -> `WS/PR3879/new-PRs/PR0/issue-4303-body.md`
+- `pr3879/PR0b/ub-guard.html` -> `WS/PR3879/new-PRs/PR0b/ub-guard.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR0b/ub-guard.html
+- `pr3879/PR0b/wade-reply.md` -> `WS/PR3879/new-PRs/PR0b/wade-reply.md`
+- `pr3879/PR0b/pr-body.v3-move.md` -> `WS/PR3879/new-PRs/PR0b/pr-body.v3-move.md`
+- `pr3879/PR1/try_apply_dense_amx_page.html` -> `WS/PR3879/new-PRs/PR1/try_apply_dense_amx_page.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/try_apply_dense_amx_page.html
+- `pr3879/PR1/reviews/self_attention-hpp.html` -> `WS/PR3879/new-PRs/PR1/reviews/self_attention-hpp.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/reviews/self_attention-hpp.html
+- `pr3879/PR1/reviews/amx_qpack-2-attn_accum.html` -> `WS/PR3879/new-PRs/PR1/reviews/amx_qpack-2-attn_accum.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/reviews/amx_qpack-2-attn_accum.html
+- `pr3879/PR1/reviews/amx_qpack-2-attn_accum.figs.py` -> `WS/PR3879/new-PRs/PR1/reviews/amx_qpack-2-attn_accum.figs.py`
+- `pr3879/PR1/reviews/amx_qpack-reply.post.md` -> `WS/PR3879/new-PRs/PR1/reviews/amx_qpack-reply.post.md`
+- `pr3879/PR1/reviews/range_hint.html` -> `WS/PR3879/new-PRs/PR1/reviews/range_hint.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/reviews/range_hint.html
+- `pr3879/PR1/andoria-AMD-machine-test.md` -> `WS/PR3879/new-PRs/PR1/andoria-AMD-machine-test.md`
+  (handoffs: claude_20260907_pr-4267-page-share-counters-review.md, claude_20260908_try-apply-dense-amx-page-walkthrough-diagrams.md, claude_20260909_tron-pr-4267-review-comment.md, claude_20260909_fuse-integration-issue-for-pr-4267.md, claude_20260909_wade-review-comment-on-tron-pr-4265.md, claude_20260910_amx-qpack-vs-attn-accum-in-tron-pr-3879.md, claude_20260910_range-hint-handling-in-tron-pr-3879.md, claude_20260910_pr-3879-open-comment-responses.md, claude_20260910_pr3879-amx-review-findings-response.md, claude_20260911_andoria-09-vs-andoria-06-idle-status.md)

@@ -1,0 +1,215 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR0b/ub-guard.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/pr3879/PR0b/ub-guard.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR 0b: can a test guard the memory-order bug?</title>
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;max-width:1080px;margin:24px auto;padding:0 16px;color:#1b1b1b;background:#fff;line-height:1.45}
+h1{font-size:1.6em;margin-bottom:.2em}h2{font-size:1.2em;margin-top:1.8em;border-bottom:1px solid #ddd;padding-bottom:.2em}h3{font-size:1.05em;margin-top:1.2em}
+table{border-collapse:collapse;width:100%;margin:.6em 0}th,td{border:1px solid #d8d8d8;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f3f3f3}
+.short{background:#f6f8fa;border-left:4px solid #6c8ebf;padding:10px 14px;margin:12px 0}
+code{background:#f3f3f3;padding:1px 4px;border-radius:3px;font-size:.92em}pre{background:#f6f8fa;border:1px solid #e1e4e8;padding:10px 12px;overflow-x:auto;font-size:.88em;line-height:1.35}
+.muted{color:#666;font-size:.92em}ul{margin:.3em 0 .6em 1.2em}
+.grid td.c{text-align:center;font-weight:600}
+.miss{background:#f1f1f1;color:#555}.catch{background:#dff3e3;color:#155724}.same{background:#fff3cd;color:#6b4e00}.na{background:#fafafa;color:#999;font-weight:400}
+.take{margin:.2em 0 1em 0;font-style:normal;color:#333}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:.85em;font-weight:600}.ok{background:#dff3e3;color:#155724}.fail{background:#f8d7da;color:#721c24}.warn{background:#fff3cd;color:#6b4e00}
+</style>
+</head>
+<body>
+<h1>PR 0b: can a test guard the memory-order bug?</h1>
+<p class="muted">Part of the PR 3879 split. Written 2026-09-08 04:5x UTC, "Landed" table added 12:0x UTC. Evidence files: <code>PR3879/new-PRs/PR0b/ub-guard/</code>
+(scripts, compiler outputs, the proposed test, the verification report). Experiments ran on delphi-3bda with tron's own toolchain
+(single-file compiles only, because the nightly CI held the machine).</p>
+
+<div class="short"><b>Short version.</b> No test that only watches program output can catch this bug: with tron's compiler the wrong
+line and the fixed line produce identical machine code, and no compiler warning, clang-tidy check, ThreadSanitizer or
+UndefinedBehaviorSanitizer report exists for it. One instrument does catch it: the C++ standard library's own precondition check,
+switched on by the macro <code>_GLIBCXX_ASSERTIONS</code>, which aborts the program at the first bad load. A small Catch2 test
+compiled with that macro on its own target fails on today's main and passes with PR 0b, inside the normal build; a pre-commit grep
+rule is a cheaper second guard for the literal spelling.</div>
+
+<h2>Words used here</h2>
+<ul>
+<li><b>PR 0b</b>: draft pull request #4265 (branch <code>jhan-kv-footprint-memorder</code>, commit e2f22c7a09), a one-line fix in
+<code>h/tron/models/kv_cache.hpp</code>.</li>
+<li><b>log_kv_footprint</b>: the function in kv_cache.hpp that prints the throttled "KV cache footprint" log line (KV = the attention keys
+and values the server caches). Every KV book (one allocation of cache pages) calls it when created and destroyed.</li>
+<li><b>memory order</b>: the argument of an atomic operation that says how it is ordered against other memory operations. The
+standard forbids <code>release</code> and <code>acq_rel</code> on a load ([atomics.types.operations], unchanged since C++11).
+Breaking that rule is <b>undefined behaviour</b>: the compiler may do anything, including the right thing by accident.</li>
+<li><b>libstdc++</b>: the C++ standard library tron links (GCC 14.3's copy in the nix toolchain; GCC 11 or 12's copy on the CI
+runners). <b><code>_GLIBCXX_ASSERTIONS</code></b>: its switch for run-time precondition checks; independent of <code>NDEBUG</code>;
+does not change data layouts (unlike <code>_GLIBCXX_DEBUG</code>).</li>
+<li><b>TSan / UBSan</b>: ThreadSanitizer and UndefinedBehaviorSanitizer, clang's run-time checkers (tron presets <code>tsan</code>,
+option <code>UBSAN</code>).</li>
+<li><b>always-inline</b>: <code>TRON(inline)</code> expands to <code>inline __attribute__((always_inline))</code>
+(h/common/attributes.hpp:78), so every translation unit that calls the function compiles its own copy.</li>
+<li><b>lefthook</b>: tron's pre-commit hook runner (<code>lefthook.yml</code>); the CI lint job runs the same hooks over the whole tree.</li>
+<li><b>cost data</b>: <code>config/test-benchmarks.json</code>; CI fails a build whose test binaries have no entry
+(<code>bin/slice bench --check</code>).</li>
+</ul>
+
+<h2>1. Which guard notices the bad load?</h2>
+<p>Each cell: does this guard react to <code>last_print_bytes.load(std::memory_order_release)</code> in a verbatim copy of the
+throttle (<code>repro.cpp</code>)? Tron's flags were used (<code>-std=gnu++23 -O2 -g -DNDEBUG -Wall -Wpedantic -Wextra -O3</code>).</p>
+<table class="grid">
+<tr><th>Guard</th><th>tron toolchain<br><span class="muted">nix clang 19.1.7 + libstdc++ 14.3</span></th><th>CI runner pairing<br><span class="muted">Ubuntu clang 19.1.7 + libstdc++ 12</span></th><th>reference only<br><span class="muted">host g++ 11.4 + libstdc++ 11</span></th></tr>
+<tr><td>Compiler warnings, tron's set (-Wall -Wextra -Wpedantic), -O0 and -O3</td><td class="c miss">silent</td><td class="c miss">silent</td><td class="c miss">silent</td></tr>
+<tr><td>Every clang warning (-Weverything)</td><td class="c miss">silent</td><td class="c miss">silent</td><td class="c na">n/a</td></tr>
+<tr><td>GCC -Winvalid-memory-model (on by default)</td><td class="c na">n/a</td><td class="c na">n/a</td><td class="c miss">silent (fires only with -Wsystem-headers)</td></tr>
+<tr><td>clang-tidy 19, all checks</td><td class="c miss">silent</td><td class="c na">not run</td><td class="c na">n/a</td></tr>
+<tr><td>ThreadSanitizer (-fsanitize=thread)</td><td class="c miss">silent</td><td class="c miss">silent</td><td class="c catch">runtime CHECK (GCC's libtsan only)</td></tr>
+<tr><td>UndefinedBehaviorSanitizer (-fsanitize=undefined)</td><td class="c miss">silent</td><td class="c miss">silent</td><td class="c miss">silent</td></tr>
+<tr><td><b>libstdc++ precondition check (-D_GLIBCXX_ASSERTIONS)</b></td><td class="c catch">ABORTS at the load (exit 134)</td><td class="c catch">ABORTS (exit 134)</td><td class="c catch">ABORTS (exit 134)</td></tr>
+<tr><td>Machine code, wrong line vs fixed line (-S diff)</td><td class="c same">identical instructions</td><td class="c same">identical instructions</td><td class="c same">identical (one instruction moved)</td></tr>
+</table>
+<p class="take">Takeaway: in tron's toolchain only the libstdc++ precondition check reacts. The identical machine code means the two
+versions behave the same way, so no assertion on outputs can tell them apart.</p>
+<p class="muted">Why the compilers stay silent: clang's diagnostic for invalid orders fires only when the order is a constant at the
+builtin call; libstdc++ passes it through a function parameter, so clang never sees a constant and lowers the load to a relaxed load
+before TSan instruments it (LLVM 19 CGAtomic.cpp, ThreadSanitizer.cpp; LLVM's TSan runtime checks load orders only in debug builds of
+the runtime). GCC's warning exists but is attributed to the system header and hidden. libc++ would warn at compile time, but the nix
+toolchain has no libc++ (link fails on <code>-lc++</code>).</p>
+
+<h2>2. Proof on the real function</h2>
+<p>A 9-line program includes the real <code>kv_cache.hpp</code> and calls <code>tron::log_kv_footprint</code> twice. It was compiled
+with the exact compile command recorded for <code>src/rinzler.cpp</code> (clang 19, libstdc++ 14.3), once against the tree at
+fcc78573b0 (the wrong line, identical to main a80b102c18 and origin/main b6f09db0d2 at line 454) and once with a copy of the header
+where only that line is changed to <code>relaxed</code>.</p>
+<table>
+<tr><th>Run</th><th>Compile</th><th>Result</th></tr>
+<tr><td>wrong line, no define</td><td>0 diagnostics</td><td>prints "KV cache footprint: 2.00 GB in 1 books", exit 0 <span class="pill warn">silent bug</span></td></tr>
+<tr><td>wrong line, -D_GLIBCXX_ASSERTIONS</td><td>0 diagnostics</td><td><code>atomic_base.h:498: ... load(memory_order) ...: Assertion '__b != memory_order_release' failed.</code> exit 134 <span class="pill ok">caught</span></td></tr>
+<tr><td>fixed line, -D_GLIBCXX_ASSERTIONS</td><td>0 diagnostics</td><td>prints the footprint line, exit 0 <span class="pill ok">clean</span></td></tr>
+<tr><td>assembly, wrong vs fixed (-S, no -g)</td><td colspan="2">identical, 1114 lines</td></tr>
+<tr><td>wrong line + define, linked with lld (tron's linker)</td><td colspan="2">same abort, exit 134</td></tr>
+</table>
+<p>The define worked with <code>-DNDEBUG</code> and <code>-O3</code> present, and the object compiled with the define linked
+against <code>libtron.a</code> and <code>libspdlog.a</code> built without it (the macro does not change the library's data
+layouts).</p>
+
+<h2>3. Guard A: a Catch2 test whose own target carries the define</h2>
+<p>Because <code>log_kv_footprint</code> is always-inline, a test translation unit compiled with <code>_GLIBCXX_ASSERTIONS</code>
+gets its own checked copy of the function, while the rest of tron is built as today. The test forks a child that calls the function
+once below the print granularity (so the load on line 454 executes and nothing is logged) and requires the child to exit normally.
+This is the pattern of <code>t/t_heap_guard.cpp</code> for code that must abort.</p>
+<pre>// t/t_kv_footprint_memorder.cpp (draft; full file in ub-guard/t_kv_footprint_memorder.cpp)
+#ifndef _GLIBCXX_ASSERTIONS
+#error "t_kv_footprint_memorder needs _GLIBCXX_ASSERTIONS (add_catch_test DEFINES); without it the test cannot fail"
+#endif
+#include &lt;catch2/catch_test_macros.hpp&gt;
+#include "tron/models/kv_cache.hpp"
+// fork_and_get_signal(fn): fork, run fn in the child, return the signal that killed it (0 = exited normally)
+
+TEST_CASE("log_kv_footprint satisfies the atomic memory-order preconditions", "[kv_cache][memory_order]") {
+  int sig = fork_and_get_signal([] { tron::log_kv_footprint(1, 0); });
+  REQUIRE(sig == 0);
+}</pre>
+<pre># t/CMakeLists.txt (draft). DEFINES is an argument add_catch_test already accepts (t/CMakeLists.txt:111).
+add_catch_test(NAME t_kv_footprint_memorder LIBRARIES tron pos_fake
+  DEFINES _GLIBCXX_ASSERTIONS   # the instrument: libstdc++ precondition checks in this translation unit only
+  PROPERTIES LABELS fake)</pre>
+<table>
+<tr><th>Build of the draft test (tron's clang 19 + libstdc++ 14.3, linked with lld)</th><th>Result</th></tr>
+<tr><td>wrong line, with the define</td><td><code>REQUIRE( sig == 0 )</code> fails with expansion <code>6 == 0</code> (6 = SIGABRT); "test cases: 1 | 1 failed" <span class="pill fail">fails on main</span></td></tr>
+<tr><td>fixed line, with the define</td><td>"All tests passed (2 assertions in 1 test case)" <span class="pill ok">passes with PR 0b</span></td></tr>
+<tr><td>wrong line, define dropped</td><td>compile error from the <code>#error</code> guard <span class="pill ok">fails loudly</span></td></tr>
+</table>
+<h3>Landed on PR 0b (2026-09-08)</h3>
+<p>jhan asked for guard A on 2026-09-08. The test above was committed on <code>jhan-kv-footprint-memorder</code> and built
+with the project's own CMake chain (<code>exec/split-verify3.sh</code>, preset cross-avx512, clang 19 from the nix shell,
+socket 1 of delphi-3bda), once on the branch tip and once on <code>main</code> plus the test alone.</p>
+<table>
+<tr><th>Commit</th><th>Build</th><th>Test result</th></tr>
+<tr><td>dc5d496d06 = e2f22c7a09 (fix) + test; pushed, in draft #4265</td><td>rc 0, 131 s</td><td>"All tests passed (2 assertions in 1 test case)" <span class="pill ok">pass</span></td></tr>
+<tr><td>ee4caa88e0 = main a80b102c18 + test, no fix (local only, deleted after the run)</td><td>rc 0, 129 s</td><td>"assertions: 2 | 1 passed | 1 failed", child died with SIGABRT, exit code 42 <span class="pill fail">fails without the fix</span></td></tr>
+<tr><td>cost data (<code>bin/slice bench --update</code>, whole machine, no other user active, 11:51 UTC)</td><td colspan="2">about 0.7 s at 1, 2 and 4 slices, 8 MB peak RSS; committed as the third commit of the PR</td></tr>
+</table>
+<p class="muted">Logs: <code>ub-guard/split-PR0b-test*.txt</code>, <code>*.out</code>, <code>split-PR0b-test-test-benchmarks.json</code>.
+The Catch2 output of the no-fix run also shows a "SIGABRT" line at file line 45: that is Catch2's signal handler inside the forked
+child, which re-raises the signal; the parent's <code>REQUIRE(sig == 0)</code> at line 49 is the failing assertion.</p>
+
+<h3>Design points the verification pass insisted on</h3>
+<ul>
+<li>Put the define on the target, not as <code>#define</code> in the file: a precompiled header that pre-includes
+<code>&lt;atomic&gt;</code> would silently ignore a file-level define. tron has no precompiled header today
+(<code>tron_header_files</code> is never set), but the target form is safe either way. The <code>#error</code> guard makes a dropped
+define a build failure instead of a test that can no longer fail.</li>
+<li>Call <code>log_kv_footprint</code> directly. Reaching it through a KV book constructor is not reliable: the constructor is a plain
+inline member, and the linker may keep the library's unchecked copy (seen on the host at -O0). The always-inline function has no such
+copy.</li>
+<li>The test detects the bug only while <code>log_kv_footprint</code> stays a header always-inline function. If it moves into a
+.cpp file, the test passes on wrong code; the file comment should say so.</li>
+<li>The bug entered main in commit 0b5bdf2c86 (2025-04-10), so the test meets the AGENTS.md rule that a regression test must
+reproduce a failure that existed on main.</li>
+<li>Cost: a new test binary needs entries in <code>config/test-benchmarks.json</code> (the CI step <code>bin/slice bench --check</code>),
+the same gate PR 0 and PR 1 went through; measured 2026-09-08: about 0.7 s per run, 8 MB peak RSS (committed).</li>
+</ul>
+
+<h2>4. Guard B: a lefthook grep rule</h2>
+<p>Same shape as the existing <code>no-cassert</code> rule. Tested over h/, src/ and t/: the load rule hits exactly
+kv_cache.hpp:454; the store rule (order anchored as the store's own last argument, one level of nested parentheses tolerated) hits
+nothing; a naive store regex would false-positive on <code>h/tron/shard.hpp:178</code> and <code>:193</code>. Stripping
+<code>//</code> comments first changes nothing today.</p>
+<pre>    valid-atomic-orders:
+      glob: ["h/**/*.{hpp,cpp,h}", "src/**/*.cpp", "t/**/*.cpp"]
+      run: |
+        # C++ [atomics.types.operations]: a load may not use release/acq_rel; a store may not use acquire/consume/acq_rel.
+        FOUND=$(find h src t \( -name '*.[ch]pp' -o -name '*.h' \) -not -path '*/_deps/*' -print0 \
+          | xargs -0 grep -nE '\.load\(\s*std::memory_order(_|::)(release|acq_rel)\s*\)|\.store\(([^()]|\([^()]*\))*,\s*std::memory_order(_|::)(acquire|consume|acq_rel)\s*\)' || true)
+        if [ -n "$FOUND" ]; then echo "$FOUND"; echo "Invalid memory order on an atomic load or store (undefined behaviour)."; exit 1; fi</pre>
+<ul>
+<li>Enforced on every pull request: the CI lint job runs <code>lefthook run --all-files pre-commit</code> (flake.nix:1649,
+cmake-single-platform.yml:112-116).</li>
+<li>Because it scans the whole tree, it can only land together with or after PR 0b.</li>
+<li>Blind spots: orders held in named constants (h/tron/generation/harvester.hpp:78-80 style), calls wrapped over several lines,
+orders passed through variables. It checks text, not intent.</li>
+</ul>
+
+<h2>5. Option C: the define on a whole build lane</h2>
+<p>A CMake option (next to ASAN/TSAN at CMakeLists.txt:39-42; <code>add_compile_definitions(_GLIBCXX_ASSERTIONS)</code> inside the
+sanitizer block at :575-586, which reaches src/, share/, t/ and Catch2 but not the third-party targets created before the :570
+reset) turned on in the asan/tsan/coverage presets would check every libstdc++ precondition in every test. Today only the weekly
+coverage lane (Saturday 05:00 UTC) builds Debug and runs tests; pull-request CI builds the <code>native</code> preset
+(RelWithDebInfo) with <code>/usr/bin/clang++-19</code> on Ubuntu 22.04 runners. Under such a lane the existing fake host test
+<code>t_llama_unit</code>, which constructs books directly without model files, would have aborted on main with no new test code.
+<b>Insufficient data</b> on what else would fire: the measurement is a Debug-preset build with the define plus
+<code>bin/slice run --filter=host</code> on main a80b102c18 and on e2f22c7a09, listing every assertion message. Not run: it is a
+full build and delphi-3bda was executing the nightly CI.</p>
+
+<h2>6. Recommendation</h2>
+<ul>
+<li>Do both A and B. A is a real regression test that fails on main and passes with the fix, inside the normal build; B closes the
+class of mistakes for the literal spelling at commit time.</li>
+<li>A is landed in PR 0b (2026-09-08, commits dc5d496d06 and 7a7699b338). B is not added yet; it can only land with or after PR 0b
+(it fails on today's main).</li>
+<li>Consider C later, after the measurement in section 5.</li>
+</ul>
+
+<h2>7. How this was verified</h2>
+<p>Three independent reviewer agents (standard-library semantics, tron build and CI integration, test design) tried to refute nine
+written claims, and a fourth resolved their contradictions. Their report is <code>ub-guard/verification-workflow-wf_e11ca789.json</code>.
+Their corrections shaped sections 3 and 4: the per-target define (claim "no unit test can catch it" was too strong), the direct call
+instead of the constructor route, the precompiled-header trap, the balanced-parentheses store regex, the cost-data gate, and the fact
+that the CI runners use Ubuntu's clang 19 with the system libstdc++ (the assertion exists in GCC 11, 12 and 14.3 headers). Two items
+they asked for were then measured: the assembly diff on the real header (identical) and the test under tron's clang 19 with lld
+(section 3).</p>
+
+<h2>8. Files</h2>
+<ul>
+<li><code>ub-guard/CLAIMS.md</code>: the nine claims with their evidence, as given to the reviewers.</li>
+<li><code>ub-guard/repro.cpp</code>, <code>matrix.sh</code>, <code>matrix-nix.txt</code>, <code>matrix-sysclang.txt</code>: section 1.</li>
+<li><code>ub-guard/probe.cpp</code>, <code>probe3.sh</code>, <code>probe3-nix.txt</code>, <code>probe4.sh</code>, <code>probe4-nix.txt</code>: section 2.</li>
+<li><code>ub-guard/t_kv_footprint_memorder.cpp</code>, <code>probe5.sh</code>, <code>probe5-nix.txt</code>, <code>run5.sh</code>, <code>run5-nix.txt</code>: section 3.</li>
+<li>On delphi-3bda: <code>/var/tmp/jhan/memorder/</code> holds the same scripts, the binaries and the shadow header copy.</li>
+</ul>
+</body>
+</html>

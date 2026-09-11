@@ -1,0 +1,587 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/reviews/amx_qpack-2-attn_accum.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/pr3879/PR1/reviews/amx_qpack-2-attn_accum.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>amx_qpack: thread_local or attn_accum?</title>
+<style>
+body { background:#ffffff; color:#0b0b0b; font-family:system-ui,sans-serif; max-width:1120px; margin:24px auto; padding-block:0; padding-inline:20px; line-height:1.5; }
+h1 { font-size:22px; margin-bottom:2px; text-wrap:balance; }
+h2 { font-size:17px; margin-top:34px; border-bottom:1px solid #e1e0d9; padding-bottom:6px; }
+h3 { font-size:14.5px; margin-top:22px; margin-bottom:6px; }
+p.sub { color:#52514e; margin-top:0; }
+figure { margin:14px 0 6px 0; overflow-x:auto; }
+figure svg { max-width:100%; height:auto; display:block; }
+figcaption { font-size:12.5px; color:#52514e; margin-top:6px; }
+table { border-collapse:collapse; font-size:13px; width:100%; }
+th,td { border:1px solid #d8d6d0; padding:5px 8px; text-align:left; vertical-align:top; }
+th { background:#f4f3ef; }
+td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+code { background:#f4f3ef; padding:1px 4px; font-size:12px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+pre { background:#f4f3ef; padding:10px 12px; font-size:12px; overflow-x:auto; line-height:1.45; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin:8px 0; }
+pre code { background:none; padding:0; }
+pre .del { color:#a4242a; } pre .add { color:#1b6e3a; }
+.take { background:#f4f3ef; border-left:4px solid #d95f02; padding:8px 12px; font-size:14px; margin:12px 0; }
+.quote { border-left:3px solid #7570b3; background:#faf9f6; padding:6px 12px; margin:8px 0; font-size:13.5px; }
+.quote .who { color:#52514e; font-size:12px; }
+.ok { background:#e6f4ea; }
+.warn { background:#fff4d6; }
+.bad { background:#fde2e1; }
+dl dt { font-weight:600; margin-top:8px; } dl dd { margin-left:0; font-size:13.5px; }
+ul.plain { padding-left:18px; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:760px) { .two { grid-template-columns:1fr; } }
+.small { font-size:12.5px; color:#52514e; }
+</style>
+</head>
+<body>
+
+<h1><code>amx_qpack</code>: thread_local or <code>attn_accum</code>?</h1>
+<p class="sub">Investigation of Ben's review thread on PR #3879 (<a href="https://github.com/positron-ai/tron/pull/3879#discussion_r3936949728">r3936949728</a>, 2026-09-04, and <a href="https://github.com/positron-ai/tron/pull/3879#discussion_r3973410716">r3973410716</a>, 2026-09-09) and of the AMX walkthrough meeting of 2026-09-09 (<a href="https://docs.google.com/document/d/1S-vphIbaMq0oVNNGto3XwafFVagWNENTwFxH0-ZJUQA/edit?usp=sharing">transcript</a>). Code: <code>h/tron/models/self_attention.hpp</code> at the PR 1 head <code>26a0338c3b</code>. Written 2026-09-10.</p>
+
+<h2>Short version</h2>
+<div class="take">
+Ben is right: the packed-Q buffer can live in <code>attn_accum</code>, and the reason we gave for keeping it out ("a pack is per (token, kv_head) and this PR keeps attn_accum's ownership unchanged") was a scope choice, not a technical obstacle. We moved the buffer into <code>attn_accum</code> in two prototype builds, once as a lazily sized <code>std::vector</code> member and once as Ben's <code>std::array&lt;amx_qpack_slot, max_minibatch_size&gt;</code>; both build and pass the three attention test binaries on the AMX machine. We recommend the <code>std::vector</code> member: it keeps today's allocation pattern (one growth per worker to the largest minibatch it has seen) and costs 24 bytes in every scratchpad that never runs the AMX path, whereas the array costs 512 KiB (llama plugin) or 4 MiB (ingested plugins) in each of the 55 scratchpads of a model state and in both copies of every hardware-attention scratchpad, used or not.<br><br><b>Decision (jhan, 2026-09-10): option B.</b> It is committed on the PR 1 branch as <code>752e9f571a</code> (local, not pushed), with jhan's shorter member comment; the same three test binaries pass on that exact commit, with the dispatch flag on and off. Left to do: push the branch, post the reply in section 8, and edit row 3 of the thread-map comment.
+</div>
+
+<h2>1. Words used here</h2>
+<dl>
+<dt>tron, PR 1</dt><dd>tron is the inference program under review. PR #3879 is now "PR 1" of the split: the AMX attention kernels and their dispatch, without the K mirror (the second copy of K, which is PR 2).</dd>
+<dt>AMX, the AMX path</dt><dd>AMX is Intel's Advanced Matrix Extensions, tile-matrix instructions on the Xeon 6. The AMX path replaces the AVX-512 dot-product loop (the "dotter") for dense 64-token pages when the head size is 128 and there are 4 query heads per KV head.</dd>
+<dt>KV head, kv_head, kv_mul</dt><dd>A KV head is one key/value head of the attention layer. kv_mul is the number of query heads that share it: 4 for llama-3.1-8b and Qwen3-4B, 8 for llama-70b and gpt-oss-120b, 3 for llama-3.2-3b.</dd>
+<dt>page</dt><dd>64 consecutive tokens of K and V in the KV cache.</dd>
+<dt>minibatch, batch_job_ix, max_minibatch_size</dt><dd>The tokens one forward pass processes together. batch_job_ix is a token's position in that minibatch. max_minibatch_size is the compile-time upper bound: 128 in the handwritten llama plugin (<code>llama.hpp:184</code>), 1024 in the mock plugin and every ingested plugin (<code>mock.hpp:98</code>, <code>TronCpp.hs:264</code>).</dd>
+<dt>pool worker, attention worker, main helper</dt><dd>The app thread pool has <code>num_workers</code> long-lived threads (55 under <code>--instance 1,2</code> on the 6962P: 56 CPU ids minus one). The last <code>n_attn_workers</code> of them run attention; the first <code>n_main_helpers</code> are "main helpers" that never touch attention (<code>llama.hpp:595</code>, <code>model.hpp</code> Note [Attention workers are the last pool workers]).</dd>
+<dt>attn_accum, scratchpad, <code>attn[w]</code></dt><dd>The per-worker struct that holds the running softmax state of every token of the minibatch (<code>self_attention.hpp:280</code>). <code>attn</code> is a vector with one attn_accum per pool worker, indexed by attention-worker index; the code calls the index "scratchpad".</dd>
+<dt>v*, s*, m*, valid</dt><dd>The running state of the deferred softmax: the weighted sum of V, the softmax denominator, the largest score seen, and a flag per (token, kv_head) saying whether a state exists yet.</dd>
+<dt>section, plan, join</dt><dd>A kv_section is one kv_head plus a range of pages, assigned to one worker. A worker's plan is its list of sections for a layer. After the sections, <code>join_page_ranges</code> combines the workers' states into one.</dd>
+<dt>Q pack, packed Q, amx_qpack_slot, amx_qpack</dt><dd>The AMX QK kernel cannot read a token's 4 query heads (4 x 128 bf16 = 1024 bytes) as stored; they must be copied into the tile-operand layout the kernel expects, padded to 16 columns with zeros: 4096 bytes per token. That copy is the "pack"; <code>amx_qpack_slot</code> is the 4096-byte type; <code>amx_qpack</code> is the buffer of one slot per token of the minibatch.</dd>
+<dt>thread_local, TLS</dt><dd>A C++ variable with one copy per OS thread (thread-local storage), created at the thread's first use and destroyed when the thread exits.</dd>
+<dt>hw_attn_results</dt><dd>The scratchpad of one hardware-attention (FPGA) pass. It contains two attn_accum copies (<code>data</code>, <code>unpack_tmp</code>). The deque of them is empty for models that run attention on the CPU only.</dd>
+<dt>bf16</dt><dd>The 2-byte bfloat16 floating-point format.</dd>
+</dl>
+
+<h2>2. Ben's point</h2>
+<h3>2.1 The two review comments, verbatim</h3>
+<div class="quote"><div class="who">Ben, 2026-09-04, on <code>thread_local std::vector&lt;amx_qpack_slot&gt; amx_qpack;</code> (r3936949728)</div>
+If I'm not mistaken, this is going to result in a runtime allocation. Usually this is frowned upon but the facts that 1. it's <code>thread_local</code> 2. attention workers are a long-lived pool 3. batch sizes are bounded collectively mean that this allocation will be amortized over many operations, which makes it probably okay.<br><br>
+Still, I do wonder why we don't just handle this consistently with the other intermediates needed by attention and attach it to <code>attn_accum</code>. Moreover, we know <code>max_minibatch_size</code> statically so surely this should just be an <code>array</code>.</div>
+<div class="quote"><div class="who">Ben, 2026-09-09 (r3973410716), after reading our reply</div>
+I'm still not convinced that this couldn't (and, indeed, shouldn't) live in <code>attn_accum</code>. Let's figure out whether this is really the case.</div>
+
+<h3>2.2 What he said in the meeting (2026-09-09, times are transcript offsets)</h3>
+<div class="quote"><div class="who">00:29:08 to 00:30:28</div>"I still do have the question of why don't we just handle it like we do the other intermediates. [...] there are many things that we call [...] intermediates that we allocate of the maximum mini batch [size]. [...] I got to admit I'm a little confused by that comment. I don't know what it means when it says it is not in attention accum because the pack is per token KV head and this PR keeps attention accum [ownership] unchanged."</div>
+<div class="quote"><div class="who">00:32:32</div>"as far as I can tell AMX qpack is a per thread thingy and attention accum is also a per thread thingy but [...] instead of all threads it's actually just the attention workers. [...] if you look at [attn_accum] one of the things is like valid [...] most of the things in there [...] depend upon the per token and KV head. So [...] as written, I'm not sure I understand the reason [...] being made there."</div>
+<div class="quote"><div class="who">00:33:58 to 00:35:15</div>"when I first read this, I thought, 'Oh, no, it's a std vector in the attention kernel and std vector of course is going to allocate.' [...] but then I thought about it a little bit more and okay but it's thread local and therefore we're only going to allocate it once [...]. But then [...] surely we have other intermediates [...] that are per token per KV head in the attention kernel and per worker as well. [...] they live in attention accum. [...] what is the shape of the data that we need here? Clearly it's an AMX qpack slot [...] and we want for every worker [...] an array of length max mini batch size of AMX qpack slots. [...] I think that fits in the attention accum [...] a std array of length max mini batch size and of type AMX qpack slot. [...] that would not be using thread local storage which [...] is not particularly efficient and it's also in this case sort of over approximating, right? [...] all 200 threads or whatever of the process are going to get one of these data structures."</div>
+<div class="quote"><div class="who">00:35:15 to 00:38:10</div>"I guess it doesn't matter because they don't get allocated until you actually use them. So [...] the overhead is negligible. But still [...] for code cleanliness and consistency it's good not to invent new ways of representing data like this. [...] if it can't live in attention accum [...] we should amend [the comment] to say why it can't be included."</div>
+<div class="quote"><div class="who">00:48:18, after asking his own Claude session</div>"Mr. Claude has claimed that attention accum looks reasonable as a target for this [...] structure. [...] it is unclear whether that's in fact true [...] but there's an indication."</div>
+
+<h3>2.3 The point in plain words</h3>
+<ul class="plain">
+<li><b>The shape of the data is "per worker, one slot per token of the minibatch".</b> That is exactly the shape of every array in attn_accum. Ben's proposal is a fifth array: <code>std::array&lt;amx_qpack_slot, max_minibatch_size&gt; amx_qpack;</code> inside attn_accum.</li>
+<li><b>The buffer is declared at the wrong level.</b> It is a thread-level variable, but the code that fills and reads it is the per-worker loop over tokens and pages inside <code>apply_page_range</code>. The per-worker scratchpad is the natural home for per-worker loop state. (This is how jhan summarised Ben's point after the meeting.)</li>
+<li><b>thread_local is a second mechanism for the same thing.</b> Every thread of the process gets a copy of the variable, not only the attention workers; access to a thread_local costs more than a plain member; and the code base already has one place for per-worker attention scratch.</li>
+<li><b>Our written reason did not explain anything.</b> "A pack is per (token, kv_head)" is also true of attn_accum's own <code>valid</code> array. "This PR keeps attn_accum's ownership unchanged" is not a property of the data.</li>
+<li><b>The ask:</b> either move the buffer into attn_accum, or write down the real reason it cannot move.</li>
+</ul>
+
+<h2>3. What we had answered, and why it did not land</h2>
+<p>Our reply was the comment above the declaration (<code>self_attention.hpp:1313-1323</code>) and row 3 of the thread map posted on 2026-09-08. Sentence by sentence:</p>
+<table>
+<tr><th style="width:34%">Our sentence</th><th>What it meant</th><th style="width:30%">Verdict after this investigation</th></tr>
+<tr><td>"The vector keeps its capacity for the thread's lifetime and allocates only when a call's minibatch is larger than every earlier one on this thread, so a long-lived attention worker allocates rarely."</td><td>Allocation happens once per worker per new record minibatch size.</td><td class="ok">True. Ben agreed in the meeting. Also true of a <code>std::vector</code> member of attn_accum.</td></tr>
+<tr><td>"It is not a max_minibatch_size array because that would reserve max_minibatch_size x 4096 bytes of thread-local storage per instantiation on every thread of the process (512 KiB ... 4 MiB)."</td><td>A thread_local <code>std::array</code> would be paid by every thread.</td><td class="warn">True for a thread_local array, but Ben never proposed a thread_local array. The cost of his array is per attn_accum instance: 55 per model state here, plus 2 per hardware-attention scratchpad (section 6).</td></tr>
+<tr><td>"It is not in attn_accum because a pack is per (token, kv_head)"</td><td>The bytes of a pack depend on which kv_head the call handles.</td><td class="bad">True as a description of the content, but not a reason. Within one call kv_head is fixed, so one slot per token is enough, exactly what the current vector provides. attn_accum's <code>valid</code> is itself per (token, kv_head), and v*, s*, m* are updated per (token, kv_head group). Verified in section 5, claim C5.</td></tr>
+<tr><td>"... and this PR keeps attn_accum's ownership unchanged."</td><td>We chose not to change a struct the PR did not otherwise touch (the struct is byte-identical to the merge base).</td><td class="bad">A scope statement about the diff, not a technical constraint. Ben read it as a claim about the data and could not follow it.</td></tr>
+</table>
+
+<h2>4. What attn_accum is</h2>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1210 354" width="100%" style="max-width:1210px" role="img">
+<style>
+text{font-family:system-ui,sans-serif;fill:#0b0b0b;font-size:12.5px}
+.hd{font-size:13px;font-weight:600}.cap{font-size:12px;fill:#52514e}.tt{font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.box{fill:#ffffff;stroke:#0b0b0b;stroke-width:1.2}.soft{fill:#f4f3ef;stroke:#8a8883;stroke-width:1}
+.a{fill:#e8e6f3;stroke:#7570b3;stroke-width:1.2}.b{fill:#cfe8d6;stroke:#1b9e77;stroke-width:1.2}.g{fill:#fff4d6;stroke:#d95f02;stroke-width:1.2}
+.red{fill:#fde2e1;stroke:#c8322f;stroke-width:1.4}
+.flow{stroke:#0b0b0b;stroke-width:1.3;fill:none}.dep{stroke:#7570b3;stroke-width:1.3;fill:none}.depb{stroke:#1b9e77;stroke-width:1.3;fill:none}.depg{stroke:#d95f02;stroke-width:1.4;fill:none}
+.dash{stroke-dasharray:6 4}
+</style>
+<defs><marker id="ar2" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#0b0b0b"/></marker>
+<marker id="arg2" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#d95f02"/></marker>
+<marker id="arb2" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#1b9e77"/></marker></defs>
+<text x="20" y="30" class="hd" >attn_accum: one per pool worker (attn[0..num_workers-1]) plus two inside every hw_attn_results (data, unpack_tmp)</text>
+<text x="400" y="58" class="cap" >index = the token&#x27;s position in the minibatch (batch_job_ix), 0 .. max_minibatch_size-1</text>
+<text x="400" y="72" class="cap" >0</text>
+<text x="930" y="72" class="cap" text-anchor="end" >max-1</text>
+<text x="940" y="58" class="cap" >bytes per token (32 heads x 128)</text>
+<text x="20" y="98.0" class="tt" >v_stars[tok]</text>
+<text x="20" y="113.0" class="cap" >btensor handle -&gt; heap block of 4096 bf16</text>
+<rect x="400" y="80" width="530" height="40" rx="3" class="a" />
+<line x1="433.1" y1="80" x2="433.1" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="466.2" y1="80" x2="466.2" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="499.4" y1="80" x2="499.4" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="532.5" y1="80" x2="532.5" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="565.6" y1="80" x2="565.6" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="598.8" y1="80" x2="598.8" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="631.9" y1="80" x2="631.9" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="665.0" y1="80" x2="665.0" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="698.1" y1="80" x2="698.1" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="731.2" y1="80" x2="731.2" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="764.4" y1="80" x2="764.4" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="797.5" y1="80" x2="797.5" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="830.6" y1="80" x2="830.6" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="863.8" y1="80" x2="863.8" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="896.9" y1="80" x2="896.9" y2="120" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<text x="665.0" y="104.0" class="cap" text-anchor="middle" >running weighted sum of V, all query heads</text>
+<text x="940" y="104.0" class="cap" >16 B handle + 8192 B heap block</text>
+<text x="20" y="146.0" class="tt" >s_stars[tok]</text>
+<text x="20" y="161.0" class="cap" >float x scratch_query_heads</text>
+<rect x="400" y="134" width="530" height="28" rx="3" class="a" />
+<line x1="433.1" y1="134" x2="433.1" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="466.2" y1="134" x2="466.2" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="499.4" y1="134" x2="499.4" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="532.5" y1="134" x2="532.5" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="565.6" y1="134" x2="565.6" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="598.8" y1="134" x2="598.8" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="631.9" y1="134" x2="631.9" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="665.0" y1="134" x2="665.0" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="698.1" y1="134" x2="698.1" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="731.2" y1="134" x2="731.2" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="764.4" y1="134" x2="764.4" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="797.5" y1="134" x2="797.5" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="830.6" y1="134" x2="830.6" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="863.8" y1="134" x2="863.8" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="896.9" y1="134" x2="896.9" y2="162" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<text x="665.0" y="152.0" class="cap" text-anchor="middle" >running softmax denominator, per query head</text>
+<text x="940" y="152.0" class="cap" >128 B (32 floats)</text>
+<text x="20" y="188.0" class="tt" >m_stars[tok]</text>
+<text x="20" y="203.0" class="cap" >float x scratch_query_heads</text>
+<rect x="400" y="176" width="530" height="28" rx="3" class="a" />
+<line x1="433.1" y1="176" x2="433.1" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="466.2" y1="176" x2="466.2" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="499.4" y1="176" x2="499.4" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="532.5" y1="176" x2="532.5" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="565.6" y1="176" x2="565.6" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="598.8" y1="176" x2="598.8" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="631.9" y1="176" x2="631.9" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="665.0" y1="176" x2="665.0" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="698.1" y1="176" x2="698.1" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="731.2" y1="176" x2="731.2" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="764.4" y1="176" x2="764.4" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="797.5" y1="176" x2="797.5" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="830.6" y1="176" x2="830.6" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="863.8" y1="176" x2="863.8" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="896.9" y1="176" x2="896.9" y2="204" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<text x="665.0" y="194.0" class="cap" text-anchor="middle" >running maximum score, per query head</text>
+<text x="940" y="194.0" class="cap" >128 B (32 floats)</text>
+<text x="20" y="227.0" class="tt" >valid[tok][kv_head]</text>
+<text x="20" y="242.0" class="cap" >bool x scratch_kv_heads</text>
+<rect x="400" y="218" width="530" height="22" rx="3" class="a" />
+<line x1="433.1" y1="218" x2="433.1" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="466.2" y1="218" x2="466.2" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="499.4" y1="218" x2="499.4" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="532.5" y1="218" x2="532.5" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="565.6" y1="218" x2="565.6" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="598.8" y1="218" x2="598.8" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="631.9" y1="218" x2="631.9" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="665.0" y1="218" x2="665.0" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="698.1" y1="218" x2="698.1" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="731.2" y1="218" x2="731.2" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="764.4" y1="218" x2="764.4" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="797.5" y1="218" x2="797.5" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="830.6" y1="218" x2="830.6" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="863.8" y1="218" x2="863.8" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="896.9" y1="218" x2="896.9" y2="240" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<text x="665.0" y="233.0" class="cap" text-anchor="middle" >is there a state for that kv_head yet</text>
+<text x="940" y="233.0" class="cap" >8 B (8 bools)</text>
+<text x="20" y="280.0" class="tt" >amx_qpack[tok]  (proposed)</text>
+<text x="20" y="295.0" class="cap" >amx_qpack_slot: 2048 bf16, 64-B aligned</text>
+<rect x="400" y="262" width="530" height="40" rx="3" class="red dash" />
+<line x1="433.1" y1="262" x2="433.1" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="466.2" y1="262" x2="466.2" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="499.4" y1="262" x2="499.4" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="532.5" y1="262" x2="532.5" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="565.6" y1="262" x2="565.6" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="598.8" y1="262" x2="598.8" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="631.9" y1="262" x2="631.9" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="665.0" y1="262" x2="665.0" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="698.1" y1="262" x2="698.1" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="731.2" y1="262" x2="731.2" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="764.4" y1="262" x2="764.4" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="797.5" y1="262" x2="797.5" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="830.6" y1="262" x2="830.6" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="863.8" y1="262" x2="863.8" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<line x1="896.9" y1="262" x2="896.9" y2="302" stroke="#8a8883" stroke-width="0.8" stroke-dasharray="2 3"/>
+<text x="665.0" y="286.0" class="cap" text-anchor="middle" >the token&#x27;s 4 query heads in the tile-operand layout</text>
+<text x="940" y="286.0" class="cap" >4096 B</text>
+<text x="20" y="324" class="cap" >Every row is one entry per token of the minibatch. The four existing rows are the reduction state: join_page_ranges reads them after all sections are done.</text>
+<text x="20" y="340" class="cap" >The proposed row is scratch: written once per (token, call), read by the QK kernel during the call, never joined. The index space is the same.</text>
+</svg><figcaption>Figure 2. attn_accum as it is (four purple rows) and with the proposed fifth row (dashed red). Every row has one entry per token of the minibatch; the byte sizes are for a 32-head, 8-KV-head, head-128 model on a bf16 executor.</figcaption></figure>
+<ul class="plain">
+<li><b>One struct per pool worker.</b> The state constructor runs <code>attn.resize(app_pool().num_workers())</code> once (<code>self_attention.hpp:472</code>). With <code>--instance 1,2</code> on the 6962P that is 55 instances per model state (<code>resource-map.yaml</code> gives 56 CPU ids, <code>threading.hpp:869</code> subtracts one). Only the first <code>n_attn_workers</code> are used by software attention; the main-helper slots are allocated and never touched.</li>
+<li><b>Two more copies per hardware-attention pass.</b> Each <code>hw_attn_results</code> holds <code>attn_accum data</code> and <code>attn_accum unpack_tmp</code> (<code>self_attention.hpp:392, 399</code>). The deque grows to the largest pass count of any minibatch plan and never shrinks; it stays empty for CPU-only attention, which is the case for our AMX runs.</li>
+<li><b>Four arrays, all indexed by the token's position in the minibatch.</b> They are the deferred-softmax state that must survive across pages and sections and be read by another worker's join. Every per-page intermediate of the attention loop (scores, PV output, correction factors) is a stack local; nothing else lives in attn_accum (claim C9).</li>
+<li><b>Its bulk is already out-of-line memory behind handles.</b> On the bf16 executors <code>v_stars[tok]</code> is a <code>btensor</code>, which is a 16-byte handle (<code>dmatensor.hpp:176</code>) to a separately allocated, zero-filled 8192-byte block from the DMA pool (<code>make_unique_dma</code>, <code>system/memory.hpp:213-226</code>; <code>pos_heap</code> power-of-two classes). The blocks are allocated eagerly, one per token slot, when the struct is constructed: <code>attn.resize(55)</code> performs 55 x 128 = 7,040 such allocations for the llama plugin. So "attn_accum owns one out-of-line block per token" is already the design, and a per-worker <code>std::vector</code> member is one more such block, allocated later and on the worker.</li>
+<li><b>Who touches <code>attn[w]</code>.</b> Worker w writes it inside <code>apply_page_range</code>. Other workers read the rows of a finished kv_head in <code>run_joins</code> as soon as the atomic counter <code>sections_left[kv_head]</code> reaches zero, while w may still be writing rows of another kv_head, and they write into <code>attn[0]</code>, the join target, in the same way (disjoint sub-objects, no data race; <code>self_attention.hpp:1060-1071, 1094-1095</code>). A pack member would be outside all of that: only worker w writes or reads it, and the join never touches it. Worker <code>n_attn_workers-1</code> clears validity on every instance between barrier phases (<code>free_scratchpads</code>, <code>:757-761</code>). Pool workers are long-lived threads with their own queues and no work stealing, and all forward passes run serially on one work-queue thread, so within a forward pass one OS thread owns one attention-worker index. Between passes the mapping can shift: <code>recommend_n_main_helpers</code> recomputes the helper/attention split every pass when <code>pay_for_determinism</code> is off and there is more than one minibatch (<code>model.hpp:2043-2087</code>), and attention worker i runs on pool thread <code>n_main_helpers + i</code>. Two consequences: today's thread_local buffers can end up on any pool thread over a long run, and <code>attn[i]</code> is written by different threads in different passes, exactly as v_stars already is (claim C1, refuter correction). For ingested plugins the validity reset runs on the main thread (<code>prepare_attention_job</code>), between barrier phases, never during a section.</li>
+</ul>
+<table>
+<tr><th>attn_accum size, per instance</th><th class="num">llama plugin, llama-3.1-8b (128 tokens, 32 heads)</th><th class="num">ingested plugin, Qwen3-4B (1024 tokens, 32 heads)</th></tr>
+<tr><td>inline <code>sizeof(attn_accum)</code> (handles + s*, m*, valid)</td><td class="num">35,840 B</td><td class="num">286,720 B</td></tr>
+<tr><td>DMA-pool blocks behind v_stars (8,192 B per token)</td><td class="num">1,048,576 B (1 MiB)</td><td class="num">8,388,608 B (8 MiB)</td></tr>
+<tr><td>memory the struct owns</td><td class="num">1,084,416 B (1.03 MiB)</td><td class="num">8,675,328 B (8.27 MiB)</td></tr>
+<tr><td>Ben's array member, max_minibatch_size x 4,096 B</td><td class="num">524,288 B (512 KiB, +48%)</td><td class="num">4,194,304 B (4 MiB, +48%)</td></tr>
+</table>
+<p class="small">Sizes computed from the declared types (unique_ptr handle 16 B; float 4 B; bool 1 B; <code>output_size</code> rounds 4096 bf16 to 8192 B) and cross-checked with a standalone compile of the same layout; claim C3. They hold for the bf16 executors (tp1/tp2/tp4, perm_tp1/perm_tp2/perm_tp4), which are the AMX-eligible ones. The host executor (float Q, never AMX-eligible) stores v_stars inline as floats: <code>sizeof(attn_accum)</code> = 2,130,944 B for llama-3.1-8b with no heap blocks, and Ben's array would add 25% there (refuter correction to C3). The in-code comment "each element is ~1MB" on the hw_attn deque undercounts: two attn_accum copies own 2.07 MiB (llama) or 16.5 MiB (ingested).</p>
+
+<h2>5. What amx_qpack is and how the loop uses it</h2>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 576" width="100%" style="max-width:1100px" role="img">
+<style>
+text{font-family:system-ui,sans-serif;fill:#0b0b0b;font-size:12.5px}
+.hd{font-size:13px;font-weight:600}.cap{font-size:12px;fill:#52514e}.tt{font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.box{fill:#ffffff;stroke:#0b0b0b;stroke-width:1.2}.soft{fill:#f4f3ef;stroke:#8a8883;stroke-width:1}
+.a{fill:#e8e6f3;stroke:#7570b3;stroke-width:1.2}.b{fill:#cfe8d6;stroke:#1b9e77;stroke-width:1.2}.g{fill:#fff4d6;stroke:#d95f02;stroke-width:1.2}
+.red{fill:#fde2e1;stroke:#c8322f;stroke-width:1.4}
+.flow{stroke:#0b0b0b;stroke-width:1.3;fill:none}.dep{stroke:#7570b3;stroke-width:1.3;fill:none}.depb{stroke:#1b9e77;stroke-width:1.3;fill:none}.depg{stroke:#d95f02;stroke-width:1.4;fill:none}
+.dash{stroke-dasharray:6 4}
+</style>
+<defs><marker id="ar1" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#0b0b0b"/></marker>
+<marker id="arg1" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#d95f02"/></marker>
+<marker id="arb1" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#1b9e77"/></marker></defs>
+<rect x="20" y="20" width="560" height="500" rx="6" class="soft" />
+<text x="32" y="42" class="hd" >run_sections(worker w, one layer): for each kv_section (one kv_head, one page range) in worker w&#x27;s plan</text>
+<rect x="40" y="60" width="520" height="440" rx="6" class="box" />
+<text x="52" y="82" class="hd" >apply_page_range(items, kv_head, scratchpad = w, page_range)</text>
+<rect x="60" y="98" width="480" height="34" rx="4" class="g" />
+<text x="70" y="113" class="tt" >if amx_on: amx_qpack.resize(items.size()); begin_region()</text>
+<text x="70" y="126" class="tt" >(the vector grows only when this minibatch is the largest seen so far)</text>
+<rect x="60" y="148" width="480" height="296" rx="4" class="box" />
+<text x="72" y="168" class="hd" >for each page in page_range  (a page = 64 tokens of K and V)</text>
+<rect x="80" y="184" width="440" height="244" rx="4" class="box" />
+<text x="92" y="204" class="hd" >for each token batch_job_ix in items (the minibatch)</text>
+<rect x="100" y="218" width="400" height="28" rx="4" class="soft" />
+<text x="110" y="237" class="tt" >skip if the page is invisible to the token or outside its sliding window</text>
+<rect x="100" y="254" width="400" height="28" rx="4" class="a" />
+<text x="110" y="273" class="tt" >sp = attn[scratchpad] row batch_job_ix  (v*, s*, m*, valid of this token)</text>
+<rect x="100" y="290" width="400" height="28" rx="4" class="red" />
+<text x="110" y="309" class="tt" >amx_qp = packed_amx_query(amx_qpack[batch_job_ix], ...)</text>
+<rect x="100" y="326" width="400" height="42" rx="4" class="box" />
+<text x="110" y="343" class="tt" >apply_page_tok: QK scores (AMX kernel or AVX dotter), scale, max, exp,</text>
+<text x="110" y="357" class="tt" >PV, then fold this page into v*, s*, m* of sp</text>
+<rect x="100" y="376" width="400" height="28" rx="4" class="a" />
+<text x="110" y="395" class="tt" >sp.mark_valid_for(kv_head) once a real score has landed</text>
+<rect x="60" y="456" width="480" height="28" rx="4" class="g" />
+<text x="70" y="475" class="tt" >if amx_on: end_region()</text>
+<rect x="640" y="60" width="440" height="96" rx="6" class="soft" />
+<text x="652" y="80" class="hd" >Stack of this call (gone when apply_page_range returns)</text>
+<text x="652" y="100" class="tt" >amx_packed: std::bitset, which tokens are packed in THIS call</text>
+<text x="652" y="115" class="tt" >s_pages, amx_o, corr_arr: one page&#x27;s scores, PV output, corrections</text>
+<rect x="640" y="190" width="440" height="150" rx="6" class="a" />
+<text x="652" y="210" class="hd" >attn[scratchpad]: worker w&#x27;s attn_accum</text>
+<text x="652" y="228" class="tt" >allocated once in the state constructor, attn.resize(num_workers);</text>
+<text x="652" y="243" class="tt" >lives as long as the model state; arrays indexed by token in minibatch:</text>
+<text x="652" y="258" class="tt" >v_stars[tok], s_stars[tok], m_stars[tok], valid[tok][kv_head]</text>
+<rect x="652" y="282" width="416" height="44" rx="4" class="red dash" />
+<text x="662" y="300" class="tt" >amx_qpack[tok]  &lt;- Ben&#x27;s proposal: a 5th per-token array (or vector),</text>
+<text x="662" y="315" class="tt" >written and read only by worker w, inside apply_page_range</text>
+<rect x="640" y="380" width="440" height="110" rx="6" class="g" />
+<text x="652" y="400" class="hd" >thread_local inside apply_page_range  (today)</text>
+<text x="652" y="418" class="tt" >one std::vector&lt;amx_qpack_slot&gt; per OS thread per instantiation,</text>
+<text x="652" y="433" class="tt" >lives as long as the thread; heap storage only on threads that ran</text>
+<text x="652" y="448" class="tt" >the AMX path; items.size() slots of 4096 B, capacity kept after the call</text>
+<path d="M500,268 L640,268" class="dep" marker-end="url(#ar1)"/>
+<path d="M500,308 L590,308 L590,435 L640,435" class="depg" marker-end="url(#arg1)"/>
+<text x="596" y="380" class="cap" >today</text>
+<path d="M500,300 L652,300" class="depg dash" marker-end="url(#arg1)"/>
+<text x="562" y="293" class="cap" >proposed</text>
+<text x="20" y="545" class="cap" >Figure 1. One attention worker&#x27;s loop for one layer (left) and the three places its state can live (right). Solid orange arrow: where the pack buffer lives today.</text>
+<text x="20" y="561" class="cap" >Dashed orange arrow: Ben&#x27;s proposal. Purple: the existing per-worker scratchpad rows.</text>
+</svg><figcaption>Figure 1. One attention worker's loop for one layer (left) and the three places its state can live (right). Purple: the per-worker scratchpad rows that exist today. Solid orange: where the pack buffer lives today. Dashed orange: Ben's proposal.</figcaption></figure>
+<ul class="plain">
+<li><b>One 4096-byte slot per token of the minibatch.</b> The packer copies the token's 4 query heads for the call's kv_head into the tile layout and writes only columns 0..3 of each 16-column panel; columns 4..15 must already be zero and are never written (<code>amx_attn_iface.hpp:176-185</code>, <code>amx_attn.cpp:102-116</code>). Today <code>resize()</code> zero-fills new slots, which satisfies that contract.</li>
+<li><b>Packed at most once per (token, call).</b> <code>packed_amx_query</code> packs when the call-local bitset <code>amx_packed</code> has the token's bit clear, at the token's first page that passes the visibility and window checks (<code>self_attention.hpp:1417-1432</code>). The test <code>t_amx_dispatch_dtype</code> pins this to exactly one pack per token per call.</li>
+<li><b>Read only inside the same call.</b> The single reader is the QK kernel, reached through <code>apply_page_tok</code> and <code>apply_dense_amx_page</code> for each dense page (<code>:1487-1488</code>). Nothing outside <code>apply_page_range</code> names the buffer; the join never sees it (claim C4).</li>
+<li><b>Re-packed every call by design.</b> A call handles one kv_head, and the packed bytes depend on the kv_head, so the next section must pack again; a worker's consecutive sections in one plan never share a kv_head (<code>common.hpp:855-864</code>).</li>
+<li><b>What thread_local buys and costs today.</b> The variable is one 24-byte <code>std::vector</code> object per OS thread per template instantiation of <code>apply_page_range</code>; the heap storage is allocated only on threads that run a call with the AMX path on, and it is never given back. The AMX PV kernel already keeps its own 2 KiB thread_local scratch in <code>amx_attn.cpp:197</code>, so this is the second thread_local of the AMX path, not the first (claim C9). What the thread_local costs at run time was read off the existing runtron binary (built 2026-08-31 from the pre-split tree, which declares the buffer the same way): the binary uses the local-exec TLS model, so every access is one <code>%fs</code>-relative load and there is no <code>__tls_get_addr</code> call; a call of <code>apply_page_range</code> executes 7 TLS instructions in steady state (a 3-instruction init-guard check and two address computations) and none inside the page and token loops, where the slot address is rebuilt from a stack slot with 2 ordinary loads per (page, token). The first call on each thread also registers the vector's destructor with <code>__cxa_thread_atexit</code>, once per thread per template instantiation (74 instantiations in that runtron, 32 bytes of static TLS each), and that happens even when the AMX path is off and in instantiations that can never be eligible. Ben's "not particularly efficient" is therefore true in kind but small in size: 7 instructions per call against a call that runs one QK and one PV kernel per token for each of its pages (claim C6). All of this exists only in builds with <code>TRON_AMX_DISPATCH</code> on (default off); the default build carries none of it. One more detail: libstdc++ grows a vector to <code>size + max(size, growth)</code>, so the kept capacity lies between the largest minibatch seen and about twice it.</li>
+</ul>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 330" width="100%" style="max-width:1100px" role="img">
+<style>
+text{font-family:system-ui,sans-serif;fill:#0b0b0b;font-size:12.5px}
+.hd{font-size:13px;font-weight:600}.cap{font-size:12px;fill:#52514e}.tt{font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.box{fill:#ffffff;stroke:#0b0b0b;stroke-width:1.2}.soft{fill:#f4f3ef;stroke:#8a8883;stroke-width:1}
+.a{fill:#e8e6f3;stroke:#7570b3;stroke-width:1.2}.b{fill:#cfe8d6;stroke:#1b9e77;stroke-width:1.2}.g{fill:#fff4d6;stroke:#d95f02;stroke-width:1.2}
+.red{fill:#fde2e1;stroke:#c8322f;stroke-width:1.4}
+.flow{stroke:#0b0b0b;stroke-width:1.3;fill:none}.dep{stroke:#7570b3;stroke-width:1.3;fill:none}.depb{stroke:#1b9e77;stroke-width:1.3;fill:none}.depg{stroke:#d95f02;stroke-width:1.4;fill:none}
+.dash{stroke-dasharray:6 4}
+</style>
+<defs><marker id="ar3" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#0b0b0b"/></marker>
+<marker id="arg3" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#d95f02"/></marker>
+<marker id="arb3" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#1b9e77"/></marker></defs>
+<text x="20" y="26" class="hd" >One worker, one layer, one token t. Time runs left to right (schematic, not to scale).</text>
+<rect x="250.0" y="44" width="348.5999999999999" height="26" rx="3" class="soft" />
+<text x="424.29999999999995" y="62" class="cap" text-anchor="middle" >section S0: kv_head 0</text>
+<rect x="252.0" y="74" width="83.14999999999998" height="18" rx="2" class="box" />
+<text x="293.575" y="87" class="cap" text-anchor="middle" >p0</text>
+<rect x="339.15" y="74" width="83.14999999999998" height="18" rx="2" class="box" />
+<text x="380.72499999999997" y="87" class="cap" text-anchor="middle" >p1</text>
+<rect x="426.29999999999995" y="74" width="83.14999999999998" height="18" rx="2" class="box" />
+<text x="467.87499999999994" y="87" class="cap" text-anchor="middle" >p2</text>
+<rect x="513.4499999999999" y="74" width="83.14999999999998" height="18" rx="2" class="box" />
+<text x="555.0249999999999" y="87" class="cap" text-anchor="middle" >p3</text>
+<rect x="615.2" y="44" width="348.5999999999999" height="26" rx="3" class="soft" />
+<text x="789.5" y="62" class="cap" text-anchor="middle" >section S1: kv_head 1</text>
+<rect x="617.2" y="74" width="83.14999999999998" height="18" rx="2" class="box" />
+<text x="658.7750000000001" y="87" class="cap" text-anchor="middle" >p0</text>
+<rect x="704.35" y="74" width="83.14999999999998" height="18" rx="2" class="box" />
+<text x="745.925" y="87" class="cap" text-anchor="middle" >p1</text>
+<rect x="791.5" y="74" width="83.14999999999998" height="18" rx="2" class="box" />
+<text x="833.075" y="87" class="cap" text-anchor="middle" >p2</text>
+<rect x="878.65" y="74" width="83.14999999999998" height="18" rx="2" class="box" />
+<text x="920.2249999999999" y="87" class="cap" text-anchor="middle" >p3</text>
+<rect x="980.4" y="44" width="99.60000000000002" height="26" rx="3" class="soft" />
+<text x="1030.2" y="62" class="cap" text-anchor="middle" >join</text>
+<text x="20" y="124" class="tt" >amx_packed bitset</text>
+<text x="20" y="139" class="cap" >(stack of the call)</text>
+<text x="20" y="184" class="tt" >amx_qpack[t]</text>
+<text x="20" y="199" class="cap" >(thread_local today,</text>
+<text x="20" y="213" class="cap" >attn[w] if moved)</text>
+<text x="20" y="244" class="tt" >v*, s*, m* of token t</text>
+<text x="20" y="259" class="cap" >(attn[w] row t)</text>
+<rect x="250.0" y="114" width="348.5999999999999" height="30" rx="3" class="soft" />
+<text x="424.29999999999995" y="133" class="cap" text-anchor="middle" >cleared at call start, set when t is packed, dies at return</text>
+<rect x="615.2" y="114" width="348.5999999999999" height="30" rx="3" class="soft" />
+<text x="789.5" y="133" class="cap" text-anchor="middle" >cleared at call start, set when t is packed, dies at return</text>
+<rect x="252.0" y="174" width="83.14999999999998" height="30" rx="3" class="red" />
+<text x="293.575" y="193" class="cap" text-anchor="middle" >pack</text>
+<rect x="337.15" y="174" width="261.44999999999993" height="30" rx="3" class="g" />
+<text x="467.87499999999994" y="193" class="cap" text-anchor="middle" >read by the QK kernel at each page</text>
+<rect x="617.2" y="174" width="83.14999999999998" height="30" rx="3" class="red" />
+<text x="658.7750000000001" y="193" class="cap" text-anchor="middle" >pack</text>
+<rect x="702.35" y="174" width="261.44999999999993" height="30" rx="3" class="g" />
+<text x="833.075" y="193" class="cap" text-anchor="middle" >read by the QK kernel at each page</text>
+<rect x="252" y="234" width="711.8" height="30" rx="3" class="a" />
+<text x="606.9" y="253" class="cap" text-anchor="middle" >created at S0.p0, folded at every page of S0 and S1 (kv_head 0 heads, then kv_head 1 heads)</text>
+<rect x="980.4" y="234" width="99.6" height="30" rx="3" class="a" />
+<text x="1030.1999999999998" y="253" class="cap" text-anchor="middle" >read by join</text>
+<text x="20" y="300" class="cap" >Figure 3. The pack of token t lives exactly one apply_page_range call: a 4 KiB copy made at the first page that needs it, read at each later page, not looked at after the call</text>
+<text x="20" y="316" class="cap" >returns (the next section packs again). The reduction state v*, s*, m* lives across all sections of the layer and is consumed by the join. Both are one entry per token per worker.</text>
+</svg><figcaption>Figure 3. Lifetimes for one token on one worker in one layer (schematic, not to scale). The pack is remade in every section; the softmax state persists to the join.</figcaption></figure>
+
+<h2>6. Can it live in attn_accum? Yes, and we tried both forms</h2>
+<h3>6.1 The nine checks</h3>
+<p>Each claim below was investigated by one reader of the tree and then attacked by two independent skeptics (a literal code-reading lens and a concurrency/memory/build lens). The verdicts are theirs; the file:line references are in the workflow record.</p>
+<table>
+<tr><th style="width:4%">#</th><th style="width:30%">Claim checked</th><th style="width:14%">Result</th><th>What the code says (file:line at 26a0338c3b)</th></tr>
+<tr><td>C1</td><td>During <code>apply_page_range</code>, only the worker that owns <code>attn[scratchpad]</code> writes into it, so a per-token pack member would have one writer and one reader.</td><td class="ok">Holds for the pack; two wordings of the claim corrected</td><td>The only production call site is <code>run_sections</code> (<code>:993</code>), run by attention worker i on pool thread <code>n_main_helpers + i</code> (<code>llama.hpp:606-608</code>, generated plugins alike). Other workers do read <code>attn[w]</code> rows of a finished kv_head during w's sections, and write into <code>attn[0]</code> as the join target (<code>:1069-1071, 1094-1095</code>); those touch v*, s*, m*, valid of other kv_heads, never a pack. The helper/attention split can move between passes (<code>model.hpp:2043-2087</code>), so worker index and OS thread coincide within a pass, not for the process life. Unit tests call the function from the test thread with scratchpad 0.</td></tr>
+<tr><td>C2</td><td>attn_accum instances exist only in <code>attn</code> (one per pool worker) and twice per <code>hw_attn_results</code>; every model state owns them.</td><td class="ok">Confirmed</td><td><code>attn.resize(app_pool().num_workers())</code> once in the state constructor (<code>:472</code>); <code>hw_attn.emplace_back()</code> only when the model is hardware-attention eligible and has plan entries (<code>model.hpp:2526-2527, 2747-2748</code>); no other object of the type in h/, src/, t/. <code>num_workers</code> = number of app CPU ids minus one (<code>threading.hpp:869</code>): 55 under <code>--instance 1,2</code>, 111 for the whole machine, 15 without <code>--instance</code>.</td></tr>
+<tr><td>C3</td><td>Byte sizes of attn_accum and of the proposed member.</td><td class="warn">Confirmed for the bf16 executors; the host executor was missing</td><td>Pack slot 4,096 B. Inline <code>sizeof(attn_accum)</code> 35,840 B (llama-8b) / 286,720 B (Qwen3-4B) plus 8,192 B of DMA-pool memory per token behind each <code>v_stars</code> handle (<code>dmatensor.hpp:163-181</code>). Ben's array: 524,288 B / 4,194,304 B per instance (+48% of what the struct owns). Host-executor builds store v_stars inline as floats: 2,130,944 B for llama-8b, where the array adds 25%. Standalone compile of the same layout reproduces the numbers.</td></tr>
+<tr><td>C4</td><td>A pack lives one call: packed at most once per (token, call), read only by the QK kernel inside that call, never by the join.</td><td class="ok">Confirmed</td><td><code>packed_amx_query</code> packs when the call-local bitset has the bit clear (<code>:1424-1428</code>); the only dereference is the kernel call (<code>:1487-1488</code>); the pointer cannot escape (<code>apply_page_tok</code> returns a pair, <code>apply_dense_amx_page</code> returns void); whole-tree grep finds the symbols only in <code>self_attention.hpp</code>. One call = one kv_head (<code>common.hpp:735-739</code>); a worker's sections in one plan have strictly increasing kv_head, so every call must pack anew.</td></tr>
+<tr><td>C5</td><td>Our two written reasons are not technical blockers, and nothing else blocks an attn_accum member.</td><td class="ok">Confirmed</td><td>"Per (token, kv_head)" describes the slot's content (<code>:1426</code> offsets q by kv_head); storage is per token (<code>:1380</code>); attn_accum's <code>valid</code> is per (token, kv_head) (<code>:288</code>). The struct is byte-identical to the merge base and no diff hunk touches it. attn_accum is never copied, moved, compared, memset or size-asserted; <code>noncopyable</code> applies to <code>state</code>; <code>hw_attn</code> grows only by <code>emplace_back</code>.</td></tr>
+<tr><td>C6</td><td>What the thread_local costs: object size, when the heap is allocated, per-call TLS instructions.</td><td class="ok">Confirmed from the binary, with a date correction</td><td>24 B vector + 8 B guard per (thread x instantiation) (<code>readelf</code>); heap only under <code>if (amx_on)</code>, 64-byte-aligned <code>operator new</code>, 4,096 B zero-fill per new slot; local-exec TLS (no <code>__tls_get_addr</code>); 7 TLS instructions per call in the production instance, 0 inside the page/token loops; <code>__cxa_thread_atexit</code> once per thread per instantiation, also when AMX is off (74 instantiations in the 2026-08-31 runtron). The disassembled binaries predate the split (2026-08-31, not 2026-09-04); the declaration form is the same.</td></tr>
+<tr><td>C7</td><td>A 64-byte-aligned member is allocated correctly by the containers, nothing assumes the struct's layout, and the zero-padding contract holds.</td><td class="ok">Confirmed</td><td>C++23 (<code>CMakeLists.txt:55</code>), default <code>std::allocator</code>, no aligned-new flag; over-aligned types go through <code>operator new(size, align_val_t)</code>, which runtron and rinzler route to <code>aligned_alloc</code> (<code>src/pos/memperf.cpp:125-146</code>). No <code>sizeof(attn_accum)</code>, memcpy or arena use. <code>attn.resize()</code> and <code>emplace_back()</code> value-initialize attn_accum, which zero-initializes an array member because the struct has no user-provided constructor; <code>{}</code> would make that explicit. The header <code>amx_attn_iface.hpp</code> is included unconditionally, so the slot type compiles with the dispatch flag off; the <code>#ifdef</code> around the member is ODR-safe because the define is PUBLIC on the <code>tron</code> target.</td></tr>
+<tr><td>C8</td><td>A compile-time, model-level eligibility gate for the member is feasible.</td><td class="ok">Confirmed</td><td><code>plugin_t::attention_kernels</code> is a constexpr array of geometries and <code>model.hpp:723-728</code> already folds over it; <code>std::conditional_t&lt;..., std::monostate&gt;</code> with <code>tron_no_unique_address</code> has precedents (<code>expert_stats_</code>, <code>static_option</code>). Eligible: 32/8/128 models on bf16 executors (llama-3.1-8b incl. perm_tp*, llama-3-8b, mistral-7b, ministral-8b, mixtral-8x7b, Qwen3-4B). Not eligible: llama-70b, llama-3.2-3b, gpt-oss-120b, every host-executor build. Not compiled, feasibility by reading only.</td></tr>
+<tr><td>C9</td><td>Inventory of attention intermediates: which live in attn_accum, which on the stack, which are lazily allocated per token elsewhere.</td><td class="ok">Confirmed</td><td>attn_accum holds only v*, s*, m*, valid (<code>:283-288</code>). Every per-page intermediate is a stack local (<code>:1485-1520, 1601-1664</code>; kernel <code>s_transposed</code>). The PV kernel already has a 2 KiB thread_local scratch (<code>amx_attn.cpp:197</code>). Lazily allocated per-token storage exists in <code>hw_attn_results::raw_results</code> (<code>:426-430</code>) and in the Q/O buffers grown to <code>max_tokens</code>. The generated Qwen3-4B header in <code>gen/</code> confirms 32 heads, 8 KV heads, head 128, <code>max_minibatch_size</code> 1024.</td></tr>
+</table>
+<p class="small">Verdict column: "Confirmed" = the investigator confirmed and neither skeptic refuted; "Holds ... corrected" = a skeptic refuted a wording of the claim, the correction is in the text; the consequence for the design question survived in every case. The full evidence lists (about 120 file:line citations) are in the workflow journal.</p>
+
+
+<h3>6.2 The two prototype placements</h3>
+<p>Branch <code>jhan-amx-qpack-accum-proto</code> (worktree <code>~/workspace/ai-runs/tron-qpack-accum</code>), not pushed. Both commits move the slot type to class scope and the buffer into attn_accum; <code>apply_page_range</code> then takes <code>auto&amp; amx_qpack = attn[scratchpad].amx_qpack;</code> and is otherwise unchanged.</p>
+<div class="two">
+<div>
+<p><b>Option B, commit <code>5b5eeca67f</code>: a <code>std::vector</code> member, sized on first use</b></p>
+<pre><code>    struct attn_accum {
+      ...
+      std::array&lt;std::array&lt;bool, scratch_kv_heads&gt;, max_minibatch_size&gt; valid;
+<span class="add">+#ifdef TRON_AMX_DISPATCH
++      // Packed-Q slots for the AMX attention path, one 4096-byte slot per
++      // token of the minibatch, indexed like the arrays above. Scratch of one
++      // apply_page_range call: written by packed_amx_query, read by the QK
++      // kernel, never joined. Sized on first use to the call's minibatch;
++      // resize() zero-fills new slots (the packer's padding contract) and the
++      // capacity then persists for the worker's lifetime [...]
++      std::vector&lt;amx_qpack_slot&gt; amx_qpack;
++#endif</span>
+    };
+    ...
+    void apply_page_range(...) {
+      ...
+<span class="del">-      struct alignas(64) amx_qpack_slot { bf16 v[...]; };
+-      thread_local std::vector&lt;amx_qpack_slot&gt; amx_qpack;</span>
+<span class="add">+      auto&amp; amx_qpack = attn[scratchpad].amx_qpack;</span>
+      std::bitset&lt;max_minibatch_size&gt; amx_packed;
+      if (amx_on) {
+        TRON_ASSERT_LE(items.size(), max_minibatch_size);
+        amx_qpack.resize(items.size());   // unchanged
+        amx_attn_h128g4::begin_region();
+      }</code></pre>
+</div>
+<div>
+<p><b>Option A, commit <code>250ff8204d</code>: Ben's <code>std::array</code> member</b></p>
+<pre><code>    struct attn_accum {
+      ...
+<span class="add">+#ifdef TRON_AMX_DISPATCH
++      // [...] Zero-initialized with the rest of attn_accum
++      // (the packer's padding contract needs columns 4..15 zero and writes
++      // columns 0..3 only). max_minibatch_size x 4096 bytes per attn_accum.
++      std::array&lt;amx_qpack_slot, max_minibatch_size&gt; amx_qpack;
++#endif</span>
+    };
+    ...
+      if (amx_on) {
+        TRON_ASSERT_LE(items.size(), max_minibatch_size);
+<span class="del">-        amx_qpack.resize(items.size());</span>
+        amx_attn_h128g4::begin_region();
+      }</code></pre>
+<p class="small">The zeroing relies on <code>attn.resize()</code> and <code>hw_attn.emplace_back()</code> value-initializing attn_accum, which zero-initializes the whole object because attn_accum has no user-provided constructor (claim C7). If this variant were adopted, the member should be written <code>amx_qpack{};</code> so the guarantee does not depend on that.</p>
+</div>
+</div>
+<p>Built and run on delphi-3bda (Xeon 6962P, socket 1, <code>exec/split-verify3.sh</code>, isolated worktree on local disk, guard acquired; logs <code>exec/logs/split-qpackB*.txt</code>, <code>split-qpackA.txt</code>):</p>
+<table>
+<tr><th>Run</th><th>Commit</th><th>TRON_AMX_DISPATCH</th><th class="num">Build</th><th>t_amx_numerics</th><th>t_amx_dispatch_dtype</th><th>t_llama_unit</th></tr>
+<tr class="ok"><td>Option B</td><td><code>5b5eeca67f</code></td><td>ON</td><td class="num">126 s</td><td>4109 assertions, 4 cases, all passed</td><td>1559 assertions, 1 case, all passed</td><td>120054 assertions, 27 cases, all passed</td></tr>
+<tr class="ok"><td>Option B, dispatch off</td><td><code>5b5eeca67f</code></td><td>OFF</td><td class="num">131 s</td><td>not built (AMX-only test)</td><td>not built (AMX-only test)</td><td>120054 assertions, 27 cases, all passed</td></tr>
+<tr class="ok"><td>Option A</td><td><code>250ff8204d</code></td><td>ON</td><td class="num">120 s</td><td>4109 assertions, 4 cases, all passed</td><td>1559 assertions, 1 case, all passed</td><td>120054 assertions, 27 cases, all passed</td></tr>
+<tr><td>Reference (PR 1 head)</td><td><code>26a0338c3b</code></td><td>ON</td><td class="num">134 s</td><td>4109 assertions, 4 cases</td><td>1559 assertions, 1 case</td><td>120054 assertions, 27 cases</td></tr>
+<tr class="ok"><td><b>Final commit</b> (option B + jhan's comment, on jhan-amx-p0)</td><td><code>752e9f571a</code></td><td>ON</td><td class="num">126 s</td><td>4109 assertions, 4 cases, all passed</td><td>1559 assertions, 1 case, all passed</td><td>120054 assertions, 27 cases, all passed</td></tr>
+<tr class="ok"><td>Final commit, dispatch off</td><td><code>752e9f571a</code></td><td>OFF</td><td class="num">128 s</td><td>not built</td><td>not built</td><td>120054 assertions, 27 cases, all passed</td></tr>
+</table>
+<p class="small">The final commit's tree is identical to prototype B plus the comment change (<code>git rev-parse HEAD^{tree}</code> equal to <code>4a676753b6^{tree}</code>); logs <code>exec/logs/split-qpackB-final*.txt</code>. The assertion counts equal the reference run of the unmodified head (<code>exec/logs/split-gate-ntiles.txt</code>), so the same code paths ran. <code>t_amx_dispatch_dtype</code> calls <code>apply_page_range</code> directly with scratchpad 0 and checks one pack per token per call; it exercises the moved buffer on a real AMX CPU.</p>
+
+<h2>7. What each placement costs</h2>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 636" width="100%" style="max-width:1100px" role="img">
+<style>
+text{font-family:system-ui,sans-serif;fill:#0b0b0b;font-size:12.5px}
+.hd{font-size:13px;font-weight:600}.cap{font-size:12px;fill:#52514e}.tt{font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.box{fill:#ffffff;stroke:#0b0b0b;stroke-width:1.2}.soft{fill:#f4f3ef;stroke:#8a8883;stroke-width:1}
+.a{fill:#e8e6f3;stroke:#7570b3;stroke-width:1.2}.b{fill:#cfe8d6;stroke:#1b9e77;stroke-width:1.2}.g{fill:#fff4d6;stroke:#d95f02;stroke-width:1.2}
+.red{fill:#fde2e1;stroke:#c8322f;stroke-width:1.4}
+.flow{stroke:#0b0b0b;stroke-width:1.3;fill:none}.dep{stroke:#7570b3;stroke-width:1.3;fill:none}.depb{stroke:#1b9e77;stroke-width:1.3;fill:none}.depg{stroke:#d95f02;stroke-width:1.4;fill:none}
+.dash{stroke-dasharray:6 4}
+</style>
+<defs><marker id="ar4" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#0b0b0b"/></marker>
+<marker id="arg4" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#d95f02"/></marker>
+<marker id="arb4" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#1b9e77"/></marker></defs>
+<text x="20" y="24" class="hd" >Bytes ADDED to one attn_accum instance by the two placements (today&#x27;s thread_local adds 0 here; its memory lives per OS thread instead)</text>
+<rect x="20" y="36" width="14" height="14" rx="3" fill="#eb6834"/>
+<text x="40" y="48" class="cap" >option A: std::array&lt;amx_qpack_slot, max_minibatch_size&gt; member (Ben&#x27;s proposal)</text>
+<rect x="560" y="36" width="14" height="14" rx="3" fill="#2a78d6"/>
+<text x="580" y="48" class="cap" >option B: std::vector&lt;amx_qpack_slot&gt; member, sized on first use</text>
+<text x="20" y="74" class="hd" >llama plugin: max_minibatch_size 128 (llama-3.1-8b eligible; llama-70b not: kv_mul 8)</text>
+<text x="20" y="106" class="cap" >attention-worker slot after a full minibatch</text>
+<path d="M490,90 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="101" class="cap" >512 KiB</text>
+<path d="M490,106 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#2a78d6"/>
+<text x="996.0" y="117" class="cap" >512 KiB</text>
+<text x="20" y="150" class="cap" >attention-worker slot after 8-token minibatches only (e.g. 8-user decode)</text>
+<path d="M490,134 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="145" class="cap" >512 KiB</text>
+<path d="M490,150 h27.25 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-27.25 z" fill="#2a78d6"/>
+<text x="527.25" y="161" class="cap" >32 KiB</text>
+<text x="20" y="194" class="cap" >main-helper slot (never runs attention)</text>
+<path d="M490,178 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="189" class="cap" >512 KiB</text>
+<path d="M490,194 h1.5 a0,0 0 0 1 0,0 v14 a0,0 0 0 1 -0,0 h-1.5 z" fill="#2a78d6"/>
+<text x="497.5" y="205" class="cap" >24 B</text>
+<text x="20" y="238" class="cap" >copy inside hw_attn_results (hardware-attention models)</text>
+<path d="M490,222 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="233" class="cap" >512 KiB</text>
+<path d="M490,238 h1.5 a0,0 0 0 1 0,0 v14 a0,0 0 0 1 -0,0 h-1.5 z" fill="#2a78d6"/>
+<text x="497.5" y="249" class="cap" >24 B</text>
+<text x="20" y="282" class="cap" >any slot of a model that is not AMX-eligible</text>
+<path d="M490,266 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="277" class="cap" >512 KiB</text>
+<path d="M490,282 h1.5 a0,0 0 0 1 0,0 v14 a0,0 0 0 1 -0,0 h-1.5 z" fill="#2a78d6"/>
+<text x="497.5" y="293" class="cap" >24 B</text>
+<line x1="490" y1="300" x2="990" y2="300" stroke="#8a8883" stroke-width="1"/>
+<text x="490" y="314" class="cap" >0</text>
+<text x="990" y="314" class="cap" text-anchor="end" >512 KiB</text>
+<text x="20" y="342" class="hd" >ingested plugins: max_minibatch_size 1024 (Qwen3-4B eligible; gpt-oss-120b not: head 64)</text>
+<text x="20" y="374" class="cap" >attention-worker slot after a full minibatch</text>
+<path d="M490,358 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="369" class="cap" >4 MiB</text>
+<path d="M490,374 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#2a78d6"/>
+<text x="996.0" y="385" class="cap" >4 MiB</text>
+<text x="20" y="418" class="cap" >attention-worker slot after 8-token minibatches only (e.g. 8-user decode)</text>
+<path d="M490,402 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="413" class="cap" >4 MiB</text>
+<path d="M490,418 h3.90625 a0,0 0 0 1 0,0 v14 a0,0 0 0 1 -0,0 h-3.90625 z" fill="#2a78d6"/>
+<text x="499.90625" y="429" class="cap" >32 KiB</text>
+<text x="20" y="462" class="cap" >main-helper slot (never runs attention)</text>
+<path d="M490,446 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="457" class="cap" >4 MiB</text>
+<path d="M490,462 h1.5 a0,0 0 0 1 0,0 v14 a0,0 0 0 1 -0,0 h-1.5 z" fill="#2a78d6"/>
+<text x="497.5" y="473" class="cap" >24 B</text>
+<text x="20" y="506" class="cap" >copy inside hw_attn_results (hardware-attention models)</text>
+<path d="M490,490 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="501" class="cap" >4 MiB</text>
+<path d="M490,506 h1.5 a0,0 0 0 1 0,0 v14 a0,0 0 0 1 -0,0 h-1.5 z" fill="#2a78d6"/>
+<text x="497.5" y="517" class="cap" >24 B</text>
+<text x="20" y="550" class="cap" >any slot of a model that is not AMX-eligible</text>
+<path d="M490,534 h496.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-496.0 z" fill="#eb6834"/>
+<text x="996.0" y="545" class="cap" >4 MiB</text>
+<path d="M490,550 h1.5 a0,0 0 0 1 0,0 v14 a0,0 0 0 1 -0,0 h-1.5 z" fill="#2a78d6"/>
+<text x="497.5" y="561" class="cap" >24 B</text>
+<line x1="490" y1="568" x2="990" y2="568" stroke="#8a8883" stroke-width="1"/>
+<text x="490" y="582" class="cap" >0</text>
+<text x="990" y="582" class="cap" text-anchor="end" >4 MiB</text>
+<text x="20" y="606" class="cap" >Figure 4. Option A spends max_minibatch_size x 4096 bytes in every instance, used or not. Option B spends 24 bytes (an empty vector) until a worker runs the AMX</text>
+<text x="20" y="622" class="cap" >path, then (largest minibatch seen) x 4096 bytes, which is what the thread_local costs today. Our runs: 55 pool workers per model state (--instance 1,2), no hardware copies.</text>
+</svg><figcaption>Figure 4. Bytes added to one attn_accum instance by each placement. Bars are linear; the 24-byte bars are drawn as hairlines with their value beside them.</figcaption></figure>
+<table>
+<tr><th>Per model state, <code>--instance 1,2</code> (55 pool workers, CPU attention)</th><th class="num">llama plugin (128)</th><th class="num">ingested plugin (1024)</th></tr>
+<tr><td><b>Option A</b>, array member: 55 x max_minibatch_size x 4,096 B, allocated and zeroed at state construction whether or not the model is AMX-eligible</td><td class="num">28,835,840 B (27.5 MiB)</td><td class="num">230,686,720 B (220 MiB)</td></tr>
+<tr><td>Option A, extra per hardware-attention scratchpad (2 copies), when the FPGA path is on</td><td class="num">+1 MiB each</td><td class="num">+8 MiB each</td></tr>
+<tr><td><b>Option B</b>, vector member: 24 B per scratchpad that never runs the AMX path (main helpers, hardware copies, non-eligible models); per attention worker, (largest minibatch it has seen) x 4,096 B, allocated by that worker on first use</td><td class="num">e.g. 8-user decode: 32 KiB per attention worker; full minibatch: 512 KiB</td><td class="num">e.g. 8-user decode: 32 KiB; full minibatch: 4 MiB</td></tr>
+<tr><td><b>Today</b>, thread_local: the same bytes as option B, keyed by OS thread instead of worker index (and, because the helper/attention split can move between passes, spread over more threads in a long run), plus a 24 B vector and an 8 B guard per thread per template instantiation</td><td class="num">as B</td><td class="num">as B</td></tr>
+</table>
+<p>For scale: attn_accum is already sized for the worst case. Its v_stars blocks reserve 1 MiB (llama plugin) or 8 MiB (ingested plugins) per instance at construction, zero-filled, whether or not a minibatch ever reaches <code>max_minibatch_size</code>. Ben's array is a 48% increment on that, not a new kind of cost; the difference is that it would be the first per-token attention buffer that is eligibility- and host-dependent and still always resident. Three more differences that the chart cannot show:</p>
+<ul class="plain">
+<li><b>Where the memory is first touched.</b> Option B and today's thread_local allocate on the attention worker itself, so the pages land on that worker's NUMA node. Option A's arrays are zero-filled by whichever thread constructs the model state. On our single-socket runs (<code>--instance 1,2</code>) this makes no difference.</li>
+<li><b>Hosts without AMX.</b> The dispatch flag is a build option, but availability is decided at run time (<code>amx_attn_h128g4::available()</code>: CPU, kernel permission, <code>TRON_AMX_DISABLE</code>). On a host where it returns false, or for an operator who sets the kill switch, option A's arrays are resident memory that can never be used, and no compile-time gate removes them; option B and today's thread_local stay at 24 bytes because the resize sits under <code>if (amx_on)</code> (completeness critic, item 7).</li>
+<li><b>Static gating.</b> The AMX-eligible models are those with 32 query heads, 8 KV heads and head size 128 on a bf16 executor (llama-3.1-8b, llama-3-8b, mistral-7b, ministral-8b, mixtral-8x7b, Qwen3-4B); llama-70b (kv_mul 8), llama-3.2-3b (kv_mul 3), gpt-oss-120b (head 64) and every host-executor build (float Q) are not (claim C8). Option A's cost in the non-eligible instantiations could be removed with a compile-time gate: <code>plugin_t::attention_kernels</code> is a constexpr list of geometries, the tree already folds over it for <code>max_kernel_query_width</code>, and <code>std::conditional_t&lt;..., std::monostate&gt;</code> with <code>tron_no_unique_address</code> has precedents (<code>expert_stats_</code>, <code>static_option</code>; claim C8). That gate cannot remove the cost in the two hardware-attention copies of eligible models. Option B needs no gate.</li>
+</ul>
+
+<h2>8. Recommendation</h2>
+<div class="take">
+Move the buffer into attn_accum as a <code>std::vector&lt;amx_qpack_slot&gt;</code> member (option B, commit <code>5b5eeca67f</code>), keep the <code>resize(items.size())</code> on first use, and delete the thread_local. This gives Ben the placement he asked for (one home for per-worker, per-token attention scratch, no thread-local storage, no new representation), keeps the allocation pattern he already accepted (one growth per worker to the largest minibatch seen), and adds nothing measurable to scratchpads that never pack a query.
+</div>
+<div class="quote"><div class="who">Status, 2026-09-10</div>jhan chose option B. Commit <code>752e9f571a</code> on <code>jhan-amx-p0</code> (in <code>~/workspace/tron-amx</code>) = prototype <code>5b5eeca67f</code> plus the shorter member comment below, squashed onto <code>26a0338c3b</code>; verified on delphi-3bda (table in section 6.2). Not yet done, because they are outward-facing: <code>git push</code> of <code>jhan-amx-p0</code> (a fast-forward), posting <code>reviews/amx_qpack-reply.post.md</code> on thread r3973410716, and editing row 3 of the thread-map comment (issuecomment-5578693039; the source file <code>thread-map.md</code> and <code>triage.json</code> are already updated).</div>
+<p>If Ben prefers the static <code>std::array</code> (option A), it works and passes the same tests; the price is 27.5 MiB (llama plugin) or 220 MiB (ingested plugins) per model state on this machine, paid at start-up in every model including the non-eligible ones and in both copies of every hardware-attention scratchpad. We would then write the member as <code>amx_qpack{}</code> and add the compile-time eligibility gate.</p>
+<h3>Suggested reply on the thread</h3>
+<div class="quote">You were right, and our comment gave a scope reason ("this PR does not touch attn_accum") dressed up as a technical one; sorry for the confusion. The pack is per-worker, per-token scratch for one <code>apply_page_range</code> call, which is exactly attn_accum's index space, and nothing in the join or the hardware path depends on it. It is now a member of attn_accum, <code>std::vector&lt;amx_qpack_slot&gt; amx_qpack;</code>, indexed by batch_job_ix like the other arrays and sized on first use with <code>resize(items.size())</code> (same allocation pattern as before, no thread_local left): <code>752e9f571a</code>. t_amx_numerics, t_amx_dispatch_dtype and t_llama_unit pass on the 6962P with the dispatch on, and t_llama_unit with it off. We kept it a vector rather than a <code>std::array&lt;amx_qpack_slot, max_minibatch_size&gt;</code> because the array adds 512 KiB (llama plugin) or 4 MiB (ingested plugins) to every attn_accum instance, i.e. all 55 pool-worker scratchpads per model state plus both copies in every hw_attn_results, for eligible and non-eligible models alike (27.5 MiB or 220 MiB per model state here), while the vector stays at 24 bytes wherever the AMX path never runs. If you would rather have the array anyway, that variant also builds and passes the same tests (<code>250ff8204d</code> on the prototype branch); say so and we will take it instead.</div>
+<p class="small">Plain-text copy for posting: <code>reviews/amx_qpack-reply.post.md</code>.</p>
+<h3>Suggested comment in the code (replaces the current one)</h3>
+<p>Final wording, jhan 2026-09-10 (a longer first draft was cut to the facts a reader of the struct needs; the zero-fill requirement and the growth rule stay at the <code>resize()</code> call site in <code>apply_page_range</code>, where the prototype already states them, and the one-call lifetime is stated at <code>packed_amx_query</code>). Committed as a comment-only change on branch <code>jhan-amx-qpack-accum-B</code> on top of the tested <code>5b5eeca67f</code>.</p>
+<pre><code>// The packed queries for the AMX attention path.
+//
+// The AMX QK kernel cannot read a token&#x27;s 4 query heads as they are
+// stored; it needs them copied to its tile layout (a &quot;pack&quot;). Element
+// batch_job_ix of this vector is the pack of the token at position
+// batch_job_ix of the minibatch, so the vector is indexed like the
+// arrays above.
+std::vector&lt;amx_qpack_slot&gt; amx_qpack;</code></pre>
+<p class="small">Three phrases of the first draft that were hard to read, and what they meant: "one 4096-byte slot per token of the minibatch" = one element per token of the current minibatch, element batch_job_ix for the token at that position, each element 4096 bytes; "scratch of one apply_page_range call (one kv_head)" = temporary data, meaningful only during the call that wrote it, and that call handles a single kv_head; "empty (24 bytes) in the scratchpads that never run the AMX path" = in an attn_accum whose worker never runs the AMX path the vector is never resized, so it owns no heap memory and costs only the 24-byte vector object, against 512 KiB or 4 MiB for the array.</p>
+<h2>9. What this investigation did not measure</h2>
+<ul class="plain">
+<li><b>A possible small saving that neither placement takes today.</b> The plan builder assigns a kv_head's ready pages and then its pending pages to the same worker, and <code>run_attention_job</code> runs the two plans as two <code>apply_page_range</code> calls, so in multi-minibatch passes a (token, kv_head) pair is packed twice per layer per worker (<code>model.hpp:2802-2818</code>, <code>self_attention.hpp:814-826</code>). A per-worker "packed for kv_head" tag next to the slots would let the second call reuse the first pack; an attn_accum member is the natural place for such a tag. Not needed for the placement question; noted by the completeness critic (item 4).</li>
+<li><b>Decode speed, thread_local versus member.</b> Not measured. The expected difference is below run-to-run noise: the TLS access happens once per <code>apply_page_range</code> call, i.e. once per section, and the slot pointer is then a plain vector element either way. The measurement that would settle it is an A/B decode run of <code>5b5eeca67f</code> against <code>26a0338c3b</code> with the perf-round recipe (same prompt lengths, 8 users, TVD and tokens per second).</li>
+<li><b>Memory at run time.</b> The byte counts above are computed from the declared types and the 55-worker pool of <code>--instance 1,2</code>; a resident-set comparison of the two prototype binaries under runtron would confirm them.</li>
+<li><b>Cache-line sharing.</b> A pack slot is 64-byte aligned and 4096 bytes long, so no cache line is shared with the s*, m*, valid rows that other workers read during the join; no measurement is needed for that, but none was taken.</li>
+</ul>
+
+<h2>10. Sources and method</h2>
+<ul class="plain">
+<li>GitHub: <a href="https://github.com/positron-ai/tron/pull/3879#discussion_r3936949728">r3936949728</a>, <a href="https://github.com/positron-ai/tron/pull/3879#discussion_r3973410716">r3973410716</a>, thread map <a href="https://github.com/positron-ai/tron/pull/3879#issuecomment-5578693039">issuecomment-5578693039</a> (row 3).</li>
+<li>Meeting transcript (Gemini notes, 2026-09-09): <a href="https://docs.google.com/document/d/1S-vphIbaMq0oVNNGto3XwafFVagWNENTwFxH0-ZJUQA/edit?usp=sharing">AMX walkthrough</a>; the action item reads "Determine if AMX qpack storage can be integrated into attention accum and provide reasoning if it cannot be included."</li>
+<li>Code: <code>~/workspace/tron-amx</code> at <code>26a0338c3b</code> for the investigation (read only); prototypes in <code>~/workspace/ai-runs/tron-qpack-accum</code>: branch <code>jhan-amx-qpack-accum-proto</code> with <code>5b5eeca67f</code> (vector) and <code>250ff8204d</code> (array), branch <code>jhan-amx-qpack-accum-B</code> with <code>4a676753b6</code> (vector + jhan's comment); final commit <code>752e9f571a</code> on <code>jhan-amx-p0</code>. All built and tested with <code>exec/split-verify3.sh</code> on delphi-3bda; result files <code>exec/logs/split-qpackB.txt</code>, <code>split-qpackBoff.txt</code>, <code>split-qpackA.txt</code>, <code>split-qpackB-final.txt</code>, <code>split-qpackB-final-off.txt</code>.</li>
+<li>Verification: nine claims, each investigated by one agent and attacked by two skeptics with different lenses, plus a completeness critic; workflow record <code>wf_63e1a5b3-ebf</code> in this session's transcript directory. The critic checked eight further considerations (NUMA first touch, cache-line sharing, the debug_string indexing, ready-versus-pending plans, several model states per process, test-constructed states, hosts without AMX, and the already-worst-case sizing of attn_accum); none changed the conclusion, and the two it found under-examined are in sections 7 and 9.</li>
+<li>Figures: generated by <code>gen_figs.py</code> (kept next to this page as <code>amx_qpack-2-attn_accum.figs.py</code>); byte counts as in the tables.</li>
+</ul>
+</body>
+</html>
