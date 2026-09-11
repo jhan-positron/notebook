@@ -5,10 +5,12 @@ Written 2026-09-04 (round 1). Author: Claude, for jhan. Source request:
 
 ## Short version
 
-The nightly CI for delphi-3bda is the `systems_test` repository's `system_ci`
-driver: it runs functional API tests, a throughput benchmark, MMLU Pro (an
-accuracy test), and a 3-hour soak (sustained-traffic stability test) against
-the production server rinzler. Round 1 runs those same four tests against
+The nightly CI (continuous-integration test run) for delphi-3bda (the test
+machine, a 2-socket Xeon 6 server with 8 FPGA accelerator cards) is the
+`system_ci` program in the `systems_test` repository. It runs four tests
+against rinzler, the production server: functional API tests, a throughput
+benchmark, MMLU Pro (an accuracy test), and a 3-hour soak (a sustained-traffic
+stability test). Round 1 runs those same four tests against
 rinzler built from the PR3879 branch on four models (qwen-3-4b, llama-3.1-8b,
 mixtral-8x7b, gpt-oss-120b) in three arms: AMX off, AMX canonical, AMX mirror.
 Results land in `PR3879/more-testing/round-1/status.md` and are refreshed after
@@ -23,6 +25,15 @@ every model.
 - **AMX**: Intel Advanced Matrix Extensions, the CPU tile-matrix instructions
   the change uses for software attention. **AVX**: the older vector
   instructions the existing code uses.
+- **K / KV cache / KV head / head size**: for every served token the server
+  stores the attention keys (K) and values (V); this store is the KV cache
+  (kept in hugepages). A KV head is one stored key/value stream, shared by
+  several query heads; head size is the vector width of one attention head.
+  **AMX eligible**: the change's kernels (small compute routines) are built
+  only for head size 128 with 4 query heads per KV head, the shape of qwen,
+  llama and mixtral; gpt-oss (head size 64, 8 query heads per KV head) never
+  runs them.
+- **FPGA**: the accelerator cards this machine runs the models' matrix work on.
 - **Arms** (the builds and switches compared):
   - **off**: canonical build run with `TRON_AMX_DISABLE=1` (the kill switch);
     attention runs on the AVX path. This is the within-round baseline.
@@ -159,9 +170,14 @@ baseline; it also runs only if the deadline allows.
 - The soak monitor logs into the DUT as jhan (key auth) instead of the CI
   service account.
 - The two functional tests that check the proxy's token rejection
-  (`test_auth_reject_no_token`, `test_auth_reject_bad_token`) are deselected:
-  they test platformd's proxy, which is not in front of our rinzler. CI itself
-  deselects them for every model group after the first.
+  (`test_auth_reject_no_token`, `test_auth_reject_bad_token`) test platformd's
+  proxy, which is not in front of our rinzler. Our cells passed `--deselect`
+  for them, but pytest still collected them and they skipped themselves
+  (the test skips when the Server header starts with `drogon/`, rinzler's own
+  HTTP server). CI's driver passes the same `--deselect` for every model group
+  after the first (`scripts/system_ci.py:357-363`); in the 2026-09-04 reference
+  run the second group nevertheless collected them and they skipped
+  themselves there too (pytest progress `..ss.s.s`), so the skip counts match.
 - Perf tokenizers are loaded from the DUT's local copies of the same
   Hugging Face repositories (identical files) instead of the hub.
 - Production serving was stopped per the standing rinzler policy (nightly
