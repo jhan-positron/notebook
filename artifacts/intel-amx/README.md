@@ -264,3 +264,13 @@ home, not a git repository). Repo path -> canonical path.
 - `input-2-ai/rampup.md` -> `WS/input-2-ai/rampup.md`
 - `input-2-ai/router-amx.md` -> `WS/input-2-ai/router-amx.md`
   (handoffs: claude_20260828-20260901_tron-pr3879-amx-k-mirror-comment.md, claude_20260902-20260903_perf-model-md-instructions.md, claude_20260904_input-2-ai-more-testing-md-instructions.md, claude_20260829-20260830_definitive-decode-md-brainstorm.md, claude_20260823-20260824_router-amx-md-instructions.md, claude_20260816-20260820_list-available-models-with-pal.md)
+
+## 2026-09-11 archive: doc/amx_software_attention.md from tron PR #3879
+
+- `amx_software_attention.md` — canonical: none (repo-primary). The AMX
+  software-attention page that lived in PR #3879 as
+  `doc/amx_software_attention.md` until tron commit 4290402491; removed from
+  the PR in 47f6f2dceb at Ben's request (TRON environment variables go into one
+  document, tron issue #4338) and kept here with a provenance note.
+  Sections: what it is, build configuration, runtime disable contract
+  (`TRON_AMX_DISABLE`), continuous integration, tests, measurements.
