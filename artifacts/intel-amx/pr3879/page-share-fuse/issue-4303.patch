@@ -1,0 +1,398 @@
+diff --git a/README.ci.md b/README.ci.md
+index 63282f2426..9cf139c078 100644
+--- a/README.ci.md
++++ b/README.ci.md
+@@ -516,10 +516,16 @@ instrumentation (`h/tron/kernels/page_share_counters.hpp` and five hook blocks
+ in `h/tron/models/self_attention.hpp`). The weekly `coverage` preset in
+ `CMakePresets.json` sets the option ON; `cpp-coverage.yml` builds that preset
+ (`make build-coverage`) and runs the host tests, so the hooks are compiled there
+-and exercised by `t_llama_unit`. `t_page_share_counters` compiles the counter
+-header with its own define in every lane. A binary built with the option that
+-counted at least one KV page visit prints a four-line `[page-share]` summary to
+-stderr at normal exit.
++and can be exercised by `t_llama_unit` with the environment variable
++`TRON_PAGE_SHARE_COUNTERS=1`. `t_page_share_counters` compiles the counter header
++with its own define in every lane and tests the accumulators and live FUSE reads.
++In instrumented builds, set `TRON_PAGE_SHARE_COUNTERS=1` before starting runtron
++or rinzler to collect cumulative counts under `/rinzler/stats/page_share/` and
++print the existing exit summary; unset or any other value disables collection.
++The compile-time gate remains until the same-code and runtime-disabled A/A
++controls required by [#4303](https://github.com/positron-ai/tron/issues/4303)
++establish no measurable overhead. See [README.stats.md](README.stats.md#page-share-counters)
++for the leaf layout and interval measurements.
+ 
+ `BUILD_INGEST_MODELS=ON` enables the ingest pipeline integration in the C++
+ build. This is the default for dev, test, and production builds; CI passes the
+diff --git a/README.stats.md b/README.stats.md
+index 73e1c2bfe1..f1cf61c04d 100644
+--- a/README.stats.md
++++ b/README.stats.md
+@@ -217,6 +217,46 @@ subpath (same `--instance i,N`) will collide and fail.
+   ${RZ_FUSE_MOUNT_PATH}` in `rinzler@.service` cleans the parent; per
+   the opt-out, there is no per-instance subpath to clean.
+ 
++## Page-share counters
++
++Software-attention page-share instrumentation is available in builds configured
++with `cmake -B gen --preset native -DTRON_PAGE_SHARE_COUNTERS=ON` (also enabled by
++the `coverage` preset). After rebuilding, set the environment variable
++`TRON_PAGE_SHARE_COUNTERS=1` before starting runtron or rinzler. Only the exact
++value `1` enables collection; unset, `0`, and every other value disable it. The
++setting is cached on first use for the lifetime of the process.
++
++Both binaries register these read-only, casual leaves under
++`<mountpoint>/rinzler/stats/page_share/` before mounting the stats tree:
++
++| Leaf | Cumulative value |
++|------|------------------|
++| `page_visits` | Visits to a (KV page, KV head) with at least one relevant query token |
++| `relevant_query_tokens` | Query-token/page-visit pairs with at least one relevant key |
++| `shared_visits` | Visits with at least two relevant query tokens |
++| `shared_tokens` | Query-token/page-visit pairs from shared visits |
++| `pending_visits` | Counted visits in the second (pending) attention pass |
++| `histogram` | JSON array of visit counts for 1, 2, 3, 4, 5–8, 9–16, and >16 relevant query tokens, in that order |
++
++Read a total with `cat <mountpoint>/rinzler/stats/page_share/page_visits`.
++Subtract an earlier read from a later read to measure an interval; histogram
++slots can be subtracted the same way. There is no reset file. Each atomic is
++read separately and a flush updates several atomics, so live reads do not form
++a consistent snapshot across totals and histogram slots. Values describe visits
++and sharing opportunities, not measured page-load savings.
++
++With runtime collection disabled, instrumented binaries still expose all six
++leaves: the totals stay zero and the histogram is `[0,0,0,0,0,0,0]`. With the CMake
++option OFF (the default), both the hooks and leaves are absent. The build gate
++remains until the whole-host performance controls in
++[#4303](https://github.com/positron-ai/tron/issues/4303) establish that compiling
++runtime-disabled hooks into every build has no measurable cost.
++
++These leaves are for manual inspection and are not exported to Prometheus.
++The existing `[page-share]` stderr summary is retained at normal process exit
++when any visit was counted, providing final totals after the FUSE tree has been
++unmounted. No summary is printed when collection recorded no visits.
++
+ ## How to add a FUSE stat
+ 
+ There are two flavors of FUSE stat.
+diff --git a/h/tron/kernels/page_share_counters.hpp b/h/tron/kernels/page_share_counters.hpp
+index ebacfe2d31..8b7e87bd66 100644
+--- a/h/tron/kernels/page_share_counters.hpp
++++ b/h/tron/kernels/page_share_counters.hpp
+@@ -9,19 +9,37 @@
+ // queries; a query counts if at least one K token on the page is relevant to
+ // it.
+ //
+-// Compiled in only by the CMake option TRON_PAGE_SHARE_COUNTERS (default OFF),
+-// which defines TRON_PAGE_SHARE_COUNTERS. Without the define this header is
+-// empty and the hooks in self_attention.hpp compile to nothing.
++// Build with the CMake option TRON_PAGE_SHARE_COUNTERS (default OFF), then set
++// the environment variable TRON_PAGE_SHARE_COUNTERS=1 to collect counts. Keep
++// the compile-time gate until a whole-host A/A control establishes that the
++// runtime-disabled hooks have no measurable cost (see issue #4303).
+ //
+-// Report: printed to stderr at normal process exit, if any visit was counted.
++// Live totals: read-only FUSE files under /rinzler/stats/page_share/.
++// Also printed to stderr at normal process exit, if any visit was counted.
+ 
+ #ifdef TRON_PAGE_SHARE_COUNTERS
+ #include <atomic>
+ #include <cstdint>
+ #include <cstdio>
++#include <cstdlib>
++#include <string>
++#include <string_view>
++
++#include "system/fuse_stats.hpp"
++#include "system/fuse_sysfs.hpp"
+ 
+ namespace tron::page_share {
+ 
++// Cache once per process, rather than once per attention template instantiation.
++// Only the hook sites consult this switch; direct accumulator use is unchanged.
++inline bool enabled() {
++  static const bool collect = [] {
++    const char* value = std::getenv("TRON_PAGE_SHARE_COUNTERS");
++    return value && std::string_view(value) == "1";
++  }();
++  return collect;
++}
++
+ // Process-wide totals, summed over every apply_page_range call of every
+ // attention worker. Each has a per-call counterpart of the same name without
+ // the total_ prefix in page_visit_counts below.
+@@ -62,6 +80,39 @@ inline std::atomic<uint64_t> total_shared_tokens;
+ // work] in model.hpp and Note [Minibatch Dependency Tracking] in common.hpp.
+ inline std::atomic<uint64_t> total_pending_visits;
+ 
++// Register before stats::start(). These casual leaves expose cumulative counts;
++// subtract two reads to measure an interval. Each atomic is read independently,
++// so concurrent flushes may make the values disagree across a live snapshot.
++inline void register_fuse_stats() {
++  if (!fuse::stats::is_initialized()) return;
++  using value_t = fuse::fuse_sysfs::value_type;
++  const std::string prefix = "/rinzler/stats/page_share/";
++  auto make_total = [&](const char* name, std::atomic<uint64_t>& total) {
++    auto handle = fuse::stats::make_file(prefix + name, uint64_t{0},
++        /*read_only=*/true);
++    handle->set_read_callback([&total](const std::string&, const value_t&) {
++      return value_t(total.load(std::memory_order_relaxed));
++    });
++  };
++  make_total("page_visits", total_page_visits);
++  make_total("relevant_query_tokens", total_relevant_query_tokens);
++  make_total("shared_visits", total_shared_visits);
++  make_total("shared_tokens", total_shared_tokens);
++  make_total("pending_visits", total_pending_visits);
++
++  auto histogram = fuse::stats::make_file(prefix + "histogram", std::string{"[]"},
++      /*read_only=*/true);
++  histogram->set_read_callback([](const std::string&, const value_t&) {
++    std::string out = "[";
++    for (int i = 0; i < HISTOGRAM_SLOTS_7; ++i) {
++      if (i) out += ',';
++      out += std::to_string(total_histogram[i].load(std::memory_order_relaxed));
++    }
++    out += ']';
++    return value_t(out);
++  });
++}
++
+ // Counts gathered by one apply_page_range call (one worker, one kv_head, one
+ // page range) as plain integers, then added to the total_* atomics by flush().
+ struct page_visit_counts {
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 03f7aa23d8..9a8b253e1e 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -18,7 +18,7 @@
+ #include "spdlog/spdlog.h"
+ #include "tron/kernels/dotter.hpp"
+ #include "tron/kernels/expr.hpp"
+-#include "tron/kernels/page_share_counters.hpp"  // TRON_PAGE_SHARE_COUNTERS only
++#include "tron/kernels/page_share_counters.hpp"  // optional runtime collection
+ #include "tron/models/common.hpp"
+ #include "tron/models/hw_attn_config.hpp"  // IWYU pragma: keep
+ #include "tron/models/kv_cache.hpp"
+@@ -1289,6 +1289,7 @@ struct self_attention {
+           enclosing_state.pages[page_range.front()]->at_offset(0));
+ #ifdef TRON_PAGE_SHARE_COUNTERS
+       page_share::page_visit_counts visit_counts;
++      const bool collect_page_shares = page_share::enabled();
+ #endif
+       for (page_id page_ix : page_range) {
+         page& page = *(enclosing_state.pages[page_ix]);
+@@ -1331,7 +1332,7 @@ struct self_attention {
+               page_begin_hint, sliding_window_size, run_visible_in_software);
+           page_end_hint = hint;
+ #ifdef TRON_PAGE_SHARE_COUNTERS
+-          if (relevant_k_tokens > 0) n_relevant_query_tokens++;
++          if (collect_page_shares && relevant_k_tokens > 0) n_relevant_query_tokens++;
+ #endif
+           if (relevant_k_tokens > 0 && !was_valid) {
+             // Mark valid only once a real score has landed: m_star must have
+diff --git a/src/rinzler.cpp b/src/rinzler.cpp
+index 8c1befae9d..bd65344355 100644
+--- a/src/rinzler.cpp
++++ b/src/rinzler.cpp
+@@ -110,6 +110,7 @@
+ #include "pos/lib.hpp"
+ #include "rinzler/fuse-stats-monitor.hpp"
+ #include "system/fuse_stats_config.hpp"
++#include "tron/kernels/page_share_counters.hpp"
+ #include "tron/models/load.hpp"
+ #include "version.hpp"
+ 
+@@ -4405,6 +4406,9 @@ int main(int argc, char* argv[]) {
+   // No-op under legacy pos_heap. See doc/pos_heap_v2.md §"FUSE stats
+   // exposure".
+   pos_heap_register_fuse_stats();
++#ifdef TRON_PAGE_SHARE_COUNTERS
++  tron::page_share::register_fuse_stats();
++#endif
+ 
+   // Memory-pressure governor host gauges/counters + the writable
+   // host_target_hugepages knob under /rinzler/.../memory_pressure/. Arena-only;
+diff --git a/src/runtron.cpp b/src/runtron.cpp
+index 3911504cc9..2a91173085 100644
+--- a/src/runtron.cpp
++++ b/src/runtron.cpp
+@@ -40,6 +40,7 @@
+ #include "tron/expert_routing_override_kind.hpp"
+ // Trigger rebuilds for fuse initialization if ENABLE_FUSE_STATS changes
+ #include "system/fuse_stats_config.hpp"
++#include "tron/kernels/page_share_counters.hpp"
+ #include "tron/models/cache.hpp"
+ #include "tron/models/load.hpp"
+ #include "tron/scheduler/token_cache_control.hpp"
+@@ -499,6 +500,9 @@ int main(int argc, char* argv[]) {
+     // performs full device discovery before this point because its startup
+     // keeps the mount alive independently.
+     pos_heap_register_fuse_stats();
++#ifdef TRON_PAGE_SHARE_COUNTERS
++    tron::page_share::register_fuse_stats();
++#endif
+     pos_devices_register_fuse_stats();
+     pos_driver_register_fuse_stats();
+     tron::fuse::register_tronstats_markers();
+diff --git a/t/CMakeLists.txt b/t/CMakeLists.txt
+index aca4eb6561..ec2dd81cbd 100644
+--- a/t/CMakeLists.txt
++++ b/t/CMakeLists.txt
+@@ -267,7 +267,7 @@ add_catch_test(NAME t_stats LIBRARIES tron pos_fake PROPERTIES LABELS fake)
+ add_catch_test(NAME t_constraint_mask LIBRARIES tron pos_fake PROPERTIES LABELS fake)
+ # Host-only test of the page-share instrumentation. It passes the define
+ # itself so the test runs in every CI build, whatever the value of the
+-# TRON_PAGE_SHARE_COUNTERS option.
++# TRON_PAGE_SHARE_COUNTERS option or runtime collection switch.
+ add_catch_test(NAME t_page_share_counters DEFINES TRON_PAGE_SHARE_COUNTERS LIBRARIES tron pos_fake PROPERTIES LABELS fake)
+ add_catch_test(NAME t_threading LIBRARIES tron pos_fake PROPERTIES LABELS fake)
+ add_catch_test(NAME t_minfifo LIBRARIES pos_fake PROPERTIES LABELS fake)
+diff --git a/t/t_page_share_counters.cpp b/t/t_page_share_counters.cpp
+index cced3396e7..bd089ee7ce 100644
+--- a/t/t_page_share_counters.cpp
++++ b/t/t_page_share_counters.cpp
+@@ -4,20 +4,31 @@
+ // query tokens of the minibatch had a relevant K token on that page.
+ //
+ // What this protects: the histogram slot boundaries (1, 2, 3, 4, 5-8, 9-16,
+-// >16), the flush() sums that the exit report is read from, and the rule that
+-// a visit with no relevant query token is not a visit. The CMake registration
++// >16), the flush() sums exposed through FUSE, and the rule that a visit with
++// no relevant query token is not a visit. The CMake registration
+ // passes TRON_PAGE_SHARE_COUNTERS to this translation unit, so the header's
+ // real code is compiled here even when the option is OFF for the rest of the
+ // build.
+ //
+-// Side effect: because flush() adds to the process-wide totals, the header's
+-// exit-time reporter prints one summary to stderr when this binary exits.
++// FUSE values are read through host-side handles, without mounting a filesystem.
+ 
++#include <array>
++#include <cerrno>
+ #include <cstddef>
+ #include <cstdint>
++#include <cstdlib>
++#include <filesystem>
++#include <memory>
++#include <string>
++#include <unistd.h>
++#include <variant>
+ 
+ #include <catch2/catch_test_macros.hpp>
++#include <sys/wait.h>
+ 
++#include "common/json.hpp"
++#include "system/fuse_stats.hpp"
++#include "system/fuse_sysfs.hpp"
+ #include "tron/kernels/page_share_counters.hpp"
+ 
+ using tron::page_share::HISTOGRAM_SLOTS_7;
+@@ -115,3 +126,108 @@ TEST_CASE(
+   CHECK(total_page_visits.load() - v0 == 3);
+   CHECK(total_relevant_query_tokens.load() - t0 == 1 + 2 + 20);
+ }
++
++TEST_CASE("page-share FUSE leaves expose live read-only totals", "[page_share]") {
++  using tron::fuse::stats;
++  using namespace tron::page_share;
++
++  stats::unmount();
++  stats::unmount_guard guard;
++  register_fuse_stats();
++  CHECK_FALSE(stats::is_initialized());
++
++  // initialize() alone does not mount or touch the directory. Registration and
++  // get_value() exercise the same callbacks used by live FUSE reads.
++  stats::initialize(std::filesystem::temp_directory_path().string());
++  register_fuse_stats();
++
++  const std::array<const char*, 5> names = {"page_visits", "relevant_query_tokens",
++      "shared_visits", "shared_tokens", "pending_visits"};
++  using file_handle = tron::fuse::fuse_sysfs::file_handle;
++  std::array<std::shared_ptr<file_handle>, 5> leaves;
++  const auto read_counter = [](const std::shared_ptr<file_handle>& leaf) {
++    const auto value = leaf->get_value();
++    REQUIRE(std::holds_alternative<uint64_t>(value));
++    return std::get<uint64_t>(value);
++  };
++  std::array<uint64_t, 5> before;
++  for (std::size_t i = 0; i < names.size(); ++i) {
++    leaves[i] =
++        stats::get_file_handle(std::string("/rinzler/stats/page_share/") + names[i]);
++    REQUIRE(leaves[i]);
++    CHECK(leaves[i]->is_read_only());
++    before[i] = read_counter(leaves[i]);
++  }
++
++  const auto histogram = stats::get_file_handle("/rinzler/stats/page_share/histogram");
++  REQUIRE(histogram);
++  CHECK(histogram->is_read_only());
++  const auto read_histogram = [&] {
++    const auto value = histogram->get_value();
++    REQUIRE(std::holds_alternative<std::string>(value));
++    const auto parsed = tron::json::parse(std::get<std::string>(value));
++    REQUIRE(parsed.is_array());
++    REQUIRE(parsed.size() == HISTOGRAM_SLOTS_7);
++    for (const auto& count : parsed) {
++      REQUIRE(count.is_number_unsigned());
++    }
++    return parsed.get<std::array<uint64_t, HISTOGRAM_SLOTS_7>>();
++  };
++  const auto histogram_before = read_histogram();
++
++  // Distinct bucket counts expose reordered JSON slots as well as stale values.
++  page_visit_counts counts;
++  counts.record_page_visit(0, /*is_pending=*/true);
++  const std::array<uint64_t, 7> query_counts = {1, 2, 3, 4, 8, 16, 17};
++  for (std::size_t i = 0; i < query_counts.size(); ++i) {
++    for (std::size_t visit = 0; visit <= i; ++visit) {
++      counts.record_page_visit(query_counts[i], /*is_pending=*/i == 2);
++    }
++  }
++  counts.flush();
++
++  const std::array<uint64_t, 5> expected = {28, 285, 27, 284, 3};
++  for (std::size_t i = 0; i < names.size(); ++i) {
++    CHECK(read_counter(leaves[i]) - before[i] == expected[i]);
++  }
++  const std::array<uint64_t, HISTOGRAM_SLOTS_7> expected_histogram = {
++      1, 2, 3, 4, 5, 6, 7};
++  const auto histogram_after = read_histogram();
++  for (std::size_t i = 0; i < expected_histogram.size(); ++i) {
++    CHECK(histogram_after[i] - histogram_before[i] == expected_histogram[i]);
++  }
++}
++
++TEST_CASE(
++    "page-share runtime opt-in requires exactly 1 and is cached", "[page_share]") {
++  // Each child gets its own first enabled() call and leaves the parent cache
++  // and environment untouched, so Catch2 case ordering does not affect this.
++  struct runtime_case {
++    const char* setting;
++    bool expected;
++  };
++  const std::array<runtime_case, 6> settings = {{{nullptr, false}, {"", false},
++      {"0", false}, {"1", true}, {"true", false}, {"01", false}}};
++  for (const auto& [setting, expected] : settings) {
++    const pid_t child = ::fork();
++    REQUIRE(child >= 0);
++    if (child == 0) {
++      const int result = setting == nullptr
++                             ? ::unsetenv("TRON_PAGE_SHARE_COUNTERS")
++                             : ::setenv("TRON_PAGE_SHARE_COUNTERS", setting, 1);
++      if (result != 0) ::_exit(1);
++      if (tron::page_share::enabled() != expected) ::_exit(2);
++      if (::setenv("TRON_PAGE_SHARE_COUNTERS", expected ? "0" : "1", 1) != 0)
++        ::_exit(3);
++      ::_exit(tron::page_share::enabled() == expected ? 0 : 4);
++    }
++    int status = 0;
++    pid_t waited;
++    do {
++      waited = ::waitpid(child, &status, 0);
++    } while (waited < 0 && errno == EINTR);
++    REQUIRE(waited == child);
++    REQUIRE(WIFEXITED(status));
++    CHECK(WEXITSTATUS(status) == 0);
++  }
++}
