@@ -19,3 +19,5 @@ copies during the next handoff run. All canonicals are on host claude-agentsrv.
   from the missing-bubblewrap warning; despite its filename, it is not a
   container-copy recipe. Originally written on claude-alpha on 2026-08-25.
   (handoff: `handoffs/codex_20260819-20260825_can-you-access-my-notion-pages.md`)
+
+- `delphi-3bda-setup.sh` — canonical `claude-agentsrv:/home/jhan/delphi-3bda-setup.sh` — shell setup sourced before using delphi-3bda: sets `SYSTEM_CONFIG="--instance 1,2"` (jhan's half of the FPGA cards) and `GUARD_EXCLUDE_USERS` for the campaign guard. Added by the 2026-09-11 handoff run. (handoff: claude_20260906_delphi-3bda-guard-doc-in-handoffs.md)
