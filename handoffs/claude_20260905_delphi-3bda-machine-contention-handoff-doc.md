@@ -48,7 +48,7 @@ Write a handoff for sharing delphi-3bda with Bill outside the CI window, includi
 ## Artifacts
 
 - claude-agentsrv:/home/jhan/workspace/notebook/handoffs/share-3bda-with-bill.md (170 lines, 8851 bytes, mtime 2026-09-05 22:21). Untracked in the notebook repo as of 2026-09-11 (`git status` shows `??`).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/people-check.sh (3644 bytes, executable, mtime 2026-09-05 22:18). Also visible on delphi-3bda through NFS. Not under version control.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/people-check.sh (3644 bytes, executable, mtime 2026-09-05 22:18). Also visible on delphi-3bda through NFS. Not under version control. (preserved: artifacts/intel-amx/exec/people-check.sh)
 - claude-agentsrv:/home/jhan/workspace/notebook/handoffs/check-CI.md (committed, f31ba4c) - the companion the new file refers to.
 - Test copy without checks 1 and 2: claude-agentsrv:/home/jhan/workspace/ai-runs/.pc-test.sh (temporary; not verified to still exist).
 

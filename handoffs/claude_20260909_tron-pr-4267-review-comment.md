@@ -47,8 +47,8 @@ The user asked: respond to Wade's review on PR #4267 here (in chat), do not upda
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/respond-2-Wade-PR0.html: the deliverable: Short version, 45-term glossary, Wade's question, two diagrams, what exists in tron, the FUSE design sketch, why the exit summary stays, section 6 (value, AMX and general), trade-off table (11 rows), open items, recommendation, copyable draft reply.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/wade-fuse-question-20260909.md: the workflow synthesis (94 lines) that the chat answer was based on.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/respond-2-Wade-PR0.html: the deliverable: Short version, 45-term glossary, Wade's question, two diagrams, what exists in tron, the FUSE design sketch, why the exit summary stays, section 6 (value, AMX and general), trade-off table (11 rows), open items, recommendation, copyable draft reply. (preserved: artifacts/intel-amx/pr3879/PR0/respond-2-Wade-PR0.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/wade-fuse-question-20260909.md: the workflow synthesis (94 lines) that the chat answer was based on. (preserved: artifacts/intel-amx/pr3879/PR0/wade-fuse-question-20260909.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-fuse-question-pr4267.md: memory note (created, then updated to point at the HTML page); MEMORY.md index line added.
 - Wade's review: https://github.com/positron-ai/tron/pull/4267#pullrequestreview-5156698046 (APPROVED, 2026-09-09T15:52:05Z). Text: "I'm wondering if you looked at the possibility of using FUSE for this? Collection could still be opt-in (via env-var maybe), then they could be inspected live and measured over random chosen intervals instead."
 - Related earlier record: `PR0/codex-benchmark-artifact.html` (the local Codex review of 2026-09-08).

@@ -56,14 +56,14 @@ The user asked whether andoria-09 or andoria-06 was idle for a test that the AMX
 ## Artifacts
 
 Pages and documents:
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/Hannah-AMX-CI.html (title "AMX Coverage on CI", about 43 KB, includes a job-graph SVG)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/Hannah-AMX-CI.html (title "AMX Coverage on CI", about 43 KB, includes a job-graph SVG) (preserved: artifacts/intel-amx/pr3879/PR1/Hannah-AMX-CI.html)
 - Published Artifact of that page: https://claude.ai/code/artifact/fc5be84d-8e49-48bd-8057-7515ee23a52f (Version 1, private; published from a copy in the session scratchpad)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/ci-runner-data-20260911/ (raw CI job tables behind the page)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/andoria-AMD-machine-test.md
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/andoria-AMD-machine-test.md (preserved: artifacts/intel-amx/pr3879/PR1/andoria-AMD-machine-test.md)
 
 Test code and logs (NFS home, same path on every host):
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/amd-amx-20260911/amxprobe.c (LD_PRELOAD shim source)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/amd-amx-20260911/run-andoria06.sh (the AMD test: CPU flags, binary checks, two arms with the shim, token comparison, cleanup)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/amd-amx-20260911/amxprobe.c (LD_PRELOAD shim source) (preserved: artifacts/intel-amx/exec/amd-amx-20260911/amxprobe.c)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/amd-amx-20260911/run-andoria06.sh (the AMD test: CPU flags, binary checks, two arms with the shim, token comparison, cleanup) (preserved: artifacts/intel-amx/exec/amd-amx-20260911/run-andoria06.sh)
 - andoria-06:/var/tmp/jhan/amxprobe-andoria06.so (compiled shim, local disk)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/andoria06-amd-build-20260911.log (build log, ends with BUILD_EXIT=0)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/amd-amx-20260911/ (andoria-06-run.txt and the delphi-3bda shim logs 3bda-on / 3bda-off)

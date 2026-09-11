@@ -64,8 +64,8 @@ The token is valid for about a year (Claude's statement in the session; not veri
 
 No files were created or modified. Files read (all on the shared NFS home, visible from claude-agentsrv):
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/input-2-ai/breakup-PR3879.md (743 bytes, dated 2026-09-04 20:54) - the user's instruction: use PAL with a stated model to implement the plan in `PR3879/breakup-PR3879.html`, creating `PR3879/new-PRs/<PR id>/` folders.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/breakup-PR3879.html - the plan page "Breaking Up PR 3879".
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/input-2-ai/breakup-PR3879.md (743 bytes, dated 2026-09-04 20:54) - the user's instruction: use PAL with a stated model to implement the plan in `PR3879/breakup-PR3879.html`, creating `PR3879/new-PRs/<PR id>/` folders. (preserved: artifacts/intel-amx/input-2-ai/breakup-PR3879.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/breakup-PR3879.html - the plan page "Breaking Up PR 3879". (preserved: artifacts/intel-amx/pr3879/breakup-PR3879.html)
 
 ## Current state
 

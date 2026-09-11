@@ -55,12 +55,12 @@ Code (repository github.com/positron-ai/tron, worktree claude-agentsrv:/home/jha
 
 Files on claude-agentsrv (NFS `/home/jhan`):
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/wade-reply.md: the reply to Wade with the measured numbers (Short version: yes; the move; results). wade-reply.post.md: the version to post (hash 4b98dc134a filled in; unverified that it exactly matches the final hash, check before posting).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/wade-reply.md: the reply to Wade with the measured numbers (Short version: yes; the move; results). wade-reply.post.md: the version to post (hash 4b98dc134a filled in; unverified that it exactly matches the final hash, check before posting). (preserved: artifacts/intel-amx/pr3879/PR0b/wade-reply.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/move-commit-message.txt: final commit message text; move-test-commit-messages.md: the two-commit history proposal (renamed from fold-commit-messages.md); move-commits.txt: commit ids.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/pr-body.v3-move.md: new PR description (the current GitHub body still describes the standalone test); pr-body.md is the older description.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/wade-exp-20260909.sh and wade-exp-inner-20260909.sh: the measurement script; exec/logs/wade-exp.txt (results), wade-exp.log, wade-exp.done.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/pr-body.v3-move.md: new PR description (the current GitHub body still describes the standalone test); pr-body.md is the older description. (preserved: artifacts/intel-amx/pr3879/PR0b/pr-body.v3-move.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/wade-exp-20260909.sh and wade-exp-inner-20260909.sh: the measurement script; exec/logs/wade-exp.txt (results), wade-exp.log, wade-exp.done. (preserved: artifacts/intel-amx/exec/wade-exp-20260909.sh)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/split-move-head.txt, split-move-reverted.txt, split-move-reverted-t_llama_unit.out: verification logs.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/split-verify3.sh: edited: `git diff --name-only` now uses `--diff-filter=d`.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/split-verify3.sh: edited: `git diff --name-only` now uses `--diff-filter=d`. (preserved: artifacts/intel-amx/exec/split-verify3.sh)
 - Memory notes under claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/: `wade-move-test-question-pr4265.md` (renamed from wade-fold-question-pr4265.md; state and results), `claude-box-tron-build-env.md` (nix gone update), MEMORY.md index.
 - Wade's comment: https://github.com/positron-ai/tron/pull/4265#discussion_r3970127694 (review 5156352104, on `t/t_kv_footprint_memorder.cpp` at 7a7699b338).
 

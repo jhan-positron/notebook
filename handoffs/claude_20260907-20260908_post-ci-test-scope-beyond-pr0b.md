@@ -64,8 +64,8 @@ Asked what to test on delphi-3bda after CI and whether the data suffice to choos
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/g1-20260908/ — cells/<model>__<arm>__u<N>/ (meta.json, perf.json, rinzler.log, STATUS), summary.txt, summary.json, runtron-8u8k.txt, runtron-*-rep*-t*.log, probe-build.txt, soak__canon60/.
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/g3-lite-20260908/summary.txt.
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/logs/g1-20260908.log, .status, .done (=ok).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/Tuesday-plan.html — plan, arm definitions, schedule with the wall-clock lanes figure, verdict, rules.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/Tuesday-morning-status.html — timeline, two charts (TTFT dots per arm; penalty vs user count), all tables, gate reading, plan of actions, words used, "Reading the runtron table".
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/Tuesday-plan.html — plan, arm definitions, schedule with the wall-clock lanes figure, verdict, rules. (preserved: artifacts/intel-amx/pr3879/new-PRs/Tuesday-plan.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/Tuesday-morning-status.html — timeline, two charts (TTFT dots per arm; penalty vs user count), all tables, gate reading, plan of actions, words used, "Reading the runtron table". (preserved: artifacts/intel-amx/pr3879/new-PRs/Tuesday-morning-status.html)
 - Memory note: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/g1-store-cost-campaign.md (new; versions, fixes, results) and the MEMORY.md index line.
 - Workflow outputs (scratchpad, session-local): /tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs/4cd330c4-93d0-429c-8584-0b5d34ee913c/tasks/{w6ci0bjj0,whe1q0b3t,wqqcuink9,w1ns8znn0,wm0deu4t4}.output.
 - Cross-session messages to new-prs-44 (two, both acknowledged).

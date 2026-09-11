@@ -44,7 +44,7 @@ Create the GitHub issue that tracks the request "publish the page-share counters
 ## Artifacts
 
 - GitHub issue: https://github.com/positron-ai/tron/issues/4303: title "page_share_counters: publish as FUSE stats with env-var opt-in (follow-up to #4267)", labels "Type: enhancement" and "stats", assignee jhan-positron.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/issue-4303-body.md: record copy of the posted body (13886 bytes, about 2000 words).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/issue-4303-body.md: record copy of the posted body (13886 bytes, about 2000 words). (preserved: artifacts/intel-amx/pr3879/PR0/issue-4303-body.md)
 - Draft versions in the session scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-PR0/4abb76ab-c53e-4037-8c8c-6fb1607d614d/scratchpad/issue-body{.v1,.v2-with-names,.v3-pre-round2-fixes,}.md (temporary; may be gone).
 - Memory notes on claude-agentsrv under /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/: `no-names-in-github-issues.md` (new, type feedback), `wade-fuse-question-pr4267.md` (updated with the issue number and two design corrections), MEMORY.md index.
 - Inputs a resumer needs: `PR0/wade-fuse-question-20260909.md` and `PR0/respond-2-Wade-PR0.html` (the assessment the issue is based on), reviews https://github.com/positron-ai/tron/pull/4267#pullrequestreview-5156698046 (Wade, approved) and review 5160920121 (Ben, approved).

@@ -50,7 +50,7 @@ Write `handoffs/delphi-3bda-guard.md`, based on `handoffs/check-CI.md`, so that 
 ## Artifacts
 
 - claude-agentsrv:/home/jhan/workspace/notebook/handoffs/delphi-3bda-guard.md (139 lines, 6154 bytes, mtime 2026-09-06 14:39). Untracked in the notebook repo as of 2026-09-11 (`git status` shows `??`).
-- claude-agentsrv:/home/jhan/delphi-3bda-setup.sh - typo fixed by the user during the session; on 2026-09-11 line 7 reads `export SYSTEM_CONFIG="--instance 1,2"` and line 13 reads `export GUARD_EXCLUDE_USERS="jhan nobody positron packer bill"` (the latter was added after this session; not observed in the transcript).
+- claude-agentsrv:/home/jhan/delphi-3bda-setup.sh - typo fixed by the user during the session; on 2026-09-11 line 7 reads `export SYSTEM_CONFIG="--instance 1,2"` and line 13 reads `export GUARD_EXCLUDE_USERS="jhan nobody positron packer bill"` (the latter was added after this session; not observed in the transcript). (preserved: artifacts/dev-machines/delphi-3bda-setup.sh)
 - claude-agentsrv:/home/jhan/workspace/notebook/handoffs/check-CI.md (committed, f31ba4c) and handoffs/share-3bda-with-bill.md (untracked) - the companions.
 
 ## What delphi-3bda-guard.md says

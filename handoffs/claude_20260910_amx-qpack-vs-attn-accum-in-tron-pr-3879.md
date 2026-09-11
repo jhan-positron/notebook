@@ -59,11 +59,11 @@ All times 2026-09-10, US Pacific.
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/amx_qpack-2-attn_accum.html (the report, about 80 KB, four inline SVG figures, nine-claim table, both prototype diffs, test results, recommendation, suggested reply, replacement code comment).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/amx_qpack-2-attn_accum.figs.py (figure generator; needs cairosvg for the PNG check).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/amx_qpack-reply.post.md (reply text for Ben's thread, not posted).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/amx_qpack-2-attn_accum.html (the report, about 80 KB, four inline SVG figures, nine-claim table, both prototype diffs, test results, recommendation, suggested reply, replacement code comment). (preserved: artifacts/intel-amx/pr3879/PR1/reviews/amx_qpack-2-attn_accum.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/amx_qpack-2-attn_accum.figs.py (figure generator; needs cairosvg for the PNG check). (preserved: artifacts/intel-amx/pr3879/PR1/reviews/amx_qpack-2-attn_accum.figs.py)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/amx_qpack-reply.post.md (reply text for Ben's thread, not posted). (preserved: artifacts/intel-amx/pr3879/PR1/reviews/amx_qpack-reply.post.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/triage.json (entries for comments 3936949728 and Ben's follow-up marked done, modified).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/thread-map.md (row 3 rewritten).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/thread-map.md (row 3 rewritten). (preserved: artifacts/intel-amx/pr3879/PR1/thread-map.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/qpack-attn-accum-investigation.md (memory note; index MEMORY.md updated).
 - Private artifact copy of the report: https://claude.ai/code/artifact/8da93963-17b0-4bcd-b188-27af9d186e7e (version 3).
 - Code, repo positron-ai/tron:

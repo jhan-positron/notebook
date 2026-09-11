@@ -70,13 +70,13 @@ Code (repository github.com/positron-ai/tron):
 
 Files written or updated on claude-agentsrv (all under NFS `/home/jhan`):
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/Monday-report.html: answers to the twelve comments, decisions, verification rows, both gpt-6-astra reviews.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/Monday-report.html: answers to the twelve comments, decisions, verification rows, both gpt-6-astra reviews. (preserved: artifacts/intel-amx/pr3879/PR0/Monday-report.html)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/review1.diff, review1.commit: round 1 diff and final commit id.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/histogram-slots.patch: the `HISTOGRAM_SLOTS_7` and label patch (applied in 834d8346d5).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/pr-body.md (draft PR body; NOT applied to GitHub except one appended sentence), pr-body.v4-20260907-before-review1.md (backup), status.html.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/pr-body.md (posted as the #3879 body), pr-body.v5-20260908-before-go.md, thread-map.md (posted), thread-map.v2-20260908-before-go.md, issue-3997-comment.md (posted).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/pr-body.md (draft PR body; NOT applied to GitHub except one appended sentence), pr-body.v4-20260907-before-review1.md (backup), status.html. (preserved: artifacts/intel-amx/pr3879/PR0/pr-body.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/pr-body.md (posted as the #3879 body), pr-body.v5-20260908-before-go.md, thread-map.md (posted), thread-map.v2-20260908-before-go.md, issue-3997-comment.md (posted). (preserved: artifacts/intel-amx/pr3879/PR1/pr-body.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/reviews/gpt-6-astra-{prompt,reply}-14-pr0-review1.md, -15-pr0-review1b.md, -16-pr1-go-texts.md.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/Monday-handoff.md (new top section), exec/split-status/state.json and the four status pages (regenerated).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/Monday-handoff.md (new top section), exec/split-status/state.json and the four status pages (regenerated). (preserved: artifacts/intel-amx/pr3879/new-PRs/Monday-handoff.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/split-PR0-rev1{,b,c,d}-{on,off}.txt, split-PR0-jhan{1,2}-{on,off}.txt: build and test logs from delphi-3bda; split-PR0-on-test-benchmarks.json and split-PR1-on-test-benchmarks.json: bench output used for the cost-data commits.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/qwen8u8k-pr1-20260907T1904.txt: the whole-machine qwen run whose numbers went into the PR 1 body.
 - Memory note claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr3879-split-progress.md (three UPDATE entries appended).

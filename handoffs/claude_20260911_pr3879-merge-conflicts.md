@@ -34,7 +34,7 @@ The user reported: "PR3879 is marked blocked on github because, `This branch has
 - Claude Code in container claude-agentsrv, working directory /home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1.
 - Main tron checkout: /home/jhan/workspace/tron-amx (branch `jhan-amx-p0` at 47f6f2dceb, the old PR head; left untouched). Shared `.git`: /home/jhan/workspace/tron.
 - Scratch worktree created: /home/jhan/workspace/ai-runs/tron-pr1-rebase, branch `jhan-amx-p0-rebase-scratch`.
-- delphi-3bda: build worktree /var/tmp/jhan/tron-pr1-rebase (detached at 2fae855413); build driven by /home/jhan/workspace/intel-AMX/exec/pr1-rebase-20260911/build-test.sh over ssh; no CI lease file present at the time.
+- delphi-3bda: build worktree /var/tmp/jhan/tron-pr1-rebase (detached at 2fae855413); build driven by /home/jhan/workspace/intel-AMX/exec/pr1-rebase-20260911/build-test.sh over ssh; no CI lease file present at the time. (preserved: artifacts/intel-amx/exec/pr1-rebase-20260911/build-test.sh)
 - State of main at the time: 632c6181ed ("Merge pull request #3266 ... gemma-4-e4b-tp1"). Main was 159 commits ahead of the merge base a80b102c1817; PR1 was 19 commits ahead.
 
 ## Timeline
@@ -56,7 +56,7 @@ All times 2026-09-11, US Pacific.
 
 - claude-agentsrv:/home/jhan/workspace/ai-runs/tron-pr1-rebase (scratch worktree, branch `jhan-amx-p0-rebase-scratch`, head 2fae855413; superseded by the user's merge commit, left in place).
 - delphi-3bda:/var/tmp/jhan/tron-pr1-rebase (build worktree at 2fae855413, left in place).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-rebase-20260911/build-test.sh (build-and-test script) and build-test.log (its log; NFS, written from delphi-3bda).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-rebase-20260911/build-test.sh (build-and-test script) and build-test.log (its log; NFS, written from delphi-3bda). (preserved: artifacts/intel-amx/exec/pr1-rebase-20260911/build-test.sh)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/worktree-prune-nfs-trap.md (new) and pr3879-split-progress.md (appended).
 - Session scratchpad helper: claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-PR1/bd144c6b-6a0f-4ada-abd9-d6a8e6c8b15d/scratchpad/keepboth.py (may be gone; session-specific).
 - Repo positron-ai/tron: old PR head 47f6f2dceb; rebased head 2fae855413 (local only, never pushed); user's merge commit 544ca05c7a (= main 632c6181ed merged into `jhan-amx-p0`, now the PR head); PR0 #4267 merge commit 9eb8a7ef42.

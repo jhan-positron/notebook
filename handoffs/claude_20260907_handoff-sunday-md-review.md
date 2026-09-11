@@ -16,7 +16,7 @@ The user asked Claude to read handoff-Sunday.md and do nothing else until questi
 
 ## Objective
 
-Read /home/jhan/workspace/intel-AMX/PR3879/new-PRs/handoff-Sunday.md and wait for questions.
+Read /home/jhan/workspace/intel-AMX/PR3879/new-PRs/handoff-Sunday.md and wait for questions. (preserved: artifacts/intel-amx/pr3879/new-PRs/handoff-Sunday.md)
 
 ## Environment
 

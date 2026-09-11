@@ -76,12 +76,12 @@ Code (repository positron-ai/tron):
 
 Project files (all on the NFS home, written from claude-agentsrv):
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/ub-guard.html — the guard study with the compile matrix, the two guards, and the "Landed" table.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/ub-guard.html — the guard study with the compile matrix, the two guards, and the "Landed" table. (preserved: artifacts/intel-amx/pr3879/PR0b/ub-guard.html)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/ub-guard/ — CLAIMS.md, repro.cpp, matrix outputs (matrix-nix.txt, matrix-sysclang.txt), probe outputs (probe3-nix.txt, probe4-nix.txt, probe5-nix.txt, run5-nix.txt), the chain logs split-PR0b-test*.txt and *.out, and the bench JSON.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/pr-body.md — updated to "Three commits"; previous text in pr-body.v2-20260906-one-line.md. The GitHub description of #4265 was NOT changed and still says "One line".
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/pr-body.md — updated to "Three commits"; previous text in pr-body.v2-20260906-one-line.md. The GitHub description of #4265 was NOT changed and still says "One line". (preserved: artifacts/intel-amx/pr3879/PR0b/pr-body.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0b/test-commits.txt.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/codex-benchmark-artifact.html, codex-benchmark-artifact-claims.md, codex-benchmark-artifact-verification.json.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/Monday-handoff.md — "Update" sections added for 04:5x, 05:1x/12:0x, 11:5x, 19:1x UTC of 2026-09-08 and the CI-green lines.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR0/codex-benchmark-artifact.html, codex-benchmark-artifact-claims.md, codex-benchmark-artifact-verification.json. (preserved: artifacts/intel-amx/pr3879/PR0/codex-benchmark-artifact.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/Monday-handoff.md — "Update" sections added for 04:5x, 05:1x/12:0x, 11:5x, 19:1x UTC of 2026-09-08 and the CI-green lines. (preserved: artifacts/intel-amx/pr3879/new-PRs/Monday-handoff.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/split-status/state.json and the regenerated status pages PR0b/status.html, PR1/status.html, PR2/status.html (generator exec/split-status/gen_status.py).
 - Memory notes: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/libstdcxx-assertions-memorder-guard.md (new), pr3879-split-progress.md (appended), MEMORY.md (index line).
 - delphi-3bda:/var/tmp/jhan/memorder/ — compile experiments; delphi-3bda:/home/jhan/workspace/intel-AMX/exec/logs/split-PR0b-test*.

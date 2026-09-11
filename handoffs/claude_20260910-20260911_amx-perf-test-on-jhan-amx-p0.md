@@ -66,18 +66,18 @@ Run, on the latest jhan-amx-p0, after the nightly CI releases delphi-3bda:
 ## Artifacts
 
 Scripts (all also readable from delphi-3bda through the NFS home):
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/campaign.sh (and campaign.sh.v1-20260911)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/rz.sh (and rz.sh.v1-20260911)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/launch.sh
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/summarize.py (and summarize.py.v1-20260911)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/gen_report.py (and gen_report.py.v1-20260911)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/campaign.sh (and campaign.sh.v1-20260911) (preserved: artifacts/intel-amx/exec/p0perf-20260911/campaign.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/rz.sh (and rz.sh.v1-20260911) (preserved: artifacts/intel-amx/exec/p0perf-20260911/rz.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/launch.sh (preserved: artifacts/intel-amx/exec/p0perf-20260911/launch.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/summarize.py (and summarize.py.v1-20260911) (preserved: artifacts/intel-amx/exec/p0perf-20260911/summarize.py)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/p0perf-20260911/gen_report.py (and gen_report.py.v1-20260911) (preserved: artifacts/intel-amx/exec/p0perf-20260911/gen_report.py)
 
 Results and logs:
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/p0perf-20260911/ : rt-results.txt and rt/*.log (runtron runs), cells/<model>__<arm>__rep<N>/{perf.json,perf.log,proof.txt,meta.json,STATUS} (CI-harness runs), build.txt (tip, cmake line, sha256 of the binaries), summary.json, summary.md, summary.err, ci-reference-20260911.json (the nightly's qwen numbers), ci-run-34559196745.log (the nightly's full log)
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/logs/p0perf-20260911.log, .status, .done (campaign log, status line, marker)
 
 Report:
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/Friday-morning-CI-results.html
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/Friday-morning-CI-results.html (preserved: artifacts/intel-amx/pr3879/PR1/Friday-morning-CI-results.html)
 - Published Artifact: https://claude.ai/code/artifact/a92880b9-a389-406b-833c-3bfb953edd8e (Version 1, private)
 
 Memory:
@@ -89,7 +89,7 @@ Code under test (not modified by this session):
 Files a resumer needs that this session did not create:
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/lib-guard.sh (campaign_guard_acquire, CI lease check)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/more-testing-r1/st_perf.py (the CI-harness driver)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/amx_qpack-2-attn_accum.html (footprint data, section 7)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/amx_qpack-2-attn_accum.html (footprint data, section 7) (preserved: artifacts/intel-amx/pr3879/PR1/reviews/amx_qpack-2-attn_accum.html)
 
 ## Results
 

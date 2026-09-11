@@ -79,8 +79,8 @@ Code, repository positron-ai/tron, branch jhan-amx-p0 (PR https://github.com/pos
 Project files:
 
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/pr-body.v0-20260827-github-presplit.md — the last pre-split GitHub description (new). pr-body.md itself was NOT edited by this session; the rewritten sections exist only in the transcript.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/gptoss120b-pr1-half.sh — new half-machine regression script for gpt-oss-120b tp2 (prompts 2048 and 8192, 8 users, three arms, 2 rounds).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/syn-check.sh — new light check: fresh worktree, configure only, build the fuse3 dependency, syntax-only compile of the AMX dispatch translation units.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/gptoss120b-pr1-half.sh — new half-machine regression script for gpt-oss-120b tp2 (prompts 2048 and 8192, 8 users, three arms, 2 rounds). (preserved: artifacts/intel-amx/exec/gptoss120b-pr1-half.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/syn-check.sh — new light check: fresh worktree, configure only, build the fuse3 dependency, syntax-only compile of the AMX dispatch translation units. (preserved: artifacts/intel-amx/exec/syn-check.sh)
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/qwen8u8k-pr1-half-20260909T1704.txt and gptoss120b-pr1-half-20260909T1706.txt — raw runtron logs.
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/logs/split-gate-{866e588,d0ce12a,69031c2,planes-fix,consts,ntiles}.{log,txt,done} — the isolated build runs (866e588 and d0ce12a were superseded commits, killed before running).
 - Memory: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr3879-split-progress.md (appended), MEMORY.md.

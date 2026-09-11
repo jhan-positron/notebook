@@ -59,7 +59,7 @@ All times 2026-09-10, US Pacific.
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/range_hint.html (the review page; sections: words, what range_hint is, why Ben cares, safety claims with line citations, measured context, suggested reply and code comment, verification record).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/reviews/range_hint.html (the review page; sections: words, what range_hint is, why Ben cares, safety claims with line citations, measured context, suggested reply and code comment, verification record). (preserved: artifacts/intel-amx/pr3879/PR1/reviews/range_hint.html)
 - Private artifact copy: https://claude.ai/code/artifact/ddceb70f-c833-402d-bf05-d7f6229cb8e5 (version 3).
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/range-hint-audit.md (new) and pr3879-split-progress.md (appended: new heads 339dde7fe7 and 524c510609).
 - Code, repo positron-ai/tron, branch `jhan-amx-p0`, pushed to origin:
