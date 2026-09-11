@@ -288,3 +288,36 @@ Canonical files remain authoritative. Refresh canonical → mirror; do not hand-
 | [pr3879/PR1/Hannah-AMX-CI.html](pr3879/PR1/Hannah-AMX-CI.html) | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/Hannah-AMX-CI.html` | Pre-existing detailed CI/build/runner analysis required by the checklist Related: [codex_20260911_check-amx-ci-after-pr3879.md](../../handoffs/codex_20260911_check-amx-ci-after-pr3879.md). [Rendered view](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/Hannah-AMX-CI.html). |
 | [pr3879/PR1/Friday-morning-CI-results.html](pr3879/PR1/Friday-morning-CI-results.html) | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/PR1/Friday-morning-CI-results.html` | Pre-existing Qwen measurement and CI interpretation report Related: [codex_20260911_check-amx-ci-after-pr3879.md](../../handoffs/codex_20260911_check-amx-ci-after-pr3879.md). [Rendered view](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/Friday-morning-CI-results.html). |
 | [exec/more-testing-r1/resultlib.py](exec/more-testing-r1/resultlib.py) | `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/more-testing-r1/resultlib.py` | Required shared result parser imported by the refreshed gen_status.py. Related: [codex_20260911_follow-handoff-generation-prompt.md](../../handoffs/codex_20260911_follow-handoff-generation-prompt.md). |
+
+
+## 2026-09-11 preservation batch (claude-agentsrv handoff run)
+
+Registered by the 2026-09-11 SCOPE:auto handoff run on claude-agentsrv. Same
+rules as the earlier batches: canonical -> repo mirrors, edit the canonical
+file first. `WS` = `claude-agentsrv:/home/jhan/workspace/intel-AMX` (shared NFS
+home, not a git repository). Repo path -> canonical path. Mirrors of
+`WS/PR3879/new-PRs/PR0|PR0b|PR1/...` live under `pr3879/PR0|PR0b|PR1/...`
+(the layout the 2026-09-11 Codex batch above started); the top-level
+`new-PRs/*.md|html` planning docs live under `pr3879/new-PRs/`.
+
+### split planning docs (group A)
+
+- `pr3879/breakup-PR3879.html` -> `WS/PR3879/breakup-PR3879.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/breakup-PR3879.html
+- `input-2-ai/breakup-PR3879.md` -> `WS/input-2-ai/breakup-PR3879.md`
+- `pr3879/new-PRs/handoff-Saturday.md` -> `WS/PR3879/new-PRs/handoff-Saturday.md`
+- `pr3879/new-PRs/handoff-Sunday.md` -> `WS/PR3879/new-PRs/handoff-Sunday.md`
+- `pr3879/new-PRs/Monday-handoff.md` -> `WS/PR3879/new-PRs/Monday-handoff.md`
+- `pr3879/new-PRs/report-20260906.md` -> `WS/PR3879/new-PRs/report-20260906.md`
+- `pr3879/new-PRs/report-20260906-figures/fig1-timeline.svg` -> `WS/PR3879/new-PRs/report-20260906-figures/fig1-timeline.svg`
+- `pr3879/new-PRs/report-20260906-figures/fig2-bench.svg` -> `WS/PR3879/new-PRs/report-20260906-figures/fig2-bench.svg`
+- `pr3879/new-PRs/report-20260906-figures/fig3-branches.svg` -> `WS/PR3879/new-PRs/report-20260906-figures/fig3-branches.svg`
+- `pr3879/new-PRs/Tuesday-plan.html` -> `WS/PR3879/new-PRs/Tuesday-plan.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-PRs/Tuesday-plan.html
+- `pr3879/new-PRs/Tuesday-morning-status.html` -> `WS/PR3879/new-PRs/Tuesday-morning-status.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-PRs/Tuesday-morning-status.html
+- `pr3879/PR0/pr-body.md` -> `WS/PR3879/new-PRs/PR0/pr-body.md`
+- `pr3879/PR0b/pr-body.md` -> `WS/PR3879/new-PRs/PR0b/pr-body.md`
+- `pr3879/PR1/pr-body.md` -> `WS/PR3879/new-PRs/PR1/pr-body.md`
+- `pr3879/PR1/thread-map.md` -> `WS/PR3879/new-PRs/PR1/thread-map.md`
+  (handoffs: claude_20260904_breakup-pr3829-md-instructions.md, claude_20260904-20260905_breakup-pr3879-md-instructions.md, claude_20260905-20260906_handoff-saturday-md-plan-after-ci.md, claude_20260906-20260907_pr3879-sunday-handoff.md, claude_20260907-20260908_post-ci-test-scope-beyond-pr0b.md, claude_20260907_pr-4267-page-share-counters-review.md, claude_20260908-20260909_pr-3879-description-wording.md)
