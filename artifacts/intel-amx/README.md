@@ -406,3 +406,13 @@ home, not a git repository). Repo path -> canonical path. Mirrors of
 - `pr3879/PR0b/ub-guard/repro.cpp` -> `WS/PR3879/new-PRs/PR0b/ub-guard/repro.cpp`
 - `pr3879/PR0b/ub-guard/t_kv_footprint_memorder.cpp` -> `WS/PR3879/new-PRs/PR0b/ub-guard/t_kv_footprint_memorder.cpp`
   (handoffs: claude_20260904_breakup-pr3829-md-instructions.md, claude_20260905_delphi-3bda-machine-contention-handoff-doc.md, claude_20260906-20260907_pr3879-sunday-handoff.md, claude_20260907-20260908_post-ci-test-scope-beyond-pr0b.md, claude_20260907-20260908_pr0b-vs-pr1-separation.md, claude_20260908-20260909_pr-3879-description-wording.md, claude_20260909_wade-review-comment-on-tron-pr-4265.md, claude_20260910-20260911_amx-perf-test-on-jhan-amx-p0.md, claude_20260911_andoria-09-vs-andoria-06-idle-status.md, claude_20260911_pr3879-merge-conflicts.md)
+
+## 2026-09-13 preservation batch
+
+Same rules as the earlier batches: canonical -> repo mirror, edit the canonical
+file first. `WS` = `/home/jhan/workspace/intel-AMX`.
+
+### PR #3879 pages
+
+- `pr3879/baseline-vs-mirror-sketch.html` -> `WS/PR3879/baseline-vs-mirror-sketch.html` — jhan's hand sketch contrasting the baseline (canonical-K) and mirror (K*) AMX attention paths, read step by step against tron 60d66d9c04, with the measured costs (single-attention phases, TTFT, arena RAM) and a corrected redraw; pure-ASCII HTML (entities) after the artifact-host mojibake
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/baseline-vs-mirror-sketch.html
