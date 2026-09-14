@@ -416,3 +416,13 @@ file first. `WS` = `/home/jhan/workspace/intel-AMX`.
 
 - `pr3879/baseline-vs-mirror-sketch.html` -> `WS/PR3879/baseline-vs-mirror-sketch.html` — jhan's hand sketch contrasting the baseline (canonical-K) and mirror (K*) AMX attention paths, read step by step against tron 60d66d9c04, with the measured costs (single-attention phases, TTFT, arena RAM) and a corrected redraw; pure-ASCII HTML (entities) after the artifact-host mojibake
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/baseline-vs-mirror-sketch.html
+
+## 2026-09-14 preservation batch
+
+Same rules as the earlier batches: canonical -> repo mirror, edit the canonical
+file first. `WS` = `/home/jhan/workspace/intel-AMX`.
+
+### PR #3879 pages
+
+- `pr3879/baseline-vs-mirror-sketch.html` (updated) -> `WS/PR3879/baseline-vs-mirror-sketch.html` — the section 2 side-by-side diagram now lists the matrix shapes in every box (Q group, the 4 Q_packed panels, K and K* tiles, S^T and S, s_pages, P, V_page, O, v*/s*/m*, out) plus a legend paragraph; every shape line verified by two adversarial agent rounds against tron 60d66d9c04 (v* is bf16 in memory and truncated to bf16 on store, Q_packed is 4 panels of 1 KB, not a 16 x 128 matrix)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/baseline-vs-mirror-sketch.html
