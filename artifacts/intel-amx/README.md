@@ -426,3 +426,12 @@ file first. `WS` = `/home/jhan/workspace/intel-AMX`.
 
 - `pr3879/baseline-vs-mirror-sketch.html` (updated) -> `WS/PR3879/baseline-vs-mirror-sketch.html` — the section 2 side-by-side diagram now lists the matrix shapes in every box (Q group, the 4 Q_packed panels, K and K* tiles, S^T and S, s_pages, P, V_page, O, v*/s*/m*, out) plus a legend paragraph; every shape line verified by two adversarial agent rounds against tron 60d66d9c04 (v* is bf16 in memory and truncated to bf16 on store, Q_packed is 4 panels of 1 KB, not a 16 x 128 matrix)
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/baseline-vs-mirror-sketch.html
+
+## 2026-09-15 preservation batch
+
+- `amx_software_attention.md` (updated) — canonical: none (repo-primary). New addendum
+  for tron PR #4424 (K stored in the VNNI layout): the build option `TRON_K_VNNI`
+  (default OFF, requires `TRON_AMX_DISPATCH`), the amended runtime disable contract
+  (`TRON_AMX_DISABLE=1` keeps the VNNI layout and runs the AVX-512 reader; no rollback to
+  row-major numerics), the numerics tests, the CI lane flags, a verification recipe and
+  the prompt-1024 / 8192 measurements. The PR #3879 body of the page is unchanged.
