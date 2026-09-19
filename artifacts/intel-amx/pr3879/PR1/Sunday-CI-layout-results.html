@@ -1,0 +1,633 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/Sunday-CI-layout-results.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/pr3879/PR1/Sunday-CI-layout-results.html
+-->
+<title>Sunday CI-layout results</title>
+<style>
+:root { color-scheme: light; }
+body { background:#f9f9f7; color:#0b0b0b; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size:15px; line-height:1.5; margin:0; padding-block:24px 48px; padding-inline:16px; }
+main { max-width: 980px; margin: 0 auto; }
+h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 18px; margin: 32px 0 8px; } h3 { font-size: 15px; margin: 20px 0 6px; }
+.sub { color:#52514e; font-size: 13.5px; margin-bottom: 18px; }
+.short { background:#fcfcfb; border:1px solid #e1e0d9; border-radius:8px; padding:14px 18px; }
+table { border-collapse: collapse; font-size: 13.5px; } .tw { overflow-x:auto; }
+th, td { border-bottom: 1px solid #e1e0d9; padding: 5px 10px; text-align: left; vertical-align: top; } th { color:#52514e; font-weight:600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.fig { background:#fcfcfb; border:1px solid #e1e0d9; border-radius:8px; padding:10px 12px 6px; margin: 10px 0; overflow-x:auto; }
+.take { font-size: 13.5px; color:#52514e; margin: 4px 0 0 4px; }
+code { font-size: 12.5px; background:#f0efec; padding:1px 4px; border-radius:3px; }
+dl { margin:0; } dt { font-weight:600; margin-top:6px; } dd { margin: 0; color:#52514e; }
+ul.inner { margin: 4px 0 0 0; }
+.warn { border-left: 4px solid #eda100; padding-left: 12px; }
+</style>
+<main>
+<h1>AMX performance check with the nightly CI's own engine and user layout (2026-09-13)</h1>
+<div class="sub">CI = continuous integration, the automated nightly test run of the tron inference program (GitHub Actions workflow "System CI (Rinzler 72-core Intel system OCI version)", called "System CI" below; its client runs on another host, its server is delphi-3bda, the shared test machine). This page repeats Friday's (2026-09-11) tests: runtron and the CI benchmark, qwen-3-4b tp2 and tp4, prompt 1024, AMX-off against AMX-on. New today: the CI benchmark is laid out as the nightly runs it (the same number of users per server process, the CPU-core and card assignment of the production server processes, the same environment variables), plus a third setting with the nightly's current attention on the FPGA cards. Branch jhan-amx-p0, commit 544ca05c7a, our half of delphi-3bda. One campaign pass on 2026-09-13, 11:17:44Z to 12:49:58Z UTC, finished ok; 6 runtron repetitions and 3 CI-benchmark repetitions per cell. Page generated 2026-09-13 13:24 UTC.</div>
+<div class="short"><p><b>Short version.</b> If the nightly CI (the automated test run every night against delphi-3bda) switched its qwen-3-4b engines (one engine = one server process serving the model) from attention on the FPGA cards to attention on the CPU with AMX (Intel's matrix instructions, the code under test here), the per-user decode rate it reports would change by -20.6% at tp2 (the model spread over 2 cards; the three repetitions gave -20.8% to -20.4%) and -19.5% at tp4 (4 cards; repetitions -23.7% to -14.1%). Its time to first token would change by -4.4% (tp2) and +1.9% (tp4). Inside CPU attention, AMX gains +8.4% / +7.9% in decode rate over the existing AVX code in the CI benchmark (tp2 / tp4) and +13.2% / +6.8% in runtron (tron's command-line tool, 8 users on one process).</p><p><b>Basis of the prediction.</b> Our set-up (the same users per engine, placement and environment as the nightly) reproduces the nightly's decode rate: the FPGA-attention arm gives 192.1 (tp2) and 154.0 (tp4) tokens per second per user against the nightly's own 185.4 and 147.2 of 2026-09-11 (+3.6% / +4.6%), within the ±5% threshold we chose for this check, so the TPS prediction above compares two arms of one binary in a set-up that behaves like the nightly's. It does not reproduce the nightly's time to first token: 761 and 839 ms here against the nightly's 507 and 635 ms (+50.1% / +32.2%), so the TTFT prediction above is less certain than the TPS prediction (see How to read). The nightly reference is one run (GitHub Actions run 34559196745); its night-to-night spread is Insufficient data (the CI results database would give it).</p></div>
+<h2>Words used here</h2>
+<dl>
+<dt>tron, runtron, rinzler, engine</dt><dd>tron is the inference program under test (it serves large language models on this hardware). runtron is its command-line tool: one process loads the model, sends 8 synthetic prompts at once and generates a fixed number of tokens for each. rinzler is the production HTTP server built from the same source. One running rinzler process serving one model is an engine.</dd>
+<dt>CI, the nightly, CI harness, nightly layout</dt><dd>CI = continuous integration, the automated build-and-test system. "The nightly" = the GitHub Actions workflow System CI that runs every night against delphi-3bda. One of its phases is a throughput benchmark (repository positron-ai/systems_test, file testlib/tps.py); that code, run by us, is the CI harness. The nightly sends its 8 benchmark users (n_users=8 in the job log of run 34559196745) through platformd's Caddy reverse proxy (platformd = the production process manager; Caddy = the web server that forwards each request to one engine) to every engine of the model: 4 engines for a tp2 model, 2 for tp4 (log lines "All 4 inference engines are running" and "All 4 Caddy upstreams are healthy" before the tp2 test, "All 2 ..." before the tp4 test). How the proxy spread the 8 users is not logged. We take 2 users per tp2 engine and 4 per tp4 engine, the even spread: the 80 per-user tp2 values of that run fall into two speed groups (42 values near 193.4 and 38 near 176.6 tokens per second), and the fast:slow count per round was 4:4, 2:6, 6:2, 6:2, 4:4, 4:4, 4:4, 6:2, 4:4, 2:6, always even, which fits pairs of users sharing an engine; single rounds may still have put 3 users on one engine and 1 on another. "Nightly layout" here = that average load on our half of the machine: tp2 = 2 engines (cards 90/93 and b9/bc) with a 2-user client each, run at the same time; tp4 = 1 engine with a 4-user client.</dd>
+<dt>AMX, AVX, kernel</dt><dd>AMX = Intel Advanced Matrix Extensions, CPU instructions that multiply small matrices in one step; the branch uses them for the attention step of the model. AVX = Intel Advanced Vector Extensions, the older CPU vector instructions the existing attention code uses. A kernel is one small compute routine.</dd>
+<dt>arm: AMX-off, AMX-on, FPGA attention; kill switch</dt><dd>An arm is one setting of the two environment variables that choose the attention path, applied to the same binary; the page compares the three settings below with each other, and the FPGA-attention setting with the nightly. All arms run the binary built from the branch head with the AMX code compiled in (cmake option TRON_AMX_DISPATCH=ON). AMX-off = CPU attention (USE_HW_ATTN=0) with the AMX code turned off at run time by the environment variable TRON_AMX_DISABLE=1 (called the kill switch below), so attention takes the existing AVX path. AMX-on = CPU attention with the kill switch unset. FPGA attention = USE_HW_ATTN unset, the nightly's current setting for the ingested qwen model: attention runs on the FPGA cards from query position 127 on, positions 0 to 126 of every sequence stay on the CPU, and the kill switch is set so that CPU share runs on AVX as the nightly's main-branch package (which has no AMX code) runs it. runtron cells have the arms AMX-off and AMX-on only.</dd>
+<dt>on vs off, on vs fpga, off vs fpga</dt><dd>on vs off = AMX-on mean divided by AMX-off mean, minus one: the gain of the AMX kernels inside the CPU-attention path. on vs fpga = AMX-on divided by FPGA attention, minus one: the change the nightly would report after its qwen engines are switched from FPGA attention to CPU attention with AMX. off vs fpga = AMX-off divided by FPGA attention, minus one: the existing AVX attention against FPGA attention, without any AMX. For TTFT all three are changes of the time, so negative is better.</dd>
+<dt>fidelity check</dt><dd>The test that our set-up behaves like the nightly's: the FPGA-attention arm's decode rate (the same attention setting as the nightly) divided by the nightly's own decode rate of 2026-09-11. A gap of at most 5% counts as a pass; the 5% is a threshold chosen while writing this page (before the CI cells ran), not a measured noise figure. TTFT is compared but not part of the pass criterion (see How to read).</dd>
+<dt>tp2, tp4, FPGA</dt><dd>tp = tensor parallelism, the number of FPGA cards one model instance spans (2 or 4). FPGA = field-programmable gate array, the accelerator cards of this machine (8 per machine). On our half tp2 engines use cards 90:00.0+93:00.0 and b9:00.0+bc:00.0; the tp4 engine uses all four, all attached to CPU socket 1.</dd>
+<dt>delphi-3bda, our half, Bill, socket, hugepages</dt><dd>delphi-3bda is the shared test machine: 2 CPU sockets (72 cores each, 288 hardware threads in total) and 8 FPGA cards. Since 2026-09-06 it is split between two people: Bill (a colleague) uses socket 0 and cards 10/13/38/3b; we use socket 1 and cards 90/93/b9/bc ("our half"). Hugepages are 1 GiB memory pages reserved at boot for tron; the machine has 512, and "hugepages_free=512" in a machine line means none were in use when the run started.</dd>
+<dt>ingested, prefill, decode, speculative decoding, FUSE</dt><dd>"Ingested" marks a model converted into tron's own format (the model name carries the prefix). Prefill = processing the prompt tokens before the first answer token; decode = generating the answer one token at a time. Speculative decoding = tron guessing several tokens ahead and then checking them; it is off in the nightly and here. FUSE = a file system served by a user program; rinzler mounts one per engine for its token files.</dd>
+<dt>TPS (runtron)</dt><dd>tokens per second per user during decode, as runtron prints it per request, averaged over the 8 requests of one run (the 8 values agree within 0.01 because the 8 users run in one batch).</dd>
+<dt>TTFT (runtron)</dt><dd>time to first token: the largest of the 8 "Parsing the prompt took S s" values of one run, that is the wait until the last of the 8 users has its first token (the 8 prompts are prefilled together). In all 24 runs the 8 values agree within 0.4 ms (largest spread 0.36 ms, tp4 on repetition 1). Figures and tables use milliseconds.</dd>
+<dt>TPS and TTFT (CI harness), capture window, pooled</dt><dd>Each harness client sends, per user, 10 rounds of a chat prompt cut to 1024 tokens from real conversations (the sharegpt set, a public set of chat transcripts; the server counted 976 prompt tokens per request on average, with a prefix-cache hit rate of 1.3%) and reads 1536 generated tokens. TPS = tokens per second per user measured in the capture window, generated tokens 896 to 1024 of each answer, averaged over every user and round of the cell. For tp2 the 20 samples of each of the two engines are put into one list of 40 before averaging ("pooled"); the nightly pools its 8 users the same way. TTFT = milliseconds until the first piece of the streamed HTTP answer arrives, same averaging. The nightly's TTFT also contains the proxy hop and the network to its client host; ours does not.</dd>
+<dt>cell, repetition, per repetition, n, sd</dt><dd>A cell is one combination of test, tp and arm. A repetition is one complete run of a cell. "Per repetition" columns pair the runs that carry the same repetition number (for example AMX-on repetition 1 divided by AMX-off repetition 1, minus one); the two runs of a pair started 45 to 72 s apart for runtron and 2.5 to 4 minutes apart for the CI harness. n = the number of repetitions that enter a cell's mean (runtron: tp2 off n=6, tp2 on n=6, tp4 off n=6, tp4 on n=6; CI harness: tp2 off n=3, tp2 on n=3, tp2 fpga n=3, tp4 off n=3, tp4 on n=3, tp4 fpga n=3). sd = the sample standard deviation over those repetitions (divides by n-1; roughly the typical distance of one repetition from the cell mean); with n=3 or 6 the sd itself is imprecise, so read it as an order of magnitude. In the Exact numbers table it is written after ±. In the Every run table, "sd over N samples" is the population standard deviation (divides by N, the numpy convention combine.py uses) of the N per-user per-round TPS samples inside that one run, and "slowest sample" is the smallest of them.</dd>
+<dt>resolved, not resolved</dt><dd>A change between two cell means counts as resolved when it exceeds twice the combined standard error of the two means, 2 × sqrt(sd₁²/n₁ + sd₂²/n₂), expressed as a percent of the baseline mean. The figures print that threshold next to a change that does not exceed it and colour it gray; resolved changes are green (better) or red (worse).</dd>
+<dt>placement, SYSTEM_CONFIG</dt><dd>Placement = the machine resources one tron process gets: --instance k,n = the k-th of n equal shares of the machine from tron's resource map; --devices = the FPGA cards; --app-cores = CPU cores for the application threads; --dev-cores = cores for the device driver threads; --numa = the memory node (socket); --nr_hugepages = the number of 1 GiB hugepages. SYSTEM_CONFIG is an environment variable the login shell exports with a default placement; tron applies it after the command line, so every run here removes it (env -u) and passes the placement explicitly.</dd>
+</dl>
+<h2>What was run</h2>
+<div class="tw"><table>
+<tr><th>#</th><th>test</th><th>model</th><th>arm</th><th>engines × users</th><th>prompt</th><th>generated</th><th>repetitions</th></tr>
+<tr><td>1</td><td>runtron</td><td>ingested-qwen-3-4b-instruct-2507-tp2</td><td>AMX-off</td><td>1 process × 8 users</td><td>1024 synthetic tokens</td><td>256-token limit (253 generated)</td><td>6 done</td></tr>
+<tr><td>2</td><td>runtron</td><td>ingested-qwen-3-4b-instruct-2507-tp2</td><td>AMX-on</td><td>1 process × 8 users</td><td>1024 synthetic tokens</td><td>256-token limit (253 generated)</td><td>6 done</td></tr>
+<tr><td>3</td><td>runtron</td><td>ingested-qwen-3-4b-instruct-2507-tp4</td><td>AMX-off</td><td>1 process × 8 users</td><td>1024 synthetic tokens</td><td>256-token limit (253 generated)</td><td>6 done</td></tr>
+<tr><td>4</td><td>runtron</td><td>ingested-qwen-3-4b-instruct-2507-tp4</td><td>AMX-on</td><td>1 process × 8 users</td><td>1024 synthetic tokens</td><td>256-token limit (253 generated)</td><td>6 done</td></tr>
+<tr><td>5</td><td>CI harness</td><td>ingested-qwen-3-4b-instruct-2507-tp2</td><td>AMX-off</td><td>2 engines × 2 users</td><td>1024 (harness setting)</td><td>1536 per round, 10 rounds</td><td>3 done</td></tr>
+<tr><td>6</td><td>CI harness</td><td>ingested-qwen-3-4b-instruct-2507-tp2</td><td>AMX-on</td><td>2 engines × 2 users</td><td>1024 (harness setting)</td><td>1536 per round, 10 rounds</td><td>3 done</td></tr>
+<tr><td>7</td><td>CI harness</td><td>ingested-qwen-3-4b-instruct-2507-tp2</td><td>FPGA attention</td><td>2 engines × 2 users</td><td>1024 (harness setting)</td><td>1536 per round, 10 rounds</td><td>3 done</td></tr>
+<tr><td>8</td><td>CI harness</td><td>ingested-qwen-3-4b-instruct-2507-tp4</td><td>AMX-off</td><td>1 engine × 4 users</td><td>1024 (harness setting)</td><td>1536 per round, 10 rounds</td><td>3 done</td></tr>
+<tr><td>9</td><td>CI harness</td><td>ingested-qwen-3-4b-instruct-2507-tp4</td><td>AMX-on</td><td>1 engine × 4 users</td><td>1024 (harness setting)</td><td>1536 per round, 10 rounds</td><td>3 done</td></tr>
+<tr><td>10</td><td>CI harness</td><td>ingested-qwen-3-4b-instruct-2507-tp4</td><td>FPGA attention</td><td>1 engine × 4 users</td><td>1024 (harness setting)</td><td>1536 per round, 10 rounds</td><td>3 done</td></tr>
+</table></div>
+<p class='take'>Inside each repetition the arms run in the same order (runtron: tp2 off, tp2 on, tp4 off, tp4 on; CI harness: off, on, fpga per tp), so a slow change of the machine over the campaign lands on every arm alike. The two tp2 engines of a CI cell are started together and their two clients run at the same time.</p>
+<h2>Results</h2><h3>Figure 1: decode throughput per user (higher is better)</h3><div class="fig">
+<svg viewBox="0 0 980 472" width="100%" style="max-width:980px;min-width:760px;display:block;background:#fcfcfb" role="img" aria-label="decode TPS per user, by arm">
+<text x="330" y="22" font-size="15" font-weight="600" fill="#0b0b0b">decode TPS per user, by arm</text>
+<line x1="330.0" y1="84" x2="330.0" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="330.0" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">0</text>
+<line x1="425.3" y1="84" x2="425.3" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="425.3" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">50</text>
+<line x1="520.7" y1="84" x2="520.7" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="520.7" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">100</text>
+<line x1="616.0" y1="84" x2="616.0" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="616.0" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">150</text>
+<line x1="711.3" y1="84" x2="711.3" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="711.3" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">200</text>
+<text x="550.0" y="464" font-size="11" fill="#52514e" text-anchor="middle">tokens per second per user</text>
+<line x1="330" y1="84" x2="330" y2="434" stroke="#c3c2b7" stroke-width="1"/>
+<text x="316" y="121.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">runtron · tp2</text>
+<text x="316" y="137.0" font-size="11" fill="#898781" text-anchor="end">8 users, one process · 256-token limit</text>
+<line x1="463.9" y1="124.0" x2="481.6" y2="124.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="463.9" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 70.2 tokens per second per user</title></circle>
+<circle cx="463.7" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 70.1 tokens per second per user</title></circle>
+<circle cx="464.1" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 70.3 tokens per second per user</title></circle>
+<circle cx="464.0" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 70.3 tokens per second per user</title></circle>
+<circle cx="464.0" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 70.3 tokens per second per user</title></circle>
+<circle cx="463.8" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 70.2 tokens per second per user</title></circle>
+<circle cx="482.0" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 79.7 tokens per second per user</title></circle>
+<circle cx="481.9" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 79.7 tokens per second per user</title></circle>
+<circle cx="481.5" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 79.5 tokens per second per user</title></circle>
+<circle cx="481.3" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 79.3 tokens per second per user</title></circle>
+<circle cx="481.5" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 79.4 tokens per second per user</title></circle>
+<circle cx="481.6" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 79.5 tokens per second per user</title></circle>
+<circle cx="463.9" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="463.9" cy="124.0" r="6" fill="#6b6a66"><title>AMX-off: mean 70.2 tokens per second per user, sd 0.1, n=6</title></circle>
+<circle cx="481.6" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="481.6" cy="124.0" r="6" fill="#2a78d6"><title>AMX-on: mean 79.5 tokens per second per user, sd 0.2, n=6</title></circle>
+<text x="463.9" y="112.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">off 70.2</text>
+<text x="481.6" y="162.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">on 79.5</text>
+<text x="782" y="114.0" font-size="13" font-weight="600" fill="#006300" font-variant-numeric="tabular-nums">on vs off +13.2%</text>
+<text x="316" y="205.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">runtron · tp4</text>
+<text x="316" y="221.0" font-size="11" fill="#898781" text-anchor="end">8 users, one process · 256-token limit</text>
+<line x1="514.4" y1="208.0" x2="527.1" y2="208.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="510.0" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 94.4 tokens per second per user</title></circle>
+<circle cx="515.0" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 97.0 tokens per second per user</title></circle>
+<circle cx="505.5" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 92.1 tokens per second per user</title></circle>
+<circle cx="519.4" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 99.3 tokens per second per user</title></circle>
+<circle cx="516.6" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 97.9 tokens per second per user</title></circle>
+<circle cx="520.2" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 99.7 tokens per second per user</title></circle>
+<circle cx="532.3" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 106.1 tokens per second per user</title></circle>
+<circle cx="530.5" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 105.2 tokens per second per user</title></circle>
+<circle cx="521.6" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 100.5 tokens per second per user</title></circle>
+<circle cx="524.6" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 102.1 tokens per second per user</title></circle>
+<circle cx="522.3" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 100.9 tokens per second per user</title></circle>
+<circle cx="530.9" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 105.4 tokens per second per user</title></circle>
+<circle cx="514.4" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="514.4" cy="208.0" r="6" fill="#6b6a66"><title>AMX-off: mean 96.7 tokens per second per user, sd 3.0, n=6</title></circle>
+<circle cx="527.1" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="527.1" cy="208.0" r="6" fill="#2a78d6"><title>AMX-on: mean 103.4 tokens per second per user, sd 2.5, n=6</title></circle>
+<text x="514.4" y="196.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">off 96.7</text>
+<text x="527.1" y="246.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">on 103.4</text>
+<text x="782" y="198.0" font-size="13" font-weight="600" fill="#006300" font-variant-numeric="tabular-nums">on vs off +6.8%</text>
+<text x="316" y="289.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">CI harness · tp2</text>
+<text x="316" y="305.0" font-size="11" fill="#898781" text-anchor="end">2 engines × 2 users · 10 rounds</text>
+<line x1="598.1" y1="292.0" x2="696.3" y2="292.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="598.3" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 140.7 tokens per second per user</title></circle>
+<circle cx="598.0" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 140.6 tokens per second per user</title></circle>
+<circle cx="597.9" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 140.5 tokens per second per user</title></circle>
+<circle cx="621.8" cy="312.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 153.0 tokens per second per user</title></circle>
+<circle cx="620.0" cy="312.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 152.1 tokens per second per user</title></circle>
+<circle cx="620.2" cy="312.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 152.2 tokens per second per user</title></circle>
+<circle cx="696.7" cy="318.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 192.3 tokens per second per user</title></circle>
+<circle cx="696.4" cy="318.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 192.2 tokens per second per user</title></circle>
+<circle cx="695.8" cy="318.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 191.8 tokens per second per user</title></circle>
+<path d="M 683.5 283.0 L 690.5 292.0 L 683.5 301.0 L 676.5 292.0 Z" fill="#fcfcfb" stroke="#d9822b" stroke-width="2"><title>nightly 2026-09-11: 185.4 tokens per second per user</title></path>
+<circle cx="598.1" cy="292.0" r="8" fill="#fcfcfb"/><circle cx="598.1" cy="292.0" r="6" fill="#6b6a66"><title>AMX-off: mean 140.6 tokens per second per user, sd 0.1, n=3</title></circle>
+<circle cx="620.7" cy="292.0" r="8" fill="#fcfcfb"/><circle cx="620.7" cy="292.0" r="6" fill="#2a78d6"><title>AMX-on: mean 152.5 tokens per second per user, sd 0.5, n=3</title></circle>
+<circle cx="696.3" cy="292.0" r="8" fill="#fcfcfb"/><circle cx="696.3" cy="292.0" r="6" fill="#d9822b"><title>FPGA attention: mean 192.1 tokens per second per user, sd 0.2, n=3</title></circle>
+<text x="596.1" y="280.0" font-size="12" fill="#0b0b0b" text-anchor="end" font-variant-numeric="tabular-nums">off 140.6</text>
+<text x="620.7" y="336.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">on 152.5</text>
+<text x="698.3" y="280.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-variant-numeric="tabular-nums">fpga 192.1</text>
+<text x="782" y="282.0" font-size="13" font-weight="600" fill="#006300" font-variant-numeric="tabular-nums">on vs off +8.4%</text>
+<text x="782" y="297.0" font-size="10.5" font-weight="400" fill="#d03b3b" font-variant-numeric="tabular-nums">on vs fpga -20.6%</text>
+<text x="782" y="312.0" font-size="10.5" font-weight="400" fill="#898781" font-variant-numeric="tabular-nums">nightly 2026-09-11: 185.4</text>
+<text x="316" y="373.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">CI harness · tp4</text>
+<text x="316" y="389.0" font-size="11" fill="#898781" text-anchor="end">1 engine × 4 users · 10 rounds</text>
+<line x1="548.8" y1="376.0" x2="623.6" y2="376.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="540.2" cy="390.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 110.3 tokens per second per user</title></circle>
+<circle cx="557.4" cy="390.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 119.3 tokens per second per user</title></circle>
+<circle cx="548.8" cy="390.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 114.8 tokens per second per user</title></circle>
+<circle cx="571.0" cy="396.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 126.4 tokens per second per user</title></circle>
+<circle cx="567.6" cy="396.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 124.6 tokens per second per user</title></circle>
+<circle cx="560.1" cy="396.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 120.7 tokens per second per user</title></circle>
+<circle cx="610.4" cy="402.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 147.1 tokens per second per user</title></circle>
+<circle cx="628.9" cy="402.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 156.7 tokens per second per user</title></circle>
+<circle cx="631.5" cy="402.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 158.1 tokens per second per user</title></circle>
+<path d="M 610.7 367.0 L 617.7 376.0 L 610.7 385.0 L 603.7 376.0 Z" fill="#fcfcfb" stroke="#d9822b" stroke-width="2"><title>nightly 2026-09-11: 147.2 tokens per second per user</title></path>
+<circle cx="548.8" cy="376.0" r="8" fill="#fcfcfb"/><circle cx="548.8" cy="376.0" r="6" fill="#6b6a66"><title>AMX-off: mean 114.8 tokens per second per user, sd 4.5, n=3</title></circle>
+<circle cx="566.2" cy="376.0" r="8" fill="#fcfcfb"/><circle cx="566.2" cy="376.0" r="6" fill="#2a78d6"><title>AMX-on: mean 123.9 tokens per second per user, sd 2.9, n=3</title></circle>
+<circle cx="623.6" cy="376.0" r="8" fill="#fcfcfb"/><circle cx="623.6" cy="376.0" r="6" fill="#d9822b"><title>FPGA attention: mean 154.0 tokens per second per user, sd 6.0, n=3</title></circle>
+<text x="546.8" y="364.0" font-size="12" fill="#0b0b0b" text-anchor="end" font-variant-numeric="tabular-nums">off 114.8</text>
+<text x="566.2" y="420.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">on 123.9</text>
+<text x="625.6" y="364.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-variant-numeric="tabular-nums">fpga 154.0</text>
+<text x="782" y="366.0" font-size="13" font-weight="600" fill="#006300" font-variant-numeric="tabular-nums">on vs off +7.9%</text>
+<text x="782" y="381.0" font-size="10.5" font-weight="400" fill="#d03b3b" font-variant-numeric="tabular-nums">on vs fpga -19.5%</text>
+<text x="782" y="396.0" font-size="10.5" font-weight="400" fill="#898781" font-variant-numeric="tabular-nums">nightly 2026-09-11: 147.2</text>
+<circle cx="338" cy="46" r="6" fill="#6b6a66"/>
+<text x="351" y="50" font-size="11.5" fill="#52514e">AMX-off (kill switch)</text>
+<circle cx="507.29999999999995" cy="46" r="6" fill="#2a78d6"/>
+<text x="520.3" y="50" font-size="11.5" fill="#52514e">AMX-on</text>
+<circle cx="582.0999999999999" cy="46" r="6" fill="#d9822b"/>
+<text x="595.0999999999999" y="50" font-size="11.5" fill="#52514e">FPGA attention</text>
+<circle cx="702.3" cy="46" r="3" fill="#6b6a66" fill-opacity="0.65"/><circle cx="708.3" cy="46" r="3" fill="#2a78d6" fill-opacity="0.65"/><circle cx="714.3" cy="46" r="3" fill="#d9822b" fill-opacity="0.65"/>
+<text x="720.3" y="50" font-size="11.5" fill="#52514e">single repetitions, arm colour</text>
+<path d="M 338 55 L 344 62 L 338 69 L 332 62 Z" fill="#fcfcfb" stroke="#d9822b" stroke-width="2"/>
+<text x="351" y="66" font-size="11.5" fill="#52514e">nightly 2026-09-11</text>
+</svg>
+<div class="take">Reading: big dots are arm means; the small dots below them are the single repetitions, one strip per arm in the arm's colour. The hollow diamond on the CI rows marks the nightly's own value of 2026-09-11 for the same model (GitHub Actions run 34559196745, tron package 2026.09.11-632c6181, FPGA attention, 4 or 2 engines behind the proxy, client on host system-ci-runner; job log exec/results/p0perf-20260911/ci-run-34559196745.log, tp2 block lines 2003-2130, tp4 block lines 2162-2291). Fidelity check: tp2: our FPGA-attention arm 192.1 TPS per user against the nightly&#x27;s 185.4 (+3.6%). tp4: our FPGA-attention arm 154.0 TPS per user against the nightly&#x27;s 147.2 (+4.6%). Colours of the right column: green = better, red = worse, gray = not resolved (the change is within twice the combined standard error of the two means; that threshold is printed). The gray reference line gives the nightly's own value and is not a change.</div></div>
+<h3>Figure 2: time to first token (lower is better)</h3><div class="fig">
+<svg viewBox="0 0 980 304" width="100%" style="max-width:980px;min-width:760px;display:block;background:#fcfcfb" role="img" aria-label="time to first token, runtron (batched prefill of 8 prompts)">
+<text x="330" y="22" font-size="15" font-weight="600" fill="#0b0b0b">time to first token, runtron (batched prefill of 8 prompts)</text>
+<line x1="330.0" y1="84" x2="330.0" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="330.0" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">0</text>
+<line x1="423.0" y1="84" x2="423.0" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="423.0" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">1000</text>
+<line x1="516.0" y1="84" x2="516.0" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="516.0" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">2000</text>
+<line x1="609.0" y1="84" x2="609.0" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="609.0" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">3000</text>
+<line x1="702.0" y1="84" x2="702.0" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="702.0" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">4000</text>
+<text x="550.0" y="296" font-size="11" fill="#52514e" text-anchor="middle">milliseconds</text>
+<line x1="330" y1="84" x2="330" y2="266" stroke="#c3c2b7" stroke-width="1"/>
+<text x="316" y="121.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">runtron · tp2</text>
+<text x="316" y="137.0" font-size="11" fill="#898781" text-anchor="end">batched prefill of 8 prompts</text>
+<line x1="622.7" y1="124.0" x2="695.7" y2="124.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="696.7" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 3943 milliseconds</title></circle>
+<circle cx="696.0" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 3935 milliseconds</title></circle>
+<circle cx="695.3" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 3929 milliseconds</title></circle>
+<circle cx="695.0" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 3925 milliseconds</title></circle>
+<circle cx="695.6" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 3932 milliseconds</title></circle>
+<circle cx="695.6" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 3932 milliseconds</title></circle>
+<circle cx="623.9" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 3160 milliseconds</title></circle>
+<circle cx="622.4" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 3145 milliseconds</title></circle>
+<circle cx="622.0" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 3140 milliseconds</title></circle>
+<circle cx="622.2" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 3143 milliseconds</title></circle>
+<circle cx="622.9" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 3150 milliseconds</title></circle>
+<circle cx="623.0" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 3150 milliseconds</title></circle>
+<circle cx="695.7" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="695.7" cy="124.0" r="6" fill="#6b6a66"><title>AMX-off: mean 3933 milliseconds, sd 6, n=6</title></circle>
+<circle cx="622.7" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="622.7" cy="124.0" r="6" fill="#2a78d6"><title>AMX-on: mean 3148 milliseconds, sd 7, n=6</title></circle>
+<text x="622.7" y="112.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">on 3148</text>
+<text x="695.7" y="162.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">off 3933</text>
+<text x="782" y="114.0" font-size="13" font-weight="600" fill="#006300" font-variant-numeric="tabular-nums">on vs off -20.0%</text>
+<text x="316" y="205.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">runtron · tp4</text>
+<text x="316" y="221.0" font-size="11" fill="#898781" text-anchor="end">batched prefill of 8 prompts</text>
+<line x1="534.5" y1="208.0" x2="558.5" y2="208.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="560.3" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 2476 milliseconds</title></circle>
+<circle cx="559.4" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 2467 milliseconds</title></circle>
+<circle cx="556.6" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 2437 milliseconds</title></circle>
+<circle cx="558.4" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 2456 milliseconds</title></circle>
+<circle cx="559.2" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 2464 milliseconds</title></circle>
+<circle cx="557.3" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 2445 milliseconds</title></circle>
+<circle cx="534.7" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 2201 milliseconds</title></circle>
+<circle cx="535.5" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 2210 milliseconds</title></circle>
+<circle cx="534.5" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 2200 milliseconds</title></circle>
+<circle cx="534.4" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 2198 milliseconds</title></circle>
+<circle cx="534.2" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 2196 milliseconds</title></circle>
+<circle cx="533.9" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 2192 milliseconds</title></circle>
+<circle cx="558.5" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="558.5" cy="208.0" r="6" fill="#6b6a66"><title>AMX-off: mean 2458 milliseconds, sd 15, n=6</title></circle>
+<circle cx="534.5" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="534.5" cy="208.0" r="6" fill="#2a78d6"><title>AMX-on: mean 2199 milliseconds, sd 6, n=6</title></circle>
+<text x="534.5" y="196.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">on 2199</text>
+<text x="558.5" y="246.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">off 2458</text>
+<text x="782" y="198.0" font-size="13" font-weight="600" fill="#006300" font-variant-numeric="tabular-nums">on vs off -10.5%</text>
+<circle cx="338" cy="46" r="6" fill="#6b6a66"/>
+<text x="351" y="50" font-size="11.5" fill="#52514e">AMX-off (kill switch)</text>
+<circle cx="507.29999999999995" cy="46" r="6" fill="#2a78d6"/>
+<text x="520.3" y="50" font-size="11.5" fill="#52514e">AMX-on</text>
+<circle cx="577.0999999999999" cy="46" r="3" fill="#6b6a66" fill-opacity="0.65"/><circle cx="583.0999999999999" cy="46" r="3" fill="#2a78d6" fill-opacity="0.65"/><circle cx="589.0999999999999" cy="46" r="3" fill="#d9822b" fill-opacity="0.65"/>
+<text x="595.0999999999999" y="50" font-size="11.5" fill="#52514e">single repetitions</text>
+</svg>
+<svg viewBox="0 0 980 304" width="100%" style="max-width:980px;min-width:760px;display:block;background:#fcfcfb" role="img" aria-label="time to first token, CI harness (per request)">
+<text x="330" y="22" font-size="15" font-weight="600" fill="#0b0b0b">time to first token, CI harness (per request)</text>
+<line x1="330.0" y1="84" x2="330.0" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="330.0" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">0</text>
+<line x1="426.0" y1="84" x2="426.0" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="426.0" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">250</text>
+<line x1="522.0" y1="84" x2="522.0" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="522.0" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">500</text>
+<line x1="618.0" y1="84" x2="618.0" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="618.0" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">750</text>
+<line x1="713.9" y1="84" x2="713.9" y2="266" stroke="#e1e0d9" stroke-width="1"/>
+<text x="713.9" y="282" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">1000</text>
+<text x="550.0" y="296" font-size="11" fill="#52514e" text-anchor="middle">milliseconds</text>
+<line x1="330" y1="84" x2="330" y2="266" stroke="#c3c2b7" stroke-width="1"/>
+<text x="316" y="121.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">CI harness · tp2</text>
+<text x="316" y="137.0" font-size="11" fill="#898781" text-anchor="end">per request, users 0.1 s apart</text>
+<line x1="609.3" y1="124.0" x2="678.9" y2="124.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="680.5" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 913 milliseconds</title></circle>
+<circle cx="677.9" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 906 milliseconds</title></circle>
+<circle cx="678.2" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 907 milliseconds</title></circle>
+<circle cx="608.7" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 726 milliseconds</title></circle>
+<circle cx="610.7" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 731 milliseconds</title></circle>
+<circle cx="608.4" cy="144.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 725 milliseconds</title></circle>
+<circle cx="621.4" cy="150.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 759 milliseconds</title></circle>
+<circle cx="621.8" cy="150.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 760 milliseconds</title></circle>
+<circle cx="623.3" cy="150.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 764 milliseconds</title></circle>
+<circle cx="678.9" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="678.9" cy="124.0" r="6" fill="#6b6a66"><title>AMX-off: mean 909 milliseconds, sd 4, n=3</title></circle>
+<circle cx="609.3" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="609.3" cy="124.0" r="6" fill="#2a78d6"><title>AMX-on: mean 727 milliseconds, sd 3, n=3</title></circle>
+<circle cx="622.2" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="622.2" cy="124.0" r="6" fill="#d9822b"><title>FPGA attention: mean 761 milliseconds, sd 3, n=3</title></circle>
+<text x="607.3" y="112.0" font-size="12" fill="#0b0b0b" text-anchor="end" font-variant-numeric="tabular-nums">on 727</text>
+<text x="622.2" y="168.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">fpga 761</text>
+<text x="680.9" y="112.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-variant-numeric="tabular-nums">off 909</text>
+<text x="782" y="114.0" font-size="13" font-weight="600" fill="#006300" font-variant-numeric="tabular-nums">on vs off -20.0%</text>
+<text x="782" y="129.0" font-size="10.5" font-weight="400" fill="#006300" font-variant-numeric="tabular-nums">on vs fpga -4.4%</text>
+<text x="782" y="144.0" font-size="10.5" font-weight="400" fill="#898781" font-variant-numeric="tabular-nums">nightly 2026-09-11: 507 ms</text>
+<text x="316" y="205.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">CI harness · tp4</text>
+<text x="316" y="221.0" font-size="11" fill="#898781" text-anchor="end">per request, users 0.1 s apart</text>
+<line x1="652.3" y1="208.0" x2="695.5" y2="208.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="696.3" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 954 milliseconds</title></circle>
+<circle cx="696.7" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 955 milliseconds</title></circle>
+<circle cx="693.6" cy="222.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>AMX-off, one repetition: 947 milliseconds</title></circle>
+<circle cx="657.9" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 854 milliseconds</title></circle>
+<circle cx="658.7" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 856 milliseconds</title></circle>
+<circle cx="659.0" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>AMX-on, one repetition: 857 milliseconds</title></circle>
+<circle cx="653.7" cy="234.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 843 milliseconds</title></circle>
+<circle cx="650.2" cy="234.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 834 milliseconds</title></circle>
+<circle cx="652.9" cy="234.0" r="3" fill="#d9822b" fill-opacity="0.65"><title>FPGA attention, one repetition: 841 milliseconds</title></circle>
+<circle cx="695.5" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="695.5" cy="208.0" r="6" fill="#6b6a66"><title>AMX-off: mean 952 milliseconds, sd 4, n=3</title></circle>
+<circle cx="658.5" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="658.5" cy="208.0" r="6" fill="#2a78d6"><title>AMX-on: mean 856 milliseconds, sd 2, n=3</title></circle>
+<circle cx="652.3" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="652.3" cy="208.0" r="6" fill="#d9822b"><title>FPGA attention: mean 839 milliseconds, sd 5, n=3</title></circle>
+<text x="650.3" y="196.0" font-size="12" fill="#0b0b0b" text-anchor="end" font-variant-numeric="tabular-nums">fpga 839</text>
+<text x="658.5" y="252.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">on 856</text>
+<text x="697.5" y="196.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-variant-numeric="tabular-nums">off 952</text>
+<text x="782" y="198.0" font-size="13" font-weight="600" fill="#006300" font-variant-numeric="tabular-nums">on vs off -10.1%</text>
+<text x="782" y="213.0" font-size="10.5" font-weight="400" fill="#d03b3b" font-variant-numeric="tabular-nums">on vs fpga +1.9%</text>
+<text x="782" y="228.0" font-size="10.5" font-weight="400" fill="#898781" font-variant-numeric="tabular-nums">nightly 2026-09-11: 635 ms</text>
+<circle cx="338" cy="46" r="6" fill="#6b6a66"/>
+<text x="351" y="50" font-size="11.5" fill="#52514e">AMX-off (kill switch)</text>
+<circle cx="507.29999999999995" cy="46" r="6" fill="#2a78d6"/>
+<text x="520.3" y="50" font-size="11.5" fill="#52514e">AMX-on</text>
+<circle cx="582.0999999999999" cy="46" r="6" fill="#d9822b"/>
+<text x="595.0999999999999" y="50" font-size="11.5" fill="#52514e">FPGA attention</text>
+<circle cx="702.3" cy="46" r="3" fill="#6b6a66" fill-opacity="0.65"/><circle cx="708.3" cy="46" r="3" fill="#2a78d6" fill-opacity="0.65"/><circle cx="714.3" cy="46" r="3" fill="#d9822b" fill-opacity="0.65"/>
+<text x="720.3" y="50" font-size="11.5" fill="#52514e">single repetitions, arm colour</text>
+</svg>
+<div class="take">The two panels have their own axes. runtron TTFT is the batched prefill of 8 prompts of 1024 tokens (time until the last user has its first token); CI TTFT is each user's wait for the first streamed chunk. The nightly's TTFT (gray line) also contains its proxy hop and network path; compare arms within a row, and see How to read for the gap between our FPGA-attention arm and the nightly. Colours of the right column: green = better, red = worse, gray = not resolved (the change is within twice the combined standard error of the two means; that threshold is printed). The gray reference line gives the nightly's own value and is not a change.</div></div>
+<h3>Figure 3: decode throughput, runtron against the CI harness for the same arm</h3><div class="fig">
+<svg viewBox="0 0 980 472" width="100%" style="max-width:980px;min-width:760px;display:block;background:#fcfcfb" role="img" aria-label="decode TPS per user: runtron (ring) against the CI harness (dot)">
+<text x="330" y="22" font-size="15" font-weight="600" fill="#0b0b0b">decode TPS per user: runtron (ring) against the CI harness (dot)</text>
+<line x1="330.0" y1="84" x2="330.0" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="330.0" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">0</text>
+<line x1="449.8" y1="84" x2="449.8" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="449.8" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">50</text>
+<line x1="569.6" y1="84" x2="569.6" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="569.6" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">100</text>
+<line x1="689.4" y1="84" x2="689.4" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="689.4" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">150</text>
+<text x="550.0" y="464" font-size="11" fill="#52514e" text-anchor="middle">tokens per second per user</text>
+<line x1="330" y1="84" x2="330" y2="434" stroke="#c3c2b7" stroke-width="1"/>
+<text x="316" y="121.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">tp2 · AMX-off</text>
+<text x="316" y="137.0" font-size="11" fill="#898781" text-anchor="end">runtron (ring) and CI harness (dot)</text>
+<line x1="498.3" y1="124.0" x2="666.9" y2="124.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="498.3" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 70.2 tokens per second per user</title></circle>
+<circle cx="498.0" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 70.1 tokens per second per user</title></circle>
+<circle cx="498.5" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 70.3 tokens per second per user</title></circle>
+<circle cx="498.4" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 70.3 tokens per second per user</title></circle>
+<circle cx="498.4" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 70.3 tokens per second per user</title></circle>
+<circle cx="498.1" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 70.2 tokens per second per user</title></circle>
+<circle cx="667.2" cy="144.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 140.7 tokens per second per user</title></circle>
+<circle cx="666.8" cy="144.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 140.6 tokens per second per user</title></circle>
+<circle cx="666.7" cy="144.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 140.5 tokens per second per user</title></circle>
+<circle cx="498.3" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="498.3" cy="124.0" r="6" fill="#fcfcfb" stroke="#6b6a66" stroke-width="2.5"><title>runtron: mean 70.2 tokens per second per user, sd 0.1, n=6</title></circle>
+<circle cx="666.9" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="666.9" cy="124.0" r="6" fill="#6b6a66"><title>CI harness: mean 140.6 tokens per second per user, sd 0.1, n=3</title></circle>
+<text x="498.3" y="112.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">runtron 70.2</text>
+<text x="666.9" y="162.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">CI 140.6</text>
+<text x="782" y="114.0" font-size="13" font-weight="600" fill="#0b0b0b" font-variant-numeric="tabular-nums">CI / runtron = 2.00×</text>
+<text x="316" y="205.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">tp2 · AMX-on</text>
+<text x="316" y="221.0" font-size="11" fill="#898781" text-anchor="end">runtron (ring) and CI harness (dot)</text>
+<line x1="520.5" y1="208.0" x2="695.3" y2="208.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="521.1" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 79.7 tokens per second per user</title></circle>
+<circle cx="520.9" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 79.7 tokens per second per user</title></circle>
+<circle cx="520.4" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 79.5 tokens per second per user</title></circle>
+<circle cx="520.1" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 79.3 tokens per second per user</title></circle>
+<circle cx="520.3" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 79.4 tokens per second per user</title></circle>
+<circle cx="520.5" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 79.5 tokens per second per user</title></circle>
+<circle cx="696.7" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 153.0 tokens per second per user</title></circle>
+<circle cx="694.4" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 152.1 tokens per second per user</title></circle>
+<circle cx="694.7" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 152.2 tokens per second per user</title></circle>
+<circle cx="520.5" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="520.5" cy="208.0" r="6" fill="#fcfcfb" stroke="#2a78d6" stroke-width="2.5"><title>runtron: mean 79.5 tokens per second per user, sd 0.2, n=6</title></circle>
+<circle cx="695.3" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="695.3" cy="208.0" r="6" fill="#2a78d6"><title>CI harness: mean 152.5 tokens per second per user, sd 0.5, n=3</title></circle>
+<text x="520.5" y="196.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">runtron 79.5</text>
+<text x="695.3" y="246.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">CI 152.5</text>
+<text x="782" y="198.0" font-size="13" font-weight="600" fill="#0b0b0b" font-variant-numeric="tabular-nums">CI / runtron = 1.92×</text>
+<text x="316" y="289.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">tp4 · AMX-off</text>
+<text x="316" y="305.0" font-size="11" fill="#898781" text-anchor="end">runtron (ring) and CI harness (dot)</text>
+<line x1="561.8" y1="292.0" x2="605.0" y2="292.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="556.2" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 94.4 tokens per second per user</title></circle>
+<circle cx="562.5" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 97.0 tokens per second per user</title></circle>
+<circle cx="550.6" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 92.1 tokens per second per user</title></circle>
+<circle cx="568.0" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 99.3 tokens per second per user</title></circle>
+<circle cx="564.4" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 97.9 tokens per second per user</title></circle>
+<circle cx="568.9" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 99.7 tokens per second per user</title></circle>
+<circle cx="594.2" cy="312.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 110.3 tokens per second per user</title></circle>
+<circle cx="615.8" cy="312.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 119.3 tokens per second per user</title></circle>
+<circle cx="605.0" cy="312.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 114.8 tokens per second per user</title></circle>
+<circle cx="561.8" cy="292.0" r="8" fill="#fcfcfb"/><circle cx="561.8" cy="292.0" r="6" fill="#fcfcfb" stroke="#6b6a66" stroke-width="2.5"><title>runtron: mean 96.7 tokens per second per user, sd 3.0, n=6</title></circle>
+<circle cx="605.0" cy="292.0" r="8" fill="#fcfcfb"/><circle cx="605.0" cy="292.0" r="6" fill="#6b6a66"><title>CI harness: mean 114.8 tokens per second per user, sd 4.5, n=3</title></circle>
+<text x="561.8" y="280.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">runtron 96.7</text>
+<text x="605.0" y="330.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">CI 114.8</text>
+<text x="782" y="282.0" font-size="13" font-weight="600" fill="#0b0b0b" font-variant-numeric="tabular-nums">CI / runtron = 1.19×</text>
+<text x="316" y="373.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">tp4 · AMX-on</text>
+<text x="316" y="389.0" font-size="11" fill="#898781" text-anchor="end">runtron (ring) and CI harness (dot)</text>
+<line x1="577.6" y1="376.0" x2="626.8" y2="376.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="584.3" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 106.1 tokens per second per user</title></circle>
+<circle cx="582.0" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 105.2 tokens per second per user</title></circle>
+<circle cx="570.8" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 100.5 tokens per second per user</title></circle>
+<circle cx="574.6" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 102.1 tokens per second per user</title></circle>
+<circle cx="571.7" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 100.9 tokens per second per user</title></circle>
+<circle cx="582.4" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 105.4 tokens per second per user</title></circle>
+<circle cx="632.8" cy="396.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 126.4 tokens per second per user</title></circle>
+<circle cx="628.6" cy="396.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 124.6 tokens per second per user</title></circle>
+<circle cx="619.1" cy="396.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 120.7 tokens per second per user</title></circle>
+<circle cx="577.6" cy="376.0" r="8" fill="#fcfcfb"/><circle cx="577.6" cy="376.0" r="6" fill="#fcfcfb" stroke="#2a78d6" stroke-width="2.5"><title>runtron: mean 103.4 tokens per second per user, sd 2.5, n=6</title></circle>
+<circle cx="626.8" cy="376.0" r="8" fill="#fcfcfb"/><circle cx="626.8" cy="376.0" r="6" fill="#2a78d6"><title>CI harness: mean 123.9 tokens per second per user, sd 2.9, n=3</title></circle>
+<text x="577.6" y="364.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">runtron 103.4</text>
+<text x="626.8" y="414.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">CI 123.9</text>
+<text x="782" y="366.0" font-size="13" font-weight="600" fill="#0b0b0b" font-variant-numeric="tabular-nums">CI / runtron = 1.20×</text>
+<circle cx="338" cy="46" r="6" fill="#fcfcfb" stroke="#52514e" stroke-width="2.5"/>
+<text x="351" y="50" font-size="11.5" fill="#52514e">runtron (ring, arm colour)</text>
+<circle cx="538.8" cy="46" r="6" fill="#52514e"/>
+<text x="551.8" y="50" font-size="11.5" fill="#52514e">CI harness, nightly layout (dot)</text>
+<circle cx="772.4" cy="46" r="3" fill="#6b6a66" fill-opacity="0.65"/><circle cx="778.4" cy="46" r="3" fill="#2a78d6" fill-opacity="0.65"/><circle cx="784.4" cy="46" r="3" fill="#d9822b" fill-opacity="0.65"/>
+<text x="790.4" y="50" font-size="11.5" fill="#52514e">single repetitions</text>
+</svg>
+<div class="take">Both marks of a row share the arm's colour; the ring is runtron (8 users on one process), the dot the CI harness in the nightly layout (2 or 4 users per engine). Ratios: tp2 AMX-off: CI / runtron = 2.00; tp2 AMX-on: CI / runtron = 1.92; tp4 AMX-off: CI / runtron = 1.19; tp4 AMX-on: CI / runtron = 1.20. Hypothesis: after the switch to CPU attention with AMX, the nightly's qwen decode rate should be about these CI / runtron factors times runtron's 8-user rate at the same commit (1.92 at tp2, 1.20 at tp4, the AMX-on rows), corrected by the fidelity gap (+3.6% / +4.6%); the first nightly that runs qwen with CPU attention and the AMX build settles it. Two things make the factor differ from 1: the CI harness puts 2 or 4 users on an engine where runtron puts 8 (the 2026-09-08 users sweep in Context shows fewer users per engine means a higher per-user rate), and the two tools time different things (Words used here). This page does not separate the two contributions.</div></div>
+<h3>Figure 4: time to first token, runtron against the CI harness for the same arm</h3><div class="fig">
+<svg viewBox="0 0 980 472" width="100%" style="max-width:980px;min-width:760px;display:block;background:#fcfcfb" role="img" aria-label="time to first token: runtron (ring) against the CI harness (dot)">
+<text x="330" y="22" font-size="15" font-weight="600" fill="#0b0b0b">time to first token: runtron (ring) against the CI harness (dot)</text>
+<line x1="330.0" y1="84" x2="330.0" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="330.0" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">0</text>
+<line x1="423.0" y1="84" x2="423.0" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="423.0" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">1000</text>
+<line x1="516.0" y1="84" x2="516.0" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="516.0" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">2000</text>
+<line x1="609.0" y1="84" x2="609.0" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="609.0" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">3000</text>
+<line x1="702.0" y1="84" x2="702.0" y2="434" stroke="#e1e0d9" stroke-width="1"/>
+<text x="702.0" y="450" font-size="11" fill="#898781" text-anchor="middle" font-variant-numeric="tabular-nums">4000</text>
+<text x="550.0" y="464" font-size="11" fill="#52514e" text-anchor="middle">milliseconds</text>
+<line x1="330" y1="84" x2="330" y2="434" stroke="#c3c2b7" stroke-width="1"/>
+<text x="316" y="121.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">tp2 · AMX-off</text>
+<text x="316" y="137.0" font-size="11" fill="#898781" text-anchor="end">runtron (ring) and CI harness (dot)</text>
+<line x1="414.5" y1="124.0" x2="695.7" y2="124.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="696.7" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 3943 milliseconds</title></circle>
+<circle cx="696.0" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 3935 milliseconds</title></circle>
+<circle cx="695.3" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 3929 milliseconds</title></circle>
+<circle cx="695.0" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 3925 milliseconds</title></circle>
+<circle cx="695.6" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 3932 milliseconds</title></circle>
+<circle cx="695.6" cy="138.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 3932 milliseconds</title></circle>
+<circle cx="414.9" cy="144.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 913 milliseconds</title></circle>
+<circle cx="414.2" cy="144.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 906 milliseconds</title></circle>
+<circle cx="414.3" cy="144.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 907 milliseconds</title></circle>
+<circle cx="695.7" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="695.7" cy="124.0" r="6" fill="#fcfcfb" stroke="#6b6a66" stroke-width="2.5"><title>runtron: mean 3933 milliseconds, sd 6, n=6</title></circle>
+<circle cx="414.5" cy="124.0" r="8" fill="#fcfcfb"/><circle cx="414.5" cy="124.0" r="6" fill="#6b6a66"><title>CI harness: mean 909 milliseconds, sd 4, n=3</title></circle>
+<text x="414.5" y="112.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">CI 909</text>
+<text x="695.7" y="162.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">runtron 3933</text>
+<text x="782" y="114.0" font-size="13" font-weight="600" fill="#0b0b0b" font-variant-numeric="tabular-nums">CI / runtron = 0.23×</text>
+<text x="316" y="205.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">tp2 · AMX-on</text>
+<text x="316" y="221.0" font-size="11" fill="#898781" text-anchor="end">runtron (ring) and CI harness (dot)</text>
+<line x1="397.6" y1="208.0" x2="622.7" y2="208.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="623.9" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 3160 milliseconds</title></circle>
+<circle cx="622.4" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 3145 milliseconds</title></circle>
+<circle cx="622.0" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 3140 milliseconds</title></circle>
+<circle cx="622.2" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 3143 milliseconds</title></circle>
+<circle cx="622.9" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 3150 milliseconds</title></circle>
+<circle cx="623.0" cy="222.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 3150 milliseconds</title></circle>
+<circle cx="397.5" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 726 milliseconds</title></circle>
+<circle cx="398.0" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 731 milliseconds</title></circle>
+<circle cx="397.4" cy="228.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 725 milliseconds</title></circle>
+<circle cx="622.7" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="622.7" cy="208.0" r="6" fill="#fcfcfb" stroke="#2a78d6" stroke-width="2.5"><title>runtron: mean 3148 milliseconds, sd 7, n=6</title></circle>
+<circle cx="397.6" cy="208.0" r="8" fill="#fcfcfb"/><circle cx="397.6" cy="208.0" r="6" fill="#2a78d6"><title>CI harness: mean 727 milliseconds, sd 3, n=3</title></circle>
+<text x="397.6" y="196.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">CI 727</text>
+<text x="622.7" y="246.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">runtron 3148</text>
+<text x="782" y="198.0" font-size="13" font-weight="600" fill="#0b0b0b" font-variant-numeric="tabular-nums">CI / runtron = 0.23×</text>
+<text x="316" y="289.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">tp4 · AMX-off</text>
+<text x="316" y="305.0" font-size="11" fill="#898781" text-anchor="end">runtron (ring) and CI harness (dot)</text>
+<line x1="418.5" y1="292.0" x2="558.5" y2="292.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="560.3" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 2476 milliseconds</title></circle>
+<circle cx="559.4" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 2467 milliseconds</title></circle>
+<circle cx="556.6" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 2437 milliseconds</title></circle>
+<circle cx="558.4" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 2456 milliseconds</title></circle>
+<circle cx="559.2" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 2464 milliseconds</title></circle>
+<circle cx="557.3" cy="306.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>runtron, one repetition: 2445 milliseconds</title></circle>
+<circle cx="418.7" cy="312.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 954 milliseconds</title></circle>
+<circle cx="418.8" cy="312.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 955 milliseconds</title></circle>
+<circle cx="418.1" cy="312.0" r="3" fill="#6b6a66" fill-opacity="0.65"><title>CI harness, one repetition: 947 milliseconds</title></circle>
+<circle cx="558.5" cy="292.0" r="8" fill="#fcfcfb"/><circle cx="558.5" cy="292.0" r="6" fill="#fcfcfb" stroke="#6b6a66" stroke-width="2.5"><title>runtron: mean 2458 milliseconds, sd 15, n=6</title></circle>
+<circle cx="418.5" cy="292.0" r="8" fill="#fcfcfb"/><circle cx="418.5" cy="292.0" r="6" fill="#6b6a66"><title>CI harness: mean 952 milliseconds, sd 4, n=3</title></circle>
+<text x="418.5" y="280.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">CI 952</text>
+<text x="558.5" y="330.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">runtron 2458</text>
+<text x="782" y="282.0" font-size="13" font-weight="600" fill="#0b0b0b" font-variant-numeric="tabular-nums">CI / runtron = 0.39×</text>
+<text x="316" y="373.0" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="end">tp4 · AMX-on</text>
+<text x="316" y="389.0" font-size="11" fill="#898781" text-anchor="end">runtron (ring) and CI harness (dot)</text>
+<line x1="409.6" y1="376.0" x2="534.5" y2="376.0" stroke="#c3c2b7" stroke-width="2" stroke-linecap="round"/>
+<circle cx="534.7" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 2201 milliseconds</title></circle>
+<circle cx="535.5" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 2210 milliseconds</title></circle>
+<circle cx="534.5" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 2200 milliseconds</title></circle>
+<circle cx="534.4" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 2198 milliseconds</title></circle>
+<circle cx="534.2" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 2196 milliseconds</title></circle>
+<circle cx="533.9" cy="390.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>runtron, one repetition: 2192 milliseconds</title></circle>
+<circle cx="409.4" cy="396.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 854 milliseconds</title></circle>
+<circle cx="409.6" cy="396.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 856 milliseconds</title></circle>
+<circle cx="409.7" cy="396.0" r="3" fill="#2a78d6" fill-opacity="0.65"><title>CI harness, one repetition: 857 milliseconds</title></circle>
+<circle cx="534.5" cy="376.0" r="8" fill="#fcfcfb"/><circle cx="534.5" cy="376.0" r="6" fill="#fcfcfb" stroke="#2a78d6" stroke-width="2.5"><title>runtron: mean 2199 milliseconds, sd 6, n=6</title></circle>
+<circle cx="409.6" cy="376.0" r="8" fill="#fcfcfb"/><circle cx="409.6" cy="376.0" r="6" fill="#2a78d6"><title>CI harness: mean 856 milliseconds, sd 2, n=3</title></circle>
+<text x="409.6" y="364.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">CI 856</text>
+<text x="534.5" y="414.0" font-size="12" fill="#0b0b0b" text-anchor="middle" font-variant-numeric="tabular-nums">runtron 2199</text>
+<text x="782" y="366.0" font-size="13" font-weight="600" fill="#0b0b0b" font-variant-numeric="tabular-nums">CI / runtron = 0.39×</text>
+<circle cx="338" cy="46" r="6" fill="#fcfcfb" stroke="#52514e" stroke-width="2.5"/>
+<text x="351" y="50" font-size="11.5" fill="#52514e">runtron (ring, arm colour)</text>
+<circle cx="538.8" cy="46" r="6" fill="#52514e"/>
+<text x="551.8" y="50" font-size="11.5" fill="#52514e">CI harness, nightly layout (dot)</text>
+<circle cx="772.4" cy="46" r="3" fill="#6b6a66" fill-opacity="0.65"/><circle cx="778.4" cy="46" r="3" fill="#2a78d6" fill-opacity="0.65"/><circle cx="784.4" cy="46" r="3" fill="#d9822b" fill-opacity="0.65"/>
+<text x="790.4" y="50" font-size="11.5" fill="#52514e">single repetitions</text>
+</svg>
+<div class="take">Ratios CI / runtron: tp2 AMX-off: 0.23; tp2 AMX-on: 0.23; tp4 AMX-off: 0.39; tp4 AMX-on: 0.39. These TTFT ratios do not transfer to the nightly: they divide a per-request mean (CI) by the largest of 8 batched prefill times (runtron), two different waits, and our CI-harness TTFT is +50.1% (tp2) and +32.2% (tp4) away from the nightly's own TTFT (see How to read).</div></div>
+<h3>Exact numbers</h3><p class="take">Means and sd are over the repetitions (sample standard deviation). TTFT in milliseconds. The "per repetition" columns pair the runs of the same repetition number (Words used here). A runtron run marked <b>early stop</b> is listed but excluded from the means.</p><div class="tw"><table><tr><th>test</th><th>metric</th><th class="num">AMX-off</th><th class="num">AMX-on</th><th class="num">FPGA attention</th><th class="num">on vs off</th><th>on vs off per repetition</th><th class="num">on vs fpga</th><th>on vs fpga per repetition</th><th class="num">off vs fpga</th></tr>
+<tr><td>runtron tp2</td><td>TPS per user</td><td class='num'>70.23 ± 0.08 (n=6)</td><td class='num'>79.53 ± 0.15 (n=6)</td><td class='num'>–</td><td class='num'>+13.2%</td><td>rep1: +13.5%, rep2: +13.6%, rep3: +13.0%, rep4: +12.9%, rep5: +13.0%, rep6: +13.3%</td><td class='num'>–</td><td>–</td><td class='num'>–</td></tr>
+<tr><td>runtron tp2</td><td>TTFT ms (batched prefill)</td><td class='num'>3933 ± 6 (n=6)</td><td class='num'>3148 ± 7 (n=6)</td><td class='num'>–</td><td class='num'>-20.0%</td><td>rep1: -19.9%, rep2: -20.1%, rep3: -20.1%, rep4: -19.9%, rep5: -19.9%, rep6: -19.9%</td><td class='num'>–</td><td>–</td><td class='num'>–</td></tr>
+<tr><td>runtron tp4</td><td>TPS per user</td><td class='num'>96.74 ± 2.98 (n=6)</td><td class='num'>103.35 ± 2.49 (n=6)</td><td class='num'>–</td><td class='num'>+6.8%</td><td>rep1: +12.4%, rep2: +8.4%, rep3: +9.2%, rep4: +2.8%, rep5: +3.1%, rep6: +5.6%</td><td class='num'>–</td><td>–</td><td class='num'>–</td></tr>
+<tr><td>runtron tp4</td><td>TTFT ms (batched prefill)</td><td class='num'>2458 ± 15 (n=6)</td><td class='num'>2199 ± 6 (n=6)</td><td class='num'>–</td><td class='num'>-10.5%</td><td>rep1: -11.1%, rep2: -10.4%, rep3: -9.7%, rep4: -10.5%, rep5: -10.9%, rep6: -10.3%</td><td class='num'>–</td><td>–</td><td class='num'>–</td></tr>
+<tr><td>CI harness tp2</td><td>TPS per user</td><td class='num'>140.61 ± 0.11 (n=3)</td><td class='num'>152.46 ± 0.51 (n=3)</td><td class='num'>192.11 ± 0.23 (n=3)</td><td class='num'>+8.4%</td><td>rep1: +8.7%, rep2: +8.2%, rep3: +8.3%</td><td class='num'>-20.6%</td><td>rep1: -20.4%, rep2: -20.8%, rep3: -20.7%</td><td class='num'>-26.8%</td></tr>
+<tr><td>CI harness tp2</td><td>TTFT ms</td><td class='num'>909 ± 4 (n=3)</td><td class='num'>727 ± 3 (n=3)</td><td class='num'>761 ± 3 (n=3)</td><td class='num'>-20.0%</td><td>rep1: -20.5%, rep2: -19.3%, rep3: -20.1%</td><td class='num'>-4.4%</td><td>rep1: -4.3%, rep2: -3.8%, rep3: -5.1%</td><td class='num'>+19.4%</td></tr>
+<tr><td>CI harness tp4</td><td>TPS per user</td><td class='num'>114.77 ± 4.51 (n=3)</td><td class='num'>123.89 ± 2.93 (n=3)</td><td class='num'>153.98 ± 6.01 (n=3)</td><td class='num'>+7.9%</td><td>rep1: +14.6%, rep2: +4.5%, rep3: +5.1%</td><td class='num'>-19.5%</td><td>rep1: -14.1%, rep2: -20.5%, rep3: -23.7%</td><td class='num'>-25.5%</td></tr>
+<tr><td>CI harness tp4</td><td>TTFT ms</td><td class='num'>952 ± 4 (n=3)</td><td class='num'>856 ± 2 (n=3)</td><td class='num'>839 ± 5 (n=3)</td><td class='num'>-10.1%</td><td>rep1: -10.5%, rep2: -10.4%, rep3: -9.5%</td><td class='num'>+1.9%</td><td>rep1: +1.3%, rep2: +2.6%, rep3: +1.9%</td><td class='num'>+13.4%</td></tr>
+</table></div>
+<p class='take'>Resolution thresholds (twice the combined standard error of the two means, as a percent of the baseline; a change inside the threshold is 'not resolved'): runtron tp2 TPS ±0.2%, TTFT ±0.2%; runtron tp4 TPS ±3.3%, TTFT ±0.5%; CI tp2 TPS on vs off ±0.4%, on vs fpga ±0.3%; TTFT on vs off ±0.6%, on vs fpga ±0.6%; CI tp4 TPS on vs off ±5.4%, on vs fpga ±5.0%; TTFT on vs off ±0.6%, on vs fpga ±0.7%.</p>
+<h3>Every run</h3><div class="tw"><table><tr><th>run</th><th class="num">TPS per user</th><th class="num">TTFT ms</th><th>per engine (users: TPS, TTFT ms)</th><th>notes (sd over the per-user per-round samples of the run, population sd; slowest = lowest single sample; minutes = client wall time)</th></tr>
+<tr><td>runtron tp2 AMX-off rep1</td><td class='num'>70.24</td><td class='num'>3943</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-off rep2</td><td class='num'>70.11</td><td class='num'>3935</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-off rep3</td><td class='num'>70.32</td><td class='num'>3929</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-off rep4</td><td class='num'>70.30</td><td class='num'>3925</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-off rep5</td><td class='num'>70.28</td><td class='num'>3932</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-off rep6</td><td class='num'>70.16</td><td class='num'>3932</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-on rep1</td><td class='num'>79.74</td><td class='num'>3160</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-on rep2</td><td class='num'>79.66</td><td class='num'>3145</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-on rep3</td><td class='num'>79.47</td><td class='num'>3140</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-on rep4</td><td class='num'>79.33</td><td class='num'>3143</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-on rep5</td><td class='num'>79.44</td><td class='num'>3150</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp2 AMX-on rep6</td><td class='num'>79.53</td><td class='num'>3150</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-off rep1</td><td class='num'>94.40</td><td class='num'>2476</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-off rep2</td><td class='num'>97.04</td><td class='num'>2467</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-off rep3</td><td class='num'>92.05</td><td class='num'>2437</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-off rep4</td><td class='num'>99.34</td><td class='num'>2456</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-off rep5</td><td class='num'>97.86</td><td class='num'>2464</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-off rep6</td><td class='num'>99.73</td><td class='num'>2445</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-on rep1</td><td class='num'>106.12</td><td class='num'>2201</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-on rep2</td><td class='num'>105.18</td><td class='num'>2210</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-on rep3</td><td class='num'>100.50</td><td class='num'>2200</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-on rep4</td><td class='num'>102.08</td><td class='num'>2198</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-on rep5</td><td class='num'>100.87</td><td class='num'>2196</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>runtron tp4 AMX-on rep6</td><td class='num'>105.37</td><td class='num'>2192</td><td>–</td><td>8 requests, 253 tokens each</td></tr>
+<tr><td>CI tp2 AMX-off rep1</td><td class='num'>140.74</td><td class='num'>913</td><td>engine 0 (2 users): 140.91, 916; engine 1 (2 users): 140.56, 910</td><td>sd over 40 samples (4 users × 10 rounds) 1.19 TPS, slowest sample 138.5 TPS; client ran 1.9 min; status done</td></tr>
+<tr><td>CI tp2 AMX-off rep2</td><td class='num'>140.58</td><td class='num'>906</td><td>engine 0 (2 users): 140.37, 906; engine 1 (2 users): 140.79, 905</td><td>sd over 40 samples (4 users × 10 rounds) 0.85 TPS, slowest sample 139.1 TPS; client ran 1.9 min; status done</td></tr>
+<tr><td>CI tp2 AMX-off rep3</td><td class='num'>140.52</td><td class='num'>907</td><td>engine 0 (2 users): 141.29, 908; engine 1 (2 users): 139.75, 905</td><td>sd over 40 samples (4 users × 10 rounds) 1.31 TPS, slowest sample 138.1 TPS; client ran 1.9 min; status done</td></tr>
+<tr><td>CI tp2 AMX-on rep1</td><td class='num'>153.04</td><td class='num'>726</td><td>engine 0 (2 users): 153.27, 721; engine 1 (2 users): 152.82, 730</td><td>sd over 40 samples (4 users × 10 rounds) 1.06 TPS, slowest sample 150.4 TPS; client ran 1.8 min; status done</td></tr>
+<tr><td>CI tp2 AMX-on rep2</td><td class='num'>152.11</td><td class='num'>731</td><td>engine 0 (2 users): 151.97, 729; engine 1 (2 users): 152.26, 733</td><td>sd over 40 samples (4 users × 10 rounds) 1.11 TPS, slowest sample 150.0 TPS; client ran 1.8 min; status done</td></tr>
+<tr><td>CI tp2 AMX-on rep3</td><td class='num'>152.22</td><td class='num'>725</td><td>engine 0 (2 users): 152.28, 723; engine 1 (2 users): 152.17, 726</td><td>sd over 40 samples (4 users × 10 rounds) 0.82 TPS, slowest sample 151.1 TPS; client ran 1.8 min; status done</td></tr>
+<tr><td>CI tp2 FPGA attention rep1</td><td class='num'>192.30</td><td class='num'>759</td><td>engine 0 (2 users): 193.08, 756; engine 1 (2 users): 191.53, 761</td><td>sd over 40 samples (4 users × 10 rounds) 5.83 TPS, slowest sample 178.5 TPS; client ran 1.5 min; status done</td></tr>
+<tr><td>CI tp2 FPGA attention rep2</td><td class='num'>192.16</td><td class='num'>760</td><td>engine 0 (2 users): 194.03, 758; engine 1 (2 users): 190.30, 762</td><td>sd over 40 samples (4 users × 10 rounds) 7.02 TPS, slowest sample 175.9 TPS; client ran 1.5 min; status done</td></tr>
+<tr><td>CI tp2 FPGA attention rep3</td><td class='num'>191.85</td><td class='num'>764</td><td>engine 0 (2 users): 192.60, 761; engine 1 (2 users): 191.10, 767</td><td>sd over 40 samples (4 users × 10 rounds) 7.34 TPS, slowest sample 170.4 TPS; client ran 1.5 min; status done</td></tr>
+<tr><td>CI tp4 AMX-off rep1</td><td class='num'>110.26</td><td class='num'>954</td><td>engine 0 (4 users): 110.26, 954</td><td>sd over 40 samples (4 users × 10 rounds) 3.45 TPS, slowest sample 107.1 TPS; client ran 2.5 min; status done</td></tr>
+<tr><td>CI tp4 AMX-off rep2</td><td class='num'>119.28</td><td class='num'>955</td><td>engine 0 (4 users): 119.28, 955</td><td>sd over 40 samples (4 users × 10 rounds) 3.11 TPS, slowest sample 102.3 TPS; client ran 2.3 min; status done</td></tr>
+<tr><td>CI tp4 AMX-off rep3</td><td class='num'>114.76</td><td class='num'>947</td><td>engine 0 (4 users): 114.76, 947</td><td>sd over 40 samples (4 users × 10 rounds) 1.24 TPS, slowest sample 111.7 TPS; client ran 2.4 min; status done</td></tr>
+<tr><td>CI tp4 AMX-on rep1</td><td class='num'>126.38</td><td class='num'>854</td><td>engine 0 (4 users): 126.38, 854</td><td>sd over 40 samples (4 users × 10 rounds) 2.57 TPS, slowest sample 113.2 TPS; client ran 2.1 min; status done</td></tr>
+<tr><td>CI tp4 AMX-on rep2</td><td class='num'>124.63</td><td class='num'>856</td><td>engine 0 (4 users): 124.63, 856</td><td>sd over 40 samples (4 users × 10 rounds) 2.20 TPS, slowest sample 119.2 TPS; client ran 2.2 min; status done</td></tr>
+<tr><td>CI tp4 AMX-on rep3</td><td class='num'>120.66</td><td class='num'>857</td><td>engine 0 (4 users): 120.66, 857</td><td>sd over 40 samples (4 users × 10 rounds) 2.59 TPS, slowest sample 114.9 TPS; client ran 2.3 min; status done</td></tr>
+<tr><td>CI tp4 FPGA attention rep1</td><td class='num'>147.09</td><td class='num'>843</td><td>engine 0 (4 users): 147.09, 843</td><td>sd over 40 samples (4 users × 10 rounds) 3.44 TPS, slowest sample 141.1 TPS; client ran 1.9 min; status done</td></tr>
+<tr><td>CI tp4 FPGA attention rep2</td><td class='num'>156.74</td><td class='num'>834</td><td>engine 0 (4 users): 156.74, 834</td><td>sd over 40 samples (4 users × 10 rounds) 4.06 TPS, slowest sample 150.8 TPS; client ran 1.8 min; status done</td></tr>
+<tr><td>CI tp4 FPGA attention rep3</td><td class='num'>158.11</td><td class='num'>841</td><td>engine 0 (4 users): 158.11, 841</td><td>sd over 40 samples (4 users × 10 rounds) 3.67 TPS, slowest sample 153.5 TPS; client ran 1.8 min; status done</td></tr>
+</table></div>
+<p class='take'><b>The two tp2 engines.</b> Inside each tp2 CI cell the two engines (cards 90/93 and b9/bc, both on socket 1) serve 2 users each at the same time. Their per-user TPS differed by 0.1% to 2.0% (largest: FPGA attention repetition 2, 194.0 against 190.3 TPS). The nightly's per-user tp2 samples of 2026-09-11 (80 values, job log lines 2031-2130) fall into two groups: 38 values near 176.6 and 42 values near 193.4 TPS, 9.5% apart; our two socket-1 engines both sit at the faster level. Hypothesis: the two groups are two engine speeds, and the slower engines are the nightly's socket-0 engines, which our half cannot reproduce; this would also account for part of the +3.6% of the fidelity check. The measurement that would settle it: the nightly's per-user samples matched to the engine (port) that served each request, or a run of the same layout on socket 0.</p>
+<h2>Context</h2>
+<h3>Friday's cells (2026-09-11, one engine, all 8 users on it) against today's nightly layout</h3>
+<div class="tw"><table><tr><th>test</th><th>layout</th><th class="num">AMX-off TPS</th><th class="num">AMX-on TPS</th><th class="num">on vs off</th><th class="num">AMX-off TTFT ms</th><th class="num">AMX-on TTFT ms</th><th class="num">on vs off</th><th>n (off / on)</th></tr>
+<tr><td>CI harness tp2, Friday (commit 47f6f2dceb)</td><td>1 engine × 8 users</td><td class='num'>48.81</td><td class='num'>55.61</td><td class='num'>+13.9%</td><td class='num'>3052</td><td class='num'>2460</td><td class='num'>-19.4%</td><td>2 / 2</td></tr>
+<tr><td>CI harness tp2, today (commit 544ca05c7a)</td><td>2 engines × 2 users</td><td class='num'>140.61</td><td class='num'>152.46</td><td class='num'>+8.4%</td><td class='num'>909</td><td class='num'>727</td><td class='num'>-20.0%</td><td>3 / 3</td></tr>
+<tr><td>CI harness tp4, Friday (commit 47f6f2dceb)</td><td>1 engine × 8 users</td><td class='num'>72.76</td><td class='num'>82.38</td><td class='num'>+13.2%</td><td class='num'>1738</td><td class='num'>1578</td><td class='num'>-9.2%</td><td>2 / 2</td></tr>
+<tr><td>CI harness tp4, today (commit 544ca05c7a)</td><td>1 engine × 4 users</td><td class='num'>114.77</td><td class='num'>123.89</td><td class='num'>+7.9%</td><td class='num'>952</td><td class='num'>856</td><td class='num'>-10.1%</td><td>3 / 3</td></tr>
+<tr><td>runtron tp2, Friday</td><td>1 process × 8 users</td><td class='num'>71.07</td><td class='num'>79.53</td><td class='num'>+11.9%</td><td class='num'>3934</td><td class='num'>3128</td><td class='num'>-20.5%</td><td>5 / 6 (one tp2 AMX-off run excluded, early stop)</td></tr>
+<tr><td>runtron tp2, today</td><td>1 process × 8 users</td><td class='num'>70.23</td><td class='num'>79.53</td><td class='num'>+13.2%</td><td class='num'>3933</td><td class='num'>3148</td><td class='num'>-20.0%</td><td>6 / 6</td></tr>
+<tr><td>runtron tp4, Friday</td><td>1 process × 8 users</td><td class='num'>95.15</td><td class='num'>101.63</td><td class='num'>+6.8%</td><td class='num'>2458</td><td class='num'>2188</td><td class='num'>-11.0%</td><td>6 / 6</td></tr>
+<tr><td>runtron tp4, today</td><td>1 process × 8 users</td><td class='num'>96.74</td><td class='num'>103.35</td><td class='num'>+6.8%</td><td class='num'>2458</td><td class='num'>2199</td><td class='num'>-10.5%</td><td>6 / 6</td></tr>
+</table></div>
+<p class='take'>Friday's page: PR3879/new-PRs/PR1/Friday-morning-CI-results.html. The AMX gain measured by the CI harness is smaller in the nightly layout than on Friday: +8.4% / +7.9% today (2 or 4 users per engine, commit 544ca05c7a) against +13.9% / +13.2% on Friday (8 users on one engine, commit 47f6f2dceb). Insufficient data to say why: the two campaigns differ in users per engine and in commit; a run of both user counts at one commit would separate them.</p>
+<p class='take'>The one-engine users sweep of 2026-09-08 (same harness, qwen tp4, CPU attention, AMX-on, the canonical build of commit 60d66d9c04, that is the AMX kernels without any extra copy of the attention cache; placement --instance 0,2 on socket 0, the other half of the machine; exec/results/g1-20260908) gave 189.3 TPS per user at 1 user, 159.3 at 2, 121.8 at 4 and 78.5 at 8. Fewer users per engine means a higher per-user rate, which is why the nightly layout's numbers sit far above Friday's 8-users-on-one-engine numbers. Today's socket-1 AMX-on cell at 4 users (123.9) is +1.7% from the sweep's 4-user value (121.8), a different commit and socket.</p>
+<h2>How to read these numbers</h2>
+<ul>
+<li><b>Same binary, three environments.</b> Every arm runs the binary built from the branch head. The arms differ only in two environment variables (USE_HW_ATTN, TRON_AMX_DISABLE). The FPGA-attention arm is our substitute for the nightly's main-branch package. It matches the nightly in placement (tp4 copied from the production unit file, tp2 derived from it), users per engine, speculative decoding off (TRON_USE_SPECULATION=0 here; the nightly's job exports SYSTEM_CI_SPECULATION=0), FUSE settings and log level. Differences that remain (from the campaign design; none removable on our binaries):
+<ul class="inner">
+<li>the build: our branch commit 544ca05c7a against the main-branch package 2026.09.11-632c6181;</li>
+<li>the proxy hop: our clients talk to each engine directly, the nightly's requests pass through Caddy;</li>
+<li>the client host: ours runs on delphi-3bda itself, pinned to cores no engine uses (87-95 and 231-239), the nightly's on host system-ci-runner;</li>
+<li>the arrival pattern: each of our clients starts its users 0.1 s apart (tp2: 0 and 0.1 s per engine; tp4: 0 to 0.3 s), the nightly starts 8 users over 0.7 s through one proxy;</li>
+<li>the spread of users over engines: assumed even (2 or 4 per engine) from the nightly's per-user values, not read from the proxy;</li>
+<li>the prompts: each client picks conversation number (round × users + user) from the sharegpt set, so both tp2 clients send the same 20 conversations (one copy to each engine) and the tp4 client 40, where the nightly's one 8-user client sends 80 different ones; all are cut to 1024 tokens and the decode length is fixed at 1536;</li>
+<li>the two tp2 clients are not round-synchronized: the slower engine's last rounds run after the other engine has finished and sits idle; the nightly's one client starts every round for all 8 users together;</li>
+<li>the second socket: the nightly's engines on socket 0 run at the same time as its socket-1 engines; our half has no socket-0 engines.</li>
+</ul></li>
+<li><b>What the fidelity check can and cannot show.</b> We count our set-up as reproducing the nightly when the FPGA-attention arm's mean decode rate is within ±5% of the nightly's value of 2026-09-11; the threshold is a choice made while writing this page, not a measured noise figure, and the reference is one nightly run. Measured: tp2 repetitions +3.7%, +3.7%, +3.5%; tp4 repetitions -0.1%, +6.5%, +7.4% (the tp4 mean +4.6% is inside the threshold, two of three repetitions are outside it). A pass means our set-up measures decode rate the way the nightly does, so on vs fpga predicts the nightly's change with one binary on both sides; the remaining gap adds to the error of the prediction. The nightly's TTFT is NOT reproduced: our FPGA-attention arm gives 761 ms (tp2) and 839 ms (tp4) against the nightly's 507 and 635 ms (+50.1% / +32.2%), although the nightly's value contains an extra proxy hop. Hypothesis: the nightly's 8 users arrive 0.1 s apart across 4 (or 2) engines, so the users that share one engine arrive about 0.4 s apart and are prefilled one after the other, while our 2 or 4 users of one engine arrive 0.1 s apart and are prefilled together, which lengthens the wait of every user; the measurement that would settle it is one CI-harness cell per engine with the stagger set to 0.4 s. Until then the TTFT prediction (on vs fpga) is less certain than the TPS prediction.</li>
+<li><b>Run order.</b> Inside every repetition the arms run in the same order (runtron: off, on; CI harness: off, on, fpga), never reversed, and every run starts a fresh process. A drift that changes between repetitions (the machine speeding up or slowing down over the campaign) would show as per-repetition deltas that differ from one another (Exact numbers table). An effect of the position inside a repetition that repeats identically every time cannot be separated from the arm effect in these data; one repetition in reversed order would settle it (Insufficient data). Evidence against a large position effect: the tp2 CI on-vs-off deltas agree within 0.5 points across the three repetitions spread over 40 minutes, while the 1-minute load average (the number of runnable threads; the machine has 288 hardware threads) fell from 91 at the first runtron run, 2.5 minutes after the 587-second build ended, to 6 to 16 for the later runs.</li>
+<li><b>Spread and resolution.</b> Spread = the largest value of one arm's repetitions divided by the smallest, minus one. Decode TPS: runtron tp2 AMX-off 0.3%; runtron tp2 AMX-on 0.5%; runtron tp4 AMX-off 8.3%; runtron tp4 AMX-on 5.6%; CI tp2 AMX-off 0.2%; CI tp2 AMX-on 0.6%; CI tp2 FPGA attention 0.2%; CI tp4 AMX-off 8.2%; CI tp4 AMX-on 4.7%; CI tp4 FPGA attention 7.5%. The tp2 CI cells repeat within 0.6%; the tp4 cells and the runtron tp4 cells spread by 5 to 8%, so their changes carry the wider thresholds printed under the Exact numbers table. 36 of the 36 per-repetition on-vs-off comparisons (runtron and CI, TPS and TTFT) favour AMX-on.</li>
+<li><b>The other half of the machine.</b> Bill's socket-0 work can run at the same time as our cells; the machine line at the start of every run (Provenance) shows his process count and CPU so that a disturbed cell can be identified. Memory and cards are per socket.</li>
+</ul>
+<h2>Provenance</h2><dl>
+<dt>Source</dt><dd>branch jhan-amx-p0, commit 544ca05c7a954f892f0e23ccb465f74ad46bea5e (2026-09-11 09:23:32 -0700 Merge branch &#x27;main&#x27; into jhan-amx-p0)</dd>
+<dt>Build</dt><dd>cmake --preset cross-avx512 -DBUILD_INGEST_MODELS=ON -DTRON_AMX_DISPATCH=ON -DCMAKE_CXX_FLAGS= ; targets runtron rinzler; built 2026-09-13T11:29:37Z in 587 s on cpus 72-143,216-287<br>09c4b6b2129dd722a737f57cd0f7c81f9741e619bb4b639f29f48eb01d08eb68  gen/runtron.p0perf13<br>67e559b1777b7081315b574180340c8d4e7f1de772a2fdc3295a6a682ca4394c  gen/rinzler.p0perf13<br>2026.09.13-544ca05c</dd>
+<dt>Placement tp2, runtron and CI engine 0 (key 2a, --instance 2,4, port 13100, launcher cores 73,217)</dt><dd><code>--instance 2,4 --devices 90:00.0,93:00.0 --app-cores 223-224,96-101,120-125,225-226,102-107,126-131 --dev-cores 75,76 --numa 1 --nr_hugepages 128</code></dd>
+<dt>Placement tp2, CI engine 1 (key 2b, port 13101, launcher cores 74,218, 2 users)</dt><dd><code>--instance 3,4 --devices b9:00.0,bc:00.0 --app-cores 227-228,108-113,132-137,229-230,114-119,138-143 --dev-cores 77,78 --numa 1 --nr_hugepages 128</code></dd>
+<dt>Placement tp4, runtron and CI engine (--instance 1,2, port 13100, launcher cores 73,217,74,218)</dt><dd><code>--instance 1,2 --devices 90:00.0,93:00.0,b9:00.0,bc:00.0 --app-cores 223-224,96-101,120-125,225-226,102-107,126-131,227-228,108-113,132-137,229-230,114-119,138-143 --dev-cores 75,76,77,78 --numa 1 --nr_hugepages 256</code>. This is the same string as the RZ_CLI_ARGS line (without the --model, --port and --hugepage_file words) of the production unit file /etc/rinzler/instance-1.env as read on delphi-3bda at 06:11 UTC on 2026-09-13 and pasted into the session; the paste is archived as exec/results/p0perf-20260913/platformd-instance-1.env.txt, and its CPUAFFINITY line (CPUAFFINITY=73,217,74,218) is the launcher core set used here. Match checked by this generator: yes.</dd>
+<dt>Derived placements</dt><dd>The two tp2 engine placements and their launcher cores are the two halves of the tp4 lists (cards 90/93 with cores 223-224,96-101,120-125,225-226,102-107,126-131, dev cores 75,76, launcher cores 73,217; cards b9/bc with the remaining cores, dev cores 77,78, launcher cores 74,218). The production unit files for a tp2 model were not read. Engine 0's placement is the same tp2 placement Friday's runs used (Friday's page, Provenance); tron logged 'Configured instance 2,4 using resource map' and 'Configured instance 3,4 using resource map' for the two engines (cells/*tp2*/proof.txt).</dd>
+<dt>Environment</dt><dd><code>env -u SYSTEM_CONFIG</code> on every tron process. rinzler engines get the production environment (<code>TRON_USE_SPECULATION=0 RZ_FUSE_MOUNT_PRESCOPED=1 RZ_ENABLE_SAVE_TOKENS=1</code>, a FUSE mount path per port, launcher cores per engine via taskset) plus the arm: off = <code>USE_HW_ATTN=0 TRON_AMX_DISABLE=1</code>, on = <code>USE_HW_ATTN=0</code>, fpga = <code>TRON_AMX_DISABLE=1</code> with USE_HW_ATTN unset. Log level: <code>TRON_LOG_LEVEL=debug SPDLOG_LEVEL=debug</code> (the login environment's values). The production tp4 unit file (archived paste, see above) sets neither variable, and tron's default when TRON_LOG_LEVEL is unset is debug (src/system/spdlog.cpp), so the production tp4 engine logs at the same level; the tp2 unit files were not read.</dd>
+<dt>Harness clients</dt><dd>systems_test 470aca1 testlib/tps.py through exec/more-testing-r1/st_perf.py --users 2 (tp2, one client per engine, both at the same time) or --users 4 (tp4), pinned with taskset to cores 87-95,231-239 (socket-1 cores no engine uses), each talking to its engine directly at http://delphi-3bda:1310x/v1; the CI results database is replaced by a stub that writes nothing. Per-engine results are pooled by exec/p0perf-20260913/combine.py. The nightly's job ran systems_test commit efb2d985; its testlib/tps.py is identical to 470aca1's.</dd>
+<dt>runtron command</dt><dd><code>runtron.p0perf13 stream-generate-text -m &lt;model&gt; &lt;placement&gt; --hugepage_file /dev/hugepages/amx-p0perf13 -o --prompt-length 1024 -l 256 -u 8</code></dd>
+<dt>Machine</dt><dd>delphi-3bda, our half (socket 1, cards 90/93/b9/bc). The production rinzler engines the nightly had left running were idle (no request lines in their journal, no non-idle statistics, no remote connections for 10 minutes) and were stopped at 2026-09-13T11:31:47Z UTC by the standing rule that stops idle production engines after 10 minutes without client requests; they were not restarted. Free 1 GiB hugepages afterwards: 512 of 512. Machine line at the start of every run: load average over 1, 5 and 15 minutes (the number of runnable threads; the machine has 288 hardware threads), free hugepages, Bill's process count and his summed CPU percent:</dd>
+</dl><div class='tw'><table><tr><th>run</th><th>machine line at start</th></tr>
+<tr><td>runtron tp2 off rep1</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:32:08Z load=91.10 129.58 134.98 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 off rep2</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:35:59Z load=13.36 63.84 106.65 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 off rep3</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:39:50Z load=8.20 33.65 84.88 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 off rep4</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:43:38Z load=12.03 20.86 68.55 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 off rep5</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:47:25Z load=8.48 14.03 55.27 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 off rep6</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:51:13Z load=12.16 11.36 45.17 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 on rep1</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:32:55Z load=42.37 110.35 128.15 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 on rep2</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:36:44Z load=11.47 56.98 102.53 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 on rep3</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:40:37Z load=8.54 30.11 81.26 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 on rep4</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:44:23Z load=10.30 19.10 65.69 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 on rep5</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:48:10Z load=6.49 12.71 52.87 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp2 on rep6</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:51:59Z load=9.73 10.79 43.20 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp2 off rep1 (done)</td><td><code>load=12.75 10.70 37.38 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp2 off rep2 (done)</td><td><code>load=46.43 45.57 43.36 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp2 off rep3 (done)</td><td><code>load=42.23 45.01 44.63 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp2 on rep1 (done)</td><td><code>load=45.15 27.26 39.22 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp2 on rep2 (done)</td><td><code>load=47.09 47.01 44.20 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp2 on rep3 (done)</td><td><code>load=46.93 47.25 45.52 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp2 fpga rep1 (done)</td><td><code>load=46.35 35.78 40.50 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp2 fpga rep2 (done)</td><td><code>load=46.70 47.82 44.91 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp2 fpga rep3 (done)</td><td><code>load=46.69 47.55 45.83 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 off rep1</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:33:40Z load=22.42 95.54 122.30 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 off rep2</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:37:28Z load=8.05 49.66 97.89 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 off rep3</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:41:20Z load=6.55 26.56 77.63 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 off rep4</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:45:06Z load=9.43 17.57 62.96 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 off rep5</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:48:54Z load=5.53 11.58 50.58 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 off rep6</td><td><code>env=TRON_AMX_DISABLE=1 prompt=1024 len=256 users=8 2026-09-13T11:52:43Z load=9.52 10.56 41.76 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 on rep1</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:34:51Z load=16.09 77.88 114.18 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 on rep2</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:38:39Z load=10.86 40.91 91.06 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 on rep3</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:42:29Z load=11.40 23.67 73.15 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 on rep4</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:46:18Z load=11.88 16.15 59.14 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 on rep5</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:50:02Z load=10.83 11.56 47.91 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>runtron tp4 on rep6</td><td><code>env=TRON_AMX_DISABLE unset prompt=1024 len=256 users=8 2026-09-13T11:53:54Z load=12.00 10.64 39.49 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp4 off rep1 (done)</td><td><code>load=45.09 39.62 41.18 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp4 off rep2 (done)</td><td><code>load=45.59 47.43 45.12 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp4 off rep3 (done)</td><td><code>load=45.02 46.81 45.73 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp4 on rep1 (done)</td><td><code>load=48.27 44.56 42.59 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp4 on rep2 (done)</td><td><code>load=47.73 47.52 45.36 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp4 on rep3 (done)</td><td><code>load=48.04 47.50 45.95 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp4 fpga rep1 (done)</td><td><code>load=47.32 45.80 43.22 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp4 fpga rep2 (done)</td><td><code>load=47.32 46.96 45.27 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+<tr><td>CI tp4 fpga rep3 (done)</td><td><code>load=47.48 47.45 45.98 hugepages_free=512 bill_procs=0 bill_cpu_pct=0</code></td></tr>
+</table></div>
+<p class='take'>bill_procs=0 and bill_cpu_pct=0 in 42 of 42 lines; hugepages_free=512 in 42 of 42 lines. The first runtron line (load 91) follows the 587-second build on our cores that ended 11:29:37 UTC.</p>
+<h2>Raw data</h2>
+<ul>
+<li>exec/results/p0perf-20260913/rt-results.txt (runtron result lines per run), rt/*.log (full runtron output per run)</li>
+<li>exec/results/p0perf-20260913/cells/&lt;model&gt;__&lt;arm&gt;__rep&lt;N&gt;/ (perf.json pooled, perf-e&lt;k&gt;.json and perf-e&lt;k&gt;.log per engine, rinzler-e&lt;k&gt;.log, meta.json, proof.txt, STATUS)</li>
+<li>exec/results/p0perf-20260913/summary.json, summary.md (exec/p0perf-20260913/summarize.py); build.txt; platformd-instance-1.env.txt (the production unit file as pasted)</li>
+<li>the nightly's reference numbers: exec/results/p0perf-20260911/ci-reference-20260911.json and its job log exec/results/p0perf-20260911/ci-run-34559196745.log (run 34559196745)</li>
+<li>campaign: exec/p0perf-20260913/campaign.sh, rz.sh, launch.sh, combine.py; log exec/logs/p0perf-20260913.log; this page: exec/p0perf-20260913/gen_report.py</li>
+</ul>
+</main>
