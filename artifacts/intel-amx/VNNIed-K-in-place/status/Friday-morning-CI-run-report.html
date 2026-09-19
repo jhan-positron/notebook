@@ -1,0 +1,584 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/VNNIed-K-in-place/status/Friday-morning-CI-run-report.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/VNNIed-K-in-place/status/Friday-morning-CI-run-report.html
+-->
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Friday morning CI run</title>
+<style>
+:root{color-scheme:light;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;--grid:#e1e0d9;--surf:#fcfcfb;--page:#f9f9f7;--base:#2a78d6;--target:#eb6834;--nightly:#898781}
+html,body{background:var(--page);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0}
+main{max-width:1080px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:24px;margin:0 0 4px} h2{font-size:18px;margin:36px 0 8px;border-bottom:1px solid var(--grid);padding-bottom:4px} h3{font-size:15px;margin:20px 0 6px}
+p,li{line-height:1.45;font-size:14px} .sub{color:var(--ink2);font-size:13px}
+.short{background:var(--surf);border:1px solid var(--grid);border-radius:8px;padding:12px 16px;margin:16px 0}
+.short p{margin:6px 0}
+table{border-collapse:collapse;font-size:12.5px;margin:8px 0 16px;background:var(--surf)} th,td{border:1px solid var(--grid);padding:4px 8px;text-align:left;vertical-align:top} th{color:var(--ink2);font-weight:600}
+td:nth-child(n+2){font-variant-numeric:tabular-nums} tr.flag td{background:#fff4ee}
+.fig{background:var(--surf);border:1px solid var(--grid);border-radius:8px;padding:8px;margin:12px 0}
+.legend{font-size:12px;color:var(--ink2);margin:4px 0 8px} .legend span{margin-right:16px} .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.take{font-size:13px;color:var(--ink2);margin:4px 0 0 8px}
+code{font-size:12px;background:#f1f0ec;padding:1px 4px;border-radius:3px}
+.gloss dt{font-weight:600;font-size:13px;margin-top:6px} .gloss dd{margin:0 0 0 16px;font-size:13px;color:var(--ink2)}
+</style></head><body><main>
+<h1>Friday morning CI run: the nightly perf phase by hand, base vs AMX + VNNI-K target</h1>
+<p class="sub">delphi-3bda, whole machine, 2026-09-18 after the nightly. Generated 2026-09-18 18:51 UTC by exec/ci-mimic-20260918/gen_report.py from the run records.</p>
+
+<div class="short"><h2 style="margin-top:0;border:0">Short version</h2>
+<p>The base run, on the nightly's own package (2026.09.18-3faba6d0) and through the nightly's client path, gave TPS (decode tokens per second per user) within 5.3 % of the same-day nightly on all 12 configs, and no config fails the fidelity rule of section 2.</p><p>The target package (PR #4424, which stores the K cache in the layout the AMX instructions read, built with AMX turned on) changes TPS by a resolved amount (larger than the night-to-night noise, section 3) on 4 of 12 configs: qwen-3-4b tp4 @8u -11.0%, qwen-3-4b tp2 @8u -5.0%, llama-3.2-3b fast tp2 @32u -3.7% (not trusted, see the caveats), llama-3.3-70b good tp2 @4u +1.1%, while llama-3.1-8b, where the AMX kernel ran (30.1 billion AMX-busy cycles against 0 on base), changes only +0.8%.</p><p>Read the caveats first: the client host was CPU-saturated by other containers for most of the base run and the first five target configs, and with a single run per arm, differences smaller than a config's night-to-night band are not resolved.</p>
+</div>
+
+<h2>Words used here</h2>
+<dl class="gloss">
+<dt>nightly, CI, systems_test, CI runner</dt><dd>CI = continuous integration, the automated nightly test job. The nightly is the systems_test job "System CI (Rinzler 72-core Intel system OCI version)" that runs on delphi-3bda (the 72-core Intel Granite Rapids test machine) every night at 03:30 UTC. systems_test is the repository that holds the system tests. The CI runner is the machine that runs the nightly's client code. This page repeats the nightly's perf phase by hand.</dd>
+<dt>arm, config</dt><dd>An arm is one of the two packages under test, base or target, run once through all configs. A config is one row of the nightly's perf list: a model, its tensor-parallel width and a user count, for example llama-3.1-8b good tp2 @8u.</dd>
+<dt>harness</dt><dd>The nightly's client code (systems_test scripts/perf.py and testlib/tps.py). It provisions each model, starts the users' requests, and computes TPS and TTFT. The same code produced every number here.</dd>
+<dt>platformd, rinzler@N, engine, Caddy</dt><dd>platformd is the daemon on the machine that writes one env file per engine and starts the rinzler@N systemd units. rinzler is the production tron server, and one running rinzler is one engine. Caddy is the port-80 proxy in front of the engines. It sends each new user to the engine with the fewest connections.</dd>
+<dt>deb, preset, PR</dt><dd>The deb is the tron apt package the nightly installs. The preset is the CMake build recipe ("deb") that builds it. PR = pull request. PR #4424 is the VNNI-K change (branch jhan-amx-vnniK).</dd>
+<dt>base</dt><dd>The package the nightly installed on 2026-09-18 (2026.09.18-3faba6d0). It contains no AMX code. The deb preset never turned the AMX option on.</dd>
+<dt>target</dt><dd>Our package 2026.09.18-29a8a547-jhan-ci-mimic-target. It is PR #4424 merged into the same main commit as the nightly's package, built with the deb preset carrying TRON_AMX_DISPATCH=ON and TRON_K_VNNI=ON.</dd>
+<dt>AMX, VNNI-K, K cache, KV head, kv_mul, head size</dt><dd>AMX = Intel Advanced Matrix Extensions, the tile matrix instructions of Granite Rapids CPUs. The AMX kernel accelerates software attention for models with a head size of 128 elements and 4 query heads per KV head (kv_mul = 4). A KV head is one key/value head of attention that several query heads share. The K cache is the stored keys of all earlier tokens. VNNI-K = storing the K cache in the pair-interleaved layout the AMX instructions read (two consecutive tokens side by side), the change of PR #4424.</dd>
+<dt>FPGA attention, CPU attention, ingested, USE_HW_ATTN</dt><dd>Ingested models (models converted by tron's ingest compiler) run attention on the FPGA cards (Positron's accelerator cards) by default; here that is qwen-3-4b and gpt-oss. gemma-4-31b is ingested but has no FPGA attention (head size 256). It therefore runs attention on the CPU. Hand-written models (models coded by hand in tron) run attention on the CPU, where AMX and VNNI-K act. USE_HW_ATTN is the environment variable that would force one or the other. It was unset, as in the nightly.</dd>
+<dt>tp2, tp4, @Nu, round</dt><dd>tp2 and tp4 = tensor-parallel width, the number of FPGA cards one engine uses (2 or 4). The machine's 8 cards therefore give 4 or 2 engines. @Nu = N concurrent users. A round is one pass in which every user sends one request. Every config runs 10 rounds with fixed prompts.</dd>
+<dt>TPS, TTFT, slowest user, prefill</dt><dd>TPS = decode tokens per second per user, measured between generated token 896 and 1024 (2 and 333 for llama-3b), mean over users and rounds. TTFT = time to first token in ms, measured on the client. Slowest user = the minimum TPS sample of a config. Prefill = processing the prompt before the first token.</dd>
+<dt>paired t, 95 % interval, z, sd, 13-night band, Slack reports</dt><dd>Paired t = the mean of the 10 per-round differences divided by its standard error. The prompts are fixed. Round r of one run therefore pairs with round r of the other. The 95 % interval is the confidence interval of that mean. sd = standard deviation. The Slack reports are the summary messages the nightly posts to a Slack channel. The 13 reports of 2026-09-05 to 09-17 give each config a mean and sd. z = (base minus the 13-night mean) / the 13-night sd. The band drawn is the 13-night mean +/- 2 sd.</dd>
+<dt>thresholds, granite_rapids_72_rinzler</dt><dd>The static goals are the mean-TPS and slowest-user limits the Slack report applies (from systems_test scripts/system_ci.py for the machine profile named granite_rapids_72_rinzler). The ratchet thresholds are a second set in YAML files that tightens over time and is not shown in Slack.</dd>
+<dt>EXE.AMX_BUSY probe</dt><dd>A 20 s read of the CPU counter EXE.AMX_BUSY, which counts cycles in which the AMX unit was busy, summed over all engine processes while 4 short requests run. It runs before the benchmark of the probed config. It therefore does not touch the measured rounds.</dd>
+<dt>PSI, DUT, sha256, runtron, MoE, talos</dt><dd>PSI = Pressure Stall Information. Its "some" value is the share of time at least one task waited for a CPU. DUT = device under test, delphi-3bda. sha256 = a hash that identifies a file's content. runtron = tron's command-line tool, used in earlier campaigns instead of the server. MoE = mixture of experts. talos = the CI's metrics recorder, replaced here by a local stub.</dd>
+</dl>
+
+<h2>1. What ran</h2>
+<ul>
+<li><b>Machine and layout:</b> the whole of delphi-3bda. The marker file that reserves half the machine for Bill was removed at 01:10 UTC (and again before each relaunch, after the failed attempts had re-created it) and re-created for good at 17:58 UTC after the run. Engines were created by platformd for every config exactly as in the nightly: 4 engines for tp2, 2 for tp4, users spread by Caddy.</li>
+<li><b>Client:</b> the harness's own <code>test_performance</code> loop, run by <code>st_ci_perf.py</code> from claude-agentsrv (a container on the same network as the CI runner) with the same Python dependency lock file (uv.lock) as the CI runner, through <code>http://delphi-3bda.positron.internal/v1</code>. Speculative decoding (draft-token prediction) was off (SYSTEM_CI_SPECULATION=0), as in the nightly. Each config ran 10 rounds with a 1024-token prompt and 1536 generated tokens (llama-3b: 800 shared prompt tokens + 200 own prompt tokens, 845 generated tokens).</li>
+<li><b>Arms:</b> base = nightly package 2026.09.18-3faba6d0; target = 2026.09.18-29a8a547-jhan-ci-mimic-target. The swap used the nightly's own sequence (apt-get remove, apt-get install), and the nightly's package was reinstalled at the end.</li>
+<li><b>Reference:</b> the 2026-09-18 nightly run 35303980268 (package 2026.09.18-3faba6d0) and the 13 Slack reports 2026-09-05 to 09-17.</li>
+</ul>
+<h3>Deviations from the real nightly (recorded by the driver)</h3>
+<ul><li>perf phase only</li><li>ssh as jhan (key) instead of positron</li><li>talos recording stub</li><li>client host = claude-agentsrv</li><li>layout snapshots after provisioning, AMX probe before selected benchmarks</li>
+<li>The nightly runs 25 min of functional tests first, then perf, then MMLU Pro (an accuracy benchmark) and a 3 h soak (a long steady-load test). Here the perf phase followed the nightly's soak (base) or the package swap (target).</li>
+<li>One run per arm, one nightly for the same-day comparison. Effects below a config's 13-night band are therefore not resolved (section 3).</li>
+</ul>
+<h3>Caveats and incidents (read before the numbers)</h3><ul>
+<li><b>The client host (claude-agentsrv, the container that ran the harness) was CPU-saturated by other containers for most of the base arm and the first 5 target configs.</b> The CI runner (the machine that runs the nightly's client code) has no load record. The comparison assumes it is idle. Evidence, from the driver's snapshots unless noted:
+<ul>
+<li>Base arm (13:43 to 15:27 UTC): the 1-minute load average (runnable tasks, on a 32-CPU host) at the 14 snapshots ranged from 4.5 to 147. A spot check at 14:52 UTC showed 0 % idle CPU and a CPU pressure (PSI "some", the share of time at least one task waited for a CPU) of 93 %. The driver and its 8 workers used about 20 % of the host's CPU in that spot check (est.). The 1-minute load fell below 32 from about 15:00 UTC (configs 8 to 11), while the 15-minute load stayed at 62 to 98. The base arm has no PSI record of its own.</li>
+<li>Target arm: PSI 96 % to 99 % and load 97 to 258 at the start of configs 1 to 5 (llama-3b to llama-70b tp4, snapshots 16:13 to 17:06 UTC). The load fell during config 5. Configs 6, 7, 10, 11 and 12 (mixtral, qwen-2.5-32b, gemma-2, gpt-oss, gemma-4) ran at PSI 0 % to 4 % and load 2 to 25. The two qwen-3-4b configs (8 and 9) ran at PSI 27 % to 48 % and load 10 to 20.</li>
+</ul>
+Effects:
+<ul>
+<li>Rounds took up to 11 times longer on the client. Method: config wall time divided by 10 rounds. llama-3b: 42 s per round on base (5.6 times the nightly's 7.4 s) and 84 s on target (11.3 times).</li>
+<li>Each arm's perf phase took 103.8 min against the nightly's 79 min. The extra time sits inside the rounds, not in our provisioning path. For the 7 target configs from mixtral onward, our snapshots, probes and provisioning added 0.7 min in total against the nightly (7.3 against 6.7 min). The rounds themselves took 34.3 min against 28.5 min, about 20 % longer at equal TPS, even at PSI 0 % to 4 %.</li>
+<li>Short TTFTs are inflated: llama-3b 119 ms (base) and 62 ms (target) against 56 ms in the nightly.</li>
+<li>A stall can slow a whole round. Base llama-3b round 7 averaged 166 TPS (the other 9 rounds 194 to 200). Without that round the base mean is 197.67 TPS, equal to the nightly's 197.66. Base llama-70b tp4 round 4 averaged 27.3 TPS (others 29.9 to 30.3). So the base-vs-nightly gaps of -1.6 % (llama-3b) and -0.7 % (llama-70b tp4) are client artifacts. The other TPS means are within 2 sd of the 13 nights, except llama-70b tp2 @4u (z +5.1, where the same-day nightly was high by the same amount, see section 2) and qwen-2.5-32b (z +2.0, at the band edge).</li>
+<li>Stalls lower the slowest-user values: llama-3b 118 (base) and 163 (target) against 173 in the nightly, and llama-70b tp4 23.0 (base) against 29.6. llama-8b's base slowest user (109) is below the 13-night range (116 to 138). A stall is likely there but not shown in the logs.</li>
+<li>TTFT differences between target and base for the configs from mixtral onward compare unlike client conditions (base under load, target lightly loaded). Example: base qwen-3-4b tp2 TTFT was 556 ms, 47 ms above the 13-night mean (509.5 +/- 7.2 ms), while the target's 504 ms is a normal night's value. The TTFT marks on mixtral (-1.8 %) and qwen-3-4b tp2 (-9.4 %) therefore cannot be attributed to the package with this data. A package effect of that size is possible: the 2026-09-16 runtron cells with FPGA attention measured a TTFT gain of 34 to 58 ms on qwen-3-4b for PR #4424 alone.</li>
+</ul></li>
+<li><b>The two arms did not run one right after the other.</b> Base ran 13:43 to 15:27 UTC and target 16:13 to 17:57 UTC. Three launch failures happened, all in our scripts, none in the harness or on the DUT (device under test, delphi-3bda):
+<ul>
+<li>13:19 UTC: a bash flag-expansion bug in the campaign script. It aborted before any package step.</li>
+<li>13:35 UTC: a conflict between two event loops of asyncio (Python's asynchronous I/O library), one in our driver and one in the harness. The target was installed at 13:35 and the nightly's package restored at 13:36:50.</li>
+<li>15:29 UTC: a missing import after a mid-run edit of the driver. The target was installed at 15:27 and the nightly's package restored at 15:29:38. This failure caused the 47 min gap between the arms. The first two delayed the campaign's start.</li>
+</ul></li>
+<li><b>Target config 1 (llama-3b) ran on engines started at 15:28 UTC by the failed attempt.</b> Those four engines showed a deleted executable. The package file was replaced twice after they started. The sha256 (a hash that identifies a file's content) of each running executable equals the target package's rinzler (3ee9c8f0...). So they served the target binary. Every later target config except llama-70b tp2 @4u (which reuses the @8u engines by design) re-provisioned its engines. Every base config ran on the nightly's binary (sha 27e6883c...).</li>
+<li><b>gpt-oss-120b base vs nightly is +5.3 %</b>, the largest same-day difference. This config's 13 nightlies vary by 3.0 TPS (sd, standard deviation). The 09-18 nightly (101.16 TPS) is at the low end of that band. The base value 106.51 is 0.6 sd above the 13-night mean.</li>
+<li><b>Engine layout matched the nightly for every config:</b> 4 engines for tp2 and 2 for tp4 were running after every provisioning. The driver checked this. The harness itself only warns. The rinzler service file was the deb's unmodified copy in both arms (the hand edit that added --num-expert-replicas 750 on 09-17 was gone). The Intel Speed Select policy (the CPU core-priority setting) was verified before both arms: clos0 224 cores and clos3 64 cores, where clos = class of service, a core-priority group. The nightly logs do not record it.</li>
+<li><b>Reference limits.</b> gemma-4-31b has only 3 nightlies (09-15 to 09-17). Its "13-night" band is a 3-night band. The 09-18 nightly itself failed two Slack thresholds, llama-8b (mean 140.66 below 144, slowest 136.34 below 140) and llama-70b tp2 @8u (16.58 below 27), as on all 13 earlier nights. It passed qwen-2.5-32b for the first time (slowest user 35.03 against a goal of 35). The 13 earlier nights had 33.48 to 34.82.</li>
+</ul>
+
+
+<h2>2. Fidelity: does base reproduce the nightly?</h2>
+<p>Test: the same package, the same harness and the same engine layout, about 10 hours after the nightly's perf phase (04:05 to 05:24 UTC against 13:43 to 15:27 UTC). Observation: the chart and table below. Meaning: a dot inside the gray band is within 2 standard deviations of the last 13 nightlies.</p>
+<div class="legend"><span><i style="background:#2a78d6"></i>base vs the 2026-09-18 nightly</span><span><i style="background:#e1e0d9"></i>13-night mean +/- 2 sd, placed relative to the 09-18 nightly</span></div>
+<div class="fig"><svg viewBox="0 0 960 536" width="100%" style="max-width:960px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#fcfcfb" role="img" aria-label="Fidelity: base TPS relative to the same-day nightly">
+<text x="16" y="24" font-size="16" font-weight="600" fill="#0b0b0b">Fidelity: base TPS relative to the same-day nightly</text>
+<text x="16" y="44" font-size="12" fill="#52514e">Dot = base against the 2026-09-18 nightly, in percent. Gray band = the 13-night mean +/- 2 standard</text>
+<text x="16" y="60" font-size="12" fill="#52514e">deviations, drawn where it sits relative to that nightly (a band off centre means the 09-18 nightly itself</text>
+<text x="16" y="76" font-size="12" fill="#52514e">was off its usual value). A dot inside the band is within 2 sd of the 13 nights. * = fails the fidelity rule</text>
+<text x="16" y="92" font-size="12" fill="#52514e">of the text below.</text>
+<line x1="275.5" y1="110" x2="275.5" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="275.5" y="494" font-size="11" fill="#898781" text-anchor="middle">-10%</text>
+<line x1="326.4" y1="110" x2="326.4" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="326.4" y="494" font-size="11" fill="#898781" text-anchor="middle">-8%</text>
+<line x1="377.3" y1="110" x2="377.3" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="377.3" y="494" font-size="11" fill="#898781" text-anchor="middle">-6%</text>
+<line x1="428.2" y1="110" x2="428.2" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="428.2" y="494" font-size="11" fill="#898781" text-anchor="middle">-4%</text>
+<line x1="479.1" y1="110" x2="479.1" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="479.1" y="494" font-size="11" fill="#898781" text-anchor="middle">-2%</text>
+<line x1="530.0" y1="110" x2="530.0" y2="476" stroke="#898781" stroke-width="1"/>
+<text x="530.0" y="494" font-size="11" fill="#898781" text-anchor="middle">+0%</text>
+<line x1="580.9" y1="110" x2="580.9" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="580.9" y="494" font-size="11" fill="#898781" text-anchor="middle">+2%</text>
+<line x1="631.8" y1="110" x2="631.8" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="631.8" y="494" font-size="11" fill="#898781" text-anchor="middle">+4%</text>
+<line x1="682.7" y1="110" x2="682.7" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="682.7" y="494" font-size="11" fill="#898781" text-anchor="middle">+6%</text>
+<line x1="733.6" y1="110" x2="733.6" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="733.6" y="494" font-size="11" fill="#898781" text-anchor="middle">+8%</text>
+<line x1="784.5" y1="110" x2="784.5" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="784.5" y="494" font-size="11" fill="#898781" text-anchor="middle">+10%</text>
+<text x="530.0" y="516" font-size="12" fill="#52514e" text-anchor="middle">base minus nightly, percent of the nightly</text>
+<text x="240" y="135.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.2-3b fast tp2 @32u</text>
+<rect x="496.9" y="122.0" width="36.9" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 196.53 TPS +/- 2 sd (1.43 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="489.8" cy="131.0" r="7" fill="#fcfcfb"/>
+<circle cx="489.8" cy="131.0" r="5" fill="#2a78d6"><title>nightly 197.66 TPS, base 194.54 TPS, z -2.8</title></circle>
+<text x="499.8" y="135.0" font-size="12" font-weight="400" fill="#0b0b0b">-1.6%</text>
+<text x="240" y="165.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.1-8b good tp2 @8u</text>
+<rect x="494.4" y="152.0" width="37.3" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 139.73 TPS +/- 2 sd (1.03 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="507.1" cy="161.0" r="7" fill="#fcfcfb"/>
+<circle cx="507.1" cy="161.0" r="5" fill="#2a78d6"><title>nightly 140.66 TPS, base 139.40 TPS, z -0.6</title></circle>
+<text x="517.1" y="165.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.9%</text>
+<text x="240" y="195.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp2 @8u</text>
+<rect x="529.2" y="182.0" width="6.9" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 16.59 TPS +/- 2 sd (0.02 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="528.8" cy="191.0" r="7" fill="#fcfcfb"/>
+<circle cx="528.8" cy="191.0" r="5" fill="#2a78d6"><title>nightly 16.58 TPS, base 16.57 TPS, z -2.2</title></circle>
+<text x="538.8" y="195.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.0%</text>
+<text x="240" y="225.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp2 @4u</text>
+<rect x="491.7" y="212.0" width="24.3" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 27.64 TPS +/- 2 sd (0.13 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="534.8" cy="221.0" r="7" fill="#fcfcfb"/>
+<circle cx="534.8" cy="221.0" r="5" fill="#2a78d6"><title>nightly 27.93 TPS, base 27.98 TPS, z +5.1</title></circle>
+<text x="544.8" y="225.0" font-size="12" font-weight="400" fill="#0b0b0b">+0.2%</text>
+<text x="240" y="255.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp4 @4u</text>
+<rect x="500.1" y="242.0" width="66.5" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 30.18 TPS +/- 2 sd (0.39 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="511.8" cy="251.0" r="7" fill="#fcfcfb"/>
+<circle cx="511.8" cy="251.0" r="5" fill="#2a78d6"><title>nightly 30.14 TPS, base 29.92 TPS, z -1.3</title></circle>
+<text x="521.8" y="255.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.7%</text>
+<text x="240" y="285.0" font-size="12" fill="#52514e" text-anchor="end">mixtral-8x7b tp2 @8u</text>
+<rect x="512.8" y="272.0" width="23.4" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 79.12 TPS +/- 2 sd (0.36 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="527.5" cy="281.0" r="7" fill="#fcfcfb"/>
+<circle cx="527.5" cy="281.0" r="5" fill="#2a78d6"><title>nightly 79.29 TPS, base 79.21 TPS, z +0.5</title></circle>
+<text x="537.5" y="285.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.1%</text>
+<text x="240" y="315.0" font-size="12" fill="#52514e" text-anchor="end">qwen-2.5-32b fast tp2 @8u</text>
+<rect x="500.2" y="302.0" width="20.1" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 35.07 TPS +/- 2 sd (0.14 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="520.5" cy="311.0" r="7" fill="#fcfcfb"/>
+<circle cx="520.5" cy="311.0" r="5" fill="#2a78d6"><title>nightly 35.35 TPS, base 35.21 TPS, z +2.0</title></circle>
+<text x="530.5" y="315.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.4%</text>
+<text x="240" y="345.0" font-size="12" fill="#52514e" text-anchor="end">qwen-3-4b tp2 @8u</text>
+<rect x="500.7" y="332.0" width="40.6" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 185.67 TPS +/- 2 sd (1.49 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="527.3" cy="341.0" r="7" fill="#fcfcfb"/>
+<circle cx="527.3" cy="341.0" r="5" fill="#2a78d6"><title>nightly 186.33 TPS, base 186.13 TPS, z +0.6</title></circle>
+<text x="537.3" y="345.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.1%</text>
+<text x="240" y="375.0" font-size="12" fill="#52514e" text-anchor="end">qwen-3-4b tp4 @8u</text>
+<rect x="293.5" y="362.0" width="348.3" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 145.18 TPS +/- 2 sd (10.18 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="549.1" cy="371.0" r="7" fill="#fcfcfb"/>
+<circle cx="549.1" cy="371.0" r="5" fill="#2a78d6"><title>nightly 148.82 TPS, base 149.94 TPS, z +0.9</title></circle>
+<text x="559.1" y="375.0" font-size="12" font-weight="400" fill="#0b0b0b">+0.8%</text>
+<text x="240" y="405.0" font-size="12" fill="#52514e" text-anchor="end">gemma-2-9b fast tp2 @8u</text>
+<rect x="474.9" y="392.0" width="74.2" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 101.32 TPS +/- 2 sd (1.49 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="527.2" cy="401.0" r="7" fill="#fcfcfb"/>
+<circle cx="527.2" cy="401.0" r="5" fill="#2a78d6"><title>nightly 102.04 TPS, base 101.93 TPS, z +0.8</title></circle>
+<text x="537.2" y="405.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.1%</text>
+<text x="240" y="435.0" font-size="12" fill="#52514e" text-anchor="end">gpt-oss-120b tp4 @8u</text>
+<rect x="467.2" y="422.0" width="302.9" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 104.68 TPS +/- 2 sd (6.02 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="664.5" cy="431.0" r="7" fill="#fcfcfb"/>
+<circle cx="664.5" cy="431.0" r="5" fill="#2a78d6"><title>nightly 101.16 TPS, base 106.51 TPS, z +0.6</title></circle>
+<text x="674.5" y="435.0" font-size="12" font-weight="400" fill="#0b0b0b">+5.3%</text>
+<text x="240" y="465.0" font-size="12" fill="#52514e" text-anchor="end">gemma-4-31b tp2 @8u</text>
+<rect x="481.6" y="452.0" width="67.3" height="18" fill="#e1e0d9" rx="2"><title>13-night mean 37.87 TPS +/- 2 sd (0.50 TPS); the same-day nightly is at 0</title></rect>
+<circle cx="528.0" cy="461.0" r="7" fill="#fcfcfb"/>
+<circle cx="528.0" cy="461.0" r="5" fill="#2a78d6"><title>nightly 38.09 TPS, base 38.06 TPS, z +0.8</title></circle>
+<text x="538.0" y="465.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.1%</text>
+</svg></div>
+<table><thead><tr><th>config</th><th>nightly 09-18 TPS</th><th>base TPS</th><th>base vs nightly</th><th>paired t (10 rounds)</th><th>13-night mean &#177; sd</th><th>z</th><th>nightly TTFT ms</th><th>base TTFT ms</th><th>TTFT delta</th></tr></thead><tbody><tr class=""><td>llama-3.2-3b fast tp2 @32u</td><td>197.66</td><td>194.54</td><td>-1.6%</td><td>-1.1</td><td>196.53 &#177; 0.72 (n=13)</td><td>-2.8</td><td>56</td><td>119</td><td>+111.0%</td></tr><tr class=""><td>llama-3.1-8b good tp2 @8u</td><td>140.66</td><td>139.40</td><td>-0.9%</td><td>-2.5</td><td>139.73 &#177; 0.52 (n=13)</td><td>-0.6</td><td>664</td><td>611</td><td>-8.0%</td></tr><tr class=""><td>llama-3.3-70b good tp2 @8u</td><td>16.58</td><td>16.57</td><td>-0.0%</td><td>-0.8</td><td>16.59 &#177; 0.01 (n=13)</td><td>-2.2</td><td>9,428</td><td>9,500</td><td>+0.8%</td></tr><tr class=""><td>llama-3.3-70b good tp2 @4u</td><td>27.93</td><td>27.98</td><td>+0.2%</td><td>+1.3</td><td>27.64 &#177; 0.07 (n=13)</td><td>+5.1</td><td>4,673</td><td>4,567</td><td>-2.3%</td></tr><tr class=""><td>llama-3.3-70b good tp4 @4u</td><td>30.14</td><td>29.92</td><td>-0.7%</td><td>-0.7</td><td>30.18 &#177; 0.20 (n=13)</td><td>-1.3</td><td>4,907</td><td>4,927</td><td>+0.4%</td></tr><tr class=""><td>mixtral-8x7b tp2 @8u</td><td>79.29</td><td>79.21</td><td>-0.1%</td><td>-0.2</td><td>79.12 &#177; 0.18 (n=13)</td><td>+0.5</td><td>1,265</td><td>1,288</td><td>+1.8%</td></tr><tr class=""><td>qwen-2.5-32b fast tp2 @8u</td><td>35.35</td><td>35.21</td><td>-0.4%</td><td>-2.1</td><td>35.07 &#177; 0.07 (n=13)</td><td>+2.0</td><td>3,985</td><td>4,012</td><td>+0.7%</td></tr><tr class=""><td>qwen-3-4b tp2 @8u</td><td>186.33</td><td>186.13</td><td>-0.1%</td><td>-0.2</td><td>185.67 &#177; 0.74 (n=13)</td><td>+0.6</td><td>528</td><td>556</td><td>+5.4%</td></tr><tr class=""><td>qwen-3-4b tp4 @8u</td><td>148.82</td><td>149.94</td><td>+0.8%</td><td>+0.7</td><td>145.18 &#177; 5.09 (n=13)</td><td>+0.9</td><td>636</td><td>650</td><td>+2.1%</td></tr><tr class=""><td>gemma-2-9b fast tp2 @8u</td><td>102.04</td><td>101.93</td><td>-0.1%</td><td>-0.8</td><td>101.32 &#177; 0.74 (n=13)</td><td>+0.8</td><td>844</td><td>843</td><td>-0.1%</td></tr><tr class=""><td>gpt-oss-120b tp4 @8u</td><td>101.16</td><td>106.51</td><td>+5.3%</td><td>+3.4</td><td>104.68 &#177; 3.01 (n=13)</td><td>+0.6</td><td>1,095</td><td>1,100</td><td>+0.5%</td></tr><tr class=""><td>gemma-4-31b tp2 @8u</td><td>38.09</td><td>38.06</td><td>-0.1%</td><td>-0.4</td><td>37.87 &#177; 0.25 (n=3)</td><td>+0.8</td><td>5,429</td><td>5,440</td><td>+0.2%</td></tr></tbody></table>
+<h3>Reading rule and reference limits</h3>
+<ul>
+<li>A row is marked * only if all three hold: |z| &gt; 3 against the 13 nights, base at least 1 % from the 13-night mean, and base at least 1 % from the same-day nightly. The third condition was added after seeing the data, for the case below. The rule was therefore not fixed before the data.</li>
+<li>llama-70b tp2 @4u has z +5.1 (base 27.98 TPS against a 13-night mean of 27.64 +/- 0.07 TPS) but is not marked. The same-day nightly was also high, at 27.93 TPS (z +4.3), and base differs from it by +0.2 %. Both runs of that day were high by the same amount. That is not a fidelity miss.</li>
+<li>llama-3b (z -2.8) and llama-70b tp2 @8u (z -2.2) are outside 2 sd but inside 3 sd. The llama-3b gap is the client stall described in the caveats.</li>
+<li>llama-70b tp2 @8u has a 13-night sd of 0.01 TPS (Slack prints 2 decimals), and llama-3b's reference TTFT is an integer (56 or 57 ms). Tiny z values there carry no information.</li>
+<li>qwen-3-4b tp4 and gpt-oss tp4 vary 3 to 5 TPS night to night on their own, and gemma-4-31b has only 3 reference nights.</li>
+</ul>
+
+<h2>3. Effect: target (AMX + VNNI-K) vs base</h2>
+<p>Test: swap only the package, keep everything else. Observation: the two charts and the table. Meaning: see the rules below.</p>
+<ul>
+<li>A resolved TPS change (marked *) meets three conditions: its 95 % interval over the 10 paired rounds excludes zero, its size is at least 1 %, and its size is larger than the config's 13-night TPS band (2 sd).</li>
+<li>The band condition is needed. The nightlies of 2026-09-16 and 09-17, two consecutive packages without AMX, differ by +4.7 % on qwen-3-4b tp4 with a paired t of 4.2. The t test alone would flag too many changes on the noisy configs.</li>
+<li>The TTFT * uses the same three conditions with the config's 13-night TTFT band and a floor of 1 ms.</li>
+<li>TTFT differences for the configs from mixtral onward compare unlike client conditions (base under load, target lightly loaded, see the caveats). Their TTFT marks cannot be attributed to the package with this data.</li>
+</ul>
+<div class="legend"><span><i style="background:#eb6834"></i>target vs base</span></div>
+<div class="fig"><svg viewBox="0 0 960 536" width="100%" style="max-width:960px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#fcfcfb" role="img" aria-label="Effect: target TPS relative to base">
+<text x="16" y="24" font-size="16" font-weight="600" fill="#0b0b0b">Effect: target TPS relative to base</text>
+<text x="16" y="44" font-size="12" fill="#52514e">Dot = target vs base (percent); whisker = 95 % confidence interval from the 10 paired round means. * =</text>
+<text x="16" y="60" font-size="12" fill="#52514e">resolved: |t| &gt;= 2.26, |delta| &gt;= 1 %, and |delta| larger than the config's 13-night band (2 sd), because</text>
+<text x="16" y="76" font-size="12" fill="#52514e">two consecutive nightlies already differ by up to 4.7 % on the noisy configs. llama-3b's * is not trusted</text>
+<text x="16" y="92" font-size="12" fill="#52514e">(client-affected config, see the text).</text>
+<line x1="267.5" y1="110" x2="267.5" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="267.5" y="494" font-size="11" fill="#898781" text-anchor="middle">-15%</text>
+<line x1="355.0" y1="110" x2="355.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="355.0" y="494" font-size="11" fill="#898781" text-anchor="middle">-10%</text>
+<line x1="442.5" y1="110" x2="442.5" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="442.5" y="494" font-size="11" fill="#898781" text-anchor="middle">-5%</text>
+<line x1="530.0" y1="110" x2="530.0" y2="476" stroke="#898781" stroke-width="1"/>
+<text x="530.0" y="494" font-size="11" fill="#898781" text-anchor="middle">+0%</text>
+<line x1="617.5" y1="110" x2="617.5" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="617.5" y="494" font-size="11" fill="#898781" text-anchor="middle">+5%</text>
+<line x1="705.0" y1="110" x2="705.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="705.0" y="494" font-size="11" fill="#898781" text-anchor="middle">+10%</text>
+<line x1="792.5" y1="110" x2="792.5" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="792.5" y="494" font-size="11" fill="#898781" text-anchor="middle">+15%</text>
+<text x="530.0" y="516" font-size="12" fill="#52514e" text-anchor="middle">target minus base, percent of base</text>
+<text x="240" y="135.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.2-3b fast tp2 @32u</text>
+<line x1="405.2" y1="131.0" x2="523.8" y2="131.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="464.5" cy="131.0" r="7" fill="#fcfcfb"/>
+<circle cx="464.5" cy="131.0" r="5" fill="#eb6834"><title>base 194.54 TPS, target 187.26 TPS, paired t -2.5</title></circle>
+<text x="533.8" y="135.0" font-size="12" font-weight="600" fill="#0b0b0b">-3.7% *</text>
+<text x="240" y="165.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.1-8b good tp2 @8u</text>
+<line x1="533.4" y1="161.0" x2="555.1" y2="161.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="544.2" cy="161.0" r="7" fill="#fcfcfb"/>
+<circle cx="544.2" cy="161.0" r="5" fill="#eb6834"><title>base 139.40 TPS, target 140.53 TPS, paired t +3.0</title></circle>
+<text x="565.1" y="165.0" font-size="12" font-weight="400" fill="#0b0b0b">+0.8%</text>
+<text x="240" y="195.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp2 @8u</text>
+<line x1="532.0" y1="191.0" x2="534.2" y2="191.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="533.1" cy="191.0" r="7" fill="#fcfcfb"/>
+<circle cx="533.1" cy="191.0" r="5" fill="#eb6834"><title>base 16.57 TPS, target 16.60 TPS, paired t +6.4</title></circle>
+<text x="544.2" y="195.0" font-size="12" font-weight="400" fill="#0b0b0b">+0.2%</text>
+<text x="240" y="225.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp2 @4u</text>
+<line x1="545.3" y1="221.0" x2="554.3" y2="221.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="549.8" cy="221.0" r="7" fill="#fcfcfb"/>
+<circle cx="549.8" cy="221.0" r="5" fill="#eb6834"><title>base 27.98 TPS, target 28.30 TPS, paired t +10.0</title></circle>
+<text x="564.3" y="225.0" font-size="12" font-weight="600" fill="#0b0b0b">+1.1% *</text>
+<text x="240" y="255.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp4 @4u</text>
+<line x1="519.3" y1="251.0" x2="597.6" y2="251.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="558.5" cy="251.0" r="7" fill="#fcfcfb"/>
+<circle cx="558.5" cy="251.0" r="5" fill="#eb6834"><title>base 29.92 TPS, target 30.41 TPS, paired t +1.6</title></circle>
+<text x="607.6" y="255.0" font-size="12" font-weight="400" fill="#0b0b0b">+1.6%</text>
+<text x="240" y="285.0" font-size="12" fill="#52514e" text-anchor="end">mixtral-8x7b tp2 @8u</text>
+<line x1="517.0" y1="281.0" x2="534.0" y2="281.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="525.5" cy="281.0" r="7" fill="#fcfcfb"/>
+<circle cx="525.5" cy="281.0" r="5" fill="#eb6834"><title>base 79.21 TPS, target 79.01 TPS, paired t -1.2</title></circle>
+<text x="544.0" y="285.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.3%</text>
+<text x="240" y="315.0" font-size="12" fill="#52514e" text-anchor="end">qwen-2.5-32b fast tp2 @8u</text>
+<line x1="517.1" y1="311.0" x2="540.6" y2="311.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="528.8" cy="311.0" r="7" fill="#fcfcfb"/>
+<circle cx="528.8" cy="311.0" r="5" fill="#eb6834"><title>base 35.21 TPS, target 35.19 TPS, paired t -0.2</title></circle>
+<text x="550.6" y="315.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.1%</text>
+<text x="240" y="345.0" font-size="12" fill="#52514e" text-anchor="end">qwen-3-4b tp2 @8u</text>
+<line x1="415.2" y1="341.0" x2="468.4" y2="341.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="441.8" cy="341.0" r="7" fill="#fcfcfb"/>
+<circle cx="441.8" cy="341.0" r="5" fill="#eb6834"><title>base 186.13 TPS, target 176.75 TPS, paired t -7.5</title></circle>
+<text x="478.4" y="345.0" font-size="12" font-weight="600" fill="#0b0b0b">-5.0% *</text>
+<text x="240" y="375.0" font-size="12" fill="#52514e" text-anchor="end">qwen-3-4b tp4 @8u</text>
+<line x1="294.9" y1="371.0" x2="380.0" y2="371.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="337.4" cy="371.0" r="7" fill="#fcfcfb"/>
+<circle cx="337.4" cy="371.0" r="5" fill="#eb6834"><title>base 149.94 TPS, target 133.44 TPS, paired t -10.2</title></circle>
+<text x="390.0" y="375.0" font-size="12" font-weight="600" fill="#0b0b0b">-11.0% *</text>
+<text x="240" y="405.0" font-size="12" fill="#52514e" text-anchor="end">gemma-2-9b fast tp2 @8u</text>
+<line x1="518.9" y1="401.0" x2="547.3" y2="401.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="533.1" cy="401.0" r="7" fill="#fcfcfb"/>
+<circle cx="533.1" cy="401.0" r="5" fill="#eb6834"><title>base 101.93 TPS, target 102.11 TPS, paired t +0.5</title></circle>
+<text x="557.3" y="405.0" font-size="12" font-weight="400" fill="#0b0b0b">+0.2%</text>
+<text x="240" y="435.0" font-size="12" fill="#52514e" text-anchor="end">gpt-oss-120b tp4 @8u</text>
+<line x1="462.3" y1="431.0" x2="586.1" y2="431.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="524.2" cy="431.0" r="7" fill="#fcfcfb"/>
+<circle cx="524.2" cy="431.0" r="5" fill="#eb6834"><title>base 106.51 TPS, target 106.16 TPS, paired t -0.2</title></circle>
+<text x="596.1" y="435.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.3%</text>
+<text x="240" y="465.0" font-size="12" fill="#52514e" text-anchor="end">gemma-4-31b tp2 @8u</text>
+<line x1="518.8" y1="461.0" x2="530.5" y2="461.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="524.6" cy="461.0" r="7" fill="#fcfcfb"/>
+<circle cx="524.6" cy="461.0" r="5" fill="#eb6834"><title>base 38.06 TPS, target 37.94 TPS, paired t -2.1</title></circle>
+<text x="540.5" y="465.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.3%</text>
+</svg></div>
+<div class="fig"><svg viewBox="0 0 960 536" width="100%" style="max-width:960px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#fcfcfb" role="img" aria-label="Effect: target TTFT relative to base">
+<text x="16" y="24" font-size="16" font-weight="600" fill="#0b0b0b">Effect: target TTFT relative to base</text>
+<text x="16" y="44" font-size="12" fill="#52514e">Time to first token, mean over users and rounds; negative = faster. Whisker = 95 % CI over paired rounds.</text>
+<text x="16" y="60" font-size="12" fill="#52514e">The axis stops at 25 %: llama-3b's value is client-side noise and llama-70b tp2 @4u's TTFT falls into two</text>
+<text x="16" y="76" font-size="12" fill="#52514e">groups (0.3 s and 5.3 s) whose mix varies per run. From mixtral downward the base ran under client load and</text>
+<text x="16" y="92" font-size="12" fill="#52514e">the target on an idle client, so those rows compare unlike conditions.</text>
+<line x1="250.0" y1="110" x2="250.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="250.0" y="494" font-size="11" fill="#898781" text-anchor="middle">-25%</text>
+<line x1="298.0" y1="110" x2="298.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="298.0" y="494" font-size="11" fill="#898781" text-anchor="middle">-20%</text>
+<line x1="346.0" y1="110" x2="346.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="346.0" y="494" font-size="11" fill="#898781" text-anchor="middle">-15%</text>
+<line x1="394.0" y1="110" x2="394.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="394.0" y="494" font-size="11" fill="#898781" text-anchor="middle">-10%</text>
+<line x1="442.0" y1="110" x2="442.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="442.0" y="494" font-size="11" fill="#898781" text-anchor="middle">-5%</text>
+<line x1="490.0" y1="110" x2="490.0" y2="476" stroke="#898781" stroke-width="1"/>
+<text x="490.0" y="494" font-size="11" fill="#898781" text-anchor="middle">+0%</text>
+<line x1="538.0" y1="110" x2="538.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="538.0" y="494" font-size="11" fill="#898781" text-anchor="middle">+5%</text>
+<line x1="586.0" y1="110" x2="586.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="586.0" y="494" font-size="11" fill="#898781" text-anchor="middle">+10%</text>
+<line x1="634.0" y1="110" x2="634.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="634.0" y="494" font-size="11" fill="#898781" text-anchor="middle">+15%</text>
+<line x1="682.0" y1="110" x2="682.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="682.0" y="494" font-size="11" fill="#898781" text-anchor="middle">+20%</text>
+<line x1="730.0" y1="110" x2="730.0" y2="476" stroke="#e1e0d9" stroke-width="1"/>
+<text x="730.0" y="494" font-size="11" fill="#898781" text-anchor="middle">+25%</text>
+<text x="490.0" y="516" font-size="12" fill="#52514e" text-anchor="middle">target minus base, percent of base</text>
+<text x="240" y="135.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.2-3b fast tp2 @32u</text>
+<line x1="250.0" y1="131.0" x2="682.2" y2="131.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="250.0" cy="131.0" r="7" fill="#fcfcfb"/>
+<circle cx="250.0" cy="131.0" r="5" fill="#eb6834"><title>base 119 ms, target 62 ms</title></circle>
+<text x="740.0" y="135.0" font-size="12" font-weight="400" fill="#0b0b0b">-47.6% (CI &#177;68 %, off scale)</text>
+<text x="240" y="165.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.1-8b good tp2 @8u</text>
+<line x1="393.0" y1="161.0" x2="485.5" y2="161.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="439.3" cy="161.0" r="7" fill="#fcfcfb"/>
+<circle cx="439.3" cy="161.0" r="5" fill="#eb6834"><title>base 611 ms, target 579 ms</title></circle>
+<text x="495.5" y="165.0" font-size="12" font-weight="600" fill="#0b0b0b">-5.3% *</text>
+<text x="240" y="195.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp2 @8u</text>
+<line x1="470.8" y1="191.0" x2="499.1" y2="191.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="485.0" cy="191.0" r="7" fill="#fcfcfb"/>
+<circle cx="485.0" cy="191.0" r="5" fill="#eb6834"><title>base 9,500 ms, target 9,451 ms</title></circle>
+<text x="509.1" y="195.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.5%</text>
+<text x="240" y="225.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp2 @4u</text>
+<line x1="250.0" y1="221.0" x2="637.6" y2="221.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="327.5" cy="221.0" r="7" fill="#fcfcfb"/>
+<circle cx="327.5" cy="221.0" r="5" fill="#eb6834"><title>base 4,567 ms, target 3,794 ms</title></circle>
+<text x="647.6" y="225.0" font-size="12" font-weight="400" fill="#0b0b0b">-16.9% (CI &#177;32 %, off scale)</text>
+<text x="240" y="255.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp4 @4u</text>
+<line x1="477.9" y1="251.0" x2="495.4" y2="251.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="486.6" cy="251.0" r="7" fill="#fcfcfb"/>
+<circle cx="486.6" cy="251.0" r="5" fill="#eb6834"><title>base 4,927 ms, target 4,910 ms</title></circle>
+<text x="505.4" y="255.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.4%</text>
+<text x="240" y="285.0" font-size="12" fill="#52514e" text-anchor="end">mixtral-8x7b tp2 @8u</text>
+<line x1="461.1" y1="281.0" x2="484.7" y2="281.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="472.9" cy="281.0" r="7" fill="#fcfcfb"/>
+<circle cx="472.9" cy="281.0" r="5" fill="#eb6834"><title>base 1,288 ms, target 1,265 ms</title></circle>
+<text x="494.7" y="285.0" font-size="12" font-weight="600" fill="#0b0b0b">-1.8% *</text>
+<text x="240" y="315.0" font-size="12" fill="#52514e" text-anchor="end">qwen-2.5-32b fast tp2 @8u</text>
+<line x1="475.4" y1="311.0" x2="490.6" y2="311.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="483.0" cy="311.0" r="7" fill="#fcfcfb"/>
+<circle cx="483.0" cy="311.0" r="5" fill="#eb6834"><title>base 4,012 ms, target 3,982 ms</title></circle>
+<text x="500.6" y="315.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.7%</text>
+<text x="240" y="345.0" font-size="12" fill="#52514e" text-anchor="end">qwen-3-4b tp2 @8u</text>
+<line x1="356.2" y1="341.0" x2="442.8" y2="341.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="399.5" cy="341.0" r="7" fill="#fcfcfb"/>
+<circle cx="399.5" cy="341.0" r="5" fill="#eb6834"><title>base 556 ms, target 504 ms</title></circle>
+<text x="452.8" y="345.0" font-size="12" font-weight="600" fill="#0b0b0b">-9.4% *</text>
+<text x="240" y="375.0" font-size="12" fill="#52514e" text-anchor="end">qwen-3-4b tp4 @8u</text>
+<line x1="421.6" y1="371.0" x2="496.8" y2="371.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="459.2" cy="371.0" r="7" fill="#fcfcfb"/>
+<circle cx="459.2" cy="371.0" r="5" fill="#eb6834"><title>base 650 ms, target 629 ms</title></circle>
+<text x="506.8" y="375.0" font-size="12" font-weight="400" fill="#0b0b0b">-3.2%</text>
+<text x="240" y="405.0" font-size="12" fill="#52514e" text-anchor="end">gemma-2-9b fast tp2 @8u</text>
+<line x1="480.3" y1="401.0" x2="517.8" y2="401.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="499.0" cy="401.0" r="7" fill="#fcfcfb"/>
+<circle cx="499.0" cy="401.0" r="5" fill="#eb6834"><title>base 843 ms, target 851 ms</title></circle>
+<text x="527.8" y="405.0" font-size="12" font-weight="400" fill="#0b0b0b">+0.9%</text>
+<text x="240" y="435.0" font-size="12" fill="#52514e" text-anchor="end">gpt-oss-120b tp4 @8u</text>
+<line x1="443.2" y1="431.0" x2="512.8" y2="431.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="478.0" cy="431.0" r="7" fill="#fcfcfb"/>
+<circle cx="478.0" cy="431.0" r="5" fill="#eb6834"><title>base 1,100 ms, target 1,086 ms</title></circle>
+<text x="522.8" y="435.0" font-size="12" font-weight="400" fill="#0b0b0b">-1.3%</text>
+<text x="240" y="465.0" font-size="12" fill="#52514e" text-anchor="end">gemma-4-31b tp2 @8u</text>
+<line x1="485.6" y1="461.0" x2="492.8" y2="461.0" stroke="#eb6834" stroke-width="2" stroke-linecap="round"/>
+<circle cx="489.2" cy="461.0" r="7" fill="#fcfcfb"/>
+<circle cx="489.2" cy="461.0" r="5" fill="#eb6834"><title>base 5,440 ms, target 5,435 ms</title></circle>
+<text x="502.8" y="465.0" font-size="12" font-weight="400" fill="#0b0b0b">-0.1%</text>
+</svg></div>
+<table><thead><tr><th>config</th><th>base TPS</th><th>target TPS</th><th>target vs base</th><th>95 % interval (paired rounds)</th><th>paired t</th><th>13-night TPS band (2 sd)</th><th>base TTFT ms</th><th>target TTFT ms</th><th>TTFT delta</th><th>TTFT paired t</th></tr></thead><tbody><tr class="flag"><td>llama-3.2-3b fast tp2 @32u</td><td>194.54</td><td>187.26</td><td>-3.7% *</td><td>&#177;3.4 %</td><td>-2.5</td><td>&#177;0.7 %</td><td>119</td><td>62</td><td>-47.6%</td><td>-1.6</td></tr><tr class=""><td>llama-3.1-8b good tp2 @8u</td><td>139.40</td><td>140.53</td><td>+0.8%</td><td>&#177;0.6 %</td><td>+3.0</td><td>&#177;0.7 %</td><td>611</td><td>579</td><td>-5.3% *</td><td>-2.5</td></tr><tr class=""><td>llama-3.3-70b good tp2 @8u</td><td>16.57</td><td>16.60</td><td>+0.2%</td><td>&#177;0.1 %</td><td>+6.4</td><td>&#177;0.1 %</td><td>9,500</td><td>9,451</td><td>-0.5%</td><td>-0.8</td></tr><tr class="flag"><td>llama-3.3-70b good tp2 @4u</td><td>27.98</td><td>28.30</td><td>+1.1% *</td><td>&#177;0.3 %</td><td>+10.0</td><td>&#177;0.5 %</td><td>4,567</td><td>3,794</td><td>-16.9%</td><td>-1.2</td></tr><tr class=""><td>llama-3.3-70b good tp4 @4u</td><td>29.92</td><td>30.41</td><td>+1.6%</td><td>&#177;2.2 %</td><td>+1.6</td><td>&#177;1.3 %</td><td>4,927</td><td>4,910</td><td>-0.4%</td><td>-0.9</td></tr><tr class=""><td>mixtral-8x7b tp2 @8u</td><td>79.21</td><td>79.01</td><td>-0.3%</td><td>&#177;0.5 %</td><td>-1.2</td><td>&#177;0.5 %</td><td>1,288</td><td>1,265</td><td>-1.8% *</td><td>-3.3</td></tr><tr class=""><td>qwen-2.5-32b fast tp2 @8u</td><td>35.21</td><td>35.19</td><td>-0.1%</td><td>&#177;0.7 %</td><td>-0.2</td><td>&#177;0.4 %</td><td>4,012</td><td>3,982</td><td>-0.7%</td><td>-2.1</td></tr><tr class="flag"><td>qwen-3-4b tp2 @8u</td><td>186.13</td><td>176.75</td><td>-5.0% *</td><td>&#177;1.5 %</td><td>-7.5</td><td>&#177;0.8 %</td><td>556</td><td>504</td><td>-9.4% *</td><td>-4.7</td></tr><tr class="flag"><td>qwen-3-4b tp4 @8u</td><td>149.94</td><td>133.44</td><td>-11.0% *</td><td>&#177;2.4 %</td><td>-10.2</td><td>&#177;7.0 %</td><td>650</td><td>629</td><td>-3.2%</td><td>-1.9</td></tr><tr class=""><td>gemma-2-9b fast tp2 @8u</td><td>101.93</td><td>102.11</td><td>+0.2%</td><td>&#177;0.8 %</td><td>+0.5</td><td>&#177;1.5 %</td><td>843</td><td>851</td><td>+0.9%</td><td>+1.1</td></tr><tr class=""><td>gpt-oss-120b tp4 @8u</td><td>106.51</td><td>106.16</td><td>-0.3%</td><td>&#177;3.5 %</td><td>-0.2</td><td>&#177;5.7 %</td><td>1,100</td><td>1,086</td><td>-1.3%</td><td>-0.8</td></tr><tr class=""><td>gemma-4-31b tp2 @8u</td><td>38.06</td><td>37.94</td><td>-0.3%</td><td>&#177;0.3 %</td><td>-2.1</td><td>&#177;1.3 %</td><td>5,440</td><td>5,435</td><td>-0.1%</td><td>-0.5</td></tr></tbody></table>
+<h3>Reading the effects</h3><ul>
+<li><b>qwen-3-4b tp2 &#8722;5.0 % and tp4 &#8722;11.0 % (both resolved).</b> These two configs keep FPGA attention in the nightly setting. The AMX kernel therefore touches only the query positions the CPU still scores (positions 0 to 126 plus the most recent tokens not yet copied to HBM, the high-bandwidth memory on the FPGA card). The VNNI-K layout changes how the K cache is written and how the FPGA path reads it. The direction matches the 2026-09-16 runtron cells with FPGA attention. The size matches for tp4 (&#8722;11.0 % here, &#8722;9.7 % to &#8722;11.5 % there) but not for tp2 (&#8722;5.0 % here, &#8722;1.8 % to &#8722;2.2 % there). Under the nightly's static thresholds this turns qwen-3-4b tp4 from PASS to FAIL (133.4 TPS against a goal of 135).</li>
+<li><b>llama-3.1-8b +0.8 % (not resolved: below the 1 % floor).</b> AMX ran: the probe counted 30.1 billion AMX-busy cycles across the four engines, against 0 on base. The +17 % of 2026-09-16 came from 8 users on ONE engine with runtron. The nightly layout spreads the 8 users over 4 engines (2 per engine). Hypothesis, untested here: at 2 users per engine, attention is a small share of each decode step, and the kernel then has little to accelerate. The measurement that would test it is runtron at 2 users, AMX on against off. TTFT is 579 ms on target against 611 ms on base (&#8722;5.3 %). But base was already 53 ms below the same-day nightly (664 ms) on the same package. So the TTFT attribution is not isolated.</li>
+<li><b>llama-3.2-3b &#8722;3.7 % (flagged by the rule, but not trustworthy).</b> This 32-user config is the one the saturated client host affected most. Its rounds took 84 s on target against 42 s on base and 7 s in the nightly. The per-sample spread grew (sd 26.9 TPS on target, 25.1 on base, 22.4 in the nightly). The paired t is only &#8722;2.5 with a 95 % interval of &#177;3.4 %. Treat it as unresolved until a run from an idle client.</li>
+<li><b>llama-3.3-70b tp2 @4u +1.1 % (resolved, small).</b> A consistent difference with a narrow 95 % interval (t +10, &#177;0.3 %) on a CPU-attention model that gets only the VNNI-K layout (8 query heads per KV head, no AMX kernel). Its TTFT falls into two groups in the three nightlies with per-request data (09-16 to 09-18): per round, 0 to 4 of the 4 users see about 0.3 s and the rest about 5.3 s. Base had 6 fast requests of 40, the 09-18 nightly 5, target 12. The &#8722;16.9 % TTFT difference is that 12-against-6 count. Whether the count is a package effect is unresolved at one run per arm. The 13 nightly TTFT means (3418 to 4418 ms) imply about 7 to 15 fast requests of 40 per night (est.), a range that covers the target and sits one to two requests above base and the 09-18 nightly.</li>
+<li><b>Everything else is below the 1 % floor or not resolved.</b> A control config is one where no effect is possible.
+<ul>
+<li>llama-70b tp2 @8u +0.2 % (t +6.4, below the 1 % floor).</li>
+<li>llama-70b tp4 +1.6 % (95 % interval &#177;2.2 %).</li>
+<li>mixtral (AMX-eligible, MoE = mixture of experts) &#8722;0.3 %.</li>
+<li>qwen-2.5-32b &#8722;0.1 %.</li>
+<li>gemma-2 +0.2 %.</li>
+<li>gemma-4 &#8722;0.3 % (t &#8722;2.1).</li>
+<li>gpt-oss &#8722;0.3 % (interval &#177;3.5 %). The 09-16 runtron cells had gpt-oss at &#8722;5.0 % with n = 6 repetitions and FPGA attention. That did not repeat here.</li>
+<li>gemma-2, gemma-4 and gpt-oss have head sizes of 256, 256 and 64 elements. Neither AMX nor VNNI-K applies to them. Their near-zero differences are the expected result for control configs.</li>
+</ul></li>
+</ul>
+
+<h3>Which configs can react, and why</h3>
+<ul><li><b>llama-3.2-3b fast tp2 @32u</b>: CPU attention; VNNI-K layout in target (kv_mul 3, no AMX kernel)</li><li><b>llama-3.1-8b good tp2 @8u</b>: CPU attention; AMX kernel + VNNI-K in target</li><li><b>llama-3.3-70b good tp2 @8u</b>: CPU attention; VNNI-K layout in target (kv_mul 8)</li><li><b>llama-3.3-70b good tp2 @4u</b>: same engines as the @8u cell (no re-provisioning)</li><li><b>llama-3.3-70b good tp4 @4u</b>: CPU attention; VNNI-K layout in target</li><li><b>mixtral-8x7b tp2 @8u</b>: CPU attention; AMX kernel + VNNI-K in target</li><li><b>qwen-2.5-32b fast tp2 @8u</b>: CPU attention; VNNI-K layout in target (kv_mul 5)</li><li><b>qwen-3-4b tp2 @8u</b>: FPGA attention (nightly default); AMX only in the CPU share</li><li><b>qwen-3-4b tp4 @8u</b>: FPGA attention; night-to-night noisy (sd 5 TPS)</li><li><b>gemma-2-9b fast tp2 @8u</b>: head 256: neither AMX nor VNNI-K applies</li><li><b>gpt-oss-120b tp4 @8u</b>: FPGA attention; head 64: no AMX kernel; noisy (sd 3 TPS)</li><li><b>gemma-4-31b tp2 @8u</b>: head 256: neither applies; 3 nights of reference only</li></ul>
+
+<h2>4. Absolute numbers side by side</h2>
+<div class="legend"><span><i style="background:#898781"></i>nightly 2026-09-18</span><span><i style="background:#2a78d6"></i>base</span><span><i style="background:#eb6834"></i>target</span><span><i style="background:#e1e0d9"></i>13-night min to max</span></div>
+<div class="fig"><svg viewBox="0 0 960 568" width="100%" style="max-width:960px;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#fcfcfb" role="img" aria-label="Absolute TPS per config: nightly, base, target">
+<text x="16" y="24" font-size="16" font-weight="600" fill="#0b0b0b">Absolute TPS per config: nightly, base, target</text>
+<text x="16" y="44" font-size="12" fill="#52514e">Tokens per second per user, mean over users and rounds. The base-to-target connector is the change the</text>
+<text x="16" y="60" font-size="12" fill="#52514e">target package makes.</text>
+<text x="240" y="106.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.2-3b fast tp2 @32u</text>
+<line x1="250" y1="102.0" x2="920" y2="102.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="675.9" y="94.0" width="96.6" height="16" fill="#e1e0d9" rx="2"><title>13-night range 194.86 to 197.41</title></rect>
+<line x1="663.8" y1="102.0" x2="387.9" y2="102.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="782.1" cy="102.0" r="7" fill="#fcfcfb"/>
+<circle cx="782.1" cy="102.0" r="5" fill="#898781"><title>nightly: 197.66 TPS</title></circle>
+<circle cx="663.8" cy="102.0" r="7" fill="#fcfcfb"/>
+<circle cx="663.8" cy="102.0" r="5" fill="#2a78d6"><title>base: 194.54 TPS</title></circle>
+<circle cx="387.9" cy="102.0" r="7" fill="#fcfcfb"/>
+<circle cx="387.9" cy="102.0" r="5" fill="#eb6834"><title>target: 187.26 TPS</title></circle>
+<text x="782.1" y="117.0" font-size="10.5" fill="#52514e" text-anchor="middle">197.7</text>
+<text x="663.8" y="117.0" font-size="10.5" fill="#52514e" text-anchor="middle">194.5</text>
+<text x="387.9" y="117.0" font-size="10.5" fill="#52514e" text-anchor="middle">187.3</text>
+<text x="240" y="142.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.1-8b good tp2 @8u</text>
+<line x1="250" y1="138.0" x2="920" y2="138.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="387.9" y="130.0" width="339.6" height="16" fill="#e1e0d9" rx="2"><title>13-night range 138.75 to 140.40</title></rect>
+<line x1="521.6" y1="138.0" x2="754.5" y2="138.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="782.1" cy="138.0" r="7" fill="#fcfcfb"/>
+<circle cx="782.1" cy="138.0" r="5" fill="#898781"><title>nightly: 140.66 TPS</title></circle>
+<circle cx="521.6" cy="138.0" r="7" fill="#fcfcfb"/>
+<circle cx="521.6" cy="138.0" r="5" fill="#2a78d6"><title>base: 139.40 TPS</title></circle>
+<circle cx="754.5" cy="138.0" r="7" fill="#fcfcfb"/>
+<circle cx="754.5" cy="138.0" r="5" fill="#eb6834"><title>target: 140.53 TPS</title></circle>
+<text x="782.1" y="128.0" font-size="10.5" fill="#52514e" text-anchor="middle">140.7</text>
+<text x="521.6" y="153.0" font-size="10.5" fill="#52514e" text-anchor="middle">139.4</text>
+<text x="754.5" y="153.0" font-size="10.5" fill="#52514e" text-anchor="middle">140.5</text>
+<text x="240" y="178.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp2 @8u</text>
+<line x1="250" y1="174.0" x2="920" y2="174.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="390.9" y="166.0" width="391.2" height="16" fill="#e1e0d9" rx="2"><title>13-night range 16.57 to 16.61</title></rect>
+<line x1="387.9" y1="174.0" x2="677.4" y2="174.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="464.2" cy="174.0" r="7" fill="#fcfcfb"/>
+<circle cx="464.2" cy="174.0" r="5" fill="#898781"><title>nightly: 16.58 TPS</title></circle>
+<circle cx="387.9" cy="174.0" r="7" fill="#fcfcfb"/>
+<circle cx="387.9" cy="174.0" r="5" fill="#2a78d6"><title>base: 16.57 TPS</title></circle>
+<circle cx="677.4" cy="174.0" r="7" fill="#fcfcfb"/>
+<circle cx="677.4" cy="174.0" r="5" fill="#eb6834"><title>target: 16.60 TPS</title></circle>
+<text x="464.2" y="189.0" font-size="10.5" fill="#52514e" text-anchor="middle">16.58</text>
+<text x="387.9" y="189.0" font-size="10.5" fill="#52514e" text-anchor="middle">16.57</text>
+<text x="677.4" y="189.0" font-size="10.5" fill="#52514e" text-anchor="middle">16.60</text>
+<text x="240" y="214.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp2 @4u</text>
+<line x1="250" y1="210.0" x2="920" y2="210.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="387.9" y="202.0" width="129.9" height="16" fill="#e1e0d9" rx="2"><title>13-night range 27.54 to 27.79</title></rect>
+<line x1="617.7" y1="210.0" x2="782.1" y2="210.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="590.1" cy="210.0" r="7" fill="#fcfcfb"/>
+<circle cx="590.1" cy="210.0" r="5" fill="#898781"><title>nightly: 27.93 TPS</title></circle>
+<circle cx="617.7" cy="210.0" r="7" fill="#fcfcfb"/>
+<circle cx="617.7" cy="210.0" r="5" fill="#2a78d6"><title>base: 27.98 TPS</title></circle>
+<circle cx="782.1" cy="210.0" r="7" fill="#fcfcfb"/>
+<circle cx="782.1" cy="210.0" r="5" fill="#eb6834"><title>target: 28.30 TPS</title></circle>
+<text x="590.1" y="225.0" font-size="10.5" fill="#52514e" text-anchor="middle">27.93</text>
+<text x="617.7" y="200.0" font-size="10.5" fill="#52514e" text-anchor="middle">27.98</text>
+<text x="782.1" y="225.0" font-size="10.5" fill="#52514e" text-anchor="middle">28.30</text>
+<text x="240" y="250.0" font-size="12" fill="#52514e" text-anchor="end">llama-3.3-70b good tp4 @4u</text>
+<line x1="250" y1="246.0" x2="920" y2="246.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="387.9" y="238.0" width="393.3" height="16" fill="#e1e0d9" rx="2"><title>13-night range 29.67 to 30.41</title></rect>
+<line x1="523.3" y1="246.0" x2="782.1" y2="246.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="637.8" cy="246.0" r="7" fill="#fcfcfb"/>
+<circle cx="637.8" cy="246.0" r="5" fill="#898781"><title>nightly: 30.14 TPS</title></circle>
+<circle cx="523.3" cy="246.0" r="7" fill="#fcfcfb"/>
+<circle cx="523.3" cy="246.0" r="5" fill="#2a78d6"><title>base: 29.92 TPS</title></circle>
+<circle cx="782.1" cy="246.0" r="7" fill="#fcfcfb"/>
+<circle cx="782.1" cy="246.0" r="5" fill="#eb6834"><title>target: 30.41 TPS</title></circle>
+<text x="637.8" y="261.0" font-size="10.5" fill="#52514e" text-anchor="middle">30.14</text>
+<text x="523.3" y="261.0" font-size="10.5" fill="#52514e" text-anchor="middle">29.92</text>
+<text x="782.1" y="261.0" font-size="10.5" fill="#52514e" text-anchor="middle">30.41</text>
+<text x="240" y="286.0" font-size="12" fill="#52514e" text-anchor="end">mixtral-8x7b tp2 @8u</text>
+<line x1="250" y1="282.0" x2="920" y2="282.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="387.9" y="274.0" width="394.1" height="16" fill="#e1e0d9" rx="2"><title>13-night range 78.82 to 79.38</title></rect>
+<line x1="665.2" y1="282.0" x2="521.5" y2="282.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="719.7" cy="282.0" r="7" fill="#fcfcfb"/>
+<circle cx="719.7" cy="282.0" r="5" fill="#898781"><title>nightly: 79.29 TPS</title></circle>
+<circle cx="665.2" cy="282.0" r="7" fill="#fcfcfb"/>
+<circle cx="665.2" cy="282.0" r="5" fill="#2a78d6"><title>base: 79.21 TPS</title></circle>
+<circle cx="521.5" cy="282.0" r="7" fill="#fcfcfb"/>
+<circle cx="521.5" cy="282.0" r="5" fill="#eb6834"><title>target: 79.01 TPS</title></circle>
+<text x="719.7" y="272.0" font-size="10.5" fill="#52514e" text-anchor="middle">79.29</text>
+<text x="665.2" y="297.0" font-size="10.5" fill="#52514e" text-anchor="middle">79.21</text>
+<text x="521.5" y="297.0" font-size="10.5" fill="#52514e" text-anchor="middle">79.01</text>
+<text x="240" y="322.0" font-size="12" fill="#52514e" text-anchor="end">qwen-2.5-32b fast tp2 @8u</text>
+<line x1="250" y1="318.0" x2="920" y2="318.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="387.9" y="310.0" width="222.2" height="16" fill="#e1e0d9" rx="2"><title>13-night range 34.92 to 35.16</title></rect>
+<line x1="659.4" y1="318.0" x2="637.4" y2="318.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="782.1" cy="318.0" r="7" fill="#fcfcfb"/>
+<circle cx="782.1" cy="318.0" r="5" fill="#898781"><title>nightly: 35.35 TPS</title></circle>
+<circle cx="659.4" cy="318.0" r="7" fill="#fcfcfb"/>
+<circle cx="659.4" cy="318.0" r="5" fill="#2a78d6"><title>base: 35.21 TPS</title></circle>
+<circle cx="637.4" cy="318.0" r="7" fill="#fcfcfb"/>
+<circle cx="637.4" cy="318.0" r="5" fill="#eb6834"><title>target: 35.19 TPS</title></circle>
+<text x="782.1" y="333.0" font-size="10.5" fill="#52514e" text-anchor="middle">35.35</text>
+<text x="659.4" y="308.0" font-size="10.5" fill="#52514e" text-anchor="middle">35.21</text>
+<text x="637.4" y="333.0" font-size="10.5" fill="#52514e" text-anchor="middle">35.19</text>
+<text x="240" y="358.0" font-size="12" fill="#52514e" text-anchor="end">qwen-3-4b tp2 @8u</text>
+<line x1="250" y1="354.0" x2="920" y2="354.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="685.2" y="346.0" width="96.9" height="16" fill="#e1e0d9" rx="2"><title>13-night range 184.36 to 186.84</title></rect>
+<line x1="754.4" y1="354.0" x2="387.9" y2="354.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="762.1" cy="354.0" r="7" fill="#fcfcfb"/>
+<circle cx="762.1" cy="354.0" r="5" fill="#898781"><title>nightly: 186.33 TPS</title></circle>
+<circle cx="754.4" cy="354.0" r="7" fill="#fcfcfb"/>
+<circle cx="754.4" cy="354.0" r="5" fill="#2a78d6"><title>base: 186.13 TPS</title></circle>
+<circle cx="387.9" cy="354.0" r="7" fill="#fcfcfb"/>
+<circle cx="387.9" cy="354.0" r="5" fill="#eb6834"><title>target: 176.75 TPS</title></circle>
+<text x="762.1" y="344.0" font-size="10.5" fill="#52514e" text-anchor="middle">186.3</text>
+<text x="754.4" y="369.0" font-size="10.5" fill="#52514e" text-anchor="middle">186.1</text>
+<text x="387.9" y="369.0" font-size="10.5" fill="#52514e" text-anchor="middle">176.8</text>
+<text x="240" y="394.0" font-size="12" fill="#52514e" text-anchor="end">qwen-3-4b tp4 @8u</text>
+<line x1="250" y1="390.0" x2="920" y2="390.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="450.7" y="382.0" width="331.3" height="16" fill="#e1e0d9" rx="2"><title>13-night range 136.58 to 153.14</title></rect>
+<line x1="718.0" y1="390.0" x2="387.9" y2="390.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="695.6" cy="390.0" r="7" fill="#fcfcfb"/>
+<circle cx="695.6" cy="390.0" r="5" fill="#898781"><title>nightly: 148.82 TPS</title></circle>
+<circle cx="718.0" cy="390.0" r="7" fill="#fcfcfb"/>
+<circle cx="718.0" cy="390.0" r="5" fill="#2a78d6"><title>base: 149.94 TPS</title></circle>
+<circle cx="387.9" cy="390.0" r="7" fill="#fcfcfb"/>
+<circle cx="387.9" cy="390.0" r="5" fill="#eb6834"><title>target: 133.44 TPS</title></circle>
+<text x="695.6" y="405.0" font-size="10.5" fill="#52514e" text-anchor="middle">148.8</text>
+<text x="718.0" y="380.0" font-size="10.5" fill="#52514e" text-anchor="middle">149.9</text>
+<text x="387.9" y="405.0" font-size="10.5" fill="#52514e" text-anchor="middle">133.4</text>
+<text x="240" y="430.0" font-size="12" fill="#52514e" text-anchor="end">gemma-2-9b fast tp2 @8u</text>
+<line x1="250" y1="426.0" x2="920" y2="426.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="387.9" y="418.0" width="394.1" height="16" fill="#e1e0d9" rx="2"><title>13-night range 100.08 to 103.09</title></rect>
+<line x1="630.0" y1="426.0" x2="653.7" y2="426.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="644.5" cy="426.0" r="7" fill="#fcfcfb"/>
+<circle cx="644.5" cy="426.0" r="5" fill="#898781"><title>nightly: 102.04 TPS</title></circle>
+<circle cx="630.0" cy="426.0" r="7" fill="#fcfcfb"/>
+<circle cx="630.0" cy="426.0" r="5" fill="#2a78d6"><title>base: 101.93 TPS</title></circle>
+<circle cx="653.7" cy="426.0" r="7" fill="#fcfcfb"/>
+<circle cx="653.7" cy="426.0" r="5" fill="#eb6834"><title>target: 102.11 TPS</title></circle>
+<text x="644.5" y="416.0" font-size="10.5" fill="#52514e" text-anchor="middle">102.0</text>
+<text x="630.0" y="441.0" font-size="10.5" fill="#52514e" text-anchor="middle">101.9</text>
+<text x="667.7" y="441.0" font-size="10.5" fill="#52514e" text-anchor="start">102.1</text>
+<text x="240" y="466.0" font-size="12" fill="#52514e" text-anchor="end">gpt-oss-120b tp4 @8u</text>
+<line x1="250" y1="462.0" x2="920" y2="462.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="387.9" y="454.0" width="394.1" height="16" fill="#e1e0d9" rx="2"><title>13-night range 99.32 to 108.38</title></rect>
+<line x1="700.6" y1="462.0" x2="685.3" y2="462.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="468.0" cy="462.0" r="7" fill="#fcfcfb"/>
+<circle cx="468.0" cy="462.0" r="5" fill="#898781"><title>nightly: 101.16 TPS</title></circle>
+<circle cx="700.6" cy="462.0" r="7" fill="#fcfcfb"/>
+<circle cx="700.6" cy="462.0" r="5" fill="#2a78d6"><title>base: 106.51 TPS</title></circle>
+<circle cx="685.3" cy="462.0" r="7" fill="#fcfcfb"/>
+<circle cx="685.3" cy="462.0" r="5" fill="#eb6834"><title>target: 106.16 TPS</title></circle>
+<text x="468.0" y="477.0" font-size="10.5" fill="#52514e" text-anchor="middle">101.2</text>
+<text x="700.6" y="452.0" font-size="10.5" fill="#52514e" text-anchor="middle">106.5</text>
+<text x="685.3" y="477.0" font-size="10.5" fill="#52514e" text-anchor="middle">106.2</text>
+<text x="240" y="502.0" font-size="12" fill="#52514e" text-anchor="end">gemma-4-31b tp2 @8u</text>
+<line x1="250" y1="498.0" x2="920" y2="498.0" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="387.9" y="490.0" width="394.1" height="16" fill="#e1e0d9" rx="2"><title>13-night range 37.60 to 38.10</title></rect>
+<line x1="749.3" y1="498.0" x2="657.0" y2="498.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<circle cx="772.5" cy="498.0" r="7" fill="#fcfcfb"/>
+<circle cx="772.5" cy="498.0" r="5" fill="#898781"><title>nightly: 38.09 TPS</title></circle>
+<circle cx="749.3" cy="498.0" r="7" fill="#fcfcfb"/>
+<circle cx="749.3" cy="498.0" r="5" fill="#2a78d6"><title>base: 38.06 TPS</title></circle>
+<circle cx="657.0" cy="498.0" r="7" fill="#fcfcfb"/>
+<circle cx="657.0" cy="498.0" r="5" fill="#eb6834"><title>target: 37.94 TPS</title></circle>
+<text x="772.5" y="488.0" font-size="10.5" fill="#52514e" text-anchor="middle">38.09</text>
+<text x="749.3" y="513.0" font-size="10.5" fill="#52514e" text-anchor="middle">38.06</text>
+<text x="657.0" y="513.0" font-size="10.5" fill="#52514e" text-anchor="middle">37.94</text>
+<text x="16" y="546" font-size="11" fill="#898781">Each row has its own scale (units differ 12x between configs). Gray band = 13-night min to max of the nightly. Gray dot = the</text>
+<text x="16" y="560" font-size="11" fill="#898781">2026-09-18 nightly, blue = base, orange = target.</text>
+</svg></div>
+
+<h2>5. Threshold verdicts (CURRENT static goals, as the Slack report applies them)</h2>
+<p>PASS needs mean TPS at or above the goal AND the slowest user at or above the slowest-user goal. These are the thresholds from systems_test scripts/system_ci.py for granite_rapids_72_rinzler; the ratchet YAML thresholds are a separate, unpublished set.</p>
+<table><thead><tr><th>config</th><th>goal mean / slowest TPS</th><th>nightly 09-18</th><th>base</th><th>target</th></tr></thead><tbody><tr class=""><td>llama-3.2-3b fast tp2 @32u</td><td>191 / 150</td><td>PASS</td><td>FAIL: slowest 118.40 &lt; 150</td><td>FAIL: mean 187.26 &lt; 191</td></tr><tr class=""><td>llama-3.1-8b good tp2 @8u</td><td>144 / 140</td><td>FAIL: mean 140.66 &lt; 144; slowest 136.34 &lt; 140</td><td>FAIL: mean 139.40 &lt; 144; slowest 108.55 &lt; 140</td><td>FAIL: mean 140.53 &lt; 144; slowest 130.27 &lt; 140</td></tr><tr class=""><td>llama-3.3-70b good tp2 @8u</td><td>27 / 18</td><td>FAIL: mean 16.58 &lt; 27; slowest 16.53 &lt; 18</td><td>FAIL: mean 16.57 &lt; 27; slowest 16.52 &lt; 18</td><td>FAIL: mean 16.60 &lt; 27; slowest 16.57 &lt; 18</td></tr><tr class=""><td>llama-3.3-70b good tp2 @4u</td><td>27 / 27</td><td>PASS</td><td>PASS</td><td>PASS</td></tr><tr class=""><td>llama-3.3-70b good tp4 @4u</td><td>27 / 27</td><td>PASS</td><td>FAIL: slowest 22.98 &lt; 27</td><td>PASS</td></tr><tr class=""><td>mixtral-8x7b tp2 @8u</td><td>71 / 71</td><td>PASS</td><td>PASS</td><td>PASS</td></tr><tr class=""><td>qwen-2.5-32b fast tp2 @8u</td><td>35 / 35</td><td>PASS</td><td>FAIL: slowest 34.83 &lt; 35</td><td>FAIL: slowest 32.53 &lt; 35</td></tr><tr class=""><td>qwen-3-4b tp2 @8u</td><td>175 / 145</td><td>PASS</td><td>PASS</td><td>PASS</td></tr><tr class=""><td>qwen-3-4b tp4 @8u</td><td>135 / 115</td><td>PASS</td><td>PASS</td><td>FAIL: mean 133.44 &lt; 135</td></tr><tr class=""><td>gemma-2-9b fast tp2 @8u</td><td>90 / 90</td><td>PASS</td><td>PASS</td><td>PASS</td></tr><tr class=""><td>gpt-oss-120b tp4 @8u</td><td>52 / 40</td><td>PASS</td><td>PASS</td><td>PASS</td></tr><tr class=""><td>gemma-4-31b tp2 @8u</td><td>placeholder (1.00)</td><td>no threshold</td><td>no threshold</td><td>no threshold</td></tr></tbody></table>
+<ul class="take"><li>Slowest-user verdicts change with a single stalled sample.</li><li>llama-3b: base FAIL on the slowest user (118 against 173 in the nightly), a client stall. Target FAIL on the mean (187.26 against 191), the client-affected config.</li><li>llama-70b tp4: base FAIL on the slowest user (22.98 against 29.6), a client stall. Target PASS.</li><li>llama-8b: base slowest user 109 is below the 13-night range (116 to 138). A stall is likely but not shown in the logs. The mean fails in all three columns, as on every night.</li><li>qwen-2.5-32b: failed the slowest-user goal on all 13 reference nights (33.48 to 34.82 against 35) and passed on 09-18 (35.03). Base (34.83) and target (32.53) fail it. The target sample came in round 4 (round mean 34.4 against 35.2 to 35.4 in the other rounds) on a lightly loaded client, and client load therefore does not explain it.</li><li>Against the nightly of 09-18, the target turns three verdicts to FAIL: qwen-3-4b tp4 on the mean (133.44 against 135), llama-3b on the mean (client-affected), and qwen-2.5-32b on the slowest user (the historic behaviour). The first of these is the package effect that matters for the nightly.</li></ul>
+
+<h2>6. Evidence that the right binary served, and that AMX ran</h2>
+<table><thead><tr><th>check</th><th>base</th><th>target</th></tr></thead><tbody><tr class=""><td>tron package serving</td><td>2026.09.18-3faba6d0</td><td>2026.09.18-29a8a547-jhan-ci-mimic-target</td></tr><tr class=""><td>rinzler sha256 on disk</td><td>27e6883c2e8696b8&#8230;</td><td>3ee9c8f059bc5282&#8230;</td></tr><tr class=""><td>engines running after each provisioning (running/planned)</td><td>llama-3.2-3b fast tp2 4/4; llama-3.1-8b good tp2 4/4; llama-3.3-70b good tp2 4/4; llama-3.3-70b good tp2 4/4; llama-3.3-70b good tp4 2/2; mixtral-8x7b tp2 4/4; qwen-2.5-32b fast tp2 4/4; qwen-3-4b tp2 4/4; qwen-3-4b tp4 2/2; gemma-2-9b fast tp2 4/4; gpt-oss-120b tp4 2/2; gemma-4-31b tp2 4/4</td><td>llama-3.2-3b fast tp2 4/4; llama-3.1-8b good tp2 4/4; llama-3.3-70b good tp2 4/4; llama-3.3-70b good tp2 4/4; llama-3.3-70b good tp4 2/2; mixtral-8x7b tp2 4/4; qwen-2.5-32b fast tp2 4/4; qwen-3-4b tp2 4/4; qwen-3-4b tp4 2/2; gemma-2-9b fast tp2 4/4; gpt-oss-120b tp4 2/2; gemma-4-31b tp2 4/4</td></tr><tr class=""><td>snapshots showing an engine on a deleted (replaced on disk) binary</td><td>0</td><td>2</td></tr><tr class=""><td>AMX-busy cycles in a 20 s probe (EXE.AMX_BUSY, all engine pids)</td><td>llama-3.1-8b: 0; ingested-qwen-3-4b: 0</td><td>llama-3.1-8b: 30,132,776,756; ingested-qwen-3-4b: 13,740,361,900</td></tr><tr class=""><td>hand edit in rinzler@.service (--num-expert-replicas count)</td><td>0</td><td>0</td></tr><tr class=""><td>USE_HW_ATTN / TRON_AMX_* / TRON_K_VNNI in engine env files</td><td>/etc/rinzler/instance-0.env:0 /etc/rinzler/instance-1.env:0 /etc/rinzler/instance-2.env:0 /etc/rinzler/instance-3.env:0</td><td>/etc/rinzler/instance-0.env:0 /etc/rinzler/instance-1.env:0 /etc/rinzler/instance-2.env:0 /etc/rinzler/instance-3.env:0</td></tr><tr class=""><td>Intel Speed Select policy</td><td>Intel Speed Select two-tier policy verified: clos0=224 clos3=64.</td><td>Intel Speed Select two-tier policy verified: clos0=224 clos3=64.</td></tr><tr class=""><td>client to proxy: DNS / connect / full GET, median ms</td><td>3.466 / 4.199 / 4.93</td><td>1.105 / 1.368 / 1.851</td></tr><tr class=""><td>perf phase wall time, minutes (nightly 09-16/17: 79.1 / 78.4)</td><td>103.8</td><td>103.8</td></tr><tr class=""><td>client host / started (UTC)</td><td>claude-agentsrv / 2026-09-18T13:43:23Z</td><td>claude-agentsrv / 2026-09-18T16:13:37Z</td></tr></tbody></table>
+<ul class="take">
+<li>Expected on base: 0 AMX-busy cycles. The package has no AMX code.</li>
+<li>Expected on target: a large count for llama-3.1-8b (CPU attention) and a smaller one for qwen-3-4b tp2, where FPGA attention leaves only the first 127 positions of each query and the most recent tokens not yet copied to HBM (the high-bandwidth memory on the FPGA card) on the CPU.</li>
+<li>A "deleted binary" snapshot means an engine kept running an executable whose file was replaced on disk after it started. The target arm shows this in its "before" snapshot and its first config. In both, the running executable's sha256 matched the target package (details in the caveats). So no config served the wrong package.</li>
+</ul>
+<h3>Target package manifest</h3><table><tbody><tr><td>built</td><td><code>2026-09-18T02:12:19Z</code></td></tr><tr><td>main_sha</td><td><code>3faba6d0fddfd5f8760547f768a604a715a5a638</code></td></tr><tr><td>pr_sha</td><td><code>30c4ac82cbb6959f7e4f66b29efb36f5e0749b48</code></td></tr><tr><td>merge_sha</td><td><code>0f086eecc2f87b2808bf841c8aaf522d49f2e194</code></td></tr><tr><td>head_sha</td><td><code>29a8a547402346693e60603649c52a81088e515d</code></td></tr><tr><td>deb</td><td><code>tron_2026.09.18-29a8a547-jhan-ci-mimic-target_amd64.deb</code></td></tr><tr><td>deb_sha256</td><td><code>e08da45886055f3220499694805c9b5ae8dd68cee021d91b7dd5808de185ea17</code></td></tr><tr><td>checks</td><td><code>{"TRON_AMX_DISABLE_literal": 1, "amx_tile_insns": 126, "vnni_strings": 3}</code></td></tr><tr><td>options</td><td><code>{"TRON_AMX_DISPATCH": "ON", "TRON_K_VNNI": "ON"}</code></td></tr><tr><td>worktree</td><td><code>/var/tmp/jhan/tron-ci-mimic</code></td></tr><tr><td>branch</td><td><code>jhan-ci-mimic-target</code></td></tr></tbody></table>
+
+<h2>7. Files</h2>
+<ul>
+<li>Run records: <code>exec/results/ci-mimic-20260918/base-pass1/perf.json</code>, <code>target-pass1/perf.json</code> (per-request TPS and TTFT, snapshots, probes), <code>preflight.txt</code>, <code>base-identity.txt</code>.</li>
+<li>Reference: <code>exec/results/ci-mimic-20260918/reference/</code> (nightly logs parsed by <code>nightly_to_arm.py</code>, 13-night Slack statistics <code>nightly_stats.json</code>).</li>
+<li>Scripts: <code>exec/ci-mimic-20260918/</code> (driver <code>st_ci_perf.py</code>, <code>campaign.sh</code>, <code>dut.sh</code>, target build <code>build-target.sh</code>, this generator).</li>
+</ul>
+</main></body></html>
