@@ -21,3 +21,21 @@ copies during the next handoff run. All canonicals are on host claude-agentsrv.
   (handoff: `handoffs/codex_20260819-20260825_can-you-access-my-notion-pages.md`)
 
 - `delphi-3bda-setup.sh` — canonical `claude-agentsrv:/home/jhan/delphi-3bda-setup.sh` — shell setup sourced before using delphi-3bda: sets `SYSTEM_CONFIG="--instance 1,2"` (jhan's half of the FPGA cards) and `GUARD_EXCLUDE_USERS` for the campaign guard. Added by the 2026-09-11 handoff run. (handoff: claude_20260906_delphi-3bda-guard-doc-in-handoffs.md)
+
+
+## Codex handoff preservation — 2026-09-18
+
+Canonical files remain authoritative. This batch preserves authored documents, scripts, and compact audit results. Raw logs, source archives, binaries, and browser captures stay at their original locations.
+
+HTML pages retain their canonical workspace evidence links. The mirrors preserve the authored pages but do not make the entire source and raw-data tree available offline. Historical installers require their recorded preconditions and paths.
+
+| Preserved file | Canonical location | Purpose and related handoff |
+|---|---|---|
+| [migrate-codex-home.py](migrate-codex-home.py) | `claude-agentsrv:/home/jhan/claude-container/migrate-codex-home.py` | Container migration and build support. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
+| [CODEX-HOME-MIGRATION.md](CODEX-HOME-MIGRATION.md) | `claude-agentsrv:/home/jhan/claude-container/CODEX-HOME-MIGRATION.md` | Container migration and build support. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
+| [Containerfile](Containerfile) | `claude-agentsrv:/home/jhan/claude-container/Containerfile` | Container migration and build support. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
+| [codex-home-migration/test_migrate_index.py](codex-home-migration/test_migrate_index.py) | `claude-agentsrv:/home/jhan/workspace/random/codex-home-migration/test_migrate_index.py` | Migration test suite and its sibling inputs. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
+| [codex-home-migration/test_launcher.py](codex-home-migration/test_launcher.py) | `claude-agentsrv:/home/jhan/workspace/random/codex-home-migration/test_launcher.py` | Migration test suite and its sibling inputs. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
+| [codex-home-migration/migrate-index.py](codex-home-migration/migrate-index.py) | `claude-agentsrv:/home/jhan/workspace/random/codex-home-migration/migrate-index.py` | Migration test suite and its sibling inputs. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
+| [codex-home-migration/claude-box.proposed](codex-home-migration/claude-box.proposed) | `claude-agentsrv:/home/jhan/workspace/random/codex-home-migration/claude-box.proposed` | Migration test suite and its sibling inputs. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
+| [codex-home-migration/README.md](codex-home-migration/README.md) | `claude-agentsrv:/home/jhan/workspace/random/codex-home-migration/README.md` | Migration test suite and its sibling inputs. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# claude-box [enter|start|recreate] — manage the claude-dev container.
+# claude-box [enter|start|recreate|migrate-home] — manage the claude-dev container.
 # Same script on every host (shared NFS home); runs on alpha, sw-dev-01 and agentsrv.
 #   enter    (default) start container if needed, open a shell inside
 #   start    start container only, no shell; used at boot and by the
 #            sshd ForceCommand hook
+#   migrate-home re-create with the same image and migrate Codex paths;
+#            stops all sessions inside, so run it from a host shell
 #   recreate delete and re-create the container (picks up a new image;
 #            kills tmux sessions running inside, but NO LONGER destroys
 #            /nix, the tron build tree, or the codex home — those are
@@ -46,15 +48,159 @@ fi
 NAME=claude-dev
 IMAGE=localhost/claude-dev:latest
 PERSIST=/var/tmp/jhan/persist
-# Container hostname is per host (claude-alpha, claude-sw-dev-01) so that
-# tmux-resurrect's per-hostname save dir under the shared ~/.tmux does not
-# collide between the two containers. The codex-home mount target must
-# match CODEX_HOME as computed inside the container by jibin.bashrc.positron
-# (/home/$USER/codex-home-$HOSTNAME with USER unset -> /home//codex-home-<hostname>).
+# Keep each host's sessions separate. The mount destination matches
+# CODEX_HOME="$HOME/codex-home-${HOSTNAME}" in jibin.bashrc.positron.
 CONTAINER_HOSTNAME=claude-$HOST
+CONTAINER_CODEX_HOME=/home/jhan/codex-home-$CONTAINER_HOSTNAME
+MIGRATION_IMAGE_FILE=$PERSIST/.codex-home-migration-image
+
+# The launcher keeps its lock while Podman runs, but detached monitors must
+# never inherit it: otherwise a completed migration can lock out all entry.
+# Every call occurs after BOX_LOCK is opened below.
+podman() (
+    exec {BOX_LOCK}>&-
+    command podman "$@"
+)
+
+container_exists() {
+    local status
+    if podman container exists "$NAME"; then
+        return 0
+    else
+        status=$?
+    fi
+    if [[ "$status" == 1 ]]; then
+        return 1
+    fi
+    echo "Cannot determine whether $NAME exists; refusing to change its data." >&2
+    exit "$status"
+}
+
+check_home_migration() {
+    local entry
+    python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' || {
+        echo 'Codex home migration requires Python 3.9 or later.' >&2
+        return 1
+    }
+    # Do not hide files already present at the proposed mount destination.
+    if [[ -L "$CONTAINER_CODEX_HOME" ]] ||
+       { [[ -e "$CONTAINER_CODEX_HOME" ]] && [[ ! -d "$CONTAINER_CODEX_HOME" ]]; }; then
+        echo "Codex mount destination is not a regular directory: $CONTAINER_CODEX_HOME" >&2
+        return 1
+    fi
+    if [[ -d "$CONTAINER_CODEX_HOME" ]]; then
+        entry=$(find "$CONTAINER_CODEX_HOME" -mindepth 1 -maxdepth 1 -print -quit)
+        if [[ -n "$entry" ]]; then
+            echo "Codex mount destination contains files; refusing to hide them: $CONTAINER_CODEX_HOME" >&2
+            return 1
+        fi
+    fi
+    if [[ -d "$PERSIST/codex-home" ]]; then
+        python3 /home/jhan/claude-container/migrate-codex-home.py \
+            "$PERSIST/codex-home" "/home/codex-home-$CONTAINER_HOSTNAME" \
+            "$CONTAINER_CODEX_HOME"
+    fi
+}
+
+check_existing_home_mount() {
+    local mounts source destination matched=0
+    mounts=$(podman inspect -f '{{range .Mounts}}{{printf "%s\t%s\n" .Source .Destination}}{{end}}' "$NAME")
+    while IFS=$'\t' read -r source destination; do
+        if [[ "$source" == "$PERSIST/codex-home" ]]; then
+            if [[ "$destination" != "/home/codex-home-$CONTAINER_HOSTNAME" &&
+                  "$destination" != "$CONTAINER_CODEX_HOME" ]]; then
+                echo "Unexpected Codex mount destination: $destination" >&2
+                return 1
+            fi
+            matched=$((matched + 1))
+        fi
+    done <<< "$mounts"
+    if [[ "$matched" != 1 ]]; then
+        echo "Expected exactly one Codex mount from $PERSIST/codex-home; refusing migration." >&2
+        return 1
+    fi
+}
+
+migrate_home_index() {
+    # Call only when the container is stopped or absent. The files stay on
+    # the same host volume; only absolute session index paths need changing.
+    if [[ -d "$PERSIST/codex-home" ]]; then
+        python3 /home/jhan/claude-container/migrate-codex-home.py \
+            "$PERSIST/codex-home" "/home/codex-home-$CONTAINER_HOSTNAME" \
+            "$CONTAINER_CODEX_HOME" --apply
+    fi
+}
+
+require_stopped_container() {
+    local container_id=$1 allow_unstarted=${2:-false} state
+    if ! state=$(podman inspect -f '{{.State.Status}} {{.State.Pid}}' "$container_id"); then
+        echo "Cannot verify that $container_id stopped; migration remains pending." >&2
+        return 1
+    fi
+    case "$state" in
+        'exited 0'|'stopped 0') return 0 ;;
+        'created 0'|'configured 0')
+            if [[ "$allow_unstarted" == true ]]; then return 0; fi
+            ;;
+    esac
+    echo "Container state is '$state'; refusing to remove it or migrate data." >&2
+    return 1
+}
+
+stop_for_migration() {
+    local container_id=$1 status stop_error
+    status=$(podman inspect -f '{{.State.Status}}' "$container_id")
+    case "$status" in
+        running|exited|stopped)
+            echo "Stopping the existing container before migrating Codex home..."
+            if stop_error=$(podman stop "$container_id" 2>&1); then
+                :
+            else
+                printf '%s\n' "$stop_error" >&2
+                # Podman can stop the container but fail while collecting
+                # a dead command session's exit status. Verify the same
+                # container is stopped before retrying cleanup once.
+                if [[ "$stop_error" != *"timed out waiting for file "*"/userdata/"*"/exit/"* ]]; then
+                    echo 'Podman stop failed; migration remains pending.' >&2
+                    return 1
+                fi
+                require_stopped_container "$container_id" || return 1
+                echo 'Container is stopped. Retrying Podman cleanup once...' >&2
+                if ! podman stop "$container_id" >/dev/null; then
+                    echo 'Podman cleanup still failed; migration remains pending.' >&2
+                    return 1
+                fi
+            fi
+            ;;
+        created|configured)
+            require_stopped_container "$container_id" true
+            return
+            ;;
+        *)
+            echo "Cannot migrate a container in state '$status'." >&2
+            return 1
+            ;;
+    esac
+    require_stopped_container "$container_id"
+}
+
+verify_home_migration() {
+    podman exec "$NAME" bash -lc '
+        test "$USER" = jhan && test "$LOGNAME" = jhan &&
+        test "$HOME" = /home/jhan &&
+        test "$CODEX_HOME" = "$HOME/codex-home-$HOSTNAME" &&
+        mountpoint -q "$CODEX_HOME" &&
+        ! mountpoint -q "/home/codex-home-$HOSTNAME" &&
+        printf "Verified USER=%s LOGNAME=%s CODEX_HOME=%s\n" "$USER" "$LOGNAME" "$CODEX_HOME"
+    '
+}
 
 ensure_running() {
-    if ! podman container exists "$NAME" 2>/dev/null; then
+    if ! container_exists; then
+        if [[ -f "$MIGRATION_IMAGE_FILE" ]]; then
+            IMAGE=$(cat "$MIGRATION_IMAGE_FILE")
+        fi
+        check_home_migration
         # seccomp=unconfined is required by the nix build sandbox: podman's
         # default seccomp profile (3.4.4 and 5.8.2 alike) returns EPERM for
         # sethostname/setdomainname without CAP_SYS_ADMIN, and nix's sandbox
@@ -70,39 +216,73 @@ ensure_running() {
         # which stopped the container and every session in it. PID 1 is also
         # exempt from "kill -1", so only an explicit signal to PID 1 or
         # "podman stop" ends the container now.
+        migrate_home_index
         podman run -d --name "$NAME" --hostname "$CONTAINER_HOSTNAME" \
+            -e USER=jhan -e LOGNAME=jhan \
             --group-add keep-groups \
             --security-opt seccomp=unconfined \
             -v /home/jhan:/home/jhan \
             -v /scratch:/scratch \
             -v "$PERSIST/nix":/nix \
             -v "$PERSIST/tron-main":/var/tmp/tron-main \
-            -v "$PERSIST/codex-home":/home/codex-home-"$CONTAINER_HOSTNAME" \
+            -v "$PERSIST/codex-home":"$CONTAINER_CODEX_HOME" \
             -v "$PERSIST/etc-nix":/etc/nix \
             -w /home/jhan \
             "$IMAGE" /home/jhan/.local/libexec/catatonit -P >/dev/null
-    elif [[ "$(podman inspect -f '{{.State.Status}}' "$NAME")" != "running" ]]; then
-        podman start "$NAME" >/dev/null
+        verify_home_migration
+        rm -f "$MIGRATION_IMAGE_FILE"
+    else
+        if [[ -f "$MIGRATION_IMAGE_FILE" ]]; then
+            echo 'Codex home migration is incomplete; this container may still use the old settings.' >&2
+            echo 'To finish, run claude-box migrate-home from the host shell.' >&2
+        fi
+        if [[ "$(podman inspect -f '{{.State.Status}}' "$NAME")" != running ]]; then
+            podman start "$NAME" >/dev/null
+        fi
     fi
 }
+
+# Serialize creation and migration across SSH entry and the user service.
+# Release this lock before handing over to an interactive container shell.
+mkdir -p "$PERSIST"
+exec {BOX_LOCK}>"$PERSIST/.claude-box.lock"
+flock "$BOX_LOCK"
 
 case "${1:-enter}" in
     start)
         ensure_running
         ;;
-    recreate)
-        podman rm -f "$NAME" >/dev/null 2>&1 || true
+    recreate|migrate-home)
+        check_home_migration
+        if [[ "$1" == migrate-home && -f "$MIGRATION_IMAGE_FILE" ]]; then
+            IMAGE=$(cat "$MIGRATION_IMAGE_FILE")
+        fi
+        if container_exists; then
+            check_existing_home_mount
+            CONTAINER_ID=$(podman inspect -f '{{.Id}}' "$NAME")
+            # Migration preserves the current image. Explicit recreation
+            # continues to pick up the latest image, as before.
+            if [[ "$1" == migrate-home ]]; then
+                IMAGE=$(podman inspect -f '{{.Image}}' "$CONTAINER_ID")
+                podman image exists "$IMAGE"
+                printf '%s\n' "$IMAGE" > "$MIGRATION_IMAGE_FILE"
+            fi
+            stop_for_migration "$CONTAINER_ID"
+            podman rm "$CONTAINER_ID" >/dev/null
+        fi
         ensure_running
-        echo "recreated $NAME"
+        echo "recreated $NAME with Codex home at $CONTAINER_CODEX_HOME"
         ;;
     enter)
         ensure_running
+        flock -u "$BOX_LOCK"
+        exec {BOX_LOCK}>&-
         # IS_SANDBOX=1 lets claude accept --dangerously-skip-permissions
         # as container-root when you want unattended runs.
         exec podman exec -it -e IS_SANDBOX=1 -w /home/jhan "$NAME" bash -l
         ;;
     *)
-        echo "usage: claude-box [enter|start|recreate]" >&2
+        echo "usage: claude-box [enter|start|recreate|migrate-home]" >&2
         exit 1
         ;;
 esac
