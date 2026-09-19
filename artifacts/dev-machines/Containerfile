@@ -1,0 +1,70 @@
+# claude-dev: dev container for running Claude Code on alpha.
+# Ubuntu 22.04 to match delphi/andoria (python3.10, so ~/.local python
+# tools installed from those hosts keep working inside the container).
+FROM docker.io/library/ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive TZ=America/Los_Angeles
+
+# No subuid ranges for jhan on alpha -> single-uid user namespace.
+# apt cannot seteuid to _apt (uid 100), so keep apt's sandbox as root.
+RUN echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99-no-sandbox
+
+# Same single-uid limitation: package postinst scripts that chown/chgrp
+# to other uids fail with EINVAL. Divert both to /bin/true during
+# installs; restored in the last step.
+RUN for c in chown chgrp; do \
+      dpkg-divert --local --rename --add /usr/bin/$c && \
+      ln -sf /usr/bin/true /usr/bin/$c; \
+    done
+
+# dpkg itself chown()s files that ship with non-root ownership in the
+# .deb (man-db: /var/cache/man -> man, libutempter0 -> group utmp).
+# Statoverrides make dpkg install them root:root instead.
+RUN dpkg-statoverride --add root root 0755 /var/cache/man && \
+    dpkg-statoverride --add root root 0755 /usr/lib/x86_64-linux-gnu/utempter/utempter
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl wget gnupg \
+    git git-lfs openssh-client rsync \
+    tmux less vim nano file tree unzip zip xz-utils bzip2 \
+    procps psmisc htop lsof strace ltrace gdb \
+    build-essential pkg-config cmake ninja-build \
+    python3 python3-pip python3-venv python3-dev \
+    ripgrep fd-find exuberant-ctags jq bc \
+    numactl hwloc pciutils sysstat \
+    iputils-ping iproute2 dnsutils netcat-openbsd traceroute \
+    man-db bash-completion locales sudo tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN locale-gen en_US.UTF-8 && ln -s /usr/bin/fdfind /usr/local/bin/fd
+
+# GitHub CLI from the official repo (22.04's is too old)
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && apt-get install -y --no-install-recommends gh && \
+    rm -rf /var/lib/apt/lists/*
+
+# No sshd in this image on purpose: jhan has no subuid ranges on alpha,
+# so the namespace maps a single uid and /proc/self/setgroups is "deny",
+# which sshd's privilege separation cannot work around. Inbound SSH is
+# handled by a user sshd on the alpha host that forwards into this
+# container (see enter-container.sh).
+
+# Restore the real chown/chgrp (verify they work again)
+RUN for c in chown chgrp; do \
+      rm -f /usr/bin/$c && \
+      dpkg-divert --local --rename --remove /usr/bin/$c; \
+    done && chown root:root /usr/bin/chown
+
+# Rootless podman single-uid mapping: root inside == jhan outside.
+# Point root's home at the mounted NFS home so ~, ssh keys, git config,
+# and claude state all resolve to the real home. (usermod refuses while
+# a root process runs, so edit /etc/passwd directly.)
+RUN sed -i 's|^\(root:x:0:0:root:\)/root:|\1/home/jhan:|' /etc/passwd && \
+    grep -q '^root:.*:/home/jhan:' /etc/passwd
+
+ENV HOME=/home/jhan LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+WORKDIR /home/jhan
+CMD ["sleep", "infinity"]
