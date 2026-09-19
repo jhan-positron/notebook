@@ -471,3 +471,412 @@ HTML pages retain their canonical workspace evidence links. The mirrors preserve
 | [VNNIed-K-in-place/codex/design/root-cause-tracing.html](VNNIed-K-in-place/codex/design/root-cause-tracing.html) | `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/codex/design/root-cause-tracing.html` | Tracing design or necessary historical comparison report. Related: [codex_20260918_trace-fpga-decode-tps-loss.md](../../handoffs/codex_20260918_trace-fpga-decode-tps-loss.md). [Rendered view](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/VNNIed-K-in-place/codex/design/root-cause-tracing.html). |
 | [VNNIed-K-in-place/status/Friday-morning-CI-run-report.html](VNNIed-K-in-place/status/Friday-morning-CI-run-report.html) | `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/Friday-morning-CI-run-report.html` | Tracing design or necessary historical comparison report. Related: [codex_20260918_trace-fpga-decode-tps-loss.md](../../handoffs/codex_20260918_trace-fpga-decode-tps-loss.md). [Rendered view](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/VNNIed-K-in-place/status/Friday-morning-CI-run-report.html). |
 | [VNNIed-K-in-place/status/Wednesday-perf-test.html](VNNIed-K-in-place/status/Wednesday-perf-test.html) | `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/Wednesday-perf-test.html` | Tracing design or necessary historical comparison report. Related: [codex_20260918_trace-fpga-decode-tps-loss.md](../../handoffs/codex_20260918_trace-fpga-decode-tps-loss.md). [Rendered view](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/VNNIed-K-in-place/status/Wednesday-perf-test.html). |
+
+## 2026-09-18 preservation batch (claude-agentsrv handoff run)
+
+Registered by the 2026-09-18 SCOPE:auto handoff run on claude-agentsrv. Same rules as the earlier batches: canonical -> repo mirrors, edit the canonical file first. `WS` = `claude-agentsrv:/home/jhan/workspace/intel-AMX` (shared NFS home, not a git repository). Repo path -> canonical path. New sub-directory `vnnied-k-in-place/` mirrors `WS/VNNIed-K-in-place/`. `memory/` mirrors Claude Code project memory notes from `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/` (one note from the `-home-jhan-workspace-tron` project). `exec/workflows/` holds two Workflow scripts from session directories under `~/.claude/projects/`.
+
+
+### campaign, build and generator scripts (exec/)
+
+- `exec/bill-share.sh` -> `WS/exec/bill-share.sh`
+  (handoffs: claude_20260915_draft-reply-to-rhys.md)
+- `exec/canon-ci-20260918/build-canon.sh` -> `WS/exec/canon-ci-20260918/build-canon.sh`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/canon-ci-20260918/campaign.sh` -> `WS/exec/canon-ci-20260918/campaign.sh`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/canon-ci-20260918/dut.sh` -> `WS/exec/canon-ci-20260918/dut.sh`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/canon-ci-20260918/gen_caveats.py` -> `WS/exec/canon-ci-20260918/gen_caveats.py`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/canon-ci-20260918/gen_ci_shapes.py` -> `WS/exec/canon-ci-20260918/gen_ci_shapes.py`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/canon-ci-20260918/gen_report.py` -> `WS/exec/canon-ci-20260918/gen_report.py`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/canon-ci-20260918/launch.sh` -> `WS/exec/canon-ci-20260918/launch.sh`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/canon-ci-20260918/nightly_to_arm.py` -> `WS/exec/canon-ci-20260918/nightly_to_arm.py`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/canon-ci-20260918/st_ci_perf.py` -> `WS/exec/canon-ci-20260918/st_ci_perf.py`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/canon-ci-20260918/talos_stub/talos.py` -> `WS/exec/canon-ci-20260918/talos_stub/talos.py`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/ci-enable-20260917/amxspin.c` -> `WS/exec/ci-enable-20260917/amxspin.c`
+  (handoffs: claude_20260917_amx-in-nightly-ci-on-delphi-3bda.md)
+- `exec/ci-enable-20260917/runtime-check.sh` -> `WS/exec/ci-enable-20260917/runtime-check.sh`
+  (handoffs: claude_20260917_amx-in-nightly-ci-on-delphi-3bda.md)
+- `exec/ci-mimic-20260918/build-target.sh` -> `WS/exec/ci-mimic-20260918/build-target.sh`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/ci-mimic-20260918/campaign.sh` -> `WS/exec/ci-mimic-20260918/campaign.sh`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/ci-mimic-20260918/dut.sh` -> `WS/exec/ci-mimic-20260918/dut.sh`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/ci-mimic-20260918/gen_report.py` -> `WS/exec/ci-mimic-20260918/gen_report.py`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/ci-mimic-20260918/launch.sh` -> `WS/exec/ci-mimic-20260918/launch.sh`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/ci-mimic-20260918/nightly_to_arm.py` -> `WS/exec/ci-mimic-20260918/nightly_to_arm.py`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/ci-mimic-20260918/st_ci_perf.py` -> `WS/exec/ci-mimic-20260918/st_ci_perf.py`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/ci-mimic-20260918/talos_stub/talos.py` -> `WS/exec/ci-mimic-20260918/talos_stub/talos.py`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/ci-mimic-20260918/wait-and-build.sh` -> `WS/exec/ci-mimic-20260918/wait-and-build.sh`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/issue4500-20260918/bench/bench_k_vnni.cpp` -> `WS/exec/issue4500-20260918/bench/bench_k_vnni.cpp`
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `exec/issue4500-20260918/bench/run.sh` -> `WS/exec/issue4500-20260918/bench/run.sh`
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `exec/issue4500-20260918/campaign.sh` -> `WS/exec/issue4500-20260918/campaign.sh`
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `exec/issue4500-20260918/gen_design.py` -> `WS/exec/issue4500-20260918/gen_design.py`
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `exec/issue4500-20260918/launch.sh` -> `WS/exec/issue4500-20260918/launch.sh`
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `exec/issue4500-20260918/summarize.py` -> `WS/exec/issue4500-20260918/summarize.py`
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `exec/issue4500-20260918/trace_analyze.py` -> `WS/exec/issue4500-20260918/trace_analyze.py`
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `exec/l8bload-20260918/campaign.sh` -> `WS/exec/l8bload-20260918/campaign.sh`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/l8bload-20260918/gen_report.py` -> `WS/exec/l8bload-20260918/gen_report.py`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/l8bload-20260918/launch.sh` -> `WS/exec/l8bload-20260918/launch.sh`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/l8bload-20260918/rz.sh` -> `WS/exec/l8bload-20260918/rz.sh`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/l8bload-20260918/summarize.py` -> `WS/exec/l8bload-20260918/summarize.py`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/lib-guard-tests/test-bill-share.sh` -> `WS/exec/lib-guard-tests/test-bill-share.sh`
+  (handoffs: claude_20260915_draft-reply-to-rhys.md)
+- `exec/lib-guard-tests/test-takeover.sh` -> `WS/exec/lib-guard-tests/test-takeover.sh`
+  (handoffs: claude_20260915_draft-reply-to-rhys.md)
+- `exec/lib-guard-tests/test-wait-clear.sh` -> `WS/exec/lib-guard-tests/test-wait-clear.sh`
+  (handoffs: claude_20260915_draft-reply-to-rhys.md)
+- `exec/nightly-amx-check-20260916/gen_page.py` -> `WS/exec/nightly-amx-check-20260916/gen_page.py`
+  (handoffs: claude_20260916-20260917_tron-amx-dispatch-in-ci-builds-after-pr3879.md)
+- `exec/nightly-amx-check-20260916/slack-reports.tsv` -> `WS/exec/nightly-amx-check-20260916/slack-reports.tsv`
+  (handoffs: claude_20260916-20260917_tron-amx-dispatch-in-ci-builds-after-pr3879.md)
+- `exec/p0perf-20260913/campaign.sh` -> `WS/exec/p0perf-20260913/campaign.sh`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `exec/p0perf-20260913/combine.py` -> `WS/exec/p0perf-20260913/combine.py`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `exec/p0perf-20260913/gen_report.py` -> `WS/exec/p0perf-20260913/gen_report.py`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `exec/p0perf-20260913/launch.sh` -> `WS/exec/p0perf-20260913/launch.sh`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `exec/p0perf-20260913/rz.sh` -> `WS/exec/p0perf-20260913/rz.sh`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `exec/p0perf-20260913/summarize.py` -> `WS/exec/p0perf-20260913/summarize.py`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `exec/pr1-rebase-20260915/build-test.sh` -> `WS/exec/pr1-rebase-20260915/build-test.sh`
+  (handoffs: claude_20260915_pr3879-branch-rebase.md)
+- `exec/results/canon-ci-20260918/notes.html` -> `WS/exec/results/canon-ci-20260918/notes.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/results/canon-ci-20260918/notes.html
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/results/canon-ci-20260918/render.sh` -> `WS/exec/results/canon-ci-20260918/render.sh`
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `exec/results/ci-enable-20260917/counter-validation.txt` -> `WS/exec/results/ci-enable-20260917/counter-validation.txt`
+  (handoffs: claude_20260917_amx-in-nightly-ci-on-delphi-3bda.md)
+- `exec/results/ci-enable-20260917/package-checks.txt` -> `WS/exec/results/ci-enable-20260917/package-checks.txt`
+  (handoffs: claude_20260917_amx-in-nightly-ci-on-delphi-3bda.md)
+- `exec/results/ci-mimic-20260918/caveats.html` -> `WS/exec/results/ci-mimic-20260918/caveats.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/results/ci-mimic-20260918/caveats.html
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/results/ci-mimic-20260918/notes3.html` -> `WS/exec/results/ci-mimic-20260918/notes3.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/results/ci-mimic-20260918/notes3.html
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `exec/results/expert-replicas-20260917/README.md` -> `WS/exec/results/expert-replicas-20260917/README.md`
+  (handoffs: claude_20260917_num-expert-replicas-flag-on-delphi-3bda.md)
+- `exec/results/p0perf-20260913/platformd-instance-1.env.txt` -> `WS/exec/results/p0perf-20260913/platformd-instance-1.env.txt`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `exec/results/p0perf-20260913/summary.md` -> `WS/exec/results/p0perf-20260913/summary.md`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `exec/tilec-20260917/build.sh` -> `WS/exec/tilec-20260917/build.sh`
+  (handoffs: claude_20260916-20260917_amx-and-vnni-k-dispatch-flags.md)
+- `exec/vnnik-20260914/campaign.sh` -> `WS/exec/vnnik-20260914/campaign.sh`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `exec/vnnik-20260914/compare_tokens.py` -> `WS/exec/vnnik-20260914/compare_tokens.py`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `exec/vnnik-20260914/gen_compare.py` -> `WS/exec/vnnik-20260914/gen_compare.py`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `exec/vnnik-20260914/gen_report.py` -> `WS/exec/vnnik-20260914/gen_report.py`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `exec/vnnik-20260914/launch.sh` -> `WS/exec/vnnik-20260914/launch.sh`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `exec/vnnik-20260914/pretest-light.sh` -> `WS/exec/vnnik-20260914/pretest-light.sh`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `exec/vnnik-20260914/summarize.py` -> `WS/exec/vnnik-20260914/summarize.py`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `exec/vnnik-20260914/syn-check-vnni.sh` -> `WS/exec/vnnik-20260914/syn-check-vnni.sh`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `exec/vnnik-trace-20260914/analyze.py` -> `WS/exec/vnnik-trace-20260914/analyze.py`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `exec/vnnik-trace-20260914/lanes.py` -> `WS/exec/vnnik-trace-20260914/lanes.py`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `exec/vnnik-trace-20260914/trace.sh` -> `WS/exec/vnnik-trace-20260914/trace.sh`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `exec/vnnik2-20260915/build.sh` -> `WS/exec/vnnik2-20260915/build.sh`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `exec/vnnik2-20260915/campaign.sh` -> `WS/exec/vnnik2-20260915/campaign.sh`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md, claude_20260915_draft-reply-to-rhys.md)
+- `exec/vnnik2-20260915/compare_tokens.py` -> `WS/exec/vnnik2-20260915/compare_tokens.py`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `exec/vnnik2-20260915/confirm.sh` -> `WS/exec/vnnik2-20260915/confirm.sh`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `exec/vnnik2-20260915/confirm2.sh` -> `WS/exec/vnnik2-20260915/confirm2.sh`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `exec/vnnik2-20260915/gen_report.py` -> `WS/exec/vnnik2-20260915/gen_report.py`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md, claude_20260916-20260918_block-store-transpose-animation.md)
+- `exec/vnnik2-20260915/precheck.sh` -> `WS/exec/vnnik2-20260915/precheck.sh`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `exec/vnnik2-20260915/summarize.py` -> `WS/exec/vnnik2-20260915/summarize.py`
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `exec/vnnik2-20260915/takeover-hook-20260915.patch` -> `WS/exec/vnnik2-20260915/takeover-hook-20260915.patch`
+  (handoffs: claude_20260915_draft-reply-to-rhys.md)
+- `exec/vnnik4-20260915/chain.sh` -> `WS/exec/vnnik4-20260915/chain.sh`
+  (handoffs: claude_20260914-20260915_jhan-amx-vnnik-draft-pr-to-jhan-amx-p0.md)
+- `exec/vnnik4-20260915/models.sh` -> `WS/exec/vnnik4-20260915/models.sh`
+  (handoffs: claude_20260914-20260915_jhan-amx-vnnik-draft-pr-to-jhan-amx-p0.md)
+- `exec/vnnik4-20260915/precheck.sh` -> `WS/exec/vnnik4-20260915/precheck.sh`
+  (handoffs: claude_20260914-20260915_jhan-amx-vnnik-draft-pr-to-jhan-amx-p0.md)
+- `exec/vnnik4-20260915/verify.sh` -> `WS/exec/vnnik4-20260915/verify.sh`
+  (handoffs: claude_20260914-20260915_jhan-amx-vnnik-draft-pr-to-jhan-amx-p0.md)
+- `exec/vnnik5-20260916/build.sh` -> `WS/exec/vnnik5-20260916/build.sh`
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `exec/vnnik5-20260916/final-head.sh` -> `WS/exec/vnnik5-20260916/final-head.sh`
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `exec/vnnik5-20260916/format-check.sh` -> `WS/exec/vnnik5-20260916/format-check.sh`
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `exec/vnnik5-20260916/host-suite.sh` -> `WS/exec/vnnik5-20260916/host-suite.sh`
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `exec/vnnik6-20260916/PLAN.md` -> `WS/exec/vnnik6-20260916/PLAN.md`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/analyze.py` -> `WS/exec/vnnik6-20260916/analyze.py`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/build.sh` -> `WS/exec/vnnik6-20260916/build.sh`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/campaign.sh` -> `WS/exec/vnnik6-20260916/campaign.sh`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/chain.sh` -> `WS/exec/vnnik6-20260916/chain.sh`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/compare_tokens.py` -> `WS/exec/vnnik6-20260916/compare_tokens.py`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/extra-oldbase.sh` -> `WS/exec/vnnik6-20260916/extra-oldbase.sh`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/extra2-trace8192.sh` -> `WS/exec/vnnik6-20260916/extra2-trace8192.sh`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/extra3-trace2048.sh` -> `WS/exec/vnnik6-20260916/extra3-trace2048.sh`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/gen_report.py` -> `WS/exec/vnnik6-20260916/gen_report.py`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/launch.sh` -> `WS/exec/vnnik6-20260916/launch.sh`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/sections/notes.html` -> `WS/exec/vnnik6-20260916/sections/notes.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/vnnik6-20260916/sections/notes.html
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/sections/recommendation.html` -> `WS/exec/vnnik6-20260916/sections/recommendation.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/vnnik6-20260916/sections/recommendation.html
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/sections/remedies.html` -> `WS/exec/vnnik6-20260916/sections/remedies.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/vnnik6-20260916/sections/remedies.html
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/summarize.py` -> `WS/exec/vnnik6-20260916/summarize.py`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik6-20260916/trace.sh` -> `WS/exec/vnnik6-20260916/trace.sh`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `exec/vnnik7-20260916/build.sh` -> `WS/exec/vnnik7-20260916/build.sh`
+  (handoffs: claude_20260916_k-vnni-hpp-rebuild.md)
+- `exec/wedperf-20260916/build-chain.sh` -> `WS/exec/wedperf-20260916/build-chain.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/build.sh` -> `WS/exec/wedperf-20260916/build.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/campaign-attr.sh` -> `WS/exec/wedperf-20260916/campaign-attr.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/campaign-attr2.sh` -> `WS/exec/wedperf-20260916/campaign-attr2.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/campaign-gen.sh` -> `WS/exec/wedperf-20260916/campaign-gen.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/campaign.sh` -> `WS/exec/wedperf-20260916/campaign.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/compare_tokens.py` -> `WS/exec/wedperf-20260916/compare_tokens.py`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/gen_report.py` -> `WS/exec/wedperf-20260916/gen_report.py`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/launch-attr-more.sh` -> `WS/exec/wedperf-20260916/launch-attr-more.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/launch-attr.sh` -> `WS/exec/wedperf-20260916/launch-attr.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/launch-attr2.sh` -> `WS/exec/wedperf-20260916/launch-attr2.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/launch-builds.sh` -> `WS/exec/wedperf-20260916/launch-builds.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/launch-campaign.sh` -> `WS/exec/wedperf-20260916/launch-campaign.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/launch-gen1536.sh` -> `WS/exec/wedperf-20260916/launch-gen1536.sh`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/make_artifact_copy.py` -> `WS/exec/wedperf-20260916/make_artifact_copy.py`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/wedperf-20260916/summarize.py` -> `WS/exec/wedperf-20260916/summarize.py`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `exec/workflows/amx-128x4-ci-models-wf_e1d04f3e-7a3.js` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/5435bd53-a7f6-440c-894a-f90c35d3546e/workflows/scripts/amx-128x4-ci-models-wf_e1d04f3e-7a3.js`
+  (handoffs: claude_20260918_amx-compatible-128x4-models-in-nightly-ci.md)
+- `exec/workflows/review-rinzler-takeover-wf_1ca7399d-b54.js` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/2c293dfd-07a3-4dc2-a1b4-4fffea2824de/workflows/scripts/review-rinzler-takeover-wf_1ca7399d-b54.js`
+  (handoffs: claude_20260915_draft-reply-to-rhys.md)
+
+### VNNIed K in place: status pages, design, animations, issue 4500 (vnnied-k-in-place/)
+
+- `vnnied-k-in-place/codex/design/root-cause-tracing.html` -> `WS/VNNIed-K-in-place/codex/design/root-cause-tracing.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/codex/design/root-cause-tracing.html
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `vnnied-k-in-place/design/claude-VNNIed-K.html` -> `WS/VNNIed-K-in-place/design/claude-VNNIed-K.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/design/claude-VNNIed-K.html
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `vnnied-k-in-place/exec/block-store-animation/build-gt.sh` -> `WS/VNNIed-K-in-place/exec/block-store-animation/build-gt.sh`
+  (handoffs: claude_20260916-20260918_block-store-transpose-animation.md)
+- `vnnied-k-in-place/exec/block-store-animation/gen_page.py` -> `WS/VNNIed-K-in-place/exec/block-store-animation/gen_page.py`
+  (handoffs: claude_20260916-20260918_block-store-transpose-animation.md)
+- `vnnied-k-in-place/exec/block-store-animation/gt.cpp` -> `WS/VNNIed-K-in-place/exec/block-store-animation/gt.cpp`
+  (handoffs: claude_20260916-20260918_block-store-transpose-animation.md)
+- `vnnied-k-in-place/exec/block-store-animation/shim/common/numerics/bf16.hpp` -> `WS/VNNIed-K-in-place/exec/block-store-animation/shim/common/numerics/bf16.hpp`
+  (handoffs: claude_20260916-20260918_block-store-transpose-animation.md)
+- `vnnied-k-in-place/exec/block-store-animation/shim/common/numerics/fp16.hpp` -> `WS/VNNIed-K-in-place/exec/block-store-animation/shim/common/numerics/fp16.hpp`
+  (handoffs: claude_20260916-20260918_block-store-transpose-animation.md)
+- `vnnied-k-in-place/exec/gen_fpga_page.py` -> `WS/VNNIed-K-in-place/exec/gen_fpga_page.py`
+  (handoffs: claude_20260916-20260917_pr4424-vnni-k-layout-and-fpga-attention.md)
+- `vnnied-k-in-place/exec/shared-save-animation/context_sections.py` -> `WS/VNNIed-K-in-place/exec/shared-save-animation/context_sections.py`
+  (handoffs: claude_20260918_shared-save-context-in-shared-save-animation-html.md)
+- `vnnied-k-in-place/exec/shared-save-animation/cut_units.py` -> `WS/VNNIed-K-in-place/exec/shared-save-animation/cut_units.py`
+  (handoffs: claude_20260916-20260918_block-store-transpose-animation.md, claude_20260918_shared-save-context-in-shared-save-animation-html.md)
+- `vnnied-k-in-place/exec/shared-save-animation/gen_page.py` -> `WS/VNNIed-K-in-place/exec/shared-save-animation/gen_page.py`
+  (handoffs: claude_20260918_shared-save-context-in-shared-save-animation-html.md)
+- `vnnied-k-in-place/exec/shared-save-animation/savek_spans.py` -> `WS/VNNIed-K-in-place/exec/shared-save-animation/savek_spans.py`
+  (handoffs: claude_20260918_shared-save-context-in-shared-save-animation-html.md)
+- `vnnied-k-in-place/exec/shared-save-animation/window_layout.cpp` -> `WS/VNNIed-K-in-place/exec/shared-save-animation/window_layout.cpp`
+  (handoffs: claude_20260916-20260918_block-store-transpose-animation.md, claude_20260918_shared-save-context-in-shared-save-animation-html.md)
+- `vnnied-k-in-place/input-2-ai/to-claude.md` -> `WS/VNNIed-K-in-place/input-2-ai/to-claude.md`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `vnnied-k-in-place/issue4500/root-cause-debug.html` -> `WS/VNNIed-K-in-place/issue4500/root-cause-debug.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/root-cause-debug.html
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `vnnied-k-in-place/status/Friday-morning-CI-run-report.html` -> `WS/VNNIed-K-in-place/status/Friday-morning-CI-run-report.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/Friday-morning-CI-run-report.html
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `vnnied-k-in-place/status/Monday-morning-report.html` -> `WS/VNNIed-K-in-place/status/Monday-morning-report.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/Monday-morning-report.html
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `vnnied-k-in-place/status/VNNI-K-FPGA-ATTN.html` -> `WS/VNNIed-K-in-place/status/VNNI-K-FPGA-ATTN.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/VNNI-K-FPGA-ATTN.html
+  (handoffs: claude_20260916-20260917_pr4424-vnni-k-layout-and-fpga-attention.md)
+- `vnnied-k-in-place/status/Wednesday-morning-report.html` -> `WS/VNNIed-K-in-place/status/Wednesday-morning-report.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/Wednesday-morning-report.html
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `vnnied-k-in-place/status/Wednesday-perf-test.html` -> `WS/VNNIed-K-in-place/status/Wednesday-perf-test.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/Wednesday-perf-test.html
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
+- `vnnied-k-in-place/status/amx-options-page/page.md` -> `WS/VNNIed-K-in-place/status/amx-options-page/page.md`
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `vnnied-k-in-place/status/amx-tree-hw-attn.html` -> `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place/150fe5cd-91f2-4ba4-a357-dc1a80c785c9/scratchpad/amx-tree-hw-attn.html` (volatile session scratchpad, the repo copy is the durable one)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/amx-tree-hw-attn.html
+  (handoffs: claude_20260916-20260917_amx-and-vnni-k-dispatch-flags.md)
+- `vnnied-k-in-place/status/block-store-animation.html` -> `WS/VNNIed-K-in-place/status/block-store-animation.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/block-store-animation.html
+  (handoffs: claude_20260916-20260918_block-store-transpose-animation.md)
+- `vnnied-k-in-place/status/handoff-store-remedies.md` -> `WS/VNNIed-K-in-place/status/handoff-store-remedies.md`
+  (handoffs: claude_20260914-20260915_jhan-amx-vnnik-draft-pr-to-jhan-amx-p0.md, claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md)
+- `vnnied-k-in-place/status/issue-fpga-attention-vnni-k-tps.body.md` -> `WS/VNNIed-K-in-place/status/issue-fpga-attention-vnni-k-tps.body.md`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `vnnied-k-in-place/status/llama8b-AMX-gain-vs-load.html` -> `WS/VNNIed-K-in-place/status/llama8b-AMX-gain-vs-load.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/llama8b-AMX-gain-vs-load.html
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `vnnied-k-in-place/status/main-rebase-20260915/issue-divergence-body.md` -> `WS/VNNIed-K-in-place/status/main-rebase-20260915/issue-divergence-body.md`
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `vnnied-k-in-place/status/main-rebase-20260915/pr-body.before.md` -> `WS/VNNIed-K-in-place/status/main-rebase-20260915/pr-body.before.md`
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `vnnied-k-in-place/status/main-rebase-20260915/rebase-report.html` -> `WS/VNNIed-K-in-place/status/main-rebase-20260915/rebase-report.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/main-rebase-20260915/rebase-report.html
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `vnnied-k-in-place/status/mirror-vs-VNNI-K.html` -> `WS/VNNIed-K-in-place/status/mirror-vs-VNNI-K.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/mirror-vs-VNNI-K.html
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `vnnied-k-in-place/status/pr-body-draft.md` -> `WS/VNNIed-K-in-place/status/pr-body-draft.md`
+  (handoffs: claude_20260914-20260915_jhan-amx-vnnik-draft-pr-to-jhan-amx-p0.md, claude_20260915_striped-block-store-naming-alternatives.md)
+- `vnnied-k-in-place/status/shared-save-animation.html` -> `WS/VNNIed-K-in-place/status/shared-save-animation.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/shared-save-animation.html
+  (handoffs: claude_20260918_shared-save-context-in-shared-save-animation-html.md)
+- `vnnied-k-in-place/status/store-remedies-report.html` -> `WS/VNNIed-K-in-place/status/store-remedies-report.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/store-remedies-report.html
+  (handoffs: claude_20260914_save-k-vnni-perfetto-trace-and-block-transpose.md, claude_20260916-20260918_block-store-transpose-animation.md)
+
+### PR1 and CI-enable reports (pr3879/)
+
+- `pr3879/CI-enable/Thursday-report.md` -> `WS/PR3879/new-PRs/CI-enable/Thursday-report.md`
+  (handoffs: claude_20260917_amx-in-nightly-ci-on-delphi-3bda.md)
+- `pr3879/CI-enable/for-Rhys-andoria-AMD-test.md` -> `WS/PR3879/new-PRs/CI-enable/for-Rhys-andoria-AMD-test.md`
+  (handoffs: claude_20260917_amx-in-nightly-ci-on-delphi-3bda.md)
+- `pr3879/PR1/CI-AMX-test-shapes.html` -> `WS/PR3879/new-PRs/PR1/CI-AMX-test-shapes.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/CI-AMX-test-shapes.html
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `pr3879/PR1/Sunday-CI-layout-results.html` -> `WS/PR3879/new-PRs/PR1/Sunday-CI-layout-results.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/Sunday-CI-layout-results.html
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `pr3879/PR1/canonical-AMX-CI-run-report.html` -> `WS/PR3879/new-PRs/PR1/canonical-AMX-CI-run-report.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/canonical-AMX-CI-run-report.html
+  (handoffs: claude_20260918_pr3879-amx-ci-harness-run.md)
+- `pr3879/PR1/nightly-amx-check-20260916.html` -> `WS/PR3879/new-PRs/PR1/nightly-amx-check-20260916.html`
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/nightly-amx-check-20260916.html
+  (handoffs: claude_20260916-20260917_tron-amx-dispatch-in-ci-builds-after-pr3879.md)
+- `pr3879/amx-shape-ci.html` -> `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/5435bd53-a7f6-440c-894a-f90c35d3546e/scratchpad/amx-shape-ci.html` (volatile session scratchpad, the repo copy is the durable one)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/amx-shape-ci.html
+  (handoffs: claude_20260918_amx-compatible-128x4-models-in-nightly-ci.md)
+- `pr3879/gen_sec2.py` -> `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX/d5572a41-5bae-4bce-87ed-3285768e6e77/scratchpad/gen_sec2.py` (volatile session scratchpad, the repo copy is the durable one)
+  (handoffs: claude_20260914_baseline-vs-mirror-sketch-html-matrix-dimensions.md)
+
+### project memory notes (memory/)
+
+- `memory/3bda-nightly-rinzler-cleanup.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/3bda-nightly-rinzler-cleanup.md`
+  (handoffs: claude_20260915_striped-block-store-naming-alternatives.md)
+- `memory/amx-busy-perf-counter.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-busy-perf-counter.md`
+  (handoffs: claude_20260917_amx-in-nightly-ci-on-delphi-3bda.md)
+- `memory/amx-options-notion-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-options-notion-page.md`
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `memory/amx-vnni-pseudocode-check-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-vnni-pseudocode-check-page.md`
+  (handoffs: claude_20260916-20260917_amx-and-vnni-k-dispatch-flags.md)
+- `memory/artifact-utf8-mojibake-trap.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/artifact-utf8-mojibake-trap.md`
+  (handoffs: claude_20260913_amx-baseline-vs-mirror-sketch.md)
+- `memory/baseline-vs-mirror-sketch.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/baseline-vs-mirror-sketch.md`
+  (handoffs: claude_20260913_amx-baseline-vs-mirror-sketch.md, claude_20260914_baseline-vs-mirror-sketch-html-matrix-dimensions.md)
+- `memory/ci-enable-20260917-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ci-enable-20260917-campaign.md`
+  (handoffs: claude_20260917_amx-in-nightly-ci-on-delphi-3bda.md)
+- `memory/ci-mimic-20260918-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ci-mimic-20260918-campaign.md`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `memory/claude-box-tron-build-env.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/claude-box-tron-build-env.md`
+  (handoffs: claude_20260916-20260917_amx-and-vnni-k-dispatch-flags.md)
+- `memory/fpga-path-under-vnni-k.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/fpga-path-under-vnni-k.md`
+  (handoffs: claude_20260916-20260917_pr4424-vnni-k-layout-and-fpga-attention.md)
+- `memory/issue-4500-root-cause-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue-4500-root-cause-campaign.md`
+  (handoffs: claude_20260918_tron-4500-fpga-attention-decode-tps-loss.md)
+- `memory/l8bload-20260918-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/l8bload-20260918-campaign.md`
+  (handoffs: claude_20260917-20260918_nightly-ci-mimic-with-amx-and-vnni-k.md)
+- `memory/nightly-vs-ours-tps-context.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/nightly-vs-ours-tps-context.md`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `memory/notebook-preservation-convention.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/notebook-preservation-convention.md`
+  (handoffs: claude_20260913_amx-baseline-vs-mirror-sketch.md)
+- `memory/p0perf-20260913-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/p0perf-20260913-campaign.md`
+  (handoffs: claude_20260912-20260913_tps-discrepancy-vs-nightly-ci.md)
+- `memory/pr-item-register.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr-item-register.md`
+  (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
+- `memory/pr4424-description-on-github.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4424-description-on-github.md`
+  (handoffs: claude_20260915_striped-block-store-naming-alternatives.md)
+- `memory/rinzler-unit-expert-replicas-750.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/rinzler-unit-expert-replicas-750.md`
+  (handoffs: claude_20260917_num-expert-replicas-flag-on-delphi-3bda.md)
+- `memory/vnni-k-terminology.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/vnni-k-terminology.md`
+  (handoffs: claude_20260915_striped-block-store-naming-alternatives.md, claude_20260916-20260917_amx-and-vnni-k-dispatch-flags.md)
+- `memory/vnnied-k-in-place-project.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/vnnied-k-in-place-project.md`
+  (handoffs: claude_20260913-20260914_input-2-ai-to-claude-md-instructions.md)
+- `memory/vnnik-branch-build-convention.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-tron/memory/vnnik-branch-build-convention.md`
+  (handoffs: claude_20260916_k-vnni-hpp-rebuild.md)
+- `memory/vnnik6-kvmul8-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/vnnik6-kvmul8-campaign.md`
+  (handoffs: claude_20260915-20260916_pr4424-vnni-layout-gate-for-kv-mul-8.md)
+- `memory/wedperf-20260916-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wedperf-20260916-campaign.md`
+  (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
