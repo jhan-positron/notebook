@@ -1,0 +1,94 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/VNNIed-K-in-place/design/codex-TTFT-plan-review.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/VNNIed-K-in-place/design/codex-TTFT-plan-review.html
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Review of Claude’s TTFT improvement plan</title>
+<style>
+:root{color-scheme:light;--ink:#172638;--muted:#506176;--line:#d7e0e9;--blue:#0072b2;--orange:#a95100}
+*{box-sizing:border-box}body{margin:0;background:#f6f8fb;color:var(--ink);font:16px/1.6 system-ui,sans-serif}main{max-width:1100px;margin:auto;padding:36px 24px 60px}h1{font-size:2.1rem;line-height:1.2}h2{font-size:1.4rem;margin-top:0}h3{font-size:1.08rem}section,nav{background:white;border:1px solid var(--line);border-radius:10px;padding:24px;margin:20px 0}p{margin:.7em 0}a{color:#005e96}li{margin:.5em 0}code{font-size:.88em;overflow-wrap:anywhere}.short{border-left:5px solid var(--blue)}.caption,.ref{color:var(--muted);font-size:.9rem}.notice{background:#fff6e8;border-left:4px solid var(--orange);padding:12px 16px}.flow,.charts{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:center}.box{background:#edf6fc;border:1px solid #a9bfd3;border-radius:8px;padding:16px}.box strong{display:block;margin-bottom:8px}.arrow{font-size:1.6rem;color:var(--blue)}.charts{grid-template-columns:1fr 1fr;align-items:start;gap:28px;margin:24px 0}.track{background:#edf1f5;height:23px;margin:4px 0 14px}.bar{height:100%;background:var(--orange)}.bar.proposed{background:var(--blue)}.bar-label{display:flex;justify-content:space-between;gap:12px;font-size:.9rem}.takeaway{font-weight:650}.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:.92rem}th,td{padding:10px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{background:#eff4f9}nav{display:flex;gap:16px;flex-wrap:wrap}section[id]{scroll-margin-top:18px}@media(max-width:700px){main{padding:20px 12px}section,nav{padding:18px}h1{font-size:1.7rem}.charts,.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg);text-align:center}th,td{padding:8px}}@media print{body{background:white}main{padding:0}section{break-inside:avoid}nav{display:none}}
+</style>
+</head>
+<body><main>
+<h1>Improve the key writer first; add helper threads through an explicit save phase</h1>
+<p class="caption">14 September 2026 · Review of Monday report §7.1 and Claude design §7 · Source revision <code>5e45ae55ae3277f025bd69a29e93741e2690e3e3</code></p>
+<section class="short"><h2>Short version</h2>
+<p>I agree with testing (a), then (b), and measuring their combination. The block transpose fits the stored layout, but “16× fewer store instructions” is incorrect for the current vector scatter. Whether either change removes the measured time-to-first-token regression remains unmeasured.</p>
+</section>
+<nav aria-label="Contents"><a href="#terms">Terms</a><a href="#block">(a) Block transpose</a><a href="#helpers">(b) Helper threads</a><a href="#measure">(c) Measurement plan</a></nav>
+<section id="terms"><h2>Words used here</h2>
+<ul>
+<li><strong>TTFT</strong>: time to first token. <strong>Prefill</strong> processes the prompt. <strong>Decode</strong> generates subsequent tokens.</li>
+<li><strong>K / V</strong>: attention keys / values. A <strong>key head</strong> has 128 dimensions in this model. A <strong>KV page</strong> holds 64 tokens. A <strong>slot</strong> selects the persistent storage for an attention operation.</li>
+<li><strong>VNNI-K</strong>: Claude’s candidate, which stores pairs of key dimensions together. <strong>bf16</strong> is the 2-byte bfloat16 format. One dimension pair occupies 4 bytes.</li>
+<li><strong>Scatter</strong>: a vector instruction that writes its elements to separate addresses. A <strong>cache line</strong> is 64 bytes here. A <strong>write fragment</strong> below means one explicitly addressed destination piece, not a measured hardware transaction.</li>
+<li><strong>Main helpers</strong> assist the main CPU thread. <strong>Attention workers</strong> run attention in a separate group. <strong>TP2 / TP4</strong> split one model copy over 2 / 4 accelerator cards. <strong>AMX</strong> is the CPU matrix instruction set.</li>
+</ul></section>
+<section id="block"><h2>(a) Yes: transpose complete blocks and write full lines</h2>
+<p>One stored line holds a dimension pair from each of 16 consecutive tokens. Transposing a complete block produces exactly those lines. The destination layout stays the same. [<a href="../tron-VNNIed-K/h/tron/kernels/k_vnni.hpp">k_vnni.hpp:16–24, 62–65</a>]</p>
+<div class="flow" role="group" aria-label="One dimension panel changes from token rows to dimension-pair rows">
+<div class="box"><strong>Input: one panel from 16 tokens</strong>16 token rows × 16 dimension pairs<br>Each pair = 4 bytes<br>Each source row contributes 64 bytes</div>
+<div class="arrow" aria-hidden="true">→</div>
+<div class="box"><strong>After a register transpose</strong>16 pair rows × 16 tokens<br>Each row = one full 64-byte store<br>16 stores = 1,024 bytes per panel</div>
+</div>
+<p class="caption">Repeat for 4 dimension panels to cover one 128-dimension head: 4,096 bytes in total. The four destination panels are separated in the page’s memory layout. This is a layout diagram, not a timing diagram. [<a href="../tron-VNNIed-K/h/tron/kernels/k_vnni.hpp">k_vnni.hpp:62–79</a>]</p>
+<h3>The correction: fewer destination fragments, the same store-operation count</h3>
+<div class="charts" role="group" aria-label="Write fragments decrease from 1024 to 64; vector store operations remain 64">
+<div><strong>Destination write fragments</strong>
+<div class="bar-label"><span>Current scatter</span><strong>1,024 fragments</strong></div><div class="track"><div class="bar" style="width:100%"></div></div>
+<div class="bar-label"><span>Proposed full-line stores</span><strong>64 fragments</strong></div><div class="track"><div class="bar proposed" style="width:6.25%"></div></div>
+<p class="takeaway">16× fewer fragments; each is 16× larger.</p></div>
+<div><strong>Vector store operations</strong>
+<div class="bar-label"><span>Current scatter</span><strong>64 scatters</strong></div><div class="track"><div class="bar" style="width:100%"></div></div>
+<div class="bar-label"><span>Proposed full-line stores</span><strong>64 stores</strong></div><div class="track"><div class="bar proposed" style="width:100%"></div></div>
+<p class="takeaway">Same count; different instructions.</p></div>
+</div>
+<p class="caption">Each chart starts at zero and uses its own scale. Static counts for one full 16-token block and one key head. The proposed transpose is not implemented or timed in this review.</p>
+<div class="scroll"><table><thead><tr><th>Quantity</th><th>Current scatter</th><th>Proposed block transpose</th></tr></thead><tbody>
+<tr><td>Vector store operations</td><td>16 tokens × 4 scatters = 64</td><td>4 panels × 16 stores = 64</td></tr>
+<tr><td>Destination fragments</td><td>1,024 × 4 bytes</td><td>64 × 64 bytes</td></tr>
+<tr><td>Bytes written</td><td>4,096 bytes</td><td>4,096 bytes</td></tr>
+<tr><td>Distinct destination lines</td><td>64 lines</td><td>64 lines</td></tr>
+</tbody></table></div>
+<p class="ref">[<a href="../tron-VNNIed-K/h/tron/kernels/k_vnni.hpp">current scatter, k_vnni.hpp:89–98</a>; <a href="../status/codex-ttft-plan-audit.json">computed counts and address audit</a>]</p>
+<p><strong>Performance hypothesis:</strong> contiguous stores cost less than the scatters they replace, even after the register shuffles. Measure the complete block writer, including loads, conversion, shuffles, and stores. These counts do not establish a speedup or a reduction in memory traffic.</p>
+<ul>
+<li>Group by the actual page and aligned 16-token destination block. All 16 tokens must be present and eligible for this save. Consecutive batch entries alone do not prove that condition. [<a href="../tron-VNNIed-K/h/tron/models/model.hpp">model.hpp:2745–2751</a>]</li>
+<li>Keep per-token scatter for incomplete blocks and ordinary decode. Do not wait for future tokens to fill a block. Preserve the current conversion to bf16 for other source formats. [<a href="../tron-VNNIed-K/h/tron/models/model.hpp">model.hpp:2754–2771</a>]</li>
+</ul></section>
+<section id="helpers"><h2>(b) Yes, with a coordinated phase in the existing helpers</h2>
+<p>Separate 16-token destination blocks have disjoint cache lines. Assign each block to one worker. Assigning neighboring tokens in the same block to different workers would make them write different bytes of the same lines. [<a href="../tron-VNNIed-K/h/tron/kernels/k_vnni.hpp">k_vnni.hpp:16–24</a>; <a href="../status/codex-ttft-plan-audit.json">address audit</a>]</p>
+<p class="notice"><strong>“Idle” does not mean available to execute a newly queued task.</strong> The generated pipeline already places long-lived helper and attention tasks on the pool. Helpers currently skip the attention statement containing the saves. A nested parallel loop that queues work to this pool and waits can deadlock. This follows from the worker schedule and the pool’s run-to-completion task loop. [<a href="../tron-VNNIed-K/ingest/src/TronCpp.hs">TronCpp.hs:1150–1163, 2279, 2339–2353</a>; <a href="../tron-VNNIed-K/h/tron/threading.hpp">threading.hpp:789–800, 820–827</a>]</p>
+<p>The implementation should add an explicit save phase to the existing main/helper streams. Use the actual allocated helper count, with a serial path when it is zero. Keep the current attention-worker allocation for the first experiment. Disjoint destination bytes establish write independence, but they do not establish input readiness or completion ordering. [<a href="../tron-VNNIed-K/h/tron/models/model.hpp">model.hpp:1937–1981</a>]</p>
+<ol>
+<li>Wait until the block’s source keys are ready. Keep their buffers valid while helpers read them. The current generated main path waits on the key channel before calling the save. [<a href="../tron-VNNIed-K/ingest/src/TronCpp.hs">TronCpp.hs:2339–2353</a>]</li>
+<li>Write every key head before marking a token complete or crediting its hardware-upload completion. Preserve exactly one completion per saved token. [<a href="../tron-VNNIed-K/h/tron/models/model.hpp">model.hpp:2754–2782</a>]</li>
+<li>Join all helper stores before releasing the batch’s key-ready dependency or source buffers. Notify each downstream batch once. Attention over pages being written waits on the combined key/value dependency. [<a href="../tron-VNNIed-K/h/tron/models/model.hpp">model.hpp:2785–2787, 2850–2852</a>; <a href="../tron-VNNIed-K/h/tron/models/self_attention.hpp">self_attention.hpp:782–788</a>]</li>
+</ol>
+<p><strong>Performance hypothesis:</strong> helper work shortens the save phase enough to offset dispatch, synchronization, and cache costs. Measure phase wall time and helper waiting. The existing source does not prove that extra threads will improve TTFT.</p>
+</section>
+<section id="measure"><h2>(c) Measure each change before choosing both</h2>
+<p><strong>Insufficient data:</strong> the campaign has no isolated key-save timing. The TP4 regression is measured, but its attribution to scatter stores is not. The existing <code>Save K</code> trace span provides a starting point. [<a href="../status/Monday-morning-report.html">Monday report §7.1</a>; <a href="../tron-VNNIed-K/h/tron/models/model.hpp">model.hpp:2739</a>; <a href="../status/codex-tp-scaling-data.json">recomputed campaign results</a>]</p>
+<div class="scroll"><table><thead><tr><th>Variant</th><th>What it answers</th></tr></thead><tbody>
+<tr><td>Current VNNI-K</td><td>Reference for the writer changes</td></tr>
+<tr><td>(a) Block transpose, one writer thread</td><td>Does replacing scatters improve the complete save phase?</td></tr>
+<tr><td>(b) Current scatters, coordinated helpers</td><td>Does distributing the existing work help?</td></tr>
+<tr><td>(a) + (b)</td><td>Do helpers still help after the writer becomes faster?</td></tr>
+<tr><td>PR3879 AMX baseline</td><td>Has the original TTFT regression been removed?</td></tr>
+</tbody></table></div>
+<ul>
+<li>Start with the regressing TP4 cases: prompt lengths 1,024 and 2,048 tokens, one engine, and 8 users. Rotate variant order and repeat. Trace source-key readiness, the whole save phase, helper completion, and attention’s dependency wait.</li>
+<li>Check TP2 and the 8,192-token prompt before accepting the change. Measure ordinary decode too. Retain the numerical checks for partial pages, skipped tokens, block boundaries, and completion ordering.</li>
+<li>Compare end-to-end TTFT with phase timing. Summed worker CPU time is not elapsed save time. Attention can also wait for saved values or other work. A shorter key-save phase alone does not prove the same reduction in TTFT. [<a href="../tron-VNNIed-K/h/tron/models/self_attention.hpp">self_attention.hpp:777–788</a>]</li>
+</ul>
+<p><strong>Recommendation:</strong> implement and measure (a) first. Add (b) if the remaining save phase justifies the scheduling change. Choose the combination only if its measured TTFT and decode results support it.</p>
+</section>
+<p class="caption">Scope: source review and exhaustive destination-address enumeration for all four full token blocks. Scheduling was reviewed in the checked-in code generator; the generated Qwen C++ was unavailable locally. No production implementation or machine benchmark was run. <a href="../status/codex-ttft-plan-audit.json">Audit and source hashes</a> · <a href="codex-TP2-TP4-analysis.html">Campaign versus nightly comparison</a></p>
+</main></body></html>
