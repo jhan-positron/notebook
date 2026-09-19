@@ -1,0 +1,489 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/root-cause-debug.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/root-cause-debug.html
+-->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Issue 4500 root cause plan</title><style>
+    body { margin: 0; background: #ffffff; color: #0b0b0b; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.5; }
+    main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 60px; }
+    h1 { font-size: 26px; margin: 0 0 6px; } h2 { font-size: 20px; margin: 34px 0 10px; border-bottom: 1px solid #e1e0d9; padding-bottom: 4px; } h3 { font-size: 16px; margin: 22px 0 6px; }
+    p { margin: 8px 0; } .meta { color: #52514e; font-size: 13px; }
+    .short { background: #f3f2ef; border-left: 4px solid #2a78d6; padding: 10px 14px; margin: 14px 0; }
+    table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin: 10px 0; } th, td { border: 1px solid #e1e0d9; padding: 5px 8px; text-align: left; vertical-align: top; } th { background: #f3f2ef; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .chart { display: block; max-width: 100%; height: auto; margin: 12px 0; } .cap { color: #52514e; font-size: 13px; margin: 0 0 14px; }
+    code { background: #f3f2ef; padding: 1px 4px; border-radius: 3px; font-size: 13px; } pre { background: #f3f2ef; padding: 10px 12px; overflow-x: auto; font-size: 12.5px; line-height: 1.4; }
+    .ok { background: #e6f4ec; } .warn { background: #fbe3d8; } .no { background: #f3f2ef; color: #52514e; } .mid { background: #fdf3d6; }
+    ul { margin: 6px 0 6px 22px; } li { margin: 3px 0; }
+    </style></head><body><main>
+<h1>Finding the cause of the FPGA-attention decode loss under the VNNI K layout</h1>
+<p class="meta">Design and execution record for positron-ai/tron issue #4500. Written 2026-09-18 (Claude); code read at PR #4424 head 30c4ac82cb (worktree VNNIed-K-in-place/tron-VNNIed-K), merge base c7844ca2ce. Facts come from a 16-agent read-and-verify pass (8 readers, 8 adversarial verifiers); every fact carries a file:line citation. The codex design (codex/design/root-cause-tracing.html) was compared after this design was drafted; section 9 lists what was taken from it.</p>
+<div class="short"><b>Short version.</b> The extra time is spent on the CPU, not on the FPGA card: the bytes the card reads are identical in both builds, and only three CPU operations on the K cache differ (the per-token K store on the main thread, the K-row gather when a group of four tokens is staged for the card, and the tail-scoring reader on the workers). A micro-benchmark run today on delphi-3bda measured the K store at +350 ns per row, which alone predicts 98 % of the runtron tp4 loss, about half of the CI tp4 loss and about 70 % of the CI tp2 loss (tp4 and tp2 = the model split over 4 or 2 FPGA cards; CI = the nightly test layout). The plan measures the three costs in the running program with runtron and Perfetto traces, separates the store from the other two with a run-time switch that needs no rebuild, and names in advance the result that confirms or rejects each cause.</div>
+
+<h2>Words used here</h2>
+<table><tr><th>term</th><th>meaning</th></tr>
+<tr><td>tp2, tp4</td><td>tensor parallel over 2 or 4 FPGA cards: the model's weights are split across that many cards of one engine (tp2 uses cards 90 and 93 of our half, tp4 adds b9 and bc). The K cache is not split across the cards (section 1).</td></tr>
+<tr><td>CI, CI layout, nightly</td><td>CI = the nightly continuous-integration run of systems_test on delphi-3bda. The CI layout is its serving shape: 8 users through the Caddy proxy over 4 tp2 engines (2 users per engine) or 2 tp4 engines (4 users per engine), prompt 1024, 1536 generated tokens, TPS captured between generated tokens 896 and 1024.</td></tr>
+<tr><td>tron, runtron, rinzler</td><td>tron = the inference program under test. runtron = its command-line tool (one model, synthetic users). rinzler = the production server the nightly CI drives through the Caddy proxy.</td></tr>
+<tr><td>FPGA attention, HW attention</td><td>attention scored on the FPGA cards. The environment variable USE_HW_ATTN unset turns it on for ingested models such as qwen-3-4b. The CPU still scores the newest tokens (the tail, section 2).</td></tr>
+<tr><td>VNNI K layout, PR 4424, TRON_K_VNNI</td><td>VNNI = Vector Neural Network Instructions. PR 4424 stores the K cache of 128-dimension heads in the pair-interleaved operand layout of the AMX tile multiply instead of row by row. TRON_K_VNNI is its CMake option; there is no run-time switch.</td></tr>
+<tr><td>AMX, kill switch</td><td>AMX = Intel Advanced Matrix Extensions, the tile unit of the CPU. The kill switch TRON_AMX_DISABLE=1 turns the AMX kernels off at run time; it does not change the K layout.</td></tr>
+<tr><td>K, KV head, KV cache, bf16</td><td>K = the attention keys of the past tokens (V = their values). A KV head is one key/value head of an attention layer; qwen-3-4b has 8 per layer, each shared by 4 query heads. The KV cache is the store of every past token's keys and values. bf16 = 16-bit brain floating point, 2 bytes per value.</td></tr>
+<tr><td>row, line, plane, page</td><td>row = one token's K values for one KV head (128 bf16 = 256 bytes). line = one 64-byte cache line. plane = the K storage of one (page, KV head) = 64 tokens x 128 dims = 16 KiB. page = 64 tokens of the KV cache.</td></tr>
+<tr><td>scatter, gather, RFO</td><td>scatter_row writes one row into the VNNI plane with 4 AVX-512 scatter instructions: 4 bytes into each of 64 lines. gather_row reads one row back with 4 gather instructions from the same 64 lines. Row-major stores or reads a row as 4 whole lines. RFO = read-for-ownership: before a core writes part of a line it must fetch the whole line, so a partial write costs a line transfer.</td></tr>
+<tr><td>GOF, populate, staging, DMA</td><td>GOF = group of four consecutive tokens, the unit copied to the card. gof::populate copies the 4 tokens' K and V rows into an 8 KiB + 8 KiB staging block. DMA = the copy of that block into the card memory (HBM). A GOF is populated when its 4th token's K and V are saved, and again only if its staging block was freed and a new DMA needs it (backfill of a new shard) [gof.cpp:193-195; gof.hpp:244-265]. In a plain decode run each GOF is populated once.</td></tr>
+<tr><td>tail, qk_group, dotter</td><td>tail = the tokens after the last DMA-complete GOF (1 to about 8 per user), which the CPU scores every step. qk_group = the AVX-512 reader of the VNNI plane (64 masked line loads per 16-token block, whatever the number of live tokens). dotter = the row-major per-token reader (4 lines per live token).</td></tr>
+<tr><td>main thread, attention workers, main helpers</td><td>main thread = the thread that runs the generated plugin's run() (rmsnorm, matmul launches, Save K, Save V). attention workers = the pool threads that score the tail and stage GOFs. main helpers = pool threads that share dense kernels with main; they do nothing for K in decode.</td></tr>
+<tr><td>rmsnorm, rope, WV, WO, matmul</td><td>rmsnorm = the layer normalization before attention. rope = the rotary position encoding applied to Q and K. WV and WO = the value-projection and output-projection weight matrices of the attention layer (tron record labels). A matmul is one weight multiplication launched on the card.</td></tr>
+<tr><td>ready section, pending section, join</td><td>An attention worker's ready section scores pages written in earlier steps (empty under FPGA attention in decode). Its pending section scores the pages written in this step (the tail). The join merges every worker's partial results and the card's result for one KV head.</td></tr>
+<tr><td>Perfetto, trace, span, pass, category</td><td>Perfetto = the in-process tracing library compiled into tron; runtron --trace-gen FILE writes one trace per run. A span is one timed code region in the trace (start, end, thread). A pass is one forward run of the model over the batch: one prefill chunk or one decode step (the forward span carries n_token_jobs). A category is a group of spans that TRON_TRACE_CATEGORIES turns on together.</td></tr>
+<tr><td>hugepage, generated tokens (-l)</td><td>hugepage = a 1 GiB memory page reserved for tron; the machine has 512, the tp4 placement needs 256. runtron -l N = N generated tokens per user (the runs below use 256 for TPS cells, 40 for traces, 4096 for the perf window).</td></tr>
+<tr><td>early / late launch, B</td><td>B = tokens (users) in one batch of one engine. B &gt;= TRON_HWATTN_EARLY_LAUNCH_MIN_B (default 4) launches the card BEFORE Save K and Save V of the layer (early). Smaller B saves K and V first and launches after (late).</td></tr>
+<tr><td>TPS, step, TTFT</td><td>TPS = generated tokens per second per user. step = 1000 / TPS in ms = the period of one batched decode step (all users of an engine share it). TTFT = time to first token.</td></tr>
+<tr><td>arms: base, headoff, vnni, vnni2, vnnikill, head30</td><td>base = runtron.main0916 (c7844ca2ce, the PR's merge base, row-major K, AMX dispatch compiled). headoff = runtron.headoff0916 (ff680c8020 = PR code with TRON_K_VNNI=OFF, row-major K). vnni = runtron.pr4424 (ff680c8020, TRON_K_VNNI=ON). vnni2 = the vnni binary run a second time in the same repetition (an A/A control: two runs of the same program measure run-to-run noise; any vnni2 minus vnni difference is noise). vnnikill = vnni with TRON_AMX_DISABLE=1. head30 = tron-tilec/gen/runtron (30c4ac82cb, the PR head on GitHub), run once. All built on 3bda, RelWithDebInfo.</td></tr>
+<tr><td>paired t, Welch t</td><td>paired t = mean of per-repetition differences divided by its standard error (repetitions interleave the arms). Welch t = two-sample t with unequal variances. Two-sided 95 % thresholds: 12.71 at n = 2, 4.30 at n = 3, 2.57 at n = 6, 2.26 at n = 10.</td></tr>
+</table>
+<h2>1. The loss to explain</h2>
+<p>All four measured configurations run qwen-3-4b (36 layers, 8 KV heads, head size 128, 4 query heads per KV head) with prompt 1024 and FPGA attention. The table converts each TPS pair into a per-step budget. The step period is 1000 / TPS. Every user of an engine reports the same ms per token to 0.001 ms, so the step is shared [wedperf-attr rt logs, 8 'average tok/s' lines per run].</p>
+<table><tr><th>configuration</th><th class="num">base TPS</th><th class="num">target TPS</th><th class="num">step base ms</th><th class="num">step target ms</th><th class="num">loss ms/step</th><th class="num">loss %</th><th class="num">us per layer</th><th class="num">rows per layer</th><th class="num">ns per row</th><th>launch</th><th>source</th></tr>
+<tr><td>runtron tp2, 8 users, 1 engine</td><td class="num">125.41</td><td class="num">122.61</td><td class="num">7.974</td><td class="num">8.156</td><td class="num">+0.182</td><td class="num">-2.2</td><td class="num">5.1</td><td class="num">64</td><td class="num">79</td><td>early</td><td>wedperf-attr block D, n=6, t -6.5</td></tr>
+<tr><td>runtron tp4, 8 users, 1 engine</td><td class="num">129.65</td><td class="num">117.12</td><td class="num">7.713</td><td class="num">8.538</td><td class="num">+0.825</td><td class="num">-9.7</td><td class="num">22.9</td><td class="num">64</td><td class="num">358</td><td>early</td><td>wedperf-attr block D, n=6, t -2.9</td></tr>
+<tr><td>CI layout tp2, 2 users per engine</td><td class="num">186.13</td><td class="num">176.75</td><td class="num">5.373</td><td class="num">5.658</td><td class="num">+0.285</td><td class="num">-5.0</td><td class="num">7.9</td><td class="num">16</td><td class="num">495</td><td>late</td><td>ci-mimic 2026-09-18, 80 samples, Welch t -7.2</td></tr>
+<tr><td>CI layout tp4, 4 users per engine</td><td class="num">149.94</td><td class="num">133.44</td><td class="num">6.669</td><td class="num">7.494</td><td class="num">+0.825</td><td class="num">-11.0</td><td class="num">22.9</td><td class="num">32</td><td class="num">716</td><td>early</td><td>ci-mimic 2026-09-18, 80 samples, Welch t -17.4</td></tr>
+</table>
+<p class="cap">rows per layer = users per engine x 8 KV heads. ns per row = the loss per layer divided by the rows. The K cache is not split across the tp cards (a 1024-token shard with all 8 KV heads lives on one card) [full.hpp:2442-2488; gof.cpp:161-164], so tp does not change the rows [gof.hpp:36; shard.hpp:5].</p>
+<ul>
+<li><b>The loss is not proportional to rows.</b> Per row it spans 79 ns (runtron tp2) to 716 ns (CI tp4), a 9x spread. A cost that is purely per row cannot fit all four cells. Exposure matters: how much of the extra CPU time lands on the step's critical path.</li>
+<li><b>The store cost fits the tp4 runtron cell and the CI tp2 cell.</b> CI tp2 runs 2 users per engine, below the early-launch threshold of 4 (section 2). Save K therefore runs before the card launch and is fully on the critical path. Its 495 ns per row is 1.4x the +350 ns per row the micro-benchmark gives for the scatter store (section 6), so the store explains 71 % of that cell. runtron tp4 loses 23 us per layer with 2304 rows per step, and 2304 rows x 350 ns = 0.81 ms per step (est.) is 98 % of its loss. CI tp4 loses the same 23 us per layer with only 1152 rows per step, so the store predicts 0.40 ms (est.) of its 0.825 ms, about half. The other half of the CI tp4 loss needs another cause (sections 3 and 5).</li>
+<li><b>runtron tp2 with 8 users overlaps most of the store with the card's work.</b> It loses 5 us per layer. The micro-benchmark predicts 23 us per layer for the store at 8 users (est., 2304 rows x 355 ns / 36 layers). At tp2 the card's step is long enough that the early-launched attention runs at the same time as Save K and Save V, so most of the store cost is hidden there.</li>
+<li><b>The tp4 runtron runs are bimodal.</b> The two row-major arms of the 2026-09-16 campaign (eb2de0265a = main before PR 3879, and c7844ca2ce = this page's base) sit at 7.40 ms per step in 9 of 12 repetitions and at 8.46 ms in 3. The VNNI arm (ff680c8020) sits at 8.54 ms in 6 of 6 [wedperf-attr rt logs, per-rep 'average tok/s']. The design records per-repetition steps, not only means.</li>
+</ul>
+<svg class="chart" viewBox="0 0 1040 372" width="1040" height="372" role="img" aria-label="Per-step decode loss to explain per configuration, with the store cost predicted from the micro-benchmark" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+<rect x="0" y="0" width="1040" height="372" fill="#fcfcfb"/>
+<text x="20" y="24" font-size="13" fill="#52514e">Figure 1. The loss per decode step (measured) and the K-store cost predicted from the micro-benchmark (rows per step x 350 ns).</text>
+<line x1="300.0" y1="54" x2="300.0" y2="292" stroke="#c3c2b7" stroke-width="1"/>
+<text x="300.0" y="308" font-size="12" text-anchor="middle" fill="#52514e">0.0 ms</text>
+<line x1="420.0" y1="54" x2="420.0" y2="292" stroke="#e1e0d9" stroke-width="1"/>
+<text x="420.0" y="308" font-size="12" text-anchor="middle" fill="#52514e">0.2 ms</text>
+<line x1="540.0" y1="54" x2="540.0" y2="292" stroke="#e1e0d9" stroke-width="1"/>
+<text x="540.0" y="308" font-size="12" text-anchor="middle" fill="#52514e">0.4 ms</text>
+<line x1="660.0" y1="54" x2="660.0" y2="292" stroke="#e1e0d9" stroke-width="1"/>
+<text x="660.0" y="308" font-size="12" text-anchor="middle" fill="#52514e">0.6 ms</text>
+<line x1="780.0" y1="54" x2="780.0" y2="292" stroke="#e1e0d9" stroke-width="1"/>
+<text x="780.0" y="308" font-size="12" text-anchor="middle" fill="#52514e">0.8 ms</text>
+<line x1="900.0" y1="54" x2="900.0" y2="292" stroke="#e1e0d9" stroke-width="1"/>
+<text x="900.0" y="308" font-size="12" text-anchor="middle" fill="#52514e">1.0 ms</text>
+<text x="600" y="328" font-size="12.5" text-anchor="middle" fill="#52514e">milliseconds added to one decode step (target minus base)</text>
+<text x="288" y="78" font-size="13" font-weight="600" text-anchor="end" fill="#0b0b0b">runtron tp2, 8 users, 1 engine</text>
+<text x="288" y="94" font-size="11.5" text-anchor="end" fill="#52514e">64 rows per layer, early launch</text>
+<rect x="300.0" y="66" width="109.3" height="16" rx="3" fill="#2a78d6"><title>measured loss 0.182 ms per step</title></rect>
+<text x="415.3" y="78" font-size="12" fill="#0b0b0b">+0.182 ms (-2.2% TPS)</text>
+<line x1="783.8" y1="60" x2="783.8" y2="96" stroke="#eb6834" stroke-width="3"/><title>store prediction 0.81 ms</title>
+<text x="783.8" y="108" font-size="11" text-anchor="middle" fill="#eb6834">store est. 0.81 ms</text>
+<text x="288" y="136" font-size="13" font-weight="600" text-anchor="end" fill="#0b0b0b">runtron tp4, 8 users, 1 engine</text>
+<text x="288" y="152" font-size="11.5" text-anchor="end" fill="#52514e">64 rows per layer, early launch</text>
+<rect x="300.0" y="124" width="495.1" height="16" rx="3" fill="#2a78d6"><title>measured loss 0.825 ms per step</title></rect>
+<text x="801.1" y="136" font-size="12" fill="#0b0b0b">+0.825 ms (-9.7% TPS)</text>
+<line x1="783.8" y1="118" x2="783.8" y2="154" stroke="#eb6834" stroke-width="3"/><title>store prediction 0.81 ms</title>
+<text x="783.8" y="166" font-size="11" text-anchor="middle" fill="#eb6834">store est. 0.81 ms</text>
+<text x="288" y="194" font-size="13" font-weight="600" text-anchor="end" fill="#0b0b0b">CI layout tp2, 2 users per engine</text>
+<text x="288" y="210" font-size="11.5" text-anchor="end" fill="#52514e">16 rows per layer, late launch</text>
+<rect x="300.0" y="182" width="171.1" height="16" rx="3" fill="#2a78d6"><title>measured loss 0.285 ms per step</title></rect>
+<text x="477.1" y="194" font-size="12" fill="#0b0b0b">+0.285 ms (-5.0% TPS)</text>
+<line x1="421.0" y1="176" x2="421.0" y2="212" stroke="#eb6834" stroke-width="3"/><title>store prediction 0.20 ms</title>
+<text x="421.0" y="224" font-size="11" text-anchor="middle" fill="#eb6834">store est. 0.20 ms</text>
+<text x="288" y="252" font-size="13" font-weight="600" text-anchor="end" fill="#0b0b0b">CI layout tp4, 4 users per engine</text>
+<text x="288" y="268" font-size="11.5" text-anchor="end" fill="#52514e">32 rows per layer, early launch</text>
+<rect x="300.0" y="240" width="494.8" height="16" rx="3" fill="#2a78d6"><title>measured loss 0.825 ms per step</title></rect>
+<text x="800.8" y="252" font-size="12" fill="#0b0b0b">+0.825 ms (-11.0% TPS)</text>
+<line x1="541.9" y1="234" x2="541.9" y2="270" stroke="#eb6834" stroke-width="3"/><title>store prediction 0.40 ms</title>
+<text x="541.9" y="282" font-size="11" text-anchor="middle" fill="#eb6834">store est. 0.40 ms</text>
+<rect x="20" y="350" width="14" height="10" fill="#2a78d6"/><text x="40" y="359" font-size="12" fill="#0b0b0b">measured loss per step</text>
+<line x1="250" y1="348" x2="250" y2="362" stroke="#eb6834" stroke-width="3"/><text x="260" y="359" font-size="12" fill="#0b0b0b">main-thread K store cost, est. from the micro-benchmark (+350 ns per row, measured 2026-09-18)</text>
+</svg>
+<p class="cap">Figure 1. Blue bars: the measured loss per decode step. Orange ticks: the K-store cost predicted from the micro-benchmark (rows per step x 350 ns, est.). The tick reaches the bar in the runtron tp4 cell (98 %), covers half of the CI tp4 bar (49 %) and 70 % of the CI tp2 bar. The runtron tp2 bar is far below its tick, so most of the store is overlapped there.</p>
+<h2>2. What a decode step does with FPGA attention (verified in the code)</h2>
+<p>The FPGA reads K only through gof::populate. PR 4424 did not change the staging block format, the DMA or the HBM layout [git diff c7844ca2ce..30c4ac82cb: h/pos, lib, fpga-reg untouched; gof.cpp +2/-1]. So the card's work is identical in both builds and the loss is CPU time. Three operations differ, and only three, on the decode path:</p>
+<table><tr><th>#</th><th>operation</th><th>who runs it, when</th><th>row-major (base, headoff)</th><th>VNNI (vnni)</th><th>how often</th><th>citations</th></tr>
+<tr><td>1</td><td><b>K store</b> (Save K)</td><td>main thread, every layer, every step; never shared with helpers below 17 items</td><td>memcpy of 4 whole lines per row</td><td>scatter_row: 4 bytes into each of 64 lines (64 read-for-ownership transfers)</td><td>users x 8 heads rows per layer, every step</td><td>model.hpp:2806-2814, 3040, 2914-2927; kv_cache.hpp:1701-1711; k_vnni.hpp:135-146</td></tr>
+<tr><td>2</td><td><b>staging gather</b> (populate)</td><td>an attention worker at the start of the next layer (help_drain_gof, 4 GOFs per worker), or the main thread after the last layer (wait_coop_gof)</td><td>returns a pointer into the page; the shuffle reads 4 lines</td><td>gather_row: 4 gathers over 64 lines into scratch, then the shuffle reads the scratch</td><td>once per GOF per layer: every 4th token per user (in runtron all users complete a GOF on the same step: 288 populates every 4th step)</td><td>full.hpp:2644-2661; gof.cpp:188-222; model.hpp:3146-3189; TronCpp.hs:1331-1348</td></tr>
+<tr><td>3</td><td><b>tail scoring</b> (pending section)</td><td>attention workers, every layer, after Save K and Save V of the layer, before the hw wait</td><td>dotter: 4 lines per live token, 4 heads</td><td>qk_group: 64 masked line loads + 256 VDPBF16PS per 16-token block with any live token</td><td>users x 8 heads calls per layer, every step; 1 to 8 live tokens</td><td>self_attention.hpp:1604-1641, 776-789; k_vnni.hpp:246-308; dotter.hpp:176-226</td></tr>
+</table>
+<ul>
+<li><b>Not on the decode path:</b>
+<ul>
+<li>the AMX dense-page kernel. is_dense_amx_page (the check that selects that kernel) needs a whole 64-token page in the software range. Under FPGA attention that holds only when the DMA lags by 64 or more tokens or when a shard cannot use the card [self_attention.hpp:1383-1394; ranged_mask.cpp:13-96]. The vnnikill arm is the direct check, and the m3 tail-length reading (H5) shows the lag. In prefill the dense AMX kernel does run under FPGA attention.</li>
+<li>page copies. copy_storage_slot runs only from book::append during tree defragmentation (compaction of a conversation tree's KV pages) [kv_cache.hpp:2093-2120; full.hpp:1309-1347].</li>
+<li>the shared block save. It needs more than 16 items [model.hpp:2806-2814].</li>
+<li>the rest of the diff: a 4.7 KiB batch struct zeroed per step, a no-op helper call per layer, one assert per row on the VNNI path. Together below 20 us per step (est. from operation counts, not measured).</li>
+</ul></li>
+<li><b>Why the CPU-attention campaigns did not see it.</b> There the same store cost (+24 to +29 us per layer at 8 users [vnnik-trace-20260914 analysis.md]) was smaller than the time the AMX reader saved on the full pages, and the step still got shorter. Under FPGA attention the card scores the full pages. The AMX reader then saves no time, and the store, the gather and the tail reader add time with nothing to offset them.</li>
+<li><b>Populate never gates the same step's card launch.</b> The launch waits only for the rotated Q; DMA completion is observed once per forward at the next forward's start [self_attention.hpp:634-672; full.hpp:1877; model.hpp:1512]. A slow populate lengthens the tail (more tokens scored on the CPU) in the following step instead.</li>
+<li><b>Order inside a layer, early phase (B &gt;= 4)</b> [plugin qwen_3_4b_instruct_2507.hpp:1790-1836, 7743-7757; TronCpp.hs:2370-2411; model.hpp:91-137].
+<ol>
+<li>Main thread: (1) rmsnorm and rope; (2) launch the WV matmul; (3) prepare, ending in a barrier with the workers; (4) launch HW attention; (5) Save K; (6) Save V; (7) the WO matmul waits for the attention output.</li>
+<li>Workers: (1) wait at the barrier; (2) drain up to 4 GOFs (populate + DMA submit); (3) ready sections (empty in decode); (4) wait for Save K and Save V; (5) pending section = tail scoring; (6) spin until the card's result arrives (hw wait); (7) join.</li>
+<li>Late phase (B &lt; 4): Save K and Save V come before prepare and launch on the main thread. The workers' wait ends at Save V, so the tail scoring then runs in parallel with prepare, launch and the card.</li>
+</ol></li>
+</ul>
+<svg class="chart" viewBox="0 0 1240 600" width="1240" height="600" role="img" aria-label="One layer of one FPGA-attention decode step: what the main thread, the attention workers and the FPGA do, for the early and the late launch phase, with the three VNNI-only costs marked" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+<rect x="0" y="0" width="1240" height="600" fill="#fcfcfb"/>
+<defs><marker id="ah2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#52514e"/></marker></defs>
+<text x="20" y="22" font-size="13" fill="#52514e">Figure 2. One layer of one decode step with FPGA attention (order verified in the generated qwen plugin). Boxes are steps in order, widths are NOT time. Orange = changed by VNNI.</text>
+<text x="20" y="44" font-size="13.5" font-weight="600" fill="#0b0b0b">A. Early launch (batch of 4 or more users per engine: runtron with 8 users, CI tp4).</text>
+<text x="20" y="61" font-size="13.5" font-weight="400" fill="#52514e">The card is launched before Save K. The store overlaps the card&#x27;s work.</text>
+<text x="20" y="103" font-size="12.5" fill="#52514e">main thread</text>
+<line x1="150" y1="121" x2="1220" y2="121" stroke="#e1e0d9" stroke-width="1"/>
+<text x="20" y="165" font-size="12.5" fill="#52514e">attention workers</text>
+<line x1="150" y1="183" x2="1220" y2="183" stroke="#e1e0d9" stroke-width="1"/>
+<text x="20" y="227" font-size="12.5" fill="#52514e">FPGA card</text>
+<line x1="150" y1="245" x2="1220" y2="245" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="150" y="83" width="57" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="178" y="99" font-size="10.5" text-anchor="middle" fill="#0b0b0b">rmsnorm</text>
+<text x="178" y="113" font-size="10.5" text-anchor="middle" fill="#0b0b0b">+ rope</text>
+<rect x="213" y="83" width="57" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="242" y="99" font-size="10.5" text-anchor="middle" fill="#0b0b0b">WV matmul</text>
+<text x="242" y="113" font-size="10.5" text-anchor="middle" fill="#0b0b0b">launch</text>
+<rect x="276" y="83" width="54" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="303" y="99" font-size="10.5" text-anchor="middle" fill="#0b0b0b">prepare</text>
+<text x="303" y="113" font-size="10.5" text-anchor="middle" fill="#0b0b0b">(barrier)</text>
+<rect x="336" y="207" width="122" height="38" rx="4" fill="#e3edf9" stroke="#2a78d6" stroke-width="1"/>
+<text x="397" y="223" font-size="10.5" text-anchor="middle" fill="#0b0b0b">attention on</text>
+<text x="397" y="237" font-size="10.5" text-anchor="middle" fill="#0b0b0b">the card</text>
+<rect x="464" y="83" width="63" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="496" y="99" font-size="10.5" text-anchor="middle" fill="#0b0b0b">launch HW</text>
+<text x="496" y="113" font-size="10.5" text-anchor="middle" fill="#0b0b0b">attention</text>
+<rect x="533" y="83" width="108" height="38" rx="4" fill="#fbe3d8" stroke="#eb6834" stroke-width="2"/>
+<text x="587" y="99" font-size="10.5" text-anchor="middle" fill="#0b0b0b">Save K: scatter</text>
+<text x="587" y="113" font-size="10.5" text-anchor="middle" fill="#0b0b0b">64 lines per row</text>
+<rect x="647" y="83" width="49" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="672" y="99" font-size="10.5" text-anchor="middle" fill="#0b0b0b">Save V</text>
+<rect x="702" y="145" width="113" height="38" rx="4" fill="#fbe3d8" stroke="#eb6834" stroke-width="2"/>
+<text x="758" y="161" font-size="10.5" text-anchor="middle" fill="#0b0b0b">drain GOFs: gather</text>
+<text x="758" y="175" font-size="10.5" text-anchor="middle" fill="#0b0b0b">64 lines per row</text>
+<rect x="821" y="145" width="72" height="38" rx="4" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="857" y="161" font-size="10.5" text-anchor="middle" fill="#0b0b0b">wait K/V</text>
+<text x="857" y="175" font-size="10.5" text-anchor="middle" fill="#0b0b0b">of this layer</text>
+<rect x="899" y="145" width="108" height="38" rx="4" fill="#fbe3d8" stroke="#eb6834" stroke-width="2"/>
+<text x="953" y="161" font-size="10.5" text-anchor="middle" fill="#0b0b0b">tail: qk_group</text>
+<text x="953" y="175" font-size="10.5" text-anchor="middle" fill="#0b0b0b">64 lines per block</text>
+<rect x="1013" y="145" width="54" height="38" rx="4" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1040" y="161" font-size="10.5" text-anchor="middle" fill="#0b0b0b">hw wait</text>
+<text x="1040" y="175" font-size="10.5" text-anchor="middle" fill="#0b0b0b">(spin)</text>
+<rect x="1073" y="145" width="41" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="1094" y="161" font-size="10.5" text-anchor="middle" fill="#0b0b0b">join</text>
+<rect x="1120" y="83" width="98" height="38" rx="4" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1169" y="99" font-size="10.5" text-anchor="middle" fill="#0b0b0b">WO matmul</text>
+<text x="1169" y="113" font-size="10.5" text-anchor="middle" fill="#0b0b0b">waits attention out</text>
+<text x="20" y="312" font-size="13.5" font-weight="600" fill="#0b0b0b">B. Late launch (batch below 4 users per engine: CI tp2 with 2 users).</text>
+<text x="20" y="329" font-size="13.5" font-weight="400" fill="#52514e">Save K and Save V run before the card is launched. The store is serial time.</text>
+<text x="20" y="371" font-size="12.5" fill="#52514e">main thread</text>
+<line x1="150" y1="389" x2="1220" y2="389" stroke="#e1e0d9" stroke-width="1"/>
+<text x="20" y="433" font-size="12.5" fill="#52514e">attention workers</text>
+<line x1="150" y1="451" x2="1220" y2="451" stroke="#e1e0d9" stroke-width="1"/>
+<text x="20" y="495" font-size="12.5" fill="#52514e">FPGA card</text>
+<line x1="150" y1="513" x2="1220" y2="513" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="150" y="351" width="57" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="178" y="367" font-size="10.5" text-anchor="middle" fill="#0b0b0b">rmsnorm</text>
+<text x="178" y="381" font-size="10.5" text-anchor="middle" fill="#0b0b0b">+ rope</text>
+<rect x="213" y="351" width="57" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="242" y="367" font-size="10.5" text-anchor="middle" fill="#0b0b0b">WV matmul</text>
+<text x="242" y="381" font-size="10.5" text-anchor="middle" fill="#0b0b0b">launch</text>
+<rect x="276" y="351" width="54" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="303" y="367" font-size="10.5" text-anchor="middle" fill="#0b0b0b">prepare</text>
+<text x="303" y="381" font-size="10.5" text-anchor="middle" fill="#0b0b0b">(barrier)</text>
+<rect x="336" y="351" width="108" height="38" rx="4" fill="#fbe3d8" stroke="#eb6834" stroke-width="2"/>
+<text x="390" y="367" font-size="10.5" text-anchor="middle" fill="#0b0b0b">Save K: scatter</text>
+<text x="390" y="381" font-size="10.5" text-anchor="middle" fill="#0b0b0b">64 lines per row</text>
+<rect x="450" y="351" width="49" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="474" y="367" font-size="10.5" text-anchor="middle" fill="#0b0b0b">Save V</text>
+<rect x="505" y="351" width="73" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="542" y="367" font-size="10.5" text-anchor="middle" fill="#0b0b0b">prepare +</text>
+<text x="542" y="381" font-size="10.5" text-anchor="middle" fill="#0b0b0b">launch HW</text>
+<rect x="584" y="475" width="122" height="38" rx="4" fill="#e3edf9" stroke="#2a78d6" stroke-width="1"/>
+<text x="645" y="491" font-size="10.5" text-anchor="middle" fill="#0b0b0b">attention on</text>
+<text x="645" y="505" font-size="10.5" text-anchor="middle" fill="#0b0b0b">the card</text>
+<rect x="712" y="413" width="73" height="38" rx="4" fill="#fbe3d8" stroke="#eb6834" stroke-width="2"/>
+<text x="748" y="429" font-size="10.5" text-anchor="middle" fill="#0b0b0b">drain GOFs:</text>
+<text x="748" y="443" font-size="10.5" text-anchor="middle" fill="#0b0b0b">gather</text>
+<rect x="791" y="413" width="49" height="38" rx="4" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="816" y="429" font-size="10.5" text-anchor="middle" fill="#0b0b0b">wait K/V</text>
+<rect x="846" y="413" width="82" height="38" rx="4" fill="#fbe3d8" stroke="#eb6834" stroke-width="2"/>
+<text x="887" y="429" font-size="10.5" text-anchor="middle" fill="#0b0b0b">tail: qk_group</text>
+<rect x="934" y="413" width="54" height="38" rx="4" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="961" y="429" font-size="10.5" text-anchor="middle" fill="#0b0b0b">hw wait</text>
+<text x="961" y="443" font-size="10.5" text-anchor="middle" fill="#0b0b0b">(spin)</text>
+<rect x="994" y="413" width="41" height="38" rx="4" fill="#f3f2ef" stroke="#c3c2b7" stroke-width="1"/>
+<text x="1014" y="429" font-size="10.5" text-anchor="middle" fill="#0b0b0b">join</text>
+<rect x="1041" y="351" width="98" height="38" rx="4" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="1090" y="367" font-size="10.5" text-anchor="middle" fill="#0b0b0b">WO matmul</text>
+<text x="1090" y="381" font-size="10.5" text-anchor="middle" fill="#0b0b0b">waits attention out</text>
+<text x="20" y="566" font-size="12" fill="#52514e">Dashed = waiting. The drain of completed GOFs (populate + DMA submit) runs on the workers at the start of the NEXT layer, and on the main thread after the last layer (wait_coop_gof).</text>
+<text x="20" y="584" font-size="12" fill="#52514e">Sources: generated plugin qwen_3_4b_instruct_2507.hpp:1790-1836 and 7743-7757 (on 3bda); model.hpp:91-137 (launch phase); self_attention.hpp:746-813; model.hpp:3166-3189.</text>
+</svg>
+<p class="cap">Figure 2. In panel A the store (orange, main) overlaps the card; the tail scoring and the GOF drain (orange, workers) sit before the hw wait. In panel B the store precedes the launch, so every extra nanosecond of it delays the card. Widths are schematic; the traces of block m3 give the real widths.</p>
+<h2>3. Candidate causes and what each predicts</h2>
+<table><tr><th>id</th><th>cause</th><th>mechanism</th><th>scales with</th><th>size est. (from section 6, labelled est.)</th><th>prediction that would confirm it</th></tr>
+<tr><td><b>H1</b></td><td>K store scatter on the main thread</td><td>64 partial-line writes per row instead of 4 whole lines; serial main-thread time; fully exposed when the launch is late, partly hidden when early</td><td>users per engine x 8 x 36, every step; exposure depends on B and on the card's step length</td><td>+350 ns per row: 0.81 ms per step at 8 users, 0.40 at 4, 0.20 at 2 (est.)</td><td>Save K span grows by about 20 us per layer at 8 users in the trace; the loss moves with the launch phase (block m2); perf: stores and RFO misses on the main thread only</td></tr>
+<tr><td><b>H2</b></td><td>K-row gather in populate</td><td>64 lines per row, cross-core (the main thread wrote them); runs on workers before their sections or on main at forward end</td><td>users / 4 x 36 GOFs per step on average; bursty in runtron</td><td>+64 ns per row: +2.0 us per GOF per layer; 0.15 ms per step average at 8 users, 0.59 ms on the burst step (est.)</td><td>gof_populate sum per burst pass grows by about 0.5 ms; wait_coop_gof on main grows; a 4-step period in the per-step time series of runtron (absent in the CI layout)</td></tr>
+<tr><td><b>H3</b></td><td>tail scoring with qk_group</td><td>64 lines per block for 1 to 8 live tokens instead of 4 lines per token; on the workers in the pending section, before the hw wait</td><td>users x 8 x 36 per step, spread over 20 to 47 workers</td><td>+580 ns per (user, head, layer): 1.3 ms of worker time per step at 8 users; 30 to 70 us per step on the critical path if spread (est.)</td><td>Attention Pending max per worker grows by about 2 us per layer; the loss does not move with the launch phase</td></tr>
+<tr><td><b>H4</b></td><td>a discrete state at tp4</td><td>base sits in a fast (7.4 ms) or slow (8.5 ms) mode per run; the VNNI arm always in the slow one; candidate: round-robin card of the second shard, or a DMA-lag threshold</td><td>per run, not per row</td><td>1.05 to 1.14 ms per step when it flips (measured spread)</td><td>per-repetition steps of base/headoff show two clusters; traces of a fast and a slow base run differ in shard placement or hw wait</td></tr>
+<tr><td><b>H5</b></td><td>second-order: a slower populate or DMA lengthens the tail</td><td>DMA completion is seen one step later; more tail tokens for H3 to score</td><td>couples H2 to H3</td><td>at most 4 more tokens per user per lagging step (est.)</td><td>the pending span's live-token count (or Attention Pending duration) grows on the step after a burst in the vnni arm only</td></tr>
+<tr><td><b>H6</b></td><td>anything else in the PR (batch struct zeroing, helper no-op, asserts, AMX tile bracket)</td><td>common or tiny</td><td>-</td><td>below 20 us per step (est. by count); the AMX bracket exists in base too</td><td>headoff vs base shows no loss (same launch phase, same rows)</td></tr>
+</table>
+<h2>4. Measurements, in the order they run</h2>
+<p>Everything below runs with binaries that already exist on delphi-3bda; nothing needs a rebuild. Scripts: exec/issue4500-20260918/{campaign.sh, summarize.py, trace_analyze.py, bench/}. Results: exec/results/issue4500-20260918/.</p>
+<table><tr><th>block</th><th>what</th><th>arms x cells</th><th>reads</th><th>separates</th><th>runs, time</th></tr>
+<tr><td><b>m1</b></td><td>attribution without tracing: the same runtron cell as the issue (1 engine, 8 users, prompt 1024, 256 tokens, --dont-stop)</td><td>base, headoff, vnni, vnni2 (A/A), vnnikill; head30 once; tp2 and tp4; 3 interleaved repetitions (order reversed on even repetitions)</td><td>TPS per user, step ms, TTFT, per-rep values</td><td>layout (vnni vs headoff, same source) from the PR's other code (headoff vs base); AMX kernel (vnnikill vs vnni); noise (vnni2 vs vnni); GitHub head equivalence (head30 vs vnni)</td><td>32 runs, about 30 min</td></tr>
+<tr><td><b>m2</b></td><td>launch-phase switch: TRON_HWATTN_EARLY_LAUNCH_MIN_B=1 forces the early launch at 2 users, =100 forces the late launch at 8 users</td><td>headoff, vnni; users 2 and 8; tp2 and tp4; 3 repetitions</td><td>same</td><td>H1 (exposure of the store) from H2 and H3: D = (vnni minus headoff under the late launch) minus (the same under the early launch), per repetition. D clearly positive = the store is the exposed cost (H1); D negative = the tail reader (H3); D near zero = the gather (H2). Section 5 gives the threshold.</td><td>48 runs, about 45 min</td></tr>
+<tr><td><b>m3</b></td><td>Perfetto in-process traces of all passes (40 generated tokens per user, enough for 10 GOF bursts): categories model, scheduler, hwattention (set A) and + hwattention-detail (set B)</td><td>base, headoff, vnni at tp2 and tp4 with 8 users; headoff and vnni at tp2 with 2 users (late launch)</td><td>per decode pass: Save K/V on main, wait_coop_gof, gof_rodeo / gof_populate count and duration per thread, Attention Pending/Ready per worker, hw wait, launch; burst passes tagged by gof_rodeo count</td><td>where the extra time sits (main vs workers), whether it is on the critical path (gap from Save V end to the WO launch, hw wait length), the 4-step burst pattern (H2), the tail length (H5)</td><td>14 runs, about 15 min; analysis on claude-agentsrv (trace_analyze.py)</td></tr>
+<tr><td><b>m4</b></td><td>sampling and hardware counters with sudo perf on the runtron process during decode (4096 generated tokens per user, so decode lasts about 33 s): perf record -g for 6 s first (about 2 to 8 s into decode, steady state), then per-thread cycles and instructions (6 s), L1/L2/L3 load misses (raw event 0xd1, 3 s), LLC and local/remote DRAM misses (0x2e, 0xd3, 3 s), stores and RFO misses and AMX-busy (3 s)</td><td>headoff, vnni at tp2 and tp4, 8 users</td><td>which thread class absorbs the extra cycles and misses; symbol-level shares (store_k_block with the inlined scatter, the k_head_fn lambda with the gather, qk_group)</td><td>H1 (main thread stores/RFO) from H2/H3 (worker misses); confirms the micro-benchmark in place</td><td>4 runs, about 8 min</td></tr>
+<tr><td><b>m1b</b></td><td>per-engine load like the CI layout: 2 and 4 users per engine</td><td>base, headoff, vnni; tp2 and tp4; 2 repetitions</td><td>same as m1</td><td>the users-per-engine dependence the CI cells show (late launch at 2 users)</td><td>24 runs, about 20 min</td></tr>
+<tr><td><b>bench</b></td><td>micro-benchmark of the three operations in the decode access pattern (done, section 6)</td><td>VNNI vs row-major; 2304 / 1152 / 576 rows per step; with and without the worker thread</td><td>ns per row</td><td>sizes H1, H2, H3 before the traces</td><td>done 2026-09-18 21:50 UTC</td></tr>
+<tr><td><b>m5</b> (conditional)</td><td>debug-branch probes if m1-m4 leave the split ambiguous: (a) a row-major shadow copy of K written at save time and read by k_head_fn (removes H2; also fix option 1 of the issue); (b) prefetch-for-write of the 64 lines before the scatter, or a streaming store variant (tests H1); (c) a one-line log of the shard's card per shard creation (tests H4)</td><td>on a debug branch only (jhan-dd-*), never on the PR branch</td><td>TPS + trace</td><td>the selective intervention codex asks for</td><td>build 10 min + 12 runs</td></tr>
+<tr><td><b>m6</b> (after the cause is known)</td><td>CI-layout confirmation on our half with rinzler + the CI client (exec/l8bload-20260918/rz.sh + st_perf.py): 1 engine tp2 x 2 users, 1 engine tp4 x 4 users, generate 1536, TPS window 896-1024</td><td>installed nightly deb rinzler (no AMX code) vs the ci-mimic target deb rinzler (AMX + VNNI) vs target + kill switch vs target + TRON_HWATTN_EARLY_LAUNCH_MIN_B=1</td><td>CI-style TPS</td><td>ties the runtron finding to the harness that flips the CI threshold; tests the launch-phase lever as a mitigation at 2 users</td><td>16 runs x 3 min, next free window</td></tr>
+</table>
+<h3>Exact commands</h3>
+<pre># one runtron cell (arm vnni, tp2, 8 users); the campaign wraps this in the guard and a watcher
+cd /var/tmp/jhan/tron-pr4424 &amp;&amp; env -u SYSTEM_CONFIG -u TRON_AMX_DISABLE -u USE_HW_ATTN TRON_LOG_LEVEL=info \
+  timeout -k 60 1200 gen/runtron.pr4424 stream-generate-text -m ingested-qwen-3-4b-instruct-2507-tp2 \
+  --instance 2,4 --devices 90:00.0,93:00.0 --app-cores 223-224,96-101,120-125,225-226,102-107,126-131 \
+  --dev-cores 75,76 --numa 1 --nr_hugepages 128 --hugepage_file /dev/hugepages/amx-i4500 -o \
+  --prompt-length 1024 -l 256 -u 8 --dont-stop
+# m2: prepend TRON_HWATTN_EARLY_LAUNCH_MIN_B=1 (early at 2 users) or =100 (late at 8 users)
+# m3: add TRON_TRACE_CATEGORIES=&#x27;-*,+model,+scheduler,+hwattention[,+hwattention-detail]&#x27; and
+#     -l 40 --trace-gen FILE --trace-passes 1-   (passes are then classified by the forward span&#x27;s n_token_jobs)
+# m4: while decode runs (after 8 &#x27;Parsing the prompt took&#x27; lines):
+sudo -n perf stat --per-thread -e cycles,instructions -p PID -- sleep 6
+sudo -n perf stat --per-thread -e &#x27;{cpu/event=0xd1,umask=0x08,name=l1_miss/,cpu/event=0xd1,umask=0x10,name=l2_miss/,cpu/event=0xd1,umask=0x20,name=l3_miss/}&#x27; -p PID -- sleep 3
+sudo -n perf stat -e mem_inst_retired.all_stores,mem_inst_retired.all_loads,ocr.demand_rfo.l3_miss,cpu/event=0xb7,umask=0x02,name=exe_amx_busy/ -p PID -- sleep 3
+sudo -n perf record -g -F 1999 -p PID -o FILE -- sleep 6</pre>
+<h2>5. Prediction matrix and decision rules</h2>
+<p>Each cell says what the measurement shows if the cause in the column is the main one. A cause is accepted only when every row agrees.</p>
+<table><tr><th>measurement</th><th>H1 store (main)</th><th>H2 gather (workers/main end)</th><th>H3 tail reader (workers)</th><th>H4 tp4 state</th></tr>
+<tr><td>m1: headoff vs base (tests H6 for the PR code compiled with the layout off; the per-row assert and the k_store_shared check exist only on the VNNI path and fold into H1's Save K span)</td><td class="ok">no loss</td><td class="ok">no loss</td><td class="ok">no loss</td><td class="mid">base bimodal at tp4</td></tr>
+<tr><td>m1: vnnikill vs vnni</td><td class="ok">no resolved change (layout kept)</td><td class="ok">no resolved change</td><td class="ok">no resolved change</td><td class="ok">no resolved change</td></tr>
+<tr><td>m2: D = (vnni minus headoff) late minus early, equal users</td><td class="warn">D positive: the store is serial under the late launch</td><td class="no">D near zero (the drain is off the launch path in both phases)</td><td class="mid">D negative or zero: under the late launch the tail starts at Save V end, in parallel with prepare, launch and the card</td><td class="no">D near zero</td></tr>
+<tr><td>m3: Save K span on main per layer</td><td class="warn">+15 to +25 us per layer at 8 users</td><td class="no">unchanged</td><td class="no">unchanged</td><td class="no">unchanged</td></tr>
+<tr><td>m3: gof_populate / gof_rodeo per burst pass; wait_coop_gof on main</td><td class="no">unchanged</td><td class="warn">+0.3 to +0.6 ms per burst pass; coop wait grows; 4-step period</td><td class="no">unchanged</td><td class="no">unchanged</td></tr>
+<tr><td>m3: Attention Pending max per worker per layer</td><td class="no">unchanged</td><td class="mid">grows on the step after a burst (H5)</td><td class="warn">+1 to +3 us per layer</td><td class="no">unchanged</td></tr>
+<tr><td>m3: gap Save V end to WO launch; hw wait length</td><td class="warn">gap grows on main (early) or the launch is later (late)</td><td class="mid">hw wait shorter on burst steps (workers late)</td><td class="mid">hw wait shorter (workers busier)</td><td class="warn">hw wait itself longer in the slow mode</td></tr>
+<tr><td>m4: per-thread cycles and misses</td><td class="warn">main thread: stores x 16, RFO misses up</td><td class="warn">workers: L2/L3 misses up on burst</td><td class="warn">workers: L2/L3 misses up every step</td><td class="no">no signature</td></tr>
+<tr><td>m4: perf record symbols</td><td class="warn">store_k_block / scatter site</td><td class="warn">k_head_fn lambda / gather_row</td><td class="warn">qk_group</td><td class="no">none</td></tr>
+<tr><td>bench (done)</td><td class="warn">+350 ns per row = 0.81 ms per step at 8 users</td><td class="mid">+60 ns per row = 0.14 ms per step average</td><td class="mid">+580 ns per call = 1.3 ms of worker time per step, spread</td><td class="no">not testable off line</td></tr>
+</table>
+<h3>Rules fixed before the data</h3>
+<ul>
+<li><b>Resolved effect:</b> |paired t| &gt;= 12.71 at n = 2, 4.30 at n = 3, 2.57 at n = 6, and |delta| &gt;= 1 % of TPS. summarize.py pairs every arm against base and headoff, and vnni2, vnnikill and head30 against vnni. The A/A pair (vnni2 vs vnni) must be unresolved, or the whole block is repeated. head30 runs once, so head30 vs vnni is one run against the same-repetition vnni run, judged by the 1 % rule alone.</li>
+<li><b>m2 criterion:</b> D = (vnni minus headoff step under the late launch) minus (the same under the early launch), per repetition and per (tp, users) cell; summarize.py prints mean, sd and t of D. |t| &gt;= 4.30 at n = 3 resolves it. The vnnikill arm removes only the Q-group packing and the AMX tile bracket, which base and headoff also pay (est. below the 1 % resolution), so a resolved vnnikill gain counts as an AMX-kernel signal only if it exceeds that.</li>
+<li><b>A cause is "the cause"</b> when the span or counter it predicts explains at least 70 % of the per-step budget of section 1 in both tp2 and tp4, and the m2 switch moves in the predicted direction. 30 to 70 % = partial cause; below 30 % = not a cause.</li>
+<li><b>Exposure is judged from the trace, not from CPU time.</b> Worker spans that spin (hw wait, join polling) do not count as busy. The critical path of a layer is the longer of (main: Save K + Save V + launch) and (workers: drain + pending + hw wait + join), read from the same trace.</li>
+<li><b>Estimators:</b> per-rep step = 1000 / mean TPS of that run; the paired difference is over reps. summarize.py also reports the mean of the users' own ms per token (runtron prints both). The two differ by up to 0.03 ms per step at tp4 in the 2026-09-16 data.</li>
+<li><b>Trace overhead:</b> a traced run's TPS is compared with the untraced m1 cell of the same arm; category set B (hwattention-detail) adds about 30 spans per GOF on the workers, so B's populate durations are trusted only if set A and the untraced TPS agree within 3 %.</li>
+</ul>
+<h2>6. Micro-benchmark (measured 2026-09-18 21:50 UTC on delphi-3bda)</h2>
+<p>exec/issue4500-20260918/bench/bench_k_vnni.cpp is a stand-alone copy of scatter_row, gather_row, qk_group&lt;4,bf16&gt; and dotter&lt;bf16,128&gt;, built with clang++-19 -O3 -march=native on the host. Two threads on socket-1 cores 87 and 88 (idle; the production engines were spinning on cores 96-143) alternate like a decode step: the main thread stores one new row into every plane of the step, then the worker scores the newest token of every plane with one query group and, every 4th step, stages the 4 newest rows of every plane (populate). The working set of 2304 planes is 36 MiB, larger than the 2 MiB L2 and inside the 432 MiB L3.</p>
+<svg class="chart" viewBox="0 0 1040 300" width="1040" height="300" role="img" aria-label="Micro-benchmark: nanoseconds per row for the three K-path operations, VNNI layout against row-major, decode-like access pattern" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+<rect x="0" y="0" width="1040" height="300" fill="#fcfcfb"/>
+<text x="20" y="22" font-size="13" fill="#52514e">Figure 3. Micro-benchmark on delphi-3bda (2026-09-18): ns per (token, KV head) row, 2304 rows per step (8 users x 8 heads x 36 layers), main and worker on two cores.</text>
+<circle cx="28" cy="44" r="6" fill="#8a8987"/><text x="40" y="48" font-size="12.5" fill="#0b0b0b">row-major K (base)</text>
+<circle cx="228" cy="44" r="6" fill="#eb6834"/><text x="240" y="48" font-size="12.5" fill="#0b0b0b">VNNI K (PR 4424)</text>
+<line x1="330.0" y1="62" x2="330.0" y2="256" stroke="#c3c2b7" stroke-width="1"/>
+<text x="330.0" y="272" font-size="12" text-anchor="middle" fill="#52514e">0 ns</text>
+<line x1="472.5" y1="62" x2="472.5" y2="256" stroke="#e1e0d9" stroke-width="1"/>
+<text x="472.5" y="272" font-size="12" text-anchor="middle" fill="#52514e">200 ns</text>
+<line x1="615.0" y1="62" x2="615.0" y2="256" stroke="#e1e0d9" stroke-width="1"/>
+<text x="615.0" y="272" font-size="12" text-anchor="middle" fill="#52514e">400 ns</text>
+<line x1="757.5" y1="62" x2="757.5" y2="256" stroke="#e1e0d9" stroke-width="1"/>
+<text x="757.5" y="272" font-size="12" text-anchor="middle" fill="#52514e">600 ns</text>
+<line x1="900.0" y1="62" x2="900.0" y2="256" stroke="#e1e0d9" stroke-width="1"/>
+<text x="900.0" y="272" font-size="12" text-anchor="middle" fill="#52514e">800 ns</text>
+<text x="615" y="292" font-size="12.5" text-anchor="middle" fill="#52514e">nanoseconds per row (median of 3 runs)</text>
+<text x="316" y="105.0" font-size="13" font-weight="600" text-anchor="end" fill="#0b0b0b">K store, main thread</text>
+<line x1="354.2" y1="101.0" x2="606.9" y2="101.0" stroke="#eb6834" stroke-width="2"/>
+<circle cx="354.2" cy="101.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"/><circle cx="606.9" cy="101.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="354.2" y="89.0" font-size="12" text-anchor="middle" fill="#52514e">34</text>
+<text x="606.9" y="89.0" font-size="12" text-anchor="middle" fill="#0b0b0b">389</text>
+<text x="914" y="105.0" font-size="12.5" fill="#0b0b0b">+355 ns (11.4x)</text>
+<text x="316" y="167.0" font-size="13" font-weight="600" text-anchor="end" fill="#0b0b0b">tail scoring, 1 live token x 4 heads</text>
+<line x1="379.8" y1="163.0" x2="777.3" y2="163.0" stroke="#eb6834" stroke-width="2"/>
+<circle cx="379.8" cy="163.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"/><circle cx="777.3" cy="163.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="379.8" y="151.0" font-size="12" text-anchor="middle" fill="#52514e">70</text>
+<text x="777.3" y="151.0" font-size="12" text-anchor="middle" fill="#0b0b0b">628</text>
+<text x="914" y="167.0" font-size="12.5" fill="#0b0b0b">+558 ns (9.0x)</text>
+<text x="316" y="229.0" font-size="13" font-weight="600" text-anchor="end" fill="#0b0b0b">staging read of a GOF row (populate)</text>
+<line x1="344.2" y1="225.0" x2="389.4" y2="225.0" stroke="#eb6834" stroke-width="2"/>
+<circle cx="344.2" cy="225.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"/><circle cx="389.4" cy="225.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"/>
+<text x="344.2" y="213.0" font-size="12" text-anchor="middle" fill="#52514e">20</text>
+<text x="389.4" y="213.0" font-size="12" text-anchor="middle" fill="#0b0b0b">83</text>
+<text x="914" y="229.0" font-size="12.5" fill="#0b0b0b">+64 ns (4.2x)</text>
+</svg>
+<table><tr><th>operation</th><th class="num">rows per step</th><th class="num">row-major ns/row</th><th class="num">VNNI ns/row</th><th class="num">delta ns/row</th><th>per step at that load (est. = rows x delta)</th></tr>
+<tr><td>K store (main thread, with the worker reading)</td><td class="num">2304</td><td class="num">34</td><td class="num">389</td><td class="num">+355</td><td>0.82 ms serial on main</td></tr>
+<tr><td>K store (main thread, with the worker reading)</td><td class="num">1152</td><td class="num">50</td><td class="num">375</td><td class="num">+325</td><td>0.37 ms serial on main</td></tr>
+<tr><td>K store (main thread, with the worker reading)</td><td class="num">576</td><td class="num">64</td><td class="num">376</td><td class="num">+312</td><td>0.18 ms serial on main</td></tr>
+<tr><td>K store (main thread alone, no worker)</td><td class="num">2304</td><td class="num">37</td><td class="num">380</td><td class="num">+342</td><td>0.79 ms serial on main</td></tr>
+<tr><td>K store (main thread alone, no worker)</td><td class="num">1152</td><td class="num">34</td><td class="num">378</td><td class="num">+344</td><td>0.40 ms serial on main</td></tr>
+<tr><td>K store (main thread alone, no worker)</td><td class="num">576</td><td class="num">61</td><td class="num">394</td><td class="num">+332</td><td>0.19 ms serial on main</td></tr>
+<tr><td>tail scoring, 1 live token, 4 heads</td><td class="num">2304</td><td class="num">70</td><td class="num">628</td><td class="num">+558</td><td>1.29 ms of worker time, spread over the workers</td></tr>
+<tr><td>tail scoring, 1 live token, 4 heads</td><td class="num">1152</td><td class="num">77</td><td class="num">655</td><td class="num">+578</td><td>0.67 ms of worker time, spread over the workers</td></tr>
+<tr><td>tail scoring, 1 live token, 4 heads</td><td class="num">576</td><td class="num">85</td><td class="num">691</td><td class="num">+607</td><td>0.35 ms of worker time, spread over the workers</td></tr>
+<tr><td>staging read per GOF row (populate)</td><td class="num">2304</td><td class="num">20</td><td class="num">83</td><td class="num">+64</td><td>0.15 ms average per step (0.59 ms on the burst step, every 4th step)</td></tr>
+<tr><td>staging read per GOF row (populate)</td><td class="num">1152</td><td class="num">24</td><td class="num">78</td><td class="num">+55</td><td>0.06 ms average per step (0.25 ms on the burst step, every 4th step)</td></tr>
+<tr><td>staging read per GOF row (populate)</td><td class="num">576</td><td class="num">22</td><td class="num">76</td><td class="num">+54</td><td>0.03 ms average per step (0.12 ms on the burst step, every 4th step)</td></tr>
+</table>
+<ul>
+<li><b>The store is the largest serial cost.</b> 375 to 390 ns per row against 34 to 64 ns, flat from 9 MiB to 36 MiB of planes, with or without the worker. This is the cost of 64 partial-line writes to L3-resident lines, not an L2-capacity effect. The live CPU-attention decode traces gave 444 ns per row at tp2 and 540 ns per row at tp4 [vnnik-trace-20260914 analysis.md]. The benchmark's 389 ns per row is 14 to 39 % lower. Hypothesis: the live step adds contention from the other threads and the card DMA, which the two-thread benchmark does not model; the m4 counters on the main thread test it.</li>
+<li><b>The tail reader is the largest total cost but spread over the workers.</b> 630 to 690 ns per (user, head, layer) call against 70 to 85 ns: qk_group touches 64 lines that the main thread just wrote, the dotter 4. At 8 users that is 1.3 ms of worker time per step; with 20 or more workers scoring in parallel it is 30 to 70 us per step on the critical path (est.).</li>
+<li><b>The gather is the smallest per row</b> (+64 ns) but bursty: 288 populates x 32 rows x 64 ns = 0.59 ms on every 4th step in runtron (est.), 0.15 ms per step on average, part of it on the main thread in wait_coop_gof for the last layer's 8 GOFs.</li>
+<li>Sum of the three at 8 users, if fully exposed: 0.81 ms (store) + 0.15 ms (gather, average over the 4-step cycle) + 0.07 ms (tail reader, upper bound of its critical-path share) = about 1.0 ms per step (est.). The measured runtron tp4 loss is 0.80 to 0.83 ms per step. So the tp4 step exposes almost all of the sum. The runtron tp2 step loses 0.18 ms per step and overlaps the rest with the card's work.</li>
+</ul>
+<h2>7. Execution plan on delphi-3bda</h2>
+<ul>
+<li><b>Where:</b> our half (socket 1, cards 90/93/b9/bc; Bill's marker /bill-has-instance-0,2 is present, so the first half is his). The campaign takes the campaign guard (CI lease + host flock + no runtron of ours) before every run and a watcher stops our run within 10 s if the CI lease turns busy or a production unit comes up [exec/lib-guard.sh].</li>
+<li><b>When:</b> the nightly CI holds the machine 03:38 to about 13:20 UTC; the campaign never starts a run inside the 01:40-03:45 UTC pre-CI hold and ends itself there. Launched 2026-09-18 21:50 UTC in waiting mode; relaunch with the same command after the nightly (done runs are skipped).</li>
+<li><b>Machine sharing tonight (agreed 22:1x UTC):</b> another session runs the nightly CI perf phase once more on the WHOLE machine with a canonical-AMX deb (main 3faba6d0fd + the deb preset change, no PR 4424), about 22:40 to 00:30 UTC, holding the campaign flock. At its end it reinstalls the nightly deb, stops the idle production engines through platformd, removes their slice files and releases the flock. That is exactly this campaign's start condition (every rinzler@N unit inactive, 256 free hugepages, CI lease free), so this campaign starts by itself at about 00:30 UTC and runs until the 01:40 UTC pre-CI hold: enough for m1 and most of m2. jhan authorized this session (22:1x UTC, "Option B") to stop the idle engines itself (the recipe in launch.sh) if a unit is left up, and for the resume after the nightly (about 13:20 UTC Saturday: m3, m4, m1b). The ci-runner-stop timer restores production serving at 02:45 UTC for the nightly.</li>
+<li><b>Order and duration:</b> m1 (30 min), m2 (45 min), m3 (15 min), m4 (10 min), m1b (20 min): about 2 h once the machine is free. Resume is idempotent (a run whose log has 'average tok/s' is skipped).</li>
+<li><b>Outputs:</b> exec/results/issue4500-20260918/{rt-results.txt, rt/*.log, traces/, perf/, bench/, summary.md}; log exec/logs/issue4500-20260918.log; status .status; marker .done. Analysis: summarize.py (3bda or here), trace_analyze.py (here: the python TraceProcessor works on claude-agentsrv only), perf report on 3bda.</li>
+<li><b>After the data:</b> section 8 of this page is filled with the tables and the wall-clock lanes of one burst and one quiet decode pass per arm; the issue gets a comment with the cause and the measured split; m5/m6 follow the decision rules.</li>
+</ul>
+<h3>Traps carried over from earlier campaigns</h3>
+<ul>
+<li>runtron's SYSTEM_CONFIG from the login shell re-places a run onto instance 1,2: every command uses env -u SYSTEM_CONFIG.</li>
+<li>Never edit campaign.sh while it runs (bash re-reads the file at its byte offset).</li>
+<li>NFS attribute cache: a file edited here is checked by md5 on 3bda before a launch (launch.sh).</li>
+<li>runtron -u N with token files appends Moby Dick prompts; the cells use -u with --prompt-length only, as the issue's runs did.</li>
+<li>Perfetto passes are classified by the forward span's n_token_jobs (1024 = prefill, &lt;= 8 = decode), never by index; traces cover all passes (--trace-passes 1-) so no span loses its end at a window edge.</li>
+<li>perf: perf_event_paranoid is 4, so every perf command runs through sudo -n; raw event codes are needed (perf 6.8.12 names only 43 events on this CPU); at most 3 general-purpose events per brace group (the NMI watchdog holds one counter).</li>
+<li>/proc/PID/task/TID/stat: tron thread names below CPU 100 carry a leading space inside the parentheses; strip the comm before splitting fields.</li>
+</ul>
+<h2>8. Results</h2>
+<p>Filled from exec/results/issue4500-20260918/summary.json.</p>
+<table><tr><th>block</th><th>tp</th><th>users</th><th>tag</th><th>arm</th><th class="num">n</th><th class="num">TPS</th><th class="num">sd</th><th class="num">step ms</th><th class="num">TTFT s</th><th>version</th><th>HW attn</th></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>fpga</td><td>base</td><td class="num">3</td><td class="num">124.90</td><td class="num">0.34</td><td class="num">8.006</td><td class="num">3.189</td><td>2026.09.16-c7844ca2</td><td>enabled</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>fpga</td><td>head30</td><td class="num">1</td><td class="num">123.82</td><td class="num">0.00</td><td class="num">8.076</td><td class="num">3.155</td><td>2026.09.17-30c4ac82</td><td>enabled</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>fpga</td><td>headoff</td><td class="num">3</td><td class="num">124.82</td><td class="num">0.31</td><td class="num">8.012</td><td class="num">3.207</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>fpga</td><td>vnni</td><td class="num">3</td><td class="num">122.56</td><td class="num">0.57</td><td class="num">8.160</td><td class="num">3.189</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>fpga</td><td>vnni2</td><td class="num">3</td><td class="num">122.62</td><td class="num">0.60</td><td class="num">8.156</td><td class="num">3.161</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>fpga</td><td>vnnikill</td><td class="num">3</td><td class="num">122.13</td><td class="num">0.65</td><td class="num">8.188</td><td class="num">3.205</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>fpga</td><td>base</td><td class="num">3</td><td class="num">135.55</td><td class="num">7.11</td><td class="num">7.391</td><td class="num">2.333</td><td>2026.09.16-c7844ca2</td><td>enabled</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>fpga</td><td>head30</td><td class="num">1</td><td class="num">125.37</td><td class="num">0.00</td><td class="num">7.976</td><td class="num">2.199</td><td>2026.09.17-30c4ac82</td><td>enabled</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>fpga</td><td>headoff</td><td class="num">3</td><td class="num">132.62</td><td class="num">8.39</td><td class="num">7.560</td><td class="num">2.347</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>fpga</td><td>vnni</td><td class="num">3</td><td class="num">111.73</td><td class="num">5.32</td><td class="num">8.964</td><td class="num">2.260</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>fpga</td><td>vnni2</td><td class="num">3</td><td class="num">118.39</td><td class="num">4.55</td><td class="num">8.455</td><td class="num">2.227</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>fpga</td><td>vnnikill</td><td class="num">3</td><td class="num">120.74</td><td class="num">2.52</td><td class="num">8.285</td><td class="num">2.192</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>2</td><td>2</td><td>minb1</td><td>headoff</td><td class="num">3</td><td class="num">215.48</td><td class="num">2.54</td><td class="num">4.641</td><td class="num">0.797</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>2</td><td>2</td><td>minb1</td><td>vnni</td><td class="num">3</td><td class="num">213.49</td><td class="num">0.93</td><td class="num">4.684</td><td class="num">0.771</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>2</td><td>2</td><td>minb100</td><td>headoff</td><td class="num">3</td><td class="num">206.62</td><td class="num">0.80</td><td class="num">4.840</td><td class="num">0.796</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>2</td><td>2</td><td>minb100</td><td>vnni</td><td class="num">3</td><td class="num">199.37</td><td class="num">0.19</td><td class="num">5.016</td><td class="num">0.768</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>2</td><td>8</td><td>minb1</td><td>headoff</td><td class="num">3</td><td class="num">126.01</td><td class="num">0.65</td><td class="num">7.936</td><td class="num">3.192</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>2</td><td>8</td><td>minb1</td><td>vnni</td><td class="num">3</td><td class="num">122.48</td><td class="num">0.72</td><td class="num">8.165</td><td class="num">3.177</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>2</td><td>8</td><td>minb100</td><td>headoff</td><td class="num">3</td><td class="num">114.87</td><td class="num">0.41</td><td class="num">8.706</td><td class="num">3.185</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>2</td><td>8</td><td>minb100</td><td>vnni</td><td class="num">3</td><td class="num">105.09</td><td class="num">0.48</td><td class="num">9.516</td><td class="num">3.163</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>4</td><td>2</td><td>minb1</td><td>headoff</td><td class="num">3</td><td class="num">181.00</td><td class="num">7.71</td><td class="num">5.532</td><td class="num">0.559</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>4</td><td>2</td><td>minb1</td><td>vnni</td><td class="num">3</td><td class="num">183.83</td><td class="num">6.33</td><td class="num">5.444</td><td class="num">0.541</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>4</td><td>2</td><td>minb100</td><td>headoff</td><td class="num">3</td><td class="num">181.62</td><td class="num">0.54</td><td class="num">5.506</td><td class="num">0.560</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>4</td><td>2</td><td>minb100</td><td>vnni</td><td class="num">3</td><td class="num">161.52</td><td class="num">2.12</td><td class="num">6.192</td><td class="num">0.539</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>4</td><td>8</td><td>minb1</td><td>headoff</td><td class="num">3</td><td class="num">129.10</td><td class="num">4.66</td><td class="num">7.753</td><td class="num">2.311</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>4</td><td>8</td><td>minb1</td><td>vnni</td><td class="num">3</td><td class="num">110.83</td><td class="num">9.60</td><td class="num">9.070</td><td class="num">2.232</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>4</td><td>8</td><td>minb100</td><td>headoff</td><td class="num">3</td><td class="num">113.22</td><td class="num">5.10</td><td class="num">8.844</td><td class="num">2.269</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m2</td><td>4</td><td>8</td><td>minb100</td><td>vnni</td><td class="num">3</td><td class="num">105.00</td><td class="num">1.09</td><td class="num">9.525</td><td class="num">2.220</td><td>2026.09.16-ff680c80</td><td>enabled</td></tr>
+<tr><td>m3</td><td>2</td><td>8</td><td>catA</td><td>base</td><td class="num">1</td><td class="num">121.69</td><td class="num">0.00</td><td class="num">8.218</td><td class="num">3.667</td><td>2026.09.16-c7844ca2</td><td>enabled</td></tr>
+</table>
+<table><tr><th>block</th><th>tp</th><th>users</th><th>a</th><th>b</th><th class="num">n</th><th class="num">step a</th><th class="num">step b</th><th class="num">delta ms/step</th><th class="num">delta TPS %</th><th class="num">us/layer</th><th class="num">paired t</th></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>head30/fpga</td><td>base/fpga</td><td class="num">1</td><td class="num">8.076</td><td class="num">8.008</td><td class="num">+0.068</td><td class="num">-0.84</td><td class="num">+1.9</td><td class="num">-</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>headoff/fpga</td><td>base/fpga</td><td class="num">3</td><td class="num">8.012</td><td class="num">8.006</td><td class="num">+0.006</td><td class="num">-0.07</td><td class="num">+0.2</td><td class="num">+0.23</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>vnni/fpga</td><td>base/fpga</td><td class="num">3</td><td class="num">8.160</td><td class="num">8.006</td><td class="num">+0.153</td><td class="num">-1.88</td><td class="num">+4.3</td><td class="num">+4.80</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>vnni2/fpga</td><td>base/fpga</td><td class="num">3</td><td class="num">8.156</td><td class="num">8.006</td><td class="num">+0.149</td><td class="num">-1.83</td><td class="num">+4.1</td><td class="num">+4.21</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>vnnikill/fpga</td><td>base/fpga</td><td class="num">3</td><td class="num">8.188</td><td class="num">8.006</td><td class="num">+0.182</td><td class="num">-2.22</td><td class="num">+5.1</td><td class="num">+4.84</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>head30/fpga</td><td>headoff/fpga</td><td class="num">1</td><td class="num">8.076</td><td class="num">8.005</td><td class="num">+0.071</td><td class="num">-0.88</td><td class="num">+2.0</td><td class="num">-</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>vnni/fpga</td><td>headoff/fpga</td><td class="num">3</td><td class="num">8.160</td><td class="num">8.012</td><td class="num">+0.148</td><td class="num">-1.81</td><td class="num">+4.1</td><td class="num">+10.23</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>vnni2/fpga</td><td>headoff/fpga</td><td class="num">3</td><td class="num">8.156</td><td class="num">8.012</td><td class="num">+0.144</td><td class="num">-1.76</td><td class="num">+4.0</td><td class="num">+12.24</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>vnnikill/fpga</td><td>headoff/fpga</td><td class="num">3</td><td class="num">8.188</td><td class="num">8.012</td><td class="num">+0.177</td><td class="num">-2.15</td><td class="num">+4.9</td><td class="num">+12.58</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>head30/fpga</td><td>vnni/fpga</td><td class="num">1</td><td class="num">8.076</td><td class="num">8.125</td><td class="num">-0.049</td><td class="num">+0.60</td><td class="num">-1.3</td><td class="num">-</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>vnni2/fpga</td><td>vnni/fpga</td><td class="num">3</td><td class="num">8.156</td><td class="num">8.160</td><td class="num">-0.004</td><td class="num">+0.05</td><td class="num">-0.1</td><td class="num">-0.32</td></tr>
+<tr><td>m1</td><td>2</td><td>8</td><td>vnnikill/fpga</td><td>vnni/fpga</td><td class="num">3</td><td class="num">8.188</td><td class="num">8.160</td><td class="num">+0.029</td><td class="num">-0.35</td><td class="num">+0.8</td><td class="num">+2.28</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>head30/fpga</td><td>base/fpga</td><td class="num">1</td><td class="num">7.976</td><td class="num">7.829</td><td class="num">+0.147</td><td class="num">-1.84</td><td class="num">+4.1</td><td class="num">-</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>headoff/fpga</td><td>base/fpga</td><td class="num">3</td><td class="num">7.560</td><td class="num">7.391</td><td class="num">+0.168</td><td class="num">-2.16</td><td class="num">+4.7</td><td class="num">+0.54</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>vnni/fpga</td><td>base/fpga</td><td class="num">3</td><td class="num">8.964</td><td class="num">7.391</td><td class="num">+1.573</td><td class="num">-17.57</td><td class="num">+43.7</td><td class="num">+5.61</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>vnni2/fpga</td><td>base/fpga</td><td class="num">3</td><td class="num">8.455</td><td class="num">7.391</td><td class="num">+1.064</td><td class="num">-12.66</td><td class="num">+29.6</td><td class="num">+2.66</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>vnnikill/fpga</td><td>base/fpga</td><td class="num">3</td><td class="num">8.285</td><td class="num">7.391</td><td class="num">+0.894</td><td class="num">-10.93</td><td class="num">+24.8</td><td class="num">+2.92</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>head30/fpga</td><td>headoff/fpga</td><td class="num">1</td><td class="num">7.976</td><td class="num">7.818</td><td class="num">+0.158</td><td class="num">-1.98</td><td class="num">+4.4</td><td class="num">-</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>vnni/fpga</td><td>headoff/fpga</td><td class="num">3</td><td class="num">8.964</td><td class="num">7.560</td><td class="num">+1.404</td><td class="num">-15.76</td><td class="num">+39.0</td><td class="num">+2.84</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>vnni2/fpga</td><td>headoff/fpga</td><td class="num">3</td><td class="num">8.455</td><td class="num">7.560</td><td class="num">+0.896</td><td class="num">-10.73</td><td class="num">+24.9</td><td class="num">+3.43</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>vnnikill/fpga</td><td>headoff/fpga</td><td class="num">3</td><td class="num">8.285</td><td class="num">7.560</td><td class="num">+0.725</td><td class="num">-8.96</td><td class="num">+20.1</td><td class="num">+2.04</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>head30/fpga</td><td>vnni/fpga</td><td class="num">1</td><td class="num">7.976</td><td class="num">8.976</td><td class="num">-1.000</td><td class="num">+12.53</td><td class="num">-27.8</td><td class="num">-</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>vnni2/fpga</td><td>vnni/fpga</td><td class="num">3</td><td class="num">8.455</td><td class="num">8.964</td><td class="num">-0.509</td><td class="num">+5.97</td><td class="num">-14.1</td><td class="num">-1.23</td></tr>
+<tr><td>m1</td><td>4</td><td>8</td><td>vnnikill/fpga</td><td>vnni/fpga</td><td class="num">3</td><td class="num">8.285</td><td class="num">8.964</td><td class="num">-0.679</td><td class="num">+8.07</td><td class="num">-18.9</td><td class="num">-3.13</td></tr>
+<tr><td>m2</td><td>2</td><td>2</td><td>vnni/minb1</td><td>headoff/minb1</td><td class="num">3</td><td class="num">4.684</td><td class="num">4.641</td><td class="num">+0.043</td><td class="num">-0.93</td><td class="num">+1.2</td><td class="num">+1.26</td></tr>
+<tr><td>m2</td><td>2</td><td>2</td><td>vnni/minb100</td><td>headoff/minb100</td><td class="num">3</td><td class="num">5.016</td><td class="num">4.840</td><td class="num">+0.176</td><td class="num">-3.51</td><td class="num">+4.9</td><td class="num">+13.57</td></tr>
+<tr><td>m2</td><td>2</td><td>8</td><td>vnni/minb1</td><td>headoff/minb1</td><td class="num">3</td><td class="num">8.165</td><td class="num">7.936</td><td class="num">+0.229</td><td class="num">-2.80</td><td class="num">+6.4</td><td class="num">+26.73</td></tr>
+<tr><td>m2</td><td>2</td><td>8</td><td>vnni/minb100</td><td>headoff/minb100</td><td class="num">3</td><td class="num">9.516</td><td class="num">8.706</td><td class="num">+0.810</td><td class="num">-8.51</td><td class="num">+22.5</td><td class="num">+30.68</td></tr>
+<tr><td>m2</td><td>4</td><td>2</td><td>vnni/minb1</td><td>headoff/minb1</td><td class="num">3</td><td class="num">5.444</td><td class="num">5.532</td><td class="num">-0.087</td><td class="num">+1.57</td><td class="num">-2.4</td><td class="num">-0.36</td></tr>
+<tr><td>m2</td><td>4</td><td>2</td><td>vnni/minb100</td><td>headoff/minb100</td><td class="num">3</td><td class="num">6.192</td><td class="num">5.506</td><td class="num">+0.686</td><td class="num">-11.07</td><td class="num">+19.1</td><td class="num">+17.48</td></tr>
+<tr><td>m2</td><td>4</td><td>8</td><td>vnni/minb1</td><td>headoff/minb1</td><td class="num">3</td><td class="num">9.070</td><td class="num">7.753</td><td class="num">+1.317</td><td class="num">-14.15</td><td class="num">+36.6</td><td class="num">+4.14</td></tr>
+<tr><td>m2</td><td>4</td><td>8</td><td>vnni/minb100</td><td>headoff/minb100</td><td class="num">3</td><td class="num">9.525</td><td class="num">8.844</td><td class="num">+0.680</td><td class="num">-7.26</td><td class="num">+18.9</td><td class="num">+2.88</td></tr>
+<tr><td>m2</td><td>2</td><td>2</td><td>headoff/minb1</td><td>headoff/minb100</td><td class="num">3</td><td class="num">4.641</td><td class="num">4.840</td><td class="num">-0.199</td><td class="num">+4.29</td><td class="num">-5.5</td><td class="num">-7.98</td></tr>
+<tr><td>m2</td><td>2</td><td>2</td><td>vnni/minb1</td><td>vnni/minb100</td><td class="num">3</td><td class="num">4.684</td><td class="num">5.016</td><td class="num">-0.332</td><td class="num">+7.08</td><td class="num">-9.2</td><td class="num">-27.52</td></tr>
+<tr><td>m2</td><td>2</td><td>8</td><td>headoff/minb1</td><td>headoff/minb100</td><td class="num">3</td><td class="num">7.936</td><td class="num">8.706</td><td class="num">-0.770</td><td class="num">+9.70</td><td class="num">-21.4</td><td class="num">-30.16</td></tr>
+<tr><td>m2</td><td>2</td><td>8</td><td>vnni/minb1</td><td>vnni/minb100</td><td class="num">3</td><td class="num">8.165</td><td class="num">9.516</td><td class="num">-1.351</td><td class="num">+16.55</td><td class="num">-37.5</td><td class="num">-25.72</td></tr>
+<tr><td>m2</td><td>4</td><td>2</td><td>headoff/minb1</td><td>headoff/minb100</td><td class="num">3</td><td class="num">5.532</td><td class="num">5.506</td><td class="num">+0.025</td><td class="num">-0.34</td><td class="num">+0.7</td><td class="num">+0.20</td></tr>
+<tr><td>m2</td><td>4</td><td>2</td><td>vnni/minb1</td><td>vnni/minb100</td><td class="num">3</td><td class="num">5.444</td><td class="num">6.192</td><td class="num">-0.748</td><td class="num">+13.82</td><td class="num">-20.8</td><td class="num">-5.80</td></tr>
+<tr><td>m2</td><td>4</td><td>8</td><td>headoff/minb1</td><td>headoff/minb100</td><td class="num">3</td><td class="num">7.753</td><td class="num">8.844</td><td class="num">-1.091</td><td class="num">+14.03</td><td class="num">-30.3</td><td class="num">-4.11</td></tr>
+<tr><td>m2</td><td>4</td><td>8</td><td>vnni/minb1</td><td>vnni/minb100</td><td class="num">3</td><td class="num">9.070</td><td class="num">9.525</td><td class="num">-0.455</td><td class="num">+5.56</td><td class="num">-12.6</td><td class="num">-0.85</td></tr>
+</table>
+<h3>m2: the launch-phase criterion</h3><p>D = (vnni minus headoff step under the forced late launch) minus (the same under the forced early launch), per repetition. Positive D = the extra time is on the main thread before the launch (the store, H1).</p>
+<table><tr><th>tp</th><th>users</th><th class="num">n</th><th class="num">d early ms</th><th class="num">d late ms</th><th class="num">D ms</th><th class="num">sd</th><th class="num">t (4.30 at n = 3)</th><th class="num">store prediction ms (rows x 350 ns)</th></tr>
+<tr><td>2</td><td>2</td><td class="num">3</td><td class="num">+0.043</td><td class="num">+0.176</td><td class="num">+0.133</td><td class="num">0.038</td><td class="num">+6.07</td><td class="num">0.20</td></tr>
+<tr><td>2</td><td>8</td><td class="num">3</td><td class="num">+0.229</td><td class="num">+0.810</td><td class="num">+0.582</td><td class="num">0.051</td><td class="num">+19.69</td><td class="num">0.81</td></tr>
+<tr><td>4</td><td>2</td><td class="num">3</td><td class="num">-0.087</td><td class="num">+0.686</td><td class="num">+0.773</td><td class="num">0.437</td><td class="num">+3.07</td><td class="num">0.20</td></tr>
+<tr><td>4</td><td>8</td><td class="num">3</td><td class="num">+1.317</td><td class="num">+0.680</td><td class="num">-0.637</td><td class="num">0.683</td><td class="num">-1.62</td><td class="num">0.81</td></tr>
+</table>
+<h3>Interim reading (2026-09-19 01:5x UTC, after blocks m1 and m2; m3, m4 and m1b resume after the nightly)</h3>
+<ul>
+<li><b>The layout is the cause, not the rest of the PR and not the AMX kernel.</b> headoff (PR code, layout off) equals base within 0.006 ms per step at tp2 (t +0.2). The kill switch changes the vnni arm by +0.029 ms (t +2.3, unresolved). The GitHub head 30c4ac82cb matches the measured ff680c8020 build within 0.6 % (one run). The A/A pair agrees within 0.004 ms at tp2 (t -0.3). The peer session's canonical-AMX run of the CI layout (main plus the deb preset, no PR 4424) gave qwen-3-4b tp2 +0.1 % and tp4 -2.6 % inside the night-to-night band, with 10.5 billion AMX-busy cycles, so the -5 / -11 % of the issue is the layout there too.</li>
+<li><b>At tp2 the exposed cost is the main-thread K store (H1), and its size equals the micro-benchmark prediction.</b> With 8 users the layout costs +0.148 ms per step under the default early launch (-1.8 % TPS, t +10.2, n = 3). Forcing the late launch (Save K before the card launch) raises the layout cost to +0.810 ms per step; the store prediction for 2304 rows is 0.81 ms. Forcing the early launch at 2 users lowers it to +0.043 ms; the late launch gives +0.176 ms against a 0.20 ms prediction. The criterion D is +0.582 ms (t +19.7) at 8 users and +0.133 ms (t +6.1) at 2 users: both resolved, both positive, as H1 predicts. The remaining early-launch cost (0.04 to 0.23 ms per step) is the part of the store the card does not cover plus the gather and the tail reader; the traces (m3) will split it.</li>
+<li><b>tp4 is dominated by a per-run state (H4) and needs the traces.</b> The row-major arms swing between 7.06 and 7.83 ms per step (base sd 7.1 TPS over 3 runs); the two identical VNNI binaries differ by 0.51 ms per step (A/A t -1.2, not clean). The layout cost is large (vnni vs headoff +1.40 ms, -15.8 % TPS) but unresolved at n = 3 (t +2.8), and the m2 criterion at tp4 is not resolved (D +0.77 ms, t +3.1 at 2 users; D -0.64 ms, t -1.6 at 8 users). The m3 traces of one fast and one slow run, and the m4 counters, are the next step for tp4.</li>
+<li><b>A side finding for the CI layout:</b> TRON_HWATTN_EARLY_LAUNCH_MIN_B=1 (early launch at 2 users) speeds up the row-major binary itself at tp2 with 2 users by +4.3 % TPS (4.840 to 4.641 ms per step, t -8.0) and the VNNI binary by +7.1 %, and it shrinks the layout's cost at that load from 0.176 to 0.043 ms per step. This is a candidate mitigation for the 2-users-per-engine CI cell, to be confirmed in the CI layout (block m6).</li>
+</ul>
+
+<h2>9. Comparison with the codex design (codex/design/root-cause-tracing.html)</h2>
+<p>Codex wrote its design in parallel from the same issue. Both designs agree on the frame: the loss is host-side, the primary comparison is the same source with the layout off and on, and a cause needs a trace signature plus a selective intervention. The lists below record what this design took from codex and where the two differ.</p>
+<h3>Taken from codex</h3>
+<ul>
+<li>Manifest per run (binary hash, commit, env, placement, machine load) and an explicit A/A control arm (vnni2) with interleaved order; codex asks for randomized ABBA blocks, this design alternates the arm order per repetition.</li>
+<li>The second-order mechanism (H5): a late upload lengthens the CPU tail of later forwards; the design measures the pending span after burst steps.</li>
+<li>Correct the issue's "about 0.3 ms per step at tp4": with per-request rates the CI-layout tp4 loss is 0.82 ms per token and the CI-layout tp2 loss 0.28 ms (codex computed mean(1000 / TPS_i) from the 80 samples per arm; this design's 1000 / mean(TPS) gives 0.825 and 0.285). summarize.py reports both estimators for the new cells.</li>
+<li>Token-position modulo 4 (GOF), 16 (block) and 64 (page) analysis of per-step times; trace validity checks (open spans, complete forwards) before durations are compared.</li>
+<li>The row-major shadow copy as the strongest selective test of the gather (m5a), instead of a "skip the gather" probe that would feed the card wrong bytes.</li>
+<li>rinzler tracing for the CI layout (m6 if needed): codex describes an external Perfetto session plus SIGUSR1 to the exact engine PIDs, with the session length set by the external config; rinzler has no trace flag. The in-process variant (TRACE_FILE + TRON_TRACE_CATEGORIES in the engine's environment) is this design's addition.</li>
+</ul>
+<h3>Where this design differs, and why</h3>
+<ul>
+<li><b>Measure first with existing spans and counters, instrument later.</b> Codex proposes a correlation-ID patch (forward, GOF, DMA descriptor identities) and dependency-graph attribution before the first capture. The existing spans (Save K, gof_rodeo, gof_populate, wait_coop_gof, Attention Pending, hw wait) already sit on the three changed operations and were verified in both binaries, so the first capture needs no code change. IDs are added only if the span-level attribution leaves more than 30 % of the budget unexplained.</li>
+<li><b>The launch-phase switch (m2) is the cheapest discriminator</b> and is absent from codex: TRON_HWATTN_EARLY_LAUNCH_MIN_B is read at run time [model.hpp:107-128] and moves Save K from before to after the card launch. It separates the store (H1) from the worker-side costs (H2, H3) with no rebuild, and it is a mitigation candidate for the 2-users-per-engine CI cell.</li>
+<li><b>The kill-switch arm</b> (codex: "secondary control") is kept in m1 because it settles whether the AMX kernel is involved at all in an FPGA run.</li>
+<li><b>perf counters and perf record with sudo</b> (available on 3bda; codex relies on Perfetto only) give the thread class and the symbol without any patch.</li>
+<li><b>Micro-benchmark before the traces.</b> Codex allows a gather micro-benchmark at any time, defers only the warm/cold-state and placement sweep to after the trace, and notes that a benchmark cannot establish the root cause by itself. Agreed on the last point; here it cost 5 minutes and already sizes the three costs, so the traces test predictions instead of exploring.</li>
+<li><b>Kernel scheduling events</b> (codex) are skipped: they need the daemon backend with a writable tracefs (root) and the question they answer (runnable delay) is not among the hypotheses.</li>
+<li><b>Dense AMX page path:</b> codex lists "CPU attention costs more" generically; this design shows the AMX dense kernel does not run in FPGA-attention decode while the software tail stays under one 64-token page (is_dense_amx_page needs a whole software-scored page), so the AMX gain that hid the store cost in CPU-attention runs is absent here.</li>
+</ul>
+<h2>Appendix A. Facts this plan rests on</h2>
+<table><tr><th>fact</th><th>citation</th></tr>
+<tr><td>The FPGA staging path differs from main in exactly three places: the k_head_fn signature gains a scratch argument, populate passes a 2 KiB stack scratch, the scheduler's lambda gathers the row for VNNI slots.</td><td>gof.hpp:78; gof.cpp:203, 213; full.hpp:2644-2661; git diff --numstat c7844ca2ce..30c4ac82cb</td></tr>
+<tr><td>gather_row = 4 x _mm512_i32gather_epi32 over 64 lines; scatter_row = 4 x _mm512_i32scatter_epi32 into 64 lines; a token's 128 values sit in 64 lines.</td><td>k_vnni.hpp:135-146, 219-228, 22-30</td></tr>
+<tr><td>Decode never shares the K store: k_store_shared needs more than 16 items; store_k_block runs on the calling (main) thread; a run of one token uses set_k_row.</td><td>model.hpp:2806-2814, 3009-3040, 2914-2927; kv_cache.hpp:1701-1711</td></tr>
+<tr><td>A GOF fires when its save counter reaches 8 (4 tokens x K and V); the enqueue happens inside Save V; workers drain 4 per operation before run_attention_job; main drains the rest in wait_for_coop_gof before logits.</td><td>gof.hpp:355-366, 47-49; model.hpp:3043-3054, 3110-3123, 3146-3189, 1707-1711; TronCpp.hs:1331-1348</td></tr>
+<tr><td>The card launch waits only for the Q channel ("No explicit await on KV DMA here"); DMA completion is polled once per forward at its start.</td><td>self_attention.hpp:634-672; full.hpp:1877; model.hpp:1512; dma_tracker.cpp:83-129</td></tr>
+<tr><td>For a decode query the CPU scores only the tail after the last DMA-complete GOF. The engagement point (127 by default; USE_HW_ATTN=N rounds N up to k*128-1) is applied to query positions and to the first shard's DMA-complete extent. At the default it excludes no key: the first shard is pushed only after 32 complete GOFs = 128 tokens, so once it is pushed keys 0-126 are read on the card.</td><td>ranged_mask.cpp:13-96; full.hpp:1936-1966 (query side), 2758-2817 (2771-2775 shard side); model.hpp:2496, 2503; config.hpp:98; shard.hpp:355-365</td></tr>
+<tr><td>Early launch for B &gt;= 4 (default), late otherwise; the knob is the environment variable TRON_HWATTN_EARLY_LAUNCH_MIN_B.</td><td>model.hpp:91-137, 2022-2037, 2136-2187; TronCpp.hs:2353-2414</td></tr>
+<tr><td>qk_group loads 64 lines per 16-token block with any live token; dotter&lt;bf16,128&gt; loads 4 lines per token.</td><td>k_vnni.hpp:265-306; dotter.hpp:176-226; self_attention.hpp:1604-1641</td></tr>
+<tr><td>The kill switch keeps the layout and the qk_group reader; the dotter is compiled out for VNNI slots.</td><td>amx_attn.cpp:59-73; self_attention.hpp:1574-1603; kv_cache.hpp:684-693, 706-712</td></tr>
+<tr><td>Prior CPU-attention decode traces: Save K 4.6 to 5.8 us per layer row-major, 28.4 to 34.5 us VNNI, at 8 users; the pass still got shorter because the AMX read gain outweighed it.</td><td>exec/results/vnnik-trace-20260914/analysis.md</td></tr>
+<tr><td>Binaries on 3bda: tron-main0916 c7844ca2ce; tron-headoff0916 ff680c8020 TRON_K_VNNI=OFF; tron-pr4424 ff680c8020 ON; tron-tilec 30c4ac82cb ON; all TRON_AMX_DISPATCH=ON, RelWithDebInfo, frame pointers + DWARF-4.</td><td>CMakeCache.txt reads on 3bda 2026-09-18; CMakeLists.txt:598-599</td></tr>
+<tr><td>perf works only through sudo -n (paranoid 4; sudo is passwordless); raw events 0xd1/0x2e/0xd3/0xb7 count correctly; IMC aliases are per sub-channel on kernel 6.8.0-138.</td><td>probes on 3bda 2026-09-18 (perf-tooling reader)</td></tr>
+</table>
+<p class="meta">Generated by exec/issue4500-20260918/gen_design.py. Pure ASCII, light theme.</p>
+</main></body></html>

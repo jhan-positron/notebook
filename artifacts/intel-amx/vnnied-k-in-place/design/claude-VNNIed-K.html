@@ -1,0 +1,304 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/design/claude-VNNIed-K.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/vnnied-k-in-place/design/claude-VNNIed-K.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VNNIed K in place</title>
+<style>
+  :root { --ink:#1b1f24; --muted:#5b6470; --line:#d9dee5; --bg:#ffffff; --panel:#f6f8fa; --accent:#0b5fa5; --warn:#b3261e; --ok:#1d7a3a; --est:#8a5a00; }
+  body { margin:0; padding:24px 16px 48px; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:1000px; margin:0 auto; }
+  h1 { font-size:26px; margin:0 0 6px; }
+  h2 { font-size:20px; margin:32px 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  h3 { font-size:16px; margin:22px 0 6px; }
+  p { margin:8px 0; }
+  .sub { color:var(--muted); margin-bottom:18px; }
+  .short { background:var(--panel); border-left:4px solid var(--accent); padding:10px 14px; margin:14px 0; }
+  .short p { margin:4px 0; }
+  table { border-collapse:collapse; width:100%; margin:10px 0 14px; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:6px 8px; vertical-align:top; text-align:left; }
+  th { background:var(--panel); }
+  code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; }
+  pre { background:var(--panel); border:1px solid var(--line); padding:10px 12px; overflow-x:auto; }
+  .fig { margin:14px 0 6px; border:1px solid var(--line); background:#fff; padding:8px; overflow-x:auto; }
+  .cap { color:var(--muted); font-size:13px; margin:0 0 14px; }
+  .est { color:var(--est); font-weight:600; }
+  .warn { color:var(--warn); font-weight:600; }
+  .ok { color:var(--ok); font-weight:600; }
+  ul { margin:6px 0 10px 22px; }
+  li { margin:3px 0; }
+  .toc a { text-decoration:none; color:var(--accent); }
+  .pill { display:inline-block; font-size:12px; padding:1px 7px; border-radius:10px; background:var(--panel); border:1px solid var(--line); color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<h1>VNNIed K in place: design</h1>
+<p class="sub">Claude design document for the &quot;make K VNNI layout at its generation&quot; project. Written 2026-09-14 (Monday, 06:xx UTC) before the delphi-3bda test window. Branch <code>jhan-amx-vnniK</code> in <code>./tron-VNNIed-K</code>, first commit <code>73125f5464</code> on top of <code>jhan-amx-p0</code> at <code>544ca05c7a</code> (PR #3879 head, jhan's merge of main). Status of each part is marked <span class="pill">built</span>, <span class="pill">measured</span> or <span class="pill">planned</span>. Measured results (2026-09-14 13:14 UTC) are in <a href="../status/Monday-morning-report.html">status/Monday-morning-report.html</a> and summarized in section 8.</p>
+
+<div class="short">
+<p><b>Short version.</b> PR #3879 (the AMX baseline) keeps K stored one row per token, so its AMX kernel has to compute the scores transposed and transpose them back for every page. This design stores the K of every 128-dim head directly in the AMX pair-interleaved layout, so the kernel computes the scores in the right orientation, the partial pages are served by a new AVX-512 reader of the same layout, and no second copy of K exists. The price moves to the K store (a scatter of 64 dim pairs per token), and the Monday test on delphi-3bda measures whether the exchange pays in TPS and TTFT at prompt lengths 1024, 2048 and 8192.</p>
+</div>
+
+<h2 id="toc">Contents</h2>
+<ol class="toc">
+<li><a href="#words">Words used here</a></li>
+<li><a href="#problem">What the AMX baseline pays, and what the mirror cost</a></li>
+<li><a href="#design">The design</a></li>
+<li><a href="#flow">One page of attention, before and after</a></li>
+<li><a href="#tests">Tests</a></li>
+<li><a href="#plan">Measurement plan for delphi-3bda</a></li>
+<li><a href="#risks">Risks, open items and follow-ups</a></li>
+<li><a href="#status">Status as built</a></li>
+<li><a href="#refs">References</a></li>
+</ol>
+
+<h2 id="words">1. Words used here</h2>
+<table>
+<tr><th>Term</th><th>Meaning in this document</th></tr>
+<tr><td>tron, runtron, rinzler</td><td>tron is the inference program under test; runtron is its command-line tool (used for the measurements here); rinzler is the production server binary.</td></tr>
+<tr><td>AMX, AVX-512</td><td>Two CPU instruction sets of the Xeon 6 host. AMX multiplies 16 x 64-byte tiles; AVX-512 works on 64-byte vectors. bf16 is the 2-byte floating-point format K, V and Q are stored in.</td></tr>
+<tr><td>KV page, KV head, kv_mul</td><td>A KV page holds the K and V of 64 tokens for one KV head. kv_mul (also GQA ratio) is the number of query heads that share one KV head; qwen3-4b has head size 128 and kv_mul 4.</td></tr>
+<tr><td>QK, PV, S, S<sup>T</sup></td><td>QK is the query-key score product S = Q &middot; K<sup>T</sup> (one score per query head and token); PV multiplies the softmax weights with V. S<sup>T</sup> is the same score matrix with rows and columns exchanged.</td></tr>
+<tr><td>row-major K (canonical K)</td><td>Today's K storage: one contiguous 128-value row per token. &quot;Canonical&quot; is this project's older name for it.</td></tr>
+<tr><td>VNNI layout</td><td>The pair-interleaved layout the AMX tile multiply needs for its right-hand (B) operand: the two values of a dim pair of one token sit next to each other, and one 64-byte row holds that dim pair for 16 consecutive tokens. Defined exactly in section 3.1.</td></tr>
+<tr><td>mirror</td><td>The earlier alternative (PR #3879's stacked PR 2, parked): keep row-major K and write a second, VNNI copy of it into a separate memory arena. The formulation originates from Bill's PR #2934; the implementation and numbers quoted here are ours.</td></tr>
+<tr><td>kill switch</td><td>The environment variable TRON_AMX_DISABLE=1: the binary runs without AMX instructions.</td></tr>
+<tr><td>prefill, decode, TTFT, TPS</td><td>Prefill processes the prompt; decode generates tokens one at a time. TTFT is time to first token (here: runtron's &quot;Parsing the prompt took&quot; time). TPS is generated tokens per second per user during decode.</td></tr>
+<tr><td>GOF</td><td>Group of four tokens: the unit in which tron copies K and V from the CPU pages into the FPGA staging buffer for hardware attention.</td></tr>
+<tr><td>p0perf13 binary</td><td>The runtron built on 2026-09-13 from <code>544ca05c7a</code> (the base of this branch); it serves as the AMX-off and AMX-baseline arms of the test.</td></tr>
+</table>
+
+<h2 id="problem">2. What the AMX baseline pays, and what the mirror cost</h2>
+<p>The AMX tile multiply (TDPBF16PS) accepts a row-major matrix only as its left operand, A. Its right operand, B, must be in the VNNI layout. PR #3879 keeps K as stored (row-major), so it must use K as A and the packed query group as B. The product then comes out transposed, S<sup>T</sup>[token][head], as four 16 x 16 fp32 tiles [amx_attn_iface.hpp, Note [QK orientation]]. The kernel stores the four tiles to a 4 KiB buffer and runs an AVX-512 register transpose to write the 4 real rows into the caller's score array [amx_attn.cpp, qk_rowmajor_128x4]. Only 4 of the 16 tile columns carry real queries in decode, so 12 of 16 columns of every tile are padding work.</p>
+<p>The cost of that orientation was measured twice.</p>
+<ul>
+<li>Kernel level (2026-08-19, one L2-resident page, width 4): row-major AMX 1250 ns per page against 686 ns for the mirror kernel that reads a pre-built VNNI copy, a gap of 564 ns per page [exec/results/slot1/fused-sweep-v2.txt].</li>
+<li>Serving level (2026-09-01, prompt 8192, one user, one query x one page x one KV head): the row-major AMX unit took 2.89 us and the mirror unit 2.66 us. The QK phase alone was 1.49 us against 1.12 us, a gap of 0.37 us [exec/results/single-attn-20260901/summary.json]. The whole-unit gap is smaller (0.22 us) because the mirror's PV phase was 0.12 us slower, for a reason not yet measured.</li>
+</ul>
+<p>The mirror removed the transpose but added a second copy of K. Its measured costs were the reason PR 2 was parked.</p>
+<ul>
+<li>Memory: the arena held 39.3 to 46.5 GiB of ordinary RAM per tp2 engine over a one-hour soak [PR3879/more-testing/round-1/status.md].</li>
+<li>TTFT in the serving path: qwen tp4 with 8 concurrent prefills 2022 ms against 1630 ms for row-major AMX (+24.0%), llama tp2 +17.7% [exec/results/g1-20260908/summary.md]. The G1 probe split the qwen penalty into about 190 ms for the 64-line scatter store pattern, about 190 ms for the arena placement, and about 12 ms for the second (row-major) store.</li>
+<li>Page-table work: about 80 M 4 KiB page walks per 12 s window on the arena (base pages), costless in wall time after the THP experiment [exec/results/perfstat2-20260831, thp-20260901].</li>
+</ul>
+<p>The in-place design keeps the mirror's kernel and drops the second copy: no arena, no arena placement penalty, no coherence invariant, no page-table tax. What stays is the store pattern (the scatter), which becomes the primary store. Section 3.6 states the expectation and the measurement that settles it.</p>
+
+<h2 id="design">3. The design</h2>
+
+<h3 id="layout">3.1 The layout <span class="pill">built</span></h3>
+<p>For a page of 64 tokens and a head of 128 dims, define for token p and dim d: s = d / 32 (dim step), c = p / 16 (token block), dp = (d % 32) / 2 (dim pair), t = p % 16 (token in block), j = d % 2 (value in pair). The stored element index is</p>
+<pre>plane[(((s * 4 + c) * 16 + dp) * 16 + t) * 2 + j] == K[p][d]      // 64 x 128 bf16 = 16 KiB</pre>
+<p>The plane is 16 panels of 1 KiB. Panel (s, c) has 16 rows of 64 bytes: row dp holds dim pair (2dp, 2dp+1) of the 16 tokens of block c. One panel is exactly one AMX B tile, and one 64-byte row is exactly one AVX-512 register [h/tron/kernels/k_vnni.hpp]. The bytes and the page capacity are the same as the row-major plane; only the order changes. Token p owns column t of block c in every panel, so tokens are written independently, without read-modify-write between neighbours (unlike the pair-interleaved V plane, which pairs tokens 2i and 2i+1 in one 32-bit lane).</p>
+
+<div class="fig">
+<svg viewBox="0 0 960 300" width="960" height="300" font-family="system-ui,sans-serif" font-size="12">
+  <text x="20" y="22" font-size="14" font-weight="600">Row-major K plane (today)</text>
+  <text x="20" y="40" fill="#5b6470">one row = one token, 128 dims = 256 bytes</text>
+  <g>
+    <rect x="20" y="52" width="400" height="200" fill="#f6f8fa" stroke="#d9dee5"/>
+    <g id="rows">
+      <rect x="20" y="52" width="400" height="12" fill="#cfe3f5" stroke="#9fc3e6"/>
+      <rect x="20" y="66" width="400" height="12" fill="#e4eef8" stroke="#9fc3e6"/>
+      <rect x="20" y="80" width="400" height="12" fill="#cfe3f5" stroke="#9fc3e6"/>
+      <rect x="20" y="94" width="400" height="12" fill="#e4eef8" stroke="#9fc3e6"/>
+    </g>
+    <text x="430" y="62">token 0</text>
+    <text x="430" y="76">token 1</text>
+    <text x="430" y="90">token 2</text>
+    <text x="430" y="104">token 3</text>
+    <text x="215" y="185" text-anchor="middle" fill="#5b6470">... 64 rows ...</text>
+    <text x="430" y="248">token 63</text>
+    <rect x="20" y="240" width="400" height="12" fill="#cfe3f5" stroke="#9fc3e6"/>
+    <text x="20" y="272" fill="#5b6470">dims 0 .. 127 run left to right inside a row</text>
+    <text x="20" y="290" fill="#b3261e">AMX reads it as operand A: scores come out transposed</text>
+  </g>
+  <text x="520" y="22" font-size="14" font-weight="600">VNNI K plane (this design)</text>
+  <text x="520" y="40" fill="#5b6470">16 panels of 1 KiB; panel (s, c) = dim step s, token block c</text>
+  <g>
+    <g transform="translate(520,52)">
+      <rect x="0" y="0" width="96" height="44" fill="#d9efe0" stroke="#7fbf95"/><text x="48" y="26" text-anchor="middle">s0,c0</text>
+      <rect x="100" y="0" width="96" height="44" fill="#d9efe0" stroke="#7fbf95"/><text x="148" y="26" text-anchor="middle">s0,c1</text>
+      <rect x="200" y="0" width="96" height="44" fill="#d9efe0" stroke="#7fbf95"/><text x="248" y="26" text-anchor="middle">s0,c2</text>
+      <rect x="300" y="0" width="96" height="44" fill="#d9efe0" stroke="#7fbf95"/><text x="348" y="26" text-anchor="middle">s0,c3</text>
+      <rect x="0" y="48" width="96" height="44" fill="#e7f4eb" stroke="#7fbf95"/><text x="48" y="74" text-anchor="middle">s1,c0</text>
+      <rect x="100" y="48" width="96" height="44" fill="#e7f4eb" stroke="#7fbf95"/><text x="148" y="74" text-anchor="middle">s1,c1</text>
+      <rect x="200" y="48" width="96" height="44" fill="#e7f4eb" stroke="#7fbf95"/><text x="248" y="74" text-anchor="middle">s1,c2</text>
+      <rect x="300" y="48" width="96" height="44" fill="#e7f4eb" stroke="#7fbf95"/><text x="348" y="74" text-anchor="middle">s1,c3</text>
+      <rect x="0" y="96" width="96" height="44" fill="#d9efe0" stroke="#7fbf95"/><text x="48" y="122" text-anchor="middle">s2,c0</text>
+      <rect x="100" y="96" width="96" height="44" fill="#d9efe0" stroke="#7fbf95"/><text x="148" y="122" text-anchor="middle">s2,c1</text>
+      <rect x="200" y="96" width="96" height="44" fill="#d9efe0" stroke="#7fbf95"/><text x="248" y="122" text-anchor="middle">s2,c2</text>
+      <rect x="300" y="96" width="96" height="44" fill="#d9efe0" stroke="#7fbf95"/><text x="348" y="122" text-anchor="middle">s2,c3</text>
+      <rect x="0" y="144" width="96" height="44" fill="#e7f4eb" stroke="#7fbf95"/><text x="48" y="170" text-anchor="middle">s3,c0</text>
+      <rect x="100" y="144" width="96" height="44" fill="#e7f4eb" stroke="#7fbf95"/><text x="148" y="170" text-anchor="middle">s3,c1</text>
+      <rect x="200" y="144" width="96" height="44" fill="#e7f4eb" stroke="#7fbf95"/><text x="248" y="170" text-anchor="middle">s3,c2</text>
+      <rect x="300" y="144" width="96" height="44" fill="#e7f4eb" stroke="#7fbf95"/><text x="348" y="170" text-anchor="middle">s3,c3</text>
+    </g>
+    <text x="520" y="258" fill="#5b6470">inside one panel: row dp (16 rows x 64 B) = dim pair dp of tokens c*16 .. c*16+15</text>
+    <text x="520" y="276" fill="#5b6470">one panel = one AMX B tile = 16 AVX-512 registers</text>
+    <text x="520" y="294" fill="#1d7a3a">AMX reads it as operand B: scores come out as S[query][token]</text>
+  </g>
+</svg>
+</div>
+<p class="cap">Figure 1. The same 16 KiB of K in the two layouts. Left: 64 rows of 256 bytes. Right: 16 panels; the AMX kernel loads one panel per (dim step, token block) as its B operand. Schematic, not to scale.</p>
+
+<h3 id="gate">3.2 The gate: a property of the storage geometry <span class="pill">built</span></h3>
+<p>The layout is selected at compile time by the new CMake option <code>TRON_K_VNNI</code> (default OFF; it requires <code>TRON_AMX_DISPATCH=ON</code>, otherwise CMake stops with an error) and applies to every KV slot whose head size is 128: <code>k_vnni::layout_on&lt;head_size&gt;</code> [k_vnni.hpp]. Every other head size keeps the row-major plane. The gate depends on neither the query type nor whether AMX is available at run time, so every reader and writer of a slot sees the same layout. V is unchanged: its pair-interleaved layout is already the AMX B operand for the PV product.</p>
+<p>Why compile time and not a run-time choice: a run-time layout flag would have to be threaded through every accessor of the KV cache and checked on every hot-path access; the code base already selects the AMX dispatch and the K-mirror at compile time, and the test matrix of this project (row-major build against VNNI build, same commit) is what we measure.</p>
+
+<h3 id="consumers">3.3 Every consumer of K, and how it changes <span class="pill">built</span></h3>
+<table>
+<tr><th>Consumer</th><th>Before (row-major)</th><th>After (VNNI slot)</th><th>Where</th></tr>
+<tr><td>1. K store at generation (save_k: on the main thread of the forward pass for ingested plugins such as qwen, once per layer and pass over the pass's tokens; on the RX worker of the last tensor-parallel shard for the handwritten llama plugin)</td><td><code>page.k(slot, head, j).set(row)</code>: convert to bf16 in place, 4 x 64-byte stores.</td><td>Convert the row to bf16 on the stack, then <code>page.set_k_row</code> scatters the 64 dim pairs into the token's column: 4 AVX-512 scatter instructions of 16 dwords, 64 cache lines touched.</td><td>model.hpp save_k_impl; kv_cache.hpp set_k_row; k_vnni.hpp scatter_row</td></tr>
+<tr><td>2. Dense AMX page (a full 64-token page, all visible)</td><td><code>qk_rowmajor_128x4</code>: K as A, packed Q as B, S<sup>T</sup> tiles, transposing store.</td><td><code>qk_vnni_128x4</code>: padded Q rows as A, the 16 K panels as B, S tiles stored to a 16-row buffer, 4 rows copied out (1 KiB). Q is packed with <code>pack_q_rows_128x4</code> (a 1 KiB copy) instead of the pair-interleaving packer.</td><td>self_attention.hpp apply_dense_amx_page, packed_amx_query; amx_attn.cpp</td></tr>
+<tr><td>3. Software path: partial pages, the kill switch, hosts without AMX</td><td>The dotter: one token at a time, 4 loads of the row, 4 VDPBF16PS, one horizontal reduction.</td><td><code>k_vnni::qk_group</code>: one token per vector lane; per 16-token block, 64 masked loads of one dim pair each, the query pair broadcast, VDPBF16PS accumulates 16 scores; tokens outside the live mask are never loaded and keep -inf. Same instruction count of dot products (1024 per query group and page), no reductions. Float and fp16 queries use exact widening plus FMA, as the float dotter does.</td><td>self_attention.hpp apply_page_tok; k_vnni.hpp qk_group</td></tr>
+<tr><td>4. FPGA staging (gof::populate, then shuffle_k_entry)</td><td><code>page_info::k_head_fn</code> returned a pointer to the row in the page.</td><td>The callback takes caller-owned scratch (like the V callback) and materializes the row with <code>page.get_k_row</code> (4 gathers) for a VNNI slot; the staging bytes and the HBM layout are unchanged. This is the bounded-unpack adapter; the direct shuffle from the plane is a follow-up (section 7).</td><td>gof.hpp page_info; gof.cpp populate; full.hpp make_page_info</td></tr>
+<tr><td>5. Page copies (append, defrag)</td><td>One memcpy of the token range per head.</td><td>Whole page: one 16 KiB memcpy. Any other range: token by token, gather then scatter, because a token's column depends on its offset in the page.</td><td>kv_cache.hpp copy_storage_slot</td></tr>
+<tr><td>6. The accessor API</td><td><code>page.k()</code> row view for every slot.</td><td><code>page.k()</code> exists only for row-major slots (a compile error, not a wrong read, if a caller assumes rows). New layout-agnostic <code>set_k_row</code> / <code>get_k_row</code> for every slot and <code>k_vnni_plane</code> for VNNI slots. Tests moved to the agnostic pair.</td><td>kv_cache.hpp page</td></tr>
+</table>
+<p>Not changed: completion tracking (kv_saves, mark_k_complete, GOF credits), the EAGLE storage view (the plane lives inside the same kv_block, so the view remaps it), the hugepage placement and the page count, V and the PV kernel, the sliding-window and visibility logic, the scale / max / exp / running-softmax update.</p>
+
+<h3 id="kernel">3.4 The AMX kernel qk_vnni_128x4 <span class="pill">built</span></h3>
+<p>Tile plan per (query group, page): zero 4 C tiles (one per token block). For each of the 4 dim steps: load the Q rows step (tile 4: 16 rows x 32 dims, row stride 256 bytes; rows 4..15 are zero padding), then for each token block load the K panel (1 KiB, 64-byte rows) and multiply into that block's C tile. Store the 4 C tiles (16 rows x 64 fp32 each) into a kernel-internal buffer and copy rows 0..3 into the caller's s[4][64]. Counts: 4 A loads, 16 B loads, 16 TDPBF16PS, 4 tile stores, 1 KiB copy. The row-major kernel has the same 16 multiplies and 20 loads, plus the 64 x 16 fp32 transpose (16 unpack and 12 shuffle instructions per 4 x 16 block, 4 blocks) [amx_attn.cpp]. This kernel is the mirror kernel of the parked PR 2 (qk_mirror_128x4) with an explicit score stride and the 16-row store handled inside.</p>
+<p>Numerics: the kernel adds the same four 32-dim partial dots in the same order inside the tile multiply as the row-major kernel, so its scores are bit-identical to qk_rowmajor_128x4 on the same logical K. The test asserts this on random inputs (section 5). The PV kernel, its rounding of the weights and the numerics contract of Note [AMX attention dispatch] are unchanged.</p>
+
+<h3 id="reader">3.5 The AVX-512 reader for partial pages <span class="pill">built</span></h3>
+<p>Every query has one partial page (the page its own token lives in) per layer and KV head, and every page is partial under the kill switch or on a host without AMX. The row-major dotter cannot read the VNNI plane (a token's values are 64 bytes apart across 16 panels). The reader <code>k_vnni::qk_group&lt;kv_mul, q_scalar&gt;</code> iterates the other way round: for each 16-token block with at least one live token, for each of the 64 dim pairs, load the 64-byte pair row with a lane mask of the live tokens (dead tokens are never loaded; their storage may be unwritten), broadcast the query's dim pair, and accumulate with VDPBF16PS, one accumulator per query head. 4 heads share every K load. The scores of live tokens are stored with the same mask; the caller's -inf preset stays for the others. For prompts whose last page is short, blocks with no live token cost nothing.</p>
+<p>Numerics: the same exact bf16 x bf16 products are added in fp32; the add order differs from the dotter's (4 lanes-of-16 accumulators then a horizontal reduction). The test bounds the difference by the same envelope the AMX tests use (1e-4 of the absolute product mass plus 1e-6) over every prefix mask and random hole masks (section 5). The prototype of this reader, measured on one Granite Rapids core on 2026-09-08 with L1-hot data and one query, took 182 ns per page against 222 ns for the row-major dotter at 64 visible tokens (-18%), was faster at every visible count of 3 or more, and slower only at 1 visible token (46 ns against 36 to 45 ns) [exec/g1-20260908/g3-lite.sh, PR3879-codex/single-k-evidence/single_k_probe.md]. Our reader serves 4 heads per K load where the prototype served 1; this is a change in favour of the reader, not yet measured.</p>
+
+<h3 id="store">3.6 The store: the cost that moves <span class="pill">built, cost planned</span></h3>
+<p>A row-major K store writes 256 contiguous bytes: 4 cache lines, 4 stores. A VNNI store writes 4 bytes into each of 64 cache lines (16 rows of each of 4 panels). Our store does it with 4 <code>VPSCATTERDD</code> instructions of 16 dwords (one per dim step) from a bf16 row on the stack; the row conversion from the executor's activation type to bf16 is the same conversion the row-major store performed in place.</p>
+<p>What is known about the cost of this pattern.</p>
+<ul>
+<li>The mirror's scalar scatter (64 dword stores in a loop) took 70.9 ns per row on one L2-resident core [exec/results/bench-scatter-20260824.txt], 20.4 us per prefill token summed over 36 layers x 8 heads.</li>
+<li>In the serving path (rinzler, 8 concurrent short prefills through the nightly's harness), the G1 probe's in-place variant of that scalar scatter cost +11.7% TTFT on qwen tp4 (1820 ms against 1630 ms) and +8.0% at 1 user; the arena placement of the mirror added about the same again [exec/results/g1-20260908/summary.md]. This is the single number that made the breakup plan's single-K gate read FAIL at the agreed 2% threshold.</li>
+<li>In the runtron batch prefill path (8 users, prompt 8192), the same probe cost +1.1% of prefill time (63.01 s against 62.34 s), and its decode was +10.3% faster than row-major AMX (18.67 against 16.92 tok/s per user) because it used the mirror kernel [exec/results/g1-20260908/summary.md].</li>
+</ul>
+<p>Expectation for this design (<span class="est">est.</span>, to be replaced by the measurement): the scatter instructions replace 64 scalar loads and stores plus their address arithmetic with 4 loads and 4 scatters, so the store should cost less than the probe's 70 ns per row; the cache-line count (64 per token) is unchanged, and in prefill the 64 tokens of a page hit the same 64 lines of the same 16 KiB plane, which stays in L1 or L2 across the page. The measurement in section 6 is the arbiter for TTFT at 1024, 2048 and 8192 tokens; section 7 lists the block-transpose optimization that removes the partial-line stores if the measurement says the store dominates.</p>
+
+<h3 id="fpga">3.7 The FPGA path <span class="pill">built (adapter), cost planned</span></h3>
+<p>Hardware attention does not read the CPU pages directly: <code>gof::populate</code> obtains one K row per token and KV head through <code>page_info::k_head_fn</code> and shuffles it into the FPGA staging block (4 tokens = 8 KiB), which is then copied to the card [src/tron/gof.cpp, h/pos/hwattention.hpp shuffle_k_head]. For a VNNI slot the callback now gathers the row into caller-owned scratch (4 gather instructions) and the shuffle proceeds unchanged, so the bytes that reach the card are identical. The cost per GOF token is 4 gathers (one 256-byte row) per KV head: 128 gathers per GOF for 8 KV heads, est. 1 us per GOF and layer, est. 9 ms of extra staging work for a 1024-token prompt over 36 layers, on the staging path that runs at the workers' idle points. It is not exercised by the Monday measurement (USE_HW_ATTN=0 selects CPU attention) and it is the G2 gate item of the breakup plan (a hot and a cold measurement of gof_populate). The direct shuffle from the plane (read dim pairs straight into the staging order, no row) is the planned optimization if G2 says the gather costs.</p>
+
+<h3 id="kill">3.8 Kill switch and rollback <span class="pill">built</span></h3>
+<p>TRON_AMX_DISABLE=1 keeps the layout: a TRON_K_VNNI binary then runs the AVX-512 VNNI reader on every page. It is a same-layout AMX-off arm and a valid emergency switch, but not a rollback to the row-major binary's numerics (the add order of the two software readers differs). Rollback to row-major storage is the row-major build. The Monday test therefore takes its AMX-off and AMX-baseline arms from the row-major binary of the base commit (p0perf13), and adds the VNNI binary's kill-switch arm as a fourth cell that isolates the AVX-path change [section 6].</p>
+
+<h3 id="unchanged">3.9 What this design does not do</h3>
+<ul>
+<li>It does not change head sizes other than 128 (gpt-oss, head 64, keeps row-major K and never runs AMX attention).</li>
+<li>It does not change the AMX gate (head 128 and kv_mul 4 with a bf16 executor); a head-128 model with another kv_mul (llama-3.2-3b, kv_mul 3) gets the VNNI layout and the AVX-512 reader with 3 accumulators, not AMX.</li>
+<li>It does not add a run-time layout switch, a second copy of K, or new memory.</li>
+<li>It does not touch the V plane, the PV kernel, or the softmax update.</li>
+</ul>
+
+<h2 id="flow">4. One page of attention, before and after</h2>
+<div class="fig">
+<svg viewBox="0 0 960 330" width="960" height="330" font-family="system-ui,sans-serif" font-size="12">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b6470"/></marker>
+  </defs>
+  <text x="20" y="22" font-size="14" font-weight="600">AMX baseline (PR #3879): one (query group, page, KV head)</text>
+  <g transform="translate(20,36)">
+    <rect x="0" y="0" width="120" height="44" rx="4" fill="#e4eef8" stroke="#9fc3e6"/><text x="60" y="20" text-anchor="middle">pack Q as B</text><text x="60" y="35" text-anchor="middle" fill="#5b6470">4 KiB, once per token</text>
+    <line x1="120" y1="22" x2="140" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="140" y="0" width="160" height="44" rx="4" fill="#e4eef8" stroke="#9fc3e6"/><text x="220" y="20" text-anchor="middle">16 x TDPBF16PS</text><text x="220" y="35" text-anchor="middle" fill="#5b6470">K rows as A -&gt; S^T tiles</text>
+    <line x1="300" y1="22" x2="320" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="320" y="0" width="150" height="44" rx="4" fill="#fbe3e1" stroke="#d98a84"/><text x="395" y="20" text-anchor="middle" fill="#b3261e">store 4 KiB + transpose</text><text x="395" y="35" text-anchor="middle" fill="#b3261e">64 x 16 fp32 -&gt; 4 x 64</text>
+    <line x1="470" y1="22" x2="490" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="490" y="0" width="150" height="44" rx="4" fill="#f6f8fa" stroke="#d9dee5"/><text x="565" y="20" text-anchor="middle">scale, max, exp, sum</text><text x="565" y="35" text-anchor="middle" fill="#5b6470">unchanged</text>
+    <line x1="640" y1="22" x2="660" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="660" y="0" width="120" height="44" rx="4" fill="#f6f8fa" stroke="#d9dee5"/><text x="720" y="20" text-anchor="middle">PV on AMX</text><text x="720" y="35" text-anchor="middle" fill="#5b6470">unchanged</text>
+    <line x1="780" y1="22" x2="800" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="800" y="0" width="120" height="44" rx="4" fill="#f6f8fa" stroke="#d9dee5"/><text x="860" y="20" text-anchor="middle">update v*, s*, m*</text><text x="860" y="35" text-anchor="middle" fill="#5b6470">unchanged</text>
+  </g>
+  <text x="20" y="112" fill="#5b6470">K store (one thread per pass, per token): 4 x 64-byte stores into the row.  Partial page: dotter, one token at a time.</text>
+
+  <text x="20" y="152" font-size="14" font-weight="600">VNNIed K in place (this design)</text>
+  <g transform="translate(20,166)">
+    <rect x="0" y="0" width="120" height="44" rx="4" fill="#d9efe0" stroke="#7fbf95"/><text x="60" y="20" text-anchor="middle">copy Q rows as A</text><text x="60" y="35" text-anchor="middle" fill="#5b6470">1 KiB, once per token</text>
+    <line x1="120" y1="22" x2="140" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="140" y="0" width="160" height="44" rx="4" fill="#d9efe0" stroke="#7fbf95"/><text x="220" y="20" text-anchor="middle">16 x TDPBF16PS</text><text x="220" y="35" text-anchor="middle" fill="#5b6470">K panels as B -&gt; S tiles</text>
+    <line x1="300" y1="22" x2="320" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="320" y="0" width="150" height="44" rx="4" fill="#d9efe0" stroke="#7fbf95"/><text x="395" y="20" text-anchor="middle" fill="#1d7a3a">store 4 KiB, copy 1 KiB</text><text x="395" y="35" text-anchor="middle" fill="#1d7a3a">no transpose</text>
+    <line x1="470" y1="22" x2="490" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="490" y="0" width="150" height="44" rx="4" fill="#f6f8fa" stroke="#d9dee5"/><text x="565" y="20" text-anchor="middle">scale, max, exp, sum</text><text x="565" y="35" text-anchor="middle" fill="#5b6470">unchanged</text>
+    <line x1="640" y1="22" x2="660" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="660" y="0" width="120" height="44" rx="4" fill="#f6f8fa" stroke="#d9dee5"/><text x="720" y="20" text-anchor="middle">PV on AMX</text><text x="720" y="35" text-anchor="middle" fill="#5b6470">unchanged</text>
+    <line x1="780" y1="22" x2="800" y2="22" stroke="#5b6470" marker-end="url(#arr)"/>
+    <rect x="800" y="0" width="120" height="44" rx="4" fill="#f6f8fa" stroke="#d9dee5"/><text x="860" y="20" text-anchor="middle">update v*, s*, m*</text><text x="860" y="35" text-anchor="middle" fill="#5b6470">unchanged</text>
+  </g>
+  <text x="20" y="242" fill="#b3261e">K store (one thread per pass, per token): 4 scatters of 16 dwords into 64 cache lines (bf16 rows straight from the K buffer).</text>
+  <text x="20" y="260" fill="#1d7a3a">Partial page: AVX-512 reader, 16 tokens per register, 4 heads per K load, dead tokens never loaded.</text>
+  <text x="20" y="296" fill="#5b6470">Boxes are steps, not durations. Red = the work this design removes or adds; grey = unchanged code.</text>
+</svg>
+</div>
+<p class="cap">Figure 2. The per-page attention steps of one attention worker. The transpose leaves the attention worker's critical path; the scatter enters the K store of the thread that runs save_k (the forward pass's main thread for ingested plugins). Whether the exchange pays is what the measurement decides.</p>
+
+<h2 id="tests">5. Tests <span class="pill">built, run planned</span></h2>
+<table>
+<tr><th>Test</th><th>What incorrect behaviour it catches</th><th>Runs</th></tr>
+<tr><td><code>t_k_vnni_layout</code> (new) &quot;store and load are exact&quot;</td><td>A wrong index in scatter_row, gather_row or the documented formula: values land at or are read from the wrong slot, or one token's store touches another token (poison bytes, scrambled write order, rewrite of one token).</td><td>every host (no AMX)</td></tr>
+<tr><td><code>t_k_vnni_layout</code> &quot;reader does not digress from the dotter&quot;</td><td>A wrong pair, panel or lane in the AVX-512 reader; a load of a dead token (NaN poison in dead slots would spread); a missing -inf; bf16 and float queries; every prefix mask, holes, single tokens.</td><td>every host</td></tr>
+<tr><td><code>t_k_vnni_layout</code> &quot;page K rows survive the store, the load and an append&quot;</td><td>A broken set_k_row / get_k_row through a real book, the token-by-token copy path (append into a partly filled page) and the whole-page memcpy path. In a row-major build the same checks hold for the row-major slot.</td><td>every host</td></tr>
+<tr><td><code>t_amx_numerics</code> &quot;VNNI AMX QK is bit-identical to row-major AMX QK&quot; (new case)</td><td>A wrong panel address or pair in qk_vnni_128x4, or a store that does not match the kernel's reading: the two kernels must agree to the bit on random K and Q.</td><td>AMX hosts; skips with a warning elsewhere</td></tr>
+<tr><td><code>t_amx_dispatch_dtype</code></td><td>The dispatch calls exactly one pack and one QK per dense page whichever layout is compiled; no kernel for partial pages; no pack for float or fp16 executors. The K writes now go through set_k_row.</td><td>every host (fakes)</td></tr>
+<tr><td><code>t_llama_unit</code> (adapted sites)</td><td>Append, defrag and EAGLE-view copies of head-128 slots through the layout-agnostic accessors; the concept check that the row view is absent for VNNI slots.</td><td>every host</td></tr>
+<tr><td>GOF tests (<code>t_gof_dma</code>, <code>t_gof_staging_leaks</code>, <code>t_phase1_integration</code>)</td><td>Compile against the new k_head_fn signature; their K rows come from test buffers, so their bytes are unchanged.</td><td>every host</td></tr>
+</table>
+<p>End-to-end check planned for the test window: the greedy decode (temperature 0, pay-for-determinism, USE_HW_ATTN=0) of one prompt on the VNNI binary against the row-major AMX binary. The dense pages give bit-identical scores; the partial page differs in add order, so agreement is expected for a long run of tokens with divergence only at near-ties, as between AMX and AVX today [definitive-decode/index.html].</p>
+
+<h2 id="plan">6. Measurement plan for delphi-3bda <span class="pill">planned</span></h2>
+<p>Machine: delphi-3bda (2 x Xeon 6 6962P), our half (socket 1, FPGA cards 90/93; the other half is Bill's), after the nightly CI releases its lease (expected about 11:30 UTC). Model: ingested-qwen-3-4b-instruct-2507-tp2 (36 layers, 8 KV heads of 128 dims, kv_mul 4). CPU attention (USE_HW_ATTN=0) so that the K path under test runs on the CPU. All tron processes with <code>env -u SYSTEM_CONFIG</code> so the command line placement holds.</p>
+<table>
+<tr><th>Arm</th><th>Binary</th><th>Environment</th><th>What it measures</th></tr>
+<tr><td>off</td><td>runtron.p0perf13 (row-major, base commit 544ca05c7a)</td><td>TRON_AMX_DISABLE=1</td><td>The AVX baseline: no AMX, row-major dotter.</td></tr>
+<tr><td>base</td><td>runtron.p0perf13</td><td>switch unset</td><td>PR #3879: row-major AMX, transposing kernel.</td></tr>
+<tr><td>vnni</td><td>runtron.vnnik (this branch, TRON_K_VNNI=ON)</td><td>switch unset</td><td>This design: VNNI storage, non-transposing AMX kernel, scatter store.</td></tr>
+<tr><td>vnni-off</td><td>runtron.vnnik</td><td>TRON_AMX_DISABLE=1</td><td>The AVX-512 VNNI reader plus the scatter store without AMX: isolates the software-path change.</td></tr>
+</table>
+<p>Cells: prompt length 1024, 2048 and 8192 tokens; 8 users; 256 generated tokens per user; 3 repetitions with the four arms interleaved inside each repetition so that a drift of the machine lands on all arms alike. Numbers recorded per run: runtron's per-request decode rate (&quot;average tok/s&quot;, mean over the 8 requests) and the prefill time (&quot;Parsing the prompt took&quot;, the time to the first generated token of the batch), plus the placement proof lines (&quot;Configured instance&quot;, &quot;App CPU list&quot;) and the machine load. If the window allows, the same cells at tp4 (--instance 1,2, all four of our cards) with 2 repetitions.</p>
+<p>Order of the window: build runtron and the four unit tests from the branch tip in a fresh worktree on local disk (socket 1, about 10 minutes), run the unit tests (a failure stops the campaign), the greedy-agreement smoke, then the cells. Raw data: <code>exec/results/vnnik-20260914/</code> (rt-results.txt, one log per run, summary.json), described in the Monday report for the reviewing agent.</p>
+<p>Reading the result (stated before the data): vnni against base at each prompt length is the design's gain or loss; vnni-off against off is the cost or gain of the software path change alone; base against off is the known AMX gain and a check against the 2026-09-11 and 2026-09-13 campaigns (+11.9% and +13.2% TPS at prompt 1024, tp2, 8 users). Prior expectation, labelled as such: decode TPS of vnni above base by a few percent (the mirror kernel gave +3.7 to +5.2% of decode over the row-major kernel in August at 1 and 8 users, and its QK phase was 25% shorter at prompt 8192); prefill time (TTFT) of vnni against base uncertain in sign, because the scatter store lands on the serial save_k loop of the prefill critical chain while the transpose removal helps every dense page (<span class="est">est.</span>). A vnni TTFT more than 2% worse than base at prompt 1024 is the outcome the breakup plan's single-K gate called a fail.</p>
+
+<h2 id="risks">7. Risks, open items and follow-ups</h2>
+<ul>
+<li><b>Store cost in the serving path.</b> The G1 probe's scalar in-place scatter cost +11.7% TTFT with 8 concurrent short prefills (section 3.6). Our scatter is vectorized but touches the same 64 lines per token. Measured 2026-09-14 (Monday report 7.1): TTFT +2.2% at tp2 and +7.8% at tp4 at prompt 1024, +4.9% at tp4 prompt 2048, gains at prompt 8192. Follow-up: in prefill, save_k receives the K of a whole pass; transpose 16 tokens of one page at a time in registers (a 16 x 16 dword transpose per panel) and write full 64-byte lines, so the partial-line stores disappear, and/or stripe the save_k token loop over the idle helper threads. Decode keeps the per-token scatter (one token per user per step).</li>
+<li><b>Who runs the store, and false sharing (checked in the code, corrected 2026-09-14 after the measurement).</b> For ingested plugins (qwen, the model measured) save_k is a statement of the forward pass's main thread: once per layer and pass it loops serially over the pass's tokens (at most 1024, one minibatch per pass) and the 8 KV heads, the helper threads skip it, and the attention over the pass's own pages waits for it [ingest/src/TronCpp.hs:262-263, 2212, 2279, 2309-2353; model.hpp save_k_impl; self_attention.hpp:782-788]. For the handwritten llama plugin save_k runs once per minibatch inside the WK completion callback on the RX worker of the last tensor-parallel shard [h/tron/plugins/llama.hpp:967-1025, h/tron/hardware/tensor.hpp:333]. In both cases one thread writes a page's plane during a pass, so two threads write the same cache lines only at a minibatch boundary inside a 16-token block (handwritten plugin) or never (ingested plugin). The cost that remains is serial per-token store work on one thread that does not shrink with more cards or cores; the measured TTFT at tp4 (Monday report 7.1) shows it. Remedies: the block transpose above, or striping the save_k loop over the idle helper threads by 16-token block (tokens write disjoint bytes in this layout).</li>
+<li><b>The AVX-512 reader pays a whole 16-token block for a sparse block.</b> qk_group scores every block that has at least one live token at the full block cost (64 masked loads, 256 broadcasts, 256 VDPBF16PS at kv_mul 4, about 576 instructions), where the dotter costs about 68 instructions per live token. In decode the partial page holds 1 to 63 live tokens, so its QK cost follows a period-16 sawtooth instead of a line; at 1 live token the reader issues about 8.5x the dotter's instructions (est. 0.2 us extra per (partial page, KV head, layer) at that step), and it is cheaper than the dotter from about 8 live tokens on, so the average over a page's fill favours the reader. The measured single-query prototype showed the same shape (slower only at 1 visible token). Not a defect; a cost-model fact to keep in mind when reading the decode TPS at short prompts. A per-token fallback for blocks with one or two live tokens is a possible refinement.</li>
+<li><b>Page copies that are not page-aligned.</b> copy_storage_slot takes the whole-page memcpy only for a full page at offset 0; every other range moves token by token (4 gathers and 4 scatters per token, est. 9 k cycles per page and KV head against one 16 KiB memcpy). book::append splices a child's book at the parent's current length, so a splice that is not a multiple of 64 moves every page of the child token by token, under the tree lock. Not exercised by the Monday cells (one prompt per user, no tree merges); a same-offset masked-row copy and a block-aligned copy are possible refinements.</li>
+<li><b>FPGA staging cost (G2).</b> The gather adapter adds 4 gathers per KV head per GOF token on the staging path; unmeasured here (CPU attention in the test). Follow-up: shuffle straight from the plane, and measure gof_populate hot and cold.</li>
+<li><b>Same-layout kill switch.</b> Section 3.8: the kill switch is not a numerics rollback. Operators who want the row-major binary must deploy it.</li>
+<li><b>Other kv_mul values.</b> The reader handles any kv_mul (accumulator count), but only kv_mul 4 is measured. llama-3.2-3b (kv_mul 3) would run the reader on every page with AMX never engaging; not measured.</li>
+<li><b>CI coverage.</b> The CMake CI lane builds with TRON_AMX_DISPATCH=ON and TRON_K_VNNI OFF; the new unit test runs there against the row-major slot. A VNNI lane (or a matrix entry) is needed for the VNNI-specific cases to run in CI; the AMX case still executes only on an Intel runner. New tests also need cost-data entries (bin/slice bench --update) before a PR can pass the slice check.</li>
+<li><b>Poison in dead slots.</b> The reader never loads a dead token's lanes (asserted by the test with NaN poison). The AMX kernel reads the whole plane of a dense page, which the dense predicate guarantees is fully written, as the row-major kernel already assumed.</li>
+<li><b>Not verified before the window:</b> compile of both configurations on 3bda (syntax check launched at 06:2x UTC), the unit tests, and the end-to-end smoke. Section 8 records what passed when it passed.</li>
+</ul>
+
+<h2 id="status">8. Status as built</h2>
+<table>
+<tr><th>Item</th><th>State</th></tr>
+<tr><td>Branch / worktree</td><td><code>jhan-amx-vnniK</code> in <code>./tron-VNNIed-K</code>, base <code>544ca05c7a</code> (origin/jhan-amx-p0). Commits: <code>73125f5464</code> (the change), <code>351732f4b9</code> (fp16 queries take the float path of the reader: the first syntax check found the static_assert in the wrong branch), <code>18ba069c95</code> (clang-format-19 over the change), <code>85766f2fdc</code> and <code>900de8c7b4</code> (test-only: finite, distinct fill patterns and a bit-exact row comparison in t_k_vnni_layout), <code>f66bb07542</code> (review fixes: save_k scatters bf16 rows straight from the buffer, hand-computed index anchors, chunk-16 guard on the test) and <code>5e45ae55ae</code> (clang-format).</td></tr>
+<tr><td>Files</td><td>New: h/tron/kernels/k_vnni.hpp, t/t_k_vnni_layout.cpp. Changed: kv_cache.hpp, model.hpp, self_attention.hpp, amx_attn_iface.hpp, amx_attn.cpp, gof.hpp, gof.cpp, full.hpp, CMakeLists.txt, src/tron/CMakeLists.txt, t/CMakeLists.txt, t_amx_numerics.cpp, t_amx_dispatch_dtype.cpp, t_llama_unit.cpp, t_gof_dma.cpp, t_gof_staging_leaks.cpp, t_phase1_integration.cpp.</td></tr>
+<tr><td>Compile check</td><td>Syntax-only compile of both configurations (TRON_K_VNNI ON and OFF) on delphi-3bda during the CI window (4 cores): first commit OFF clean, ON one error (fp16 executor, fixed in 351732f4b9); formatted tip 18ba069c95 ON and OFF clean for every changed translation unit (src/tron/gof.cpp cannot be syntax-checked in a configure-only tree because the generated model-definitions file is absent; the same failure appears on the unchanged base). Record: exec/results/vnnik-20260914/prewindow/.</td></tr>
+<tr><td>Unit tests before the window</td><td>Built with 4 cores at nice 19 during the CI window (TRON_K_VNNI=ON, ingested models off, 1437 s): t_amx_numerics passes on real AMX (4621 assertions, 5 cases, including the new bit-identity case of the VNNI kernel against the row-major kernel); t_amx_dispatch_dtype passes (1559 assertions); t_k_vnni_layout passes after a test-only fix (71390 assertions, 3 cases; the first run failed one assertion because a fill pattern of the test was a bf16 NaN, commits 85766f2fdc and 900de8c7b4). t_llama_unit passes too (29 cases, 120079 assertions). All four were rebuilt and rerun at the review-fix commit f66bb07542 (below): all pass (t_k_vnni_layout 4 cases, 63208 assertions). Record: exec/results/vnnik-20260914/prewindow/.</td></tr>
+<tr><td>Adversarial review</td><td>A 55-agent review of the first commit (7 lenses, every finding verified by 2 refuters) confirmed: the fp16 static_assert (fixed in 351732f4b9); the NaN fill pattern of the new test (fixed in 85766f2fdc, 900de8c7b4); a tautological index check in the test (replaced by hand-computed anchors, f66bb07542); a stack round trip in save_k that would stall store forwarding before every scatter (bf16 rows are now scattered straight from the K buffer, f66bb07542); the missing CI lane and cost-data entry (section 7); and four cost facts folded into section 7 (false sharing bounded to minibatch boundaries, the reader's per-block cost, the GOF gather estimate, the token-by-token page copy). Refuted: a compile-time tie of page_size to the index map, kv_block::k_at as a stray row view, a G1-sized TTFT prediction, and the kill-switch comparability note (documentation only).</td></tr>
+<tr><td>Measurement</td><td><span class="pill">measured</span> 2026-09-14 11:53-13:14 UTC on our half of delphi-3bda, 60 runs, 0 failures (status/Monday-morning-report.html). Decode TPS, vnni against the AMX baseline, qwen3-4b 8 users: tp2 +6.1% / +7.1% / +10.4% at prompt 1024 / 2048 / 8192; tp4 -0.9% (within the run spread) / +3.8% / +6.7%. TTFT (prefill time), vnni against base: tp2 +2.2% / 0.0% / -1.8%; tp4 +7.8% / +4.9% / -1.1%. The AVX-512 VNNI reader alone (vnni-off against off) gains +5.2% / +3.7% / +4.2% decode at tp2 with TTFT unchanged (-0.1 / -1.4 / -2.4%). Reading: the transpose removal pays in decode and grows with the prompt length; the per-token scatter store shows as a TTFT cost at short prompts, more at tp4 where the rest of the prefill is faster, which is the store-cost risk of section 3.6 and the case for the prefill block transpose of section 7.</td></tr>
+</table>
+
+<h2 id="refs">9. References</h2>
+<ul>
+<li>Note [K VNNI storage] in h/tron/models/kv_cache.hpp; Note [QK orientation] and Note [AMX attention dispatch] in h/tron/kernels/amx_attn_iface.hpp; h/tron/kernels/k_vnni.hpp (this branch).</li>
+<li>Kernel-level orientation gap: exec/results/slot1/fused-sweep-v2.txt (2026-08-19). Serving-level single attention: exec/results/single-attn-20260901/summary.json and PR3879/make-sense-amx-vs-avx.html section 7.2.1.</li>
+<li>Mirror costs: PR3879/more-testing/round-1/status.md (soak, TTFT), exec/results/g1-20260908/summary.md and PR3879/new-PRs/Tuesday-morning-status.html (G1 store-cost gate), exec/results/perfstat2-20260831 and thp-20260901 (page walks).</li>
+<li>Reader prototype: PR3879-codex/single-k-evidence/single_k_probe.md and exec/g1-20260908/g3-lite.sh (2026-09-08).</li>
+<li>Prior AMX campaigns for the baseline check: PR3879/new-PRs/PR1/Friday-morning-CI-results.html (2026-09-11), Sunday-CI-layout-results.html (2026-09-13).</li>
+<li>Breakup plan and gates: PR3879/breakup-PR3879.html sections 5 and 6; PR3879-codex/single-K.html (the earlier single-K feasibility study, 2026-09-04).</li>
+</ul>
+</main>
+</body>
+</html>

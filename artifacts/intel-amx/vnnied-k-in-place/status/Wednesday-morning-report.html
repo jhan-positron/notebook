@@ -1,0 +1,951 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/Wednesday-morning-report.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/vnnied-k-in-place/status/Wednesday-morning-report.html
+-->
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VNNI K and kv_mul 8</title>
+<style>
+:root { color-scheme: light; --ink: #0b0b0b; --ink2: #52514e; --grid: #e6e5e1; --surf: #fcfcfb; --bg: #ffffff; --accent: #2a78d6; }
+body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 1100px; margin-left: auto; margin-right: auto; }
+h1 { font-size: 24px; margin: 0 0 6px; } h2 { font-size: 19px; margin: 36px 0 8px; border-bottom: 1px solid var(--grid); padding-bottom: 4px; } h3 { font-size: 16px; margin: 22px 0 6px; }
+p, li { max-width: 900px; } .meta { color: var(--ink2); font-size: 13px; }
+table { border-collapse: collapse; margin: 10px 0 16px; font-size: 13px; } th, td { border: 1px solid var(--grid); padding: 4px 8px; text-align: left; vertical-align: top; } th { background: #f4f3f0; }
+td:nth-child(n+3):not(:last-child) { font-variant-numeric: tabular-nums; }
+pre { background: #f6f5f2; border: 1px solid var(--grid); padding: 8px 10px; font-size: 12px; overflow-x: auto; }
+.chart { max-width: 100%; height: auto; display: block; margin: 8px 0 4px; }
+.pending { color: #7a3b00; background: #fff4e5; border: 1px solid #f2c88f; padding: 6px 10px; display: inline-block; border-radius: 4px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.small { font-size: 13px; color: var(--ink2); } .quote { border-left: 3px solid var(--grid); padding: 4px 12px; color: var(--ink2); }
+details summary { cursor: pointer; color: var(--ink2); font-size: 13px; }
+</style></head><body>
+<h1>VNNI K layout and a model with kv_mul 8: the repeated measurement</h1>
+<p class="meta">Wednesday morning report, generated 2026-09-16 16:18 UTC from exec/results/vnnik6-20260916 and exec/results/vnnik6-trace-20260916 by exec/vnnik6-20260916/gen_report.py. Model ingested-qwen-3-30b-a3b-instruct-2507 (48 layers, 4 KV heads, 32 query heads, head size 128), 8 users, 256 generated tokens, CPU attention (USE_HW_ATTN=0), our half of delphi-3bda (the shared Positron test server: our half = CPU socket 1 and the cards 90/93/b9/bc, listed under tp2, tp4 in section 1).</p>
+<p><b>Short version.</b> The 6 paired repetitions at tp2 prompt 1024 do not resolve a decode difference for qwen-3-30b-a3b between the vnni binary and base (main): 34.8 against 34.3 TPS per user (+1.5%, paired t +1.3). The PR head with the layout compiled off runs at main&#x27;s speed (34.4 TPS per user, the same as base within the run-to-run spread, paired t +0.5), and no gate is needed based on these numbers. In the other cells the decode effect ranges from a loss of -4.1% (tp2, prompt 2048, t -5.3) to gains of +11.3% (tp4, prompt 8192, t +6.4) and +24.1% (tp2, prompt 8192, t +12.2).</p><p>TTFT is lower in every cell. At tp2 prompt 1024 it moves by -428 ms (-8.1%, lower is better).</p>
+
+<h2>1. Words used here</h2>
+<table><thead><tr><th>term</th><th>meaning</th></tr></thead><tbody><tr><td>tron, runtron</td><td>tron = the inference program under test. runtron = its command-line tool that runs one model with synthetic prompts.</td></tr><tr><td>PR, PR head</td><td>PR = a GitHub pull request, one proposed change to the tron repository. The PR head = the newest commit on the PR&#x27;s branch. PR #4424 is the VNNI K change measured here (head ff680c8020). PR #3879 is the merged AMX attention kernel that #4424 builds on.</td></tr><tr><td>K, V, KV, KV head</td><td>K = the key vector and V = the value vector that attention stores for every token in every layer. The KV cache is the memory that holds them. A KV head is one key/value head. Several query heads share it (see kv_mul). A K row is the 128 K values of one token for one KV head.</td></tr><tr><td>VNNI layout</td><td>the pair-interleaved K layout of PR #4424: the two values of one dimension pair sit next to each other, and one 64-byte row holds that pair for 16 tokens. It is the right-hand (B) operand layout of the AMX tile multiply.</td></tr><tr><td>row-major K</td><td>the layout of main (the main branch of the tron git repository, the branch PR #4424 merges into): one row of 128 values per token.</td></tr><tr><td>KV page, page</td><td>a KV page = one 64-token block of the KV cache (kv_cache.hpp struct page, page_size 64). It holds the K and V rows of those tokens for one layer. &quot;page&quot; alone in this report means a KV page. page::k, page::set_k_row and similar names are the C++ members of that struct.</td></tr><tr><td>slot</td><td>one persistent K/V storage unit of the cache, selected by a kv_slot_id and described by a kv_slot_spec (kv_cache.hpp:160-176). A row-major slot keeps K in the row-major layout. A VNNI slot keeps it in the VNNI layout.</td></tr><tr><td>bf16</td><td>the 16-bit brain floating-point number format. K and V values are stored as bf16 in the cache.</td></tr><tr><td>AVX-512, gather, scatter</td><td>AVX-512 = the CPU&#x27;s 512-bit vector instruction set (Advanced Vector Extensions). Tron&#x27;s software attention path, the dotter and the reader, is AVX-512 code. A gather is one AVX-512 load that collects 16 4-byte values from 16 addresses. A scatter is the matching store to 16 addresses.</td></tr><tr><td>TRON_AMX_DISPATCH, TRON_K_VNNI</td><td>two CMake build options of tron, both OFF by default. TRON_AMX_DISPATCH compiles the AMX software-attention kernels and their dispatch [CMakeLists.txt:48]. TRON_K_VNNI stores the K cache of 128-dimension heads in the VNNI layout and requires TRON_AMX_DISPATCH [CMakeLists.txt:49; src/tron/CMakeLists.txt:209-213].</td></tr><tr><td>attention workers, ready, pending, join</td><td>the attention workers = the pool threads that run the software attention (the dotter or the reader) over the KV pages of a layer: 20 threads per tp2 process and 40 per tp4 process here (the Threads line under the trace table in section 5.2). The traces record their work as three sections. Pending = the work over the pages written in this pass. It starts after Save K and Save V of the layer. Ready = the work over pages written in earlier passes. Join = the per-KV-head step that adds the workers&#x27; partial results. &#x27;attention total&#x27; in the trace tables = the three added.</td></tr><tr><td>minibatch, main helpers</td><td>a minibatch = the group of a pass&#x27;s tokens that the model runs through each layer together (generated plugins run one minibatch per pass). The main helpers = the pool threads that run the main thread&#x27;s CPU kernels next to it. They are not the attention workers (defined above).</td></tr><tr><td>worktree, sha256, libversion.so</td><td>a worktree = a git working directory checked out at one commit. Each binary here was built from one. sha256 = the 64-hex-digit checksum of a file. Two files with the same sha256 are byte-identical. libversion.so = the small shared library of tron that holds the version string and git hash. It is relinked when the commit changes and no source changes. So a runtron binary can report a newer commit than the one its code was compiled from.</td></tr><tr><td>the nightly</td><td>the systems_test CI (continuous integration) run that executes on delphi-3bda every night (start about 03:39 UTC). It holds the machine through a lease file. Nothing of ours runs while the lease is busy. systems_test is the repository of those CI tests.</td></tr><tr><td>AMX</td><td>Intel Advanced Matrix Extensions, the tile-multiply instruction set. The AMX attention kernel of main (PR #3879) serves head size 128 with kv_mul 4 only.</td></tr><tr><td>head, query head, KV head, head size</td><td>attention in each layer runs several independent heads. Each head works on a vector of head-size values (128 for this model). A query head computes the attention scores of one token against the stored tokens. A KV head holds the stored K and V rows that the query heads read (see the row K, V, KV, KV head above). Several query heads share one KV head (see kv_mul).</td></tr><tr><td>kv_mul</td><td>the number of query heads that share one KV head. qwen-3-30b-a3b has 32 query heads and 4 KV heads: kv_mul 8. The AMX kernel is not eligible for it. So all its attention runs on the software (AVX-512) path in every binary here.</td></tr><tr><td>gate, layout gate</td><td>the compile-time condition that decides whether the K cache of a head size is stored in the VNNI layout: the variable template k_vnni::layout_on&lt;head_size&gt; (section 6.1). Today it is true for head size 128 when TRON_K_VNNI is defined. &#x27;Gating the layout on kv_mul 4&#x27; (remedy (a)) means adding &#x27;kv_mul is 4&#x27; to that condition. A kv_mul 8 model would then keep row-major K.</td></tr><tr><td>the dotter, the reader</td><td>the dotter = the per-token AVX-512 dot-product loop of main&#x27;s software attention (row-major K). The reader = k_vnni::qk_group, the AVX-512 routine of PR #4424 that scores the tokens of one page from the VNNI layout.</td></tr><tr><td>Save K</td><td>the store of the K rows of one pass into the KV cache, once per layer, on the main thread (model.hpp save_k). In decode each token&#x27;s row is one unit and the VNNI layout writes it with scatters into 64 cache lines.</td></tr><tr><td>TPS</td><td>generated tokens per second per user in decode (runtron&#x27;s &quot;average tok/s&quot; per request, averaged over the 8 requests of a run).</td></tr><tr><td>TTFT</td><td>time to first token: runtron&#x27;s &quot;Parsing the prompt took&quot; time, taken as the maximum over the 8 prompts of a run. The 8 values of one run agree to the millisecond (they differ by less than 1 ms).</td></tr><tr><td>cell, repetition</td><td>a cell = one (tp, prompt length, binary) combination run with 8 users, 256 generated tokens. A repetition = one run of a cell. The binaries interleave inside each repetition (base, headoff, vnni, base, ...).</td></tr><tr><td>paired delta, t</td><td>for every repetition present in both binaries, the difference a minus b. The tables report the mean, the sample standard deviation (sd), n, and t = mean / (sd / sqrt(n)). |t| above 2 with 6 repetitions means the mean difference is more than twice its own uncertainty. The pairing removes slow drifts of the machine.</td></tr><tr><td>smoke, A/A</td><td>smoke = a 1-user greedy run (temperature 0, deterministic reductions) of 128 tokens whose token ids are saved. A/A = the same binary run twice. Identical tokens are expected.</td></tr><tr><td>tp2, tp4</td><td>the tensor-parallel width: how many FPGA cards the model is split over. FPGA = field-programmable gate array, the accelerator card that runs the model on delphi-3bda. tp2 uses tron --instance 2,4 (2 cards), tp4 --instance 1,2 (4 cards). Both are on our half of delphi-3bda (socket 1, cards 90/93/b9/bc).</td></tr><tr><td>pass, decode step</td><td>a pass = one scheduler forward() call. A prefill pass processes a chunk of the prompts; a decode step is one pass that generates one token for each of the 8 users.</td></tr><tr><td>token job</td><td>one token processed in one pass (tron&#x27;s trace argument n_token_jobs). In these runs a prefill pass carries 1024 token jobs and a decode step carries 8, one per user.</td></tr><tr><td>Perfetto trace</td><td>tron&#x27;s built-in trace recorder. The traced runs generate 32 tokens and record the passes 1 to 24 with the categories model and scheduler.</td></tr><tr><td>base, headoff, vnni</td><td>the three binaries compared in this report. base = the main branch at commit c7844ca2ce (the merge base of PR #4424) built with TRON_AMX_DISPATCH=ON. headoff = the PR head ff680c8020 built with TRON_AMX_DISPATCH=ON and the layout option TRON_K_VNNI off. vnni = the PR head&#x27;s code (65a1c41d72, runtron.vnnik5) built with TRON_K_VNNI=ON.</td></tr></tbody></table>
+
+<h2>2. The question</h2>
+<p>PR #4424 (VNNI K: store the K cache of 128-dimension heads in the AMX VNNI layout) lists this open item:</p>
+<p class="quote">128-dimension heads with kv_mul other than 4 (measure before merging). For qwen-3-30b-a3b (kv_mul 8) the VNNI layout is on. The AMX kernel is not eligible for that shape. So every page goes through the AVX-512 reader of the layout instead of the row-major dotter. The decode store also scatters into cold lines (64-byte cache lines not yet present in the CPU cache). One run showed -5.4% decode TPS (a loss: 34.3 vs 36.3 TPS/user) and -7% TTFT (a gain of 369 ms; lower TTFT is better) against base. If more repetitions confirm the decode loss, the layout gate k_vnni::layout_on&lt;head_size&gt; should also require the AMX shape (kv_mul 4), or the reader needs work for larger groups (more query heads per KV head).</p>
+<p>Two remedies are named. Remedy (a) gates the layout on kv_mul 4. A kv_mul 8 model then keeps row-major K and the dotter. Remedy (b) makes the reader faster for larger groups.</p>
+<p>The measurement here decides three things:</p>
+<ul>
+<li>whether the loss is real (repetitions with a paired test).</li>
+<li>whether the PR's code with the layout off already equals main for this model. This is the binary headoff, and it is what remedy (a) would run.</li>
+<li>whether the loss comes from the reader (a per-page cost that grows with the prompt length) or from the decode store (a per-token cost that does not).</li>
+</ul>
+<p>Decision rule, written before the runs (exec/vnnik6-20260916/PLAN.md section 6): the loss is confirmed when the paired t of vnni minus base at tp2 prompt 1024 is below -2 with 6 repetitions. headoff equals base when |t| is below 2.</p>
+
+<h2>3. What was run</h2>
+<h3>3.1 Binaries</h3>
+<table><thead><tr><th>binary</th><th>commit</th><th>CMake options (preset cross-avx512, BUILD_INGEST_MODELS=ON)</th><th>K layout for this model</th></tr></thead><tbody>
+<tr><td><span class="sw" style="background:#8a8987"></span>base = runtron.main0916</td><td>c7844ca2ce (origin/main at the rebase of the PR = its merge base)</td><td>TRON_AMX_DISPATCH=ON</td><td>row-major, the dotter</td></tr>
+<tr><td><span class="sw" style="background:#2a78d6"></span>headoff = runtron.headoff0916</td><td>ff680c8020 (PR #4424 head)</td><td>TRON_AMX_DISPATCH=ON, TRON_K_VNNI off</td><td>row-major, the dotter (the PR's code otherwise)</td></tr>
+<tr><td><span class="sw" style="background:#eb6834"></span>vnni = runtron.vnnik5</td><td>65a1c41d72 (PR head minus the cost-data JSON commit; same C++)</td><td>TRON_AMX_DISPATCH=ON, TRON_K_VNNI=ON</td><td>VNNI layout, the AVX-512 reader on every page</td></tr>
+</tbody></table>
+<p>AMX-on / AMX-off runs (the same binary run with and without the AMX kernel) were not made. An AMX-off run sets the environment variable TRON_AMX_DISABLE=1, the runtime switch that turns the AMX kernel off for the whole run. The AMX kernel is not eligible for kv_mul 8. So that switch changes nothing for this model.</p>
+<pre>suffix headoff0916
+tip ff680c80201926907189bf803e6eb44b6717399e (2026-09-15 17:23:44 -0700 test: cost data for t_llama_unit after the rebase onto main (granite_rapids_6962p))
+cmake --preset cross-avx512 -DBUILD_INGEST_MODELS=ON -DCMAKE_CXX_FLAGS= -DTRON_AMX_DISPATCH=ON ; target runtron; built 2026-09-16T13:41:57Z in 704 s on cpus 72-143,216-287
+cache: TRON_AMX_DISPATCH:BOOL=ON
+cache: TRON_K_VNNI:BOOL=OFF
+7d7797fdfea65ebb873e42a8f6fd7ad68d32384b4425a2ead31aa811eeaf9c0f  gen/runtron.headoff0916
+2026.09.16-ff680c80</pre>
+<pre>suffix main0916
+tip c7844ca2ceb73e59268b3fcfe3465c3cfae77325 (2026-09-15 22:53:40 +0000 Merge pull request #4400 from positron-ai/mitchell2-26-09-14-preserve-cpu-scratch-ownership)
+cmake --preset cross-avx512 -DBUILD_INGEST_MODELS=ON -DCMAKE_CXX_FLAGS= -DTRON_AMX_DISPATCH=ON ; target runtron; built 2026-09-16T13:30:09Z in 675 s on cpus 72-143,216-287
+cache: TRON_AMX_DISPATCH:BOOL=ON
+5052e4b80a9067f15617bd6b651a763f2275e7c23d50ea3666395809a6fcb60c  gen/runtron.main0916
+2026.09.16-c7844ca2</pre>
+<p>The vnni binary is runtron.vnnik5, built 2026-09-16 00:09 UTC. Its build record below names the checked-out commit (the tip) d5b59b1101. The worktree was then moved to 65a1c41d72, a change to one test file. Only libversion.so was relinked. So the runtron file is byte-identical to the d5b59b1101 build (same sha256). Commit ff680c8020, the PR head, adds one JSON row of cost data on top of 65a1c41d72 and no C++.</p>
+<pre>tip d5b59b1101507bfd61c2a0733a8c995c9e70991a (2026-09-15 16:48:43 -0700 VNNI K: write &quot;dimension&quot;, not &quot;dim&quot;, in the comments this branch adds)
+cmake --preset cross-avx512 -DBUILD_INGEST_MODELS=ON -DTRON_AMX_DISPATCH=ON -DTRON_K_VNNI=ON -DCMAKE_CXX_FLAGS= ; targets runtron t_k_vnni_layout t_amx_numerics t_amx_dispatch_dtype t_llama_unit; built 2026-09-16T00:09:27Z in 519 s on cpus 72-143,216-287
+7f508484a8576f2c260813c26aa9076999578fd1b566f78b9c0459fd180d7dde  gen/runtron.vnnik5
+2026.09.16-d5b59b11
+control binaries: /var/tmp/jhan/tron-vnnik/gen/runtron.vnnik (commit 5e45ae55ae3277f025bd69a29e93741e2690e3e3), /var/tmp/jhan/tron-p0perf13/gen/runtron.p0perf13 (commit 544ca05c7a954f892f0e23ccb465f74ad46bea5e)
+467bd63f0e37a6c3f693a6fa0f76a05818c50747f1e41fd35faf0e70921a6829  /var/tmp/jhan/tron-vnnik/gen/runtron.vnnik
+09c4b6b2129dd722a737f57cd0f7c81f9741e619bb4b639f29f48eb01d08eb68  /var/tmp/jhan/tron-p0perf13/gen/runtron.p0perf13</pre>
+<details><summary>rt-results.txt header (binaries, placements, sha256, version strings)</summary><pre># vnnik6-20260916 runtron results: qwen-3-30b-a3b (kv_mul 8), 8 users, 256 generated; host delphi-3bda; started 2026-09-16T13:42:02Z
+# arms: base = runtron.main0916 (c7844ca2ce, main, TRON_AMX_DISPATCH=ON); headoff = runtron.headoff0916 (ff680c8020, PR head, TRON_K_VNNI off); vnni = runtron.vnnik5 (65a1c41d72, PR head code, TRON_K_VNNI=ON)
+# USE_HW_ATTN=0; env -u SYSTEM_CONFIG -u TRON_AMX_DISABLE; TRON_LOG_LEVEL=SPDLOG_LEVEL=debug; hugepage file /dev/hugepages/amx-vnnik6
+# placement tp2: --instance 2,4 --devices 90:00.0,93:00.0 --app-cores 223-224,96-101,120-125,225-226,102-107,126-131 --dev-cores 75,76 --numa 1 --nr_hugepages 128
+# placement tp4: --instance 1,2 --devices 90:00.0,93:00.0,b9:00.0,bc:00.0 --app-cores 223-224,96-101,120-125,225-226,102-107,126-131,227-228,108-113,132-137,229-230,114-119,138-143 --dev-cores 75,76,77,78 --numa 1 --nr_hugepages 256
+5052e4b80a9067f15617bd6b651a763f2275e7c23d50ea3666395809a6fcb60c  /var/tmp/jhan/tron-main0916/gen/runtron.main0916
+version runtron.main0916: 2026.09.16-c7844ca2
+7d7797fdfea65ebb873e42a8f6fd7ad68d32384b4425a2ead31aa811eeaf9c0f  /var/tmp/jhan/tron-headoff0916/gen/runtron.headoff0916
+version runtron.headoff0916: 2026.09.16-ff680c80
+7f508484a8576f2c260813c26aa9076999578fd1b566f78b9c0459fd180d7dde  /var/tmp/jhan/tron-vnnik5/gen/runtron.vnnik5
+version runtron.vnnik5: 2026.09.16-65a1c41d
+### runtron tp=2 prompt=1024 arm=base rep=1 attempt=1 bin=/var/tmp/jhan/tron-main0916/gen/runtron.main0916 tip=c7844ca2ce model=ingested-qwen-3-30b-a3b-instruct-2507-tp2 len=256 users=8 2026-09-16T13:47:11Z load=12.04 63.04 110.32 hugepages_free=512 bill_procs=0 bill_cpu_pct=0 marker=present
+### runtron tp=2 prompt=1024 arm=headoff rep=1 attempt=1 bin=/var/tmp/jhan/tron-headoff0916/gen/runtron.headoff0916 tip=ff680c8020 model=ingested-qwen-3-30b-a3b-instruct-2507-tp2 len=256 users=8 2026-09-16T13:48:15Z load=13.79 53.36 103.76 hugepages_free=512 bill_procs=0 bill_cpu_pct=0 marker=present
+### runtron tp=2 prompt=1024 arm=vnni rep=1 attempt=1 bin=/var/tmp/jhan/tron-vnnik5/gen/runtron.vnnik5 tip=65a1c41d72 model=ingested-qwen-3-30b-a3b-instruct-2507-tp2 len=256 users=8 2026-09-16T13:49:20Z load=15.50 45.95 97.77 hugepages_free=512 bill_procs=0 bill_cpu_pct=0 marker=present
+### runtron tp=2 prompt=1024 arm=base rep=2 attempt=1 bin=/var/tmp/jhan/tron-main0916/gen/runtron.main0916 tip=c7844ca2ce model=ingested-qwen-3-30b-a3b-instruct-2507-tp2 len=256 users=8 2026-09-16T13:50:22Z load=14.24 39.57 92.05 hugepages_free=512 bill_procs=0 bill_cpu_pct=0 marker=present
+### runtron tp=2 prompt=1024 arm=headoff rep=2 attempt=1 bin=/var/tmp/jhan/tron-headoff0916/gen/runtron.headoff0916 tip=ff680c8020 model=ingested-qwen-3-30b-a3b-instruct-2507-tp2 len=256 users=8 2026-09-16T13:51:25Z load=16.08 35.39 87.32 hugepages_free=512 bill_procs=0 bill_cpu_pct=0 marker=present
+### runtron tp=2 prompt=1024 arm=vnni rep=2 attempt=1 bin=/var/tmp/jhan/tron-vnnik5/gen/runtron.vnnik5 tip=65a1c41d72 model=ingested-qwen-3-30b-a3b-instruct-2507-tp2 len=256 users=8 2026-09-16T13:52:27Z load=15.45 31.54 82.73 hugepages_free=512 bill_procs=0 bill_cpu_pct=0 marker=present
+### runtron tp=2 prompt=1024 arm=base rep=3 attempt=1 bin=/var/tmp/jhan/tron-main0916/gen/runtron.main0916 tip=c7844ca2ce model=ingested-qwen-3-30b-a3b-instruct-2507-tp2 len=256 users=8 2026-09-16T13:53:30Z load=16.31 28.46 78.18 hugepages_free=512 bill_procs=0 bill_cpu_pct=0 marker=present
+### runtron tp=2 prompt=1024 arm=headoff rep=3 attempt=1 bin=/var/tmp/jhan/tron-headoff0916/gen/runtron.headoff0916 tip=ff680c8020 model=ingested-qwen-3-30b-a3b-instruct-2507-tp2 len=256 users=8 2026-09-16T13:54:34Z load=16.74 26.04 73.97 hugepages_free=512 bill_procs=0 bill_cpu_pct=0 marker=present
+### runtron tp=2 prompt=1024 arm=vnni rep=3 attempt=1 bin=/var/tmp/jhan/tron-vnnik5/gen/runtron.vnnik5 tip=65a1c41d72 model=ingested-qwen-3-30b-a3b-instruct-2507-tp2 len=256 users=8 2026-09-16T13:55:37Z load=15.65 23.87 70.21 hugepages_free=512 bill_procs=0 bill_cpu_pct=0 marker=present</pre></details>
+<h3>3.2 Cells and machine</h3>
+<table><thead><tr><th>order</th><th>cell</th><th>repetitions per binary</th><th>purpose</th></tr></thead><tbody>
+<tr><td>1</td><td>smoke tp2 prompt 1024 (1 user, 128 tokens): base, base2, headoff, vnni, vnni2</td><td>1</td><td>token identity and A/A controls</td></tr>
+<tr><td>2</td><td>tp2 prompt 1024</td><td>6</td><td>the reported cell</td></tr>
+<tr><td>3</td><td>tp4 prompt 1024</td><td>4</td><td>the store's TTFT cost was most visible at tp4 in the earlier campaign on qwen3-4b (the model of PR #4424's earlier campaigns: 36 layers, 32 query heads, 8 KV heads, head size 128, kv_mul 4)</td></tr>
+<tr><td>4</td><td>traces tp2 and tp4 prompt 1024 (32 tokens, passes 1-24)</td><td>1</td><td>attribution</td></tr>
+<tr><td>5</td><td>tp2 prompt 2048</td><td>3</td><td>prompt-length trend</td></tr>
+<tr><td>6</td><td>tp2 prompt 8192</td><td>3</td><td>prompt-length trend</td></tr>
+<tr><td>7</td><td>tp4 prompt 8192</td><td>2</td><td>prompt-length trend at tp4</td></tr>
+</tbody></table>
+<p>54 runs from 2026-09-16T13:47:11Z to 2026-09-16T15:41:02Z. 1-minute load average at run start (the number of runnable processes averaged over one minute, roughly the number of busy cores): min 12.0, median 20.7, max 50.8 runnable processes. For comparison, one run of ours uses about 30 to 60 cores. Processes of the other user of delphi-3bda (the colleague who holds the first half of the machine, see section 9) at run start: max 0. A value of 0 means the other user ran nothing when a run started. Marker file /bill-has-instance-0,2 (its presence means the other user holds the first half of the machine, see section 9): present.</p>
+
+<h2>4. Results</h2>
+<h3>4.1 Decode throughput (TPS per user)</h3>
+<svg class="chart" viewBox="0 0 1060 442" width="1060" height="442" role="img" aria-label="Decode TPS per user, per cell">
+<rect width="1060" height="442" fill="#fcfcfb"/>
+<text x="150" y="22" fill="#0b0b0b" font-size="15" font-weight="600">Decode TPS per user, per cell</text>
+<circle cx="155" cy="40" r="5" fill="#8a8987"/>
+<text x="164" y="44" fill="#52514e" font-size="12">base</text>
+<circle cx="219" cy="40" r="5" fill="#2a78d6"/>
+<text x="228" y="44" fill="#52514e" font-size="12">headoff</text>
+<circle cx="304" cy="40" r="5" fill="#eb6834"/>
+<text x="313" y="44" fill="#52514e" font-size="12">vnni</text>
+<text x="1050" y="44" fill="#52514e" font-size="12" text-anchor="end">large dot = mean, small dots = repetitions; higher is better</text>
+<line x1="150" y1="88.0" x2="720" y2="88.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="92.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp2, prompt 1024</text>
+<text x="178.5" y="118.0" fill="#52514e" font-size="10" text-anchor="middle">32.5</text>
+<text x="435.0" y="118.0" fill="#52514e" font-size="10" text-anchor="middle">34.4</text>
+<text x="691.5" y="118.0" fill="#52514e" font-size="10" text-anchor="middle">36.2</text>
+<line x1="419.3" y1="88.0" x2="492.0" y2="88.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="92.0" fill="#0b0b0b" font-size="12">vnni vs base +1.5% (+0.53 TPS), t = +1.3</text>
+<circle cx="245.0" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 33.0 TPS</title></circle>
+<circle cx="480.8" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 34.7 TPS</title></circle>
+<circle cx="434.5" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 3: 34.4 TPS</title></circle>
+<circle cx="494.9" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 4: 34.8 TPS</title></circle>
+<circle cx="422.4" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 5: 34.3 TPS</title></circle>
+<circle cx="438.2" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 6: 34.4 TPS</title></circle>
+<circle cx="401.2" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 34.1 TPS</title></circle>
+<circle cx="625.0" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 35.8 TPS</title></circle>
+<circle cx="372.2" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 3: 33.9 TPS</title></circle>
+<circle cx="337.1" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 4: 33.7 TPS</title></circle>
+<circle cx="478.4" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 5: 34.7 TPS</title></circle>
+<circle cx="454.1" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 6: 34.5 TPS</title></circle>
+<circle cx="424.9" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 34.3 TPS</title></circle>
+<circle cx="286.9" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 33.3 TPS</title></circle>
+<circle cx="613.3" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 3: 35.7 TPS</title></circle>
+<circle cx="563.0" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 4: 35.3 TPS</title></circle>
+<circle cx="513.8" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 5: 34.9 TPS</title></circle>
+<circle cx="549.9" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 6: 35.2 TPS</title></circle>
+<circle cx="419.3" cy="88.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 34.3 TPS, sd 0.7, n 6</title></circle>
+<text x="419.3" y="75.0" fill="#0b0b0b" font-size="11" text-anchor="middle">34.3</text>
+<circle cx="444.7" cy="88.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 34.4 TPS, sd 0.7, n 6</title></circle>
+<text x="444.7" y="62.0" fill="#0b0b0b" font-size="11" text-anchor="middle">34.4</text>
+<circle cx="492.0" cy="88.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 34.8 TPS, sd 0.9, n 6</title></circle>
+<text x="492.0" y="62.0" fill="#0b0b0b" font-size="11" text-anchor="middle">34.8</text>
+<line x1="150" y1="160.0" x2="720" y2="160.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="164.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp4, prompt 1024</text>
+<text x="178.5" y="190.0" fill="#52514e" font-size="10" text-anchor="middle">46.1</text>
+<text x="435.0" y="190.0" fill="#52514e" font-size="10" text-anchor="middle">50.0</text>
+<text x="691.5" y="190.0" fill="#52514e" font-size="10" text-anchor="middle">54.0</text>
+<line x1="432.4" y1="160.0" x2="502.5" y2="160.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="164.0" fill="#0b0b0b" font-size="12">vnni vs base +2.2% (+1.08 TPS), t = +0.9</text>
+<circle cx="570.2" cy="160.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 52.1 TPS</title></circle>
+<circle cx="378.6" cy="160.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 49.2 TPS</title></circle>
+<circle cx="412.6" cy="160.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 3: 49.7 TPS</title></circle>
+<circle cx="368.1" cy="160.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 4: 49.0 TPS</title></circle>
+<circle cx="245.0" cy="160.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 47.1 TPS</title></circle>
+<circle cx="508.9" cy="160.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 51.2 TPS</title></circle>
+<circle cx="471.6" cy="160.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 3: 50.6 TPS</title></circle>
+<circle cx="624.6" cy="160.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 4: 52.9 TPS</title></circle>
+<circle cx="625.0" cy="160.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 52.9 TPS</title></circle>
+<circle cx="545.5" cy="160.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 51.7 TPS</title></circle>
+<circle cx="274.4" cy="160.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 3: 47.6 TPS</title></circle>
+<circle cx="565.1" cy="160.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 4: 52.0 TPS</title></circle>
+<circle cx="432.4" cy="160.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 50.0 TPS, sd 1.4, n 4</title></circle>
+<text x="432.4" y="147.0" fill="#0b0b0b" font-size="11" text-anchor="middle">50.0</text>
+<circle cx="462.5" cy="160.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 50.5 TPS, sd 2.4, n 4</title></circle>
+<text x="462.5" y="134.0" fill="#0b0b0b" font-size="11" text-anchor="middle">50.5</text>
+<circle cx="502.5" cy="160.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 51.1 TPS, sd 2.4, n 4</title></circle>
+<text x="502.5" y="134.0" fill="#0b0b0b" font-size="11" text-anchor="middle">51.1</text>
+<line x1="150" y1="232.0" x2="720" y2="232.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="236.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp2, prompt 2048</text>
+<text x="178.5" y="262.0" fill="#52514e" font-size="10" text-anchor="middle">22.1</text>
+<text x="435.0" y="262.0" fill="#52514e" font-size="10" text-anchor="middle">23.0</text>
+<text x="691.5" y="262.0" fill="#52514e" font-size="10" text-anchor="middle">23.9</text>
+<line x1="568.4" y1="232.0" x2="285.0" y2="232.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="236.0" fill="#0b0b0b" font-size="12">vnni vs base -4.1% (-0.97 TPS), t = -5.3</text>
+<circle cx="625.0" cy="232.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 23.6 TPS</title></circle>
+<circle cx="476.9" cy="232.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 23.1 TPS</title></circle>
+<circle cx="603.3" cy="232.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 3: 23.6 TPS</title></circle>
+<circle cx="458.7" cy="232.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 23.1 TPS</title></circle>
+<circle cx="513.6" cy="232.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 23.2 TPS</title></circle>
+<circle cx="454.9" cy="232.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 3: 23.0 TPS</title></circle>
+<circle cx="313.3" cy="232.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 22.6 TPS</title></circle>
+<circle cx="296.6" cy="232.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 22.5 TPS</title></circle>
+<circle cx="245.0" cy="232.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 3: 22.3 TPS</title></circle>
+<circle cx="568.4" cy="232.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 23.4 TPS, sd 0.3, n 3</title></circle>
+<text x="568.4" y="219.0" fill="#0b0b0b" font-size="11" text-anchor="middle">23.4</text>
+<circle cx="475.8" cy="232.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 23.1 TPS, sd 0.1, n 3</title></circle>
+<text x="475.8" y="219.0" fill="#0b0b0b" font-size="11" text-anchor="middle">23.1</text>
+<circle cx="285.0" cy="232.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 22.5 TPS, sd 0.1, n 3</title></circle>
+<text x="285.0" y="219.0" fill="#0b0b0b" font-size="11" text-anchor="middle">22.5</text>
+<line x1="150" y1="304.0" x2="720" y2="304.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="308.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp2, prompt 8192</text>
+<text x="178.5" y="334.0" fill="#52514e" font-size="10" text-anchor="middle">10.5</text>
+<text x="435.0" y="334.0" fill="#52514e" font-size="10" text-anchor="middle">12.6</text>
+<text x="691.5" y="334.0" fill="#52514e" font-size="10" text-anchor="middle">14.7</text>
+<line x1="278.1" y1="304.0" x2="606.7" y2="304.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="308.0" fill="#0b0b0b" font-size="12">vnni vs base +24.1% (+2.72 TPS), t = +12.2</text>
+<circle cx="314.6" cy="304.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 11.6 TPS</title></circle>
+<circle cx="245.0" cy="304.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 11.0 TPS</title></circle>
+<circle cx="274.6" cy="304.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 3: 11.3 TPS</title></circle>
+<circle cx="259.7" cy="304.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 11.1 TPS</title></circle>
+<circle cx="249.8" cy="304.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 11.1 TPS</title></circle>
+<circle cx="258.0" cy="304.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 3: 11.1 TPS</title></circle>
+<circle cx="604.0" cy="304.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 14.0 TPS</title></circle>
+<circle cx="625.0" cy="304.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 14.2 TPS</title></circle>
+<circle cx="591.0" cy="304.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 3: 13.9 TPS</title></circle>
+<circle cx="278.1" cy="304.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 11.3 TPS, sd 0.3, n 3</title></circle>
+<text x="278.1" y="291.0" fill="#0b0b0b" font-size="11" text-anchor="middle">11.3</text>
+<circle cx="255.9" cy="304.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 11.1 TPS, sd 0.0, n 3</title></circle>
+<text x="255.9" y="278.0" fill="#0b0b0b" font-size="11" text-anchor="middle">11.1</text>
+<circle cx="606.7" cy="304.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 14.0 TPS, sd 0.1, n 3</title></circle>
+<text x="606.7" y="291.0" fill="#0b0b0b" font-size="11" text-anchor="middle">14.0</text>
+<line x1="150" y1="376.0" x2="720" y2="376.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="380.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp4, prompt 8192</text>
+<text x="178.5" y="406.0" fill="#52514e" font-size="10" text-anchor="middle">21.1</text>
+<text x="435.0" y="406.0" fill="#52514e" font-size="10" text-anchor="middle">23.0</text>
+<text x="691.5" y="406.0" fill="#52514e" font-size="10" text-anchor="middle">24.9</text>
+<line x1="286.1" y1="376.0" x2="614.8" y2="376.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="380.0" fill="#0b0b0b" font-size="12">vnni vs base +11.3% (+2.47 TPS), t = +6.4</text>
+<circle cx="245.0" cy="376.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 21.6 TPS</title></circle>
+<circle cx="327.3" cy="376.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 22.2 TPS</title></circle>
+<circle cx="299.2" cy="376.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 22.0 TPS</title></circle>
+<circle cx="271.2" cy="376.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 21.8 TPS</title></circle>
+<circle cx="625.0" cy="376.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 24.4 TPS</title></circle>
+<circle cx="604.7" cy="376.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 24.3 TPS</title></circle>
+<circle cx="286.1" cy="376.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 21.9 TPS, sd 0.4, n 2</title></circle>
+<text x="286.1" y="363.0" fill="#0b0b0b" font-size="11" text-anchor="middle">21.9</text>
+<circle cx="285.2" cy="376.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 21.9 TPS, sd 0.1, n 2</title></circle>
+<text x="285.2" y="350.0" fill="#0b0b0b" font-size="11" text-anchor="middle">21.9</text>
+<circle cx="614.8" cy="376.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 24.3 TPS, sd 0.1, n 2</title></circle>
+<text x="614.8" y="363.0" fill="#0b0b0b" font-size="11" text-anchor="middle">24.3</text>
+<text x="720" y="434" fill="#52514e" font-size="11" text-anchor="end">each row has its own axis (TPS). The gray bar is the base-to-vnni gap.</text>
+</svg>
+<h3>4.2 Time to first token (TTFT)</h3>
+<svg class="chart" viewBox="0 0 1060 442" width="1060" height="442" role="img" aria-label="TTFT in seconds, per cell">
+<rect width="1060" height="442" fill="#fcfcfb"/>
+<text x="150" y="22" fill="#0b0b0b" font-size="15" font-weight="600">TTFT in seconds, per cell</text>
+<circle cx="155" cy="40" r="5" fill="#8a8987"/>
+<text x="164" y="44" fill="#52514e" font-size="12">base</text>
+<circle cx="219" cy="40" r="5" fill="#2a78d6"/>
+<text x="228" y="44" fill="#52514e" font-size="12">headoff</text>
+<circle cx="304" cy="40" r="5" fill="#eb6834"/>
+<text x="313" y="44" fill="#52514e" font-size="12">vnni</text>
+<text x="1050" y="44" fill="#52514e" font-size="12" text-anchor="end">large dot = mean, small dots = repetitions; lower is better</text>
+<line x1="150" y1="88.0" x2="720" y2="88.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="92.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp2, prompt 1024</text>
+<text x="178.5" y="118.0" fill="#52514e" font-size="10" text-anchor="middle">4.71</text>
+<text x="435.0" y="118.0" fill="#52514e" font-size="10" text-anchor="middle">5.04</text>
+<text x="691.5" y="118.0" fill="#52514e" font-size="10" text-anchor="middle">5.37</text>
+<line x1="607.6" y1="88.0" x2="275.7" y2="88.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="92.0" fill="#0b0b0b" font-size="12">vnni vs base -8.1% (-428 ms), t = -35.9</text>
+<circle cx="595.2" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 5.25 s</title></circle>
+<circle cx="600.8" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 5.25 s</title></circle>
+<circle cx="593.1" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 3: 5.24 s</title></circle>
+<circle cx="625.0" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 4: 5.28 s</title></circle>
+<circle cx="612.0" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 5: 5.27 s</title></circle>
+<circle cx="619.5" cy="88.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 6: 5.28 s</title></circle>
+<circle cx="593.1" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 5.24 s</title></circle>
+<circle cx="579.7" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 5.23 s</title></circle>
+<circle cx="573.4" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 3: 5.22 s</title></circle>
+<circle cx="589.7" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 4: 5.24 s</title></circle>
+<circle cx="613.8" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 5: 5.27 s</title></circle>
+<circle cx="598.2" cy="88.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 6: 5.25 s</title></circle>
+<circle cx="276.6" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 4.83 s</title></circle>
+<circle cx="305.5" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 4.87 s</title></circle>
+<circle cx="245.0" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 3: 4.79 s</title></circle>
+<circle cx="266.3" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 4: 4.82 s</title></circle>
+<circle cx="281.9" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 5: 4.84 s</title></circle>
+<circle cx="279.2" cy="88.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 6: 4.84 s</title></circle>
+<circle cx="607.6" cy="88.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 5.26 s, sd 0.02, n 6</title></circle>
+<text x="607.6" y="75.0" fill="#0b0b0b" font-size="11" text-anchor="middle">5.26</text>
+<circle cx="591.3" cy="88.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 5.24 s, sd 0.02, n 6</title></circle>
+<text x="591.3" y="62.0" fill="#0b0b0b" font-size="11" text-anchor="middle">5.24</text>
+<circle cx="275.7" cy="88.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 4.83 s, sd 0.03, n 6</title></circle>
+<text x="275.7" y="75.0" fill="#0b0b0b" font-size="11" text-anchor="middle">4.83</text>
+<line x1="150" y1="160.0" x2="720" y2="160.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="164.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp4, prompt 1024</text>
+<text x="178.5" y="190.0" fill="#52514e" font-size="10" text-anchor="middle">2.90</text>
+<text x="435.0" y="190.0" fill="#52514e" font-size="10" text-anchor="middle">3.08</text>
+<text x="691.5" y="190.0" fill="#52514e" font-size="10" text-anchor="middle">3.26</text>
+<line x1="596.6" y1="160.0" x2="274.3" y2="160.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="164.0" fill="#0b0b0b" font-size="12">vnni vs base -7.1% (-227 ms), t = -23.2</text>
+<circle cx="557.1" cy="160.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 3.17 s</title></circle>
+<circle cx="607.6" cy="160.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 3.21 s</title></circle>
+<circle cx="616.1" cy="160.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 3: 3.21 s</title></circle>
+<circle cx="605.5" cy="160.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 4: 3.20 s</title></circle>
+<circle cx="625.0" cy="160.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 3.22 s</title></circle>
+<circle cx="612.6" cy="160.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 3.21 s</title></circle>
+<circle cx="594.1" cy="160.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 3: 3.20 s</title></circle>
+<circle cx="588.6" cy="160.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 4: 3.19 s</title></circle>
+<circle cx="255.7" cy="160.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 2.96 s</title></circle>
+<circle cx="245.0" cy="160.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 2.95 s</title></circle>
+<circle cx="309.4" cy="160.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 3: 2.99 s</title></circle>
+<circle cx="286.9" cy="160.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 4: 2.98 s</title></circle>
+<circle cx="596.6" cy="160.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 3.20 s, sd 0.02, n 4</title></circle>
+<text x="596.6" y="147.0" fill="#0b0b0b" font-size="11" text-anchor="middle">3.20</text>
+<circle cx="605.1" cy="160.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 3.20 s, sd 0.01, n 4</title></circle>
+<text x="605.1" y="134.0" fill="#0b0b0b" font-size="11" text-anchor="middle">3.20</text>
+<circle cx="274.3" cy="160.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 2.97 s, sd 0.02, n 4</title></circle>
+<text x="274.3" y="147.0" fill="#0b0b0b" font-size="11" text-anchor="middle">2.97</text>
+<line x1="150" y1="232.0" x2="720" y2="232.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="236.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp2, prompt 2048</text>
+<text x="178.5" y="262.0" fill="#52514e" font-size="10" text-anchor="middle">12.85</text>
+<text x="435.0" y="262.0" fill="#52514e" font-size="10" text-anchor="middle">14.06</text>
+<text x="691.5" y="262.0" fill="#52514e" font-size="10" text-anchor="middle">15.28</text>
+<line x1="612.1" y1="232.0" x2="248.3" y2="232.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="236.0" fill="#0b0b0b" font-size="12">vnni vs base -11.5% (-1720 ms), t = -100.1</text>
+<circle cx="601.8" cy="232.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 14.85 s</title></circle>
+<circle cx="621.2" cy="232.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 14.94 s</title></circle>
+<circle cx="613.4" cy="232.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 3: 14.91 s</title></circle>
+<circle cx="619.1" cy="232.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 14.93 s</title></circle>
+<circle cx="606.6" cy="232.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 14.88 s</title></circle>
+<circle cx="625.0" cy="232.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 3: 14.96 s</title></circle>
+<circle cx="245.0" cy="232.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 13.17 s</title></circle>
+<circle cx="252.3" cy="232.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 13.20 s</title></circle>
+<circle cx="247.5" cy="232.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 3: 13.18 s</title></circle>
+<circle cx="612.1" cy="232.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 14.90 s, sd 0.05, n 3</title></circle>
+<text x="612.1" y="219.0" fill="#0b0b0b" font-size="11" text-anchor="middle">14.90</text>
+<circle cx="616.9" cy="232.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 14.92 s, sd 0.04, n 3</title></circle>
+<text x="616.9" y="206.0" fill="#0b0b0b" font-size="11" text-anchor="middle">14.92</text>
+<circle cx="248.3" cy="232.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 13.18 s, sd 0.02, n 3</title></circle>
+<text x="248.3" y="219.0" fill="#0b0b0b" font-size="11" text-anchor="middle">13.18</text>
+<line x1="150" y1="304.0" x2="720" y2="304.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="308.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp2, prompt 8192</text>
+<text x="178.5" y="334.0" fill="#52514e" font-size="10" text-anchor="middle">132.43</text>
+<text x="435.0" y="334.0" fill="#52514e" font-size="10" text-anchor="middle">150.19</text>
+<text x="691.5" y="334.0" fill="#52514e" font-size="10" text-anchor="middle">167.95</text>
+<line x1="619.7" y1="304.0" x2="247.2" y2="304.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="308.0" fill="#0b0b0b" font-size="12">vnni vs base -15.8% (-25798 ms), t = -134.3</text>
+<circle cx="617.8" cy="304.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 162.85 s</title></circle>
+<circle cx="616.2" cy="304.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 162.74 s</title></circle>
+<circle cx="625.0" cy="304.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 3: 163.35 s</title></circle>
+<circle cx="619.4" cy="304.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 162.96 s</title></circle>
+<circle cx="624.4" cy="304.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 163.30 s</title></circle>
+<circle cx="619.3" cy="304.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 3: 162.95 s</title></circle>
+<circle cx="249.4" cy="304.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 137.33 s</title></circle>
+<circle cx="245.0" cy="304.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 137.03 s</title></circle>
+<circle cx="247.2" cy="304.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 3: 137.18 s</title></circle>
+<circle cx="619.7" cy="304.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 162.98 s, sd 0.32, n 3</title></circle>
+<text x="619.7" y="291.0" fill="#0b0b0b" font-size="11" text-anchor="middle">162.98</text>
+<circle cx="621.0" cy="304.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 163.07 s, sd 0.20, n 3</title></circle>
+<text x="621.0" y="278.0" fill="#0b0b0b" font-size="11" text-anchor="middle">163.07</text>
+<circle cx="247.2" cy="304.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 137.18 s, sd 0.15, n 3</title></circle>
+<text x="247.2" y="291.0" fill="#0b0b0b" font-size="11" text-anchor="middle">137.18</text>
+<line x1="150" y1="376.0" x2="720" y2="376.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="140" y="380.0" fill="#0b0b0b" font-size="13" text-anchor="end">tp4, prompt 8192</text>
+<text x="178.5" y="406.0" fill="#52514e" font-size="10" text-anchor="middle">70.78</text>
+<text x="435.0" y="406.0" fill="#52514e" font-size="10" text-anchor="middle">80.07</text>
+<text x="691.5" y="406.0" fill="#52514e" font-size="10" text-anchor="middle">89.36</text>
+<line x1="624.8" y1="376.0" x2="246.3" y2="376.0" stroke="#52514e" stroke-width="2" stroke-linecap="round"/>
+<text x="732" y="380.0" fill="#0b0b0b" font-size="12">vnni vs base -15.8% (-13710 ms), t = -249.5</text>
+<circle cx="624.6" cy="376.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 1: 86.94 s</title></circle>
+<circle cx="625.0" cy="376.0" r="4" fill="#8a8987" fill-opacity="0.35"><title>base rep 2: 86.96 s</title></circle>
+<circle cx="617.9" cy="376.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 1: 86.70 s</title></circle>
+<circle cx="624.6" cy="376.0" r="4" fill="#2a78d6" fill-opacity="0.35"><title>headoff rep 2: 86.94 s</title></circle>
+<circle cx="247.7" cy="376.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 1: 73.29 s</title></circle>
+<circle cx="245.0" cy="376.0" r="4" fill="#eb6834" fill-opacity="0.35"><title>vnni rep 2: 73.19 s</title></circle>
+<circle cx="624.8" cy="376.0" r="7" fill="#8a8987" stroke="#fcfcfb" stroke-width="2"><title>base (main c7844ca2ce, row-major K): mean 86.95 s, sd 0.01, n 2</title></circle>
+<text x="624.8" y="363.0" fill="#0b0b0b" font-size="11" text-anchor="middle">86.95</text>
+<circle cx="621.2" cy="376.0" r="7" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>headoff (PR head, layout compiled off): mean 86.82 s, sd 0.17, n 2</title></circle>
+<text x="621.2" y="350.0" fill="#0b0b0b" font-size="11" text-anchor="middle">86.82</text>
+<circle cx="246.3" cy="376.0" r="7" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>vnni (PR head, VNNI layout on): mean 73.24 s, sd 0.07, n 2</title></circle>
+<text x="246.3" y="363.0" fill="#0b0b0b" font-size="11" text-anchor="middle">73.24</text>
+<text x="720" y="434" fill="#52514e" font-size="11" text-anchor="end">each row has its own axis (s). The gray bar is the base-to-vnni gap.</text>
+</svg>
+<h3>4.3 The numbers</h3>
+<table><thead><tr><th>cell</th><th>binary</th><th>n</th><th>TPS per user</th><th>sd</th><th>TTFT s</th><th>sd</th><th>early-stop runs</th><th>version in the log</th></tr></thead><tbody>
+<tr><td>tp2, prompt 1024</td><td><span class="sw" style="background:#8a8987"></span>base</td><td>6</td><td>34.26</td><td>0.66</td><td>5.262</td><td>0.017</td><td>0</td><td>c7844ca2ce</td></tr>
+<tr><td>tp2, prompt 1024</td><td><span class="sw" style="background:#2a78d6"></span>headoff</td><td>6</td><td>34.44</td><td>0.75</td><td>5.241</td><td>0.018</td><td>0</td><td>ff680c8020</td></tr>
+<tr><td>tp2, prompt 1024</td><td><span class="sw" style="background:#eb6834"></span>vnni</td><td>6</td><td>34.79</td><td>0.86</td><td>4.833</td><td>0.026</td><td>0</td><td>65a1c41d72</td></tr>
+<tr><td>tp4, prompt 1024</td><td><span class="sw" style="background:#8a8987"></span>base</td><td>4</td><td>49.99</td><td>1.44</td><td>3.197</td><td>0.019</td><td>0</td><td>c7844ca2ce</td></tr>
+<tr><td>tp4, prompt 1024</td><td><span class="sw" style="background:#2a78d6"></span>headoff</td><td>4</td><td>50.45</td><td>2.44</td><td>3.203</td><td>0.012</td><td>0</td><td>ff680c8020</td></tr>
+<tr><td>tp4, prompt 1024</td><td><span class="sw" style="background:#eb6834"></span>vnni</td><td>4</td><td>51.07</td><td>2.39</td><td>2.970</td><td>0.021</td><td>0</td><td>65a1c41d72</td></tr>
+<tr><td>tp2, prompt 2048</td><td><span class="sw" style="background:#8a8987"></span>base</td><td>3</td><td>23.43</td><td>0.27</td><td>14.901</td><td>0.046</td><td>0</td><td>c7844ca2ce</td></tr>
+<tr><td>tp2, prompt 2048</td><td><span class="sw" style="background:#2a78d6"></span>headoff</td><td>3</td><td>23.12</td><td>0.11</td><td>14.924</td><td>0.044</td><td>0</td><td>ff680c8020</td></tr>
+<tr><td>tp2, prompt 2048</td><td><span class="sw" style="background:#eb6834"></span>vnni</td><td>3</td><td>22.47</td><td>0.12</td><td>13.181</td><td>0.018</td><td>0</td><td>65a1c41d72</td></tr>
+<tr><td>tp2, prompt 8192</td><td><span class="sw" style="background:#8a8987"></span>base</td><td>3</td><td>11.30</td><td>0.29</td><td>162.980</td><td>0.323</td><td>0</td><td>c7844ca2ce</td></tr>
+<tr><td>tp2, prompt 8192</td><td><span class="sw" style="background:#2a78d6"></span>headoff</td><td>3</td><td>11.12</td><td>0.04</td><td>163.072</td><td>0.201</td><td>0</td><td>ff680c8020</td></tr>
+<tr><td>tp2, prompt 8192</td><td><span class="sw" style="background:#eb6834"></span>vnni</td><td>3</td><td>14.02</td><td>0.14</td><td>137.182</td><td>0.151</td><td>0</td><td>65a1c41d72</td></tr>
+<tr><td>tp4, prompt 8192</td><td><span class="sw" style="background:#8a8987"></span>base</td><td>2</td><td>21.87</td><td>0.44</td><td>86.949</td><td>0.010</td><td>0</td><td>c7844ca2ce</td></tr>
+<tr><td>tp4, prompt 8192</td><td><span class="sw" style="background:#2a78d6"></span>headoff</td><td>2</td><td>21.87</td><td>0.15</td><td>86.820</td><td>0.173</td><td>0</td><td>ff680c8020</td></tr>
+<tr><td>tp4, prompt 8192</td><td><span class="sw" style="background:#eb6834"></span>vnni</td><td>2</td><td>24.34</td><td>0.11</td><td>73.239</td><td>0.068</td><td>0</td><td>65a1c41d72</td></tr>
+</tbody></table>
+<p>An early-stop run is a run in which the 8 requests did not all generate the same number of tokens (one request left the batch early, or fewer than 8 requests reported). Its per-user TPS is not comparable with the other runs. So it is left out of the TPS means and the paired deltas. Its TTFT is kept. The column early-stop runs counts such runs per cell.</p>
+<h3>4.4 Paired deltas and the decision</h3>
+<table><thead><tr><th>cell</th><th>comparison</th><th>TPS delta %</th><th>paired TPS delta, mean (sd) n</th><th>t</th><th>TTFT delta ms</th><th>paired TTFT delta ms, mean (sd) n</th><th>t</th><th>reading</th></tr></thead><tbody>
+<tr><td>tp2, prompt 1024</td><td>vnni vs base</td><td>+1.5</td><td>0.53 (1.01) 6</td><td>1.3</td><td>-428</td><td>-428 (29) 6</td><td>-35.9</td><td>no difference resolved (|t| below 2)</td></tr>
+<tr><td>tp2, prompt 1024</td><td>headoff vs base</td><td>+0.5</td><td>0.18 (0.88) 6</td><td>0.5</td><td>-21</td><td>-21 (18) 6</td><td>-2.9</td><td>same as base within the run-to-run spread (|t| below 2)</td></tr>
+<tr><td>tp2, prompt 1024</td><td>vnni vs headoff</td><td>+1.0</td><td>0.34 (1.53) 6</td><td>0.6</td><td>-407</td><td>-407 (27) 6</td><td>-36.7</td><td></td></tr>
+<tr><td>tp4, prompt 1024</td><td>vnni vs base</td><td>+2.2</td><td>1.08 (2.33) 4</td><td>0.9</td><td>-227</td><td>-227 (20) 4</td><td>-23.2</td><td>no difference resolved (|t| below 2)</td></tr>
+<tr><td>tp4, prompt 1024</td><td>headoff vs base</td><td>+0.9</td><td>0.46 (3.85) 4</td><td>0.2</td><td>+6</td><td>6 (29) 4</td><td>0.4</td><td>same as base within the run-to-run spread (|t| below 2)</td></tr>
+<tr><td>tp4, prompt 1024</td><td>vnni vs headoff</td><td>+1.2</td><td>0.61 (3.78) 4</td><td>0.3</td><td>-233</td><td>-233 (31) 4</td><td>-15.0</td><td></td></tr>
+<tr><td>tp2, prompt 2048</td><td>vnni vs base</td><td>-4.1</td><td>-0.97 (0.31) 3</td><td>-5.3</td><td>-1720</td><td>-1720 (30) 3</td><td>-100.1</td><td>loss confirmed (paired t below -2)</td></tr>
+<tr><td>tp2, prompt 2048</td><td>headoff vs base</td><td>-1.3</td><td>-0.32 (0.38) 3</td><td>-1.4</td><td>+23</td><td>23 (80) 3</td><td>0.5</td><td>same as base within the run-to-run spread (|t| below 2)</td></tr>
+<tr><td>tp2, prompt 2048</td><td>vnni vs headoff</td><td>-2.8</td><td>-0.65 (0.13) 3</td><td>-8.4</td><td>-1743</td><td>-1743 (59) 3</td><td>-51.1</td><td></td></tr>
+<tr><td>tp2, prompt 8192</td><td>vnni vs base</td><td>+24.1</td><td>2.72 (0.39) 3</td><td>12.2</td><td>-25798</td><td>-25798 (333) 3</td><td>-134.3</td><td>gain (paired t above 2)</td></tr>
+<tr><td>tp2, prompt 8192</td><td>headoff vs base</td><td>-1.6</td><td>-0.18 (0.25) 3</td><td>-1.3</td><td>+92</td><td>92 (479) 3</td><td>0.3</td><td>same as base within the run-to-run spread (|t| below 2)</td></tr>
+<tr><td>tp2, prompt 8192</td><td>vnni vs headoff</td><td>+26.1</td><td>2.90 (0.18) 3</td><td>27.8</td><td>-25890</td><td>-25890 (340) 3</td><td>-132.0</td><td></td></tr>
+<tr><td>tp4, prompt 8192</td><td>vnni vs base</td><td>+11.3</td><td>2.47 (0.55) 2</td><td>6.4</td><td>-13710</td><td>-13710 (78) 2</td><td>-249.5</td><td>gain (paired t above 2)</td></tr>
+<tr><td>tp4, prompt 8192</td><td>headoff vs base</td><td>-0.0</td><td>-0.01 (0.59) 2</td><td>-0.0</td><td>-130</td><td>-130 (163) 2</td><td>-1.1</td><td>same as base within the run-to-run spread (|t| below 2)</td></tr>
+<tr><td>tp4, prompt 8192</td><td>vnni vs headoff</td><td>+11.3</td><td>2.48 (0.04) 2</td><td>86.8</td><td>-13581</td><td>-13581 (241) 2</td><td>-79.6</td><td></td></tr>
+</tbody></table>
+<h3>4.5 Smoke tokens</h3>
+<p>Each line below compares the 128 generated token ids of two smoke runs, position by position. A token id is the integer number of one entry of the model vocabulary. Ids are labels: the gap between two ids has no meaning. &#x27;identical for 128 tokens (lengths 128 / 128)&#x27; means every id matches, and each run produced 128 ids. &#x27;first difference at generated token N of 128 (A vs B); agreeing prefix N tokens&#x27; means the two runs agree on the first N ids (positions 0 to N-1, the count starts at 0) and differ at position N: id A in the first-named run, id B in the second. &#x27;missing&#x27; means one of the two runs was not made. The bracket at the end of each line names what the pair controls for. It is not a source reference.</p>
+<ul>
+<li>base vs base2: identical for 128 tokens (lengths 128 / 128) [A/A of the main binary]</li>
+<li>vnni vs vnni2: identical for 128 tokens (lengths 128 / 128) [A/A of the VNNI binary]</li>
+<li>headoff vs headoff2: missing (A/A of the headoff binary (run only when the base build failed))</li>
+<li>base vs headoff: identical for 128 tokens (lengths 128 / 128) [main vs PR head with the layout off: expected identical]</li>
+<li>base vs vnni: first difference at generated token 5 of 128 (11 vs 304); agreeing prefix 5 tokens [main vs VNNI layout: diverged at token 5 on 2026-09-15]</li>
+<li>headoff vs vnni: first difference at generated token 5 of 128 (11 vs 304); agreeing prefix 5 tokens [PR head, layout off vs on]</li>
+</ul>
+<details><summary>smoke run lines (version, TTFT, TPS of the 1-user runs)</summary><pre>smoke base rc=0 [13:42:38.075324413|thread 1625126|cpu 230] [info ] Version: 2026.09.16-c7844ca2 hash: c7844ca2ceb73e59268b3fcfe3465c3cfae77325 [13:43:27.459752292|thread 1644746|cpu 230] [info ] [Request 1] Parsing the prompt took 0.92263003 s at 1109.870659640246 tokens/s [13:43:28.577468017|thread 1644746|cpu 230] [info ] [Request 1] Generating 125 response tokens with 1025 context took 1.107680 s at 112.849 a
+smoke base2 rc=0 [13:43:40.730508824|thread 1667278|cpu 99] [info ] Version: 2026.09.16-c7844ca2 hash: c7844ca2ceb73e59268b3fcfe3465c3cfae77325 [13:44:21.124315823|thread 1680054|cpu 99] [info ] [Request 1] Parsing the prompt took 0.915465974 s at 1118.5560458634807 tokens/s [13:44:22.181438387|thread 1680054|cpu 99] [info ] [Request 1] Generating 125 response tokens with 1025 context took 1.047565 s at 119.324 av
+smoke headoff rc=0 [13:44:34.537478174|thread 1702641|cpu 5] [info ] Version: 2026.09.16-ff680c80 hash: ff680c80201926907189bf803e6eb44b6717399e [13:45:14.340861767|thread 1713956|cpu 5] [info ] [Request 1] Parsing the prompt took 0.910555172 s at 1124.5886372275747 tokens/s [13:45:15.388081678|thread 1713956|cpu 5] [info ] [Request 1] Generating 125 response tokens with 1025 context took 1.037612 s at 120.469 avera
+smoke vnni rc=0 [13:45:27.524020171|thread 1736531|cpu 237] [info ] Version: 2026.09.16-65a1c41d hash: 65a1c41d72d0b68021c0fcd653ac38e7d2b904f3 [13:46:05.847507450|thread 1747841|cpu 237] [info ] [Request 1] Parsing the prompt took 0.859318837 s at 1191.6415140798315 tokens/s [13:46:06.867666511|thread 1747841|cpu 237] [info ] [Request 1] Generating 125 response tokens with 1025 context took 1.010842 s at 123.659
+smoke vnni2 rc=0 [13:46:19.265675779|thread 1762871|cpu 96] [info ] Version: 2026.09.16-65a1c41d hash: 65a1c41d72d0b68021c0fcd653ac38e7d2b904f3 [13:46:58.880475474|thread 1781758|cpu 96] [info ] [Request 1] Parsing the prompt took 0.866624094 s at 1181.5965042855132 tokens/s [13:46:59.975172714|thread 1781758|cpu 96] [info ] [Request 1] Generating 125 response tokens with 1025 context took 1.084773 s at 115.232 av
+smoke token rows: {&#x27;base&#x27;: 128, &#x27;base2&#x27;: 128, &#x27;headoff&#x27;: 128, &#x27;vnni&#x27;: 128, &#x27;vnni2&#x27;: 128}</pre></details>
+
+<h2>5. Attribution: reader or store?</h2>
+<h3>5.1 The prompt-length trend</h3>
+<p>The decode step of one user takes 1000 / TPS milliseconds. The figure shows that time for vnni minus base. The reader scores every KV page of the context (the prompt plus the tokens generated so far) on every step. So its cost grows with the prompt length. The decode store (Save K in a decode step) writes one K row per token per layer whatever the context length. So its cost is flat over the prompt length.</p>
+<svg class="chart" viewBox="0 0 820 320" width="820" height="320" role="img" aria-label="decode step delta by prompt length">
+<rect width="820" height="320" fill="#fcfcfb"/>
+<text x="70" y="22" fill="#0b0b0b" font-size="15" font-weight="600">Decode step time, vnni minus base (ms per generated token)</text>
+<line x1="70" y1="260.0" x2="630" y2="260.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="62" y="264.0" fill="#52514e" font-size="11" text-anchor="end">-20.97</text>
+<line x1="70" y1="205.0" x2="630" y2="205.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="62" y="209.0" fill="#52514e" font-size="11" text-anchor="end">-14.32</text>
+<line x1="70" y1="150.0" x2="630" y2="150.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="62" y="154.0" fill="#52514e" font-size="11" text-anchor="end">-7.67</text>
+<line x1="70" y1="95.0" x2="630" y2="95.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="62" y="99.0" fill="#52514e" font-size="11" text-anchor="end">-1.01</text>
+<line x1="70" y1="40.0" x2="630" y2="40.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="62" y="44.0" fill="#52514e" font-size="11" text-anchor="end">+5.64</text>
+<line x1="70" y1="86.6" x2="630" y2="86.6" stroke="#52514e" stroke-width="1"/>
+<text x="163.3" y="278" fill="#52514e" font-size="12" text-anchor="middle">prompt 1024</text>
+<text x="350.0" y="278" fill="#52514e" font-size="12" text-anchor="middle">prompt 2048</text>
+<text x="536.7" y="278" fill="#52514e" font-size="12" text-anchor="middle">prompt 8192</text>
+<path d="M163.3,90.3 L350.0,71.4 L536.7,228.6" fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="163.3" cy="90.3" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>tp2 prompt 1024: -0.44 ms per token (-1.5% of the base step 29.19 ms)</title></circle>
+<text x="172.3" y="82.3" fill="#0b0b0b" font-size="11">-0.44 ms (-1.5%)</text>
+<circle cx="350.0" cy="71.4" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>tp2 prompt 2048: +1.84 ms per token (+4.3% of the base step 42.68 ms)</title></circle>
+<text x="359.0" y="63.4" fill="#0b0b0b" font-size="11">+1.84 ms (+4.3%)</text>
+<circle cx="536.7" cy="228.6" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>tp2 prompt 8192: -17.17 ms per token (-19.4% of the base step 88.50 ms)</title></circle>
+<text x="545.7" y="220.6" fill="#0b0b0b" font-size="11">-17.17 ms (-19.4%)</text>
+<text x="545.7" y="206.6" fill="#52514e" font-size="11">tp2</text>
+<path d="M163.3,90.1 L536.7,125.0" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="163.3" cy="90.1" r="5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>tp4 prompt 1024: -0.42 ms per token (-2.1% of the base step 20.00 ms)</title></circle>
+<text x="172.3" y="108.1" fill="#0b0b0b" font-size="11">-0.42 ms (-2.1%)</text>
+<circle cx="536.7" cy="125.0" r="5" fill="#eb6834" stroke="#fcfcfb" stroke-width="2"><title>tp4 prompt 8192: -4.64 ms per token (-10.2% of the base step 45.72 ms)</title></circle>
+<text x="545.7" y="143.0" fill="#0b0b0b" font-size="11">-4.64 ms (-10.2%)</text>
+<text x="545.7" y="155.0" fill="#52514e" font-size="11">tp4</text>
+<text x="70" y="300" fill="#52514e" font-size="11">positive = the vnni binary needs more time per generated token, negative = less.</text>
+<text x="70" y="314" fill="#52514e" font-size="11">a per-token cost (the store) is a flat offset over the prompt length. A per-page effect (the reader) grows with it.</text>
+</svg>
+<h3>5.2 The traces</h3>
+<p>One traced run per binary and tp (prompt 1024, 32 tokens). A section is one attention worker's work item over a set of KV pages, recorded as one trace span. Per pass the figures and the table give: the pass time, the attention workers' section time per worker, the Save K time on the main thread, and the kernel time per main helper. Each value is the mean over the traced passes of that kind (prefill or decode).</p>
+<svg class="chart" viewBox="0 0 960 300" width="960" height="300" role="img" aria-label="decode step composition tp2">
+<rect width="960" height="300" fill="#fcfcfb"/>
+<text x="12" y="22" fill="#0b0b0b" font-size="14" font-weight="600">Decode step composition from the traces, tp2: mean over 16 traced decode steps, each panel on its own axis</text>
+<line x1="52.0" y1="236.0" x2="228.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="52.0" y1="172.0" x2="228.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">11.80</text>
+<line x1="52.0" y1="108.0" x2="228.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">23.59</text>
+<line x1="52.0" y1="44.0" x2="228.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">35.39</text>
+<rect x="77.0" y="85.7" width="34" height="150.3" rx="4" ry="4" fill="#8a8987"><title>base: decode step (pass), ms = 27.702 ms</title></rect>
+<rect x="77.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="94.0" y="80.7" fill="#0b0b0b" font-size="11" text-anchor="middle">27.70</text>
+<rect x="123.0" y="82.6" width="34" height="153.4" rx="4" ry="4" fill="#2a78d6"><title>headoff: decode step (pass), ms = 28.282 ms</title></rect>
+<rect x="123.0" y="232.0" width="34" height="4" fill="#2a78d6"/>
+<text x="140.0" y="77.6" fill="#0b0b0b" font-size="11" text-anchor="middle">28.28</text>
+<rect x="169.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#eb6834"><title>vnni: decode step (pass), ms = 28.310 ms</title></rect>
+<rect x="169.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="186.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">28.31</text>
+<text x="140.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">decode step (pass), ms</text>
+<line x1="292.0" y1="236.0" x2="468.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="292.0" y1="172.0" x2="468.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">2.85</text>
+<line x1="292.0" y1="108.0" x2="468.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">5.70</text>
+<line x1="292.0" y1="44.0" x2="468.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">8.55</text>
+<rect x="317.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#8a8987"><title>base: attention, ms per worker = 6.841 ms</title></rect>
+<rect x="317.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="334.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">6.84</text>
+<rect x="363.0" y="83.1" width="34" height="152.9" rx="4" ry="4" fill="#2a78d6"><title>headoff: attention, ms per worker = 6.809 ms</title></rect>
+<rect x="363.0" y="232.0" width="34" height="4" fill="#2a78d6"/>
+<text x="380.0" y="78.1" fill="#0b0b0b" font-size="11" text-anchor="middle">6.81</text>
+<rect x="409.0" y="100.2" width="34" height="135.8" rx="4" ry="4" fill="#eb6834"><title>vnni: attention, ms per worker = 6.050 ms</title></rect>
+<rect x="409.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="426.0" y="95.2" fill="#0b0b0b" font-size="11" text-anchor="middle">6.05</text>
+<text x="380.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">attention, ms per worker</text>
+<line x1="532.0" y1="236.0" x2="708.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="532.0" y1="172.0" x2="708.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">0.38</text>
+<line x1="532.0" y1="108.0" x2="708.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">0.76</text>
+<line x1="532.0" y1="44.0" x2="708.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">1.14</text>
+<rect x="557.0" y="210.1" width="34" height="25.9" rx="4" ry="4" fill="#8a8987"><title>base: Save K per step (main thread), ms = 0.154 ms</title></rect>
+<rect x="557.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="574.0" y="205.1" fill="#0b0b0b" font-size="11" text-anchor="middle">0.15</text>
+<rect x="603.0" y="211.8" width="34" height="24.2" rx="4" ry="4" fill="#2a78d6"><title>headoff: Save K per step (main thread), ms = 0.144 ms</title></rect>
+<rect x="603.0" y="232.0" width="34" height="4" fill="#2a78d6"/>
+<text x="620.0" y="206.8" fill="#0b0b0b" font-size="11" text-anchor="middle">0.14</text>
+<rect x="649.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#eb6834"><title>vnni: Save K per step (main thread), ms = 0.914 ms</title></rect>
+<rect x="649.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="666.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">0.91</text>
+<text x="620.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">Save K per step (main thread), ms</text>
+<line x1="772.0" y1="236.0" x2="948.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="772.0" y1="172.0" x2="948.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">4.29</text>
+<line x1="772.0" y1="108.0" x2="948.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">8.58</text>
+<line x1="772.0" y1="44.0" x2="948.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">12.87</text>
+<rect x="797.0" y="90.8" width="34" height="145.2" rx="4" ry="4" fill="#8a8987"><title>base: kernels, ms per main helper = 9.731 ms</title></rect>
+<rect x="797.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="814.0" y="85.8" fill="#0b0b0b" font-size="11" text-anchor="middle">9.73</text>
+<rect x="843.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#2a78d6"><title>headoff: kernels, ms per main helper = 10.294 ms</title></rect>
+<rect x="843.0" y="232.0" width="34" height="4" fill="#2a78d6"/>
+<text x="860.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">10.29</text>
+<rect x="889.0" y="84.5" width="34" height="151.5" rx="4" ry="4" fill="#eb6834"><title>vnni: kernels, ms per main helper = 10.156 ms</title></rect>
+<rect x="889.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="906.0" y="79.5" fill="#0b0b0b" font-size="11" text-anchor="middle">10.16</text>
+<text x="860.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">kernels, ms per main helper</text>
+<rect x="52" y="278" width="10" height="10" rx="2" fill="#8a8987"/>
+<text x="66" y="287" fill="#52514e" font-size="12">base</text>
+<rect x="116" y="278" width="10" height="10" rx="2" fill="#2a78d6"/>
+<text x="130" y="287" fill="#52514e" font-size="12">headoff</text>
+<rect x="201" y="278" width="10" height="10" rx="2" fill="#eb6834"/>
+<text x="215" y="287" fill="#52514e" font-size="12">vnni</text>
+<text x="948" y="287" fill="#52514e" font-size="11" text-anchor="end">one traced run per binary; the step-to-step spread of the pass is about 2 ms</text>
+</svg>
+<svg class="chart" viewBox="0 0 960 300" width="960" height="300" role="img" aria-label="decode step composition tp4">
+<rect width="960" height="300" fill="#fcfcfb"/>
+<text x="12" y="22" fill="#0b0b0b" font-size="14" font-weight="600">Decode step composition from the traces, tp4: mean over 16 traced decode steps, each panel on its own axis</text>
+<line x1="52.0" y1="236.0" x2="228.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="52.0" y1="172.0" x2="228.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">9.12</text>
+<line x1="52.0" y1="108.0" x2="228.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">18.25</text>
+<line x1="52.0" y1="44.0" x2="228.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">27.37</text>
+<rect x="77.0" y="85.9" width="34" height="150.1" rx="4" ry="4" fill="#8a8987"><title>base: decode step (pass), ms = 21.406 ms</title></rect>
+<rect x="77.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="94.0" y="80.9" fill="#0b0b0b" font-size="11" text-anchor="middle">21.41</text>
+<rect x="123.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#2a78d6"><title>headoff: decode step (pass), ms = 21.900 ms</title></rect>
+<rect x="123.0" y="232.0" width="34" height="4" fill="#2a78d6"/>
+<text x="140.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">21.90</text>
+<rect x="169.0" y="83.6" width="34" height="152.4" rx="4" ry="4" fill="#eb6834"><title>vnni: decode step (pass), ms = 21.733 ms</title></rect>
+<rect x="169.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="186.0" y="78.6" fill="#0b0b0b" font-size="11" text-anchor="middle">21.73</text>
+<text x="140.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">decode step (pass), ms</text>
+<line x1="292.0" y1="236.0" x2="468.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="292.0" y1="172.0" x2="468.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">1.75</text>
+<line x1="292.0" y1="108.0" x2="468.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">3.50</text>
+<line x1="292.0" y1="44.0" x2="468.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">5.26</text>
+<rect x="317.0" y="84.2" width="34" height="151.8" rx="4" ry="4" fill="#8a8987"><title>base: attention, ms per worker = 4.156 ms</title></rect>
+<rect x="317.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="334.0" y="79.2" fill="#0b0b0b" font-size="11" text-anchor="middle">4.16</text>
+<rect x="363.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#2a78d6"><title>headoff: attention, ms per worker = 4.204 ms</title></rect>
+<rect x="363.0" y="232.0" width="34" height="4" fill="#2a78d6"/>
+<text x="380.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">4.20</text>
+<rect x="409.0" y="98.8" width="34" height="137.2" rx="4" ry="4" fill="#eb6834"><title>vnni: attention, ms per worker = 3.755 ms</title></rect>
+<rect x="409.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="426.0" y="93.8" fill="#0b0b0b" font-size="11" text-anchor="middle">3.76</text>
+<text x="380.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">attention, ms per worker</text>
+<line x1="532.0" y1="236.0" x2="708.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="532.0" y1="172.0" x2="708.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">0.34</text>
+<line x1="532.0" y1="108.0" x2="708.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">0.69</text>
+<line x1="532.0" y1="44.0" x2="708.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">1.03</text>
+<rect x="557.0" y="203.0" width="34" height="33.0" rx="4" ry="4" fill="#8a8987"><title>base: Save K per step (main thread), ms = 0.177 ms</title></rect>
+<rect x="557.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="574.0" y="198.0" fill="#0b0b0b" font-size="11" text-anchor="middle">0.18</text>
+<rect x="603.0" y="205.6" width="34" height="30.4" rx="4" ry="4" fill="#2a78d6"><title>headoff: Save K per step (main thread), ms = 0.164 ms</title></rect>
+<rect x="603.0" y="232.0" width="34" height="4" fill="#2a78d6"/>
+<text x="620.0" y="200.6" fill="#0b0b0b" font-size="11" text-anchor="middle">0.16</text>
+<rect x="649.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#eb6834"><title>vnni: Save K per step (main thread), ms = 0.827 ms</title></rect>
+<rect x="649.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="666.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">0.83</text>
+<text x="620.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">Save K per step (main thread), ms</text>
+<line x1="772.0" y1="236.0" x2="948.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="772.0" y1="172.0" x2="948.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">2.48</text>
+<line x1="772.0" y1="108.0" x2="948.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">4.96</text>
+<line x1="772.0" y1="44.0" x2="948.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">7.45</text>
+<rect x="797.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#8a8987"><title>base: kernels, ms per main helper = 5.957 ms</title></rect>
+<rect x="797.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="814.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">5.96</text>
+<rect x="843.0" y="88.0" width="34" height="148.0" rx="4" ry="4" fill="#2a78d6"><title>headoff: kernels, ms per main helper = 5.741 ms</title></rect>
+<rect x="843.0" y="232.0" width="34" height="4" fill="#2a78d6"/>
+<text x="860.0" y="83.0" fill="#0b0b0b" font-size="11" text-anchor="middle">5.74</text>
+<rect x="889.0" y="83.7" width="34" height="152.3" rx="4" ry="4" fill="#eb6834"><title>vnni: kernels, ms per main helper = 5.906 ms</title></rect>
+<rect x="889.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="906.0" y="78.7" fill="#0b0b0b" font-size="11" text-anchor="middle">5.91</text>
+<text x="860.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">kernels, ms per main helper</text>
+<rect x="52" y="278" width="10" height="10" rx="2" fill="#8a8987"/>
+<text x="66" y="287" fill="#52514e" font-size="12">base</text>
+<rect x="116" y="278" width="10" height="10" rx="2" fill="#2a78d6"/>
+<text x="130" y="287" fill="#52514e" font-size="12">headoff</text>
+<rect x="201" y="278" width="10" height="10" rx="2" fill="#eb6834"/>
+<text x="215" y="287" fill="#52514e" font-size="12">vnni</text>
+<text x="948" y="287" fill="#52514e" font-size="11" text-anchor="end">one traced run per binary; the step-to-step spread of the pass is about 2 ms</text>
+</svg>
+<p>Columns of the trace tables (this one and those of sections 5.3 and 5.4):</p>
+<ul>
+<li>Save K share % = the Save K time of the pass as a percentage of the pass time.</li>
+<li>attention ready = the workers' sections over the pages written in earlier passes, summed and divided by the attention-worker count.</li>
+<li>attention pending = the workers' sections over the pages written in this pass, summed and divided by the worker count. A pending section starts after Save K and Save V of the layer.</li>
+<li>join = the step that adds the workers' partial results of one KV head into one result, summed and divided by the worker count.</li>
+<li>attention total = ready + pending + join, the workers' busy time per pass.</li>
+<li>kernels ms per main helper = the per-token kernel spans on the main helper threads, summed and divided by the helper count.</li>
+<li>workers busy in Save K = the fraction of attention workers (0 to 1) that had a section overlapping a Save K span, averaged over the Save K spans of the pass. 1.00 = every worker was busy while the store ran, 0 = the store ran with every worker idle.</li>
+</ul>
+<table><thead><tr><th>trace</th><th>kind</th><th>passes</th><th>pass ms</th><th>layers</th><th>Save K us per layer</th><th>Save K ns per row</th><th>Save K share %</th><th>attention ready ms per worker</th><th>attention pending ms per worker</th><th>join ms per worker</th><th>attention total ms per worker</th><th>kernels ms per main helper</th><th>workers busy in Save K</th></tr></thead><tbody>
+<tr><td><span class="sw" style="background:#8a8987"></span>base tp2</td><td>prefill</td><td>8</td><td>652.06</td><td>48</td><td>157.7</td><td>39</td><td>1.16</td><td>238.032</td><td>42.943</td><td>12.565</td><td>293.539</td><td>190.667</td><td>0.80</td></tr>
+<tr><td><span class="sw" style="background:#8a8987"></span>base tp2</td><td>decode</td><td>16</td><td>27.70</td><td>48</td><td>3.2</td><td>100</td><td>0.56</td><td>6.446</td><td>0.091</td><td>0.304</td><td>6.841</td><td>9.731</td><td>0.99</td></tr>
+<tr><td><span class="sw" style="background:#2a78d6"></span>headoff tp2</td><td>prefill</td><td>8</td><td>653.69</td><td>48</td><td>153.1</td><td>37</td><td>1.12</td><td>237.269</td><td>42.986</td><td>12.223</td><td>292.478</td><td>191.223</td><td>0.81</td></tr>
+<tr><td><span class="sw" style="background:#2a78d6"></span>headoff tp2</td><td>decode</td><td>16</td><td>28.28</td><td>48</td><td>3.0</td><td>94</td><td>0.51</td><td>6.401</td><td>0.090</td><td>0.317</td><td>6.809</td><td>10.294</td><td>1.00</td></tr>
+<tr><td><span class="sw" style="background:#eb6834"></span>vnni tp2</td><td>prefill</td><td>8</td><td>601.94</td><td>48</td><td>51.8</td><td>13</td><td>0.41</td><td>194.806</td><td>38.634</td><td>12.543</td><td>245.982</td><td>192.569</td><td>0.79</td></tr>
+<tr><td><span class="sw" style="background:#eb6834"></span>vnni tp2</td><td>decode</td><td>16</td><td>28.31</td><td>48</td><td>19.0</td><td>595</td><td>3.23</td><td>5.619</td><td>0.136</td><td>0.294</td><td>6.050</td><td>10.156</td><td>1.00</td></tr>
+<tr><td><span class="sw" style="background:#8a8987"></span>base tp4</td><td>prefill</td><td>8</td><td>403.56</td><td>48</td><td>158.9</td><td>39</td><td>1.89</td><td>119.235</td><td>21.681</td><td>9.329</td><td>150.245</td><td>137.887</td><td>0.77</td></tr>
+<tr><td><span class="sw" style="background:#8a8987"></span>base tp4</td><td>decode</td><td>16</td><td>21.41</td><td>48</td><td>3.7</td><td>116</td><td>0.83</td><td>3.640</td><td>0.049</td><td>0.467</td><td>4.156</td><td>5.957</td><td>0.90</td></tr>
+<tr><td><span class="sw" style="background:#2a78d6"></span>headoff tp4</td><td>prefill</td><td>8</td><td>403.95</td><td>48</td><td>156.5</td><td>38</td><td>1.86</td><td>119.093</td><td>21.640</td><td>9.730</td><td>150.463</td><td>137.063</td><td>0.76</td></tr>
+<tr><td><span class="sw" style="background:#2a78d6"></span>headoff tp4</td><td>decode</td><td>16</td><td>21.90</td><td>48</td><td>3.4</td><td>107</td><td>0.75</td><td>3.700</td><td>0.048</td><td>0.456</td><td>4.204</td><td>5.741</td><td>0.93</td></tr>
+<tr><td><span class="sw" style="background:#eb6834"></span>vnni tp4</td><td>prefill</td><td>8</td><td>375.19</td><td>48</td><td>39.6</td><td>10</td><td>0.51</td><td>97.590</td><td>19.504</td><td>9.433</td><td>126.527</td><td>135.685</td><td>0.76</td></tr>
+<tr><td><span class="sw" style="background:#eb6834"></span>vnni tp4</td><td>decode</td><td>16</td><td>21.73</td><td>48</td><td>17.2</td><td>538</td><td>3.80</td><td>3.203</td><td>0.072</td><td>0.480</td><td>3.755</td><td>5.906</td><td>0.98</td></tr>
+</tbody></table>
+<p class="small">Threads per trace.<br>Every tp2 trace: main 1, attention workers 20, main helpers 7.<br>Every tp4 trace: main 1, attention workers 40, main helpers 15.</p>
+<h3>5.3 The traces at prompt 8192 (tp2, base and vnni)</h3>
+<p>These traces were run after the campaign. The prompt-2048 cells showed a decode loss. The prompt-1024 cells did not. The traces were run to find the cause of that difference. Same recipe, prompt 8192, passes 1-90: 64 prefill passes of 1024 token jobs each (64 x 1024 = the 8 prompts of 8192 tokens) and 26 decode steps.</p>
+<p>Decode step (mean over 26 traced steps): 87.41 ms for base, 70.47 ms for vnni (-16.95 ms per generated token).</p><p>The attention workers&#x27; time per worker per step: 54.46 against 45.85 ms (-8.60 ms, -16%). That is the reader against the dotter.</p><p>The Save K span on the main thread per step: 0.168 against 0.853 ms (+0.686 ms). That is the per-token scatter store.</p><p>The kernels on the main helpers per step: 12.12 against 12.15 ms (+0.04 ms). The layout does not touch them, so this is the step-to-step spread.</p><p>Prefill pass (64 passes of 1024 token jobs): 2540.7 against 2144.7 ms (-396.0 ms per pass, -25.34 s over the 64 passes). Save K per layer falls from 158.8 to 52.4 us. The attention workers&#x27; time per worker per pass falls from 2175.3 to 1781.8 ms.</p><p>Reading: at this prompt length attention takes most of the step (54.5 of 87.4 ms per worker for base), so the reader&#x27;s gain per worker (-8.60 ms) sets the step. The store (+0.69 ms) is small against it. The traced step difference (-16.95 ms) matches the cells of section 4 (1000 / TPS: 88.50 against 71.33 ms per token).</p>
+<svg class="chart" viewBox="0 0 960 300" width="960" height="300" role="img" aria-label="decode step composition tp2">
+<rect width="960" height="300" fill="#fcfcfb"/>
+<text x="12" y="22" fill="#0b0b0b" font-size="14" font-weight="600">Decode step composition from the traces, tp2: mean over 26 traced decode steps, each panel on its own axis</text>
+<line x1="52.0" y1="236.0" x2="228.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="52.0" y1="172.0" x2="228.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">36.42</text>
+<line x1="52.0" y1="108.0" x2="228.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">72.84</text>
+<line x1="52.0" y1="44.0" x2="228.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">109.27</text>
+<rect x="100.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#8a8987"><title>base: decode step (pass), ms = 87.414 ms</title></rect>
+<rect x="100.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="117.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">87.41</text>
+<rect x="146.0" y="112.2" width="34" height="123.8" rx="4" ry="4" fill="#eb6834"><title>vnni: decode step (pass), ms = 70.465 ms</title></rect>
+<rect x="146.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="163.0" y="107.2" fill="#0b0b0b" font-size="11" text-anchor="middle">70.47</text>
+<text x="140.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">decode step (pass), ms</text>
+<line x1="292.0" y1="236.0" x2="468.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="292.0" y1="172.0" x2="468.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">22.69</text>
+<line x1="292.0" y1="108.0" x2="468.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">45.38</text>
+<line x1="292.0" y1="44.0" x2="468.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">68.07</text>
+<rect x="340.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#8a8987"><title>base: attention, ms per worker = 54.456 ms</title></rect>
+<rect x="340.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="357.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">54.46</text>
+<rect x="386.0" y="106.7" width="34" height="129.3" rx="4" ry="4" fill="#eb6834"><title>vnni: attention, ms per worker = 45.854 ms</title></rect>
+<rect x="386.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="403.0" y="101.7" fill="#0b0b0b" font-size="11" text-anchor="middle">45.85</text>
+<text x="380.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">attention, ms per worker</text>
+<line x1="532.0" y1="236.0" x2="708.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="532.0" y1="172.0" x2="708.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">0.36</text>
+<line x1="532.0" y1="108.0" x2="708.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">0.71</text>
+<line x1="532.0" y1="44.0" x2="708.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">1.07</text>
+<rect x="580.0" y="205.8" width="34" height="30.2" rx="4" ry="4" fill="#8a8987"><title>base: Save K per step (main thread), ms = 0.168 ms</title></rect>
+<rect x="580.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="597.0" y="200.8" fill="#0b0b0b" font-size="11" text-anchor="middle">0.17</text>
+<rect x="626.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#eb6834"><title>vnni: Save K per step (main thread), ms = 0.853 ms</title></rect>
+<rect x="626.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="643.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">0.85</text>
+<text x="620.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">Save K per step (main thread), ms</text>
+<line x1="772.0" y1="236.0" x2="948.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="772.0" y1="172.0" x2="948.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">5.06</text>
+<line x1="772.0" y1="108.0" x2="948.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">10.13</text>
+<line x1="772.0" y1="44.0" x2="948.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">15.19</text>
+<rect x="820.0" y="82.9" width="34" height="153.1" rx="4" ry="4" fill="#8a8987"><title>base: kernels, ms per main helper = 12.116 ms</title></rect>
+<rect x="820.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="837.0" y="77.9" fill="#0b0b0b" font-size="11" text-anchor="middle">12.12</text>
+<rect x="866.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#eb6834"><title>vnni: kernels, ms per main helper = 12.152 ms</title></rect>
+<rect x="866.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="883.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">12.15</text>
+<text x="860.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">kernels, ms per main helper</text>
+<rect x="52" y="278" width="10" height="10" rx="2" fill="#8a8987"/>
+<text x="66" y="287" fill="#52514e" font-size="12">base</text>
+<rect x="116" y="278" width="10" height="10" rx="2" fill="#eb6834"/>
+<text x="130" y="287" fill="#52514e" font-size="12">vnni</text>
+<text x="948" y="287" fill="#52514e" font-size="11" text-anchor="end">one traced run per binary; the step-to-step spread of the pass is about 2 ms</text>
+</svg>
+<table><thead><tr><th>trace</th><th>kind</th><th>passes</th><th>pass ms</th><th>layers</th><th>Save K us per layer</th><th>Save K ns per row</th><th>Save K share %</th><th>attention ready ms per worker</th><th>attention pending ms per worker</th><th>join ms per worker</th><th>attention total ms per worker</th><th>kernels ms per main helper</th><th>workers busy in Save K</th></tr></thead><tbody>
+<tr><td><span class="sw" style="background:#8a8987"></span>base tp2</td><td>prefill</td><td>64</td><td>2540.68</td><td>48</td><td>158.8</td><td>39</td><td>0.30</td><td>2120.034</td><td>42.620</td><td>12.606</td><td>2175.259</td><td>194.882</td><td>0.98</td></tr>
+<tr><td><span class="sw" style="background:#8a8987"></span>base tp2</td><td>decode</td><td>26</td><td>87.41</td><td>48</td><td>3.5</td><td>109</td><td>0.19</td><td>54.089</td><td>0.139</td><td>0.229</td><td>54.456</td><td>12.116</td><td>0.97</td></tr>
+<tr><td><span class="sw" style="background:#eb6834"></span>vnni tp2</td><td>prefill</td><td>64</td><td>2144.72</td><td>48</td><td>52.4</td><td>13</td><td>0.12</td><td>1731.159</td><td>38.063</td><td>12.584</td><td>1781.806</td><td>198.747</td><td>0.97</td></tr>
+<tr><td><span class="sw" style="background:#eb6834"></span>vnni tp2</td><td>decode</td><td>26</td><td>70.47</td><td>48</td><td>17.8</td><td>556</td><td>1.21</td><td>45.415</td><td>0.176</td><td>0.264</td><td>45.854</td><td>12.152</td><td>1.00</td></tr>
+</tbody></table>
+<p class="small">Threads per trace.<br>Every tp2 trace: main 1, attention workers 20, main helpers 7.</p>
+<h3>5.4 The traces at prompt 2048 (tp2, base and vnni)</h3>
+<p>Run after the prompt-8192 traces. Same recipe, prompt 2048, passes 1-40: 16 prefill passes of 1024 token jobs each (16 x 1024 = the 8 prompts of 2048 tokens) and 24 decode steps.</p>
+<p>Decode step (mean over 24 traced steps): 42.62 ms for base, 44.88 ms for vnni (+2.25 ms per generated token).</p><p>The attention workers&#x27; time per worker per step: 13.22 against 12.25 ms (-0.97 ms, -7%). That is the reader against the dotter.</p><p>The Save K span on the main thread per step: 0.177 against 0.956 ms (+0.778 ms). That is the per-token scatter store.</p><p>The kernels on the main helpers per step: 12.80 against 13.12 ms (+0.33 ms). The layout does not touch them, so this is the step-to-step spread.</p><p>Prefill pass (16 passes of 1024 token jobs): 931.2 against 830.3 ms (-100.9 ms per pass, -1.61 s over the 16 passes). Save K per layer falls from 158.4 to 51.3 us. The attention workers&#x27; time per worker per pass falls from 561.3 to 466.0 ms.</p><p>Reading: the reader is still faster per worker (-0.97 ms) and the store still costs +0.78 ms on the main thread, yet the step is +2.25 ms slower. The two spans account for -0.19 ms of it. The rest (+2.44 ms) is not in any measured span. Hypothesis, not measured: at this prompt length the attention phase (13.2 ms per worker) and the expert kernels (12.8 ms per helper) take about the same time, so the serial store on the main thread lands on the critical path while the workers&#x27; gain does not shorten it. The measurement that decides it: wall-clock lanes of one decode step (every thread&#x27;s spans against time, the lanes.py recipe of the 2026-09-14 trace analysis).</p>
+<svg class="chart" viewBox="0 0 960 300" width="960" height="300" role="img" aria-label="decode step composition tp2">
+<rect width="960" height="300" fill="#fcfcfb"/>
+<text x="12" y="22" fill="#0b0b0b" font-size="14" font-weight="600">Decode step composition from the traces, tp2: mean over 24 traced decode steps, each panel on its own axis</text>
+<line x1="52.0" y1="236.0" x2="228.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="52.0" y1="172.0" x2="228.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">18.70</text>
+<line x1="52.0" y1="108.0" x2="228.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">37.40</text>
+<line x1="52.0" y1="44.0" x2="228.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="47.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">56.10</text>
+<rect x="100.0" y="90.1" width="34" height="145.9" rx="4" ry="4" fill="#8a8987"><title>base: decode step (pass), ms = 42.622 ms</title></rect>
+<rect x="100.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="117.0" y="85.1" fill="#0b0b0b" font-size="11" text-anchor="middle">42.62</text>
+<rect x="146.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#eb6834"><title>vnni: decode step (pass), ms = 44.876 ms</title></rect>
+<rect x="146.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="163.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">44.88</text>
+<text x="140.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">decode step (pass), ms</text>
+<line x1="292.0" y1="236.0" x2="468.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="292.0" y1="172.0" x2="468.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">5.51</text>
+<line x1="292.0" y1="108.0" x2="468.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">11.02</text>
+<line x1="292.0" y1="44.0" x2="468.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="287.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">16.53</text>
+<rect x="340.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#8a8987"><title>base: attention, ms per worker = 13.221 ms</title></rect>
+<rect x="340.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="357.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">13.22</text>
+<rect x="386.0" y="93.6" width="34" height="142.4" rx="4" ry="4" fill="#eb6834"><title>vnni: attention, ms per worker = 12.254 ms</title></rect>
+<rect x="386.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="403.0" y="88.6" fill="#0b0b0b" font-size="11" text-anchor="middle">12.25</text>
+<text x="380.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">attention, ms per worker</text>
+<line x1="532.0" y1="236.0" x2="708.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="532.0" y1="172.0" x2="708.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">0.40</text>
+<line x1="532.0" y1="108.0" x2="708.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">0.80</text>
+<line x1="532.0" y1="44.0" x2="708.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="527.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">1.19</text>
+<rect x="580.0" y="207.5" width="34" height="28.5" rx="4" ry="4" fill="#8a8987"><title>base: Save K per step (main thread), ms = 0.177 ms</title></rect>
+<rect x="580.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="597.0" y="202.5" fill="#0b0b0b" font-size="11" text-anchor="middle">0.18</text>
+<rect x="626.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#eb6834"><title>vnni: Save K per step (main thread), ms = 0.956 ms</title></rect>
+<rect x="626.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="643.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">0.96</text>
+<text x="620.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">Save K per step (main thread), ms</text>
+<line x1="772.0" y1="236.0" x2="948.0" y2="236.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="240.0" fill="#52514e" font-size="10" text-anchor="end">0.00</text>
+<line x1="772.0" y1="172.0" x2="948.0" y2="172.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="176.0" fill="#52514e" font-size="10" text-anchor="end">5.47</text>
+<line x1="772.0" y1="108.0" x2="948.0" y2="108.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="112.0" fill="#52514e" font-size="10" text-anchor="end">10.94</text>
+<line x1="772.0" y1="44.0" x2="948.0" y2="44.0" stroke="#e6e5e1" stroke-width="1"/>
+<text x="767.0" y="48.0" fill="#52514e" font-size="10" text-anchor="end">16.40</text>
+<rect x="820.0" y="86.2" width="34" height="149.8" rx="4" ry="4" fill="#8a8987"><title>base: kernels, ms per main helper = 12.797 ms</title></rect>
+<rect x="820.0" y="232.0" width="34" height="4" fill="#8a8987"/>
+<text x="837.0" y="81.2" fill="#0b0b0b" font-size="11" text-anchor="middle">12.80</text>
+<rect x="866.0" y="82.4" width="34" height="153.6" rx="4" ry="4" fill="#eb6834"><title>vnni: kernels, ms per main helper = 13.123 ms</title></rect>
+<rect x="866.0" y="232.0" width="34" height="4" fill="#eb6834"/>
+<text x="883.0" y="77.4" fill="#0b0b0b" font-size="11" text-anchor="middle">13.12</text>
+<text x="860.0" y="254" fill="#52514e" font-size="11" text-anchor="middle">kernels, ms per main helper</text>
+<rect x="52" y="278" width="10" height="10" rx="2" fill="#8a8987"/>
+<text x="66" y="287" fill="#52514e" font-size="12">base</text>
+<rect x="116" y="278" width="10" height="10" rx="2" fill="#eb6834"/>
+<text x="130" y="287" fill="#52514e" font-size="12">vnni</text>
+<text x="948" y="287" fill="#52514e" font-size="11" text-anchor="end">one traced run per binary; the step-to-step spread of the pass is about 2 ms</text>
+</svg>
+<table><thead><tr><th>trace</th><th>kind</th><th>passes</th><th>pass ms</th><th>layers</th><th>Save K us per layer</th><th>Save K ns per row</th><th>Save K share %</th><th>attention ready ms per worker</th><th>attention pending ms per worker</th><th>join ms per worker</th><th>attention total ms per worker</th><th>kernels ms per main helper</th><th>workers busy in Save K</th></tr></thead><tbody>
+<tr><td><span class="sw" style="background:#8a8987"></span>base tp2</td><td>prefill</td><td>16</td><td>931.17</td><td>48</td><td>158.4</td><td>39</td><td>0.82</td><td>505.983</td><td>42.767</td><td>12.578</td><td>561.327</td><td>193.353</td><td>0.90</td></tr>
+<tr><td><span class="sw" style="background:#8a8987"></span>base tp2</td><td>decode</td><td>24</td><td>42.62</td><td>48</td><td>3.7</td><td>116</td><td>0.42</td><td>12.871</td><td>0.126</td><td>0.224</td><td>13.221</td><td>12.797</td><td>0.99</td></tr>
+<tr><td><span class="sw" style="background:#eb6834"></span>vnni tp2</td><td>prefill</td><td>16</td><td>830.26</td><td>48</td><td>51.3</td><td>13</td><td>0.30</td><td>414.987</td><td>38.368</td><td>12.649</td><td>466.004</td><td>197.418</td><td>0.90</td></tr>
+<tr><td><span class="sw" style="background:#eb6834"></span>vnni tp2</td><td>decode</td><td>24</td><td>44.88</td><td>48</td><td>19.9</td><td>622</td><td>2.13</td><td>11.875</td><td>0.159</td><td>0.220</td><td>12.254</td><td>13.123</td><td>1.00</td></tr>
+</tbody></table>
+<p class="small">Threads per trace.<br>Every tp2 trace: main 1, attention workers 20, main helpers 7.</p>
+
+<h2>6. What each remedy takes (code analysis)</h2>
+<p>This section comes from a read-only code analysis of the PR head (commit ff680c8020). Five analysis agents (Claude Code subagents: automated language-model sessions launched by one workflow script, each given one prompt and one topic) read the code. For each topic, two further agents (the checkers, ten in total) opened every cited line and tried to refute every claim. Only claims that both checkers of a topic confirmed are stated as facts. The record of that analysis is the workflow journal wf_0818cf73-833 (the log of the 15 agents' prompts and answers) in the session's workflows folder. Estimates are marked "est.". Line numbers refer to the worktree VNNIed-K-in-place/tron-VNNIed-K at ff680c8020.</p>
+
+<h3>6.1 Where the gate lives, and why kv_mul cannot be read there today</h3>
+<ul>
+<li>The gate is the variable template k_vnni::layout_on&lt;head_size&gt;. It is true for head size 128 when TRON_K_VNNI is defined and false otherwise [h/tron/kernels/k_vnni.hpp:91-97]. TRON_K_VNNI becomes a public compile definition of the tron target [src/tron/CMakeLists.txt:213]. It requires TRON_AMX_DISPATCH [src/tron/CMakeLists.txt:210-211].</li>
+<li>The gate is read at 20 places in four headers. 13 are in kv_cache.hpp (eight page::k overloads, k_vnni_plane, set_k_row, set_k_block, get_k_row, copy_storage_slot, at lines 1619-1740 and 2099). 3 are in self_attention.hpp (1365, 1436, 1574). 3 are in model.hpp (2807, 2865, 2967). 1 is in full.hpp (2648, the FPGA staging path: "staging" is the copy of a token group's K and V rows into the buffer that is sent to the FPGA attention hardware). Four more uses are in tests (t_llama_unit.cpp:720, 2789; t_k_vnni_layout.cpp:389, 391).</li>
+<li>The 13 kv_cache.hpp sites see only a kv_geometry (KV head count and head size) or the page's raw head_size parameter. The storage types (uniform_kv_cache, kv_layout, book, page, kv_block) receive only n_kv_heads and head_size. The query-head count appears nowhere in book or page [kv_cache.hpp:112-117 (struct kv_geometry), 805-812, 820-826, 1447-1456, 1515-1520]. So kv_mul cannot be computed at these sites without a change to the cache type.</li>
+<li>The 7 sites in self_attention.hpp, model.hpp and full.hpp hold an attention_geometry (query heads plus kv_geometry). They can compute geometry.kv_mul() today [kv_cache.hpp:194-215]. A gate evaluated only there would break the invariant the headers state: every code path that reads or writes a slot sees one layout [k_vnni.hpp:86-90; kv_cache.hpp:160-166, 176, 658-660]. The physical layout is decided inside the page's set_k_row, get_k_row, set_k_block, k_vnni_plane and copy_storage_slot.</li>
+<li>The model plugins are tron's per-model C++ code. They are either generated by ingest (the pipeline that turns a PyTorch model into a plugin) or written by hand. A plugin builds the cache type from (n_kv_heads, head_size) [generated: ingest/src/TronCpp.hs:564-579 (uniform cache); handwritten: h/tron/plugins/llama.hpp:197-203 and mock.hpp:113-118]. It builds the kernel spec from (n_query_heads, kv_geometry) [generated: ingest/src/TronCpp.hs:348-363 (kernel spec); handwritten: h/tron/plugins/llama.hpp:197-203 and mock.hpp:113-118]. The generator (the Haskell part of ingest that writes the plugin header) chooses between a uniform cache (one kv_geometry for every slot) and a heterogeneous cache (an explicit spec per slot) on (kvHeads, headSize) only [ingest/src/LoopyTron.hs:127, 169-173]. No check compares kv_mul between two kernels, or between a kernel and a slot. The existing checks compare kv_geometry only [kv_cache.hpp:366-401]. So one uniform cache may in principle serve kernels with different kv_mul values. Whether any real ingested model does so is not established. The generated plugin headers are produced at build time and are not part of the repository.</li>
+<li>No runtime switch exists. Every gate use is a C++ requires clause or an if constexpr, both resolved at compile time. The only environment variable in this code, TRON_AMX_DISABLE, controls AMX availability and not the layout.</li>
+</ul>
+
+<h3>6.2 Remedy (a): gate the layout on kv_mul 4</h3>
+<table><thead><tr><th>way to carry kv_mul to the cache</th><th>what changes</th><th>files (from the code, not exhaustive)</th><th>risks named by the checkers</th></tr></thead><tbody>
+<tr><td>a third field on kv_geometry (query heads or kv_mul), gate = layout_on&lt;kv_geometry&gt;</td>
+<td><ul><li>the struct kv_geometry gains the third field [kv_cache.hpp:112-117]</li><li>the 13 page sites switch to the geometry form. The uniform forms already forward with layout_t::primary_geometry [1756, 1764].</li><li>the 7 attention sites pass geometry.kv</li><li>every place that builds a kv_geometry must carry the same value. kv_geometry equality is the key of declares_geometry [1319-1326], of valid_attention_configuration [379-381], of is_hardware_attention_candidate [400-401] and of the static_asserts [756-757, 841, 1529].</li></ul></td>
+<td>k_vnni.hpp, kv_cache.hpp, self_attention.hpp (214, 1365, 1436, 1574), model.hpp (670, 2807, 2865, 2967), full.hpp, llama.hpp:197-202, mock.hpp:113-118, TronCpp.hs:564-579 and 634-642, Tron.hs:783-804, LoopyTron.hs:169-173 and 214-232, TronCheck.hs:842-877, 16 string expectations in ingest/test/LoopyTronSpec.hs, about 30 kv_geometry{...} initializers plus 12 named test geometries (t_llama_unit.cpp, t_k_vnni_layout.cpp, t_amx_dispatch_dtype.cpp, heterogeneous_scheduler_compile.cpp)</td>
+<td><ul><li>many files change</li><li>kv_mul would be carried twice: derived from attention_geometry.n_query_heads, and stored in the new field. valid() needs a consistency clause.</li><li>a mismatch is a compile-time error (the wanted outcome). Every literal must still agree.</li></ul></td></tr>
+<tr><td>a template argument on kv_layout / uniform_kv_cache that the plugin derives from its kernel registry (the plugin's compile-time list of attention kernel specs, each carrying the query-head count and the KV geometry), either a bool "K in VNNI" or the kv_mul</td>
+<td><ul><li>kv_geometry unchanged</li><li>the 13 page sites read layout_t::k_vnni_on&lt;geometry&gt;</li><li>the 7 attention sites read page::layout_t::k_vnni_on</li><li>the plugins pass n_heads / n_kv_heads. llama.hpp:197-199 must move cache_t after the kernel spec or compute from n_heads directly.</li><li>the generator emits the value for the uniform alias [TronCpp.hs:566-577] and per slot for the heterogeneous alias [581-597]</li></ul></td>
+<td>k_vnni.hpp, kv_cache.hpp (uniform_kv_cache 1447-1456, kv_layout 743, uniform_kv_layout 805-812), heterogeneous_kv_cache.hpp:26-38, self_attention.hpp, model.hpp, full.hpp, llama.hpp, mock.hpp, TronCpp.hs, LoopyTronSpec.hs, t_llama_unit.cpp, t_k_vnni_layout.cpp</td>
+<td><ul><li>two public alias signatures change</li><li>with a defaulted parameter, old test caches keep the head-size-only behaviour unless the default is "off"</li><li>a heterogeneous cache needs a per-slot rule when two kernels with different kv_mul share one head size</li></ul></td></tr>
+<tr><td>a per-slot flag on kv_slot_spec</td>
+<td><ul><li>book already consults kv_slot_specs[slot.i] at run time [1328-1331]</li><li>But the layout choice is compile-time (requires clauses and if constexpr at the 13 sites)</li><li>So the accessors would need the slot as a compile-time key</li></ul></td>
+<td>every accessor signature and every caller</td>
+<td>largest change of the four ways, not minimal</td></tr>
+<tr><td>runtime per-model switch</td>
+<td><ul><li>a runtime layout flag on book and page</li><li>runtime branches in set_k_row, get_k_row, set_k_block, copy_storage_slot</li><li>the return of the row view k() for VNNI-capable slots</li><li>a runtime choice between the dotter loop and the reader, and one in the FPGA k_head_fn lambda</li></ul></td>
+<td>k_vnni.hpp, kv_cache.hpp, self_attention.hpp, model.hpp, full.hpp, amx_attn.cpp</td>
+<td><ul><li>Contradicts the design: the storage geometry is compile-time.</li><li>Adds a branch on every K access.</li><li>If the code that writes a slot and the code that reads it chose different layouts inside one process, the scores would be wrong without any error. The current design makes that impossible.</li></ul></td></tr>
+</tbody></table>
+<p>Consequences of a kv_mul 4 gate that the analysis established:</p>
+<ul>
+<li>The handwritten head-128 configurations in llama.hpp (lines 1578-1596) span kv_mul 1, 2, 3, 4, 5, 6 and 8. Examples, written as query heads / KV heads with kv_mul in parentheses: llama_2_7b 32/32 (kv_mul 1), gemma_2_27b 32/16 (2), llama_3p2_3b 24/8 (3), llama_3_8b and mixtral_8x7b 32/8 (4), qwen_2p5_32b 40/8 (5), mixtral_8x22b 48/8 (6), llama_2_70b and qwen_3_32b 64/8 (8). A kv_mul 4 gate turns the layout off for every configuration that is not kv_mul 4.</li>
+<li>The test "save_k stores every token's K row once" in t_llama_unit.cpp uses a kv_mul 2 model (16 query heads, 8 KV heads; t_llama_unit.cpp:2585-2586). Its three-thread section runs the shared block save (the K store of a minibatch of more than 16 tokens, cut into work units that the main thread and its helper threads claim in turn; Note [Shared block save], model.hpp:2732). The section then checks the counters of that save in q_batch.k_store_window (t_llama_unit.cpp:2789-2805). Under a kv_mul 4 gate that model stores row-major K and runs no shared save. Those checks then fail. The test needs a kv_mul 4 model or new expectations.</li>
+<li>One VNNI plane = the K of one KV head in one page (64 tokens x 128 dimensions of bf16 = 16 KiB). The AMX kernel gains nothing from the plane for kv_mul other than 4. Its shape check rejects that shape [amx_attn_iface.hpp:148-150]. For such models the layout only changes the software reader and the K store.</li>
+<li>Under FPGA attention (USE_HW_ATTN unset) the FPGA staging path copies the K and V rows of the tokens from the KV pages into a host buffer before the transfer to the FPGA cards. That copy is gof::populate. It calls the k_head_fn lambda of full.hpp:2648 once per (token, KV head). For a VNNI slot that call is page::get_k_row. That routine issues 4 gathers of 16 dwords (a dword = one 4-byte word, here one bf16 dimension pair). For a row-major slot the lambda returns a pointer into the page and copies nothing [kv_cache.hpp Note [K VNNI storage] item 4]. The one FPGA measurement in the PR body (qwen3-4b) is -1.4% TPS with identical tokens, one run.</li>
+</ul>
+
+<h3>6.3 Remedy (b): the reader at kv_mul 8</h3>
+<p>The table lists the instruction counts per 64-token page and KV head for each path. The counts were read from the code [k_vnni.hpp:247-309; h/tron/kernels/dotter.hpp; self_attention.hpp:1560-1650].</p>
+<table><thead><tr><th>per page and KV head</th><th>reader k_vnni::qk_group, kv_mul 4</th><th>reader, kv_mul 8</th><th>dotter loop, kv_mul 4</th><th>dotter loop, kv_mul 8</th></tr></thead><tbody>
+<tr><td>VDPBF16PS (the dot-product instruction for bf16 pairs)</td><td>1024</td><td>2048</td><td>1024</td><td>2048</td></tr>
+<tr><td>64-byte K loads</td><td>256 (each line once, masked). A masked load fills only the lanes the mask selects. A lane is one of the 16 4-byte positions of a 64-byte vector register.</td><td>256</td><td>1024 (each line once per head)</td><td>2048</td></tr>
+<tr><td>query broadcast loads (a broadcast load copies one 4-byte value into all 16 lanes)</td><td>1024</td><td>2048</td><td>0 when the query stays in registers. A zmm register is one of the 32 vector registers of a core, 64 bytes each. The query needs 4 zmm per head: 16 at kv_mul 4, 32 at kv_mul 8 (every register).</td><td>reloads the query from memory (count not established: the compiler decides how often)</td></tr>
+<tr><td>horizontal reductions (adding the 16 values held in one vector register into one number)</td><td>0</td><td>0</td><td>256 (about 8 instructions each, est.)</td><td>512</td></tr>
+<tr><td>stores of scores</td><td>16 masked stores (16 lanes each)</td><td>32</td><td>256 scalar</td><td>512 scalar</td></tr>
+<tr><td>live zmm registers</td><td>4 accumulators + 2</td><td>8 accumulators + 2 (10 of the 32 zmm registers). The registers do not run out. Nothing is saved to memory.</td><td>4 + query</td><td>8 + query</td></tr>
+<tr><td>memory order over the 16 KiB plane</td><td colspan="2">16 runs of 1 KiB, one panel each (a panel = the sixteen 64-byte rows that hold 32 dimensions of one 16-token block). The 4 panels of one token block are 4 KiB apart. The reader moves through the whole 16 KiB plane 4 times, once per token block.</td><td colspan="2">one ascending 16 KiB run</td></tr>
+</tbody></table>
+<ul>
+<li>The reader and the dotter issue the same number of VDPBF16PS, at kv_mul 4 and at kv_mul 8. The doubling from 4 to 8 is proportional on both paths. Nothing in the reader's counts gets worse at kv_mul 8 relative to the dotter. Its estimated total instruction count is about 0.45 of the dotter's at either kv_mul (est.).</li>
+<li>Load work per page: the reader issues 1280 (kv_mul 4) or 2304 (kv_mul 8) load uops (micro-operations, the CPU's internal units of work). The dotter issues 1024 or 2048 load uops, plus the query reloads. uops.info (a public table of measured instruction timings) gives VDPBF16PS a throughput of one instruction per 2 cycles on one core of Emerald Rapids (Intel's 5th-generation Xeon, 2023). Granite Rapids (the Xeon 6 generation, the 6962P CPUs of delphi-3bda) is not listed there. If the same figure holds on Granite Rapids, the VDPBF16PS count sets a lower bound on the time of both paths (est.). Under that assumption, the load work needs fewer cycles than that bound (est.).</li>
+<li>On the page that is filling during decode (n live tokens), the reader issues 64 x ceil(n/16) x kv_mul VDPBF16PS and the dotter 4 x n x kv_mul. Averaged over n = 1..64, the reader issues 1.23 times the dotter's VDPBF16PS count on that one page (23% more). The ratio has no kv_mul term.</li>
+<li>The per-token visibility loop (the loop that decides which tokens of the page a query may attend to: page.at_offset, find_range, sliding window) runs on both paths [self_attention.hpp:1604-1620]. The reader adds one more loop over the page after it.</li>
+<li>The kv_mul 8 instantiation of the reader has no unit test: t_k_vnni_layout.cpp tests KV_MUL_4 only (lines 246, 306, 308).</li>
+<li>What "reader work for larger groups" could be, with its effect on the counts (all est.):
+<ul><li>A loop step that scores two token blocks for all 8 heads at once (16 accumulators, 19 zmm live). It shares each query broadcast across two token blocks. Broadcasts fall from 2048 to 1024 and load uops from 2304 to 1280 (-44%). VDPBF16PS is unchanged. The memory order becomes 8 runs of 2 KiB instead of 16 of 1 KiB.</li>
+<li>Software prefetch (instructions that ask the CPU to fetch a line early) adds 16 to 256 instructions per page and changes nothing else.</li>
+<li>A pre-broadcast query table (32 KiB at kv_mul 8) changes no load-uop count.</li>
+<li>Splitting accumulators adds 32 adds per page.</li></ul>
+None of these lowers the VDPBF16PS count. That count is identical on both paths. So none can produce a large gain if that count is the limit.</li>
+</ul>
+
+<h3>6.4 The decode store for this model</h3>
+<ul>
+<li>A decode step of 8 users is one minibatch of 8 items. The K store is shared with the main helpers only when the minibatch holds more than 16 items. So a decode step takes the per-token scatter path (one scatter instruction writes 16 4-byte pieces to 16 addresses) on the thread that calls save_k, the generated plugin's main thread. The helpers' save_k_helper returns at once [model.hpp:2806-2814, 3009, 3040, 2970; TronCpp.hs:2277, 2402-2408].</li>
+<li>One (token, KV head) row in the VNNI layout is 4 scatters of 16 dwords. Each dword lands in a different 64-byte cache line. So one row touches 64 lines with 4 bytes each [k_vnni.hpp:126-148; kv_cache.hpp:1704-1706]. Row-major, the same row is one 256-byte write into 4 full lines through the page's row view [model.hpp:2865-2875 in the PR head with the layout off; the same form at c7844ca2ce model.hpp:2757].</li>
+<li>Per decode step, qwen-3-30b-a3b stores 1536 K rows (48 layers x 4 KV heads x 8 tokens): 98,304 touched lines in the VNNI layout against 6,144 row-major. qwen3-4b stores 2304 rows (36 x 8 x 8): 147,456 against 9,216.</li>
+<li>The traces of section 5.2 measured the store for this model at tp2, prompt 1024: VNNI 0.914 ms per step (19.0 us per layer, 595 ns per row, 3.23% of the 28.31 ms step), row-major 0.154 ms per step (3.2 us per layer, 100 ns per row, 0.56% of the 27.70 ms step), a difference of 0.760 ms per step (2.7 percentage points). That measurement replaces the estimate that follows. Before the traces, the code analysis scaled the qwen3-4b decode trace of 2026-09-14 (VNNI 444-540 ns per row, row-major 72-91 ns per row) to this model's 1536 rows per step. That scaling gave est. 0.68-0.83 ms per step for VNNI (14.2-17.3 us per layer, 2.5-3.0% of a 27.6 ms step). The 27.6 ms step is 1000 / TPS (the formula of section 5.1) applied to the 2026-09-15 base run at tp2 prompt 1024, not a measurement of this campaign. Row-major came to est. 0.11-0.14 ms per step. The difference is est. 0.57-0.69 ms per step, 2.1-2.5 percentage points of the step time. The estimate reuses another model's per-row cost.</li>
+<li>The store sits on the serial path of a layer (the chain of steps that the layer's later work must wait for). The main thread waits for every token's K channel (the readiness tracker of the buffer that holds that token's K row). It then runs save_k and save_v. Each of the two counts down one latch (a countdown counter). The waiting threads are released when the latch reaches zero. The attention workers' pending sections (the attention work over the pages written in this pass) wait on that latch. A minibatch is on its own list of dependents: a token attends to itself. Generated plugins run exactly one minibatch (--max-minibatches 1). So no other minibatch's attention overlaps the store [model.hpp:2782-2784, 3056-3058, 1873-1888; self_attention.hpp:782-784; common.hpp:951-960; TronCpp.hs:1172-1174, 1275-1277].</li>
+</ul>
+
+<h3>6.5 What the analysis says about the one-run result</h3>
+<p>The reader's instruction counts do not predict a kv_mul-8-specific loss. Two costs that this model pays without any AMX gain do not depend on kv_mul:</p>
+<ul>
+<li>the per-token scatter store. The tp2 decode traces of section 5.2 measured its share of the step time: 3.23% for vnni against 0.56% for base, 2.7 percentage points (0.914 against 0.154 ms per step). The code analysis had estimated 2.1-2.5 percentage points (section 6.4).</li>
+<li>the whole-block cost of the page that is filling. The reader scores 16-token blocks whole. A partly filled block costs as much as a full one.</li>
+</ul>
+<p>The 2026-09-15 run compared two different code heads (544ca05c7a against dc950be5f2). The background load also differed: the 1-minute load average (runnable processes, averaged over one minute) was 12.5 at the start of the 544ca05c7a run and 16.2 at the start of the dc950be5f2 run. So noise and drift were also candidates.</p>
+<p>The campaign of this report removes those two differences: interleaved repetitions against the exact merge base, with the traces separating the store from the attention time.</p>
+
+
+<h2>7. Recommendation</h2>
+<p>The repetitions do not resolve a decode difference at tp2 prompt 1024 (paired t +1.3, section 4.4). The one-run -5.4% decode TPS per user of 2026-09-15 (34.3 against 36.3 TPS, section 2) did not repeat under interleaved repetitions against the exact merge base.</p><p>In the tp2 traces the decode step of vnni is +0.61 ms against base (28.31 against 27.70 ms). There is one traced run per binary. So this difference is within the run-to-run spread. Inside the step, two effects have opposite signs. The Save K span on the main thread costs +0.760 ms more per step (0.914 against 0.154 ms, 19.0 against 3.2 us per layer). That is the per-token scatter store. The attention workers&#x27; time per worker moves by -0.791 ms per step (6.050 against 6.841 ms). That is the reader against the dotter. In prefill (8 passes of 128 tokens x 8 users), the Save K span per layer falls from 157.7 to 51.8 us (the shared block save). The attention workers&#x27; time per worker per pass falls from 293.5 to 246.0 ms. The pass itself goes from 652.1 to 601.9 ms (-50.1 ms per pass, -401 ms over the 8 prefill passes). That is the TTFT gain.</p><p>Recommendation: no gate change for kv_mul 8. Close the open item with these numbers. Write these five points into the PR:</p><ul><li>For a model without an AMX gain, the layout trades the per-token scatter store (the Save K numbers above) against a faster software reader.</li><li>At prompt 1024 the two cancel in decode.</li><li>At prompt 8192 the reader&#x27;s gain dominates: the decode step falls by a fifth (section 5.3).</li><li>The block save and the reader together lower TTFT at every prompt length, by 7% to 16%.</li><li>The prompt-2048 cell is the one exception. It shows a resolved decode loss of 4.1%. Section 5.4 gives its traces and the open hypothesis.</li></ul><p>The other cells, vnni minus base in TPS per user, with the paired t:</p><ul><li>tp4, prompt 1024: +1.08 TPS (t +0.9)</li><li>tp2, prompt 2048: -0.97 TPS (t -5.3)</li><li>tp2, prompt 8192: +2.72 TPS (t +12.2)</li><li>tp4, prompt 8192: +2.47 TPS (t +6.4)</li></ul>
+<h3>7.1 Why the 2026-09-15 run showed a loss</h3>
+<p>The one-run cell of 2026-09-15 compared runtron.p0perf13 (commit 544ca05c7a, the PR's base at that time) with runtron.vnnik4 (commit dc950be5f2, the PR head of that time). It measured 36.28 TPS per user for the base and 34.31 TPS per user for the VNNI binary [exec/results/vnnik4-models-20260915/results.txt, cell=qwen30b]. Today's main binary (c7844ca2ce) measures 34.26 TPS per user with a sample standard deviation of 0.66 TPS over 6 repetitions at the same cell. Today's VNNI binary measures 34.79 TPS per user with a sample standard deviation of 0.86 TPS over the same 6 repetitions. So the VNNI binary runs at the same speed as on 2026-09-15. The base moved from 36.28 to 34.26 TPS per user (-2.0 TPS, -5.6%).</p>
+<p>Two explanations were open before the extra cell of section 7.3 ran:</p>
+<ul>
+<li>The code between 544ca05c7a and c7844ca2ce changed the decode speed of this model. That range holds 149 commits from 26 merged pull requests. Two of them change the KV cache. PR #3054 introduces per-layer KV arenas (an arena = one memory region reserved once, from which the cache takes its KV pages). PR #3067 reclaims out-of-window sliding KV under memory pressure (sliding-window attention lets a query see only the most recent tokens, and this change frees the KV pages of tokens that have left that window when memory runs short).</li>
+<li>The 2026-09-15 base run was a favourable single sample.</li>
+</ul>
+<p>The extra cell measured both binaries interleaved, 6 repetitions each, at the same cell (section 7.3). The old base runs at 34.96 TPS per user (standard deviation 1.35) and main at 33.92 (standard deviation 0.69). Main is slower by 1.04 TPS (paired t -1.6, not resolved with 6 repetitions). So the 36.28 TPS of the 2026-09-15 run sits about one standard deviation above the old base's own mean: it was a high single sample. A small slowdown of main (about 1 TPS, 3%) may add to it. The measurement that would resolve the second part: the same two binaries with 12 or more repetitions.</p>
+<p>The PR's open item was based on a comparison of two different code heads, one run each, under different background load (1-minute load average 12.5 against 16.2 at run start). The interleaved repetitions of this campaign against the exact merge base remove all three differences: the code difference (every binary is compared with its exact merge base), the load difference (the binaries run one after another inside each repetition), and the single run (every cell is repeated, section 3.2).</p>
+<h3>7.2 What to write into the PR</h3>
+<ul>
+<li>Replace the open item "128-dimension heads with kv_mul other than 4" with the measured result of this page: the cells of section 4.3, the paired deltas of section 4.4, and the attribution of section 5.</li>
+<li>Keep the sentence that the AMX kernel is not eligible for kv_mul 8. Add that this model therefore gains only from the K store (the TTFT gain) and not from the kernel.</li>
+<li>Keep the kv_mul 8 unit test gap of section 6.3 as a small follow-up (t_k_vnni_layout tests KV_MUL_4 only).</li>
+</ul>
+
+<h3>7.3 Extra cell: the PR's old base against main</h3>
+<p>Same cell (tp2, prompt 1024, 8 users), the two base binaries interleaved, run after the campaign. It tests the first hypothesis of section 7.1.</p>
+<table><thead><tr><th>binary</th><th>commit</th><th>n</th><th>TPS per user</th><th>sd</th><th>TTFT s</th><th>sd</th></tr></thead><tbody>
+<tr><td>old base = runtron.p0perf13</td><td>544ca05c7a (PR #3879 head, the PR&#x27;s base on 2026-09-15)</td><td>6</td><td>34.96</td><td>1.35</td><td>5.199</td><td>0.020</td></tr>
+<tr><td>base = runtron.main0916</td><td>c7844ca2ce (main, merge base of the PR)</td><td>6</td><td>33.92</td><td>0.69</td><td>5.278</td><td>0.018</td></tr>
+</tbody></table>
+<p>Paired (main minus old base, tp2 prompt 1024): TPS -1.04 per user (sd 1.60, n 6, t -1.6); TTFT +79 ms (sd 26, t 7.5). Reading: no speed difference resolved between main and the old base.</p>
+
+<h2>8. Raw data for a reviewing agent</h2>
+<ul>
+<li>Plan and decision rule: exec/vnnik6-20260916/PLAN.md. Scripts: build.sh, chain.sh, campaign.sh, trace.sh, analyze.py, summarize.py, compare_tokens.py, gen_report.py in the same folder.</li>
+<li>Runs: exec/results/vnnik6-20260916/rt-results.txt (one "### runtron ..." header per attempt with tp, prompt, arm, rep, binary, tip, machine line; then the Version, placement, TTFT and TPS lines of the run). Full logs: rt/tp&lt;N&gt;__p&lt;prompt&gt;__&lt;arm&gt;__rep&lt;k&gt;.log (the .attempt&lt;i&gt; files keep every attempt).</li>
+<li>Derived numbers: summary.json and summary.md (python3 exec/vnnik6-20260916/summarize.py exec/results/vnnik6-20260916). TPS = mean of the 8 "average tok/s" values of a run; TTFT = max of the 8 "Parsing the prompt took" values; cell mean and sample sd over repetitions; paired deltas by repetition number.</li>
+<li>Smoke: exec/results/vnnik6-20260916/smoke/&lt;arm&gt;.tokens and smoke.txt (compare_tokens.py output appended).</li>
+<li>Builds: exec/results/vnnik6-20260916/build-main0916.txt, build-headoff0916.txt (tip, options, sha256, version string); exec/results/vnnik5-20260916/build.txt for the vnni binary; logs exec/logs/vnnik6-build-*.log.</li>
+<li>Traces: exec/results/vnnik6-trace-20260916/&lt;arm&gt;-tp&lt;N&gt;.perfetto-trace, runs.txt, analysis.json, analysis.md (python3 exec/vnnik6-20260916/analyze.py exec/results/vnnik6-trace-20260916 4; the second argument is the KV-head count).</li>
+<li>Campaign log and markers: exec/logs/vnnik6-chain.log, vnnik6-20260916.log, .status, .done; vnnik6-trace-20260916.log.</li>
+<li>The one-run cell of 2026-09-15 that raised the item: exec/results/vnnik4-models-20260915/results.txt (cell=qwen30b, base 544ca05c7a vs dc950be5f2).</li>
+</ul>
+
+<h2>9. Notes and traps</h2>
+<ul>
+<li><b>Where the vnni binary came from.</b> runtron.vnnik5 was built from commit d5b59b1101 (2026-09-16 00:09 UTC). The worktree was then moved to 65a1c41d72, a change to one test file. Only libversion.so was relinked. So the runtron file kept its sha256 (7f508484...). Its "Version:" log line, however, says 65a1c41d. The PR head ff680c8020 adds one JSON row of cost data to 65a1c41d72 and no C++. The base and headoff binaries were built by this campaign. Their build records are in section 3.1.</li>
+<li><b>No AMX-on / AMX-off pair.</b> The AMX kernel serves head size 128 with kv_mul 4 (amx_attn_iface.hpp shape_ok). qwen-3-30b-a3b has kv_mul 8. So the AMX path for dense pages (a full 64-token page that the query sees in full) is never compiled in for this model. TRON_AMX_DISABLE=1, the runtime switch that turns AMX off, changes nothing. All three binaries run the software attention path for this model.</li>
+<li><b>Why headoff is the gate's stand-in.</b> The layout gate is a compile-time constant (k_vnni::layout_on, TRON_K_VNNI). A gate on kv_mul 4 would leave qwen-3-30b-a3b on row-major K with the PR's other code (save_k with a worker count, save_k_helper calls that return at once, the k_head_fn scratch parameter). A build of the PR head with TRON_K_VNNI off runs exactly that code for every model. So headoff measures the gate's outcome for this model without writing the gate.</li>
+<li><b>Log level.</b> The cells ran with TRON_LOG_LEVEL=debug and SPDLOG_LEVEL=debug. That is the convention of the qwen3-4b campaigns of PR #4424. It is also the default of the nightly. The 2026-09-15 one-run cell used TRON_LOG_LEVEL=info. The smokes and traces use info.</li>
+<li><b>Machine sharing.</b> The marker file /bill-has-instance-0,2 was present. So the first half of delphi-3bda belonged to the other user during the runs. Every run recorded his process count (rt-results.txt machine line). Our runs used CPU socket 1 and cards 90/93 (tp2) or 90/93/b9/bc (tp4).</li>
+<li><b>Chart colors.</b>
+<ul>
+<li>The colors come from the reference palette of the dataviz chart-design guide used for this report: its first color (blue) for headoff, its second (orange) for vnni, and a neutral gray for base, the control binary.</li>
+<li>The guide states that its first three colors pass its color-vision checks (simulated red-green color blindness) for every pair of the three. The guide's validator script runs under Node.js (a command-line JavaScript runtime). The container this report was written in (claude-box) does not have Node.js. So the validator was not run here.</li>
+<li>Every bar and dot carries a direct value label, and every chart has a table. So no reading depends on color.</li>
+</ul></li>
+<li><b>Traces.</b> One traced run per binary and tp. Trace overhead on the earlier qwen3-4b runs was 0 to 3% of TTFT. The traced runs generate 32 tokens (not 256) and are not part of the TPS/TTFT cells.</li>
+<li><b>Dry runs.</b> summarize.py, compare_tokens.py and gen_report.py were exercised on synthetic data before the campaign. analyze.py reproduced the 2026-09-14 numbers on the earlier qwen3-4b trace (Save K 273.6 us per layer in prefill) before the KV-head count was changed to 4 for this model.</li>
+</ul>
+
+</body></html>

@@ -1,0 +1,167 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/llama8b-AMX-gain-vs-load.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/vnnied-k-in-place/status/llama8b-AMX-gain-vs-load.html
+-->
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AMX gain against load, llama-3.1-8b</title>
+<style>
+:root { --ink: #1f1e1c; --muted: #6b6965; --band: #e1e0d9; --blue: #2a78d6; --orange: #eb6834; --grey: #898781; --bg: #ffffff; --panel: #f7f6f3; }
+html, body { background: var(--bg); color: var(--ink); font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.45; margin: 0; }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 18px; margin: 32px 0 8px; border-bottom: 1px solid var(--band); padding-bottom: 4px; }
+.sub { color: var(--muted); font-size: 14px; }
+.short { background: var(--panel); border-left: 4px solid var(--orange); padding: 12px 16px; margin: 16px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin: 8px 0 12px; }
+th, td { border-bottom: 1px solid var(--band); padding: 5px 8px; text-align: left; vertical-align: top; } th { background: var(--panel); }
+td:nth-child(n+3), th:nth-child(n+3) { white-space: nowrap; }
+.take { color: var(--ink); margin: 6px 0 18px; padding: 8px 12px; background: var(--panel); }
+figure { margin: 12px 0; overflow-x: auto; } figure svg { max-width: 100%; height: auto; }
+dl dt { font-weight: 600; margin-top: 8px; } dl dd { margin: 0 0 4px 0; }
+li { margin: 4px 0; } code { background: var(--panel); padding: 0 4px; font-size: 90%; }
+</style></head><body><main>
+<h1>Does the AMX gain on llama-3.1-8b grow with the load per engine?</h1>
+<div class="sub">Campaign l8bload-20260918 on delphi-3bda (the test machine). Cells ran 2026-09-18 19:55 to 21:07 UTC. Report generated 2026-09-18 21:37 UTC. 20 cells read, 3 complete repetitions per level.</div>
+
+<div class="short"><b>Short version.</b> On llama-3.1-8b the AMX kernel (AMX is an Intel CPU instruction set for matrix multiplication) gained +0.2 % at 2, +3.9 % at 4 and +12.9 % at 8 users per engine (mean of 3 repetitions per level, and the table in section 1 gives the paired test). The +0.8 % measured earlier in the nightly's arrangement (4 engines with 2 users each, two packages compared) is the low-load end of this curve, not a kernel failure. For llama-3.1-8b in the nightly CI (continuous integration) run, the users per engine decide the AMX gain, and the USE_HW_ATTN variable (the switch for attention on the FPGA accelerator cards) changes nothing for this CPU-attention model.</div>
+
+<h2>Words used here</h2>
+<dl>
+<dt>tron, rinzler, runtron, token</dt><dd>tron is the inference program under test. rinzler is the production server built from it. runtron is tron's command-line tool. A token is one unit of text, about one word.</dd>
+<dt>decode step, attention, dense part, FPGA</dt><dd>A decode step produces one token for every active user. Its attention part reads each user's whole context (the conversation so far) and grows with users and context length. Its dense part streams the model weights through the FPGA cards and does not grow with users at these counts. An FPGA (field-programmable gate array, a programmable chip) card is the accelerator that runs the dense part.</dd>
+<dt>engine, tp2, users per engine, load</dt><dd>An engine is one rinzler process serving one model copy split across 2 FPGA cards (tp2, tensor parallel over 2 cards). Users per engine is how many conversations one engine decodes at the same time. Load in this report means users per engine. The nightly (defined below) runs llama-3.1-8b as 4 engines with 2 users each.</dd>
+<dt>AMX, AMX kernel, kill switch, PR</dt><dd>AMX is an Intel CPU instruction set for matrix multiplication. A PR is a pull request, a proposed code change on GitHub. The AMX kernel (PR #3879) uses AMX for the attention part on the CPU. The kill switch is the environment variable TRON_AMX_DISABLE=1. Setting it keeps the same binary and turns the kernel off.</dd>
+<dt>arm, level, cell, repetition</dt><dd>An arm is one setting of the kill switch: off (TRON_AMX_DISABLE=1) or on (unset). A level is one users-per-engine count: 2, 4 or 8. A cell is one benchmark run of one arm at one level. A repetition is one pass over the levels and both arms. Repetition 4 covered level 2 only (section 2, Order).</dd>
+<dt>nightly, CI, CI harness, sharegpt</dt><dd>CI is continuous integration, the automated test system. The nightly is the CI run that executes on delphi-3bda every night. The CI harness is the nightly's throughput benchmark (the script testlib/tps.py in systems_test, the repository of the system tests). It sends prompts of 1024 tokens from the sharegpt set (a public set of real chat prompts), asks for 1536 generated tokens, runs 10 rounds, and starts users 0.1 s apart. In this campaign one client ran per engine. The clients ran on delphi-3bda itself, on cores no engine uses.</dd>
+<dt>driver</dt><dd>A driver is the program that sends requests to an engine and measures the answers. Here the driver is the CI harness. The reference run of 2026-09-16 used runtron instead.</dd>
+<dt>ci-mimic, base package, target package, main</dt><dd>ci-mimic is the campaign of 2026-09-18 that repeated the nightly's perf phase (its throughput benchmark step) by hand on the whole machine. It ran once with the nightly's own package (the base package: commit 3faba6d0 of main, the tron repository's main branch, with no AMX code) and once with the target package (the same commit plus PR #4424, with the AMX kernel and the VNNI K layout compiled in).</dd>
+<dt>VNNI K layout, K cache, head, AVX-512</dt><dd>The K cache holds the key vectors of every past token (one vector per token, which attention compares each new query against). A head is one of the independent attention sub-units of a layer. PR #4424 stores the K cache of heads whose vectors are 128 numbers wide in the layout the AMX kernel reads directly (named after VNNI, Intel's Vector Neural Network Instructions). This is a compile-time option. Both arms of this campaign have it. With the kill switch, the layout is read by the PR's AVX-512 routine (the wider CPU vector instruction set) instead of the kernel.</dd>
+<dt>hardware attention, USE_HW_ATTN, CPU attention</dt><dd>Hardware attention computes the attention part on the FPGA cards. CPU attention computes it on the CPU cores. The environment variable USE_HW_ATTN selects hardware attention. With it unset, tron keeps hardware attention off for llama-3.1-8b. This model therefore runs CPU attention in the nightly and in every cell here.</dd>
+<dt>TPS, TTFT, sample, sd</dt><dd>TPS is decode tokens per second per user. The CI harness measures it over generated tokens 896 to 1024 of each request. A sample is one such measurement for one user in one round. A cell with U users per engine has 2 x U x 10 samples (two engines, U users each, 10 rounds). sd is the standard deviation over all samples of a cell, in the population form that tps.py reports (divide by the sample count). TTFT is the time to first token in ms.</dd>
+<dt>paired t, standard error, resolved</dt><dd>In each repetition the on and off cells run back to back. The gain per repetition is (on - off) / off. The standard error is the standard deviation of the gains divided by the square root of their count. The paired t is the mean gain divided by its standard error. With 3 repetitions the 95 % threshold is 4.303 (the t value that chance alone would exceed in only 5 % of experiments with 3 paired repetitions). "Resolved" means the t passes the threshold and the mean change is at least 1 % in magnitude (a loss would count too).</dd>
+<dt>AMX-busy cycles (the EXE.AMX_BUSY counter)</dt><dd>AMX-busy cycles are the count of a CPU hardware counter, EXE.AMX_BUSY, of cycles in which the AMX unit was busy. It was read for 20 s on both engine processes during each cell. Zero in the off arm proves the kill switch worked. A large count in the on arm proves the kernel ran.</dd>
+<dt>load average, platformd, Caddy</dt><dd>The load average is the Linux count of runnable processes averaged over the last minute, read from /proc/loadavg at the start of each cell. delphi-3bda has 288 logical CPUs. A value near 50 means most CPUs are idle. platformd is the production process manager on delphi-3bda. Its HTTP API starts and stops the production engines. Caddy is the HTTP reverse proxy in front of the production engines.</dd>
+</dl>
+
+<h2>1. Result</h2>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="760" height="470" viewBox="0 0 760 470" role="img" aria-label="AMX gain on llama-3.1-8b against users per engine" font-family="Helvetica, Arial, sans-serif" font-size="13"><rect width="760" height="470" fill="#ffffff"/>
+<line x1="80" y1="324.0" x2="720" y2="324.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="72" y="328.0" text-anchor="end" fill="#6b6965">+0 %</text>
+<line x1="80" y1="253.7" x2="720" y2="253.7" stroke="#e1e0d9" stroke-width="1"/>
+<text x="72" y="257.7" text-anchor="end" fill="#6b6965">+5 %</text>
+<line x1="80" y1="183.5" x2="720" y2="183.5" stroke="#e1e0d9" stroke-width="1"/>
+<text x="72" y="187.5" text-anchor="end" fill="#6b6965">+10 %</text>
+<line x1="80" y1="113.2" x2="720" y2="113.2" stroke="#e1e0d9" stroke-width="1"/>
+<text x="72" y="117.2" text-anchor="end" fill="#6b6965">+15 %</text>
+<line x1="80" y1="324.0" x2="720" y2="324.0" stroke="#6b6965" stroke-width="1.2"/>
+<text x="80" y="28" fill="#6b6965">AMX gain in decode TPS per user, AMX kernel on against the kill switch, same binary</text>
+<polyline points="186.7,321.5 400.0,269.5 613.3,142.3" fill="none" stroke="#eb6834" stroke-width="2" stroke-opacity="0.6"/>
+<text x="186.7" y="372" text-anchor="middle" fill="#1f1e1c">2 users per engine</text>
+<text x="186.7" y="388" text-anchor="middle" fill="#6b6965">(4 users on 2 engines)</text>
+<circle cx="186.7" cy="311.9" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/>
+<circle cx="186.7" cy="323.7" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/>
+<circle cx="186.7" cy="328.9" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/>
+<circle cx="186.7" cy="321.5" r="7" fill="#eb6834" stroke="#ffffff" stroke-width="2"/>
+<text x="198.7" y="311.5" fill="#1f1e1c" font-weight="600">+0.2 % (3 repetitions)</text>
+<text x="400.0" y="372" text-anchor="middle" fill="#1f1e1c">4 users per engine</text>
+<text x="400.0" y="388" text-anchor="middle" fill="#6b6965">(8 users on 2 engines)</text>
+<circle cx="400.0" cy="287.5" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/>
+<circle cx="400.0" cy="255.7" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/>
+<circle cx="400.0" cy="265.3" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/>
+<circle cx="400.0" cy="269.5" r="7" fill="#eb6834" stroke="#ffffff" stroke-width="2"/>
+<text x="412.0" y="259.5" fill="#1f1e1c" font-weight="600">+3.9 % (3 repetitions)</text>
+<text x="613.3" y="372" text-anchor="middle" fill="#1f1e1c">8 users per engine</text>
+<text x="613.3" y="388" text-anchor="middle" fill="#6b6965">(16 users on 2 engines)</text>
+<circle cx="613.3" cy="140.5" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/>
+<circle cx="613.3" cy="135.2" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/>
+<circle cx="613.3" cy="151.1" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/>
+<circle cx="613.3" cy="142.3" r="7" fill="#eb6834" stroke="#ffffff" stroke-width="2"/>
+<text x="601.3" y="132.3" text-anchor="end" fill="#1f1e1c" font-weight="600">+12.9 % (3 repetitions)</text>
+<rect x="589.3" y="79.1" width="12" height="12" transform="rotate(45 595.3 85.1)" fill="#898781"/>
+<text x="583.3" y="89.1" text-anchor="end" fill="#898781">runtron run of 2026-09-16, 8 users on 1 engine, 1536 tokens: +17 %</text>
+<rect x="163.7" y="307.6" width="10" height="10" fill="#898781"/>
+<text x="198.7" y="334.6" fill="#898781">ci-mimic run of 2026-09-18, nightly layout, 2 users per engine: +0.8 %</text>
+<circle cx="88" cy="426" r="7" fill="#eb6834"/><text x="102" y="430" fill="#1f1e1c">mean of the repetitions</text>
+<circle cx="88" cy="450" r="5" fill="#ffffff" stroke="#eb6834" stroke-width="1.5"/><text x="102" y="454" fill="#1f1e1c">one repetition</text>
+<rect x="382" y="420" width="12" height="12" transform="rotate(45 388 426)" fill="#898781"/><text x="402" y="430" fill="#1f1e1c">runtron run of 2026-09-16 (another driver)</text>
+<rect x="383" y="445" width="10" height="10" fill="#898781"/><text x="402" y="454" fill="#1f1e1c">ci-mimic run of 2026-09-18</text>
+</svg></figure>
+<p class="take">Between levels only the load changed. Within a level only the kill switch changed. The binary, the placement (which FPGA cards and CPU cores each engine uses) and the attention mode (CPU attention in every cell) were the same in every cell. More users per engine means more attention work per decode step. The gain grows with it, as the hypothesis in section 4 predicts. Grey markers are earlier measurements under other conditions, shown for scale only (section 4 explains what each one counts).</p>
+<table><tr><th>users per engine</th><th>repetitions</th><th>off TPS</th><th>on TPS</th><th>gain</th><th>gain per repetition</th><th>paired t</th><th>resolved</th><th>TTFT off / on (ms)</th><th>AMX-busy cycles off / on (20 s)</th></tr>
+<tr><td>2</td><td>3</td><td>141.57</td><td>141.81</td><td>+0.2 %</td><td>+0.9 %, +0.0 %, -0.4 %</td><td>+0.5 (threshold 4.30)</td><td>no (t below the threshold, change below 1 %)</td><td>834 / 792</td><td>0.0 billion / 40.3 billion</td></tr><tr><td>4</td><td>3</td><td>122.93</td><td>127.69</td><td>+3.9 %</td><td>+2.6 %, +4.9 %, +4.2 %</td><td>+5.8 (threshold 4.30)</td><td>yes</td><td>1472 / 1424</td><td>0.0 billion / 67.8 billion</td></tr><tr><td>8</td><td>3</td><td>70.08</td><td>79.14</td><td>+12.9 %</td><td>+13.1 %, +13.4 %, +12.3 %</td><td>+38.7 (threshold 4.30)</td><td>yes</td><td>2768 / 2693</td><td>0.0 billion / 92.0 billion</td></tr></table>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="760" height="226" viewBox="0 0 760 226" role="img" aria-label="TPS per user, AMX off against on, per load level" font-family="Helvetica, Arial, sans-serif" font-size="13"><rect width="760" height="226" fill="#ffffff"/>
+<line x1="170.0" y1="36" x2="170.0" y2="196" stroke="#e1e0d9"/>
+<text x="170.0" y="214" text-anchor="middle" fill="#6b6965">0</text>
+<line x1="256.6" y1="36" x2="256.6" y2="196" stroke="#e1e0d9"/>
+<text x="256.6" y="214" text-anchor="middle" fill="#6b6965">25</text>
+<line x1="343.1" y1="36" x2="343.1" y2="196" stroke="#e1e0d9"/>
+<text x="343.1" y="214" text-anchor="middle" fill="#6b6965">50</text>
+<line x1="429.7" y1="36" x2="429.7" y2="196" stroke="#e1e0d9"/>
+<text x="429.7" y="214" text-anchor="middle" fill="#6b6965">75</text>
+<line x1="516.3" y1="36" x2="516.3" y2="196" stroke="#e1e0d9"/>
+<text x="516.3" y="214" text-anchor="middle" fill="#6b6965">100</text>
+<line x1="602.8" y1="36" x2="602.8" y2="196" stroke="#e1e0d9"/>
+<text x="602.8" y="214" text-anchor="middle" fill="#6b6965">125</text>
+<line x1="689.4" y1="36" x2="689.4" y2="196" stroke="#e1e0d9"/>
+<text x="689.4" y="214" text-anchor="middle" fill="#6b6965">150</text>
+<text x="720" y="20" text-anchor="end" fill="#6b6965">TPS per user (tokens per second)</text>
+<text x="158" y="60" text-anchor="end" fill="#1f1e1c">2 users per engine</text>
+<line x1="660.2" y1="56" x2="661.1" y2="56" stroke="#6b6965" stroke-width="2"/>
+<circle cx="660.2" cy="56" r="7" fill="#2a78d6" stroke="#ffffff" stroke-width="2"/>
+<circle cx="661.1" cy="56" r="7" fill="#eb6834" stroke="#ffffff" stroke-width="2"/>
+<text x="660.2" y="44" text-anchor="middle" fill="#2a78d6" font-weight="600">141.6</text>
+<text x="661.1" y="80" text-anchor="middle" fill="#eb6834" font-weight="600">141.8</text>
+<text x="675.1" y="60" fill="#1f1e1c">+0.2 %</text>
+<text x="158" y="112" text-anchor="end" fill="#1f1e1c">4 users per engine</text>
+<line x1="595.7" y1="108" x2="612.2" y2="108" stroke="#6b6965" stroke-width="2"/>
+<circle cx="595.7" cy="108" r="7" fill="#2a78d6" stroke="#ffffff" stroke-width="2"/>
+<circle cx="612.2" cy="108" r="7" fill="#eb6834" stroke="#ffffff" stroke-width="2"/>
+<text x="595.7" y="96" text-anchor="middle" fill="#2a78d6" font-weight="600">122.9</text>
+<text x="612.2" y="132" text-anchor="middle" fill="#eb6834" font-weight="600">127.7</text>
+<text x="626.2" y="112" fill="#1f1e1c">+3.9 %</text>
+<text x="158" y="164" text-anchor="end" fill="#1f1e1c">8 users per engine</text>
+<line x1="412.7" y1="160" x2="444.1" y2="160" stroke="#6b6965" stroke-width="2"/>
+<circle cx="412.7" cy="160" r="7" fill="#2a78d6" stroke="#ffffff" stroke-width="2"/>
+<circle cx="444.1" cy="160" r="7" fill="#eb6834" stroke="#ffffff" stroke-width="2"/>
+<text x="412.7" y="148" text-anchor="middle" fill="#2a78d6" font-weight="600">70.1</text>
+<text x="444.1" y="184" text-anchor="middle" fill="#eb6834" font-weight="600">79.1</text>
+<text x="458.1" y="164" fill="#1f1e1c">+12.9 %</text>
+<circle cx="170" cy="24" r="6" fill="#2a78d6"/><text x="180" y="28" fill="#1f1e1c">AMX off (kill switch)</text>
+<circle cx="400" cy="24" r="6" fill="#eb6834"/><text x="410" y="28" fill="#1f1e1c">AMX on</text>
+</svg></figure>
+<p class="take">TPS per user falls as users are added. Each decode step takes longer with more users. The AMX kernel's gain grows with the load in absolute terms (+0.2, +4.8, +9.1 TPS per user at 2, 4, 8 users per engine) and in relative terms (+0.2 %, +3.9 %, +12.9 %). Adding users lowers the off-arm TPS per user by 18.6 TPS from 2 to 4 users per engine and by 71.5 TPS from 2 to 8 users per engine. The kernel gives back 4.8 TPS (26 %) of the drop to 4 users and 9.1 TPS (13 %) of the drop to 8 users.</p>
+
+<h2>2. What ran</h2>
+<ul>
+<li><b>Binary.</b> The rinzler binary came from ci-mimic's target package (the PR #4424 package, tron 2026.09.18-29a8a547). The package holds commit 3faba6d0 of main plus PR #4424. It was built with the deb preset (the build preset for the .deb Debian package) with TRON_AMX_DISPATCH=ON and TRON_K_VNNI=ON, the compile options that enable the AMX kernel and the VNNI K layout. Its sha256 checksum (a file fingerprint) starts with 3ee9c8f0. It was extracted from the .deb and run from /var/tmp, not installed. It is the same file that the ci-mimic run's target package served.</li>
+<li><b>Placement.</b> Two engines ran on CPU socket 1. Each used the exact placement flags (--instance, --devices, --app-cores, --dev-cores, --numa, --nr_hugepages) that platformd generated for the nightly's llama-3.1-8b engines on 2026-09-18 16:28 UTC. Engine a took the flags of platformd's file /etc/rinzler/instance-3.env (cards 90 and 93, 28 application CPUs from the --app-cores list, launcher cores 73 and 217). Engine b took those of instance-2.env (cards b9 and bc, 28 application CPUs, launcher cores 74 and 218). The launcher cores are the two CPUs that the taskset wrapper pins the process start to (platformd's CPUAFFINITY). The file number is platformd's. tron's own --instance flag inside those files reads 2,4 for engine a and 3,4 for engine b. Only the port and the hugepage file name differ from the nightly's flags. The engines were started by hand, not by platformd. There is therefore no hop through Caddy, and each harness client talks to its engine directly.</li>
+<li><b>Arms.</b> off sets TRON_AMX_DISABLE=1 in the engine's environment. on leaves it unset. USE_HW_ATTN is unset in both. The model therefore runs CPU attention, as in the nightly. TRON_USE_SPECULATION=0 (speculative decoding off, a tron option that guesses tokens ahead) was set in both arms, as in the nightly. Two environment differences from the nightly remain: both arms ran with TRON_LOG_LEVEL=debug and SPDLOG_LEVEL=debug (set by rz.sh, a few log lines per minute), and without the nightly's RZ_TASK_GROUPS=4.</li>
+<li><b>Order.</b> Each repetition ran the levels 2, 4 and 8 users per engine in that order. Inside a level the two arms ran back to back. Odd repetitions ran off then on. Even repetitions ran on then off. Repetition 4 came from a second launch at 21:01 UTC that ran level 2 only (on then off), to replace the excluded cell (note A in section 3).</li>
+<li><b>Machine.</b> Before the first cell of each launch, the four idle production engines were taken down through the platformd API. Their journal had shown no request for the previous 10 minutes. They were brought back up at the end of each launch: up at 21:01:12, down again at 21:01:42, up at 21:07:48 UTC. The other half of the machine (CPU socket 0 and its four FPGA cards) was assigned to Bill (a colleague who shares delphi-3bda). His process count was recorded at the start of each cell. It was 0 in all 20 cells.</li>
+</ul>
+
+<h2>3. Per cell</h2>
+<table><tr><th>users per engine</th><th>arm</th><th>repetition</th><th>start UTC</th><th>TPS mean +/- sd</th><th>slowest sample</th><th>engine a / b TPS (a = cards 90/93, b = cards b9/bc)</th><th>TTFT ms</th><th>AMX-busy cycles (20 s)</th><th>benchmark minutes</th><th>1-min load average at start</th><th>Bill processes</th></tr>
+<tr><td>2</td><td>off</td><td>1</td><td>19:55</td><td>140.93 +/- 0.73</td><td>138.1</td><td>140.8 / 141.1</td><td>834</td><td>0</td><td>2.0</td><td>93.44</td><td>0</td></tr><tr><td>2</td><td>off</td><td>2</td><td>20:20</td><td>141.57 +/- 0.18</td><td>141.3</td><td>141.6 / 141.6</td><td>836</td><td>0</td><td>2.0</td><td>45.39</td><td>0</td></tr><tr><td>2</td><td>off</td><td>3</td><td>20:39</td><td>141.50 +/- 0.29</td><td>140.9</td><td>141.5 / 141.5</td><td>833</td><td>0</td><td>2.0</td><td>49.87</td><td>0</td></tr><tr><td>2</td><td>off</td><td>4</td><td>21:05</td><td>142.22 +/- 0.24</td><td>141.8</td><td>142.0 / 142.4</td><td>833</td><td>0</td><td>2.0</td><td>47.30</td><td>0</td></tr><tr><td>2</td><td>on</td><td>1</td><td>19:58</td><td>142.14 +/- 0.48</td><td>140.7</td><td>142.0 / 142.2</td><td>793</td><td>40,542,524,652</td><td>2.0</td><td>49.10</td><td>0</td></tr><tr><td>2</td><td>on</td><td>2</td><td>20:17</td><td>141.59 +/- 0.25</td><td>140.8</td><td>141.4 / 141.7</td><td>792</td><td>40,083,952,524</td><td>2.0</td><td>48.37</td><td>0</td></tr><tr><td>2</td><td>on (excluded, note A)</td><td>3</td><td>20:42</td><td>130.08 +/- 7.44</td><td>119.0</td><td>130.1 / 130.1</td><td>807</td><td>41,187,384,036</td><td>2.1</td><td>47.48</td><td>0</td></tr><tr><td>2</td><td>on</td><td>4</td><td>21:02</td><td>141.71 +/- 0.36</td><td>141.1</td><td>141.5 / 142.0</td><td>791</td><td>40,231,045,764</td><td>2.0</td><td>34.57</td><td>0</td></tr><tr><td>4</td><td>off</td><td>1</td><td>20:00</td><td>123.58 +/- 4.14</td><td>121.4</td><td>123.4 / 123.8</td><td>1473</td><td>0</td><td>2.4</td><td>45.22</td><td>0</td></tr><tr><td>4</td><td>off</td><td>2</td><td>20:26</td><td>122.18 +/- 3.54</td><td>119.8</td><td>122.9 / 121.5</td><td>1469</td><td>0</td><td>2.4</td><td>48.13</td><td>0</td></tr><tr><td>4</td><td>off</td><td>3</td><td>20:45</td><td>123.02 +/- 3.56</td><td>121.3</td><td>122.8 / 123.2</td><td>1474</td><td>0</td><td>2.4</td><td>47.69</td><td>0</td></tr><tr><td>4</td><td>on</td><td>1</td><td>20:04</td><td>126.79 +/- 4.31</td><td>125.5</td><td>126.8 / 126.8</td><td>1426</td><td>66,821,194,180</td><td>2.3</td><td>48.61</td><td>0</td></tr><tr><td>4</td><td>on</td><td>2</td><td>20:22</td><td>128.12 +/- 3.82</td><td>126.7</td><td>128.0 / 128.3</td><td>1420</td><td>68,380,367,324</td><td>2.3</td><td>45.31</td><td>0</td></tr><tr><td>4</td><td>on</td><td>3</td><td>20:48</td><td>128.16 +/- 4.35</td><td>126.6</td><td>128.5 / 127.8</td><td>1426</td><td>68,314,008,920</td><td>2.3</td><td>48.52</td><td>0</td></tr><tr><td>8</td><td>off</td><td>1</td><td>20:07</td><td>70.35 +/- 0.40</td><td>69.6</td><td>70.6 / 70.1</td><td>2770</td><td>0</td><td>4.0</td><td>50.27</td><td>0</td></tr><tr><td>8</td><td>off</td><td>2</td><td>20:34</td><td>69.67 +/- 0.25</td><td>69.1</td><td>69.8 / 69.6</td><td>2768</td><td>0</td><td>4.0</td><td>49.79</td><td>0</td></tr><tr><td>8</td><td>off</td><td>3</td><td>20:51</td><td>70.22 +/- 0.22</td><td>69.8</td><td>70.3 / 70.1</td><td>2767</td><td>0</td><td>4.0</td><td>46.73</td><td>0</td></tr><tr><td>8</td><td>on</td><td>1</td><td>20:12</td><td>79.53 +/- 0.37</td><td>78.4</td><td>79.7 / 79.3</td><td>2693</td><td>92,184,838,032</td><td>3.6</td><td>48.30</td><td>0</td></tr><tr><td>8</td><td>on</td><td>2</td><td>20:29</td><td>79.04 +/- 0.28</td><td>78.5</td><td>79.0 / 79.0</td><td>2692</td><td>91,902,871,156</td><td>3.6</td><td>48.28</td><td>0</td></tr><tr><td>8</td><td>on</td><td>3</td><td>20:56</td><td>78.86 +/- 0.32</td><td>78.0</td><td>79.0 / 78.7</td><td>2695</td><td>91,900,417,164</td><td>3.6</td><td>49.79</td><td>0</td></tr></table>
+<p><b>Note A (excluded cell).</b></p><ul><li>Both engines slowed identically in rounds 1 to 8 (119 to 135 TPS per round, engine a and engine b within 0.3 TPS of each other). Both returned to 141 TPS in rounds 9 and 10.</li><li>TTFT was normal (807 ms).</li><li>The other 2-user cells (five before the 21:01 UTC summary of the first launch, seven with repetition 4) have per-engine means of 140.8 to 142.4 TPS and per-engine sd of 0.11 to 1.0 TPS.</li><li>The system journal for 20:41:30 to 20:45:30 UTC is saved as journal-2042-2045.txt in this cell's result directory (section 5). It shows no other user, no cron job and no kernel event. The only sudo commands are the campaign's own perf and prlimit calls.</li><li>The window also holds routine lines from the campaign itself throughout: Caddy health-check failures against the four stopped production ports every 10 s, a systemd warning about the rinzler@.service file every 10 s, and the deactivation of the two campaign fuse mounts. The only other event is a reconfiguration of tailscaled (the VPN daemon) with a DNS cache flush at 20:44:36 UTC, 10 s after round 9 began. Its relation to the slowdown is unknown.</li><li>The cause is unknown. The cell is treated as a short disturbance from outside the campaign and is replaced by repetition 4.</li></ul>
+
+<h2>4. How to read it, and limits</h2>
+<ul>
+<li><b>Why the gain grows: a hypothesis, not a measurement.</b> The AMX kernel speeds up only the attention part of a decode step. At 2 users per engine that part is a small share of the step. A faster kernel then changes the step time little. At 8 users per engine the share is larger. This campaign measured TPS and TTFT only, not the time of each part. A per-step timing split (attention time against dense time) would confirm or reject it.</li>
+<li><b>Same layout in both arms.</b> The kill switch leaves the VNNI K layout in place and switches only the kernel off. The gain here is the kernel's alone, in addition to whatever the layout itself changes. The off arm at 2 users per engine (141.57 TPS) can be compared with the nightly's mean over 13 nights without PR #4424, 139.73 TPS (sd 0.52 TPS) [exec/results/ci-mimic-20260918/report-v4.html, row llama-3.1-8b good tp2 @8u, where @8u is the nightly's 8 users over 4 engines, 2 per engine]. That difference is +1.3 %. The two setups differ (2 engines instead of 4, no Caddy, client on the same host). This is an indication only, not a measurement of the layout's effect.</li>
+<li><b>Reference points count more than the kernel.</b> The runtron +17 % of 2026-09-16 came from another driver. runtron sends requests without HTTP and uses synthetic prompts. That run had 8 users on one engine and 2 repetitions. Its base binary was built from main just before PR #3879 merged (commit eb2de0265a). That base has neither the AMX kernel nor the VNNI K layout. Its +17 % therefore counts both changes. The ci-mimic +0.8 % compares the base package (no AMX code, no layout) with the target package, one run per package. It is not a kill-switch comparison on one binary. It therefore also counts the layout. Its client host was CPU-saturated during the target package's llama-3.1-8b config (CPU pressure 98.6 %, 1-min load 126) and lightly loaded during the base package's (1-min load 15.5).</li>
+<li><b>Three repetitions.</b> The paired threshold is high (4.303). A level can show a clear mean gain and still be "not resolved" when its three gains differ widely.</li>
+<li><b>Hardware attention.</b> This model runs CPU attention in the nightly. The tron log confirms it: "HW attention disabled for model 'llama-3.1-8b-instruct-good-tp2': default off for this model" [exec/results/l8bload-20260918/cells/2u__on__rep1/rinzler-e0.log]. USE_HW_ATTN=0 would change nothing for it. USE_HW_ATTN=1 would switch it to hardware attention. That mode was not run in this campaign.</li>
+<li><b>Added level.</b> The 8-users-per-engine level was added by Claude as a third point (jhan approved 2 and 4). It is the same load as the runtron run of 2026-09-16 (8 users on one engine).</li>
+</ul>
+
+<h2>5. Files</h2>
+<p>Paths are relative to ~/workspace/intel-AMX/.</p>
+<ul>
+<li>Scripts: exec/l8bload-20260918/{campaign.sh, rz.sh, summarize.py, gen_report.py, launch.sh}.</li>
+<li>Results: exec/results/l8bload-20260918/cells/&lt;U&gt;u__&lt;arm&gt;__rep&lt;N&gt;/ (perf.json pooled, perf-e0/1.json per engine, rinzler-e0/1.log, amx_busy.txt, proof.txt, meta.json, and on the excluded cell ANOMALY and journal-2042-2045.txt), summary.md, summary.json.</li>
+<li>Log: exec/logs/l8bload-20260918.log.</li>
+</ul>
+</main></body></html>
