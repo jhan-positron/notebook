@@ -61,6 +61,37 @@ RESULTS NIGHT 1 (2026-09-19 00:22-01:40 UTC, 81 runs, m1 + m2 complete, m3 1 tra
 - tp4: bimodal per-run state (base 7.06-7.83 ms/step, sd 7 TPS); vnni vs headoff +1.40 ms (-15.8 %, t 2.8 unresolved); A/A not
   clean (vnni2-vnni -0.51 ms); m2 D unresolved -> needs m3 traces (fast vs slow run) + m4.
 - summary: exec/results/issue4500-20260918/summary.md; page sec 8 filled (reading.html in the results dir is included by gen_design.py).
+NIGHT 2 RESUME 2026-09-19 13:41 UTC: l8b-levers (session ci-test-22) had finished its restore 13:39:56; I stopped the idle engines
+(Option B, 0 requests/10 min, POST inference/down, slice files removed, 512 free) and relaunched; m3 decode-only traces work
+(passes 10-: 38 decode passes, 11.5 MB, 9 burst passes of 288 gof_rodeo, Save K base 5.0 us/layer; the earlier passes-1- trace
+held only 4 prefill passes: ~250k hw-wait spans per prefill pass filled ~100 MB in 2.3 s). Trace overhead catA ~9 % TPS (113.5 vs
+124.9) -> compare traced arms only among themselves. ci-test-22 queues behind us (process gate: pgrep runtron|issue4500 campaign),
+needs the WHOLE machine ~5 h after us (until ~20:00 UTC) and brings the engines + Bill's marker back itself -> leave engines DOWN.
+FACT from ci-test-22: on this deployment rinzler truncates chat prompts above 4096 tokens for llama-3.1-8b (server counted 4096
+for 8192-token requests; FUSE max_prompt_tokens 131072, cap is elsewhere).
+RESULTS NIGHT 2 (2026-09-19 13:41-14:24 UTC, 123 runs total, campaign DONE ok; machine handed to ci-test-22 at 14:24):
+- traces (catA, 38 decode passes, one per arm): Save K on main 4.6 -> 20.3 us/layer (tp2 8u), 5.4 -> 21.0 (tp4): +566 us/step serial (H1);
+  busiest worker's Attention Pending 337 -> 742 us/pass (tp2), 540 -> 914 (tp4): the qk_group tail read (H3) +3.5 us per call in
+  place (bench said +0.56); hw wait per worker 1015 -> 392 (tp2), 351 -> 264 (tp4): the card stops being the critical path;
+  GOF drain on workers +1054 us per burst pass (+3.7 us/populate) but burst passes not slower in vnni (H2 hidden).
+- perf: main thread LLC misses x2.6 (tp2) / x1.7 (tp4), L1/L2 unchanged; workers L1 +25 %, L2 +40 %; perf record: apply_page_range
+  1.84 -> 4.44 %, run_joins 9.57 -> 3.65 %, store_k_block 0.05 -> 0.26 %, qk_vnni_128x4 0.04 % (dense AMX path absent), mwaitx 78 %.
+- m1b (n=2): tp2 2u vnni-headoff +0.215 ms (-4.3 %, t 43.8) = CI tp2 loss & store prediction 0.20; tp2 4u +0.131 (-2.2 %, t 17.8);
+  headoff = base; tp4 unresolved (sd 0.6-1.3 ms).
+- VERDICT: root cause = VNNI per-token column layout in decode (64 lines/row paid 3x: main scatter store, workers' tail read,
+  staging gather); exposure depends on launch phase (B<4 late -> store serial) and card step length (tp4 short -> worker chain
+  critical). AMX kernel, rest of PR, card excluded. Fix idea (unmeasured): keep the incomplete 16-token block row-major, convert
+  to VNNI when the block completes (prefill block store exists); mitigation: TRON_HWATTN_EARLY_LAUNCH_MIN_B=1 for 2 users/engine.
+- Page sec 8 filled (reading.html Night 2 block); traces/analysis.{json,md}; perf/ per arm; perf.data on 3bda /var/tmp/jhan/traces/issue4500-20260918.
+- TRAP: trace overhead 9-12 % TPS and it amplifies the vnni delta (0.636 traced vs 0.148 untraced at tp2 8u) -> traces give structure, not size.
+BLOCK m6 DONE 2026-09-19 18:40 UTC (exec/issue4500-20260918/m6.sh + m6_summarize.py; results .../m6/; rinzler on our half, 1 engine,
+nightly client; base = installed nightly deb, target = ci-mimic target deb; n=2): tp2 2u target vs base -4.3 % (+0.235 ms) = CI cell
+reproduced; kill switch +0.3 % (nothing); MIN_B=1: base +7.7 % (t -9.4), target +11.0 % (t -27); target+MIN_B=1 beats base as shipped
+by +6.2 %; layout cost when both early +0.067 ms (-1.4 %). tp4 4u: target -13.4 % (+1.0 ms, sd 0.6); targetkill vs target +6.8 %
+(t -3.4) -> AMX-side component at tp4 (also in runtron m1: vnnikill +8.1 % vs vnni at tp4, none at tp2): hypothesis = per-call AMX
+prep (Q pack + tile bracket in apply_page_range) on the critical worker chain at tp4; test = headoff vs headoff+kill at tp4 +
+turbostat per-core MHz. TRAP: rinzler writes alderaan.log into its cwd -> never cd into /opt/positron/bin (root-owned); use a
+jhan-owned cwd (m6.sh uses /var/tmp/jhan/i4500m6-cwd). Engines left DOWN (02:45 UTC timer restores); ci-test-22 done for the day.
 Codex design comparison (page sec 9): taken = manifest, A/A arm, second-order tail mechanism, both step estimators,
 mod-4/16/64 analysis, row-major shadow copy as the selective gather test, rinzler SIGUSR1+TRACE_FILE tracing; ours adds
 launch-phase switch (cheapest discriminator), kill-switch arm, sudo perf, early micro-benchmark, dense-AMX-never-runs fact.
