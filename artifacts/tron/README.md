@@ -108,3 +108,24 @@ Root mapping for this section: `random/` mirrors `claude-agentsrv:/home/jhan/wor
 - `random/from-claude/tron-concepts-verify-round2-wf_78f0fce1-335.js` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/tron-concepts-verify-round2-wf_78f0fce1-335.js` (11830 bytes). origin: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/fcd18152-9ade-458a-935d-031499cd5ec4/workflows/scripts/tron-concepts-verify-round2-wf_78f0fce1-335.js. (handoff: claude_20260919_internalize-concepts-md-directives.md)
 - `random/from-claude/tron-concepts-verify-wf_1c876190-471.js` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/tron-concepts-verify-wf_1c876190-471.js` (14735 bytes). origin: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/fcd18152-9ade-458a-935d-031499cd5ec4/workflows/scripts/tron-concepts-verify-wf_1c876190-471.js. (handoff: claude_20260919_internalize-concepts-md-directives.md)
 - `random/input-2-ai/internalize-concepts.md` -> `claude-agentsrv:/home/jhan/workspace/random/input-2-ai/internalize-concepts.md` (1187 bytes). (handoff: claude_20260919_internalize-concepts-md-directives.md)
+
+## Handoff preservation — 2026-09-20
+
+The existing `random/` mapping uses `claude-agentsrv:/home/jhan/workspace/random/`. The page uses mock teaching values, not measured benchmark results. Two validation files are copied from temporary storage into `exec/workflows/`. Their original paths remain as history.
+
+- [`random/TRON-concepts-codex.html`](random/TRON-concepts-codex.html) — authored teaching HTML; mock data; no measurement lineage.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/random/TRON-concepts-codex.html`
+  - Related handoff: [codex_20260919_internalize-input-2-ai-concepts.md](../../handoffs/codex_20260919_internalize-input-2-ai-concepts.md)
+  - Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/tron/random/TRON-concepts-codex.html
+
+- [`random/exec/workflows/validate-tron-concepts.py`](random/exec/workflows/validate-tron-concepts.py) — document browser-validation script.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/random/exec/workflows/validate-tron-concepts.py`
+  - Related handoff: [codex_20260919_internalize-input-2-ai-concepts.md](../../handoffs/codex_20260919_internalize-input-2-ai-concepts.md)
+  - origin: `claude-agentsrv:/tmp/validate-tron-concepts.py`. Copy retained at the original path.
+
+- [`random/exec/workflows/tron-concepts-validation.json`](random/exec/workflows/tron-concepts-validation.json) — compact document-validation result; not inference measurements.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/random/exec/workflows/tron-concepts-validation.json`
+  - Related handoff: [codex_20260919_internalize-input-2-ai-concepts.md](../../handoffs/codex_20260919_internalize-input-2-ai-concepts.md)
+  - origin: `claude-agentsrv:/tmp/tron-concepts-validation.json`. Copy retained at the original path.
+
+Validation results describe the original concept-page session. The handoff records which checks preceded the final edits. No inference benchmark was run for this page.
