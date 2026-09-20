@@ -1,0 +1,96 @@
+import json
+from transformers import AutoTokenizer, PreTrainedTokenizer
+from pathlib import Path
+
+
+local_dir = Path(__file__).parent
+
+
+ROLES = {
+    "system": "system",
+    "user": "user",
+    "human": "user",
+    "gpt": "assistant",
+    "bing": "assistant",
+    "chatgpt": "assistant",
+    "bard": "assistant",
+}
+
+
+class PromptGenerator:
+    @classmethod
+    def for_model(cls, model: str):
+        with open(local_dir / 'sharegpt_1000.json') as f:
+            convos = json.loads(f.read())
+        tokenizer = AutoTokenizer.from_pretrained(model)
+        return cls(convos, tokenizer)
+
+    def __init__(self, convos: list, tokenizer: PreTrainedTokenizer):
+        self.tokenizer = tokenizer
+        self.convos = convos
+
+    def _token_count(self, convo: list[dict]) -> int:
+        # The same per-part count prune_convo uses (role header + text, the
+        # leading BOS token dropped).
+        n = 0
+        for part in convo:
+            role = ROLES[part['from']]
+            prefix = f"<|start_header_id|>{role}<|end_header_id|>\n"
+            n += len(self.tokenizer.encode(prefix + part["value"])[1:])
+        return n
+
+    def prune_convo(self, convo: list[dict], prompt_length: int):
+        encoded_len = 0
+        pruned: list[dict] = []
+        for part in convo:
+            role = ROLES[part['from']]
+            prefix = f"<|start_header_id|>{role}<|end_header_id|>\n"
+            suffix = part["value"]
+            encoded = self.tokenizer.encode(prefix + suffix)[1:]
+            done = False
+            if (encoded_len + len(encoded)) >= prompt_length:
+                done = True
+                encoded = encoded[:(prompt_length - encoded_len)]
+            pruned.append({
+                'role': role,
+                'content': self.tokenizer.decode(encoded)[len(prefix):],
+            })
+            encoded_len += len(encoded)
+            if done:
+                break
+        if encoded_len < prompt_length:
+            raise ValueError(f'Prompt length {encoded_len} too short for configured length ({prompt_length})')
+        return pruned
+
+    def generate(
+        self,
+        prompt_length: int,
+        seed: int,
+    ) -> str:
+        # Fake timestamp used to make prompts unique.
+        ix = str(seed)
+        ps = ix.rjust(max(6, int((len(ix) + 1) / 2 * 2)), '0')
+        fake_time = f'{ps[0:2]}:{ps[2:4]}:{ps[4:6]}'
+        fake_time = ':'.join([ps[i:i+2] for i in range(0, len(ps), 2)])
+
+        system_prompt = {
+            'from': 'system',
+            'value': f'[TIME: {fake_time}] You are a helpful assistant.'
+        }
+
+        # Copy the stored list: the previous code inserted the system line into
+        # the stored conversation in place, so a second generate() call for the
+        # same seed in one process would see two system lines.
+        base: list[dict] = list(self.convos[seed % len(self.convos)]['conversations'])
+        # Concatenate the following conversations until the prompt is long
+        # enough. The shortest conversation is about 1500 tokens, so at
+        # prompt_length 1024 this loop never runs and the prompt is unchanged;
+        # above 2048 most single conversations are too short for prune_convo
+        # (jhan, l8b-levers campaign 2026-09-19).
+        k = 1
+        while self._token_count([system_prompt] + base) < prompt_length:
+            base = base + list(self.convos[(seed + k) % len(self.convos)]['conversations'])
+            k += 1
+        convo: list[dict] = [system_prompt] + base
+        prompt = self.prune_convo(convo, prompt_length)
+        return prompt

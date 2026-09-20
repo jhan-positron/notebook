@@ -95,3 +95,16 @@ Repo copies are mirrors: edit the canonical file, not these.
 - Canonical: claude-agentsrv:/home/jhan/workspace/tron-rampup/input-2-ai/single-thread.md
 - What it is: the user-written proposal document the assessment above answers.
 - Related handoff: handoffs/claude_20260824_input-2-ai-single-thread-md-instructions.md
+
+## 2026-09-20: TRON concepts explainer page (random project; registered by the claude-agentsrv handoff run)
+
+Root mapping for this section: `random/` mirrors `claude-agentsrv:/home/jhan/workspace/random/` (a workspace folder on the shared NFS home, not a git repository). Canonical -> repo; edit the canonical file first.
+
+- `memory/headless-chromium-render-check.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/headless-chromium-render-check.md` (1682 bytes). Memory note; the canonical stays in the session store because Claude Code edits it in place. (handoff: claude_20260919_internalize-concepts-md-directives.md)
+- `memory/tron-concepts-page-2026-09-19.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/tron-concepts-page-2026-09-19.md` (2323 bytes). Memory note; the canonical stays in the session store because Claude Code edits it in place. (handoff: claude_20260919_internalize-concepts-md-directives.md)
+- `random/from-claude/TRON-concepts-claude.html` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/TRON-concepts-claude.html` (174405 bytes). (handoff: claude_20260919_internalize-concepts-md-directives.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/tron/random/from-claude/TRON-concepts-claude.html
+- `random/from-claude/tron-concepts-understand-design-wf_fe2751af-545.js` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/tron-concepts-understand-design-wf_fe2751af-545.js` (29955 bytes). origin: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/fcd18152-9ade-458a-935d-031499cd5ec4/workflows/scripts/tron-concepts-understand-design-wf_fe2751af-545.js. (handoff: claude_20260919_internalize-concepts-md-directives.md)
+- `random/from-claude/tron-concepts-verify-round2-wf_78f0fce1-335.js` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/tron-concepts-verify-round2-wf_78f0fce1-335.js` (11830 bytes). origin: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/fcd18152-9ade-458a-935d-031499cd5ec4/workflows/scripts/tron-concepts-verify-round2-wf_78f0fce1-335.js. (handoff: claude_20260919_internalize-concepts-md-directives.md)
+- `random/from-claude/tron-concepts-verify-wf_1c876190-471.js` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/tron-concepts-verify-wf_1c876190-471.js` (14735 bytes). origin: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/fcd18152-9ade-458a-935d-031499cd5ec4/workflows/scripts/tron-concepts-verify-wf_1c876190-471.js. (handoff: claude_20260919_internalize-concepts-md-directives.md)
+- `random/input-2-ai/internalize-concepts.md` -> `claude-agentsrv:/home/jhan/workspace/random/input-2-ai/internalize-concepts.md` (1187 bytes). (handoff: claude_20260919_internalize-concepts-md-directives.md)

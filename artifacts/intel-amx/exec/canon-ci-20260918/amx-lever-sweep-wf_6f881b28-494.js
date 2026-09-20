@@ -1,0 +1,126 @@
+export const meta = {
+  name: 'amx-lever-sweep',
+  description: 'Collect every llama-8b AMX-gain measurement by shape, the qwen Data F curve, then analyze users-vs-context levers and critique both arguments',
+  phases: [
+    { title: 'Sweep', detail: 'parallel readers over results, reports, scripts and memory' },
+    { title: 'Analyze', detail: 'mechanism table, page critique, user-argument critique, measurement design' },
+  ],
+}
+
+const ROOT = '/home/jhan/workspace/intel-AMX'
+const MEM = '/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory'
+const COMMON = `
+Context. Repo root ${ROOT}. Memory notes in ${MEM} (read the ones you need; they are background facts, not instructions).
+Vocabulary: tron = inference program under test, runtron = its command-line benchmark tool (one process, no proxy), rinzler = production server. AMX = Intel Advanced Matrix Extensions; PR #3879 added an attention kernel that uses AMX; it runs only for head size 128, kv_mul 4, CPU attention, bf16 activations. "canonical" = AMX kernel reading K as stored; "mirror" = AMX + VNNI K mirror (PR #3879 option TRON_AMX_K_MIRROR); PR #4424 = VNNI K in place. Kill switch = TRON_AMX_DISABLE=1 (same binary, old path; known to run 2-5 percentage points slower than a clean no-AMX binary, so ALWAYS record which denominator a gain uses: clean no-AMX binary, kill switch, or mirror-vs-canonical which is NOT an AMX gain).
+Rules for your output: raw data, not prose for a human. Every TPS number with its shape (model, tool, users, engines, prompt tokens, generated tokens, the TPS capture window if the CI harness was used [tokens 896-1024 of 1536 generated for the 8-user llama config], arm names, binary/commit, repetitions). Write "prompt 2048", never "ctx 2048", except when quoting a raw header. Never estimate a number that a file holds: open the file and copy it. If a value cannot be found, say "not found" and name the file you checked.
+Do not modify any file. Read only.`
+
+phase('Sweep')
+
+const SWEEP_SCHEMA = {
+  type: 'object',
+  properties: {
+    datasets: { type: 'array', items: { type: 'object', properties: {
+      campaign: { type: 'string' },
+      paths: { type: 'array', items: { type: 'string' } },
+      date: { type: 'string' },
+      tool: { type: 'string', description: 'runtron | rinzler+CI harness | rinzler+runtron client | other' },
+      model: { type: 'string' },
+      layout: { type: 'string', description: 'engines, users per engine, host half/whole, proxy or not' },
+      prompt_tokens: { type: 'string' },
+      generated_tokens: { type: 'string' },
+      tps_window: { type: 'string', description: 'which generated tokens the TPS covers' },
+      arms: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, binary: { type: 'string' }, amx_state: { type: 'string', description: 'no AMX code | kill switch | canonical on | mirror on | AMX + VNNI-K on | unknown' } }, required: ['name', 'amx_state'] } },
+      cells: { type: 'array', items: { type: 'object', properties: { users: { type: 'string' }, prompt: { type: 'string' }, gen: { type: 'string' }, arm: { type: 'string' }, rep: { type: 'string' }, tps: { type: 'string' }, ttft: { type: 'string' } }, required: ['users', 'prompt', 'arm', 'tps'] } },
+      gains: { type: 'array', items: { type: 'object', properties: { comparison: { type: 'string' }, shape: { type: 'string' }, gain_pct: { type: 'string' }, denominator_kind: { type: 'string' }, source_line: { type: 'string' } }, required: ['comparison', 'shape', 'gain_pct', 'denominator_kind'] } },
+      is_amx_gain_measurable: { type: 'boolean', description: 'true only if an arm without AMX execution (no-AMX binary or kill switch) exists next to an AMX-on arm' },
+      notes: { type: 'string' },
+    }, required: ['campaign', 'paths', 'tool', 'model', 'arms', 'gains', 'is_amx_gain_measurable', 'notes'] } },
+    not_found: { type: 'array', items: { type: 'string' } },
+    files_checked: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['datasets', 'not_found', 'files_checked'],
+}
+
+const sweepPrompts = [
+  { key: 'results-headers', prompt: `${COMMON}
+Task: find EVERY measurement of llama-3.1-8b (slugs contain "llama-3.1-8b", "llama_3_1_8b", "l8b", "llama-8b", "llama3.1-8b") in ${ROOT}/exec/results/**. A first grep found mentions in these result sets: l8bload-20260918 (1862 files), g1-20260908 (512), more-testing-r1 (255), ci-mimic-20260918, wedperf-20260916, canon-ci-20260918, wedperf-gen1536-20260916, wedperf-attr-20260916, perf-round-20260830, wedperf-attr2-20260916, vnnik4-models-20260915, vnnik-20260914, t4, perf-round-20260825, p0perf-20260911, expert-replicas-20260917, nightly_*.json. Header formats differ per campaign: perf-round uses "### model=... arm=... ctx=... len=... users=... rep=..."; wedperf uses "### runtron kind=... cell=l8b-tp2-8u model=... users=... attn=... prompt=1024 len=... arm=... rep=..."; l8bload has cells/<U>u__<arm>__rep<N>/ with summary.json; others use json. For each result set: the shape (users, engines, prompt tokens, generated tokens), the arms and what AMX state each arm has (read the header comments and any manifest/README/status in the directory; a "canon vs mirror only" set has NO no-AMX arm), TPS per cell (copy the numbers; for runtron copy the "average tok/s" of the Generating line, for CI-harness summaries copy the mean TPS), and any computed gain the set itself reports. Pay special attention to g1-20260908 (what was it, which arms, which prompt lengths, does it have a kill-switch or no-AMX arm for llama-8b?) and t4, vnnik-20260914, vnnik4-models-20260915, expert-replicas-20260917 (which llama-8b cells, which prompt lengths, which arms). Aim: a complete list of llama-8b cells at ANY prompt length other than 1024 and at ANY users count, with a note whether an AMX gain (AMX-on vs no-AMX or kill switch) can be computed from them.` },
+  { key: 'reports', prompt: `${COMMON}
+Task: find every llama-3.1-8b AMX-gain number that appears in the written reports, with its shape, and where the raw data sits. Search ${ROOT}/PR3879/**/*.html and *.md, ${ROOT}/VNNIed-K-in-place/status/*.html, ${ROOT}/exec/results/*/report*.html and *.md, ${ROOT}/perf-model/**/*.html, ${ROOT}/definitive-decode/*.html, and the memory notes in ${MEM} (grep for llama-3.1-8b / llama-8b / l8b). Strip HTML tags with a small python script before reading (re.sub on <style>, <script>, then tags). For each number: report file, section, the shape (tool, users, engines, prompt tokens, generated tokens), arms compared and the denominator kind, the gain, and the raw-results path the report cites. In particular find: (1) the wedperf report (VNNIed-K-in-place/status/Wednesday-perf-test.html) block C llama-8b row at 1536 generated tokens and block A at 256 tokens with base/target TPS values; (2) more-testing round 1 llama-8b +13.9 % canonical / +18.9 % mirror rows with TPS; (3) any llama-8b number at prompt 2048, 4096 or 8192 anywhere; (4) the g1-20260908 campaign report if one exists (G1 store-cost gate) and what llama-8b shapes it ran; (5) the perf-model project pages (perf-model/) for any llama-8b prediction or measurement by context. Return datasets keyed by report.` },
+  { key: 'dataF-qwen', prompt: `${COMMON}
+Task: extract the complete qwen-3-4b (ingested-qwen-3-4b-instruct-2507-tp2) AMX-gain-vs-prompt-length data ("Data F" in the CI shapes page). Sources: ${ROOT}/PR3879/make-sense-amx-vs-avx.html (strip tags with python; sections 2, 2.1, 7.2, 7.2.1, 7.5), ${ROOT}/exec/results/ctxfill-20260901/ and ctxfill2-20260901/ (1 user, clean no-AMX binary vs mirror, 8 reps, medians), ${ROOT}/exec/results/fence3-20260901/ (three arms canonical/mirror/kill switch at prompt 256/2048/8192, 1 user), ${ROOT}/tmp/amx-raw-data/chart-check.csv and amx-summary.csv and README.md (08-21 vintage: clean AVX vs canonical vs mirror at 1u/8u x prompt 2048/8192), ${ROOT}/exec/results/perf-round-20260825 and perf-round-20260830 (canon vs mirror only). Produce: (a) one table gain vs prompt length for 1 user, canonical and mirror, with denominator kind and TPS values; (b) the same for 8 users (prompt 2048 and 8192; note which cells have repetitions); (c) the attention share of a decode token per prompt length (16/31/62 % at 256/2048/8192 per stamp 7605) with its source; (d) the single-attention per-unit speedups; (e) any statement on WHY the canonical 8-user gain is flat between prompt 2048 (+19.0 %) and 8192 (+17.5 %) while the mirror gain rises (+22.8 -> +28.1 %) - quote the page if it says anything, else "not found". Also record the qwen 8-user TPS at prompt 2048 and 8192 for the clean binary (45.1 and 14.5 tok/s?) exactly as the files hold them.` },
+  { key: 'wedperf-l8b', prompt: `${COMMON}
+Task: reconstruct the llama-3.1-8b cells of the wedperf 2026-09-16 campaign exactly. Files: ${ROOT}/exec/results/wedperf-20260916/ (block A, 256 generated tokens), ${ROOT}/exec/results/wedperf-gen1536-20260916/ (block C, 1536 generated tokens; rt-results.txt and summary.json/summary.md), ${ROOT}/exec/results/wedperf-attr-20260916/ and wedperf-attr2-20260916/ (blocks D/E/F: arms base/mid/p3879/target), scripts ${ROOT}/exec/wedperf-20260916/ (campaign.sh, campaign-gen.sh, campaign-attr.sh, summarize.py; read how TPS is taken: runtron "average tok/s" over ALL generated tokens, so the mean context during the measured decode is prompt + generated/2 approximately - confirm from the log lines "Generating N response tokens with M context"). For every llama-8b cell: arm, binary/commit and its AMX state (base eb2de0265a = main before PR #3879 = no AMX code; mid c7844ca2ce = main after #3879 with AMX compiled? check the build flags in build.sh: was TRON_AMX_DISPATCH ON for mid and target?; p3879 = 3fd5edaa66; target = PR #4424 head ff680c8020 = AMX + VNNI K), users (8), prompt (1024), generated (256 or 1536), rep, TPS, TTFT. Then the paired gains the campaign's own summarize.py reports for llama-8b (block A +2.0 %, block C +17.0 %, block D main +3.0 % / #4424 -1.1 %) with t values. State clearly what the +17.0 % at 1536 tokens compares (which two binaries, both AMX states) and what the mean context per user was during that measurement.` },
+  { key: 'l8bload-and-ci', prompt: `${COMMON}
+Task: extract the exact llama-3.1-8b cells of (1) ${ROOT}/exec/results/l8bload-20260918/ (cells/<U>u__<arm>__rep<N>/, summary.json, report.html; rinzler + CI harness, 2 engines, users per engine 2/4/8, prompt 1024, 1536 generated, TPS window tokens 896-1024, arms off = kill switch / on; binary = PR #4424 package 2026.09.18-29a8a547 = AMX + VNNI K compiled), (2) ${ROOT}/exec/results/more-testing-r1/ (llama-8b good, 8 users, one engine, prompt 1024, 1536 generated, arms off/canon/mirror; find the TPS values and what "off" was: kill switch or a no-AMX build?), (3) ${ROOT}/exec/results/ci-mimic-20260918/ and canon-ci-20260918/ (nightly layout, 4 engines, 8 users total = 2 per engine: base nightly deb without AMX code, target PR #4424 deb, canon canonical deb; llama-8b TPS per arm and the paired t), (4) ${ROOT}/exec/results/p0perf-20260911/ (was llama-8b in it? if not, say so), (5) the nightly reference exec/results/ci-mimic-20260918/reference/nightly_stats.json llama-8b 13-night mean and sd. Also compute and record, per cell, the mean context per user inside the TPS window: prompt 1024 + generated tokens 896..1024 -> about 1920 to 2048 tokens per user; and the total KV tokens per engine per decode step = users per engine x that context. Give the per-round TPS lists if summary files hold them (for the spread).` },
+]
+
+const sweeps = await parallel(sweepPrompts.map(s => () =>
+  agent(s.prompt, { label: `sweep:${s.key}`, phase: 'Sweep', schema: SWEEP_SCHEMA })
+    .then(r => ({ key: s.key, ...r }))))
+const sweepData = sweeps.filter(Boolean)
+log(`sweep done: ${sweepData.length}/${sweepPrompts.length} agents returned, ${sweepData.reduce((n, s) => n + s.datasets.length, 0)} datasets`)
+
+phase('Analyze')
+const DATA = JSON.stringify(sweepData, null, 1)
+
+const pageText = `The page under discussion is ${ROOT}/PR3879/new-PRs/PR1/CI-AMX-test-shapes.html (strip tags with python to read it; generator ${ROOT}/exec/canon-ci-20260918/gen_ci_shapes.py). Its section 1 says: "The kernel speeds up attention only ... Attention's share of a decode step grows with the number of users per engine times the context per user." Its section 4 row "longer prompts (4096 or 8192 tokens)" says: "Data F (runtron, qwen-3-4b, 8 users, canonical kernel against a binary without AMX code): +19.0 % at prompt 2048, +17.5 % at prompt 8192 ... Longer prompts give no larger gain than more users: on qwen-3-4b with runtron (data F, a different model and tool than the llama-8b harness shape) the gain at prompt 8192 is no larger than at prompt 2048. The plain ShareGPT path cannot reach those lengths (prune_convo fails 78 of 80 conversations at 4096, 80 of 80 at 8192) ... See T2." It recommends ONE new nightly config: llama-3.1-8b good tp2 at 32 users = 8 users per engine on 4 engines, prompt 1024, 1536 generated, based on data A (+12.9 % at 8 users per engine vs +0.2 % at 2).
+jhan (the user, owner of the AMX work) objects: "The projected perf boost is 12.9 % with 32 users on llama3.1-8b. But qwen3-4b achieved 19 % boost of 8 users as recorded in Data F, prompt length 2k. In the test of Data F, how's Llama3.1-8b? We have been holding a notion for a long time, AMX needs longer contexts to show its effect. Now I see you are deserting this stand and embrace more users -> better AMX. This does not make sense. I think you deserted longer context because ... qwen3-4b's AMX is significantly worse than FPGA attention, but if we just compare to sw attention, it is 19 % boost at 2k prompt. So we should not use this fact to deny longer prompt does not help, they are unrelated."`
+
+const ANALYSIS_SCHEMA = {
+  type: 'object',
+  properties: {
+    findings: { type: 'array', items: { type: 'object', properties: {
+      claim: { type: 'string' },
+      evidence: { type: 'string', description: 'file paths and the exact numbers used' },
+      confidence: { type: 'string', enum: ['measured', 'derived', 'hypothesis', 'insufficient data'] },
+      measurement_that_would_settle_it: { type: 'string' },
+    }, required: ['claim', 'evidence', 'confidence'] } },
+    table_rows: { type: 'array', items: { type: 'object', properties: {
+      model: { type: 'string' }, tool: { type: 'string' }, users_per_engine: { type: 'string' }, context_per_user_at_measurement: { type: 'string' }, kv_tokens_per_engine_step: { type: 'string' }, gain_pct: { type: 'string' }, denominator_kind: { type: 'string' }, source: { type: 'string' } }, required: ['model', 'users_per_engine', 'context_per_user_at_measurement', 'gain_pct', 'denominator_kind', 'source'] } },
+    summary: { type: 'string' },
+  },
+  required: ['findings', 'summary'],
+}
+
+const analyses = await parallel([
+  { key: 'mechanism', prompt: `${COMMON}
+${pageText}
+You are the mechanism analyst. Data from the sweep agents (JSON): ${DATA}
+Tasks:
+1. Build one table of EVERY llama-3.1-8b AMX-gain measurement with: tool, users per engine, context per user at the measurement (for CI-harness cells: prompt + tokens 896..1024 -> use the midpoint 1024+960 = 1984; for runtron "average tok/s" over N generated tokens: prompt + N/2), total KV tokens per engine per decode step (users x context), gain %, denominator kind, source. Include the qwen Data F rows as a second model in the same table (1 user and 8 users, prompt 256..32768).
+2. Test the hypothesis "the two levers (more users per engine, longer context per user) are one mechanism: the gain depends on users x context (attention work per step)". Plot mentally gain vs KV tokens per engine step per model. Say whether the llama-8b points form one monotone curve; name the outliers and what differs in them (tool, denominator, binary, layout).
+3. List the ways the two levers are NOT equivalent, each with evidence or marked hypothesis: (a) the dense part (matmuls on the FPGA cards for llama) grows with batch/users but not with context, so more users dilutes attention share less than... or more than... reason it out with the TPS drop 141.6 -> 70.1 per user at 2 -> 8 users; (b) per-user parallelism: attention workers split work per user/head/page; (c) memory bandwidth: KV bytes per step for llama-8b tp2 (32 layers, 8 KV heads, head 128, bf16 K and V; check the tp2 split of KV heads if a source says so) at 8 x 2K vs 2 x 8K are equal; the cache regime (per-user KV of 2K tokens = ? MiB fits L2/L3? L3 per socket on Xeon 6962P per the memory note delphi-3bda-hardware.md); (d) the partial tail page (last <64-token page is always AVX) is one per user per layer per KV head: 8 users have 4x the tail pages of 2 users at the same total KV tokens; (e) the qwen 8-user canonical plateau 2048 -> 8192 (+19.0 -> +17.5) vs the 1-user rise (+5.0 -> +18.0): what does that say about a saturation at large KV tokens per step, and where would 8 users x 2K (16K KV tokens) and 2 users x 8K sit on it.
+4. Answer directly: "In Data F, how's llama-8b?" (is there any llama-8b cell in Data F or in any runtron prompt-length series? If none: say Insufficient data and name the closest existing data: wedperf block C 8 users 256 vs 1536 generated tokens.)
+Return findings with confidence labels and the table rows.` },
+  { key: 'critique-page', prompt: `${COMMON}
+${pageText}
+You are an adversarial critic of the PAGE. Data from the sweep agents (JSON): ${DATA}
+Read the page (strip tags). Attack its reasoning about longer prompts and its choice of the users lever. Questions to answer with evidence:
+1. Is "Longer prompts give no larger gain than more users" supported by Data F? Data F compares prompt 2048 vs 8192 at 8 users on qwen. The nightly is at prompt 1024. What does Data F say for 1024 -> 2048 -> 4096 (the 1-user curve: +1.7 -> +5.0 -> +14.9 %)? Is the sentence a cross-model, cross-tool, cross-denominator comparison? Is it a non sequitur (the comparison "longer prompts vs more users" was never measured on one model)?
+2. Does the page contradict the long-held thesis "AMX needs longer contexts to show its effect"? Or does section 1 actually state the unified mechanism (users x context) and the page merely picks the lever the harness can pull? Quote the page.
+3. Did the page state clearly that no llama-8b measurement exists at prompt 2048/4096/8192, and that the context lever for llama-8b is untested except through generated length (wedperf block C)? If not, that is a defect: name it.
+4. Is the practical reason (prune_convo fails at 4096/8192 with ShareGPT) sufficient to demote the context lever to "optional T2"? What alternatives exist in the harness (shared_prompt_length path used by llama-3b; a different prompt source; a synthetic prompt)? Check systems_test code at ~/workspace/ai-runs/systems_test (testlib/prompt.py, scripts/perf.py) for how shared_prompt_length works and whether it could give prompt 4096 without pruning failures.
+5. Anything else wrong or overstated in the page's treatment of the qwen data (e.g., "qwen-3-4b CPU attention -20 % vs FPGA" being used as a reason against long prompts - is it? the user thinks the two were conflated; check whether the page actually conflates them or keeps them separate).
+Return findings ranked by severity, each with the exact page sentence, what is wrong, and a corrected sentence.` },
+  { key: 'critique-user', prompt: `${COMMON}
+${pageText}
+You are an adversarial but fair critic of the USER's argument. Data from the sweep agents (JSON): ${DATA}
+Questions:
+1. The user contrasts "12.9 % with 32 users on llama-8b" against "qwen-3-4b 19 % at 8 users, prompt 2k (Data F)". Are these two shapes actually different levers? Both are 8 users per engine at about 2K context per user (data A: 8 users, prompt 1024 + ~960 generated tokens; data F 8u cell: 8 users, prompt 2048 + 128 mean generated). Compute both KV-tokens-per-engine-step values. If they are the same shape, then the 19 vs 12.9 difference is model + tool + denominator (clean binary vs kill switch; runtron vs rinzler+CI harness; qwen 36 layers vs llama 32 layers; qwen dense on FPGA at 4B vs llama at 8B), not "context vs users". Say so plainly if true, with numbers.
+2. Does the user's memory of the 19 % cell as a "longer context" result hold? At 8 users, Data F's canonical gain is +19.0 % at prompt 2048 and +17.5 % at prompt 8192 - flat. At 1 user it rises +5.0 -> +18.0 -> +27.6 % (2048 -> 8192 -> 32768, mirror, pinned pair). Which of these supports "AMX needs longer contexts"? Both? Explain what the 8-user plateau means.
+3. The user says the page dropped the context lever because "qwen's AMX is worse than FPGA attention". Check the page: is the -20 % vs FPGA argument used against qwen-CPU-attention as a CONFIG (section 4 row 2) or against longer prompts (row 5)? Are they separate rows? Be precise.
+4. Where is the user RIGHT? (a) no llama-8b context-axis measurement exists, so the page had no basis to rank the levers for llama-8b; (b) the "no larger gain" sentence is a cross-model inference; (c) the long-context story is the one the team has told (check PR3879/make-sense-amx-vs-avx.html and the Notion primer memory primer-one-page.md) and a CI shape that shows AMX at long context would be the consistent story. Anything else?
+5. What is the most defensible position: (i) both levers act through attention share; (ii) for CI the users lever is one line in perf.py while the context lever needs a prompt-source change; (iii) BOTH shapes could be filed; (iv) before ranking, run a llama-8b runtron prompt-length series (1024/2048/4096/8192 at 2 and 8 users, kill switch AND clean nightly deb as denominators) - about how long would that take on our half of 3bda given the wedperf cell durations in the data?
+Return findings with confidence labels.` },
+  { key: 'measurement-design', prompt: `${COMMON}
+${pageText}
+You are the measurement designer. Data from the sweep agents (JSON): ${DATA}
+Design the cheapest measurement that settles "for llama-3.1-8b good tp2, how does the AMX gain depend on prompt length at fixed users, and does it match the users lever at equal KV tokens per engine step?". Constraints: delphi-3bda; our half = socket 1, cards 90/93/b9/bc (see memory 3bda-shared-with-bill.md and exec/bill-share.sh); the nightly CI holds /run/lock/systems-test-ci.lease from 03:30 UTC for about 7h40m (now 2026-09-19 05:2x UTC, so CI is running: nothing can run until about 11:30-13:20 UTC); campaign_guard_acquire in exec/lib-guard.sh; never run a real-driver tron without --instance. Reusable scripts: exec/wedperf-20260916/campaign-gen.sh (runtron cells, GEN_LEN parameter, prompt fixed at 1024 - find the line to parameterize), exec/l8bload-20260918/ (rinzler + CI harness, users parameter), exec/canon-ci-20260918/ (deb-based rinzler, whole machine). Binaries that exist on 3bda: nightly deb 2026.09.18-3faba6d0 (no AMX code), canonical deb 2026.09.18-0594dc54-jhan-ci-canon (AMX, no PR 4424) at /var/tmp/jhan/canon-ci-20260918/, runtron builds in /var/tmp/jhan/tron-pre3879, tron-pr4424, tron-p3879 (check exec/wedperf-20260916/build.sh for the flags; the memory note says these were built with -DBUILD_PRODUCTION_MODELS=ON; were they built with TRON_AMX_DISPATCH=ON?). 
+Deliver: (1) the cell grid (users x prompt x arms x reps) with a justification of each axis; recommended: users 2 and 8, prompt 1024/2048/4096/8192, arms = no-AMX binary, canonical with kill switch, canonical on (3 arms give both denominators), 3 reps, 1536 generated tokens? or 256? - argue which generated length (CI uses 1536 with a 896-1024 window; runtron averages over all generated tokens; a shorter generation keeps the context near the prompt value, a longer one drifts it by generated/2) and whether to use runtron (one engine, no proxy) or rinzler + CI harness (data-A method; the CI harness's prompt_length would need prune-safe prompts: prune fails at 4096 with ShareGPT -> runtron with --prompt-length is the only path to 4096/8192 today); (2) per-cell duration estimate from the wedperf block C llama-8b durations in the data (mark est.), total wall time; (3) the acceptance criteria and the decision rule (paired t over reps, 1 % floor); (4) what the result decides: if the gain at 2 users x prompt 8192 equals the gain at 8 users x prompt 1024 within 3 points, the levers are one mechanism and the CI choice is purely practical; if the context lever gives more, the page must offer a long-context shape as a peer recommendation; (5) the exact script changes (file, line, variable) needed, without making them; (6) risks and traps from the memory notes (NFS attr cache, runtron RUNPATH $ORIGIN, pgrep self-match, Monitor tail on NFS, hugepages).
+Return findings (each design decision as a finding with evidence) and a summary.` },
+].map(a => () => agent(a.prompt, { label: `analyze:${a.key}`, phase: 'Analyze', schema: ANALYSIS_SCHEMA }).then(r => ({ key: a.key, ...r }))))
+
+const out = { sweeps: sweepData, analyses: analyses.filter(Boolean) }
+log(`analysis done: ${out.analyses.length}/4 agents returned`)
+return out
