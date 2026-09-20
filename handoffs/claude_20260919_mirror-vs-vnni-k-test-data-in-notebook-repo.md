@@ -120,6 +120,15 @@ No git commit was made in this session. No file in the notebook was added or cha
 
 Preserved by the 2026-09-20 handoff run: 31 files named in this section are mirrored under `artifacts/intel-amx/` and `artifacts/tron/` (registry: `artifacts/intel-amx/README.md` and `artifacts/tron/README.md`, 2026-09-20 batch). Workflow scripts were first copied from the Claude session store into their campaign folder (`relocate:` rule).
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/vnnied-k-in-place/status/block-store-animation.html`:
+  - generator: `artifacts/intel-amx/vnnied-k-in-place/exec/block-store-animation/gen_page.py`
+  - input: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/exec/block-store-animation/token21.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/exec/block-store-animation/block.json`
+  - input built by: `artifacts/intel-amx/vnnied-k-in-place/exec/block-store-animation/build-gt.sh`, `artifacts/intel-amx/vnnied-k-in-place/exec/block-store-animation/gt.cpp`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/exec/block-store-animation/` (2 left behind (regenerable from preserved program and pinned Git source)); `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/exec/block-store-animation/shim/common/numerics/` (2 preserved). Full inventory: `artifacts/intel-amx/vnnied-k-in-place/status/block-store-animation.html.lineage.md`.
+  - regenerate: unavailable; the two generated layout inputs are deliberately omitted as regenerable. Rebuilding them needs k_vnni.hpp from the external Git worktree pinned at 04ffeedccb. No generator check was run.
+
 ## Results
 
 No performance test ran in this session and no power was captured. The numbers below are the cross-check's counts, each traced to a command in the transcript or to the verification Workflow's journal, except the two exact byte counts marked "recomputed 2026-09-20".

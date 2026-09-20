@@ -47,6 +47,8 @@ All times 2026-09-15, US Pacific.
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/8fe7ef6d-8594-4265-8524-a6107e65c691/scratchpad/scan.sh (preserved: artifacts/dev-machines/github-reviewer-removals-scan.sh) (1359 bytes, the paginated GraphQL scanner), removals.jsonl (27722 bytes, 123 events), axch_detail.jsonl (5493 bytes). All verified on disk 2026-09-18. The scratchpad is volatile.
 - Data source: GitHub GraphQL timeline of positron-ai/tron. Other positron-ai repos were not scanned.
 
+- Session-store script relocation (2026-09-20 metadata): `claude-agentsrv:/home/jhan/workspace/random/exec/workflows/github-reviewer-removals-scan.sh` is the proposed canonical for `artifacts/dev-machines/github-reviewer-removals-scan.sh` (1359 bytes; SHA256 `6b3e9af894b2da1eee4f8114d78750da306dd24f8c928fe1a2ea49a639b5359a`). Origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/8fe7ef6d-8594-4265-8524-a6107e65c691/scratchpad/scan.sh`. The repository bytes are unchanged; move the canonical copy only after approval.
+
 ## Results
 
 No performance test ran. The result is a count from GitHub data.

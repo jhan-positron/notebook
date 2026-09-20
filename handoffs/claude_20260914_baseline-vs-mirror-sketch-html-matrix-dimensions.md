@@ -68,6 +68,8 @@ All times 2026-09-14, US Pacific.
 - SVG generator: claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX/d5572a41-5bae-4bce-87ed-3285768e6e77/scratchpad/gen_sec2.py (preserved: artifacts/intel-amx/pr3879/gen_sec2.py) (12505 bytes, still on disk 2026-09-18, session scratchpad so it may disappear). Same folder: new_sec2.svg (the final SVG), baseline-vs-mirror-sketch.orig.html (pre-edit backup), render PNGs.
 - Workflow scripts: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879/d5572a41-5bae-4bce-87ed-3285768e6e77/workflows/scripts/verify-shape-lines-wf_06d6f44c-961.js and verify-shape-lines-round2-wf_27ed3ada-8fe.js. Agent journals under /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/d5572a41-5bae-4bce-87ed-3285768e6e77/subagents/workflows/.
 
+- Session-store script relocation (2026-09-20 metadata): `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/gen_sec2.py` is the proposed canonical for `artifacts/intel-amx/pr3879/gen_sec2.py` (12505 bytes; SHA256 `b67c9250b68ddce0436fc7f2bf747f30fd5fa3bda122d3531416d38a93427749`). Origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX/d5572a41-5bae-4bce-87ed-3285768e6e77/scratchpad/gen_sec2.py`. The repository bytes are unchanged; move the canonical copy only after approval.
+
 ## Results
 
 No benchmark ran. The deliverable is a set of code facts. The shapes now written in the diagram, all confirmed against 60d66d9c04 (bf16 unless fp32 is stated):

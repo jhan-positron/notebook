@@ -74,6 +74,15 @@ Inputs read (all verified on disk on 2026-09-18):
 
 Session scratchpad (session-specific, may be deleted): claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place/5ff04f1c-15e1-4f0a-bcb0-9a3fded8ef0e/scratchpad/short-version.md (the text under review), pr-body.live.md (the live PR body at 20:53 PT), bullets-rewrite.md (the draft bullets).
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/vnnied-k-in-place/status/Monday-morning-report.html`:
+  - generator: `artifacts/intel-amx/exec/vnnik-20260914/gen_report.py`
+  - input: `artifacts/intel-amx/exec/results/vnnik-20260914/summary.json`
+  - input built by: `artifacts/intel-amx/exec/vnnik-20260914/summarize.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik-20260914/` (60 left behind (duplicate, compact copy named in inventory), 14 preserved). Full inventory: `artifacts/intel-amx/vnnied-k-in-place/status/Monday-morning-report.html.lineage.md`.
+  - regenerate: unavailable; generator reads live git history and remote /var/tmp files; no preserved-only regeneration command. The input builder reads rt/*.log, whose measured request payloads are retained by rt-results.txt in the existing mirror-page inventory.
+
 ## Results
 
 No benchmark ran in this session. The numbers below are the measurements the proofread cited, with their source files. Power (PkgWatt, RAMWatt) was not part of those campaigns' summaries.

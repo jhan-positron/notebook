@@ -60,6 +60,15 @@ No file was created or modified. Files located, all verified on disk 2026-09-18:
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/handoff-Saturday.md, handoff-Sunday.md, Monday-handoff.md (work-state handoffs for the PR 3879 split, they reference the guard doc)
 - Sources for the gpt-oss shape: claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/router/p1a-u1-ctx2048-rep8-off.txt line 101 (20b) and gptoss120b-attempt-full.txt line 102 (120b), plus tron-amx-distilled.html line 3377.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/tron-amx-distilled.html`:
+  - generator: `artifacts/intel-amx/generators/gen_distilled.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/01-amx-rampup.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/02-tron-decode-amx-plan.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/2026-08-19-amx-status.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/pr-rampup.html` (1 preserved). Full inventory: `artifacts/intel-amx/tron-amx-distilled.html.lineage.md`.
+  - regenerate: unavailable; generator writes the canonical page unconditionally; no output-path argument
+
 ## Results
 
 No test ran. The facts answered, with their sources:

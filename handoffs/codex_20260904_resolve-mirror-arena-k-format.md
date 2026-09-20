@@ -44,6 +44,15 @@ All following canonical artifacts are on **claude-agentsrv**:
 
 No production change, commit, push, or GitHub comment was made in this chat. The commit hashes above identify audited source revisions.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx-single-k/single-K.html`:
+  - generator: `artifacts/intel-amx-single-k/single-k-evidence/build_report.py`
+  - input: `artifacts/intel-amx-single-k/single-k-evidence/report-results.html`
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879-codex/single-k-evidence/` (3 preserved, 2 proposed preservation). Full inventory: `artifacts/intel-amx-single-k/single-K.html.lineage.md`.
+  - regenerate: unavailable; build_report.py has no output-path argument and writes the parent single-K.html unconditionally. The report-results.html input is authored. Source archives at pinned Git revisions are excluded as already in Git.
+
 ## Current state
 
 The completed report concludes that **a single persistent swizzled CPU K is technically viable**, with a storage-interface migration and native pagewise AVX readers. FPGA transfers already use a separate GOF shuffle buffer, so direct layout-aware reads can feed the existing hardware format. The mirror’s rationale is migration scope and performance risk, rather than an ISA or FPGA requirement for canonical CPU K.

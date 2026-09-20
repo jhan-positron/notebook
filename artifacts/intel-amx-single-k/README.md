@@ -16,3 +16,22 @@ Canonical files remain authoritative. Refresh canonical → mirror; do not hand-
 | [single-k-evidence/check_bill_layout.py](single-k-evidence/check_bill_layout.py) | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879-codex/single-k-evidence/check_bill_layout.py` | Historical/current layout and GOF address check Related: [codex_20260904_resolve-mirror-arena-k-format.md](../../handoffs/codex_20260904_resolve-mirror-arena-k-format.md). |
 
 The report and generators retain canonical source/evidence links. Git-derived source archives, binaries, raw logs and generated validation JSON are intentionally not mirrored; those links require the original workspace or reproduction at the pinned Git revisions. `report-results.html` is an authored generator fragment; its body remains a fragment after the renderer comment. The preserved PDF and authored files retain their original relative layout.
+
+## Generated-report lineage backfill (2026-09-20)
+
+These entries record the source inventory and regeneration limits for existing report pages. Canonical files remain authoritative. Companion inventories are repo-primary metadata.
+
+### Source files
+
+| Repo path | Canonical path | Role | Bytes |
+|---|---|---|---|
+| [`single-k-evidence/single_k_probe.run.log`](single-k-evidence/single_k_probe.run.log) | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879-codex/single-k-evidence/single_k_probe.run.log` | source | 1159 |
+| [`single-k-evidence/single_k_probe.sanitizer-run-no-leak.log`](single-k-evidence/single_k_probe.sanitizer-run-no-leak.log) | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879-codex/single-k-evidence/single_k_probe.sanitizer-run-no-leak.log` | source | 715 |
+
+### single-K.html
+
+- generator: `artifacts/intel-amx-single-k/single-k-evidence/build_report.py`
+- input: `artifacts/intel-amx-single-k/single-k-evidence/report-results.html`
+- input built by: none
+- sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879-codex/single-k-evidence/` (3 preserved, 2 proposed preservation). Full per-file inventory: [single-K.html.lineage.md](single-K.html.lineage.md).
+- regenerate: unavailable; build_report.py has no output-path argument and writes the parent single-K.html unconditionally. The report-results.html input is authored. Source archives at pinned Git revisions are excluded as already in Git.

@@ -73,6 +73,27 @@ Repos, commits, PRs:
 - https://github.com/positron-ai/tron/issues/3997 — tracking issue for the missing AMX CI configuration
 - https://github.com/jhan-positron/notebook — commit `f3d1ee4` on main: `artifacts/intel-amx/intel-amx.md` (archived copy of the removed doc at `a5ef65761`)
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/pr3879/alexey-review.html`:
+  - generator: `artifacts/intel-amx/exec/review-pipeline/gen_review6.py`
+  - input: `artifacts/intel-amx/exec/review-pipeline/r6/round5_comments.json`, `artifacts/intel-amx/exec/review-pipeline/r6/status.json`, `artifacts/intel-amx/exec/review-pipeline/r6/carry.json`, `artifacts/intel-amx/exec/review-pipeline/r6/round6_data.py`, `artifacts/intel-amx/pr3879/triage.json`
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/review-pipeline/r6/` (4 preserved). Full inventory: `artifacts/intel-amx/pr3879/alexey-review.html.lineage.md`.
+  - regenerate: unavailable; generator has no output-path argument and requires a clean live tron-amx worktree at 3fa11d911cbb3741db9d94c9953c3b51b53f740f. Code snippets already in Git are not mirrored.
+- `artifacts/intel-amx/pr3879/alexey-review-4.html`:
+  - generator: `artifacts/intel-amx/exec/review-pipeline/gen_review4.py` (preserved)
+  - input: `artifacts/intel-amx/exec/review-pipeline/r4/` (preserved authored inputs and collected records). The generator also reads the live reviewed tron worktree.
+  - input built by: `exec/review-pipeline/r4/build_status.py` combines the review workflow journal with `r4/round3_comments.json`. `r4/round4_data.py` is authored content.
+  - sources: `exec/review-pipeline/r4/`: preserved authored status, comments, round data, and collected records. Raw review journal/agent transcripts: left behind (provenance). These authored reviews are not deterministic benchmark runs. Full inventory: `artifacts/intel-amx/pr3879/alexey-review-4.html.lineage.md`.
+  - regenerate: unavailable (The generator reads a live tron worktree at d176c88b3 plus an uncommitted document. r4/round4_data.py also uses a missing absolute scratch path. The pipeline README says later response blocks were inserted by hand.). regenerate unverified (fixed output paths and historical live-worktree requirements).
+- `artifacts/intel-amx/pr3879/alexey-review-5.html`:
+  - generator: `artifacts/intel-amx/exec/review-pipeline/gen_review5.py` (preserved)
+  - input: `artifacts/intel-amx/exec/review-pipeline/r5/` (preserved authored inputs and collected records). The generator also reads the live reviewed tron worktree.
+  - input built by: `exec/review-pipeline/r5/build_status5.py` combines the workflow journal and agent prompt transcripts with `round4_comments.json` and `changed_items.json`. `round5_data.py` is authored content.
+  - sources: `exec/review-pipeline/r5/`: preserved authored status, comments, round data, and collected records. Raw review journal/agent transcripts: left behind (provenance). These authored reviews are not deterministic benchmark runs. Full inventory: `artifacts/intel-amx/pr3879/alexey-review-5.html.lineage.md`.
+  - regenerate: unavailable (The generator requires the tron worktree at 234c02bde4bd41700dde901438ad4bddfca15943 and writes the current canonical review and Markdown output with no output-path option.). regenerate unverified (fixed output paths and historical live-worktree requirements).
+
 ## Current state
 
 - Round-6 review files are current for head `3fa11d911`: 61 open comments, 0 blockers, verdict CHANGES_REQUESTED (the remaining block is comment sentences that do not match the code). Every item in the blocking list carries a Suggested fix block; R1-10 also carries the explanation sub-section.

@@ -88,6 +88,15 @@ advantages. Caveat stated in memory: the study covers a single Tuesday.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/alpha-vs-sw-dev-01-load-study.md
   — project-memory summary of the study.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/dev-machines/loadmon/report.html`:
+  - generator: `artifacts/dev-machines/loadmon/build_report.py`
+  - input: `claude-agentsrv:/home/jhan/workspace/random/loadmon/summary.json`
+  - input built by: `artifacts/dev-machines/loadmon/analyze.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/random/loadmon/alpha.csv` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/random/loadmon/summary.json` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/random/loadmon/sw-dev-01.csv` (1 proposed preservation). Full inventory: `artifacts/dev-machines/loadmon/report.html.lineage.md`.
+  - regenerate: unavailable; build_report.py has no output-path argument and unconditionally writes a session scratchpad path as well as report.html.
+
 ## Current state
 
 - Both samplers exited on their own; no loop, cron, or Monitor is still

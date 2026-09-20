@@ -139,6 +139,21 @@ the generator script on 2026-08-23).
   - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f/scratchpad/tpl-gptoss.html
   - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f/scratchpad/tpl-qwen.html
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/common-knowledge/weights-bytes-gpt-oss-120b.html`:
+  - generator: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f/scratchpad/gen_weights_pages.py` — left behind (missing on 2026-09-20)
+  - input: `/tmp/claude-0/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f/scratchpad/gptoss-{config,index,tensors}.json` and `/tmp/claude-0/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f/scratchpad/tpl-gptoss.html` — left behind (missing on 2026-09-20)
+  - input built by: Inline Python in the recorded session downloaded the checkpoint headers and wrote the tensor JSON. The exact command is recorded at `/home/jhan/.claude/projects/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f.jsonl:269`. No separate builder file was created by that command.
+  - sources: Downloaded config, index, and tensor-header records: left behind (missing on 2026-09-20). The public model URLs used `main`, without a pinned revision. These are checkpoint storage counts, not runtime benchmark measurements. Full inventory: `artifacts/common-knowledge/weights-bytes-gpt-oss-120b.html.lineage.md`.
+  - regenerate: unavailable (generator, template, and downloaded input records are missing; the page also received later direct edits). regenerate unverified (missing inputs).
+- `artifacts/common-knowledge/weights-bytes-qwen2.5-32b.html`:
+  - generator: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f/scratchpad/gen_weights_pages.py` — left behind (missing on 2026-09-20)
+  - input: `/tmp/claude-0/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f/scratchpad/qwen-{config,index,tensors}.json` and `/tmp/claude-0/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f/scratchpad/tpl-qwen.html` — left behind (missing on 2026-09-20)
+  - input built by: Inline Python in the recorded session downloaded the checkpoint headers and wrote the tensor JSON. The exact command is recorded at `/home/jhan/.claude/projects/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f.jsonl:269`. No separate builder file was created by that command.
+  - sources: Downloaded config, index, and tensor-header records: left behind (missing on 2026-09-20). The public model URLs used `main`, without a pinned revision. These are checkpoint storage counts, not runtime benchmark measurements. Full inventory: `artifacts/common-knowledge/weights-bytes-qwen2.5-32b.html.lineage.md`.
+  - regenerate: unavailable (generator, template, and downloaded input records are missing; the page also received later direct edits). regenerate unverified (missing inputs).
+
 ## Current state
 
 - kv-head-vs-query-head.html: all this session's changes committed and

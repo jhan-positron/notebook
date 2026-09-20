@@ -74,6 +74,15 @@ Inputs a resumer needs (not created here):
 - Related pages from the parallel session: `new-PRs/PR1/reviews/amx_qpack-2-attn_accum.html` and `new-PRs/PR1/reviews/range_hint.html` under the project directory.
 - Pack cost measurement: claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/jeremy-measure-20260831/bench-qpack.txt lines 8 to 10.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/pr3879/PR-open-comments.html`:
+  - generator: `/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879/a32b231a-3e77-4d83-a47b-e3c9f7bd7660/scratchpad/gen_page.py` — left behind (missing on 2026-09-20)
+  - input: The 13 `final-*.json` item records, `page-extra.json`, `threads-p1.json`, and the Ben/Wade quoted-review captures in the session scratch directory — left behind (missing on 2026-09-20).
+  - input built by: Claude drafting/refutation/reconciliation workflows authored and revised the final records. `page-extra-static.py` wrote static glossary/method content. Later commands changed the records and generator through the final session.
+  - sources: Scratch inputs and source captures: left behind (missing on 2026-09-20). Code identity is linked to tron PR #3879 and commits 26a0338c3b, 524c510609, and 4290402491. No replacement data is inferred from current GitHub state. Full inventory: `artifacts/intel-amx/pr3879/PR-open-comments.html.lineage.md`.
+  - regenerate: unavailable (the generator and final authored input records are missing). regenerate unverified (missing inputs).
+
 ## Results
 
 Build and test runs on delphi-3bda for the three edits (from the `split-w3edits*` result files). "Assertions/cases" is the Catch2 count printed by each test binary. No performance test was run, so there are no throughput or power numbers.

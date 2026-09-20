@@ -94,6 +94,15 @@ Pages and notes:
 
 On delphi-3bda (not verified from this machine): /var/tmp/jhan/tron-vnnik2, /var/tmp/jhan/tron-vnnik3, /var/tmp/jhan/blk, /var/tmp/jhan/cabal-test-details.txt.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/vnnied-k-in-place/status/store-remedies-report.html`:
+  - generator: `artifacts/intel-amx/exec/vnnik2-20260915/gen_report.py`
+  - input: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-20260915/summary.json`, `artifacts/intel-amx/exec/results/vnnik-20260914/summary.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-confirm-20260915/summary.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik-trace-20260914/analysis.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-20260915/analysis.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-confirm-20260915/analysis.json`
+  - input built by: `artifacts/intel-amx/exec/vnnik2-20260915/summarize.py`, `artifacts/intel-amx/exec/vnnik-trace-20260914/analyze.py`, `artifacts/intel-amx/exec/vnnik-trace-20260914/lanes.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik-20260914/` (60 left behind (duplicate, compact copy named in inventory), 2 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik-trace-20260914/` (2 left behind (size), 7 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-20260915/` (84 left behind (duplicate, compact copy named in inventory), 5 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-confirm-20260915/` (12 left behind (duplicate, compact copy named in inventory), 5 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-20260915/` (4 left behind (size), 5 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-confirm-20260915/` (1 proposed preservation). Full inventory: `artifacts/intel-amx/vnnied-k-in-place/status/store-remedies-report.html.lineage.md`.
+  - regenerate: unavailable; generator accepts OUT but hard-codes all input directories and campaign markers. No supported invocation redirects all reads to preserved copies. Original traces are inventoried through each analysis.json trace field.
+
 ## Results
 
 Perfetto measurement (`exec/results/vnnik-trace-20260914/analysis.md`, qwen3-4b, 8 users, prompt 1024, mean over 8 passes of each kind):

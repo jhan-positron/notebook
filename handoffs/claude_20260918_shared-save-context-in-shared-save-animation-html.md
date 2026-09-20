@@ -85,6 +85,15 @@ All on claude-agentsrv. Sizes are those on disk on 2026-09-18.
 - Not preserved: the page is not in the notebook repo (checked /home/jhan/workspace/notebook/artifacts/intel-amx/VNNIed-K-in-place/status/ on 2026-09-18).
 - Workflow outputs (session-specific): /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place/0448d137-2e5e-4b50-a7fc-6044c04a098a/tasks/wwacjkrux.output and w9q2vhag7.output, with compact lists in the scratchpad (confirmed.txt, confirmed2.txt).
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/vnnied-k-in-place/status/shared-save-animation.html`:
+  - generator: `artifacts/intel-amx/vnnied-k-in-place/exec/shared-save-animation/gen_page.py`
+  - input: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/exec/shared-save-animation/layout.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/exec/shared-save-animation/units.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/exec/shared-save-animation/savek_spans.json`
+  - input built by: `artifacts/intel-amx/vnnied-k-in-place/exec/shared-save-animation/window_layout.cpp`, `artifacts/intel-amx/vnnied-k-in-place/exec/shared-save-animation/cut_units.py`, `artifacts/intel-amx/vnnied-k-in-place/exec/shared-save-animation/savek_spans.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/exec/shared-save-animation/` (2 left behind (regenerable from preserved program and pinned Git source), 1 preserved, 1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik-trace-20260914/` (2 left behind (size), 7 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-20260915/` (84 left behind (duplicate, compact copy named in inventory), 2 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-20260915/` (4 left behind (size), 13 proposed preservation). Full inventory: `artifacts/intel-amx/vnnied-k-in-place/status/shared-save-animation.html.lineage.md`.
+  - regenerate: unavailable; generator and context_sections.py hard-code trace/result paths. Layout and units are derived from preserved programs, so they are listed as regenerable instead of newly mirrored.
+
 ## Results
 
 No test or benchmark ran in this session. Power was not captured. Every number below was read from files measured on 2026-09-14 and 2026-09-15 on delphi-3bda (qwen3-4b, 8 users, prompt 1024) and recomputed by the page generators.

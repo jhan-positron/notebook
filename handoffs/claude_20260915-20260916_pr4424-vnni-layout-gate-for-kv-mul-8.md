@@ -95,6 +95,15 @@ Memory (verified): claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-worksp
 
 No tron code was changed. PR 4424 was not edited.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/vnnied-k-in-place/status/Wednesday-morning-report.html`:
+  - generator: `artifacts/intel-amx/exec/vnnik6-20260916/gen_report.py`
+  - input: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-20260916/summary.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-oldbase-20260916/summary.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-trace-20260916/analysis.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-trace8192-20260916/analysis.json`, `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-trace2048-20260916/analysis.json`
+  - input built by: `artifacts/intel-amx/exec/vnnik6-20260916/summarize.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik5-20260916/` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-20260916/` (54 left behind (duplicate, compact copy named in inventory), 5 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-oldbase-20260916/` (12 left behind (duplicate, compact copy named in inventory), 2 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-trace-20260916/` (6 left behind (size), 1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-trace2048-20260916/` (2 left behind (size), 1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik6-trace8192-20260916/` (2 left behind (size), 1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/vnnik6-20260916/sections/` (3 preserved). Full inventory: `artifacts/intel-amx/vnnied-k-in-place/status/Wednesday-morning-report.html.lineage.md`.
+  - regenerate: unavailable; some result roots can be overridden, but other directories and section fragments are hard-coded. Original trace sources are inventoried through each analysis.json trace field.
+
 ## Results
 
 qwen-3-30b-a3b, 8 users, 256 generated tokens, CPU attention, our half of delphi-3bda, arms interleaved per repetition. Source: exec/results/vnnik6-20260916/summary.md. Power (PkgWatt, RAMWatt) was not captured in this campaign.

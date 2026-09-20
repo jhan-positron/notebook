@@ -61,6 +61,15 @@ worker" and "running softmax state update".
   regenerated 2026-09-02 12:37 (preserved: artifacts/intel-amx/tron-amx-distilled.html).
 - Memory: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attn-worker-lane-facts.md.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/tron-amx-distilled.html`:
+  - generator: `artifacts/intel-amx/generators/gen_distilled.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/01-amx-rampup.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/02-tron-decode-amx-plan.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/2026-08-19-amx-status.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/pr-rampup.html` (1 preserved). Full inventory: `artifacts/intel-amx/tron-amx-distilled.html.lineage.md`.
+  - regenerate: unavailable; generator writes the canonical page unconditionally; no output-path argument
+
 ## Current state
 
 - Figure and caption updated; only that figure changed.

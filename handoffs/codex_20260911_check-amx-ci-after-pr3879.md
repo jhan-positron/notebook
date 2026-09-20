@@ -41,6 +41,15 @@ Read-only SSH checks targeted `delphi-3bda` (`delphi-3bda.positron.internal`), t
 
 No implementation commit or follow-up pull request was produced.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/pr3879/PR1/Friday-morning-CI-results.html`:
+  - generator: `artifacts/intel-amx/exec/p0perf-20260911/gen_report.py`
+  - input: `artifacts/intel-amx/exec/results/p0perf-20260911/summary.json`
+  - input built by: `artifacts/intel-amx/exec/p0perf-20260911/summarize.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/g1-20260908/` (4 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/p0perf-20260911/` (24 left behind (duplicate, compact copy named in inventory), 1 left behind (size), 29 preserved). Full inventory: `artifacts/intel-amx/pr3879/PR1/Friday-morning-CI-results.html.lineage.md`.
+  - regenerate: `python3 artifacts/intel-amx/exec/p0perf-20260911/gen_report.py artifacts/intel-amx/exec/results/p0perf-20260911 <OUT>`; command supports result-directory and explicit OUT; the sibling exec/logs campaign log is inventoried because its start/finish measurements appear on the page. Large CI run logs remain left behind (size). Regenerate unverified; scratch output did not match. Oversized ci-run-34559196745.log was omitted, so the generator omits its parenthetical copied-log reference; measured values otherwise match. Do not call this a verified full rebuild.
+
 ## Current state
 
 At the transcript cutoff, **2026-09-11 11:35:48 PDT**, the deliverables were the checklist and issue. Their creation and issue-body updates are verified by tool results. The issue tracks implementation work that remained undone; successful nightly AMX generation was not demonstrated.

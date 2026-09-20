@@ -93,6 +93,15 @@ diagram. Also answer where the AVX attention path lives in the code.
   (measured LDTILECFG 182-216 cycles back to back; TDPBF16PS 16.2-16.4
   cycles per op).
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/tron-amx-distilled.html`:
+  - generator: `artifacts/intel-amx/generators/gen_distilled.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/01-amx-rampup.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/02-tron-decode-amx-plan.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/2026-08-19-amx-status.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/pr-rampup.html` (1 preserved). Full inventory: `artifacts/intel-amx/tron-amx-distilled.html.lineage.md`.
+  - regenerate: unavailable; generator writes the canonical page unconditionally; no output-path argument
+
 ## Current state
 
 - Both subsections are in the generator and the regenerated page; SVGs

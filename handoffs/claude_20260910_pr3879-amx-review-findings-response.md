@@ -80,6 +80,15 @@ Inputs a resumer needs (not created here):
 - Bill's shared artifacts: https://claude.ai/code/artifact/7456b389-1df5-4a97-a5c0-ac97f5472c31 (AMX Review Findings) and https://claude.ai/code/artifact/875ab8ac-05b4-4372-ac40-d11f9ee0496d (AMX Backend Seam).
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/triage.json (earlier reviewer decisions, including R1-47).
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/pr3879/Bill-claude-review-response.html`:
+  - generator: `artifacts/intel-amx/pr3879/Bill-claude-review-response/gen.py`
+  - input: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/Bill-claude-review-response/data.json`
+  - input built by: `artifacts/intel-amx/pr3879/Bill-claude-review-response/build_data.py`, `artifacts/intel-amx/pr3879/Bill-claude-review-response/apply_claimcheck.py`, `artifacts/intel-amx/pr3879/Bill-claude-review-response/apply_update_0911.py`, `artifacts/intel-amx/pr3879/Bill-claude-review-response/build_f10_extra.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/Bill-claude-review-response/` (1 preserved, 3 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/more-testing-r1/` (2 proposed preservation). Full inventory: `artifacts/intel-amx/pr3879/Bill-claude-review-response.html.lineage.md`.
+  - regenerate: `python3 artifacts/intel-amx/pr3879/Bill-claude-review-response/gen.py artifacts/intel-amx/pr3879/Bill-claude-review-response/data.json <OUT>`; unverified; data is authored review findings and the measured soak arena sizes cite preserved rinzler logs. Pinned Git code sources are not mirrored.
+
 ## Current state
 
 Status of the 14 findings at PR head 47f6f2dceb (evidence: verification records in the session scratchpad and the page):

@@ -107,6 +107,21 @@ Project files (claude-agentsrv:/home/jhan/workspace/intel-AMX — not a git repo
 
 Reference inputs: delphi-3bda:/scratch/jhan/Intel_vs_AMD/refs/ (Intel optimization manual, ISA extensions programming reference, SDM as text).
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/rampup/pr-rampup.html`:
+  - generator: `artifacts/intel-amx/generators/gen_pr_rampup.py`
+  - input: `artifacts/intel-amx/rampup/01-amx-rampup.html`
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/t4/` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/01-amx-rampup.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/2026-08-19-amx-status.html` (1 preserved). Full inventory: `artifacts/intel-amx/rampup/pr-rampup.html.lineage.md`.
+  - regenerate: unavailable; generator has no output-path argument and writes rampup/pr-rampup.html relative to cwd.
+- `artifacts/intel-amx/rampup/2026-08-19-amx-status.html`:
+  - generator: `artifacts/intel-amx/generators/gen_status_report.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/t4/` (2 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/fused-sweep.html` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/p0-baseline.html` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/p2-inc1b.html` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/p2-inc2.html` (1 proposed preservation). Full inventory: `artifacts/intel-amx/rampup/2026-08-19-amx-status.html.lineage.md`.
+  - regenerate: unavailable; preserved historical generator has no output-path argument and writes status-reports/2026-08-19-amx-status.html; registered current page is the later rampup version. Historical generator does not establish a reproducible build of the later page.
+
 ## Current state
 
 - Five commits pushed to `jhan-amx-p0` (PR https://github.com/positron-ai/tron/pull/3879); `make format`, `make lint`, `make lint-notes` pass on delphi-3bda as of the last push (verified in extract).

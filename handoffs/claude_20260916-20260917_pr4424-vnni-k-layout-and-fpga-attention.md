@@ -74,6 +74,15 @@ Times in US Pacific.
 
 No tron code, PR text or issue was changed.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/vnnied-k-in-place/status/VNNI-K-FPGA-ATTN.html`:
+  - generator: `artifacts/intel-amx/vnnied-k-in-place/exec/gen_fpga_page.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik4-models-20260915/` (6 proposed preservation). Full inventory: `artifacts/intel-amx/vnnied-k-in-place/status/VNNI-K-FPGA-ATTN.html.lineage.md`.
+  - regenerate: unavailable; generator has no output-path argument and writes the canonical page. The four measurement logs and two token-comparison inputs are inventoried from vnnik4-models-20260915.
+
 ## Results
 
 No test ran in this session. The only measurement with FPGA attention and a VNNI binary was cited from the 2026-09-15 campaign (exec/results/vnnik4-models-20260915/results.txt): model qwen-3-4b tp2, prompt 1024, USE_HW_ATTN unset, VNNI binary at the pre-rebase commit dc950be5f2 (its staging code is identical to ff680c8020), one run per arm. Power was not captured in that campaign.

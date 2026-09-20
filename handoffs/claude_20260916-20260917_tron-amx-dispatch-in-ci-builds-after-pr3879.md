@@ -78,6 +78,15 @@ Times in US Pacific.
 - Downloaded run logs (session scratchpad, may be gone): systems_test runs 34925789174, 35052594106, 34923936332, 35050734153, tron package build run 35044660449, PR-lane build logs 33123633446, 33132987517, 33134418284, 34375107972, 34621722240, GCP Nix build logs 35027854110 and 35030442734.
 - Nothing was written on delphi-3bda. No tron code changed. No PR opened.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/pr3879/PR1/nightly-amx-check-20260916.html`:
+  - generator: `artifacts/intel-amx/exec/nightly-amx-check-20260916/gen_page.py`
+  - input: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/nightly-amx-check-20260916/evidence.json`
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/nightly-amx-check-20260916/` (1 preserved, 1 proposed preservation); `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-PR1/65083b84-d7db-4aa7-82ef-613b1002c56b/scratchpad/` (4 left behind (size)). Full inventory: `artifacts/intel-amx/pr3879/PR1/nightly-amx-check-20260916.html.lineage.md`.
+  - regenerate: unavailable; generator has no output-path argument. evidence.json was authored from four GitHub Actions run logs, each above 5 MiB and listed as left behind (size). Binary and build identity records are provenance, not measured rate/time sources.
+
 ## Results
 
 No test was run by this session. The numbers below are read from the nightly run logs, the Slack posts and the binaries.

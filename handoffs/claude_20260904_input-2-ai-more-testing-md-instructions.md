@@ -133,6 +133,15 @@ existed at handoff time (Insufficient data for perf-per-watt).
   the user's brief (preserved: artifacts/intel-amx/input-2-ai/more-testing.md)
 - Memory: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/more-testing-round1.md.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/pr3879/more-testing/round-1/status.md`:
+  - generator: `artifacts/intel-amx/exec/more-testing-r1/gen_status.py`
+  - input: none
+  - input built by: `artifacts/intel-amx/exec/more-testing-r1/resultlib.py`, `artifacts/intel-amx/exec/more-testing-r1/mmlu_diff.py`, `artifacts/intel-amx/exec/more-testing-r1/ci_reference.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/more-testing-r1/` (36 preserved, 328 proposed preservation); `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX/fffbcfe8-4091-44ec-a261-0731127ed318/scratchpad/ci-logs/` (1 left behind (missing)). Full inventory: `artifacts/intel-amx/pr3879/more-testing/round-1/status.md.lineage.md`.
+  - regenerate: unavailable; generator and resultlib hard-code the canonical inputs and output; no output argument. The original CI log was identified from the builder command at transcript line 404 and is inventoried below.
+
 ## Current state (as of 2026-09-04 15:10 Pacific)
 
 - 6 of 12 model-arm cells done plus the soak; mixtral off cell running; the

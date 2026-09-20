@@ -113,6 +113,33 @@ claude-alpha container).
   jhan-amx-p0, heads reviewed: bbb55ae5f (round 1) → cc8a86bb3 (round 2) →
   96b5a6c72 (round 3). The PR branch itself was not modified by this session.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/pr3879/alexey-review.html`:
+  - generator: `artifacts/intel-amx/exec/review-pipeline/gen_review6.py`
+  - input: `artifacts/intel-amx/exec/review-pipeline/r6/round5_comments.json`, `artifacts/intel-amx/exec/review-pipeline/r6/status.json`, `artifacts/intel-amx/exec/review-pipeline/r6/carry.json`, `artifacts/intel-amx/exec/review-pipeline/r6/round6_data.py`, `artifacts/intel-amx/pr3879/triage.json`
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/review-pipeline/r6/` (4 preserved). Full inventory: `artifacts/intel-amx/pr3879/alexey-review.html.lineage.md`.
+  - regenerate: unavailable; generator has no output-path argument and requires a clean live tron-amx worktree at 3fa11d911cbb3741db9d94c9953c3b51b53f740f. Code snippets already in Git are not mirrored.
+- `artifacts/intel-amx/pr3879/alexey-review-1.html`:
+  - generator: `/tmp/claude-0/-home-jhan-workspace-intel-AMX/c79e32fa-b9aa-4cba-959e-87718cfed503/scratchpad/pr3879/gen_review.py` — left behind (missing on 2026-09-20)
+  - input: Round-authored review data and code snippets from the reviewed tron tree. The known scratch input paths are missing. Insufficient data: the full input list cannot be read from the missing generator.
+  - input built by: Claude review workflow plus `collect.py` in the session scratch directory. The generator and collection script are missing.
+  - sources: Known generator/data files: left behind (missing on 2026-09-20). The recorded reviewed commit was `bbb55ae5f`. The existing HTML remains the archived review. Full inventory: `artifacts/intel-amx/pr3879/alexey-review-1.html.lineage.md`.
+  - regenerate: unavailable (historical generator and authored inputs are missing). regenerate unverified (missing inputs).
+- `artifacts/intel-amx/pr3879/alexey-review-2.html`:
+  - generator: `/tmp/claude-0/-home-jhan-workspace-intel-AMX/c79e32fa-b9aa-4cba-959e-87718cfed503/scratchpad/pr3879/gen_review2.py` — left behind (missing on 2026-09-20)
+  - input: Round-authored review data and code snippets from the reviewed tron tree. The known scratch input paths are missing. Insufficient data: the full input list cannot be read from the missing generator.
+  - input built by: Claude review workflow plus `collect.py` in the session scratch directory. The generator and collection script are missing.
+  - sources: Known generator/data files: left behind (missing on 2026-09-20). The recorded reviewed commit was `cc8a86bb3`. The existing HTML remains the archived review. Full inventory: `artifacts/intel-amx/pr3879/alexey-review-2.html.lineage.md`.
+  - regenerate: unavailable (historical generator and authored inputs are missing). regenerate unverified (missing inputs).
+- `artifacts/intel-amx/pr3879/alexey-review-3.html`:
+  - generator: `/tmp/claude-0/-home-jhan-workspace-intel-AMX/c79e32fa-b9aa-4cba-959e-87718cfed503/scratchpad/pr3879/gen_review3.py` — left behind (missing on 2026-09-20)
+  - input: Round-authored review data and code snippets from the reviewed tron tree. The known scratch input paths are missing. Insufficient data: the full input list cannot be read from the missing generator.
+  - input built by: Claude review workflow plus `collect.py` in the session scratch directory. The generator and collection script are missing.
+  - sources: Known generator/data files: left behind (missing on 2026-09-20). The recorded reviewed commit was `96b5a6c72`. The existing HTML remains the archived review. Full inventory: `artifacts/intel-amx/pr3879/alexey-review-3.html.lineage.md`.
+  - regenerate: unavailable (historical generator and authored inputs are missing). regenerate unverified (missing inputs).
+
 ## Current state
 
 - Final review files reflect head 96b5a6c72: 82 open comments, 5 resolved,

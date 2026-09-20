@@ -74,6 +74,15 @@ runtime; the doc explains tron's AMX attention work).
   tron-amx h/tron/kernels/dotter.hpp, h/tron/models/self_attention.hpp,
   h/tron/models/model.hpp.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/tron-amx-distilled.html`:
+  - generator: `artifacts/intel-amx/generators/gen_distilled.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/01-amx-rampup.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/02-tron-decode-amx-plan.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/2026-08-19-amx-status.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/pr-rampup.html` (1 preserved). Full inventory: `artifacts/intel-amx/tron-amx-distilled.html.lineage.md`.
+  - regenerate: unavailable; generator writes the canonical page unconditionally; no output-path argument
+
 ## Current state
 
 - Section 4.4 exists in both the generator and the regenerated HTML, with

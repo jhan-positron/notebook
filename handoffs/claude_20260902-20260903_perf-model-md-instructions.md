@@ -121,6 +121,15 @@ non-attention main-thread time as 62% FPGA waits, 22% launch bookkeeping,
   user's brief (preserved: artifacts/intel-amx/input-2-ai/perf-model.md)
 - Memory: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/perf-model-project.md.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/perf-model-20260903/pages/index.html`:
+  - generator: `artifacts/intel-amx/perf-model-20260903/tools/gen_report.py`
+  - input: `artifacts/intel-amx/perf-model-20260903/results/model.json`, `artifacts/intel-amx/perf-model-20260903/results/medians.json`, `artifacts/intel-amx/perf-model-20260903/results/narrative.json`, `artifacts/intel-amx/perf-model-20260903/results/m8-spans.json`
+  - input built by: `artifacts/intel-amx/perf-model-20260903/tools/parse.py`, `artifacts/intel-amx/perf-model-20260903/tools/model.py`, `artifacts/intel-amx/perf-model-20260903/tools/spans.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/fallback-20260901/` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/perf-model-20260903/` (1 left behind (size), 119 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/perfstat3-20260901/` (2 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/single-attn-20260901/` (4 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/thp-20260901/` (1 preserved). Full inventory: `artifacts/intel-amx/perf-model-20260903/pages/index.html.lineage.md`.
+  - regenerate: unavailable; generator supports three input arguments but also reads hard-coded RES, HIST, THP_FILE, and perfstat3 paths. No supported command redirects all reads to preserved copies.
+
 ## Current state
 
 - Campaign complete, report and plan published, everything archived. The

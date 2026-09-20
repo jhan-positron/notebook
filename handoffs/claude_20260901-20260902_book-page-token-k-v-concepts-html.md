@@ -136,6 +136,15 @@ measurement probe.
 - Memory: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-tron/memory/intel-amx-distilled-generator.md
   (generator pitfall) and the workspace layout note.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/tron-amx-distilled.html`:
+  - generator: `artifacts/intel-amx/generators/gen_distilled.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/01-amx-rampup.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/02-tron-decode-amx-plan.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/2026-08-19-amx-status.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/pr-rampup.html` (1 preserved). Full inventory: `artifacts/intel-amx/tron-amx-distilled.html.lineage.md`.
+  - regenerate: unavailable; generator writes the canonical page unconditionally; no output-path argument
+
 ## Current state
 
 - Page pushed; distilled page updated on disk (not a git repository; mirror

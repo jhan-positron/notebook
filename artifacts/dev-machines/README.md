@@ -39,4 +39,26 @@ HTML pages retain their canonical workspace evidence links. The mirrors preserve
 | [codex-home-migration/migrate-index.py](codex-home-migration/migrate-index.py) | `claude-agentsrv:/home/jhan/workspace/random/codex-home-migration/migrate-index.py` | Migration test suite and its sibling inputs. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
 | [codex-home-migration/claude-box.proposed](codex-home-migration/claude-box.proposed) | `claude-agentsrv:/home/jhan/workspace/random/codex-home-migration/claude-box.proposed` | Migration test suite and its sibling inputs. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
 | [codex-home-migration/README.md](codex-home-migration/README.md) | `claude-agentsrv:/home/jhan/workspace/random/codex-home-migration/README.md` | Migration test suite and its sibling inputs. Related: [codex_20260912-20260913_find-cpp-coding-guide-skill-files.md](../../handoffs/codex_20260912-20260913_find-cpp-coding-guide-skill-files.md). |
-- `github-reviewer-removals-scan.sh` — canonical `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/8fe7ef6d-8594-4265-8524-a6107e65c691/scratchpad/scan.sh` (volatile session scratchpad, the repo copy is the durable one) — paginated GitHub GraphQL scanner for ReviewRequestRemovedEvent across positron-ai/tron PRs. Registered 2026-09-18. (handoffs: claude_20260915_alexey-reviewer-removals-across-prs.md)
+- `github-reviewer-removals-scan.sh` — canonical `claude-agentsrv:/home/jhan/workspace/random/exec/workflows/github-reviewer-removals-scan.sh` (workspace canonical after the approved relocation; original scratchpad path recorded below) — paginated GitHub GraphQL scanner for ReviewRequestRemovedEvent across positron-ai/tron PRs. Registered 2026-09-18. (handoffs: claude_20260915_alexey-reviewer-removals-across-prs.md)
+
+## Generated-report lineage backfill (2026-09-20)
+
+These entries record the source inventory and regeneration limits for existing report pages. Canonical files remain authoritative. Companion inventories are repo-primary metadata.
+
+### Source files
+
+| Repo path | Canonical path | Role | Bytes |
+|---|---|---|---|
+| [`loadmon/alpha.csv`](loadmon/alpha.csv) | `claude-agentsrv:/home/jhan/workspace/random/loadmon/alpha.csv` | source | 25886 |
+| [`loadmon/summary.json`](loadmon/summary.json) | `claude-agentsrv:/home/jhan/workspace/random/loadmon/summary.json` | input | 80188 |
+| [`loadmon/sw-dev-01.csv`](loadmon/sw-dev-01.csv) | `claude-agentsrv:/home/jhan/workspace/random/loadmon/sw-dev-01.csv` | source | 28756 |
+
+### loadmon/report.html
+
+- generator: `artifacts/dev-machines/loadmon/build_report.py`
+- input: `claude-agentsrv:/home/jhan/workspace/random/loadmon/summary.json`
+- input built by: `artifacts/dev-machines/loadmon/analyze.py`
+- sources: `claude-agentsrv:/home/jhan/workspace/random/loadmon/alpha.csv` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/random/loadmon/summary.json` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/random/loadmon/sw-dev-01.csv` (1 proposed preservation). Full per-file inventory: [loadmon/report.html.lineage.md](loadmon/report.html.lineage.md).
+- regenerate: unavailable; build_report.py has no output-path argument and unconditionally writes a session scratchpad path as well as report.html.
+
+- Session-store relocation: `artifacts/dev-machines/github-reviewer-removals-scan.sh` now points to `claude-agentsrv:/home/jhan/workspace/random/exec/workflows/github-reviewer-removals-scan.sh`; origin `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/8fe7ef6d-8594-4265-8524-a6107e65c691/scratchpad/scan.sh`. Bytes unchanged; relocation requires approval.

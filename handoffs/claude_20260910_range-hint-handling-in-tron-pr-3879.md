@@ -68,6 +68,15 @@ All times 2026-09-10, US Pacific.
   - Also carried by the first push: 752e9f571a from the sibling session (packed-Q slots into `attn_accum`).
 - Inputs a resumer needs: Ben's comment https://github.com/positron-ai/tron/pull/3879#discussion_r3973407196; fallback counter logs claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/fallback-20260901/ (fallback.txt, run-c256-r1.log, run-c2048-r1.log, run-c8192-r1.log); fence-branch counters commit 3cd2670df1 in /home/jhan/workspace/ai-runs/tron-fence-amx; the earlier page /home/jhan/workspace/intel-AMX/PR3879/make-sense-amx-vs-avx.html section 7.7 (fallback by cause); CI status page /home/jhan/workspace/intel-AMX/PR3879/more-testing/round-1/status.md.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/pr3879/more-testing/round-1/status.md`:
+  - generator: `artifacts/intel-amx/exec/more-testing-r1/gen_status.py`
+  - input: none
+  - input built by: `artifacts/intel-amx/exec/more-testing-r1/resultlib.py`, `artifacts/intel-amx/exec/more-testing-r1/mmlu_diff.py`, `artifacts/intel-amx/exec/more-testing-r1/ci_reference.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/more-testing-r1/` (36 preserved, 328 proposed preservation); `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX/fffbcfe8-4091-44ec-a261-0731127ed318/scratchpad/ci-logs/` (1 left behind (missing)). Full inventory: `artifacts/intel-amx/pr3879/more-testing/round-1/status.md.lineage.md`.
+  - regenerate: unavailable; generator and resultlib hard-code the canonical inputs and output; no output argument. The original CI log was identified from the builder command at transcript line 404 and is inventoried below.
+
 ## Results
 
 No new performance test ran in this session. The page reuses measurements from the fence-branch fallback counters of 2026-09-01 (qwen-3-4b, one user, FPGA attention off, mirror arm of the fence branch, not PR1 itself):

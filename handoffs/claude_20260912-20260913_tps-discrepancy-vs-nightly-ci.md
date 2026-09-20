@@ -82,6 +82,21 @@ Our 2026-09-11 CI-harness numbers were far below the nightly's because we sent a
 - Repo positron-ai/tron: tested head 544ca05c7a ("Merge branch 'main' into jhan-amx-p0", 2026-09-11), the PR https://github.com/positron-ai/tron/pull/3879 head at the time. No code change in this session.
 - Inputs: Friday-morning-CI-results.html and exec/results/p0perf-20260911/ (Friday campaign, ci-run-34559196745.log is the nightly log). Verified on disk.
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/pr3879/PR1/Friday-morning-CI-results.html`:
+  - generator: `artifacts/intel-amx/exec/p0perf-20260911/gen_report.py`
+  - input: `artifacts/intel-amx/exec/results/p0perf-20260911/summary.json`
+  - input built by: `artifacts/intel-amx/exec/p0perf-20260911/summarize.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/g1-20260908/` (4 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/p0perf-20260911/` (24 left behind (duplicate, compact copy named in inventory), 1 left behind (size), 29 preserved). Full inventory: `artifacts/intel-amx/pr3879/PR1/Friday-morning-CI-results.html.lineage.md`.
+  - regenerate: `python3 artifacts/intel-amx/exec/p0perf-20260911/gen_report.py artifacts/intel-amx/exec/results/p0perf-20260911 <OUT>`; command supports result-directory and explicit OUT; the sibling exec/logs campaign log is inventoried because its start/finish measurements appear on the page. Large CI run logs remain left behind (size). Regenerate unverified; scratch output did not match. Oversized ci-run-34559196745.log was omitted, so the generator omits its parenthetical copied-log reference; measured values otherwise match. Do not call this a verified full rebuild.
+- `artifacts/intel-amx/pr3879/PR1/Sunday-CI-layout-results.html`:
+  - generator: `artifacts/intel-amx/exec/p0perf-20260913/gen_report.py`
+  - input: `artifacts/intel-amx/exec/results/p0perf-20260913/summary.json`
+  - input built by: `artifacts/intel-amx/exec/p0perf-20260913/summarize.py`
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/g1-20260908/` (4 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/p0perf-20260911/` (1 left behind (size)); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/p0perf-20260913/` (24 left behind (duplicate, compact copy named in inventory), 86 preserved). Full inventory: `artifacts/intel-amx/pr3879/PR1/Sunday-CI-layout-results.html.lineage.md`.
+  - regenerate: `python3 artifacts/intel-amx/exec/p0perf-20260913/gen_report.py artifacts/intel-amx/exec/results/p0perf-20260913 <OUT>`; command supports result-directory and explicit OUT; the sibling exec/logs campaign log is inventoried because its start/finish measurements appear on the page. Large CI run logs remain left behind (size). Scratch preparation preview verified 2026-09-20; normalizations: exact six-line notebook renderer comment, Page generated timestamp.
+
 ## Results
 
 All cells: model qwen-3-4b, prompt 1024 tokens, our half of delphi-3bda, build 2026.09.13-544ca05c. Values are mean ± sample sd over repetitions.

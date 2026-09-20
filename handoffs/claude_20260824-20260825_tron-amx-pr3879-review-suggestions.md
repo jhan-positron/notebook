@@ -162,6 +162,33 @@ Workspace files (claude-agentsrv paths; /home is NFS-shared with delphi-3bda):
   claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/
   (amx-tron-softattn-project.md; new deleted-comments-stay-deleted.md).
 
+Lineage backfill (2026-09-20; Artifacts metadata only):
+
+- `artifacts/intel-amx/tron-amx-distilled.html`:
+  - generator: `artifacts/intel-amx/generators/gen_distilled.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/01-amx-rampup.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/02-tron-decode-amx-plan.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/2026-08-19-amx-status.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/pr-rampup.html` (1 preserved). Full inventory: `artifacts/intel-amx/tron-amx-distilled.html.lineage.md`.
+  - regenerate: unavailable; generator writes the canonical page unconditionally; no output-path argument
+- `artifacts/intel-amx/rampup/gptoss-estimate.html`:
+  - generator: `artifacts/intel-amx/generators/gen_gptoss_estimate.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/2026-08-19-amx-status.html` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/pr-rampup.html` (1 preserved). Full inventory: `artifacts/intel-amx/rampup/gptoss-estimate.html.lineage.md`.
+  - regenerate: unavailable; repo-primary generator has no output-path argument and writes rampup/gptoss-estimate.html relative to cwd. Estimates are arithmetic in the generator; measured comparisons cite the two preserved pages.
+- `artifacts/intel-amx/exec/results/perf-round-20260825/perf-round.html`:
+  - generator: `artifacts/intel-amx/exec/perf-round-report.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/ci-models/` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/perf-round-20260825/` (1 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/t4/` (2 preserved). Full inventory: `artifacts/intel-amx/exec/results/perf-round-20260825/perf-round.html.lineage.md`.
+  - regenerate: unavailable; generator has no output-path argument and writes the canonical output under Path.home().
+- `artifacts/intel-amx/rampup/2026-08-19-amx-status.html`:
+  - generator: `artifacts/intel-amx/generators/gen_status_report.py`
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/t4/` (2 preserved); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/fused-sweep.html` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/p0-baseline.html` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/p2-inc1b.html` (1 proposed preservation); `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/p2-inc2.html` (1 proposed preservation). Full inventory: `artifacts/intel-amx/rampup/2026-08-19-amx-status.html.lineage.md`.
+  - regenerate: unavailable; preserved historical generator has no output-path argument and writes status-reports/2026-08-19-amx-status.html; registered current page is the later rampup version. Historical generator does not establish a reproducible build of the later page.
+
 ## Current state
 
 - All five commits are pushed to `origin/jhan-amx-p0`; the working tree was
