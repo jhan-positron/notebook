@@ -84,6 +84,12 @@ tron repo, branch `jhan-amx-p0` (worktree claude-agentsrv:/home/jhan/workspace/t
 
 Project files (claude-agentsrv:/home/jhan/workspace/intel-AMX — not a git repo; NFS-shared with delphi-3bda per the extract):
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/tron-amx-distilled.html — assembled design doc (~250 KB), regenerated per the Notion skeleton (preserved: artifacts/intel-amx/tron-amx-distilled.html)
+  - generator: `exec/gen_distilled.py` (preserved: artifacts/intel-amx/generators/gen_distilled.py)
+  - input: none (the generator reads the rampup corpus directly)
+  - input built by: none
+  - sources: `rampup/01-amx-rampup.html`, `rampup/02-tron-decode-amx-plan.html`, `rampup/pr-rampup.html`, `rampup/2026-08-19-amx-status.html` (preserved under artifacts/intel-amx/rampup/)
+  - regenerate: unavailable (the generator has no output-path argument and writes the canonical page `WS/tron-amx-distilled.html` unconditionally)
+  (lineage labels added 2026-09-20 by the handoff run; header dates unchanged)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/amx-design.md — decision record (D1, rejected alternatives, gates, Note anchors); now the only home of that content (preserved: artifacts/intel-amx/amx-design.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/gen_distilled.py — generator for tron-amx-distilled.html (preserved: artifacts/intel-amx/generators/gen_distilled.py)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/gen_pr_rampup.py — generator for rampup/pr-rampup.html (durable home; previously only in an old session scratchpad) (preserved: artifacts/intel-amx/generators/gen_pr_rampup.py)
