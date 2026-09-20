@@ -72,7 +72,10 @@ name or project path hint and the right side is the chat name.
      then `Project:` + `Codex chat:` as a last fallback. Existing handoffs are
      UPDATED per Step 5; chats without an existing handoff get their first
      handoff. A chat with no new activity since its handoff's Activity END date
-     is skipped (report it as unchanged; no commit churn).
+     is skipped (report it as unchanged; no commit churn). One exception
+     (added 2026-09-20): the Step 4b lineage backfill (lineage: Step 4,
+     Artifacts item 4) runs for a chat without new activity. It does not
+     override EXCLUDE_CWDS or the FROZEN/BLOCKED handoff protections.
    - FROZEN-handoff rule (added 2026-08-19): a handoff whose `Transcript:` host
      is NOT this machine and is not reachable is frozen for this run -- no
      update and no questions. List it in the run report as "not checkable from
@@ -325,6 +328,36 @@ Body sections (omit empty ones):
    `WINDOWS-HOST:C:\Users\jibin\Documents\repo\README.md` or
    `delphi-3bda:/scratch/jhan/flat_freq_tests/README.md`). This section is
    mandatory when the chat created or modified any file.
+   Two kinds of entry are easy to miss (added 2026-09-20):
+   - Session-store scripts. List any script needed to resume the work that
+     lives in a tool's session store rather than the workspace. A Claude
+     Workflow (a script of agent steps) may be one such dependency under
+     `~/.claude/projects/<project-dir>/<session-id>/workflows/scripts/`.
+     For Codex-created scripts, use their observed paths. Do not infer a
+     Workflow directory layout under Codex home.
+   - Lineage of report pages. A report page is an HTML or md page that
+     shows measured numbers. Its lineage is the set of files it is
+     computed from. Under the page's Artifacts line, nest these labels
+     verbatim, so Step 4b can find those files:
+     - `generator:` the script or Workflow that wrote the page, or
+       `none` when a person or an agent wrote it by hand.
+     - `input:` the file(s) the generator reads, or `none`. Add the note
+       `hand-edited after build` when that applies.
+     - `input built by:` the script or Workflow that wrote the input
+       from the sources, or `none`.
+     - `sources:` the raw result files, or the directories that hold
+       them, that the input (or the page, when there is no input) took
+       its numbers from.
+     - `regenerate:` the exact command, with `<OUT>` as the output path,
+       or `none` when there is no generator or the generator is a
+       Workflow, or `unavailable (<reason>)` when the generator has no
+       output-path argument or reads files outside its `input:` and
+       `sources:` (live git history, files under `/var/tmp`). Never
+       write a command that lets the generator fall back to a default
+       output path: `gen_compare.py ROWS_JSON` with one argument
+       overwrites the canonical page.
+     A data file listed only under a results directory, with no label
+     linking it to the page it feeds, is not enough.
 5. Current state -- only claims backed by evidence from the chat (commands,
    outputs, commit hashes, generated files); mark anything unverified as
    unverified. Do not use generic text such as "open the app link and inspect
@@ -350,27 +383,203 @@ accidental workspace deletion cannot destroy them.
      projectless Codex-managed working directories, /scratch, /var/tmp, /tmp,
      home dirs, NFS workspaces). Files already in a git repo are already safe.
   3. Executable knowledge or an irreplaceable document: scripts, tools,
-     generators, configs, recipes, analysis/plan docs, distilled-knowledge pages
-     (HTML/md). Litmus test: if the workspace vanished tonight, would
-     recreating this cost hours-to-days?
-  4. Not bulk or regenerable data (benchmark result trees, raw logs, large trace
-     files, turbostat captures, and raw command dumps stay on their storage).
+     generators, configs, recipes, analysis/plan docs, distilled-knowledge
+     pages (HTML/md), or measurement data that a preserved report page,
+     or a handoff's Results table, is computed from (added 2026-09-20).
+     Litmus test: if the workspace vanished tonight, would recreating
+     this cost hours-to-days, or be impossible? Measurement data is the
+     impossible case: a test cannot be re-run into the same numbers once
+     the binary, the machine state and the time are gone.
+  4. Not bulk or regenerable data. Judge each file by its class and its
+     size, never by its location: a file is not excluded for sitting
+     inside a result tree (updated 2026-09-20: the old wording excluded
+     "benchmark result trees" as a whole).
+     - Classes that stay on their storage: server logs (for example
+       `rinzler.log`, the inference server's log), raw turbostat
+       captures (per-interval output of the Linux CPU power sampler,
+       hundreds of lines or more), campaign logs and `.done` markers,
+       binaries, CI client logs (`perf*.log`) when the sibling
+       `perf*.json` holds the per-request samples, and per-repetition
+       logs when a proposed compact result text already holds the lines
+       that carry the page's measured numbers (check those lines one by
+       one, not by appearance). One override: a file that the page, its
+       input, or the handoff's Results table takes a measured number
+       from (a rate, a time, a power reading) is a source and is
+       proposed, whatever its class, unless a proposed compact text
+       holds every such line. A line citation in the input is the usual
+       evidence, and for an authored page the `sources:` label is
+       enough. Lines used for identity or configuration (version,
+       commit, device count, NUMA node, memory footprint) do not trigger
+       it.
+     - Size: a single file above 5 MiB (5242880 bytes) is not proposed.
+       List it at the gate as `left behind (size)` with its byte count,
+       and I can approve it there. State every batch's file count and
+       total MiB at the gate, plus the clone's `.git` size from `du -sm`
+       or a native disk-usage equivalent reporting MiB.
+     - Regenerable means a command rebuilds the file from files already
+       in git. A file that can only be rebuilt from unpreserved data, a
+       hand-edited file, or a file a Workflow built (agent steps, not
+       one deterministic command) is not regenerable. This test is for
+       data files: a report page is preserved even when its generator
+       and input are in git, so GitHub can render it.
+- Computed-from files (added 2026-09-20): when a report page (Step 4,
+  Artifacts item 4) is proposed or already registered, propose with it
+  every not-yet-preserved file its numbers are computed from. Rule 1 is
+  satisfied through the page's lineage labels: present in the handoff,
+  written there on approval by the lineage walk below, or, for a FROZEN
+  or BLOCKED/SKIPPED handoff, held in the README entry until the handoff
+  is next updated.
+  Rules 2 to 4 still apply to each file. The set is:
+  - the generator and its input file(s) (`gen_compare.py` and
+    `mirror-vs-vnni-rows.json` for `mirror-vs-VNNI-K.html`).
+  - the script or Workflow that built the input from the sources.
+  - the source files the input cites, of three kinds:
+    - the compact texts that hold the per-request or per-repetition
+      measured lines: `rt-results.txt`, `perf-round*.txt`, loose `*.txt`
+      outputs of runtron (the command-line test tool), and `perf*.json`
+      of the CI harness (the nightly test system).
+    - the small records beside them: `summary.{json,md,txt}`,
+      `build.txt`, `meta.json`, `proof.txt`, a `power_capture.sh`
+      summary, a turbostat summary of a few lines.
+    - any notes file the input cites for a value the page shows.
+  Left behind, and shown at the gate as `left behind (<reason>)`, one
+  reason per file, the first that applies: the rule 4 classes
+  (`provenance`), files above the size threshold (`size`), a
+  per-repetition log whose measured lines a proposed compact text holds
+  (`duplicate (held by <compact text>)`), files already mirrored at
+  another repo path (`duplicate (<repo path>)`: register that path
+  instead of copying again), and files the page takes no value from
+  (`no value used`). Mirror each file at
+  `artifacts/<topic>/<path relative to the canonical root>`, the layout
+  the `exec/results/perf-round-*` entries already use. A canonical root
+  is a folder the topic README maps to a repo prefix, never the
+  chat's cwd. For intel-amx it is `WS`, that is
+  `claude-agentsrv:/home/jhan/workspace/intel-AMX`. A topic may have
+  several roots with their own prefixes (`tron-perf-fluctuation` maps a
+  workspace root to `workspace/` and a `/scratch` root to
+  `alpha-scratch/`). Use the registered mapping. For a file under no
+  registered root, propose a prefix at the gate. Never derive a path
+  that contains `..`.
+  Gate line, one per page: `computed-from: <page> <- <N> files, <M>
+  MiB; left behind: <K> files (<reason>: <count>, ...)`, followed by the
+  proposed repo paths one per line. I approve paths, not counts.
+  History: the 2026-09-18 run preserved `mirror-vs-VNNI-K.html` and its
+  generator. It read the old rule 4 phrase "benchmark result trees" as
+  excluding the data files in `exec/results/vnnik-20260914/`. So the
+  input file and the raw texts behind 24 of the page's 52 tests stayed
+  on NFS only. The analysis and the file list are in
+  `VNNIed-K-in-place/status/mirror-vs-VNNI-K-data-preservation.md`
+  (intel-AMX canonical folder, 2026-09-19, sections 4 to 6).
+- Session-store files (added 2026-09-20): a needed artifact that exists
+  only in a tool's session store has no stable canonical location. This
+  includes scripts found under Codex home or `~/.claude/projects/`.
+  Use the observed path and host. Retention is Insufficient data unless
+  verified for that tool and store. Treat these files as at risk.
+  Propose at the gate
+  `relocate: <session-store path> -> <target folder>/<file>`. The target
+  is the canonical folder of the script that reads the artifact's
+  output, or, failing that, of the scripts it drove. For
+  `pull-mirror-vs-vnni-data-wf_9b0f456d-293.js` that is
+  `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/vnnik-20260914/`,
+  the folder of `gen_compare.py`, which reads the file the Workflow
+  wrote. When no folder qualifies, or more than one does, the target is
+  `<canonical root>/exec/workflows/` under the relevant registered root.
+  The `relocate:` line says so.
+  On approval: create the target folder if it is missing. Stop and ask
+  if a file of that name exists. Copy the file there with `cp -p` or a
+  native equivalent that preserves timestamps. Mirror it from there at
+  the layout path and register THAT path as canonical. Record the
+  session-store path in the README entry as `origin:` (a
+  history note that the refresh loop never fetches). The copy comes from
+  the store. When the store has already deleted the file, it comes from
+  the repo mirror, the restore that the canonical-missing rule asks for.
+  This relocation copy, folder creation included, is the one write into
+  a canonical folder this prompt allows, and only on approval. Direction
+  otherwise stays canonical -> repo. This supersedes the 2026-09-18
+  practice of registering the session-store path itself as canonical
+  (`artifacts/intel-amx/README.md` lines 722-725 on 2026-09-19).
 - Registry: each `artifacts/<topic>/README.md` lists every preserved file with
   its canonical `<host>:<absolute path>`, what it is, and related Codex
   handoffs. That README is the source of truth for refresh.
+  The README records WHAT is preserved. The qualifying rules live in
+  this prompt (added 2026-09-20). Phrases in existing README headers and
+  entries such as "bulk result trees stay on the canonical storage"
+  (lines 44, 113-114, 202 and 442-444 on 2026-09-19) describe what those
+  batches held. They are not a rule: do not apply them, do not repeat
+  them in a new batch header, and do not rewrite the old headers. A
+  report page's entry carries the five lineage labels from Step 4, with
+  `<OUT>` in the `regenerate:` command. Under `sources:` each path or
+  directory is marked `preserved` or `left behind (<reason>)`, and a
+  directory that is partly preserved lists both by file kind, for
+  example `cells/*/: preserved perf.json, meta.json, proof.txt; left
+  behind (provenance) rinzler.log, perf.log`. The full inventory goes in
+  a companion file `<page mirror path>.lineage.md` beside the page's
+  mirror: one line per source with its canonical path, its repo path or
+  left-behind reason, its byte size, and for a duplicate the compact
+  text that holds its lines. The entry names that file. A new batch
+  header lists which cited files were left behind and why, so a reader
+  sees a decision, not an omission.
 - Refresh on EVERY run (any SCOPE): for each registered artifact, fetch the
   canonical file and compare content with the repo copy.
-  - Different -> refresh the repo copy and report it at the approval gate.
-  - Canonical missing or inaccessible -> NEVER delete the repo copy; alert
-    loudly: the repo copy may be the only copy, or Codex needs access to the
-    canonical host/path. Restore it to the workspace, grant access, or
+  - Different -> propose refreshing the repo copy at the approval gate,
+    subject to the measurement-file and content-frozen rules below.
+  - Canonical missing -> NEVER delete the repo copy; alert loudly: the
+    repo copy is now the only copy -- restore it to the workspace or
     deregister it deliberately.
+  - Canonical UNREACHABLE (ssh host down / no route) is NOT the missing
+    case: skip the refresh, report those mirrors as unverified this run,
+    no alarm. The alarm is for a canonical that is GONE from a reachable
+    location.
   - Direction is strictly canonical -> repo. Repo copies are mirrors; do not
     hand-edit them -- edit the canonical file and let the next run sync.
+  - Measurement files (added 2026-09-20): a preserved input or source
+    file is a record, not a document. If its canonical copy differs from
+    the repo copy (a re-run wrote into the same result directory), do
+    not refresh it silently. Show `measurement changed: <file>
+    (+<a>/-<b> lines)` at the gate, as one item together with every
+    report page, generator and lineage file that changed with it, and
+    wait for my answer. Yes: refresh every changed file of that set and
+    re-run the regeneration check below. No: add `content frozen:
+    <date>` to every entry of the set, the page and generator included,
+    so the mirror stays one consistent version, and compare only
+    existence on later runs.
 - New artifacts: when generating/updating handoffs, propose qualifying
   Artifacts entries at the approval gate; on approval copy them in, register
   them in the topic README, and annotate the handoff's Artifacts line with
   `(preserved: artifacts/<topic>/<file>)`.
+  Lineage walk (added 2026-09-20): for every report page proposed this
+  run, and for every registered page whose README entry or handoff line
+  names a generator (`generated by <script>` or a `generator:` label)
+  but whose entry lacks the lineage labels, walk generator -> input ->
+  input builder -> cited sources, and propose the not-yet-preserved
+  files per the "Computed-from files" bullet. Show the second case at
+  the gate as `lineage unknown: <page>`. This backfill runs even when
+  the page's chat has no new activity (the `SCOPE: auto` no-churn
+  skip does not apply to it). EXCLUDE_CWDS still applies to new
+  artifact and lineage proposals. Read the labels from the handoff, the
+  generator's source (the files it reads and its output-path argument),
+  the input's own citations, the page's own citations when it has no
+  input, and the chat transcripts that ran the generator and built
+  the input. If a cited source's host is unreachable, propose the
+  reachable files, record `lineage incomplete: <page>: <host>
+  unreachable` in the entry, and walk again next run. If a cited file
+  is gone from a reachable host, mark it `left behind (missing on
+  <date>)` and do not invent a substitute. On approval, write the
+  labels into the README entry and nest them under the page's line in
+  the handoff's Artifacts section, in the same commit as the
+  `(preserved: ...)` annotation. Regeneration check: at a page's first
+  preservation, and again when a file of its lineage is refreshed, run
+  the `regenerate:` command once with `<OUT>` in the scratch directory
+  and only the preserved copies as input. If the command is `none` or
+  `unavailable (<reason>)`, record the reason instead of running it.
+  Record `regenerate verified <date>` or
+  `regenerate unverified (<reason>)` in the entry. Do not run it on
+  other passes. A backfill edits only those Artifacts
+  lines: the header dates and the filename stay, and the gate lists the
+  handoff as `UPDATE (lineage labels only)`. For a FROZEN or
+  BLOCKED/SKIPPED handoff, write the labels into the README entry only
+  and show `lineage labels pending: <handoff>` at the gate. For a batch,
+  commit as `Preserve artifact: <topic>/<page> lineage (<N> files, <M> MiB)`.
 - HTML artifacts: GitHub's normal blob view does not render standalone HTML.
   When preserving or generating an `.html` file in this notebook repo, add
   rendered-view links using this exact pattern (updated 2026-08-19 to match the
@@ -420,7 +629,10 @@ accidental workspace deletion cannot destroy them.
      Step 2), `git mv` the file to the new `codex_<START>-<END>_<slug>.md` name
      in the same commit so the filename stays truthful, and record the old
      filename on the `Formerly named:` header line. Never create a second file
-     for a chat that already has one.
+     for a chat that already has one. Exception (added 2026-09-20): a
+     lineage backfill (Step 4b) edits only the page's Artifacts lines,
+     keeps the header dates and the filename, and is committed in the
+     `Preserve artifact:` commit, not as `Update Codex handoff:`.
    - If none exists: write a new file. If an unrelated file with the same name is
      somehow present, stop and ask before overwriting.
 3. APPROVAL GATE -- show me, for every scoped chat and every output file:
@@ -431,9 +643,25 @@ accidental workspace deletion cannot destroy them.
    BLOCKED/SKIPPED chats, show the exact reason, such as "remote transcript not
    readable", "transcript missing", or "scope too large; needs batching". Also
    list artifact actions from Step 4b (preserved / refreshed /
-   canonical-missing-or-inaccessible alerts). Wait for my explicit approval.
+   canonical-missing alerts / unreachable mirrors unverified this run),
+   plus (added 2026-09-20) the `computed-from:`, `lineage unknown:`,
+   `lineage incomplete:`, `lineage labels pending:`, `relocate:`,
+   `measurement changed:` and `left behind` lines, each batch's file
+   count and total MiB, and the clone's `.git` size in MiB. Wait for my
+   explicit approval.
 4. On approval: commit with message
    `Add Codex handoff: <slug> (<START>..<END>)` for new files, or
    `Update Codex handoff: <slug> (<START>..<END>)` for updates, then push.
+   After a push that carries artifact preservation or refresh actions,
+   including actions bundled with a handoff commit, run `git fetch
+   origin`. For every approved file (mirrors, lineage inventories,
+   README, handoffs), compare the blob id (Git's identifier for file
+   contents) from `git ls-tree -r origin/main <path>` with
+   `git hash-object <local path>`. Include approved files even if they
+   were accidentally omitted from the commit. Check the final local
+   files after adding HTML rendering comments. Report `on origin/main:
+   <N> of <N> files, contents match`, and name any file whose id differs
+   or is missing. A name check alone would pass a README-only push that
+   left a changed mirror unstaged (added 2026-09-20).
 5. If push fails (auth, permissions, non-fast-forward): stop, show the exact
    error, and ask. No force-push, no credential changes.
