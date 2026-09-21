@@ -8,6 +8,15 @@ from workspace cleanup.
 Repo copies are mirrors: edit the canonical files first, then refresh these
 copies during the next handoff run.
 
+## CI versus runtron: users and engines
+
+- [ci-vs-runtron-users-and-engines.md](ci-vs-runtron-users-and-engines.md) —
+  repo-primary note, added 2026-09-21. Compares 2, 4, 8, 16 and 32 total users
+  across whole-machine nightly CI and single-engine runtron on half the machine.
+  Includes TP2/TP4 engine counts, balanced user distributions, and the separate
+  two-engine TP2 setup that fills the half machine. These are calculated layouts,
+  not new routing or performance measurements.
+
 ## amx_tron_decode_plan.html
 
 - Rendered view:
