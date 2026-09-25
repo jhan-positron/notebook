@@ -1982,7 +1982,7 @@ Batch content: 419 files (45.08 MiB) from 23 new handoffs, plus 40 relocated Wor
 
 #### pr3879/new-counters/counter.html
 
-- mirror of `None` (? bytes with the rendered-view comment). Related: [claude_20260924_counter-html-toggle-env-var-vs-build-option.md](../../handoffs/claude_20260924_counter-html-toggle-env-var-vs-build-option.md)  (sections 1 to 12: claude_20260922_avx-amx-aof-path-counters-on-pr3879.md)
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/counter.html` (133641 canonical bytes). Related: [claude_20260924_counter-html-toggle-env-var-vs-build-option.md](../../handoffs/claude_20260924_counter-html-toggle-env-var-vs-build-option.md)  (sections 1 to 12: claude_20260922_avx-amx-aof-path-counters-on-pr3879.md)
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/counter.html
 - generator: `artifacts/intel-amx/exec/counter-20260922/gen_counter.py`
 - input: constants and closed-form functions in gen_counter.py and artifacts/intel-amx/exec/counter-20260922/closed_form.py; artifacts/intel-amx/exec/attnstats-20260924/decision.json for section 13; exec/results/single-attn-20260901/summary.json (earlier batch); the rdtsc measurement of rdtsc_cost.c
@@ -2663,3 +2663,188 @@ One line per file: repo path -> canonical, bytes, citing handoff(s). Files that 
 - `memory/cpp-guide-literals-include-bools.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/cpp-guide-literals-include-bools.md` (2290 bytes). Related: [claude_20260923_pr-4557-literal-bools-in-view-template.md](../../handoffs/claude_20260923_pr-4557-literal-bools-in-view-template.md).
 - `memory/attn-stats-pr-implementation.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attn-stats-pr-implementation.md` (9602 bytes). Related: [claude_20260924_counter-html-toggle-env-var-vs-build-option.md](../../handoffs/claude_20260924_counter-html-toggle-env-var-vs-build-option.md).
 - `memory/attn-stats-why-not-fuse.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attn-stats-why-not-fuse.md` (4280 bytes). Related: [claude_20260924_pr-4596-attn-stats-hpp-vs-fuse-stats.md](../../handoffs/claude_20260924_pr-4596-attn-stats-hpp-vs-fuse-stats.md).
+
+
+## Codex handoff preservation — 2026-09-24
+
+Short version: Preserved the approved authored outputs and compact validation records. Canonical means the original working copy. The user approved this batch and its listed relocation paths.
+
+Root mapping: existing intel-AMX mappings apply. `exec/workflows/` maps to `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/`. Temporary validation and generator files were copied there after approval, preserving timestamps. Their origins remain intact as historical pointers.
+
+- `vnnied-k-in-place/issue4525/CONTEXT.md` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/CONTEXT.md`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/status/plain-english-review.html` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/plain-english-review.html`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+  - Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4525/status/plain-english-review.html
+- `vnnied-k-in-place/issue4525/evidence/artifact-validation.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/artifact-validation.json`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/evidence/design-revision-artifact-validation.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-artifact-validation.json`
+  - Related handoffs: handoffs/codex_20260921_incorporate-tensor-design-review.md
+- `vnnied-k-in-place/issue4525/evidence/design-revision-layout-checks.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-layout-checks.json`
+  - Related handoffs: handoffs/codex_20260921_incorporate-tensor-design-review.md
+- `vnnied-k-in-place/issue4525/evidence/design-revision-render-checks.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-render-checks.json`
+  - Related handoffs: handoffs/codex_20260921_incorporate-tensor-design-review.md
+- `vnnied-k-in-place/issue4525/evidence/design-revision-source-audit.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-source-audit.json`
+  - Related handoffs: handoffs/codex_20260921_incorporate-tensor-design-review.md
+- `vnnied-k-in-place/issue4525/evidence/design-round2-artifact-validation.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-artifact-validation.json`
+  - Related handoffs: handoffs/codex_20260921_regenerate-tensor-type-design.md
+- `vnnied-k-in-place/issue4525/evidence/design-round2-layout-checks.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-layout-checks.json`
+  - Related handoffs: handoffs/codex_20260921_regenerate-tensor-type-design.md
+- `vnnied-k-in-place/issue4525/evidence/design-round2-render-checks.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-render-checks.json`
+  - Related handoffs: handoffs/codex_20260921_regenerate-tensor-type-design.md
+- `vnnied-k-in-place/issue4525/evidence/design-round2-source-audit.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-source-audit.json`
+  - Related handoffs: handoffs/codex_20260921_regenerate-tensor-type-design.md
+- `vnnied-k-in-place/issue4525/evidence/design-round3-artifact-validation.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-artifact-validation.json`
+  - Related handoffs: handoffs/codex_20260922_incorporate-tensor-design-review.md
+- `vnnied-k-in-place/issue4525/evidence/design-round3-layout-checks.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-layout-checks.json`
+  - Related handoffs: handoffs/codex_20260922_incorporate-tensor-design-review.md
+- `vnnied-k-in-place/issue4525/evidence/design-round3-render-checks.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-render-checks.json`
+  - Related handoffs: handoffs/codex_20260922_incorporate-tensor-design-review.md
+- `vnnied-k-in-place/issue4525/evidence/design-round3-source-audit.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-source-audit.json`
+  - Related handoffs: handoffs/codex_20260922_incorporate-tensor-design-review.md
+- `vnnied-k-in-place/issue4525/evidence/github-review.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/github-review.json`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/evidence/issue-verification.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/issue-verification.json`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/evidence/layout-checks.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/layout-checks.json`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/evidence/plain-english-review.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/plain-english-review.json`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/evidence/render-checks.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/render-checks.json`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/evidence/source-audit.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/source-audit.json`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/evidence/check_layouts.py` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/check_layouts.py`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/evidence/validate_artifact.py` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/validate_artifact.py`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/evidence/issue-body.md` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/issue-body.md`
+  - Related handoffs: handoffs/codex_20260921_add-tensor-type-support.md
+- `vnnied-k-in-place/issue4525/status/remove-dummy-new-codex.html` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/remove-dummy-new-codex.html`
+  - Related handoffs: handoffs/codex_20260923_redesign-kv-object-lifetimes.md
+  - Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4525/status/remove-dummy-new-codex.html
+- `vnnied-k-in-place/issue4525/evidence/design-a/ci-baseline.txt` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-a/ci-baseline.txt`
+  - Related handoffs: handoffs/codex_20260923_redesign-kv-object-lifetimes.md
+- `vnnied-k-in-place/issue4525/evidence/design-a/pr-body.md` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-a/pr-body.md`
+  - Related handoffs: handoffs/codex_20260923_redesign-kv-object-lifetimes.md
+- `vnnied-k-in-place/issue4525/evidence/design-a/review.txt` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-a/review.txt`
+  - Related handoffs: handoffs/codex_20260923_redesign-kv-object-lifetimes.md
+- `vnnied-k-in-place/issue4525/evidence/design-a/validate_address_formulas.out.txt` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-a/validate_address_formulas.out.txt`
+  - Related handoffs: handoffs/codex_20260923_redesign-kv-object-lifetimes.md
+- `vnnied-k-in-place/issue4525/evidence/design-a/validate_address_formulas.py` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-a/validate_address_formulas.py`
+  - Related handoffs: handoffs/codex_20260923_redesign-kv-object-lifetimes.md
+- `vnnied-k-in-place/issue4525/evidence/design-a/validation.json` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-a/validation.json`
+  - Related handoffs: handoffs/codex_20260923_redesign-kv-object-lifetimes.md
+- `vnnied-k-in-place/status/shared-save-explained-codex.html` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/shared-save-explained-codex.html`
+  - Related handoffs: handoffs/codex_20260920-20260921_explain-pr4424-shared-save.md
+  - Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/shared-save-explained-codex.html
+  - generator: none (authored directly)
+  - input: none
+  - input built by: preserved exec/vnnik-trace-20260914/analyze.py and lanes.py produced the cited historical summaries
+  - sources: Exact records below; transitive historical comparison sources remain registered in artifacts/intel-amx/vnnied-k-in-place/status/store-remedies-report.html.lineage.md.
+  - regenerate: none
+  - regenerate unverified (authored page; no generator)
+  - inventory: `artifacts/intel-amx/vnnied-k-in-place/status/shared-save-explained-codex.html.lineage.md`
+- `vnnied-k-in-place/status/block-store-explained-codex.html` — authored page, input, or compact validation evidence.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/block-store-explained-codex.html`
+  - Related handoffs: handoffs/codex_20260921_explain-block-store-like-pr4424.md
+  - Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/block-store-explained-codex.html
+  - generator: claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/build-block-store-page.py (relocated after approval)
+  - input: claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/block-store-body.html (hand-authored template), claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/shared-save-explained-codex.html, claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-20260915/analysis.json
+  - input built by: preserved exec/vnnik-trace-20260914/analyze.py produced analysis.json; template authored in this chat
+  - sources: Exact records below; transitive historical comparison sources remain registered in artifacts/intel-amx/vnnied-k-in-place/status/store-remedies-report.html.lineage.md.
+  - regenerate: unavailable (generator hard-codes canonical inputs, /tmp template, and output; no output-path argument)
+  - regenerate unverified (unavailable (generator hard-codes canonical inputs, /tmp template, and output; no output-path argument))
+  - inventory: `artifacts/intel-amx/vnnied-k-in-place/status/block-store-explained-codex.html.lineage.md`
+- `exec/workflows/shared-save-validate.py` — validation script or authored generator input.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/shared-save-validate.py`
+  - origin: `claude-agentsrv:/tmp/shared-save-validate.py` (relocated after approval; original retained).
+  - Related handoffs: handoffs/codex_20260920-20260921_explain-pr4424-shared-save.md
+- `exec/workflows/shared-save-validation.json` — validation script or authored generator input.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/shared-save-validation.json`
+  - origin: `claude-agentsrv:/tmp/shared-save-validation.json` (relocated after approval; original retained).
+  - Related handoffs: handoffs/codex_20260920-20260921_explain-pr4424-shared-save.md
+- `exec/workflows/build-block-store-page.py` — validation script or authored generator input.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/build-block-store-page.py`
+  - origin: `claude-agentsrv:/tmp/build-block-store-page.py` (relocated after approval; original retained).
+  - Related handoffs: handoffs/codex_20260921_explain-block-store-like-pr4424.md
+- `exec/workflows/block-store-body.html` — validation script or authored generator input.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/block-store-body.html`
+  - origin: `claude-agentsrv:/tmp/block-store-body.html` (relocated after approval; original retained).
+  - Related handoffs: handoffs/codex_20260921_explain-block-store-like-pr4424.md
+  - Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/workflows/block-store-body.html
+- `exec/workflows/check-block-store-page.py` — validation script or authored generator input.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/check-block-store-page.py`
+  - origin: `claude-agentsrv:/tmp/check-block-store-page.py` (relocated after approval; original retained).
+  - Related handoffs: handoffs/codex_20260921_explain-block-store-like-pr4424.md
+- `exec/workflows/validate_tensor_round3.py` — validation script or authored generator input.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/validate_tensor_round3.py`
+  - origin: `claude-agentsrv:/tmp/validate_tensor_round3.py` (relocated after approval; original retained).
+  - Related handoffs: handoffs/codex_20260922_incorporate-tensor-design-review.md
+- `exec/workflows/validate-tensor-design-round3-browser.py` — validation script or authored generator input.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/validate-tensor-design-round3-browser.py`
+  - origin: `claude-agentsrv:/tmp/validate-tensor-design-round3-browser.py` (relocated after approval; original retained).
+  - Related handoffs: handoffs/codex_20260922_incorporate-tensor-design-review.md
+- `exec/counter-20260922/gen_counter.py` — registered generator refresh.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_counter.py`
+  - Related handoffs: handoffs/claude_20260924_counter-html-toggle-env-var-vs-build-option.md
+- `pr3879/new-counters/counter.html` — registered report whose mirror was absent.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/counter.html`
+  - Related handoffs: handoffs/claude_20260924_counter-html-toggle-env-var-vs-build-option.md
+  - Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/counter.html
+  - generator: artifacts/intel-amx/exec/counter-20260922/gen_counter.py
+  - input: artifacts/intel-amx/amx-decode-boost-202608/single-attn-20260901/summary.json, artifacts/intel-amx/exec/attnstats-20260924/decision.json, generator constants
+  - input built by: existing phase-analysis scripts and exec/attnstats-20260924/decide.py; cycle-read result recorded in artifacts/intel-amx/exec/counter-20260922/rdtsc-record-20260922.txt
+  - sources: Preserved existing benchmark records, phase records, generator constants, and transcript excerpt; see artifacts/intel-amx/pr3879/new-counters/counter.html.lineage.md
+  - regenerate: unavailable (fixed canonical output and absolute input paths)
+  - regenerate unverified (fixed canonical output and absolute input paths)
+  - inventory: `artifacts/intel-amx/pr3879/new-counters/counter.html.lineage.md`
+- `exec/counter-20260922/rdtsc-record-20260922.txt` — exact cycle-read measurements quoted by counter.html.
+  - Canonical: `repository-primary transcript excerpt`
+  - Related handoffs: handoffs/claude_20260922_avx-amx-aof-path-counters-on-pr3879.md
+- `exec/results/vnnik2-trace-20260915/runs.txt` — source.
+  - Canonical: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-20260915/runs.txt`
+  - Related handoffs: handoffs/codex_20260920-20260921_explain-pr4424-shared-save.md, handoffs/codex_20260921_explain-block-store-like-pr4424.md
+- `vnnied-k-in-place/status/shared-save-explained-codex.html.lineage.md` — per-source evidence inventory.
+  - Canonical: `repository-primary lineage inventory`
+  - Related handoffs: handoffs/codex_20260920-20260921_explain-pr4424-shared-save.md
+- `vnnied-k-in-place/status/block-store-explained-codex.html.lineage.md` — per-source evidence inventory.
+  - Canonical: `repository-primary lineage inventory`
+  - Related handoffs: handoffs/codex_20260921_explain-block-store-like-pr4424.md
+- `pr3879/new-counters/counter.html.lineage.md` — add omitted page inputs and exact timing record.
+  - Canonical: `repository-primary lineage inventory`
+  - Related handoffs: handoffs/claude_20260924_counter-html-toggle-env-var-vs-build-option.md
+
+Left behind (size): the four trace inputs listed in the new page inventories exceed 5 MiB each. The parsed summaries are preserved. Historical comparison-source omissions remain itemized in the existing store-remedies inventory. Temporary browser screenshots and one-time text-edit scripts are not needed to resume the final documents.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates PR3879/new-PRs/PR1/counter.html (AMX / AVX / FPGA attention path counters design).
+"""Generates PR3879/new-PRs/new-counters/counter.html (moved from PR1/ on 2026-09-24) (AMX / AVX / FPGA attention path counters design).
 
 Every number on the page is either computed here (closed form, est.) or copied from a
 named measurement file. Pure-ASCII output (artifact mojibake trap, 2026-09-13).
@@ -7,7 +7,7 @@ named measurement file. Pure-ASCII output (artifact mojibake trap, 2026-09-13).
 import json, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.expanduser("~/workspace/intel-AMX/PR3879/new-PRs/PR1/counter.html")
+OUT = os.path.expanduser("~/workspace/intel-AMX/PR3879/new-PRs/new-counters/counter.html")
 SA = os.path.expanduser("~/workspace/intel-AMX/exec/results/single-attn-20260901/summary.json")
 
 # ---------------------------------------------------------------- closed form (est.)
@@ -44,12 +44,15 @@ def decode_cpu(N0, steps):
             avx += N % PAGE; vv += 1
     return amx, avx, va, vv
 
-def decode_aof(N0, steps, lag=4):
+def decode_aof(N0, steps):
+    # DMA keeps up: the boundary is the last landed 4-token GOF, so the CPU tail behind it holds
+    # (p mod 4) + 1 tokens for the query at position p = N - 1 (1 to 4, mean 2.5); see section 2.2.
     fpga = avx = 0
     for t in range(1, steps + 1):
         N = N0 + t
-        fpga += N - lag
-        avx += lag
+        tail = ((N - 1) % 4) + 1
+        fpga += N - tail
+        avx += tail
     return fpga, avx
 
 ROWS = {}
@@ -201,6 +204,160 @@ def fig_decode():
         s.append(f'<text x="{X(t) - (3 if anchor == "end" else -3):.1f}" y="{ya + dy}" font-size="11" text-anchor="{anchor}" fill="{INK2}">{lbl}</text>')
     s.append('</svg>')
     return "\n".join(s)
+
+
+# ---------------------------------------------------------------- figure 3: where AMX work comes from under FPGA attention
+def fig_cases():
+    """One row per state of section 2.3, K positions 0..1100 to scale (same axis as figure 2)."""
+    N = 1100; W = 900; x0, x1 = 60, 880
+    sx = (x1 - x0) / N
+    def X(t): return x0 + t * sx
+    rows = [
+        ("1. Query below the engagement point (p = 100, no card range)",
+         "page 0 (positions 0 to 63) is dense and takes AMX; positions 64 to 100 take AVX",
+         [(0, 64, ORANGE), (64, 101, BLUE)], 101),
+        ("2. First shard not engaged (p = 130, fewer than 128 tokens landed for every layer)",
+         "pages 0 and 1 take AMX; positions 128 to 130 take AVX",
+         [(0, 128, ORANGE), (128, 131, BLUE)], 131),
+        ("3. Copy lag of a whole page (p = 1099, boundary at 1023: 19 GOFs in flight)",
+         "card 0 to 1023; page 16 (1024 to 1087) takes AMX; 1088 to 1099 take AVX",
+         [(0, 1024, AQUA), (1024, 1088, ORANGE), (1088, 1100, BLUE)], 1100),
+        ("4. Degraded shard 0, card memory exhausted (p = 1099, no card range at all)",
+         "same split as CPU attention: 17 pages take AMX, 12 tokens take AVX",
+         [(0, 1088, ORANGE), (1088, 1100, BLUE)], 1100),
+        ("5. Warm branch inside shard 0, cached prefix 0 to 999 (p = 1099, copy landed up to 511 so far)",
+         "card 0 to 511; pages 8 to 16 (512 to 1087) take AMX; 1088 to 1099 take AVX",
+         [(0, 512, AQUA), (512, 1088, ORANGE), (1088, 1100, BLUE)], 1100),
+    ]
+    rh, lab, gap, top = 24, 34, 14, 14
+    H = top + len(rows) * (rh + lab + gap) + 56
+    s = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Five states in which the CPU scores a whole 64-token page under FPGA attention, so the AMX kernel runs: a query below position 127, the first shard not yet engaged, a copy lag of a whole page, a degraded shard, and a warm prefix-cache branch inside a shard" xmlns="http://www.w3.org/2000/svg">']
+    s.append(f'<rect x="0" y="0" width="{W}" height="{H}" fill="{SURF}" />')
+    y = top
+    for title, detail, segs, n in rows:
+        s.append(f'<text x="{x0}" y="{y + 12}" font-size="12" font-weight="600" fill="{INK}">{title}</text>')
+        s.append(f'<text x="{x0}" y="{y + 27}" font-size="11" fill="{INK2}">{detail}</text>')
+        yb = y + lab
+        for a, b, col in segs:
+            s.append(f'<rect x="{X(a):.1f}" y="{yb}" width="{max((b - a) * sx - 1.0, 1.5):.1f}" height="{rh}" fill="{col}" />')
+        s.append(f'<line x1="{X(n):.1f}" y1="{yb - 3}" x2="{X(n):.1f}" y2="{yb + rh + 3}" stroke="{INK2}" stroke-width="1" />')
+        if n < 600:
+            s.append(f'<text x="{X(n) + 5:.1f}" y="{yb + rh - 7}" font-size="10.5" fill="{INK2}">query p = {n - 1}</text>')
+        y += rh + lab + gap
+    ya = y + 8
+    s.append(f'<line x1="{x0}" y1="{ya}" x2="{x1}" y2="{ya}" stroke="{GRID}" stroke-width="1" />')
+    for t, lbl, anchor in ((0, "0", "start"), (127, "127", "start"), (512, "512", "middle"), (1024, "1024 (shard 1 ends)", "end"), (1100, "1100", "end")):
+        s.append(f'<line x1="{X(t):.1f}" y1="{ya - 4}" x2="{X(t):.1f}" y2="{ya + 4}" stroke="{INK2}" stroke-width="1" />')
+        s.append(f'<text x="{X(t) - (3 if anchor == "end" else -3 if anchor == "start" else 0):.1f}" y="{ya + 16}" font-size="11" text-anchor="{anchor}" fill="{INK2}">{lbl}</text>')
+    lx = x0
+    for col, name in ((AQUA, "card (FPGA)"), (ORANGE, "CPU, AMX kernel (dense page)"), (BLUE, "CPU, AVX dotter")):
+        s.append(f'<rect x="{lx}" y="{ya + 24}" width="12" height="12" rx="2" fill="{col}" />')
+        s.append(f'<text x="{lx + 17}" y="{ya + 34}" font-size="11" fill="{INK2}">{name}</text>')
+        lx += 210
+    s.append('</svg>')
+    return "\n".join(s)
+
+# ---------------------------------------------------------------- predictions for the queued 2026-09-25 cells (est.)
+def _pred_cells():
+    L, KV, U = 36, 8, 8                        # qwen-3-4b layers, KV heads, users of the 8-user cells
+    per = L * KV                               # visits per (query, page) summed over layers and KV heads, one user
+    # 8 users x prompt 1024 (and 1 user: divide by 8): decode queries at positions 1024..1278
+    tail_1024 = sum(((p % 4) + 1) for p in range(1024, 1279))
+    # 8 users x prompt 64: decode queries at positions 64..318
+    q_sub = len([p for p in range(64, 319) if p < 127])          # queries below the engagement point
+    ready_amx_p64 = (q_sub + 1) * per * U                        # + the query at 127 (its own GOF has not landed)
+    pend_amx_p64 = 1 * per * U                                   # the full pending page at p = 127
+    return dict(tail_1024=tail_1024, pend_k_1024=tail_1024 * per * U, pend_v_1024=255 * per * U,
+                fwd2_amx=2 * 128 * per * U, ready_amx_p64=ready_amx_p64, pend_amx_p64=pend_amx_p64,
+                sets_p64_amxavx=q_sub * U, sets_p64_amx=U, sets_p64_fpga=(255 - q_sub - 1) * U)
+PRED = _pred_cells()
+
+def sec22():
+    return """<h3 id="q2b">2.2 One decode query under each attention mode (figure 2, step by step)</h3>
+<p>This sub-section unpacks figure 2. The query is the token at position 1099, so the context is 1100 tokens (prompt 1024 plus 76 generated tokens). One layer, one KV head. "Tail" below means the key positions behind the card's range that the CPU must score. "Poll" means the one check per forward that records which copies to the card have landed.</p>
+<p><b>Row A, CPU attention.</b></p>
+<ul class="tight">
+<li>The ready pass walks pages 0 to 16 (positions 0 to 1087), all written in earlier forwards. Each holds 64 live entries, the query sees all of them through one mask range, and the page's last position lies below the query's range end (1100). So each page passes the dense test and takes the AMX kernel: 17 visits of 64 K tokens [self_attention.hpp:1601-1614, 1760-1768].</li>
+<li>The pending pass walks page 17 (positions 1088 to 1099), whose newest entry was written in this forward. The page has 12 live entries, so end (12) differs from the page size and the dense test fails. The AVX dotter scores its 12 K tokens: 1 visit [self_attention.hpp:1739-1743, 1793-1809].</li>
+<li>When the context is a multiple of 64 the pending page is full. Its 64th entry is the query itself, at position N-1, below the range end N, so the page is dense and takes AMX. Measured 2026-09-24 (qwen-3-4b, 8 users, prompt 1024, 256 tokens, CPU attention): pending_amx_visits 6,912 = 3 such forwards x 8 users x 36 layers x 8 KV heads, and 24 token jobs whose path set was {AMX} alone [exec/results/attnstats-20260924/exit-reports.txt].</li>
+<li>So under CPU attention the description in the question holds: a decode step splits its attention between AMX (the full pages) and AVX (the partial tail page) in 63 of every 64 steps.</li>
+</ul>
+<p><b>Row B, attention on the FPGA.</b></p>
+<ul class="tight">
+<li>The forward first runs the poll, then plans the step, and only then writes this step's K/V. The plan takes, per shard, the leading run of GOFs whose copy has landed for every layer and sets the boundary L to the last position of that run. L therefore always has the form 4k - 1 [full.hpp:1877-1893, 2755-2759, 2791-2794; shard.hpp:355-364].</li>
+<li>The card scores positions 0 to min(p, L) for a query at position p. This range includes positions 0 to 126: the engagement point 127 is a rule about the query's position, not about the keys [model.hpp:2510-2519]. So the sentence of the earlier caption is confirmed: positions below 127 stay on the CPU only for a query that is itself below 127, or for a query with no card range at all.</li>
+<li>The CPU scores positions L+1 to p, the query included. When every copy submitted before this step has landed, L = 4 floor(p/4) - 1 and the tail holds (p mod 4) + 1 tokens: 1 to 4, mean 2.5 [ranged_mask.cpp:42-49; model.hpp:2519]. In figure 2, p = 1099 has p mod 4 = 3, so the tail is 1096 to 1099, 4 tokens. Each GOF whose copy has not landed at the poll adds 4 tokens to the tail, and the code puts no upper bound on that count [dma_queue.cpp:354-380].</li>
+<li>The tail starts at a multiple of 4, and 64 is a multiple of 4, so the tail never crosses a page edge: it lies inside the page that holds the query. That page either has fewer than 64 live entries or, when it is full, has the card/CPU boundary inside it. Both fail the dense test, so the AVX dotter scores the 1 to 4 tokens [self_attention.hpp:1609-1611, 1746-1747].</li>
+<li>Pages fully inside the card's range are dropped before any visit when the section is large enough (pages x queries at or above 64), and otherwise counted as an empty visit that scores nothing [self_attention.hpp:1409-1425, 1800-1808].</li>
+<li>So in this steady state a decode step splits its attention between the card and AVX. The AMX kernel is not called, and the token's path set is {FPGA, AVX}. The AMX kernel has no switch tied to the attention mode; it simply finds no dense page to run on [self_attention.hpp:1406-1408].</li>
+</ul>
+<p class="take">Takeaway: the AVX/AMX split of a partial page is a CPU-attention fact. Under FPGA attention the CPU keeps 1 to 4 tokens per step and scores them with AVX, so the steady state has no AMX work. The next sub-section lists the states that are not steady.</p>"""
+
+def sec23():
+    P = PRED
+    rows = [
+        ("1. Query below the engagement point",
+         "p &lt; 127 with USE_HW_ATTN unset or 1 (USE_HW_ATTN=N with N &gt; 1 raises the point to k x 128 - 1; N=1 is the default 127).",
+         "everything, positions 0 to p", "floor((p+1)/64): 1 page from p = 64, so at most 1 at the default point",
+         "model.hpp:2516-2518; hw_attn_config.cpp:21-30", "verified in code; the prompt-64 cell measures it"),
+        ("2. First shard not yet engaged",
+         "fewer than 32 complete GOFs (128 tokens) have landed for every layer, or the boundary is below 127; the earliest query that can offload is p = 128.",
+         "everything", "floor((p+1)/64)", "full.hpp:2755-2765, 2776-2779",
+         "verified in code; prefill forward 2 is in this state unless all 32 GOFs x 36 layers land before its poll"),
+        ("3. Copy lag of a whole page",
+         "15 or more submitted GOFs (60 or more tokens) have not landed at the poll.",
+         "the tail L+1 to p", "the whole pages inside the tail", "full.hpp:2791-2794; dma_queue.cpp:354-380",
+         "not bounded by the code; never observed; the 8-user prompt-1024 cell settles it (decode_like ready_amx_visits)"),
+        ("4. Degraded shard (card memory exhausted)",
+         "the shard's HBM allocation failed at creation: warning 'lose HW attention', count in sw_fallback_total; the shard stays degraded until its edge gains tokens and a card passes the capacity gate; a stable ancestor edge keeps it.",
+         "that shard's 1,024 tokens and every later position", "16 per degraded shard, plus every later full page",
+         "gof.cpp:70-103; shard.hpp:264-272; full.hpp:2401-2428, 2776-2804",
+         "verified in code; measured co-occurrence 2026-09-22 (warm 4096 to 6144 cells, prefill page); every such page scored on AMX when AMX is on"),
+        ("5. Prefix-cache branch inside a shard",
+         "a new request's cached prefix ends inside a shard's 1,024-token range; the shared edge keeps only shards that end at or before the split, the spanning shard moves to the old child, and the new branch creates its own shard and re-copies the shared GOFs (backfill).",
+         "the cached pages above the landed part of the copy, then the tail", "the whole cached pages until the copy lands",
+         "full.hpp:1043-1054, 2455-2462, 2525-2538; gof.cpp:227-289",
+         "mechanism verified in code; size Insufficient data; the best candidate for the 2026-09-17 count; the prompt-1000 warm cells measure it"),
+        ("6. Prefill copy lag",
+         "chunk k's GOFs have not all landed at the poll that opens forward k+1.",
+         "the lagging positions of chunks 1 to k, then the own chunk", "the whole pages above the landed prefix",
+         "full.hpp:2755-2761; ranged_mask.cpp:52-56", "verified in code; Table 1's prefill rows assume none"),
+        ("7. Sliding-window layers",
+         "an attention operation that is not full-causal never gets an FPGA pass; the CPU scores every visible key.",
+         "everything inside the window", "as under CPU attention, when the model is AMX-eligible", "self_attention.hpp:487-495",
+         "verified in code; qwen-3-4b has no such layer (section 3)"),
+        ("not a case: prefix-cache hit at a shard end",
+         "the cached prefix ends exactly at a shard end (for example a 1,024-token prompt repeated): the landed shard stays on the shared edge and the new request reuses it.",
+         "only the tail", "0", "shard.hpp:8-20; full.hpp:1261-1270, 2747-2748",
+         "verified in code; the prompt-1024 warm cell is the contrast measurement"),
+    ]
+    t2 = ['<div class="tw"><table><tr><th>State</th><th>When it happens</th><th>What the CPU scores</th><th>AMX visits per (layer, KV head, query)</th><th>Code (tron main 0a51385e95)</th><th>Evidence</th></tr>']
+    for r in rows:
+        t2.append('<tr>' + ''.join(f'<td>{c}</td>' for c in r) + '</tr>')
+    t2.append('</table></div>')
+    t3 = ['<div class="tw"><table><tr><th>Queued cell (qwen-3-4b tp2, 256 generated tokens, TRON_ATTN_STATS=1)</th><th>State tested</th><th>Predicted counter values (est., every copy landed by the next poll)</th></tr>',
+          f'<tr><td>attnstats-20260925-fpga: 8 users x prompt 1024, FPGA attention</td><td>steady state (rows of Table 1); state 3 if it occurs</td><td>decode_like: ready_amx_visits 0, pending_amx_visits 0, pending_avx_visits {fmt(P["pend_v_1024"])}, pending_avx_k_tokens {fmt(P["pend_k_1024"])} ({P["tail_1024"]} per user per layer and KV head, mean 2.49 tokens per query), fpga_queries 2,040, path sets fpga+avx 2,040. prompt_or_mixed: forward 1 all-AVX (path set avx 1,024); forward 2 either card-assisted (0 AMX visits) or state 2 (ready_amx_visits {fmt(P["fwd2_amx"])} = 2 pages x 128 queries x 8 users x 36 x 8); forwards 3 to 8 on the card with the own chunk on AVX.</td></tr>',
+          f'<tr><td>attnstats-20260925-fpga: 1 user x prompt 1024, FPGA attention</td><td>the same, one user (the 2026-09-17 shape without the cache)</td><td>the 8-user values divided by 8.</td></tr>',
+          f'<tr><td>attnstats-20260925-fpga: 8 users x prompt 64, FPGA attention</td><td>states 1 and 2</td><td>decode_like: ready_amx_visits {fmt(P["ready_amx_p64"])} (queries at positions 64 to 127, one dense page each, x 8 users x 36 x 8), pending_amx_visits {fmt(P["pend_amx_p64"])} (the full pending page at p = 127), path sets amx+avx {P["sets_p64_amxavx"]}, amx {P["sets_p64_amx"]}, fpga+avx {fmt(P["sets_p64_fpga"])}; each further step of copy lag at p = 128 and after adds 2 x 2,304 ready AMX visits.</td></tr>',
+          '<tr><td>attnstats-20260925-fpga: 8 users x prompt 8192, FPGA attention</td><td>steady state at the Table 1 8192 rows; state 4 if the card fills (72 shards per engine gave 0 warnings on 2026-09-22)</td><td>decode_like ready_amx_visits 0 and pending_amx_visits 0; any nonzero value comes with sw_fallback warnings (state 4) or is state 3.</td></tr>',
+          '<tr><td>attnstats-20260925-fpga: the same four cells with TRON_AMX_DISABLE=1</td><td>control</td><td>amx visits 0 by construction; ready_avx_full_page_visits and pending_avx_full_page_visits equal the AMX visits of the matching cell (the dense pages, scored by the dotter instead).</td></tr>',
+          '<tr><td>attnstats-20260925-warm: 1 user and 8 users x prompt 1000, --iterations 3, FPGA attention</td><td>state 5 (iterations 2 and 3 branch at position 1000 inside shard 0)</td><td>warm-iteration counters = (3-iteration run minus the 1-iteration run of the same cell) / 2. Prediction: decode_like ready_amx_visits greater than 0 in the warm iterations, one visit per (layer, KV head) for every whole cached page above the landed part of the copy at each step; the count measures how many decode steps the backfill copy takes. Zero would refute state 5 as the cause of the 2026-09-17 count.</td></tr>',
+          '<tr><td>attnstats-20260925-warm: 1 user x prompt 1024, --iterations 3, FPGA attention</td><td>the "not a case" row (branch at the shard end)</td><td>warm-iteration decode_like ready_amx_visits 0 (the landed shard is reused); prompt_or_mixed nearly empty (1,024 reused tokens per iteration).</td></tr>',
+          '</table></div>']
+    return f"""<h3 id="q2c">2.3 When the AMX path still runs under FPGA attention</h3>
+<p>The AMX kernel has no switch tied to the attention mode. It runs for any page the CPU is required to score that passes the dense test [self_attention.hpp:1406-1408, 1746-1768]. Under FPGA attention such a page exists only when the card's range stops short of a whole 64-token page that the query can see. The code produces that state in the six cases below, drawn in figure 3 and listed in Table 2 with the counter values the queued runs should print (Table 3). "p" is the query's position. "Backfill" is the copy of already-saved GOFs into a newly created shard. A "degraded shard" is one whose card memory could not be allocated.</p>
+<div class="fig">{fig_cases()}</div>
+<p class="cap">Figure 3. Five states in which the CPU scores a whole 64-token page while attention is on the FPGA, K positions drawn to scale (0 to 1100). Orange = the AMX kernel runs on that page; blue = the AVX dotter; green = the card. State 5 is drawn at one moment of the backfill copy (landed up to position 511, est.); the orange part shrinks as the copy lands. State 6 (prefill copy lag) has the same shape as state 3 with prompt queries.</p>
+{chr(10).join(t2)}
+<p class="cap">Table 2. States that give the AMX kernel work under FPGA attention, with the code that produces them (tron main 0a51385e95) and the evidence status. "Verified in code" = a claim of workflow wf_12412298-770 that two adversarial refuters could not break. Every count is per (layer, KV head, query); multiply by 36 x 8 for qwen-3-4b and by the number of users.</p>
+<p>Two measurements already show AMX work under FPGA attention, without saying which state produced it:</p>
+<ul class="tight">
+<li>2026-09-17, rinzler, qwen-3-4b, one user, three requests after a warm-up with the same prompt (910 cached prompt tokens, about 131 generated tokens each): EXE.AMX_BUSY 501,350,140 cycles with FPGA attention against 873,318,988 with CPU attention (57 %) and 0 with the kill switch [exec/results/ci-enable-20260917/summary.tsv]. States 1 and 2 cannot produce that much (at most 2 pages for at most 65 queries). State 5 fits the shape: the cached prefix of 910 tokens ends inside shard 0, so each request re-copied it and scored the cached pages on AMX until the copy landed. This is a hypothesis; the prompt-1000 warm cells are the test.</li>
+<li>2026-09-18/19, whole-machine CI cells with the canonical AMX package under FPGA attention: 10.5 G AMX-busy cycles in a 20 s probe of 4 short requests, 0 with the no-AMX package [exec/results/canon-ci-20260918/report-v2.html]. The probe includes prefill, so states 2 and 6 are the likely sources; the counters split it by forward class.</li>
+</ul>
+{chr(10).join(t3)}
+<p class="cap">Table 3. Predicted counter values for the runs queued on 2026-09-25 (est., closed form in gen_counter.py, _pred_cells). Visits are summed over 36 layers, 8 KV heads and the users of the cell. The runs wait for the CI lease on delphi-3bda; their exit reports land in exec/results/attnstats-20260925-fpga/ and exec/results/attnstats-20260925-warm/.</p>
+<p class="take">Takeaway: with USE_HW_ATTN at its default, the AMX kernel does run on some decode steps, but only in the states of Table 2: the first 64 queries of a short context, the steps before the first shard engages, a degraded shard, a whole-page copy lag, or a warm branch inside a shard. In the steady state of the Table 1 rows it does not run. The queued runs put numbers on each state.</p>"""
 
 # ---------------------------------------------------------------- chart A: closed-form shares
 def chart_shares():
@@ -373,9 +530,9 @@ def share_table():
     for N in (1024, 2048, 4096, 8192):
         r = ROWS[N]
         out.append(f'<tr><td>prompt {N}, prefill, CPU attention</td><td class="n">{fmt(r["pre_tot"])}</td><td class="n">{fmt(r["pre_amx"])} ({pct(r["pre_amx"], r["pre_tot"])} %)</td><td class="n">{fmt(r["pre_avx"])} ({pct(r["pre_avx"], r["pre_tot"])} %)</td><td class="n">0</td><td class="n">{fmt(r["pre_va"])}</td><td class="n">{fmt(r["pre_vv"])}</td><td class="n">{r["forwards"]}</td></tr>')
-        out.append(f'<tr><td>prompt {N}, prefill, FPGA attention, DMA keeps up (est.)</td><td class="n">{fmt(r["pre_tot"])}</td><td class="n">0</td><td class="n">{fmt(r["pre_fpga_avx"])} ({pct(r["pre_fpga_avx"], r["pre_tot"])} %)</td><td class="n">{fmt(r["pre_fpga"])} ({pct(r["pre_fpga"], r["pre_tot"])} %)</td><td class="n">0</td><td class="n">{fmt(r["pre_vv"])}</td><td class="n">{r["forwards"]}</td></tr>')
+        out.append(f'<tr><td>prompt {N}, prefill, FPGA attention, DMA keeps up (est.)</td><td class="n">{fmt(r["pre_tot"])}</td><td class="n">0 (a)</td><td class="n">{fmt(r["pre_fpga_avx"])} ({pct(r["pre_fpga_avx"], r["pre_tot"])} %)</td><td class="n">{fmt(r["pre_fpga"])} ({pct(r["pre_fpga"], r["pre_tot"])} %)</td><td class="n">0</td><td class="n">{fmt(r["pre_vv"])}</td><td class="n">{r["forwards"]}</td></tr>')
         out.append(f'<tr><td>prompt {N}, 256 decode steps, CPU attention</td><td class="n">{fmt(r["dec_tot"])}</td><td class="n">{fmt(r["dec_amx"])} ({pct(r["dec_amx"], r["dec_tot"])} %)</td><td class="n">{fmt(r["dec_avx"])} ({pct(r["dec_avx"], r["dec_tot"])} %)</td><td class="n">0</td><td class="n">{fmt(r["dec_va"])}</td><td class="n">{fmt(r["dec_vv"])}</td><td class="n">256</td></tr>')
-        out.append(f'<tr><td>prompt {N}, 256 decode steps, FPGA attention, lag 4 tokens (est.)</td><td class="n">{fmt(r["dec_tot"])}</td><td class="n">0</td><td class="n">{fmt(r["dec_fpga_avx"])} ({100.0*r["dec_fpga_avx"]/r["dec_tot"]:.2f} %)</td><td class="n">{fmt(r["dec_fpga"])} ({pct(r["dec_fpga"], r["dec_tot"])} %)</td><td class="n">0</td><td class="n">256</td><td class="n">256</td></tr>')
+        out.append(f'<tr><td>prompt {N}, 256 decode steps, FPGA attention, DMA keeps up: CPU tail 1 to 4 tokens (est.)</td><td class="n">{fmt(r["dec_tot"])}</td><td class="n">0 (a)</td><td class="n">{fmt(r["dec_fpga_avx"])} ({100.0*r["dec_fpga_avx"]/r["dec_tot"]:.2f} %)</td><td class="n">{fmt(r["dec_fpga"])} ({pct(r["dec_fpga"], r["dec_tot"])} %)</td><td class="n">0</td><td class="n">256</td><td class="n">256</td></tr>')
     out.append('</table></div>')
     return "\n".join(out)
 
@@ -451,7 +608,7 @@ HTML = f"""<!DOCTYPE html>
 <title>AMX path counters</title>
 <style>{CSS}</style></head><body><main>
 <h1>Counters for the AVX / AMX / FPGA attention paths: what to count, where, and what the answers already are</h1>
-<p class="sub">For jhan. Date 2026-09-22, updated 2026-09-24 with the decision record (section 13). Source revision: tron main 0a51385e95 (read-only worktree ~/workspace/ai-runs/tron-counters-ro), the tree that contains PR 3879 (merged 2026-09-15). Verification: a 30-agent read / refute / design / judge workflow (wf_a8e982c8-1b8) produced 411 code claims with file:line citations, of which 327 hold, 82 hold with a qualifier and 2 were refuted and dropped. Every number below is either computed by exec/counter-20260922/closed_form.py (marked est.) or copied from a named measurement file. Generated by exec/counter-20260922/gen_counter.py.</p>
+<p class="sub">For jhan. Date 2026-09-22, updated 2026-09-24 with the decision record (section 13) and 2026-09-25 with sections 2.2 and 2.3 (does the AMX path run when attention is on the FPGA) and a relabelled Table 1. Source revision: tron main 0a51385e95 (read-only worktree ~/workspace/ai-runs/tron-counters-ro), the tree that contains PR 3879 (merged 2026-09-15). Verification: a 30-agent read / refute / design / judge workflow (wf_a8e982c8-1b8) produced 411 code claims with file:line citations, of which 327 hold, 82 hold with a qualifier and 2 were refuted and dropped. Every number below is either computed by exec/counter-20260922/closed_form.py (marked est.) or copied from a named measurement file. Generated by exec/counter-20260922/gen_counter.py.</p>
 
 <div class="short"><h2 style="margin-top:0;border:0">Short version</h2>
 <p>Prefill runs attention for every prompt token, so the prefill counter is the largest one, not a useless one (section 1). One decode token uses several paths at once, one choice per 64-token page of cached keys, so the counter must count key tokens scored per path, not tokens per path (section 2). The 2026-09-24 decision puts every counter and timer of the design behind one environment variable, TRON_ATTN_STATS, built and measured as recorded in section 13, and keeps the 2026-09-01 probe that timed the QK, softmax and PV phases of attention as a lab-build option (section 6).</p></div>
@@ -462,7 +619,7 @@ HTML = f"""<!DOCTYPE html>
 <li><a href="#q1">1. Prefill: not one token, and not AMX-only</a>
   <ol><li><a href="#q1b">1.1 Why a given prompt token still runs attention and the FFN</a></li></ol></li>
 <li><a href="#q2">2. Decode: the path is chosen per page visit, not per token</a>
-  <ol><li><a href="#q2a">2.1 What is closed-form and what is not</a></li></ol></li>
+  <ol><li><a href="#q2a">2.1 What is closed-form and what is not</a></li><li><a href="#q2b">2.2 One decode query under each attention mode (figure 2, step by step)</a></li><li><a href="#q2c">2.3 When the AMX path still runs under FPGA attention</a></li></ol></li>
 <li><a href="#q3">3. Layers: the same path in every layer only for uniform models</a></li>
 <li><a href="#today">4. What tron measures today, and the gaps</a></li>
 <li><a href="#design">5. Proposed counters and timers (v1)</a>
@@ -528,19 +685,21 @@ HTML = f"""<!DOCTYPE html>
 <div class="wrong"><p><b>Premise in the question:</b> "out of 256 generated tokens, how many are generated by the AVX path, AMX path or AoF path? This can be calculated."</p>
 <p><b>What the code does:</b> apply_page_tok decides per (query token, KV page, KV head) whether the pair takes AMX (dense page), the AVX dotter (everything else) or nothing (the FPGA owns the range), and the join folds the FPGA partial and the CPU partial into one output [self_attention.hpp:1746-1768, 1800-1852; model.hpp:2503-2519]. One decode token therefore uses a set of paths.</p></div>
 <div class="fig">{fig_decode()}</div>
-<p class="cap">Figure 2. One decode query at context 1100 (prompt 1024 plus 76 generated tokens), one layer, one KV head, drawn to scale in K position. Row A, CPU attention: 17 full 64-token pages are dense and take AMX; the 12-token tail page (the pending page, written in this forward) takes AVX. Row B, FPGA attention: the card scores the HBM-resident prefix up to the last complete GOF at plan time (here 1096, est. with a 4-token lag); the CPU scores the remaining 4 tokens on AVX; no full CPU page exists, so AMX gets no work in steady-state decode. Positions below 127 are scored on the CPU only when the query itself is below 127.</p>
+<p class="cap">Figure 2. One decode query at position 1099 (context 1100 = prompt 1024 plus 76 generated tokens), one layer, one KV head, drawn to scale in K position. Row A: CPU attention. Row B: attention on the FPGA, drawn for the state where every copy to the card has landed (1099 mod 4 = 3, so the CPU tail is 4 tokens). Section 2.2 walks through both rows; section 2.3 lists the states in which row B does contain AMX work.</p>
 <h3 id="q2a">2.1 What is closed-form and what is not</h3>
 <ul class="tight">
-<li>Under CPU attention, at context N (query at position N-1): floor(N/64) full pages on AMX, N mod 64 tokens on AVX, one visit each per KV head [self_attention.hpp:1601-1611]. In 63 of 64 steps the token's path set is {{AMX, AVX}}; when N mod 64 == 0 the pending page is full and, for a single-user sequence with one mask range, should be dense and take AMX (likely, not yet verified by a run: 4 of the 256 steps at prompt 1024).</li>
-<li>Under FPGA attention the CPU/FPGA boundary B is captured at plan time from asynchronous DMA completion [model.hpp:2503-2507; h/tron/scheduler/full.hpp:2756-2803]. It lags the newest token by at least one GOF, needs 32 complete GOFs before the first shard engages, and a shard whose HBM allocation failed falls back to the CPU for all 1024 tokens (counted today only per shard in the sw_fallback_total leaf) [src/tron/gof.cpp:73-79; src/rinzler.cpp:4271]. Nothing in the code fixes B for a given N, so the FPGA share must be measured.</li>
+<li>Under CPU attention, at context N (query at position N-1): floor(N/64) full pages on AMX, N mod 64 tokens on AVX, one visit each per KV head [self_attention.hpp:1601-1611]. In 63 of 64 steps the token's path set is {{AMX, AVX}}; when N mod 64 == 0 the pending page is full, is dense, and takes AMX (measured 2026-09-24: pending_amx_visits 6,912 = 3 of the 255 decode forwards at prompt 1024, times 8 users x 36 layers x 8 KV heads; section 2.2).</li>
+<li>Under FPGA attention the CPU/FPGA boundary B is captured at plan time from asynchronous DMA completion [model.hpp:2503-2507; h/tron/scheduler/full.hpp:2756-2803]. The CPU tail behind B holds (p mod 4) + 1 tokens for the query at position p when every copy has landed, plus 4 tokens per copy still in flight (section 2.2). The first shard engages only after 32 complete GOFs (128 tokens) have landed for every layer, and a shard whose HBM allocation failed stays CPU work, together with every later position, until its edge gains tokens and card memory is free again (counted today only per shard in the sw_fallback_total leaf; section 2.3) [src/tron/gof.cpp:70-103; src/rinzler.cpp:4271; h/tron/scheduler/full.hpp:2401-2428]. Nothing in the code fixes B for a given N, so the FPGA share must be measured.</li>
 <li>Two more things that only a measurement shows: prefix-cache branch points inside a page split the page's mask range and force AVX for that page, and USE_HW_ATTN=N raises the engagement point (N=128 gives 255, rounded to HW pages of 128) [src/tron/models/hw_attn_config.cpp:24-30].</li>
-<li>The steady-state decode picture under FPGA attention (row B) predicts zero AMX visits. That matches the measured decode result at prompt 1024 (no AMX gain under AoF, 2026-09-21/22 page) and makes the warm long-prompt decode gains (+2 to +14 %, n=1) a question the counter settles: they need pages that are not HBM-resident and are scored on the CPU as dense pages.</li>
+<li>The steady-state decode picture under FPGA attention (row B) predicts zero AMX visits. That matches the measured decode result at prompt 1024 (no AMX gain under AoF, 2026-09-21/22 page) and makes the warm long-prompt decode gains (+2 to +14 %, n=1) a question the counter settles: they need pages that are not HBM-resident and are scored on the CPU as dense pages. Section 2.3 lists the states that produce such pages; the runs queued on 2026-09-25 measure them.</li>
 </ul>
 <div class="fig">{chart_shares()}</div>
-<p class="cap">Chart A. Closed-form share of K tokens scored per path (est., exec/counter-20260922/closed_form.py): one user, KV page 64, prompt chunk 128, no prefix cache, no HBM exhaustion; the FPGA rows assume DMA keeps up (prefill: the previous chunks are resident at plan time; decode: a 4-token lag). Prefill at prompt 1024 is {pct(r1["pre_amx"], r1["pre_tot"])} % AMX under CPU attention because the own-chunk triangle is {pct(r1["pre_avx"], r1["pre_tot"])} % of the work; decode is {pct(r1["dec_amx"], r1["dec_tot"])} % AMX because only the tail page is AVX. Under FPGA attention AMX gets nothing in both phases unless DMA lags.</p>
+<p class="cap">Chart A. Closed-form share of K tokens scored per path (est., exec/counter-20260922/closed_form.py): one user, KV page 64, prompt chunk 128, no prefix cache, no HBM exhaustion; the FPGA rows assume DMA keeps up (prefill: the previous chunks are resident at plan time; decode: the CPU tail is the 1 to 4 tokens behind the last landed GOF, mean 2.5). Prefill at prompt 1024 is {pct(r1["pre_amx"], r1["pre_tot"])} % AMX under CPU attention because the own-chunk triangle is {pct(r1["pre_avx"], r1["pre_tot"])} % of the work; decode is {pct(r1["dec_amx"], r1["dec_tot"])} % AMX because only the tail page is AVX. Under FPGA attention AMX gets nothing in both phases under these assumptions; section 2.3 lists the states that break them.</p>
 {share_table()}
-<p class="cap">Table 1. The numbers behind Chart A. Visits are per KV head (an 8-KV-head model makes 8 visits per (query, page)). "forwards" = number of forward() calls. The AoF rows are the ideal case; measured values will differ by the DMA lag and by HBM fallbacks.</p>
+<p class="cap">Table 1. The numbers behind Chart A. Visits are per KV head (an 8-KV-head model makes 8 visits per (query, page)). "forwards" = number of forward() calls. The AoF rows are the ideal case; measured values will differ by the DMA lag and by HBM fallbacks. (a) AMX = 0 means: under the row's assumption no CPU-scored page is a whole 64-token page, so the dense test never passes. The states in which it is not zero (a query below the engagement point, the first shard not yet engaged, a copy lag of a whole page, a degraded shard, a prefix-cache branch inside a shard, prefill copy lag) are listed in section 2.3, Table 2; none of them is inside these rows' assumptions.</p>
 <p class="take">Takeaway: report "K tokens scored per path" per decode step and per prefill, plus a per-token path-set table (how many of the 256 tokens used {{FPGA, AVX}}, {{AMX, AVX}}, {{AMX}} ...). That is the well-posed form of the question.</p>
+{sec22()}
+{sec23()}
 
 <h2 id="q3">3. Layers: the same path in every layer only for uniform models</h2>
 <div class="ok"><p><b>Premise in the question:</b> "when a token is generated through a path at one layer, it took the same path at all layers."</p>
@@ -703,14 +862,14 @@ HTML = f"""<!DOCTYPE html>
 <li>Kill-switch cross-check: run the AMX-on arm and the TRON_AMX_DISABLE=1 arm with perf stat EXE.AMX_BUSY on the engine pid; amx_visits and AMX_BUSY must both be zero in the kill-switch arm and both non-zero otherwise; avx_full_page_visits (kill switch) must equal amx_visits (AMX on).</li>
 <li>Invariant: per section (amx_k_tokens + avx_k_tokens) x kv_mul == the planner's dot products, except EAGLE (63 versus 64) and window skips.</li>
 <li>Prefill claim: one user, a 256-token prompt (two chunks), CPU attention, AMX on: pending-pass amx_visits must be 0 and ready-pass amx_visits must be 2 x 128 per KV head. This also settles whether a full pending decode page (N mod 64 == 0) takes AMX.</li>
-<li>FPGA steady state: qwen-3-4b, USE_HW_ATTN default, prompt 1024, 256 tokens: amx_visits per decode step (predicted 0), avx_k_tokens per step (predicted a few), the DMA lag histogram, and how often the boundary falls on a page edge. Then the warm 8192 cell, where the AMX build was faster under AoF: the counter shows whether non-resident pages were scored on the CPU with AMX.</li>
+<li>FPGA steady state: qwen-3-4b, USE_HW_ATTN default, prompt 1024, 256 tokens: amx_visits per decode step (predicted 0), avx_k_tokens per step (predicted a few), the DMA lag histogram, and how often the boundary falls on a page edge. Then the warm 8192 cell, where the AMX build was faster under AoF: the counter shows whether non-resident pages were scored on the CPU with AMX. Queued 2026-09-25 on our half of delphi-3bda (section 2.3, Table 3): attnstats-20260925-fpga (8 users x prompt 1024, 1 user x prompt 1024, 8 users x prompt 64, 8 users x prompt 8192; arms stats on and kill switch) and attnstats-20260925-warm (prompt 1000 and 1024 with runtron --iterations 3, so iterations 2 and 3 are prefix-cache hits); results land in exec/results/attnstats-20260925-fpga/exit-reports.txt and exec/results/attnstats-20260925-warm/exit-reports.txt.</li>
 <li>n_attn_workers on 3bda for the campaign configs (depends on the CPU list platformd hands over; not in the repo): read it from the process so per-worker rows can be interpreted.</li>
 </ol>
 
 <h2 id="open">11. Open points (Insufficient data)</h2>
 <ul class="tight">
-<li>Whether a full pending decode page is dense in the same forward (measurement 5 resolves it).</li>
-<li>The steady-state DMA lag in GOFs during decode and between prefill forwards (measurement 6; or log query position minus dma_last_abs per step, full.hpp:2757-2759).</li>
+<li>Resolved 2026-09-24: a full pending decode page is dense in the same forward and takes AMX (pending_amx_visits 6,912 in the CPU-attention runs; section 2.2).</li>
+<li>The steady-state DMA lag in GOFs during decode and between prefill forwards (measurement 6, queued 2026-09-25; or log query position minus dma_last_abs per step, full.hpp:2757-2759). The counters give the average tail per query, decode_like avx k tokens divided by (token jobs x layers x KV heads), not a histogram.</li>
 <li>The inclusive-versus-count semantics of relative_hw_tok_ix (libpos.hpp:453-455 versus self_attention.hpp:565, 583): the FPGA K-token counter may be off by one per query until the device semantics are read.</li>
 <li>rdtsc cost on delphi-3bda (Granite Rapids): measure with the 1e8-read loop before adding per-visit timers.</li>
 <li>Whether the CI harness shares a cached system prompt across users: it creates ready pages in a user's first forward and changes the prefill split.</li>
@@ -721,6 +880,7 @@ HTML = f"""<!DOCTYPE html>
 <ul class="tight">
 <li>Code: tron main 0a51385e95, read-only worktree ~/workspace/ai-runs/tron-counters-ro. All file:line citations refer to it.</li>
 <li>Verification workflow wf_a8e982c8-1b8 (8 readers, 16 refuters, 3 designs, 2 judges, 1 critic): result saved as exec/counter-20260922/workflow-wf_a8e982c8-1b8-result.json (facts with status, designs, judge scores, critic).</li>
+<li>Verification workflow wf_12412298-770 (2026-09-25, for sections 2.2 and 2.3: 6 readers, 2 refuters per claim, a synthesizer, a critic): 85 claims, 5 refuted as over-general and not used; saved as exec/counter-20260922/workflow-wf_12412298-770-claims.txt, -refutations.txt and -result.json. Campaign scripts for the queued measurements: exec/attnstats-20260924/fpga-cell.sh, fpga-cell3.sh, campaign-iter.sh.</li>
 <li>Closed-form numbers: exec/counter-20260922/closed_form.py. Phase timings: exec/results/single-attn-20260901/summary.json (measured 2026-09-01 on delphi-3bda, probe commit 8fd1e7798d in ~/workspace/ai-runs/tron-fence-amx). rdtsc cost: exec/counter-20260922/rdtsc_cost.c (this workstation only).</li>
 <li>Earlier pages: PR3879/make-sense-amx-vs-avx.html section 7.2.1 (single attention), CI-test/status/qwen3-4b-prefill-amx-vs-fpga.html (FPGA versus CPU attention by prompt length), PR3879/new-PRs/PR0/respond-2-Wade-PR0.html (FUSE counters assessment).</li>
 </ul>

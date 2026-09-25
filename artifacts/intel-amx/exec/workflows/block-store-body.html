@@ -1,0 +1,242 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/workflows/block-store-body.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/exec/workflows/block-store-body.html
+-->
+<header>
+<div class="eyebrow">Tron · Pull request 4424 · An interactive explanation</div>
+<h1>Block store: turn token rows<br>into complete cache lines.</h1>
+<div class="short"><strong>Short version</strong><p class="lede">Block store collects keys from up to 16 tokens and rearranges them in vector registers. A full block then writes 64 complete cache lines, instead of writing a small piece of each line for every token. The saved values and the total payload stay the same. <a class="source-ref" href="#s1">[1]</a></p></div>
+<p class="meta">Source: <a href="https://github.com/positron-ai/tron/pull/4424">PR #4424</a>, commit <code>30c4ac82cb</code>, checked 21 September 2026. Companion: <a href="shared-save-explained-codex.html">how shared save works</a>. <span class="tag mock">Illustrative data</span> and <span class="tag">Measured results</span> are labeled separately. No new hardware benchmark was run for this page.</p>
+<nav aria-label="On this page"><a href="#why">01 · Why group the writes?</a><a href="#animation">02 · Follow the bytes</a><a href="#address">03 · Find them in memory</a><a href="#routing">04 · Select the store path</a><a href="#measurements">05 · Measured effect</a><a href="#sources">06 · Evidence</a></nav>
+<h2 class="glossary-title">Words used here</h2>
+<dl class="words">
+<div><dt>Tron, token, pass</dt><dd>Tron is the inference program under test. A token is a piece of text. A pass processes a batch of tokens through the model.</dd></div>
+<div><dt>K, V, head, attention</dt><dd>K and V are key and value vectors. A head is one group of these vectors. Attention uses keys to score how much each saved value contributes.</dd></div>
+<div><dt>Dimension, bf16, pair</dt><dd>A dimension is one value in a vector. bf16 is a 2-byte floating-point format. A dimension pair is two adjacent values: 4 bytes.</dd></div>
+<div><dt>Page, plane, block, panel</dt><dd>A page holds 64 tokens. A K plane holds one head’s keys for that page. A block covers 16 token positions. A panel holds 32 dimensions of a block.</dd></div>
+<div><dt>AVX-512, register, lane</dt><dd>AVX-512 is an instruction set for the CPU (host processor). Its vector register holds 64 bytes. Here each register has 16 lanes of 4 bytes each.</dd></div>
+<div><dt>AMX, VNNI layout</dt><dd>AMX is a CPU instruction set for matrix multiplication. VNNI layout puts one dimension pair from 16 tokens in a 64-byte row for its right-hand input.</dd></div>
+<div><dt>Cache line, scatter, mask</dt><dd>A cache line is a 64-byte memory unit here. A scatter writes lanes to separate addresses. A mask selects which lanes a store may write.</dd></div>
+<div><dt>Layer, prefill, decode</dt><dd>A layer is a repeated model stage. Prefill processes prompt tokens. Decode generates subsequent tokens.</dd></div>
+<div><dt>Block store, shared save</dt><dd>Save K copies keys into their saved pages. Block store changes how one worker writes them. Shared save divides the work among the main thread and its existing helper threads.</dd></div>
+</dl>
+</header>
+
+<section id="why">
+<div class="section-head"><span class="number">01</span><h2>The destination wants a pair from every token</h2></div>
+<p>The incoming keys are rows: 128 bf16 values per token, per head. PR4424 stores those keys in VNNI layout so AMX can read them directly as its right-hand matrix. One destination line holds the same dimension pair from 16 tokens. <a class="source-ref" href="#s1">[1]</a></p>
+<div class="grid2">
+<article class="card"><span class="tag">Per-token scatter</span><h3 style="margin-top:12px">One token touches 64 lines</h3><p>A token supplies 64 dimension pairs. Each pair writes 4 bytes in a different line. The next token writes the neighboring 4 bytes in those same lines.</p><div class="line-example" aria-label="Sixteen pieces of one cache line, written by sixteen separate scatters"><span>t0</span><span>t1</span><span>t2</span><span>t3</span><span>t4</span><span>t5</span><span>t6</span><span>t7</span><span>t8</span><span>t9</span><span>t10</span><span>t11</span><span>t12</span><span>t13</span><span>t14</span><span>t15</span></div><p class="takeaway">One line receives 16 separate 4-byte writes.</p><p class="small">Each token issues 4 scatter instructions. Each instruction sends 16 pairs to 16 different lines. <a href="#s1">[1]</a></p></article>
+<article class="card"><span class="tag source">Full block store</span><h3 style="margin-top:12px">Combine the tokens before writing</h3><p>Load 16 token slices. Transpose the pairs in registers. Each output register now holds one complete destination line.</p><div class="line-example joined" aria-label="One complete 64-byte cache line, written by one store"><span>t0</span><span>t1</span><span>t2</span><span>t3</span><span>t4</span><span>t5</span><span>t6</span><span>t7</span><span>t8</span><span>t9</span><span>t10</span><span>t11</span><span>t12</span><span>t13</span><span>t14</span><span>t15</span></div><p class="takeaway">One line receives one 64-byte store.</p><p class="small">Repeat for 64 dimension pairs. The transpose moves bits without changing their values. The writer uses AVX-512 instructions. <a href="#s1">[1]</a></p></article>
+</div>
+<div class="card"><h3>Exact work for 16 tokens × 1 head</h3><div class="tablewrap"><table><thead><tr><th>Quantity</th><th>Per-token path · 16 tokens</th><th>1 full block store</th></tr></thead><tbody>
+<tr><td>Source payload loaded</td><td>4096 bytes · 64 loads</td><td>4096 bytes · 64 loads</td></tr>
+<tr><td>Destination payload written</td><td>4096 bytes</td><td>4096 bytes</td></tr>
+<tr><td>Distinct destination lines</td><td>64 lines</td><td>64 lines</td></tr>
+<tr><td>Store instructions in the source</td><td>64 scatters, each writing 16 lanes</td><td>64 vector stores, each writing 1 line</td></tr>
+<tr><td>Writes into each line</td><td>16 writes × 4 bytes</td><td>1 write × 64 bytes</td></tr>
+<tr><td>Transpose work</td><td>None</td><td>4 transposes × 64 shuffle operations</td></tr>
+</tbody></table></div><p class="small" style="margin-top:14px">Counts follow the source loops. They are not CPU cycle counts or measured memory-bus traffic. A scatter instruction performs multiple addressed writes. <a href="#s1">[1]</a></p><p class="takeaway">Same 4 KiB of data. Same 64 destination lines. A different write pattern.</p></div>
+</section>
+
+<section id="animation">
+<div class="section-head"><span class="number">02</span><h2>Load → transpose → store, four times</h2></div>
+<p><span class="tag mock">Illustrative values · real geometry</span> Each square below is one 4-byte dimension pair. The example uses <code>K[token, dimension] = token + dimension</code>. These integer values are exactly representable in bf16.</p>
+<div class="card">
+<div class="controls"><button id="play" class="primary" type="button">Play</button><button id="restart" type="button">Restart</button><button id="prev" type="button">Previous event</button><button id="next" type="button">Next event</button><label>Playback<select id="speed"><option value="2">Slow</option><option value="6" selected>Normal</option><option value="12">Fast</option></select></label></div>
+<div class="controls"><label>Token block<select id="block"><option value="0">c0 · tokens 0–15</option><option value="1" selected>c1 · tokens 16–31</option><option value="2">c2 · tokens 32–47</option><option value="3">c3 · tokens 48–63</option></select></label><label>Present tokens<select id="preset"><option value="full">Full · all 16 lanes</option><option value="edge">Partial · lanes 5–10</option><option value="sparse">Sparse · lanes 0, 5, 9, 15</option><option value="single">Single · lane 5</option></select></label><label>Jump to dimension step<select id="jump"><option value="0">s0 · dimensions 0–31</option><option value="1">s1 · dimensions 32–63</option><option value="2">s2 · dimensions 64–95</option><option value="3">s3 · dimensions 96–127</option></select></label></div>
+<div class="scrub"><label for="event">Event</label><input id="event" type="range" min="0" max="72" step="1" value="0"><output id="event-label" for="event">0 / 72</output></div>
+<div id="state" class="state" role="status" aria-live="polite"></div>
+<div class="legend"><span><i class="key"></i>Present token / loaded value</span><span><i class="key stored"></i>Written to memory</span><span><i class="key wait"></i>Old memory stays unchanged</span><span><i class="key selected"></i>Selected pair</span></div>
+<figure><div class="scroll"><svg id="matrices" viewBox="0 0 1050 390" class="matrices" role="img" aria-label="Three matrices show input token rows, transposed dimension-pair rows, and the destination memory panel"></svg></div><figcaption>Algorithm events, not wall-clock time. The grouped loads and the transpose each occupy one playback event. In block mode, each following event is one line store. For the single-token path, each event combines one load with one scatter. The transpose’s internal shuffles are summarized. This drawing does not model cache residency or CPU execution overlap.</figcaption></figure>
+<div class="controls"><label>Follow token lane<select id="token-lane"></select></label><label for="pair">Pair within this dimension step <output id="pair-label" for="pair">1</output></label><input id="pair" type="range" min="0" max="15" value="1"></div>
+<p id="pair-detail" class="value-detail"></p>
+<h3>The selected pair row in destination memory</h3><div id="memory-line" class="pair-grid" aria-label="Sixteen token positions in the selected destination line"></div>
+<div class="counters"><div class="counter"><span>Source loads completed</span><b id="loads">0 / 64</b></div><div class="counter"><span>Transposes completed</span><b id="transposes">0 / 4</b></div><div class="counter"><span>Store instructions completed</span><b id="stores">0 / 64</b></div><div class="counter"><span>Payload written</span><b id="payload">0 / 4096 B</b></div></div>
+<p id="mask-note" class="takeaway"></p>
+<details><summary>What happens inside the transpose?</summary><p class="small">For one dimension step, the input register indexed by token lane contains 16 dimension pairs. The output register indexed by pair contains that pair from all 16 token lanes. The source implements this exchange in four stages: interleave 32-bit lanes, interleave 64-bit groups, then two stages that rearrange 128-bit groups. Each stage uses 16 shuffle operations. This is 64 operations per panel and 256 operations across the four panels of a full block. <a href="#s1">[1]</a></p><p class="small">The two bf16 values of a pair stay together in their 32-bit lane. Absent token registers are filled with zero without loading a source row. The final lane mask prevents those zeros from overwriting other tokens in memory.</p></details>
+</div>
+</section>
+
+<section id="address">
+<div class="section-head"><span class="number">03</span><h2>A block occupies four separated panels</h2></div>
+<p>One K plane contains 64 tokens × 128 dimensions × 2 bytes = <strong>16 KiB (16,384 bytes)</strong>. It holds 16 panels of 1 KiB each. The panels are ordered by dimension step first, then token block. <a class="source-ref" href="#s1">[1]</a></p>
+<div class="card"><h3 id="page-title">One head’s K plane · offsets from its start</h3><div id="page-map" class="page-map" aria-label="Sixteen panels in memory order"></div><p id="page-note" class="takeaway"></p><p class="small">Every panel is 16 pair rows × 16 tokens × 4 bytes = 1024 bytes. Each pair row is 64 bytes. Changing the block or dimension step above updates the highlighted panels.</p></div>
+<div class="grid2"><article class="card"><h3>Locate the selected pair</h3><p id="address-description"></p><div class="formula">byte offset = (4s + c) × 1024<br>+ pair × 64 + lane × 4 + j × 2</div><p class="small">All indices start at zero. <code>s</code> is the dimension step; <code>c</code> is the token block. <code>pair</code> is the pair within that step. <code>lane</code> is the token’s position in its block. <code>j</code> selects the first or second value of the pair.</p><div id="address-calculation" class="value-detail"></div><p class="small">This is the source’s <code>index()</code> element map multiplied by 2 bytes per bf16 value. <a href="#s1">[1]</a></p></article><article class="card"><h3>Why this arrangement serves attention</h3><div class="flow vertical"><div class="step"><strong>Incoming K</strong>One token row: 128 values.</div><span class="arrow" aria-hidden="true">→</span><div class="step focus"><strong>Block store</strong>Rearrange paired values when saving K.</div><span class="arrow" aria-hidden="true">→</span><div class="step"><strong>AMX reader</strong>Read a panel as its right-hand matrix.</div></div><p class="small">A panel is the size and layout of one AMX input tile. In the PR’s eligible attention path over full pages, attention computes <code>S = Q × Kᵀ</code> directly. Here Q means query vectors, S means attention scores, and Kᵀ means keys arranged by dimension across tokens. <a href="#s5">[5]</a></p><p class="takeaway">The block writer prepares the layout that the reader consumes.</p></article></div>
+</section>
+
+<section id="routing">
+<div class="section-head"><span class="number">04</span><h2>The number of tokens selects the write pattern</h2></div>
+<p>The build must enable <code>TRON_K_VNNI</code>, the option for this K layout. The K head must have 128 dimensions. Other head sizes retain their original per-token row storage. <a class="source-ref" href="#s1">[1]</a></p>
+<div class="flow" aria-label="How the model forms a store run"><div class="step"><strong>Read the pass’s item list</strong>Find items that need a K write.</div><span class="arrow" aria-hidden="true">→</span><div class="step"><strong>Form a run</strong>Same page, same block, distinct token positions.</div><span class="arrow" aria-hidden="true">→</span><div class="step focus"><strong>Count its tokens</strong>Select the path below for each head.</div></div>
+<div class="tablewrap card"><table><thead><tr><th>Run size</th><th>Source operations per head</th><th>Destination result</th></tr></thead><tbody>
+<tr><td><strong>16 tokens</strong><br>Full block</td><td>64 loads, 4 transposes, 64 full-line stores.</td><td>All 16 token positions in each of 64 lines. 4096 bytes.</td></tr>
+<tr><td><strong>2–15 tokens</strong><br>Partial block</td><td>4 loads per present token, 4 transposes, 64 masked stores.</td><td>Only the present positions. 256 bytes per token. Other bytes stay unchanged.</td></tr>
+<tr><td><strong>1 token</strong><br>Single-token run</td><td>4 loads, no transpose, 4 scatters.</td><td>One 4-byte pair in each of 64 lines. 256 bytes.</td></tr>
+</tbody></table><p class="small" style="margin-top:12px">These counts assume the incoming rows are already bf16. Other activation types are converted to bf16 before this writer consumes them. <a href="#s2">[2]</a></p></div>
+<div class="grid2"><article class="card"><h3>A run is about destination positions</h3><ul><li>It cannot cross a page or a 16-token block.</li><li>It stops before a duplicate destination position.</li><li>Positions can be sparse or arrive out of order. The writer puts each row pointer at its destination lane.</li><li>For example, page offsets 21, 25 and 18 can use one masked block store. Offsets 31 and 32 belong to different blocks. <a href="#s2">[2]</a></li></ul><details><summary>Shared work units impose additional boundaries</summary><p class="small">The shared-save partitioner cuts the item list when the page, block or “needs K/V work” flag changes. Each worker scans only its assigned item range. Within a range, the block writer skips items without K/V work. The partitioner can therefore split a run that a single unshared scan could combine. <a href="#s2">[2]</a></p></details></article>
+<article class="card"><h3>Block store and shared save are separate</h3><p>Block store can run on one thread. It can also apply to a pass with at most 16 items.</p><p>Shared save adds helper threads when the eligible pass has more than 16 items and 2–128 workers, including main. The same block writer runs inside each claimed work unit. <a href="#s2">[2]</a></p><p>In the measured 8-user decode workload, each user contributes one token to its own page. Those items form single-token runs. They use scatter stores. <a href="#s4">[4]</a></p><p class="takeaway"><a href="shared-save-explained-codex.html">Follow the helper threads in the companion page →</a></p></article></div>
+</section>
+
+<section id="measurements">
+<div class="section-head"><span class="number">05</span><h2>Block store alone cut the measured save time</h2></div>
+<p><span class="tag">Measured · 14 September 2026 UTC</span> The comparison below keeps helper sharing off in both configurations. Both use VNNI K layout in the same historical binary, commit <code>9928cb2849</code>. <a class="source-ref" href="#s4">[4]</a></p>
+<div class="card"><h3>Mean Save K time per prefill layer · lower is better</h3><figure><div class="scroll">@@CHART@@</div><figcaption>Qwen3-4b (the tested model), 8 users, prompt length 1024 tokens per user, 1024 token items per pass, CPU attention on delphi-3bda (the test server). TP2 and TP4 mean tensor parallelism across 2 and 4 accelerator devices. Each point is from one traced run, averaged over 8 prefill passes with 36 layers per pass. These points are not repeated-run confidence intervals. <a href="#s4">[4]</a></figcaption></figure><p class="takeaway">Only the writer changes in this comparison. The measured Save K span falls by about 59–60%.</p>
+<div class="tablewrap" style="margin-top:20px">@@TABLE@@</div><p class="small" style="margin-top:10px">Displayed values are rounded to 3 decimal places in microseconds (µs). Deltas and percentages use the unrounded source means.</p>
+</div>
+<div class="note"><strong>Scope of this result.</strong> Save K is one operation inside a layer. A reduction in its duration is not the same percentage reduction in total prompt processing time. The report’s 80 µs at TP2 and 60 µs at TP4 include both block store and shared save. They are not the block-only result. <a href="#s4">[4]</a></div>
+<p class="small">The historical experiment named the scatter configuration <code>vnni0</code> and the block-only configuration <code>a</code>. It used the runtime switches <code>TRON_K_VNNI_BLOCK</code> and <code>TRON_K_VNNI_STRIPE</code>. Those switches are absent from the checked PR head; its eligible runs use the paths described above. <a href="#s2">[2]</a> <a href="#s4">[4]</a></p>
+<p class="small"><strong>Insufficient data:</strong> this page has no new performance measurement of commit <code>30c4ac82cb</code>. A fresh comparison with the same workload would establish its current save time.</p>
+</section>
+
+<section id="sources">
+<div class="section-head"><span class="number">06</span><h2>Sources and verification</h2></div>
+<p>The low-level block-store test compares the complete destination plane against per-token scatter. It includes 38 masks at each of 4 block positions: 152 comparisons. Unwritten positions begin with a marker value, so an unintended overwrite changes the comparison. These are source-level test assertions; the test suite was not rerun for this page. <a href="#s3">[3]</a></p>
+<p class="small">The diagrams use the source’s address formula and loop order. The event order is the order of operations in the program, not a trace of when memory writes become visible. The illustrative K values differ from the earlier <a href="block-store-animation.html">block-store animation</a>.</p>
+<ol class="sources small">
+<li id="s1"><strong>Geometry, address map and writer.</strong> <a href="@@BASE@@/h/tron/kernels/k_vnni.hpp#L1-L107">k_vnni.hpp:1–107</a> defines the plane and layout gate. <a href="@@BASE@@/h/tron/kernels/k_vnni.hpp#L135-L216">Lines 135–216</a> define <code>scatter_row</code> (the single-token writer), <code>transpose_16x16_epi32</code> (the register transpose) and <code>store_block</code> (the block writer).</li>
+<li id="s2"><strong>Model routing and page wrapper.</strong> <a href="@@BASE@@/h/tron/models/model.hpp#L2806-L2945">model.hpp:2806–2945</a> defines <code>k_store_shared</code> (the sharing gate), <code>k_store_cut_units</code> (the item-range partitioner) and <code>store_k_block</code> (the run builder). <a href="@@BASE@@/h/tron/models/kv_cache.hpp#L1712-L1729">kv_cache.hpp:1712–1729</a> defines <code>set_k_block</code> (the page-level wrapper).</li>
+<li id="s3"><strong>Bit preservation and masked writes.</strong> <a href="@@BASE@@/t/t_k_vnni_layout.cpp#L150-L234">t_k_vnni_layout.cpp:150–234</a> tests equality against scatter, preservation of absent-token slots, and overwriting one block after other blocks have been stored.</li>
+<li id="s4"><strong>Historical measured comparison.</strong> <a href="../../exec/results/vnnik2-trace-20260915/analysis.json">analysis.json</a>, field <code>kinds.prefill.save_k_us_per_layer</code>, traces <code>vnni0-tp2</code>, <code>a-tp2</code>, <code>vnni0-tp4</code>, <code>a-tp4</code>; <a href="../../exec/results/vnnik2-trace-20260915/runs.txt">run log with binary version and switches</a>; <a href="store-remedies-report.html">store remedies report</a>, sections 3.1 and 4.3. Reduction = <code>100 × (scatter − block) / scatter</code>. Historical commit: <code>9928cb284996e7d471ee3fc1fa44730d0f9defc3</code>.</li>
+<li id="s5"><strong>Why attention consumes this layout.</strong> <a href="@@BASE@@/h/tron/models/kv_cache.hpp#L10-L110">Note [K VNNI storage] in kv_cache.hpp</a>; <a href="https://github.com/positron-ai/tron/pull/4424">PR4424’s layout and score-matrix explanation</a>. The block writer’s geometry is independent of whether a particular attention call uses AMX.</li>
+</ol>
+</section>
+<footer class="footer">Implementation links are pinned to <code>30c4ac82cbb6959f7e4f66b29efb36f5e0749b48</code>. Diagrams, playback and measurements are embedded in this file. Evidence links assume it remains in the workspace’s <code>status/</code> directory.</footer>
+<noscript>The animation and address explorer require JavaScript. The explanation, work-count table, measured chart and source links remain available.</noscript>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const maskPresets = {full:65535, edge:2016, sparse:33313, single:32};
+let eventIndex = 0, c = 1, present = maskPresets.full, selectedToken = 5, selectedPair = 1;
+let playing = false, lastFrame = 0, accumulated = 0, frame = 0;
+const bit = t => Boolean(present & (1 << t));
+const population = () => Array.from({length:16}, (_,t)=>Number(bit(t))).reduce((a,b)=>a+b,0);
+const single = () => population() === 1;
+const maxEvents = () => single() ? 4 : 72;
+const byteOffset = (token, dimension) => {
+  const s = Math.floor(dimension / 32), block = Math.floor(token / 16);
+  return (s * 4 + block) * 1024 + Math.floor(dimension % 32 / 2) * 64 + (token % 16) * 4 + (dimension % 2) * 2;
+};
+const mockPair = (t,p,s) => [16*c+t+32*s+2*p,16*c+t+32*s+2*p+1];
+function svgNode(tag, attrs={}, text) {
+  const node=document.createElementNS(NS,tag);
+  for(const [key,value] of Object.entries(attrs)) node.setAttribute(key,value);
+  if(text!==undefined) node.textContent=text;
+  return node;
+}
+function label(svg,x,y,text,attrs={}) { svg.append(svgNode('text',{x,y,fill:'#536174','font-size':12,...attrs},text)); }
+function currentState() {
+  if(single()) return {s:Math.max(0,eventIndex-1),phase:eventIndex?3:0,stored:eventIndex?16:0};
+  if(eventIndex===0) return {s:0,phase:0,stored:0};
+  const s=Math.floor((eventIndex-1)/18), phase=(eventIndex-1)%18+1;
+  return {s,phase,stored:Math.max(0,phase-2)};
+}
+function renderMatrices(state) {
+  const svg=$('matrices');svg.replaceChildren();
+  const {s,phase,stored}=state;
+  const xs=[62,405,748], top=92, cell=16;
+  const titles=['1 · Loaded token slices',single()?'2 · Transpose skipped':'2 · Transposed registers','3 · Destination panel'];
+  const subtitles=['Rows = tokens · columns = pairs','Rows = pairs · columns = tokens','Rows = pairs · columns = tokens'];
+  xs.forEach((x,m)=>{
+    label(svg,x,24,titles[m],{'font-weight':750,'font-size':16,fill:'#18283b'});
+    label(svg,x,45,subtitles[m]);
+    const disabled=single()&&m===1;
+    for(let i=0;i<16;i++) {
+      label(svg,x+i*cell+7,top-8,String(i),{'text-anchor':'middle','font-size':10});
+      label(svg,x-9,top+i*cell+11,String(i),{'text-anchor':'end','font-size':10});
+    }
+    label(svg,x,top-29,m===0?'pair index →':'token lane →',{'font-size':11});
+    for(let row=0;row<16;row++) for(let col=0;col<16;col++) {
+      const t=m===0?row:col, p=m===0?col:row;
+      const loaded=phase>0 && bit(t), transposed=!single()&&phase>=2;
+      const written=bit(t)&&p<stored;
+      let fill='#fff',stroke='#d7dee7',dash='';
+      if(m===0&&loaded) fill='#dceef8';
+      if(m===1&&transposed) fill=bit(t)?'#dceef8':'#f0f1f3';
+      if(m===2) {fill=written?'#d7eee4':'#fff'; if(!written) dash='2 2';}
+      const selected=t===selectedToken&&p===selectedPair;
+      if(selected&&!disabled) {stroke='#a95a00';fill=m===2&&!written?'#fff5dd':'#f9d88e';}
+      const rect=svgNode('rect',{x:x+col*cell,y:top+row*cell,width:14,height:14,rx:2,fill,stroke,'stroke-width':selected?2:1,'stroke-dasharray':dash,opacity:disabled?.35:1});
+      const values=mockPair(t,p,s);
+      const description=m===2&&!written?'old memory; unchanged':!bit(t)?(single()?'unused register row':'absent token; register is zero when prepared'):`values ${values.join(', ')}`;
+      rect.append(svgNode('title',{},`Token ${16*c+t}, dimensions ${32*s+2*p} and ${32*s+2*p+1}: ${description}`));
+      rect.addEventListener('click',()=>{selectedToken=t;selectedPair=p;render();});
+      svg.append(rect);
+      if(!single()&&m<2&&!bit(t)&&phase>=(m===0?1:2)&&!disabled) label(svg,x+col*cell+7,top+row*cell+11,'0',{'text-anchor':'middle','font-size':9,fill:'#68788b','pointer-events':'none'});
+    }
+    label(svg,x,top+276,m===0?'1 row = 64 bytes from one token':m===1?(single()?'The loaded slice goes to scatter.':'1 row = one pair from 16 tokens'):'1 row = one 64-byte memory line',{'font-size':11});
+  });
+  label(svg,360,218,'→',{'text-anchor':'middle','font-size':30,fill:'#0072b2'});
+  label(svg,703,218,'→',{'text-anchor':'middle','font-size':30,fill:'#007b63'});
+}
+function renderAddress(state) {
+  const {s}=state,token=16*c+selectedToken,d=32*s+2*selectedPair;
+  const base=(4*s+c)*1024,offset=byteOffset(token,d);
+  $('page-map').replaceChildren();
+  for(let step=0;step<4;step++) for(let block=0;block<4;block++) {
+    const el=document.createElement('div');
+    el.className='panel'+(block===c?' chosen':'')+(block===c&&step===s?' current':'');
+    el.innerHTML=`<strong>s${step} · c${block}</strong><span>${(step*4+block)*1024} B</span><small>dims ${step*32}–${step*32+31}<br>tokens ${block*16}–${block*16+15}</small>`;
+    $('page-map').append(el);
+  }
+  $('page-note').textContent=`Block c${c}: panel starts at ${[0,1,2,3].map(step=>(step*4+c)*1024+' B').join(', ')}. Each start is 4096 bytes after the previous one.`;
+  $('address-description').textContent=`Token ${token}, dimensions ${d} and ${d+1}: step s${s}, block c${c}, pair ${selectedPair}, token lane ${selectedToken}.`;
+  $('address-calculation').innerHTML=`Panel start <strong>${base} B</strong> + pair-row offset <strong>${selectedPair*64} B</strong> + token-lane offset <strong>${selectedToken*4} B</strong>.<br>First value: <strong>${offset} B</strong>. Second value: <strong>${offset+2} B</strong>.`;
+}
+function render() {
+  const state=currentState(),{s,phase,stored}=state,n=population(),isSingle=single();
+  $('event').max=maxEvents();$('event').value=eventIndex;$('event-label').textContent=`${eventIndex} / ${maxEvents()}`;
+  $('jump').value=s;$('token-lane').value=selectedToken;$('pair').value=selectedPair;$('pair-label').textContent=selectedPair;
+  $('prev').disabled=eventIndex===0;$('next').disabled=eventIndex===maxEvents();
+  let title,body;
+  if(eventIndex===0) {title='Ready: source rows have not been loaded.';body=`${n} token${n===1?'':'s'} present. ${isSingle?'The model selects the single-token scatter path.':'The writer will visit four dimension steps in order.'}`;}
+  else if(isSingle) {title=`Step s${s}: load one slice, then scatter its 16 pairs.`;body='Each pair writes 4 bytes into a different line. No transpose runs. All other token positions keep their old contents.';}
+  else if(phase===1) {title=`Step s${s}: load dimensions ${32*s}–${32*s+31}.`;body=`${n} source loads of 64 bytes fill the present token registers. ${16-n} absent token registers are set to zero without a load.`;}
+  else if(phase===2) {title=`Step s${s}: transpose the 16 × 16 pair matrix.`;body='Input row = one token. Output row = one dimension pair. No destination memory has been written for this step yet.';}
+  else {title=`Step s${s}: store pair row ${stored-1}, dimensions ${32*s+2*(stored-1)} and ${32*s+2*(stored-1)+1}.`;body=n===16?'One 64-byte register writes one complete line. The other pair rows wait for their store.':`One masked store writes ${n} lanes (${4*n} bytes). The absent token positions are not written.`;}
+  if(eventIndex===maxEvents()) body+=' All four dimension steps are now saved.';
+  $('state').innerHTML=`<strong>${title}</strong>${body}`;
+  const loads=isSingle?eventIndex:n*(s+(phase>0?1:0));
+  const transposes=isSingle?0:s+(phase>=2?1:0);
+  const stores=isSingle?eventIndex:16*s+stored;
+  $('loads').textContent=`${loads} / ${n*4}`;$('transposes').textContent=`${transposes} / ${isSingle?0:4}`;
+  $('stores').textContent=`${stores} / ${isSingle?4:64}`;
+  const bytes=isSingle?eventIndex*64:stores*n*4;
+  $('payload').textContent=`${bytes} / ${n*256} B`;
+  const values=mockPair(selectedToken,selectedPair,s),t=16*c+selectedToken,d=32*s+2*selectedPair;
+  $('pair-detail').textContent=`Selected: token ${t}, dimensions ${d} and ${d+1}. Input register row ${selectedToken}, pair lane ${selectedPair} → ${isSingle?'scatter destination':'output register row '+selectedPair+', token lane '+selectedToken+' → destination'}. ${bit(selectedToken)?'Mock values: '+values.join(' and ')+'.':'This token is absent; its memory stays unchanged.'}`;
+  $('memory-line').replaceChildren();
+  for(let lane=0;lane<16;lane++) {
+    const written=bit(lane)&&selectedPair<stored,el=document.createElement('div');
+    el.className='pair'+(written?' written':' untouched')+(lane===selectedToken?' selected-pair':'');
+    el.innerHTML=`<span>token ${16*c+lane}</span>${written?mockPair(lane,selectedPair,s).join(' · '):'old'}<span>${written?'written':bit(lane)?'not written yet':'preserved'}</span>`;
+    $('memory-line').append(el);
+  }
+  $('mask-note').textContent=`Mask 0x${present.toString(16).padStart(4,'0').toUpperCase()} · ${n} token lanes. `+(n===16?'Every line store writes all 64 bytes.':isSingle?'One token uses 4 scatter instructions for its complete 256-byte row.':'The same 64 line-store instructions run, but only selected lanes write. Zero-filled registers do not erase absent tokens.');
+  renderMatrices(state);renderAddress(state);
+}
+function pause() {playing=false;cancelAnimationFrame(frame);$('play').textContent='Play';$('state').setAttribute('aria-live','polite');}
+function tick(now) {
+  if(!playing)return;
+  if(lastFrame) accumulated+=Math.min(now-lastFrame,250);
+  lastFrame=now;const interval=1000/Number($('speed').value);
+  if(accumulated>=interval) {accumulated-=interval;eventIndex=Math.min(eventIndex+1,maxEvents());render();}
+  if(eventIndex===maxEvents()) pause();else frame=requestAnimationFrame(tick);
+}
+$('play').addEventListener('click',()=>{if(playing){pause();return;}if(eventIndex===maxEvents())eventIndex=0;playing=true;lastFrame=0;accumulated=0;$('play').textContent='Pause';$('state').setAttribute('aria-live','off');render();frame=requestAnimationFrame(tick);});
+$('restart').addEventListener('click',()=>{pause();eventIndex=0;render();});
+$('next').addEventListener('click',()=>{pause();eventIndex=Math.min(maxEvents(),eventIndex+1);render();});
+$('prev').addEventListener('click',()=>{pause();eventIndex=Math.max(0,eventIndex-1);render();});
+$('event').addEventListener('input',()=>{pause();eventIndex=Number($('event').value);render();});
+$('block').addEventListener('change',()=>{pause();c=Number($('block').value);eventIndex=0;render();});
+$('preset').addEventListener('change',()=>{pause();present=maskPresets[$('preset').value];eventIndex=0;render();});
+$('jump').addEventListener('change',()=>{pause();const s=Number($('jump').value);eventIndex=single()?s+1:s*18+1;render();});
+$('pair').addEventListener('input',()=>{selectedPair=Number($('pair').value);render();});
+$('token-lane').addEventListener('change',()=>{selectedToken=Number($('token-lane').value);render();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
+for(let t=0;t<16;t++) {const option=document.createElement('option');option.value=t;option.textContent=`Lane ${t}`;$('token-lane').append(option);}
+render();
+</script>

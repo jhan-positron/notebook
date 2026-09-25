@@ -36,7 +36,7 @@ Execute codex-handoff-generation-prompt.md with automatic scope, per-chat files,
 - `claude-agentsrv:/home/jhan/workspace/notebook/logs/codex-handoff-20260924-artifacts.json` — Machine-readable review manifest.
 - `claude-agentsrv:/tmp/codex-handoff-20260924/` — Scratch evidence, scripts, and prepared file copies. Not a stable archival location.
 
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/counter.html` — Registered report missing from the repository; preservation proposed at `artifacts/intel-amx/pr3879/new-counters/counter.html`.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/counter.html` — Registered report missing from the repository; preserved at `artifacts/intel-amx/pr3879/new-counters/counter.html`.
   - generator: artifacts/intel-amx/exec/counter-20260922/gen_counter.py
   - input: artifacts/intel-amx/amx-decode-boost-202608/single-attn-20260901/summary.json, artifacts/intel-amx/exec/attnstats-20260924/decision.json, generator constants
   - input built by: existing phase-analysis scripts and exec/attnstats-20260924/decide.py; cycle-read result recorded in artifacts/intel-amx/exec/counter-20260922/rdtsc-record-20260922.txt

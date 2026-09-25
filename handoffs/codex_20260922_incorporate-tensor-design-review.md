@@ -31,13 +31,13 @@ Incorporate the third review and verifier corrections into the living design for
 ## Artifacts
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/design-new-tensor-type.html` — Final round-3 design, hash d2e9dabf855a922ca0cae5e042acfeb1efce24160222d9edb4843d3804e9ff84.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-artifact-validation.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-artifact-validation.json`) — Final passing structure, review-coverage, link, and source-range checks.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-render-checks.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-render-checks.json`) — Final passing browser checks.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-layout-checks.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-layout-checks.json`) — Layout arithmetic evidence.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-source-audit.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-source-audit.json`) — Source audit.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-artifact-validation.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-artifact-validation.json`) — Final passing structure, review-coverage, link, and source-range checks.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-render-checks.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-render-checks.json`) — Final passing browser checks.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-layout-checks.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-layout-checks.json`) — Layout arithmetic evidence.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-source-audit.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-source-audit.json`) — Source audit.
 
 
-Preservation proposals for this chat (the approval report lists exact byte counts):
+Preserved files for this chat (the approval report records the approved paths and original byte counts):
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-artifact-validation.json` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-artifact-validation.json`
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round3-layout-checks.json` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round3-layout-checks.json`

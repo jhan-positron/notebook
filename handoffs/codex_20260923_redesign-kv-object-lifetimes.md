@@ -32,13 +32,13 @@ Remove the object-lifetime workaround in https://github.com/positron-ai/tron/pul
 
 ## Artifacts
 
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/remove-dummy-new-codex.html` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/status/remove-dummy-new-codex.html`) — Design comparison and implementation plan.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/remove-dummy-new-codex.html` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/status/remove-dummy-new-codex.html`) — Design comparison and implementation plan.
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-a/` — validation.json, validate_address_formulas.py, validate_address_formulas.out.txt, review.txt, ci-baseline.txt, and pr-body.md.
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/implementation` — Implementation checkout, branch jhan-kv-scalar-storage; final commit 9380012de56b6a1be6d25bdd8f15c4c65a73d523.
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/review4587` — Read-only checkout used for the competing change, observed head c73e7fb2f9.
 
 
-Preservation proposals for this chat (the approval report lists exact byte counts):
+Preserved files for this chat (the approval report records the approved paths and original byte counts):
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/remove-dummy-new-codex.html` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/status/remove-dummy-new-codex.html`
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-a/ci-baseline.txt` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-a/ci-baseline.txt`

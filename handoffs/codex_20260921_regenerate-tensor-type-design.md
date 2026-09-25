@@ -32,13 +32,13 @@ Update the design for https://github.com/positron-ai/tron/issues/4525 using the 
 ## Artifacts
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/design-new-tensor-type.html` — Living design after review round 2.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-artifact-validation.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-artifact-validation.json`) — Structure and pinned-source validation.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-layout-checks.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-layout-checks.json`) — Layout arithmetic checks.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-render-checks.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-render-checks.json`) — Desktop/mobile checks.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-source-audit.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-source-audit.json`) — Pinned source review evidence.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-artifact-validation.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-artifact-validation.json`) — Structure and pinned-source validation.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-layout-checks.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-layout-checks.json`) — Layout arithmetic checks.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-render-checks.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-render-checks.json`) — Desktop/mobile checks.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-source-audit.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-source-audit.json`) — Pinned source review evidence.
 
 
-Preservation proposals for this chat (the approval report lists exact byte counts):
+Preserved files for this chat (the approval report records the approved paths and original byte counts):
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-artifact-validation.json` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-artifact-validation.json`
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-round2-layout-checks.json` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-round2-layout-checks.json`

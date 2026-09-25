@@ -30,21 +30,21 @@ Explain the block-store operation in https://github.com/positron-ai/tron/pull/44
 
 ## Artifacts
 
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/block-store-explained-codex.html` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/status/block-store-explained-codex.html`) — Generated teaching page.
-  - generator: claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/build-block-store-page.py (relocation proposed)
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/block-store-explained-codex.html` (preserved: `artifacts/intel-amx/vnnied-k-in-place/status/block-store-explained-codex.html`) — Generated teaching page.
+  - generator: claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/build-block-store-page.py (relocated after approval)
   - input: claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/block-store-body.html (hand-authored template), claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/shared-save-explained-codex.html, claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-20260915/analysis.json
   - input built by: preserved exec/vnnik-trace-20260914/analyze.py produced analysis.json; template authored in this chat
   - sources: Exact records below; transitive historical comparison sources remain registered in artifacts/intel-amx/vnnied-k-in-place/status/store-remedies-report.html.lineage.md.
   - regenerate: unavailable (generator hard-codes canonical inputs, /tmp template, and output; no output-path argument)
   - inventory: `artifacts/intel-amx/vnnied-k-in-place/status/block-store-explained-codex.html.lineage.md`
-- `claude-agentsrv:/tmp/build-block-store-page.py` (preservation proposed: `artifacts/intel-amx/exec/workflows/build-block-store-page.py`) — Generator with fixed canonical input and output paths.
-- `claude-agentsrv:/tmp/block-store-body.html` (preservation proposed: `artifacts/intel-amx/exec/workflows/block-store-body.html`) — Hand-authored HTML template read by the generator.
-- `claude-agentsrv:/tmp/check-block-store-page.py` (preservation proposed: `artifacts/intel-amx/exec/workflows/check-block-store-page.py`) — Browser and address-check script.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/shared-save-explained-codex.html` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/status/shared-save-explained-codex.html`) — Style source for the generator.
+- `claude-agentsrv:/tmp/build-block-store-page.py` (preserved: `artifacts/intel-amx/exec/workflows/build-block-store-page.py`) — Generator with fixed canonical input and output paths.
+- `claude-agentsrv:/tmp/block-store-body.html` (preserved: `artifacts/intel-amx/exec/workflows/block-store-body.html`) — Hand-authored HTML template read by the generator.
+- `claude-agentsrv:/tmp/check-block-store-page.py` (preserved: `artifacts/intel-amx/exec/workflows/check-block-store-page.py`) — Browser and address-check script.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/shared-save-explained-codex.html` (preserved: `artifacts/intel-amx/vnnied-k-in-place/status/shared-save-explained-codex.html`) — Style source for the generator.
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-20260915/analysis.json` — Measured chart input, with run identity from runs.txt.
 
 
-Preservation proposals for this chat (the approval report lists exact byte counts):
+Preserved files for this chat (the approval report records the approved paths and original byte counts):
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/block-store-explained-codex.html` — `artifacts/intel-amx/vnnied-k-in-place/status/block-store-explained-codex.html`
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/build-block-store-page.py` — `artifacts/intel-amx/exec/workflows/build-block-store-page.py`; origin `claude-agentsrv:/tmp/build-block-store-page.py`

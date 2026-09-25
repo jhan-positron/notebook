@@ -33,13 +33,13 @@ Incorporate status/claude-review-design-new-tensor-type.html into the living imp
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/design-new-tensor-type.html` — Living design after the first review.
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/claude-review-design-new-tensor-type.html` — Review input; this path was reused by later rounds.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-artifact-validation.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-artifact-validation.json`) — Static-check result for hash ead80325cf309f02cce79b8c89a8a426eb5707abdb221d4d1fa0a5f482bb30ea.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-layout-checks.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-layout-checks.json`) — Formula-check result.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-render-checks.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-render-checks.json`) — Rendering result.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-source-audit.json` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-source-audit.json`) — Pinned source evidence.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-artifact-validation.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-artifact-validation.json`) — Static-check result for hash ead80325cf309f02cce79b8c89a8a426eb5707abdb221d4d1fa0a5f482bb30ea.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-layout-checks.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-layout-checks.json`) — Formula-check result.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-render-checks.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-render-checks.json`) — Rendering result.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-source-audit.json` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-source-audit.json`) — Pinned source evidence.
 
 
-Preservation proposals for this chat (the approval report lists exact byte counts):
+Preserved files for this chat (the approval report records the approved paths and original byte counts):
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-artifact-validation.json` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-artifact-validation.json`
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/design-revision-layout-checks.json` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/design-revision-layout-checks.json`

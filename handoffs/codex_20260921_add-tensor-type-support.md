@@ -33,12 +33,12 @@ Follow the user brief to separate typed cache access from the later packed-key o
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/input-2-ai/codex-add-tensor-type.md` — User brief.
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/design-new-tensor-type.html` — Living implementation design, revised by later chats.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/plain-english-review.html` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/status/plain-english-review.html`) — Original wording and corrections.
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/CONTEXT.md` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/issue4525/CONTEXT.md`) — Agreed tensor terminology.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/plain-english-review.html` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/status/plain-english-review.html`) — Original wording and corrections.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/CONTEXT.md` (preserved: `artifacts/intel-amx/vnnied-k-in-place/issue4525/CONTEXT.md`) — Agreed tensor terminology.
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/` — Issue body and verification, source audit, check_layouts.py, validate_artifact.py, layout-checks.json, artifact-validation.json, and render-checks.json.
 
 
-Preservation proposals for this chat (the approval report lists exact byte counts):
+Preserved files for this chat (the approval report records the approved paths and original byte counts):
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/CONTEXT.md` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/CONTEXT.md`
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/plain-english-review.html` — `artifacts/intel-amx/vnnied-k-in-place/issue4525/status/plain-english-review.html`

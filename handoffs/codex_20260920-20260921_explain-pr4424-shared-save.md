@@ -31,20 +31,20 @@ Explain the shared-save feature in https://github.com/positron-ai/tron/pull/4424
 
 ## Artifacts
 
-- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/shared-save-explained-codex.html` (preservation proposed: `artifacts/intel-amx/vnnied-k-in-place/status/shared-save-explained-codex.html`) — Authored teaching page with counters, normal and late-helper scenarios, and measured comparisons.
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/shared-save-explained-codex.html` (preserved: `artifacts/intel-amx/vnnied-k-in-place/status/shared-save-explained-codex.html`) — Authored teaching page with counters, normal and late-helper scenarios, and measured comparisons.
   - generator: none (authored directly)
   - input: none
   - input built by: preserved exec/vnnik-trace-20260914/analyze.py and lanes.py produced the cited historical summaries
   - sources: Exact records below; transitive historical comparison sources remain registered in artifacts/intel-amx/vnnied-k-in-place/status/store-remedies-report.html.lineage.md.
   - regenerate: none
   - inventory: `artifacts/intel-amx/vnnied-k-in-place/status/shared-save-explained-codex.html.lineage.md`
-- `claude-agentsrv:/tmp/shared-save-validate.py` (preservation proposed: `artifacts/intel-amx/exec/workflows/shared-save-validate.py`) — Browser validation script.
-- `claude-agentsrv:/tmp/shared-save-validation.json` (preservation proposed: `artifacts/intel-amx/exec/workflows/shared-save-validation.json`) — Recorded 29-check result.
+- `claude-agentsrv:/tmp/shared-save-validate.py` (preserved: `artifacts/intel-amx/exec/workflows/shared-save-validate.py`) — Browser validation script.
+- `claude-agentsrv:/tmp/shared-save-validation.json` (preserved: `artifacts/intel-amx/exec/workflows/shared-save-validation.json`) — Recorded 29-check result.
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/store-remedies-report.html` — Historical source report.
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/vnnik2-trace-20260915/` — Historical measured input, lanes, and run records used by the page.
 
 
-Preservation proposals for this chat (the approval report lists exact byte counts):
+Preserved files for this chat (the approval report records the approved paths and original byte counts):
 
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/status/shared-save-explained-codex.html` — `artifacts/intel-amx/vnnied-k-in-place/status/shared-save-explained-codex.html`
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/shared-save-validate.py` — `artifacts/intel-amx/exec/workflows/shared-save-validate.py`; origin `claude-agentsrv:/tmp/shared-save-validate.py`
