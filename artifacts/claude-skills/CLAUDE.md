@@ -4,22 +4,17 @@ Do NOT create new files or folders directly at ~/workspace. Agent-created
 working directories - git worktrees, clones, scratch dirs, generated report
 files - go under ~/workspace/ai-runs/ (or inside the existing project folder
 the work belongs to). Top-level ~/workspace entries are reserved for
-user-created project containers. (Rule added 2026-09-01, when all
-Claude-created entries were moved into ~/workspace/ai-runs/.)
+user-created project containers. 
 
 # machine
 
 ## delphi-3bda
 Use Positron server delphi-3bda for real tests.
-This machine runs CI nightly, during CI window only do light work load tasks.
-CI-busy detection (2026-08-19, Rhys systems_test PR #180): check
-/run/lock/systems-test-ci.lease on the machine - busy ONLY if the file exists
-AND state == "busy" AND now < expires_at_epoch; otherwise CI is not holding it
-(rinzler cleanup, hugepage cleanup, FPGA claiming allowed). Clock windows are
-advisory only. Before launching campaigns, source
-~/workspace/intel-AMX/exec/lib-guard.sh and use campaign_guard_acquire
-(lease + host-wide flock /var/tmp/jhan/3bda-campaign.lock + no-runtron guard);
-re-check ci_took_dut between long runs.
+This is CI machine, you need to follow specific rules to use the machine. Check
+your memory for the rules, if your memory rules are newer than handoffs/check-CI.md
+and handoffs/share-3bda-with-bill.md in notebook repo (checked out at ~/workspace/notebook),
+use your memory rules; otherwise use the notebook rules.
+
 Do not use other delphi or andoria machine unless user specifically mentioned.
 
 # English
