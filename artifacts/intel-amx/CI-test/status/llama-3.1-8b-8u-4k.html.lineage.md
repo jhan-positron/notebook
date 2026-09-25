@@ -1,0 +1,46 @@
+# Lineage inventory for artifacts/intel-amx/CI-test/status/llama-3.1-8b-8u-4k.html
+
+One line per source file: canonical path | repo path or left-behind reason | bytes.
+
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-identity.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/base-identity.txt | 85
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass1/perf.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/base-pass1/perf.json | 810221
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass1/summary.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/base-pass1/summary.txt | 571
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass2/perf.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/base-pass2/perf.json | 810423
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass2/summary.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/base-pass2/summary.txt | 571
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass3/perf.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/base-pass3/perf.json | 809823
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass3/summary.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/base-pass3/summary.txt | 571
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass1/perf.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/canon-pass1/perf.json | 809188
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass1/summary.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/canon-pass1/summary.txt | 581
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass2/perf.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/canon-pass2/perf.json | 809210
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass2/summary.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/canon-pass2/summary.txt | 581
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass3/perf.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/canon-pass3/perf.json | 809142
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass3/summary.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/canon-pass3/summary.txt | 581
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/check-mode/perf.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/check-mode/perf.json | 11795
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/configs-used.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/configs-used.json | 367
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/configs-used.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/configs-used.txt | 72
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/outcome.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/outcome.txt | 92
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/preflight.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/preflight.txt | 2498
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/prompt-check/run1.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/prompt-check/run1.json | 23967
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/prompt-check/run2.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/prompt-check/run2.json | 23967
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/status-history.log | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/status-history.log | 2297
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/summary.json | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/summary.json | 15917
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/summary.txt | artifacts/intel-amx/exec/results/l8b-8u4k-20260920/summary.txt | 1585
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/.done | left behind (provenance) | 0
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/.lock.out | left behind (provenance) | 16
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/.status | left behind (unclassified: no extension) | 35
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass1/driver.log | left behind (provenance) | 53361
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass1/talos.json | left behind (provenance) | 728614
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass2/driver.log | left behind (provenance) | 52218
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass2/talos.json | left behind (provenance) | 728677
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass3/driver.log | left behind (provenance) | 51994
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/base-pass3/talos.json | left behind (provenance) | 728283
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass1/driver.log | left behind (provenance) | 52031
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass1/talos.json | left behind (provenance) | 727811
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass2/driver.log | left behind (provenance) | 52028
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass2/talos.json | left behind (provenance) | 727857
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass3/driver.log | left behind (provenance) | 52032
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/canon-pass3/talos.json | left behind (provenance) | 727766
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/check-mode/driver.log | left behind (provenance) | 1181
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/prompt-check/compare.log | left behind (provenance) | 88
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/prompt-check/run1.log | left behind (provenance) | 660
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/l8b-8u4k-20260920/prompt-check/run2.log | left behind (provenance) | 660
