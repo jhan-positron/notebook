@@ -1,0 +1,234 @@
+# Lineage inventory for artifacts/intel-amx/CI-test/status/qwen3-4b-prefill-amx-vs-fpga.html
+
+One line per source file: canonical path | repo path or left-behind reason | bytes.
+
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/RUNBOOK.md | artifacts/intel-amx/exec/results/q4b-fpga-20260921/RUNBOOK.md | 14843
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/base-identity.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/base-identity.txt | 207
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/canon-pass1/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/canon-pass1/perf.json | 1909329
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/canon-pass1/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/canon-pass1/summary.txt | 5399
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/check-mode/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/check-mode/perf.json | 13677
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/configs-used.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/configs-used.json | 3422
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/configs-used.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/configs-used.txt | 72
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold-p4096/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-cold-p4096/perf.json | 221644
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold-p4096/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-cold-p4096/summary.txt | 591
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold-p8192/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-cold-p8192/perf.json | 223459
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold-p8192/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-cold-p8192/summary.txt | 591
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold2-p4096/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-cold2-p4096/perf.json | 224437
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold2-p4096/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-cold2-p4096/summary.txt | 591
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold2-p8192/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-cold2-p8192/perf.json | 227318
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold2-p8192/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-cold2-p8192/summary.txt | 591
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass1/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-pass1/perf.json | 1912578
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass1/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-pass1/summary.txt | 5314
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass2/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-pass2/perf.json | 1948637
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass2/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-pass2/summary.txt | 5316
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass3/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-pass3/perf.json | 1943199
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass3/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgabase-pass3/summary.txt | 5314
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold-p4096/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-cold-p4096/perf.json | 222217
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold-p4096/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-cold-p4096/summary.txt | 601
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold-p8192/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-cold-p8192/perf.json | 222000
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold-p8192/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-cold-p8192/summary.txt | 601
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p4096/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p4096/perf.json | 226077
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p4096/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p4096/summary.txt | 601
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p8192/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p8192/perf.json | 227167
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p8192/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p8192/summary.txt | 601
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass1/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-pass1/perf.json | 1915127
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass1/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-pass1/summary.txt | 5403
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass2/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-pass2/perf.json | 1950100
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass2/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-pass2/summary.txt | 5404
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass3/perf.json | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-pass3/perf.json | 1943891
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass3/summary.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/fpgacanon-pass3/summary.txt | 5407
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/hbm-journal-20260921.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/hbm-journal-20260921.txt | 1475990
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/hbm-journal-20260922.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/hbm-journal-20260922.txt | 2956924
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/outcome.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/outcome.txt | 92
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/preflight.txt | artifacts/intel-amx/exec/results/q4b-fpga-20260921/preflight.txt | 3139
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/status-history.log | artifacts/intel-amx/exec/results/q4b-fpga-20260921/status-history.log | 10532
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/.done | left behind (provenance) | 0
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/.lock.out | left behind (provenance) | 17
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/.status | left behind (unclassified: no extension) | 35
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/canon-pass1/driver.log | left behind (provenance) | 128004
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/canon-pass1/talos.json | left behind (provenance) | 1630761
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold-p4096/driver.log | left behind (provenance) | 16919
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold-p4096/talos.json | left behind (provenance) | 181376
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold-p8192/driver.log | left behind (provenance) | 18914
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold-p8192/talos.json | left behind (provenance) | 183092
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold2-p4096/driver.log | left behind (provenance) | 16924
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold2-p4096/talos.json | left behind (provenance) | 180254
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold2-p8192/driver.log | left behind (provenance) | 19462
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-cold2-p8192/talos.json | left behind (provenance) | 183073
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass1/driver.log | left behind (provenance) | 125928
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass1/talos.json | left behind (provenance) | 1633894
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass2/driver.log | left behind (provenance) | 127168
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass2/talos.json | left behind (provenance) | 1635766
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass3/driver.log | left behind (provenance) | 127462
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgabase-pass3/talos.json | left behind (provenance) | 1631061
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold-p4096/driver.log | left behind (provenance) | 16979
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold-p4096/talos.json | left behind (provenance) | 181682
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold-p8192/driver.log | left behind (provenance) | 16970
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold-p8192/talos.json | left behind (provenance) | 181326
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p4096/driver.log | left behind (provenance) | 16962
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p4096/talos.json | left behind (provenance) | 181970
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p8192/driver.log | left behind (provenance) | 16961
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-cold2-p8192/talos.json | left behind (provenance) | 182810
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass1/driver.log | left behind (provenance) | 125320
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass1/talos.json | left behind (provenance) | 1635826
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass2/driver.log | left behind (provenance) | 128770
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass2/talos.json | left behind (provenance) | 1637528
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass3/driver.log | left behind (provenance) | 128609
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/fpgacanon-pass3/talos.json | left behind (provenance) | 1631653
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/prev-20260921T233714Z-done-with-failures | left behind (provenance) | 0
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/prev-20260921T233714Z-outcome.txt | left behind (provenance) | 199
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/prev-20260921T233714Z-preflight.txt | left behind (provenance) | 3241
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/prev-20260921T233714Z-status | left behind (provenance) | 211
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/prev-20260922T014828Z-done | left behind (provenance) | 0
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/prev-20260922T014828Z-outcome.txt | left behind (provenance) | 92
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/prev-20260922T014828Z-preflight.txt | left behind (provenance) | 3266
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-fpga-20260921/prev-20260922T014828Z-status | left behind (provenance) | 35
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt-results.txt | artifacts/intel-amx/exec/results/q4b-rt8u-20260922/rt-results.txt | 219236
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/summary.json | artifacts/intel-amx/exec/results/q4b-rt8u-20260922/summary.json | 39681
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/summary.md | artifacts/intel-amx/exec/results/q4b-rt8u-20260922/summary.md | 6096
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__base__rep1.log | left behind (provenance) | 17870
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 17870
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__base__rep2.log | left behind (provenance) | 17866
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 17866
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__base__rep3.log | left behind (provenance) | 17866
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 17866
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__canon__rep1.log | left behind (provenance) | 17634
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 17634
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__canon__rep2.log | left behind (provenance) | 17866
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 17866
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__canon__rep3.log | left behind (provenance) | 17870
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__cpu__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 17870
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__base__rep1.log | left behind (provenance) | 19386
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 19386
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__base__rep2.log | left behind (provenance) | 19387
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 19387
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__base__rep3.log | left behind (provenance) | 19385
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 19385
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__canon__rep1.log | left behind (provenance) | 19391
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 19391
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__canon__rep2.log | left behind (provenance) | 19387
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 19387
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__canon__rep3.log | left behind (provenance) | 19397
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p4096__fpga__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 19397
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__base__rep1.log | left behind (provenance) | 18319
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 18319
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__base__rep2.log | left behind (provenance) | 18328
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 18328
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__base__rep3.log | left behind (provenance) | 18320
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 18320
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__canon__rep1.log | left behind (provenance) | 18327
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 18327
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__canon__rep2.log | left behind (provenance) | 18082
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 18082
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__canon__rep3.log | left behind (provenance) | 18198
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__cpu__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 18198
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__base__rep1.log | left behind (provenance) | 20909
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20909
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__base__rep2.log | left behind (provenance) | 20924
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20924
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__base__rep3.log | left behind (provenance) | 20774
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20774
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__canon__rep1.log | left behind (provenance) | 20922
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20922
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__canon__rep2.log | left behind (provenance) | 20925
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20925
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__canon__rep3.log | left behind (provenance) | 20643
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-2u-p8192__fpga__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20643
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__base__rep1.log | left behind (provenance) | 20819
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 3678
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__base__rep1.log.attempt2 | left behind (duplicate (held by the compact result text of the same directory)) | 20819
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__base__rep2.log | left behind (provenance) | 20991
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20991
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__base__rep3.log | left behind (provenance) | 20851
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20851
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__canon__rep1.log | left behind (provenance) | 20717
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20717
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__canon__rep2.log | left behind (provenance) | 21000
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21000
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__canon__rep3.log | left behind (provenance) | 20995
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__cpu__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20995
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__base__rep1.log | left behind (provenance) | 22998
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 22998
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__base__rep2.log | left behind (provenance) | 23297
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 23297
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__base__rep3.log | left behind (provenance) | 23301
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 23301
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__canon__rep1.log | left behind (provenance) | 23006
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 23006
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__canon__rep2.log | left behind (provenance) | 23313
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 23313
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__canon__rep3.log | left behind (provenance) | 23306
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p1024__fpga__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 23306
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__base__rep1.log | left behind (provenance) | 21670
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21670
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__base__rep2.log | left behind (provenance) | 21677
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21677
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__base__rep3.log | left behind (provenance) | 21820
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21820
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__canon__rep1.log | left behind (provenance) | 21674
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21674
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__canon__rep2.log | left behind (provenance) | 21665
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21665
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__canon__rep3.log | left behind (provenance) | 21816
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__cpu__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21816
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__base__rep1.log | left behind (provenance) | 25033
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25033
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__base__rep2.log | left behind (provenance) | 25207
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25207
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__base__rep3.log | left behind (provenance) | 25023
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25023
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__canon__rep1.log | left behind (provenance) | 24863
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 24863
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__canon__rep2.log | left behind (provenance) | 25213
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25213
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__canon__rep3.log | left behind (provenance) | 24859
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p2048__fpga__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 24859
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__base__rep1.log | left behind (provenance) | 22819
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 22819
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__base__rep2.log | left behind (provenance) | 22978
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 22978
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__base__rep3.log | left behind (provenance) | 22975
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 22975
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__canon__rep1.log | left behind (provenance) | 22663
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 22663
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__canon__rep2.log | left behind (provenance) | 22803
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 22803
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__canon__rep3.log | left behind (provenance) | 22981
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__cpu__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 22981
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__base__rep1.log | left behind (provenance) | 28157
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 28157
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__base__rep2.log | left behind (provenance) | 28563
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 28563
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__base__rep3.log | left behind (provenance) | 28564
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 28564
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__canon__rep1.log | left behind (provenance) | 28364
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 28364
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__canon__rep2.log | left behind (provenance) | 28543
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 28543
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__canon__rep3.log | left behind (provenance) | 28564
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p4096__fpga__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 28564
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__base__rep1.log | left behind (provenance) | 25208
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25208
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__base__rep2.log | left behind (provenance) | 25591
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25591
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__base__rep3.log | left behind (provenance) | 25594
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25594
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__canon__rep1.log | left behind (provenance) | 25010
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25010
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__canon__rep2.log | left behind (provenance) | 25582
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25582
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__canon__rep3.log | left behind (provenance) | 25578
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__cpu__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25578
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__base__rep1.log | left behind (provenance) | 34711
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 34711
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__base__rep2.log | left behind (provenance) | 35484
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 35484
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__base__rep3.log | left behind (provenance) | 35504
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 35504
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__canon__rep1.log | left behind (provenance) | 35243
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__canon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 35243
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__canon__rep2.log | left behind (provenance) | 35481
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__canon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 35481
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__canon__rep3.log | left behind (provenance) | 35506
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/rt/q3-4b-tp2-8u-p8192__fpga__canon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 35506
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/q4b-rt8u-20260922/summary.err | left behind (provenance) | 0

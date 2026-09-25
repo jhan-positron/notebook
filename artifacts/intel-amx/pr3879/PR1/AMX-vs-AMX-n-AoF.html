@@ -1,0 +1,945 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/AMX-vs-AMX-n-AoF.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/pr3879/PR1/AMX-vs-AMX-n-AoF.html
+-->
+<title>qwen3-4b prefill: AMX or FPGA</title>
+<style>
+    body{background:#f9f9f7;color:#0b0b0b;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.5;margin:0;padding-block:24px;padding-inline:16px}
+    main{max-width:1040px;margin:0 auto}
+    h1{font-size:26px;line-height:1.2;margin:0 0 6px;text-wrap:balance}
+    h2{font-size:19px;margin:36px 0 10px;border-bottom:1px solid #e1e0d9;padding-bottom:4px}
+    h3{font-size:16px;margin:22px 0 6px}
+    p,li{max-width:78ch}
+    .sub{color:#52514e;font-size:13px;margin:0 0 18px}
+    .short{background:#fcfcfb;border:1px solid #e1e0d9;border-left:4px solid #2a78d6;padding:12px 16px;margin:16px 0}
+    .short p{margin:6px 0}
+    .fig{background:#fcfcfb;border:1px solid #e1e0d9;padding:12px;margin:14px 0;overflow-x:auto}
+    .cap{color:#52514e;font-size:13px;margin:6px 0 0;max-width:none}
+    .tw{overflow-x:auto;margin:10px 0}
+    table{border-collapse:collapse;font-size:13px;min-width:600px}
+    th,td{border-bottom:1px solid #e1e0d9;padding:5px 8px;text-align:left;vertical-align:top}
+    th{background:#f0efec;font-weight:600;color:#52514e}
+    table.num td:not(:first-child):not(:last-child){font-variant-numeric:tabular-nums;white-space:nowrap}
+    dt{font-weight:600;margin-top:10px}
+    dd{margin:2px 0 0 0}
+    code{font-size:13px;background:#f0efec;padding:1px 4px}
+    pre{background:#f0efec;border:1px solid #e1e0d9;padding:10px 12px;font-size:12.5px;line-height:1.35;overflow-x:auto}
+    .gap{background:#fcfcfb;border:1px solid #e1e0d9;border-left:4px solid #eda100;padding:10px 14px;margin:10px 0}
+    .hyp{color:#52514e}
+    </style>
+<main>
+<h1>Prefill on qwen3-4b: attention on the CPU with AMX against attention on the FPGA</h1>
+<p class="sub">Answer to jhan's question of 2026-09-21: "Among the tests performed at qwen3-4b, comparing prefill performance between AMX (canonical, VNNI-K) and Attention-on-FPGA, which is better?" Every number comes from campaign result files under exec/results/ (extraction workflow wf_258257df-233 with 14 agents and verification workflow wf_89cf57ff-912 with 10 agents, both 2026-09-21. Section 5 added 2026-09-22 from the q4b-fpga-20260921 campaign). Generator: exec/prefill-amx-vs-fpga-20260921/gen_page.py.</p>
+<div class="short"><p><b>Short version.</b></p>
+<p>At prompt 1024, prefill takes about the same time with the AMX kernel on the CPU as with attention on the FPGA. From prompt 2048 up the FPGA is faster, up to 1.9x at a cold 8192-token prompt, and the AMX kernel on the CPU is itself 2.3x faster than the old AVX kernel at that length. Under FPGA attention the AMX build lowers the warm TTFT by 33 to 48 % from prompt 4096 up (cause not settled, section 5), but without a warm prefix cache it changes prefill by at most 8 % and decode by at most 2 % (sections 6 and 7).</p></div>
+<p class="cap"><b>Key numbers behind the Short version.</b></p><ul>
+<li>Prompt 1024 (sections 1 to 3): every matched pair of the canonical build is within -1.9 % to +4.6 % (FPGA minus CPU).</li>
+<li>Cold 8192-token prefill, CI harness, 2 users per engine (section 5): 6.7 s on the FPGA with the AMX build, 6.9 s with the AVX build, 12.7 s with the AMX kernel on the CPU (one run of 2026-09-19). FPGA against CPU AMX: 1.9x.</li>
+<li>8 prompts of 8192 tokens at once on one engine, runtron (section 7): 29 s on the FPGA, 54 s with the AMX kernel on the CPU, 123 s with the old AVX kernel. FPGA against CPU AMX: 1.8x. AMX against AVX on the CPU: 2.3x.</li>
+<li>Warm 8192 cells, CI harness (section 5): AVX on the CPU 15.8 s, AMX on the CPU 6.9 s (2.3x). The FPGA is faster than the CPU AMX kernel at every warm length from 2048 up; the 5120 pair alone is not resolved (Welch t -1.6).</li>
+<li>AMX build against AVX build under FPGA attention (sections 6 and 7): warm cells from 4096 up 33 to 48 % lower TTFT in every one of three passes, cold CI cells 2 to 8 % lower, runtron cells -2.0 to +0.3 %, decode within 2 % everywhere except the warm CI cells, where three passes do not resolve it. The card's K/V space ran out in the 4096 to 6144 cells of every pass (section 5), which explains the gain there but not at 2048.</li>
+</ul>
+<h2>Words used here</h2><dl>
+<dt>tron, runtron, rinzler, engine, FPGA, tp2 / tp4</dt><dd>tron is the inference program under test. runtron is its command-line tool (one process, no HTTP). rinzler is the production server around tron. One running rinzler is one engine. FPGA (field-programmable gate array) = the accelerator card. tp2 / tp4 = two / four FPGA cards per engine.</dd>
+<dt>prefill, TTFT, TPS</dt><dd>prefill = processing the prompt before the first generated token. TTFT = time to first token. TPS = generated tokens per second per user (decode speed). Two different TTFT numbers appear on this page and are never mixed. (a) runtron's server-side "Parsing the prompt took" time. For 8 users this is the wall time of the batched prefill of all 8 prompts (the 8 values agree to the millisecond). (b) The CI harness's client-side stopwatch from the HTTP request to the first streamed chunk. It is the mean over all users x 10 rounds (8 users = 80 samples on the whole machine, 4 users = 40 samples in the our-half cells). It also contains the proxy hop, tokenization and the first sampling step.</dd>
+<dt>CI, CI harness, the nightly</dt><dd>CI = continuous integration, the automated test run. The nightly = the CI run that starts at 03:30 UTC every night on delphi-3bda and installs that day's tron deb. The CI harness = the nightly's own client program (systems_test), which we also run by hand.</dd>
+<dt>attention on the CPU / on the FPGA, K/V, HBM, DMA</dt><dd>tron scores attention either on CPU worker threads (USE_HW_ATTN=0, "CPU attention") or on the FPGA card (USE_HW_ATTN unset, the production and nightly default for ingested models such as qwen3-4b, "FPGA attention" or "AoF"). K/V = the attention keys and values saved per prompt token. HBM = high-bandwidth memory, the card's own memory, which holds a copy of the K/V. DMA = direct memory access, the copy of K/V from host memory to the card. Even with FPGA attention a share of the prompt's attention stays on the CPU (section 4).</dd>
+<dt>AVX, canonical AMX, VNNI-K, kill switch, deb</dt><dd>AVX = the CPU attention kernel of tron before PR 3879 (AVX-512 vector instructions). An AMX build also runs it when the kill switch TRON_AMX_DISABLE=1 is set. Canonical AMX = the AMX (Intel Advanced Matrix Extensions) page kernel of PR 3879 on the normal row-major K layout. VNNI-K = PR 4424, which stores K in place in the VNNI (Intel Vector Neural Network Instructions) pair-interleaved layout. deb = a tron Debian package as the nightly installs it. The nightly deb has no AMX code. Its build preset does not set TRON_AMX_DISPATCH.</dd>
+<dt>our half, whole 3bda, nightly layout, platformd, Caddy</dt><dd>delphi-3bda is the test machine (Intel Granite Rapids, 8 FPGA cards). "Our half" = socket 1 with cards 90/93/b9/bc. "Whole 3bda, nightly layout" = 4 tp2 engines (or 2 tp4 engines) started by platformd (the service that starts and places the engines) behind the Caddy reverse proxy, 8 users in total, 2 (tp2) or 4 (tp4) users per engine. This is the nightly's own shape.</dd>
+<dt>campaign names, arm names, issue 4500</dt><dd>p0perf, wedperf, wedperf-attr, vnnik4, canon-ci, ci-mimic, q4b-swattn, issue4500, q4b-fpga = the result directories under exec/results/ that hold each measurement run. Section 8 lists their files. Arm names of the q4b-fpga campaign: fpgabase = the nightly deb with FPGA attention, fpgacanon = the canonical AMX deb with FPGA attention, canon = the canonical deb with CPU attention. issue 4500 = the GitHub issue on the VNNI-K decode loss under FPGA attention.</dd>
+<dt>prefix cache, tree node, conversation seeds, cold and warm prompts, perfetto</dt><dd>prefix cache = rinzler reuses the K/V of a prompt start it has already processed. It stores the prefixes as a tree, one node per stored prefix. A warm request hits it, a cold one does not. conversation seeds = the fixed prompt texts each simulated user of the CI harness starts from, reused inside a pass. perfetto = the timeline tracing tool tron writes its spans to.</dd>
+<dt>pre-cell AMX probe (AMX-busy probe), engine journal, driver, FUSE stats, shard</dt><dd>pre-cell AMX probe = before every cell our campaign driver counts EXE.AMX_BUSY (the CPU's count of cycles in which the AMX unit was busy) on the engine processes for 20 s. During that window it keeps 4 request streams of its own running. Each stream repeats a 6,000-character prompt (about 1,100 tokens, est.) with 256 generated tokens. The count is proof that AMX instructions ran. It measures the probe's own traffic in the state the engines are in at that moment, not the cell that follows. engine journal = the systemd log of the rinzler engines (journalctl -u rinzler@*). driver = our campaign script that provisions the engines and runs the harness cells (exec/q4b-fpga-20260921/st_ci_perf.py). FUSE stats = the file-like interface through which an engine exposes its counters (FUSE = Filesystem in Userspace). shard = the card-side copy of 1024 tokens of one request's K/V, placed on one card.</dd>
+<dt>repetition, paired t, runtron.pre3879 / runtron.main0916</dt><dd>repetition = one full round of all cells, arms and attention modes of the runtron campaign (section 7). The campaign ran 3 repetitions, interleaved. A slow change of the machine's state during the campaign therefore affects every arm alike. paired t = the mean of the per-repetition differences (repetition k of one arm minus repetition k of the other) divided by their standard error. runtron.pre3879 = runtron built from main before PR 3879 (eb2de0265a, the AVX build). runtron.main0916 = runtron built from main on 2026-09-16 (c7844ca2ce, the canonical AMX build).</dd>
+<dt>Welch t, Welch df, n, sd</dt><dd>n = repetitions the mean is over. sd = sample standard deviation over those repetitions. Welch t = (FPGA mean minus CPU mean) divided by the standard error of that difference with unequal variances. Welch df = the degrees of freedom of that test. With n = 2 on one side the df is about 1, and a two-sided p of 0.05 then needs |t| above 12.7 (4.3 at df 2, 2.8 at df 4). So a |t| of 3 means "three standard errors", not "resolved", in the low-df rows. With n = 1 on one side no t exists.</dd>
+</dl>
+<h2>1. The comparison at prompt 1024</h2>
+<div class="fig"><svg viewBox="0 0 1000 526" width="100%" role="img" aria-label="TTFT of FPGA attention relative to CPU attention, qwen3-4b, prompt 1024" style="max-width:1000px;font-family:system-ui,sans-serif">
+<text x="16" y="24" font-size="15" font-weight="600" fill="#0b0b0b">Prefill with attention on the FPGA, relative to prefill with attention on the CPU (qwen3-4b, prompt 1024)</text>
+<text x="16" y="44" font-size="12" fill="#52514e">Each dot: (FPGA-attention TTFT minus CPU-attention TTFT) as a percentage of the CPU-attention TTFT. Left of zero = the FPGA prefill is faster.</text>
+<text x="16" y="60" font-size="12" fill="#52514e">The colour is the CPU attention kernel the FPGA arm is compared with. Hollow dot = the two sides are different builds.</text>
+<circle cx="22" cy="82" r="5" fill="#1baf7a"/>
+<text x="32" y="86" font-size="11" fill="#52514e">AVX (no AMX code, or kill switch)</text>
+<circle cx="322" cy="82" r="5" fill="#2a78d6"/>
+<text x="332" y="86" font-size="11" fill="#52514e">canonical AMX (PR 3879)</text>
+<circle cx="622" cy="82" r="5" fill="#eb6834"/>
+<text x="632" y="86" font-size="11" fill="#52514e">AMX + VNNI-K (PR 4424)</text>
+<line x1="444.7" y1="110" x2="444.7" y2="466" stroke="#e1e0d9" stroke-width="1"/>
+<text x="444.7" y="482" font-size="11" fill="#898781" text-anchor="middle">-25 %</text>
+<line x1="518.3" y1="110" x2="518.3" y2="466" stroke="#e1e0d9" stroke-width="1"/>
+<text x="518.3" y="482" font-size="11" fill="#898781" text-anchor="middle">-20 %</text>
+<line x1="591.9" y1="110" x2="591.9" y2="466" stroke="#e1e0d9" stroke-width="1"/>
+<text x="591.9" y="482" font-size="11" fill="#898781" text-anchor="middle">-15 %</text>
+<line x1="665.6" y1="110" x2="665.6" y2="466" stroke="#e1e0d9" stroke-width="1"/>
+<text x="665.6" y="482" font-size="11" fill="#898781" text-anchor="middle">-10 %</text>
+<line x1="739.2" y1="110" x2="739.2" y2="466" stroke="#e1e0d9" stroke-width="1"/>
+<text x="739.2" y="482" font-size="11" fill="#898781" text-anchor="middle">-5 %</text>
+<line x1="812.8" y1="110" x2="812.8" y2="466" stroke="#898781" stroke-width="1.5"/>
+<text x="812.8" y="482" font-size="11" fill="#898781" text-anchor="middle">+0 %</text>
+<line x1="886.4" y1="110" x2="886.4" y2="466" stroke="#e1e0d9" stroke-width="1"/>
+<text x="886.4" y="482" font-size="11" fill="#898781" text-anchor="middle">+5 %</text>
+<line x1="960.0" y1="110" x2="960.0" y2="466" stroke="#e1e0d9" stroke-width="1"/>
+<text x="960.0" y="482" font-size="11" fill="#898781" text-anchor="middle">+10 %</text>
+<text x="621.4" y="104" font-size="11" fill="#898781" text-anchor="middle">FPGA prefill faster</text>
+<text x="886.4" y="104" font-size="11" fill="#898781" text-anchor="middle">CPU prefill faster</text>
+<text x="695.0" y="502" font-size="11" fill="#898781" text-anchor="middle">TTFT of the FPGA-attention arm relative to the CPU-attention arm (percent of the CPU arm)</text>
+<text x="16" y="122" font-size="12" font-weight="600" fill="#0b0b0b">CI harness (client-side TTFT, 2 or 4 users per engine)</text>
+<text x="418" y="156" font-size="11" fill="#0b0b0b" text-anchor="end">our half, tp2, 2 users/engine, one binary (09-13)</text>
+<line x1="430" y1="152" x2="960" y2="152" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="573.5" cy="152" r="6" fill="#1baf7a" stroke="#1baf7a" stroke-width="2"><title>AVX: CPU 909 ms (n=3) vs FPGA 761 ms (n=3) = -16.3 %, -148 ms, Welch t -55.4</title></circle>
+<text x="583.5" y="156" font-size="11" fill="#0b0b0b" text-anchor="start">-16.3 %</text>
+<circle cx="880.9" cy="152" r="6" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"><title>canonical AMX: CPU 727 ms (n=3) vs FPGA 761 ms (n=3) = +4.6 %, +34 ms, Welch t +14.0</title></circle>
+<text x="870.9" y="156" font-size="11" fill="#0b0b0b" text-anchor="end">+4.6 %</text>
+<text x="418" y="186" font-size="11" fill="#0b0b0b" text-anchor="end">our half, tp4, 4 users/engine, one binary (09-13)</text>
+<line x1="430" y1="182" x2="960" y2="182" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="638.5" cy="182" r="6" fill="#1baf7a" stroke="#1baf7a" stroke-width="2"><title>AVX: CPU 952 ms (n=3) vs FPGA 839 ms (n=3) = -11.8 %, -113 ms, Welch t -30.4</title></circle>
+<text x="648.5" y="186" font-size="11" fill="#0b0b0b" text-anchor="start">-11.8 %</text>
+<circle cx="784.7" cy="182" r="6" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"><title>canonical AMX: CPU 856 ms (n=3) vs FPGA 839 ms (n=3) = -1.9 %, -16 ms, Welch t -5.7</title></circle>
+<text x="794.7" y="186" font-size="11" fill="#0b0b0b" text-anchor="start">-1.9 %</text>
+<text x="418" y="216" font-size="11" fill="#0b0b0b" text-anchor="end">whole 3bda, tp2, nightly layout, one deb (09-18 / 09-20)</text>
+<line x1="430" y1="212" x2="960" y2="212" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="809.0" cy="212" r="6" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"><title>canonical AMX: CPU 517 ms (n=3) vs FPGA 516 ms (n=1) = -0.3 %, -1 ms, Welch t -</title></circle>
+<text x="819.0" y="216" font-size="11" fill="#0b0b0b" text-anchor="start">-0.3 %</text>
+<text x="418" y="246" font-size="11" fill="#0b0b0b" text-anchor="end">whole 3bda, tp2, nightly layout, nightly deb (09-18 / 09-20)</text>
+<line x1="430" y1="242" x2="960" y2="242" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="493.3" cy="242" r="6" fill="#1baf7a" stroke="#1baf7a" stroke-width="2"><title>AVX: CPU 674 ms (n=3) vs FPGA 528 ms (n=1) = -21.7 %, -146 ms, Welch t -</title></circle>
+<text x="503.3" y="246" font-size="11" fill="#0b0b0b" text-anchor="start">-21.7 %</text>
+<text x="16" y="276" font-size="12" font-weight="600" fill="#0b0b0b">runtron (server-side prefill of 8 prompts in one batch)</text>
+<text x="418" y="310" font-size="11" fill="#0b0b0b" text-anchor="end">tp2, 8 users, 09-16 (wedperf)</text>
+<line x1="430" y1="306" x2="960" y2="306" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="531.5" cy="306" r="6" fill="#1baf7a" stroke="#1baf7a" stroke-width="2"><title>AVX: CPU 3,945 ms (n=3) vs FPGA 3,191 ms (n=2) = -19.1 %, -754 ms, Welch t -52.4</title></circle>
+<text x="541.5" y="310" font-size="11" fill="#0b0b0b" text-anchor="start">-19.1 %</text>
+<circle cx="842.6" cy="306" r="6" fill="#eb6834" stroke="#eb6834" stroke-width="2"><title>VNNI-K: CPU 3,087 ms (n=3) vs FPGA 3,150 ms (n=2) = +2.0 %, +63 ms, Welch t +6.4</title></circle>
+<text x="832.6" y="310" font-size="11" fill="#0b0b0b" text-anchor="end">+2.0 %</text>
+<text x="418" y="340" font-size="11" fill="#0b0b0b" text-anchor="end">tp2, 8 users, 09-16 (wedperf-attr)</text>
+<line x1="430" y1="336" x2="960" y2="336" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="540.7" cy="336" r="6" fill="#1baf7a" stroke="#1baf7a" stroke-width="2"><title>AVX: CPU 3,943 ms (n=2) vs FPGA 3,214 ms (n=6) = -18.5 %, -729 ms, Welch t -74.0</title></circle>
+<text x="550.7" y="340" font-size="11" fill="#0b0b0b" text-anchor="start">-18.5 %</text>
+<circle cx="830.8" cy="336" r="6" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"><title>canonical AMX: CPU 3,156 ms (n=2) vs FPGA 3,195 ms (n=6) = +1.2 %, +39 ms, Welch t +8.2</title></circle>
+<text x="820.8" y="340" font-size="11" fill="#0b0b0b" text-anchor="end">+1.2 %</text>
+<circle cx="846.0" cy="336" r="6" fill="#eb6834" stroke="#eb6834" stroke-width="2"><title>VNNI-K: CPU 3,091 ms (n=2) vs FPGA 3,161 ms (n=6) = +2.3 %, +70 ms, Welch t +10.6</title></circle>
+<text x="856.0" y="340" font-size="11" fill="#0b0b0b" text-anchor="start">+2.3 %</text>
+<text x="418" y="370" font-size="11" fill="#0b0b0b" text-anchor="end">tp2, 8 users, 09-15 (vnnik4)</text>
+<line x1="430" y1="366" x2="960" y2="366" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="819.1" cy="366" r="6" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"><title>canonical AMX: CPU 3,141 ms (n=2) vs FPGA 3,155 ms (n=1) = +0.4 %, +14 ms, Welch t -</title></circle>
+<text x="809.1" y="370" font-size="11" fill="#0b0b0b" text-anchor="end">+0.4 %</text>
+<circle cx="851.0" cy="366" r="6" fill="#eb6834" stroke="#eb6834" stroke-width="2"><title>VNNI-K: CPU 3,083 ms (n=2) vs FPGA 3,162 ms (n=1) = +2.6 %, +80 ms, Welch t -</title></circle>
+<text x="861.0" y="370" font-size="11" fill="#0b0b0b" text-anchor="start">+2.6 %</text>
+<text x="418" y="400" font-size="11" fill="#0b0b0b" text-anchor="end">tp4, 8 users, 09-16 (wedperf)</text>
+<line x1="430" y1="396" x2="960" y2="396" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="698.8" cy="396" r="6" fill="#1baf7a" stroke="#1baf7a" stroke-width="2"><title>AVX: CPU 2,464 ms (n=3) vs FPGA 2,273 ms (n=2) = -7.7 %, -191 ms, Welch t -10.9</title></circle>
+<text x="708.8" y="400" font-size="11" fill="#0b0b0b" text-anchor="start">-7.7 %</text>
+<circle cx="903.3" cy="396" r="6" fill="#eb6834" stroke="#eb6834" stroke-width="2"><title>VNNI-K: CPU 2,121 ms (n=3) vs FPGA 2,252 ms (n=2) = +6.1 %, +130 ms, Welch t +3.9</title></circle>
+<text x="893.3" y="400" font-size="11" fill="#0b0b0b" text-anchor="end">+6.1 %</text>
+<text x="418" y="430" font-size="11" fill="#0b0b0b" text-anchor="end">tp4, 8 users, canonical, two builds (09-13 / 09-16)</text>
+<line x1="430" y1="426" x2="960" y2="426" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="872.3" cy="426" r="6" fill="#fcfcfb" stroke="#2a78d6" stroke-width="2"><title>canonical AMX: CPU 2,200 ms (n=6) vs FPGA 2,288 ms (n=6) = +4.0 %, +89 ms, Welch t +12.9</title></circle>
+<text x="862.3" y="430" font-size="11" fill="#0b0b0b" text-anchor="end">+4.0 %</text>
+</svg><p class="cap">Figure 1. One row per setup. One dot per CPU kernel the FPGA arm is compared with. In the two "our half" CI rows and the "one deb" whole-machine row the CPU and FPGA arms are the same binary. In the runtron rows both arms are the same binary per colour, but the CPU and FPGA cells ran in separate blocks 8 minutes to about 2 hours apart. Exact values, n, t and df are in the table below.</p></div>
+<ul>
+<li><b>Canonical AMX on the CPU against the FPGA.</b> Same binary 544ca05c7a, CI harness, our half, 2026-09-13. At tp2, 727 ms against 761 ms (+4.6 %, t +14.0). At tp4, 856 ms against 839 ms (-1.9 %, t -5.7). The sign flips between tp2 and tp4. The FPGA arm of this campaign also had the kill switch set. Block m6 of issue 4500 measured that switch at +62 ms in the same layout for the VNNI-K deb, so the tp2 gap lies between about -4 % and +4.6 %. Same deb 0594dc54 on the whole machine in the nightly layout: 517 ms against 516 ms (-0.3 %, one pass on the FPGA side). Runtron, 8 prompts in one batch: +0.4 % to +1.2 %. Over all five canonical pairs the FPGA arm is slower in three and faster in two. The two pairs nearest zero (-0.3 % and +0.4 %) have n = 1 on the FPGA side and are not resolved.</li>
+<li><b>VNNI-K on the CPU against the FPGA.</b> Only runtron pairs exist. No CI-harness run of the VNNI-K deb with CPU attention was ever made. The FPGA arm is slower by +2.0 % to +6.1 % in all four pairs (tp2 +2.0 to +2.6 %, tp4 +6.1 %). The tp4 value rests on two FPGA repetitions 67 ms apart (Welch t +3.9 with about 1 degree of freedom), so its size is not resolved. The direction is resolved by the wedperf-attr tp2 pair (n = 6 on the FPGA side, t +10.6) and by the same sign in all four pairs.</li>
+<li><b>AVX on the CPU against the FPGA.</b> The FPGA arm is faster by 8 % to 22 % in every pair. This is the comparison the nightly would see today. The nightly deb has no AMX code.</li>
+</ul>
+<p>Reading. The AMX kernel and the FPGA remove about the same amount of prefill time from the AVX baseline at this prompt length. Which one is a few percent faster depends on tp and on the harness. Within one setup the difference is resolved (t +14.0 at tp2, t -5.7 at tp4, against a run-to-run sd of 2 to 5 ms). Its sign changes between setups, so no single winner exists at this prompt length. The differences are of the size of the setup differences between the two sides: the kill switch on the p0perf FPGA arm (62 ms in block m6), separate blocks 8 minutes to 2 hours apart in runtron, and two days on the whole machine. Decode TPS, which was not the question, favours the FPGA by 24 to 57 % in the two cited cell sets (CI harness our half +24 to +37 %, runtron vnnik4 +47 to +57 %) [exec/results/p0perf-20260913/summary.md:14,16; exec/results/vnnik4-models-20260915/results.txt:70,90 with vnnik4-20260915/summary.md:9-10]. In the wedperf runtron cells that gain is +13 % (VNNI-K, tp4) to +75 % (AVX, tp2) [exec/results/wedperf-20260916/summary.md:21-24,31-34].</p>
+<h3>The record: every matched pair (the last row pairs two builds)</h3>
+<div class="tw"><table class="num"><thead><tr><th>harness</th><th>setup</th><th>CPU kernel</th><th>CPU-attention TTFT, ms (n)</th><th>FPGA-attention TTFT, ms (n)</th><th>FPGA minus CPU, ms</th><th>percent of CPU</th><th>Welch t</th><th>Welch df</th><th>note</th></tr></thead><tbody>
+<tr><td>CI harness</td><td>our half, tp2, 2 engines x 2 users, one binary 544ca05c7a, 2026-09-13</td><td>AVX</td><td>909 +/- 3.8 (3)</td><td>761 +/- 2.6 (3)</td><td>-148</td><td>-16.3 %</td><td>-55.4</td><td>3.6</td><td></td></tr>
+<tr><td>CI harness</td><td>our half, tp2, 2 engines x 2 users, one binary 544ca05c7a, 2026-09-13</td><td>canonical AMX</td><td>727 +/- 3.2 (3)</td><td>761 +/- 2.6 (3)</td><td>+34</td><td>+4.6 %</td><td>+14.0</td><td>3.9</td><td>the FPGA arm ran with the kill switch (its CPU share is AVX). Block m6 measured that switch at +62 ms in this layout for the VNNI-K deb, so the canonical-vs-FPGA gap here lies between about -4 % and +4.6 %</td></tr>
+<tr><td>CI harness</td><td>our half, tp4, 1 engine x 4 users, one binary 544ca05c7a, 2026-09-13</td><td>AVX</td><td>952 +/- 4.4 (3)</td><td>839 +/- 4.7 (3)</td><td>-113</td><td>-11.8 %</td><td>-30.4</td><td>4.0</td><td></td></tr>
+<tr><td>CI harness</td><td>our half, tp4, 1 engine x 4 users, one binary 544ca05c7a, 2026-09-13</td><td>canonical AMX</td><td>856 +/- 1.5 (3)</td><td>839 +/- 4.7 (3)</td><td>-16</td><td>-1.9 %</td><td>-5.7</td><td>2.4</td><td>the FPGA arm ran with the kill switch, so its CPU share is AVX</td></tr>
+<tr><td>CI harness</td><td>whole 3bda, tp2, 4 engines x 2 users, one deb 0594dc54, 2026-09-18 vs 09-20</td><td>canonical AMX</td><td>517 +/- 1.2 (3)</td><td>516 (1)</td><td>-1</td><td>-0.3 %</td><td>-</td><td>-</td><td>FPGA side is one pass (n = 1). The night-to-night sd of this cell is 7.2 ms. Same client host on both sides</td></tr>
+<tr><td>CI harness</td><td>whole 3bda, tp2, 4 engines x 2 users, nightly deb 3faba6d0, 2026-09-18 vs 09-20</td><td>AVX</td><td>674 +/- 24.6 (3)</td><td>528 (1)</td><td>-146</td><td>-21.7 %</td><td>-</td><td>-</td><td>FPGA side is the 2026-09-18 nightly (remote client). The 13-night mean is 509.5 +/- 7.2 ms. CPU side: base pass 3 (702 ms) had an uneven Caddy spread (22 / 22 / 0 / 20 requests per engine) and 2 Caddy health events. Passes 1 and 2 alone give 660 ms and -20.1 %</td></tr>
+<tr><td>runtron</td><td>tp2, 2026-09-16 (wedperf)</td><td>AVX</td><td>3,945 +/- 2.7 (3)</td><td>3,191 +/- 20.2 (2)</td><td>-754</td><td>-19.1 %</td><td>-52.4</td><td>1.0</td><td></td></tr>
+<tr><td>runtron</td><td>tp2, 2026-09-16 (wedperf)</td><td>VNNI-K</td><td>3,087 +/- 4.4 (3)</td><td>3,150 +/- 13.3 (2)</td><td>+63</td><td>+2.0 %</td><td>+6.4</td><td>1.1</td><td></td></tr>
+<tr><td>runtron</td><td>tp2, 2026-09-16 (wedperf-attr)</td><td>AVX</td><td>3,943 +/- 3.8 (2)</td><td>3,214 +/- 23.2 (6)</td><td>-729</td><td>-18.5 %</td><td>-74.0</td><td>5.7</td><td></td></tr>
+<tr><td>runtron</td><td>tp2, 2026-09-16 (wedperf-attr)</td><td>canonical AMX</td><td>3,156 +/- 2.3 (2)</td><td>3,195 +/- 10.8 (6)</td><td>+39</td><td>+1.2 %</td><td>+8.2</td><td>5.9</td><td></td></tr>
+<tr><td>runtron</td><td>tp2, 2026-09-16 (wedperf-attr)</td><td>VNNI-K</td><td>3,091 +/- 3.3 (2)</td><td>3,161 +/- 15.0 (6)</td><td>+70</td><td>+2.3 %</td><td>+10.6</td><td>5.9</td><td></td></tr>
+<tr><td>runtron</td><td>tp2, 2026-09-15 (vnnik4)</td><td>canonical AMX</td><td>3,141 +/- 4.0 (2)</td><td>3,155 (1)</td><td>+14</td><td>+0.4 %</td><td>-</td><td>-</td><td>FPGA side n = 1. CPU cells logged at debug level, FPGA cells at info level</td></tr>
+<tr><td>runtron</td><td>tp2, 2026-09-15 (vnnik4)</td><td>VNNI-K</td><td>3,083 +/- 9.4 (2)</td><td>3,162 (1)</td><td>+80</td><td>+2.6 %</td><td>-</td><td>-</td><td>FPGA side n = 1. CPU side forced TRON_K_VNNI_BLOCK=1 and TRON_K_VNNI_STRIPE=1 by env, the FPGA side ran the binary's defaults (not recorded)</td></tr>
+<tr><td>runtron</td><td>tp4, 2026-09-16 (wedperf)</td><td>AVX</td><td>2,464 +/- 5.0 (3)</td><td>2,273 +/- 24.3 (2)</td><td>-191</td><td>-7.7 %</td><td>-10.9</td><td>1.1</td><td></td></tr>
+<tr><td>runtron</td><td>tp4, 2026-09-16 (wedperf)</td><td>VNNI-K</td><td>2,121 +/- 7.4 (3)</td><td>2,252 +/- 47.5 (2)</td><td>+130</td><td>+6.1 %</td><td>+3.9</td><td>1.0</td><td>the two FPGA repetitions are 67 ms apart (2218 and 2285 ms), so the size of this delta is not resolved (about 1 degree of freedom)</td></tr>
+<tr><td>runtron</td><td>tp4, canonical: CPU 544ca05c7a (09-13) vs FPGA c7844ca2ce (09-16 attr)</td><td>canonical AMX</td><td>2,200 +/- 6.1 (6)</td><td>2,288 +/- 15.8 (6)</td><td>+89</td><td>+4.0 %</td><td>+12.9</td><td>6.4</td><td>different builds and days (no same-binary canonical tp4 pair exists). Hollow marker</td></tr>
+</tbody></table></div>
+<p class="cap">The runtron TTFT is the batched prefill of 8 prompts. The CI-harness TTFT is a per-request client-side value with 2 or 4 users per engine. The two are not comparable with each other, only within a row. The 1-user smoke runs of vnnik4 (VNNI-K build, CPU 432 ms with n = 2, FPGA 416 ms with n = 1) are left out: the CPU smoke ran under a machine load of 99 to 121 with no free hugepages. Sources are listed in section 9.</p>
+<h2>2. The production-like view</h2>
+<div class="fig"><svg viewBox="0 0 980 390" width="100%" role="img" aria-label="Whole-machine CI layout TTFT at prompt 1024, tp2" style="max-width:980px;font-family:system-ui,sans-serif">
+<text x="16" y="24" font-size="15" font-weight="600" fill="#0b0b0b">Whole delphi-3bda in the nightly layout (4 tp2 engines behind Caddy, 2 users each), prompt 1024</text>
+<text x="16" y="44" font-size="12" fill="#52514e">Client-side TTFT in ms, mean of 8 users x 10 rounds. CPU-attention bars: q4b-swattn 2026-09-20, mean of 3 passes.</text>
+<text x="16" y="60" font-size="12" fill="#52514e">FPGA-attention bars: one pass each (canon-ci 2026-09-19, ci-mimic 2026-09-18, the nightly of 2026-09-18).</text>
+<text x="16" y="76" font-size="12" fill="#52514e">Night-to-night spread of the nightly cell: 509.5 +/- 7.2 ms over 13 nights. Each FPGA bar is one pass,</text>
+<text x="16" y="92" font-size="12" fill="#52514e">so a difference between two bars under about 20 ms is not resolved.</text>
+<rect x="16" y="106" width="12" height="12" fill="#2a78d6"/><text x="34" y="116" font-size="11" fill="#52514e">attention on the CPU (USE_HW_ATTN=0)</text>
+<rect x="286" y="106" width="12" height="12" fill="#eb6834"/><text x="304" y="116" font-size="11" fill="#52514e">attention on the FPGA (USE_HW_ATTN unset, the nightly default)</text>
+<line x1="420.0" y1="134" x2="420.0" y2="340" stroke="#e1e0d9" stroke-width="1"/>
+<text x="420.0" y="356" font-size="11" fill="#898781" text-anchor="middle">0</text>
+<line x1="486.7" y1="134" x2="486.7" y2="340" stroke="#e1e0d9" stroke-width="1"/>
+<text x="486.7" y="356" font-size="11" fill="#898781" text-anchor="middle">100</text>
+<line x1="553.3" y1="134" x2="553.3" y2="340" stroke="#e1e0d9" stroke-width="1"/>
+<text x="553.3" y="356" font-size="11" fill="#898781" text-anchor="middle">200</text>
+<line x1="620.0" y1="134" x2="620.0" y2="340" stroke="#e1e0d9" stroke-width="1"/>
+<text x="620.0" y="356" font-size="11" fill="#898781" text-anchor="middle">300</text>
+<line x1="686.7" y1="134" x2="686.7" y2="340" stroke="#e1e0d9" stroke-width="1"/>
+<text x="686.7" y="356" font-size="11" fill="#898781" text-anchor="middle">400</text>
+<line x1="753.3" y1="134" x2="753.3" y2="340" stroke="#e1e0d9" stroke-width="1"/>
+<text x="753.3" y="356" font-size="11" fill="#898781" text-anchor="middle">500</text>
+<line x1="820.0" y1="134" x2="820.0" y2="340" stroke="#e1e0d9" stroke-width="1"/>
+<text x="820.0" y="356" font-size="11" fill="#898781" text-anchor="middle">600</text>
+<line x1="886.7" y1="134" x2="886.7" y2="340" stroke="#e1e0d9" stroke-width="1"/>
+<text x="886.7" y="356" font-size="11" fill="#898781" text-anchor="middle">700</text>
+<text x="660.0" y="374" font-size="11" fill="#898781" text-anchor="middle">TTFT, ms (client side)</text>
+<text x="408" y="155.0" font-size="11" fill="#0b0b0b" text-anchor="end">nightly deb (AVX) + CPU attention</text>
+<rect x="420" y="140" width="449.6" height="22" rx="4" fill="#2a78d6"><title>nightly deb, CPU attention (q4b-swattn, 3 passes, 2026-09-20): 674 ms, n=3</title></rect>
+<text x="877.6" y="155.0" font-size="12" fill="#0b0b0b">674 ms</text>
+<text x="408" y="191.0" font-size="11" fill="#0b0b0b" text-anchor="end">nightly deb (AVX) + FPGA attention  [2026-09-18 nightly]</text>
+<rect x="420" y="176" width="352.0" height="22" rx="4" fill="#eb6834"><title>nightly deb, FPGA attention (the 2026-09-18 nightly itself, remote client): 528 ms, n=1</title></rect>
+<text x="780.0" y="191.0" font-size="12" fill="#0b0b0b">528 ms</text>
+<text x="408" y="227.0" font-size="11" fill="#0b0b0b" text-anchor="end">canonical AMX deb + CPU attention</text>
+<rect x="420" y="212" width="344.9" height="22" rx="4" fill="#2a78d6"><title>canonical AMX deb, CPU attention (q4b-swattn, 3 passes, 2026-09-20): 517 ms, n=3</title></rect>
+<text x="772.9" y="227.0" font-size="12" fill="#0b0b0b">517 ms</text>
+<text x="408" y="263.0" font-size="11" fill="#0b0b0b" text-anchor="end">canonical AMX deb + FPGA attention</text>
+<rect x="420" y="248" width="344.0" height="22" rx="4" fill="#eb6834"><title>canonical AMX deb, FPGA attention (canon-ci, 1 pass, 2026-09-18 23:48 UTC): 516 ms, n=1</title></rect>
+<text x="772.0" y="263.0" font-size="12" fill="#0b0b0b">516 ms</text>
+<text x="408" y="299.0" font-size="11" fill="#0b0b0b" text-anchor="end">VNNI-K deb + FPGA attention  (no CPU-attention run exists)</text>
+<rect x="420" y="284" width="336.0" height="22" rx="4" fill="#eb6834"><title>VNNI-K deb, FPGA attention (ci-mimic target, 2026-09-18): 504 ms, n=1</title></rect>
+<text x="764.0" y="299.0" font-size="12" fill="#0b0b0b">504 ms</text>
+</svg><p class="cap">Figure 2. The same deb 0594dc54 gives 517 ms with CPU attention (q4b-swattn, 2026-09-20) and 516 ms with FPGA attention (canon-ci, 2026-09-18). The nightly deb (AVX) gives 674 ms with CPU attention (q4b-swattn, 2026-09-20) and 528 ms with FPGA attention in the nightly of 2026-09-18 (remote client). Each FPGA bar is one pass. A difference between two FPGA bars under about 20 ms (two sd of a two-night difference) is not resolved.</p></div>
+<p>Three caveats on this figure. The CPU-attention bars (q4b-swattn) and the canonical-AMX FPGA bar (canon-ci) used the same client host (claude-agentsrv). canon-ci measured its client lightly loaded (CPU pressure 0 to 5 %). q4b-swattn did not record its client load. The nightly bar used the remote CI runner, whose load is never recorded. The ci-mimic run of the nightly deb with FPGA attention on 2026-09-18 gave 556 ms, but its client host was CPU-saturated during that arm, so the same-day nightly (528 ms) is the number used here [exec/results/ci-mimic-20260918/caveats.html]. The 674 ms bar includes base pass 3 (702 ms), which had an uneven Caddy spread (22 / 22 / 0 / 20 requests per engine) and 2 Caddy health events [exec/results/q4b-swattn-20260919/summary.txt:13]. Passes 1 and 2 alone give 660 ms.</p>
+<h2>3. With FPGA attention, does the CPU build still matter for prefill?</h2>
+<div class="tw"><table class="num"><thead><tr><th>layout</th><th>tp</th><th>AVX build (nightly deb 3faba6d0, or runtron eb2de0265a)</th><th>canonical AMX build (deb 0594dc54, or runtron c7844ca2ce)</th><th>VNNI-K build (deb 29a8a547, or runtron ff680c8020)</th><th>VNNI-K build + kill switch</th><th>source</th></tr></thead><tbody>
+<tr><td>whole 3bda, 4 engines x 2 users, CI harness</td><td>2</td><td>528 (nightly 09-18, remote client), 556 (ci-mimic, saturated client), 13-night mean 509.5 +/- 7.2</td><td>516 (canon-ci, client pressure 0 to 5 %)</td><td>504 (ci-mimic, client pressure 27 to 48 %, so an upper bound)</td><td>-</td><td>canon-ci, ci-mimic, nightly-0918.arm.json, nightly_stats.json</td></tr>
+<tr><td>whole 3bda, 2 engines x 4 users, CI harness</td><td>4</td><td>636 (nightly 09-18), 13-night mean 635.2 +/- 10.1</td><td>646</td><td>629</td><td>-</td><td>same</td></tr>
+<tr><td>our half, 1 engine x 2 users, CI harness (issue 4500 block m6, n = 2)</td><td>2</td><td>762</td><td>-</td><td>700</td><td>762</td><td>issue4500 m6/summary.md:5-8</td></tr>
+<tr><td>our half, 1 engine x 4 users, CI harness (block m6, n = 2)</td><td>4</td><td>848</td><td>-</td><td>809</td><td>814</td><td>issue4500 m6/summary.md:10-12</td></tr>
+<tr><td>runtron, 8 users (wedperf-attr, n = 6)</td><td>2</td><td>3,214</td><td>3,195</td><td>3,161</td><td>-</td><td>wedperf-attr summary.md:25-27</td></tr>
+<tr><td>runtron, 8 users (wedperf-attr, n = 6)</td><td>4</td><td>2,253</td><td>2,288</td><td>2,231</td><td>-</td><td>wedperf-attr summary.md:22-24</td></tr>
+<tr><td>runtron, 8 users (issue 4500 block m1, 2026-09-18/19, n = 3)</td><td>2</td><td>-</td><td>3,189 (c7844ca2ce), 3,207 (PR 4424 code, layout off)</td><td>3,189 and 3,161 (two identical binaries)</td><td>3,205</td><td>issue4500 summary.md:9-14</td></tr>
+<tr><td>runtron, 8 users (block m1, n = 3)</td><td>4</td><td>-</td><td>2,333 (c7844ca2ce), 2,347 (layout off)</td><td>2,260 and 2,227</td><td>2,192</td><td>issue4500 summary.md:15-20</td></tr>
+</tbody></table></div>
+<p>At prompt 1024, once the FPGA scores attention, the CPU build changes prefill by a few percent at most. The sign depends on the build and on tp. At longer prompts with a warm prefix cache the AMX build lowers it by 33 to 48 % from 4096 up (means over three passes, section 6). The cause of that warm gain is not settled (section 5 names two candidate mechanisms).</p>
+<ul>
+<li><b>VNNI-K build against AVX build.</b> Faster in every cell: -8 % at 2 users per engine on our half (762 to 700 ms, n = 2, Welch t -35), -5 % at 4 users (848 to 809 ms), -4.5 % on the whole machine at tp2 (528 to 504 ms, one pass each, client under pressure on the 504 side), -1.7 % (tp2) and -1.0 % (tp4) in runtron with 8 prompts.</li>
+<li><b>Canonical build against AVX build.</b> Not resolved at tp2 (516 against 528 ms on the whole machine, one pass each). Against the 13-night mean of 509.5 ms the canonical deb reads +1.3 %. Slightly slower at tp4 (runtron 2,288 against 2,253 ms, +1.6 %, n = 6 per side, Welch t +3.7, and on the whole machine 646 against 636 ms, one pass each).</li>
+<li><b>The kill switch on the VNNI-K deb.</b> At tp2 it gives the AVX number back (762 ms against 762 ms for the nightly deb). At tp4 it does not (814 ms with the switch against 848 ms for the nightly deb, -4.0 %, Welch t -21.5). So at tp4 most of the VNNI-K deb's -4.7 % is a difference between the two debs, not the AMX kernel. In runtron block m1 at tp4 the kill-switch arm (2,192 ms) is the fastest of the five arms.</li>
+</ul>
+<p class="hyp">Hypothesis (unmeasured): the -8 % at 2 users per engine comes from prompt K/V whose DMA to the card had not finished when the next 128-token forward was scheduled. Those pages were then scored on the CPU as dense pages, where the AMX kernel applies (section 4). Test: a perfetto trace of one prefill with the "Attention Ready / Pending" and "attention: hw wait" spans per forward, AMX build against kill switch, on the same engine.</p>
+<h2>4. What runs where during prefill (from the tron source)</h2>
+<p>Read from the PR 4424 tree (30c4ac82cb) by three agents and checked by two more. Line numbers are from that tree. The FPGA prefill path and its constants are the same in main of 2026-09-10 (1279137d). The AMX statements exist only in the PR tree, because that main predates the PR 3879 merge. The file:line evidence is in the workflow journals.</p>
+<ul>
+<li>A prompt is fed to the model 128 tokens per user per forward pass (default of TRON_PER_USER_PROMPT_CHUNK_LIMIT, which no deployment file on delphi-3bda sets). A 1024-token prompt is 8 forwards. With 8 users in one runtron batch, each forward carries 8 x 128 = 1024 prompt tokens. That fits one forward under either reading of the per-forward budget (1024 tokens for the ingested plugin's one minibatch, or tron's 4096-token mask capacity). That is why all 8 users finish prefill on the same pass [h/libtron.hpp:197-203; src/tron/generation/context.cpp:40-42; ingest/src/TronCpp.hs:262-263; h/tron/scheduler/full.hpp:1692-1699; h/tron/models/ranged_mask.hpp:20].</li>
+<li>With FPGA attention, the queries of forward k are scored on the FPGA against the K/V of forwards 1..k-1 that already sit in the card's HBM. The first forward (positions 0..127) runs entirely on the CPU: no K/V of the prompt is on the card yet, and the FPGA takes a query only once 128 tokens (positions 0..127, up to the engagement point 127) are DMA-complete in HBM. The engagement point is the default 127. USE_HW_ATTN=N moves it to the next 64-token page boundary minus 1. Every query's own 128-token chunk (the causal triangle) is always scored on the CPU. So is any K/V above the first 4-token group whose DMA had not completed when the forward was planned: the FPGA covers a contiguous DMA-complete prefix, and everything above the first gap stays on the CPU [h/libpos.hpp:90; h/pos/config.hpp:98; h/tron/scheduler/full.hpp:1913-1919, 2755-2800; src/tron/models/ranged_mask.cpp:73-86; h/tron/models/model.hpp:2495-2513].</li>
+<li>With CPU attention, the AMX page kernel scores the queries of forward k against the full 64-token pages of forwards 1..k-1 (a page is "dense" for a query when it is fully visible). The own-chunk triangle runs the AVX path in every build [h/tron/models/self_attention.hpp:1383-1394, 1546-1556].</li>
+<li>Therefore the FPGA and the AMX kernel replace the same part of the work when the DMA keeps up with the forwards: the cross-chunk rectangles, about 87 % (est.) of the 524,800 causal (query, key) pairs of a 1024-token prompt. The remaining 13 % (est., 66,048 pairs) runs on the CPU with the AVX path in both modes. In an FPGA-attention run the AMX dense-page kernel does not touch the prompt's own attention unless DMA lags, a KV slot is configured software-only, or a shard lost its HBM allocation. The AMX build still packs each query's Q group and holds the tile configuration for every attention call, a small fixed cost that is the only AMX-build effect on the FPGA path when no DMA lags [h/tron/models/self_attention.hpp:1228-1256].</li>
+<li>Extra work inside TTFT in the FPGA path: (1) staging each group of 4 tokens into the card's layout (gof::populate) and 36 DMA descriptors per group per layer [src/tron/gof.cpp:159-222; h/tron/models/model.hpp:3146-3300]. (2) One FPGA pass per at most 32 queries per layer (MAX_B, which the card's activation-slot budget or HWATTN_MAX_B can lower), and each pass re-reads the resident K/V [h/tron/models/model.hpp:2580-2650; src/pos/worker.cpp:969-975]. (3) The unpack and join of each pass's result on the attention workers [h/tron/models/self_attention.hpp:843-895, 1024-1050].</li>
+</ul>
+<pre>
+prefill of one 1024-token prompt, FPGA attention on (8 forwards of 128 tokens)
+
+forward 1  positions 0..127     CPU only (no K/V on the card yet)
+
+forward k  positions (k-1)*128..k*128-1
+
+           FPGA : 128 queries x K/V of forwards 1..k-1 already in HBM
+
+                  (a contiguous DMA-complete prefix)
+
+           CPU  : 128 queries x own chunk (causal triangle), AVX path
+
+                  + K/V above the first DMA gap, if any
+
+           host : save K/V -> stage 4-token groups -> DMA (async,
+
+                  visible to the plan of forward k+1 at the earliest)
+
+
+
+same prompt, CPU attention (USE_HW_ATTN=0)
+
+forward k  AMX page kernel : 128 queries x dense pages of forwards 1..k-1
+
+           AVX path        : 128 queries x own chunk (causal triangle)
+
+</pre>
+<p class="cap">Text diagram. Durations are not to scale. "dense page" = a 64-token KV page fully visible to the query.</p>
+<p>Why the two are equal at 1024 (a reading of the data, not a measurement of the parts). In the CI cells on our half, replacing AVX by AMX on the cross-chunk part removed 181 ms (909 to 727) at tp2. Moving that part to the FPGA removed 148 ms (909 to 761). On the whole machine the two removals were 157 ms (674 to 517, one campaign, same client and day) and about 146 ms (est., 674 from q4b-swattn on 2026-09-20 against 528 from the 2026-09-18 nightly on a different client host). The FPGA path carries its staging, launch and join overhead inside TTFT. The AMX path carries the page kernel's own time. At this prompt length the two costs are of the same size.</p>
+<h2>5. Longer prompts: the measured FPGA curve (campaign q4b-fpga-20260921)</h2>
+<p>Measured on the whole of delphi-3bda in the nightly layout (platformd 0.11, 4 tp2 engines behind the test proxy, 2 users per engine, 1536 generated tokens) with the same harness, prompts and cells as the 2026-09-20 CPU-attention series, in two windows: 2026-09-21 22:35 to 2026-09-22 01:17 UTC (pass 1 and the first cold cells) and 2026-09-22 13:29 to 16:25 UTC (passes 2 and 3 and the second cold cells). FPGA-attention driver runs: 7 with the nightly deb, 7 with the canonical AMX deb (three 9-cell passes and four single cold cells each). The CPU-attention arms are the 2026-09-20 series (3 passes each) plus one canonical pass of 2026-09-22 and the cold check cell of 2026-09-19, not re-run further (jhan). Every engine's environment was checked after each provisioning: no USE_HW_ATTN=0 in the FPGA arms, exactly one in the CPU arms. 59 of the 62 FPGA-arm cells spread their 80 requests 20 / 20 / 20 / 20 over the four engines. 3 did not, because one engine restarted during the cell (its request counters start again from zero and its card is nearly empty afterwards): nightly deb (AVX) + FPGA attention pass 2 at prompt 2048 (spread 21 / 22 / not recorded / 21, 2 Caddy health events, 1,093 ms); nightly deb (AVX) + FPGA attention pass 3 at prompt 7168 (spread 21 / not recorded / 21 / 20, 3 Caddy health events, 4,749 ms); canonical AMX deb + FPGA attention pass 3 at prompt 1536 (spread 20 / 22 / 22 / not recorded, 3 Caddy health events, 803 ms). Those cells stay in the means, and pass 1 is the only pass without such a restart on either arm. The canonical CPU pass of 2026-09-22 has the same kind of exception: engine default-1 restarted before its prompt-3000 cell (spread 22 / not recorded / 20 / 22, 3 Caddy health events, 2,296 ms). That cell stays in the n = 4 mean and is flagged in the table caption. The measurements took three launches: the first ran fpgabase pass 1 and stopped at the switch to the canonical deb (an idle-test bug in dut.sh, see the runbook's incident log), the relaunch at 23:37 UTC ran fpgacanon pass 1, the canonical CPU pass and the first four cold cells, and the third launch after the 2026-09-22 nightly ran passes 2 and 3 of both FPGA arms and the second cold cells. The binary check of every run shows the intended deb.</p>
+<div class="fig"><svg viewBox="0 0 1060 520" width="100%" role="img" aria-label="Client-side TTFT against prompt length for four arms" style="max-width:1060px;font-family:system-ui,sans-serif">
+<text x="16" y="24" font-size="15" font-weight="600" fill="#0b0b0b">Prefill against prompt length, measured: attention on the FPGA against attention on the CPU</text>
+<text x="16" y="44" font-size="12" fill="#52514e">CI harness, whole delphi-3bda, 4 tp2 engines x 2 users, client-side TTFT in ms (mean over 8 users x 10 rounds), mean of the passes. Both axes logarithmic.</text>
+<text x="16" y="60" font-size="12" fill="#52514e">Lines: the cells of a pass (prompt 1024 cold, the others warm: 12 to 54 % prefix-cache hits). Squares: cold cells (fresh engines). End labels: the 8192 warm means.</text>
+<line x1="16" y1="78" x2="38" y2="78" stroke="#86b6ef" stroke-width="3"/><circle cx="27" cy="78" r="4" fill="#86b6ef"/>
+<text x="44" y="82" font-size="11" fill="#52514e">nightly deb (AVX) + CPU attention</text>
+<line x1="256" y1="78" x2="278" y2="78" stroke="#1c5cab" stroke-width="3"/><circle cx="267" cy="78" r="4" fill="#1c5cab"/>
+<text x="284" y="82" font-size="11" fill="#52514e">canonical AMX deb + CPU attention</text>
+<line x1="496" y1="78" x2="518" y2="78" stroke="#eb6834" stroke-width="3"/><circle cx="507" cy="78" r="4" fill="#eb6834"/>
+<text x="524" y="82" font-size="11" fill="#52514e">nightly deb (AVX) + FPGA attention</text>
+<line x1="736" y1="78" x2="758" y2="78" stroke="#8f2f0c" stroke-width="3"/><circle cx="747" cy="78" r="4" fill="#8f2f0c"/>
+<text x="764" y="82" font-size="11" fill="#52514e">canonical AMX deb + FPGA attention</text>
+<line x1="90" y1="440.0" x2="720" y2="440.0" stroke="#e1e0d9"/>
+<text x="82" y="444.0" font-size="11" fill="#898781" text-anchor="end">0.3 s</text>
+<line x1="90" y1="398.2" x2="720" y2="398.2" stroke="#e1e0d9"/>
+<text x="82" y="402.2" font-size="11" fill="#898781" text-anchor="end">0.5 s</text>
+<line x1="90" y1="341.4" x2="720" y2="341.4" stroke="#e1e0d9"/>
+<text x="82" y="345.4" font-size="11" fill="#898781" text-anchor="end">1 s</text>
+<line x1="90" y1="284.6" x2="720" y2="284.6" stroke="#e1e0d9"/>
+<text x="82" y="288.6" font-size="11" fill="#898781" text-anchor="end">2 s</text>
+<line x1="90" y1="209.6" x2="720" y2="209.6" stroke="#e1e0d9"/>
+<text x="82" y="213.6" font-size="11" fill="#898781" text-anchor="end">5 s</text>
+<line x1="90" y1="152.8" x2="720" y2="152.8" stroke="#e1e0d9"/>
+<text x="82" y="156.8" font-size="11" fill="#898781" text-anchor="end">10 s</text>
+<line x1="90" y1="96.0" x2="720" y2="96.0" stroke="#e1e0d9"/>
+<text x="82" y="100.0" font-size="11" fill="#898781" text-anchor="end">20 s</text>
+<line x1="90.0" y1="96" x2="90.0" y2="440" stroke="#e1e0d9" stroke-dasharray="2 4"/>
+<text x="90.0" y="458" font-size="10" fill="#898781" text-anchor="middle">1024</text>
+<line x1="212.8" y1="96" x2="212.8" y2="440" stroke="#e1e0d9" stroke-dasharray="2 4"/>
+<text x="212.8" y="458" font-size="10" fill="#898781" text-anchor="middle">1536</text>
+<line x1="300.0" y1="96" x2="300.0" y2="440" stroke="#e1e0d9" stroke-dasharray="2 4"/>
+<text x="300.0" y="458" font-size="10" fill="#898781" text-anchor="middle">2048</text>
+<line x1="415.7" y1="96" x2="415.7" y2="440" stroke="#e1e0d9" stroke-dasharray="2 4"/>
+<text x="415.7" y="458" font-size="10" fill="#898781" text-anchor="middle">3000</text>
+<line x1="510.0" y1="96" x2="510.0" y2="440" stroke="#e1e0d9" stroke-dasharray="2 4"/>
+<text x="510.0" y="458" font-size="10" fill="#898781" text-anchor="middle">4096</text>
+<line x1="577.6" y1="96" x2="577.6" y2="440" stroke="#e1e0d9" stroke-dasharray="2 4"/>
+<text x="577.6" y="458" font-size="10" fill="#898781" text-anchor="middle">5120</text>
+<line x1="632.8" y1="96" x2="632.8" y2="440" stroke="#e1e0d9" stroke-dasharray="2 4"/>
+<text x="632.8" y="458" font-size="10" fill="#898781" text-anchor="middle">6144</text>
+<line x1="679.5" y1="96" x2="679.5" y2="440" stroke="#e1e0d9" stroke-dasharray="2 4"/>
+<text x="679.5" y="458" font-size="10" fill="#898781" text-anchor="middle">7168</text>
+<line x1="720.0" y1="96" x2="720.0" y2="440" stroke="#e1e0d9" stroke-dasharray="2 4"/>
+<text x="720.0" y="458" font-size="10" fill="#898781" text-anchor="middle">8192</text>
+<text x="405.0" y="480" font-size="11" fill="#898781" text-anchor="middle">prompt length, tokens (log scale)</text>
+<text x="20" y="268.0" font-size="11" fill="#898781" text-anchor="middle" transform="rotate(-90 20 268.0)">TTFT, client side, ms (log scale)</text>
+<polyline points="90.0,373.7 212.8,327.8 300.0,298.7 415.7,242.1 510.0,202.2 577.6,170.2 632.8,144.3 679.5,129.8 720.0,115.5" fill="none" stroke="#86b6ef" stroke-width="2"/>
+<circle cx="90.0" cy="373.7" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + CPU attention, prompt 1024: 674 ms (n = 3)</title></circle>
+<circle cx="212.8" cy="327.8" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + CPU attention, prompt 1536: 1,181 ms (n = 3)</title></circle>
+<circle cx="300.0" cy="298.7" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + CPU attention, prompt 2048: 1,683 ms (n = 3)</title></circle>
+<circle cx="415.7" cy="242.1" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + CPU attention, prompt 3000: 3,361 ms (n = 3)</title></circle>
+<circle cx="510.0" cy="202.2" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + CPU attention, prompt 4096: 5,468 ms (n = 3)</title></circle>
+<circle cx="577.6" cy="170.2" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + CPU attention, prompt 5120: 8,086 ms (n = 3)</title></circle>
+<circle cx="632.8" cy="144.3" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + CPU attention, prompt 6144: 11,092 ms (n = 3)</title></circle>
+<circle cx="679.5" cy="129.8" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + CPU attention, prompt 7168: 13,238 ms (n = 3)</title></circle>
+<circle cx="720.0" cy="115.5" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + CPU attention, prompt 8192: 15,764 ms (n = 3)</title></circle>
+<polyline points="90.0,395.3 212.8,358.0 300.0,335.2 415.7,286.0 510.0,257.2 577.6,232.2 632.8,216.9 679.5,198.7 720.0,182.8" fill="none" stroke="#1c5cab" stroke-width="2"/>
+<circle cx="90.0" cy="395.3" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + CPU attention, prompt 1024: 518 ms (n = 4)</title></circle>
+<circle cx="212.8" cy="358.0" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + CPU attention, prompt 1536: 817 ms (n = 4)</title></circle>
+<circle cx="300.0" cy="335.2" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + CPU attention, prompt 2048: 1,078 ms (n = 4)</title></circle>
+<circle cx="415.7" cy="286.0" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + CPU attention, prompt 3000: 1,967 ms (n = 4)</title></circle>
+<circle cx="510.0" cy="257.2" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + CPU attention, prompt 4096: 2,794 ms (n = 4)</title></circle>
+<circle cx="577.6" cy="232.2" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + CPU attention, prompt 5120: 3,792 ms (n = 4)</title></circle>
+<circle cx="632.8" cy="216.9" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + CPU attention, prompt 6144: 4,569 ms (n = 4)</title></circle>
+<circle cx="679.5" cy="198.7" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + CPU attention, prompt 7168: 5,712 ms (n = 4)</title></circle>
+<circle cx="720.0" cy="182.8" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + CPU attention, prompt 8192: 6,929 ms (n = 4)</title></circle>
+<rect x="715.0" y="127.9" width="10" height="10" fill="#fcfcfb" stroke="#1c5cab" stroke-width="2"><title>canonical AMX deb + CPU attention, prompt 8192, cold: 12,743 ms (n = 1)</title></rect>
+<polyline points="90.0,389.8 212.8,359.2 300.0,337.5 415.7,311.8 510.0,224.7 577.6,198.4 632.8,184.8 679.5,209.1 720.0,191.9" fill="none" stroke="#eb6834" stroke-width="2"/>
+<circle cx="90.0" cy="389.8" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + FPGA attention, prompt 1024: 554 ms (n = 3)</title></circle>
+<circle cx="212.8" cy="359.2" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + FPGA attention, prompt 1536: 804 ms (n = 3)</title></circle>
+<circle cx="300.0" cy="337.5" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + FPGA attention, prompt 2048: 1,048 ms (n = 3)</title></circle>
+<circle cx="415.7" cy="311.8" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + FPGA attention, prompt 3000: 1,435 ms (n = 3)</title></circle>
+<circle cx="510.0" cy="224.7" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + FPGA attention, prompt 4096: 4,155 ms (n = 3)</title></circle>
+<circle cx="577.6" cy="198.4" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + FPGA attention, prompt 5120: 5,731 ms (n = 3)</title></circle>
+<circle cx="632.8" cy="184.8" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + FPGA attention, prompt 6144: 6,767 ms (n = 3)</title></circle>
+<circle cx="679.5" cy="209.1" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + FPGA attention, prompt 7168: 5,029 ms (n = 3)</title></circle>
+<circle cx="720.0" cy="191.9" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>nightly deb (AVX) + FPGA attention, prompt 8192: 6,200 ms (n = 3)</title></circle>
+<rect x="505.0" y="244.9" width="10" height="10" fill="#fcfcfb" stroke="#eb6834" stroke-width="2"><title>nightly deb (AVX) + FPGA attention, prompt 4096, cold: 3,057 ms (n = 2)</title></rect>
+<rect x="715.0" y="178.2" width="10" height="10" fill="#fcfcfb" stroke="#eb6834" stroke-width="2"><title>nightly deb (AVX) + FPGA attention, prompt 8192, cold: 6,898 ms (n = 2)</title></rect>
+<polyline points="90.0,396.2 212.8,364.5 300.0,351.4 415.7,313.3 510.0,271.8 577.6,236.9 632.8,239.5 679.5,241.7 720.0,225.7" fill="none" stroke="#8f2f0c" stroke-width="2"/>
+<circle cx="90.0" cy="396.2" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + FPGA attention, prompt 1024: 512 ms (n = 3)</title></circle>
+<circle cx="212.8" cy="364.5" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + FPGA attention, prompt 1536: 754 ms (n = 3)</title></circle>
+<circle cx="300.0" cy="351.4" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + FPGA attention, prompt 2048: 885 ms (n = 3)</title></circle>
+<circle cx="415.7" cy="313.3" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + FPGA attention, prompt 3000: 1,409 ms (n = 3)</title></circle>
+<circle cx="510.0" cy="271.8" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + FPGA attention, prompt 4096: 2,338 ms (n = 3)</title></circle>
+<circle cx="577.6" cy="236.9" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + FPGA attention, prompt 5120: 3,582 ms (n = 3)</title></circle>
+<circle cx="632.8" cy="239.5" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + FPGA attention, prompt 6144: 3,467 ms (n = 3)</title></circle>
+<circle cx="679.5" cy="241.7" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + FPGA attention, prompt 7168: 3,377 ms (n = 3)</title></circle>
+<circle cx="720.0" cy="225.7" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>canonical AMX deb + FPGA attention, prompt 8192: 4,105 ms (n = 3)</title></circle>
+<rect x="505.0" y="248.4" width="10" height="10" fill="#fcfcfb" stroke="#8f2f0c" stroke-width="2"><title>canonical AMX deb + FPGA attention, prompt 4096, cold: 2,927 ms (n = 2)</title></rect>
+<rect x="715.0" y="180.2" width="10" height="10" fill="#fcfcfb" stroke="#8f2f0c" stroke-width="2"><title>canonical AMX deb + FPGA attention, prompt 8192, cold: 6,734 ms (n = 2)</title></rect>
+<text x="730" y="119.5" font-size="11" fill="#0b0b0b">nightly deb (AVX) + CPU, warm 8192: 15.8 s</text>
+<text x="730" y="186.8" font-size="11" fill="#0b0b0b">canonical AMX deb + CPU, warm 8192: 6.9 s</text>
+<text x="730" y="200.8" font-size="11" fill="#0b0b0b">nightly deb (AVX) + FPGA, warm 8192: 6.2 s</text>
+<text x="730" y="229.7" font-size="11" fill="#0b0b0b">canonical AMX deb + FPGA, warm 8192: 4.1 s</text>
+</svg><p class="cap">Figure 3. Client-side TTFT against prompt length for the four arms, mean over the passes of each cell. Inside a pass only the prompt-1024 cell meets fresh engines. The later cells reuse the same conversation seeds, and 12 to 54 % of their prompt tokens come from the prefix cache, so the lines above 1024 are warm numbers. The end labels are the 8192 warm means. Squares mark cold cells (single-cell driver runs on fresh engines, mean of two runs for the FPGA arms): the FPGA arms at 4096 and 8192, and the canonical CPU arm at 8192 (the 2026-09-19 check cell, one run).</p></div>
+<ul>
+<li><b>Cold prefill at prompt 8192 (fresh engines, no prefix cache).</b> AMX kernel on the CPU 12,743 ms (the 2026-09-19 check cell, n = 1) against FPGA attention 6,734 ms with the AMX build and 6,898 ms with the AVX build (n = 2 each, the two cold runs of one arm 17 ms apart for the AMX build and 41 ms for the AVX build). The FPGA prefill is 1.9x faster (-47 %). The CPU build behind the FPGA changes the cold number by -2 %. No cold AVX-CPU cell exists at 8192. The CPU cell ran under platformd 0.10.7 on 2026-09-19, the FPGA cells under 0.11.0 on 2026-09-22. At 1024 the 2026-09-22 canonical pass reproduces the 0.10.7 value within 1 % (518 against 516 to 518 ms), so the layout change is not expected to move the 8192 cell either (hypothesis: no same-layout cold CPU cell at 8192 exists).</li>
+<li><b>Cold prefill at prompt 4096.</b> FPGA attention 2,927 ms (AMX build) and 3,057 ms (AVX build), n = 2 each. No cold CPU-attention cell exists at 4096 (no single-cell CPU-attention run at 4096 was made). The warm canonical CPU cell is 2,794 ms with 33 to 38 % prefix-cache hits, so the cold CPU value is higher than that (est.).</li>
+<li><b>Warm prefill at prompt 8192 (the passes' last cell).</b> AVX on the CPU 15,764 ms, AMX on the CPU 6,929 ms (2.3x faster than AVX, the 2x jhan recalled), FPGA attention 4,105 ms with the AMX build (1.7x faster than AMX on the CPU) and 6,200 ms with the AVX build. From AVX on the CPU to FPGA attention with the AMX build the warm prefill at 8192 shrinks 3.8x.</li>
+<li><b>FPGA against CPU, canonical AMX deb, per prompt length (warm cells, FPGA minus CPU in percent of CPU).</b> 1536: -8 %, 2048: -18 %, 3000: -28 %, 4096: -16 %, 5120: -6 %, 6144: -24 %, 7168: -41 %, 8192: -41 %. At 1024 (cold) 512 against 518 ms (-1 %). The FPGA is faster at every prompt length from 2048 up. The gap is largest at the longest prompts (-41 % at 7168, -41 % at 8192) and is not steady in between (-28 % at 3000, -16 % at 4096, -6 % at 5120). The warm cells at 4096 to 6144 are hybrids of FPGA and CPU attention in every pass (the card's K/V space was exhausted, subsection below), the 7168 cells in 2 of 6 pass-cells, and the 8192 cells from round 6 to 8 of 10 on. So the clean long-prompt comparison is the cold one: 6,734 against 12,743 ms at 8192. With three FPGA passes and four CPU passes per warm cell, the Welch t of FPGA against CPU is 1536: -1.6, 2048: -10.8, 3000: -3.7, 4096: -6.0, 5120: -1.6, 6144: -5.4, 7168: -24.3, 8192: -8.1: resolved (|t| above 4.3, the two-sided 5 % bound at 2 degrees of freedom) at 2048, 4096, 6144, 7168, 8192, weak at 1536, 3000, 5120.</li>
+<li><b>FPGA against CPU, nightly deb (AVX), per prompt length (warm cells).</b> 1536: -32 %, 2048: -38 %, 3000: -57 %, 4096: -24 %, 5120: -29 %, 6144: -39 %, 7168: -62 %, 8192: -61 %. At 1024 (cold) 554 against 674 ms (-18 %). This is the pair the nightly would see if it switched qwen3-4b from FPGA attention to CPU attention without AMX: prefill would take 1.2x (1024) to 2.6x (7168) longer. The nightly-deb FPGA value at 1024 (554 ms, mean of three passes that agree within 2 ms, platformd 0.11) is 25 to 45 ms above the same cell's history (528 ms on 2026-09-18, 509.5 +/- 7.2 ms over 13 nights). The agreement across passes makes it a systematic offset of this layout and client, not an outlier (hypothesis: the test proxy on port 80 or the client host; not measured). With the history values the 1024 ratio is 1.3x.</li>
+</ul>
+<p class="hyp">Why the AMX build helps the warm cells under FPGA attention far more than the cold cells: two candidate mechanisms, neither proven for every cell. The measurements first (means of the per-pass deltas over 3 paired passes per cell, section 6). The AMX build lowers the warm TTFT by 33 to 48 % from prompt 4096 up, and in every one of the 15 paired passes (-52 to -23 %). Per uncached prompt token (the two arms did not see the same prefix-cache share in a paired cell) the same gains are 27 to 44 %. At 2048 it lowers the TTFT by 15 % on average (-22.5, -17.7, -4.6 % per pass). At 1536 and 3000 the means are -6.2 and -2.0 %, with Welch t -1.4 and -0.3, so not resolved. In the cold cells it lowers TTFT by 2 to 8 % (n = 2 to 3 per cell). Mechanism 1, measured as a co-occurrence (next subsection): in every pass the 4096, 5120 and 6144 cells ran with the card's K/V space exhausted from round 1 until 60 to 99 % of the cell. At 4096 and 5120 nearly every new shard placement failed (81 to 114 % of the new placements, est.), at 6144 56 to 78 %. So in those cells both arms scored nearly all new context on the CPU, where the AMX kernel replaces the AVX loop. The AMX gain there (42 % at 4096, 37 % at 5120) is then the CPU-attention gain in another guise: the canonical CPU arm beats the AVX CPU arm by 49 % and 53 % in the same warm cells. Mechanism 1 cannot explain the 2048 cells. They had no exhaustion warning in any pass, no earlier cell of any pass had one either, and they still read -15 % on average. The 7168 cells and the first rounds of the 8192 cells are not counter-examples: a shard that fell back keeps running on the CPU for as long as the prefix cache keeps its tree node, and it warns only once, when it is created [h/tron/shard.hpp:8-31; src/tron/gof.cpp:70-103; h/tron/scheduler/full.hpp:2400-2428, Note "Retrying a degraded shard"]. A request that inherits such a shard through the prefix cache runs part of its attention on the CPU without a new warning. So the absence of new warnings at 7168 (-30.1, -38.0, -30.0 % in the three pairs) and in rounds 1 to 6 at 8192 does not show the absence of CPU attention there. Mechanism 2, a hypothesis: in a warm request the K/V pages (64-token blocks) that come from the prefix cache are scored on the CPU while the card's copy lags (the DMA-lag rule of section 4), and the AMX kernel covers that work. Evidence in the same direction, not proof. The pre-cell AMX probe (Words used here) counts AMX-busy cycles in one 20 s window before each cell. More cycles mean more attention work ran through the AMX kernel. On fresh engines it read 10.4 to 14.2 billion (7 windows, canonical FPGA arm, all three passes and the cold cells). In the warm windows without an exhaustion warning it read 14.0 to 20.6 billion (14 windows). In the windows where the card was full it read 21.2 to 33.5 billion (10 windows). The groups overlap at about 21 billion, so the probe separates fresh from warm engines but not a clean warm card from a full one. It measures its own request streams, not the cell. Test that would settle it: a perfetto trace of one warm 2048 request, AMX build against kill switch. The per-card fallback counter, recorded per cell since the third launch, confirms the exhaustion counts but cannot separate the two mechanisms.</p>
+<h3>The card ran out of K/V space in the warm long-prompt cells</h3>
+<p>The engine journal (the systemd log of the four rinzler engines) of the two campaign windows (2026-09-21 22:30 to 2026-09-22 01:30 UTC and 2026-09-22 13:00 to 16:30 UTC) holds 8,506 warnings of the form "HBM bypass space exhausted, caller degrades to SW attention" followed by "shard base tok_ix N: 36 of 36 slots lose HW attention" [exec/results/q4b-fpga-20260921/hbm-journal-20260921.txt, hbm-journal-20260922.txt]. HBM is the card's memory. A shard is the card-side copy of 1024 tokens of one request's K/V, placed on one of the engine's two cards. One warning means one new shard could not be placed on its card, and that shard's attention ran on the CPU instead. A shard warns once, when it is created. It keeps its CPU-attention state for as long as the prefix cache keeps its tree node, and a later request that inherits it through the prefix cache runs that part of its attention on the CPU without a new warning [h/tron/shard.hpp:8-31; h/tron/scheduler/full.hpp:2400-2428]. So the counts below measure new failures, not the total share of CPU attention in a cell. 6,851 warnings fall inside cells (between the harness's start and end time of a cell). The other 1,655 fall in the 30 s gaps between cells of the 6 FPGA passes: after the 3000, 4096 and 5120 cells in every pass (6, 6 and 6 of 6 passes), after the 6144 cell in 2 passes, never after 7168. In those gaps our campaign driver (the script that provisions the engines and runs the harness cells) runs the pre-cell AMX probe, which keeps 4 request streams of its own running for 20 s (Words used here). The gap warnings name only shard bases 0 and 1024. So they are the probe's own requests, which could not place even their first shard. They show that the card was already full when each 3000 cell ended and stayed full to the start of the 6144 cell. The first warning of the first window is at 22:45:30 UTC, 12 s after the prompt-3000 cell of the first FPGA pass ended and 19 s before the first round of its prompt-4096 cell. None of the warnings fall in the CPU-attention pass or in the 8 cold cells. None appear in any earlier FPGA-attention run at prompt 1024: 0 warnings in every runtron log of the issue-4500, wedperf, wedperf-attr and vnnik4-models campaigns (358 files) and in the engine logs of the p0perf-20260913 CI cells.</p>
+<div class="tw"><table class="num"><thead><tr><th>cell</th><th>passes</th><th>warnings per pass</th><th>fallback counter per pass (recorded from the third launch on)</th><th>share of the cell's new shard placements (est.)</th><th>first warning (round of 10)</th><th>last warning (% of the cell)</th><th>free space after the cell, lowest card (MiB)</th><th>reading</th></tr></thead><tbody>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 1024, warm</td><td>3</td><td>0, 0, 0</td><td>-, 0, 0</td><td>-</td><td>-, -, -</td><td>-, -, -</td><td>-, 24,536, 24,392</td><td>clean: every shard on the card (no earlier exhaustion in the pass)</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 1536, warm</td><td>3</td><td>0, 0, 0</td><td>-, 0, 0</td><td>-</td><td>-, -, -</td><td>-, -, -</td><td>-, 17,480, 17,624</td><td>clean: every shard on the card (no earlier exhaustion in the pass)</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 2048, warm</td><td>3</td><td>0, 0, 0</td><td>-, 0, 0</td><td>-</td><td>-, -, -</td><td>-, -, -</td><td>-, 9,272, 10,280</td><td>clean: every shard on the card (no earlier exhaustion in the pass)</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 3000, warm</td><td>3</td><td>0, 0, 0</td><td>-, 0, 0</td><td>-</td><td>-, -, -</td><td>-, -, -</td><td>-, 488, 1,208</td><td>clean: every shard on the card (no earlier exhaustion in the pass)</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 4096, warm</td><td>3</td><td>372, 292, 379</td><td>-, 292, 379</td><td>86 to 102 %</td><td>1, 1, 1</td><td>99, 98, 99</td><td>-, 56, 56</td><td>exhausted through the whole cell in every pass</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 5120, warm</td><td>3</td><td>434, 361, 402</td><td>-, 361, 402</td><td>89 to 114 %</td><td>1, 1, 1</td><td>98, 98, 99</td><td>-, 56, 56</td><td>exhausted through the whole cell in every pass</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 6144, warm</td><td>3</td><td>274, 355, 305</td><td>-, 355, 305</td><td>66 to 78 %</td><td>1, 1, 1</td><td>76, 99, 80</td><td>-, 56, 5,096</td><td>exhausted from round 1 until 76 to 99 % of the cell</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 7168, warm</td><td>3</td><td>0, 98, 0</td><td>-, 98, 0</td><td>23 %</td><td>-, 1, -</td><td>-, 86, -</td><td>-, 5,096, 5,384</td><td>new shards failed in 1 of 3 passes (from round 1, until 86 % of the cell), on the engine that had restarted earlier in that pass</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 8192, warm</td><td>3</td><td>85, 53, 42</td><td>-, 53, 42</td><td>7 to 17 %</td><td>7, 7, 8</td><td>95, 99, 94</td><td>-, 56, 56</td><td>clean of new failures until round 6 to 7, exhausted after</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 4096, cold</td><td>2</td><td>0, 0</td><td>-, 0</td><td>-</td><td>-, -</td><td>-, -</td><td>-, 20,072</td><td>clean: fresh engines, every shard on the card</td></tr>
+<tr><td>nightly deb (AVX) + FPGA attention, prompt 8192, cold</td><td>2</td><td>0, 0</td><td>-, 0</td><td>-</td><td>-, -</td><td>-, -</td><td>-, 15,608</td><td>clean: fresh engines, every shard on the card</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 1024, warm</td><td>3</td><td>0, 0, 0</td><td>-, 0, 0</td><td>-</td><td>-, -, -</td><td>-, -, -</td><td>-, 24,392, 24,392</td><td>clean: every shard on the card (no earlier exhaustion in the pass)</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 1536, warm</td><td>3</td><td>0, 0, 0</td><td>-, 0, 0</td><td>-</td><td>-, -, -</td><td>-, -, -</td><td>-, 17,192, 16,760</td><td>clean: every shard on the card (no earlier exhaustion in the pass)</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 2048, warm</td><td>3</td><td>0, 0, 0</td><td>-, 0, 0</td><td>-</td><td>-, -, -</td><td>-, -, -</td><td>-, 9,416, 9,416</td><td>clean: every shard on the card (no earlier exhaustion in the pass)</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 3000, warm</td><td>3</td><td>0, 0, 0</td><td>-, 0, 0</td><td>-</td><td>-, -, -</td><td>-, -, -</td><td>-, 488, 488</td><td>clean: every shard on the card (no earlier exhaustion in the pass)</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 4096, warm</td><td>3</td><td>376, 390, 284</td><td>-, 390, 284</td><td>81 to 111 %</td><td>1, 1, 1</td><td>98, 98, 98</td><td>-, 56, 56</td><td>exhausted through the whole cell in every pass</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 5120, warm</td><td>3</td><td>425, 434, 430</td><td>-, 434, 430</td><td>103 to 108 %</td><td>1, 1, 1</td><td>98, 98, 97</td><td>-, 56, 56</td><td>exhausted through the whole cell in every pass</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 6144, warm</td><td>3</td><td>293, 244, 290</td><td>-, 244, 290</td><td>56 to 75 %</td><td>1, 1, 1</td><td>79, 60, 99</td><td>-, 5,528, 56</td><td>exhausted from round 1 until 60 to 99 % of the cell</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 7168, warm</td><td>3</td><td>0, 0, 30</td><td>-, 0, 30</td><td>7 %</td><td>-, -, 1</td><td>-, -, 25</td><td>-, 4,376, 4,520</td><td>new shards failed in 1 of 3 passes (from round 1, until 25 % of the cell), on the engine that had restarted earlier in that pass</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 8192, warm</td><td>3</td><td>36, 87, 80</td><td>-, 87, 80</td><td>7 to 17 %</td><td>8, 6, 6</td><td>99, 94, 94</td><td>-, 56, 56</td><td>clean of new failures until round 5 to 7, exhausted after</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 4096, cold</td><td>2</td><td>0, 0</td><td>-, 0</td><td>-</td><td>-, -</td><td>-, -</td><td>-, 20,072</td><td>clean: fresh engines, every shard on the card</td></tr>
+<tr><td>canonical AMX deb + FPGA attention, prompt 8192, cold</td><td>2</td><td>0, 0</td><td>-, 0</td><td>-</td><td>-, -</td><td>-, -</td><td>-, 15,608</td><td>clean: fresh engines, every shard on the card</td></tr>
+</tbody></table></div>
+<p class="cap">Passes in tag order (pass 1, 2, 3 for warm cells, the two single-cell runs for cold cells). One warning per new shard per engine (a shard sits on one card). Fallback counter = the engines' sw_fallback_total FUSE stat, summed over the 4 engines x 2 cards, as the difference across the cell. It is recorded from the third launch on (passes 2 and 3 and the second cold cells); a dash = not recorded. Share (est.) = warnings divided by the cell's new shard placements, est. per request as ceil((prompt tokens not served from the prefix cache + 1536 generated tokens) / 1024), summed over the 80 requests from the harness's usage data. Values above 100 % mean the estimate of new placements is low (the probe's own requests between cells are not in it). First warning = the round (of 10) in which the first warning of the cell fell. Last warning = its position as a percentage of the cell's wall time. Free space = the allocator's free_total after the cell on the card with the least, in MiB (56 MiB = 59,113,472 B = the residue of a full card). Source: exec/prefill-amx-vs-fpga-20260921/hbm-exhaustion-cells.json (hbm_cells.py maps the journal lines and the recorded counters onto the perf.json cell windows).</p>
+<p>What the card holds (tron source at 30c4ac82cb, read 2026-09-22, and the recorded counters). The card-side K/V allocator (the code that hands out card memory to shards) manages one 1 GiB address range, fixed at compile time. Every allocation occupies that range on each of the card's 32 memory channels (the card's independent memory ports). So a card offers 32 GiB of K/V space, which is what the engines' FUSE stats report (FUSE = Filesystem in Userspace, the file-like interface through which an engine exposes its counters; capacity 34,359,738,368 bytes on every device). The FPGA weights share that space. One 1024-token shard of qwen3-4b (36 layers) takes 4.5 MiB per channel, which is 144 MiB per card. If the weights took none of the space, a card would hold 227 shards (1 GiB / 4.5 MiB), about 232,000 tokens (est.). The recorded free space gives the real figure: before the first cell of each third-launch run, on freshly provisioned engines that had served only the harness's warm-up requests, the allocator reported 30.1 to 30.9 GB free per card (8 runs x 8 cards) out of 34.4 GB. So the weights and fixed allocations take about 3.5 to 4.3 GB per card, and a card holds about 199 to 204 shards, roughly 203,000 to 208,000 tokens (est.: the warm-up requests' shards are counted as used). A shard is released only when the host prefix cache evicts its tree node (the prefix cache stores prompt prefixes as a tree, one node per stored prefix). A request ending does not release its shard. Every warning names the largest free block at that moment: 0x3000 (12 KiB) on the lower-numbered card of every engine and 0x5800 (22 KiB) on the other (4,259 and 4,247 lines), constant through both windows. In every recorded pass-cell that was still exhausted when it ended (last warning at 94 % of the cell or later: 14 pass-cells at 4096, 5120, 6144 and 8192) the free_total after the cell is 59,113,472 B (56.4 MiB) on the card with the least. 56 MiB free in blocks of at most 22 KiB, against 144 MiB per shard, means the space was full. Fragmentation played no part there. In the 4 recorded pass-cells where the space came free before the cell ended (6144 and 7168 in passes 2 and 3) the reading after the cell is 4.7 to 5.8 GB, and the constant largest-free-block value in their warning lines is the only evidence about the state at warning time. No environment variable or config changes the space or the shard size. The fallback counter (sw_fallback_total per device), recorded per cell from the third launch on, equals the journal's warning count in every cell [src/pos/driver.cpp:884-894; src/tron/gof.cpp:34-39, 64-103; h/pos/device.hpp:459-479; h/tron/shard.hpp:8-31; src/pos/alloc.cpp:350-387; h/pos/alloc.hpp:87-93; src/rinzler.cpp:4258-4283].</p>
+<p>Reading. Inside a pass the harness reuses the same conversation seeds (the fixed prompt texts each simulated user starts from). The prefix cache therefore keeps the K/V of earlier requests alive. Their shards stay on the card as well. The recorded free space shows the fill (passes 2 and 3, the card with the least): 26 GB after the 1024 cell, 18 GB after 1536, 10 to 11 GB after 2048 and 0.5 to 1.3 GB after 3000. By the end of the 3000 cell the card is full: the probe requests in the gap before 4096 could not place their first shard, in every pass. In the 4096 and 5120 cells the space stayed full through the whole cell in every pass (first warning in round 1, last at 97 to 99 % of the cell, 81 to 114 % of the cells' new shard placements failed, est.). In the 6144 cells it was full from round 1 until 60 to 99 % of the cell (56 to 78 % of the new placements failed). In the 7168 cells no new shard failed in 4 of the 6 pass-cells (4.6 to 5.6 GB free after the cell in the recorded ones). In the other 2 (98, 30 warnings) every warning came from the one engine that had restarted earlier in that pass (fpgabase pass 2 at 2048, fpgacanon pass 3 at 1536), whose card filled later than the others (hypothesis, from the per-engine counters). In the 8192 cells new shards failed again from round 6 to 8 (7 to 17 % of new placements, est.). The release during the 6144 and 7168 cells is not measured (hypothesis: the host prefix cache evicted the oldest seeds' nodes during the long 6144 cell, which released their shards). So the warm FPGA numbers at 4096 to 6144 are hybrids of FPGA and CPU attention in every pass, with nearly all new context on the CPU at 4096 and 5120. At 7168 and 8192 the new shards were mostly placed, but shards inherited from the exhausted cells through the prefix cache kept their CPU attention without a new warning, so the CPU share there is not measured. The cold cells (fresh engines, no warning) are the clean FPGA-attention numbers at every length. What this does and does not explain about the AMX build's warm gains is in the paragraph before this subsection.</p>
+<h3>The record: every cell</h3>
+<div class="tw"><table class="num"><thead><tr><th>prompt length</th>
+<th>nightly deb (AVX) + CPU attention<br>warm mean (passes) / cold</th>
+<th>canonical AMX deb + CPU attention<br>warm mean (passes) / cold</th>
+<th>nightly deb (AVX) + FPGA attention<br>warm mean (passes) / cold</th>
+<th>canonical AMX deb + FPGA attention<br>warm mean (passes) / cold</th>
+<th>FPGA vs CPU, canonical deb (warm)</th><th>FPGA vs CPU, nightly deb (warm)</th></tr></thead><tbody>
+<tr><td>1024</td>
+<td>- / 674 (3)</td>
+<td>- / 518 (4)</td>
+<td>- / 554 (3)</td>
+<td>- / 512 (3)</td>
+<td>-1 %</td>
+<td>-18 %</td>
+</tr>
+<tr><td>1536</td>
+<td>1,181 +/- 93 (3) / -</td>
+<td>817 +/- 58 (4) / -</td>
+<td>804 +/- 43 (3) / -</td>
+<td>754 +/- 45 (3) / -</td>
+<td>-8 %</td>
+<td>-32 %</td>
+</tr>
+<tr><td>2048</td>
+<td>1,683 +/- 101 (3) / -</td>
+<td>1,078 +/- 30 (4) / -</td>
+<td>1,048 +/- 101 (3) / -</td>
+<td>885 +/- 16 (3) / -</td>
+<td>-18 %</td>
+<td>-38 %</td>
+</tr>
+<tr><td>3000</td>
+<td>3,361 +/- 105 (3) / -</td>
+<td>1,967 +/- 263 (4) / -</td>
+<td>1,435 +/- 56 (3) / -</td>
+<td>1,409 +/- 128 (3) / -</td>
+<td>-28 %</td>
+<td>-57 %</td>
+</tr>
+<tr><td>4096</td>
+<td>5,468 +/- 295 (3) / -</td>
+<td>2,794 +/- 59 (4) / -</td>
+<td>4,155 +/- 640 (3) / 3,057 (2)</td>
+<td>2,338 +/- 120 (3) / 2,927 (2)</td>
+<td>-16 %</td>
+<td>-24 %</td>
+</tr>
+<tr><td>5120</td>
+<td>8,086 +/- 635 (3) / -</td>
+<td>3,792 +/- 143 (4) / -</td>
+<td>5,731 +/- 461 (3) / -</td>
+<td>3,582 +/- 186 (3) / -</td>
+<td>-6 %</td>
+<td>-29 %</td>
+</tr>
+<tr><td>6144</td>
+<td>11,092 +/- 1413 (3) / -</td>
+<td>4,569 +/- 354 (4) / -</td>
+<td>6,767 +/- 793 (3) / -</td>
+<td>3,467 +/- 171 (3) / -</td>
+<td>-24 %</td>
+<td>-39 %</td>
+</tr>
+<tr><td>7168</td>
+<td>13,238 +/- 1193 (3) / -</td>
+<td>5,712 +/- 135 (4) / -</td>
+<td>5,029 +/- 282 (3) / -</td>
+<td>3,377 +/- 118 (3) / -</td>
+<td>-41 %</td>
+<td>-62 %</td>
+</tr>
+<tr><td>8192</td>
+<td>15,764 +/- 1232 (3) / -</td>
+<td>6,929 +/- 516 (4) / 12,743 (1)</td>
+<td>6,200 +/- 708 (3) / 6,898 (2)</td>
+<td>4,105 +/- 411 (3) / 6,734 (2)</td>
+<td>-41 %</td>
+<td>-61 %</td>
+</tr>
+</tbody></table></div>
+<p class="cap">Client-side TTFT in ms, harness mean over 8 users x 10 rounds. "warm mean (passes)" = mean over the passes with the sd and the pass count. "cold" = single-cell driver runs (and the 2026-09-19 check cell for the canonical CPU arm at 8192). The CPU-attention columns come from the 2026-09-20 campaign (3 passes) plus the canonical pass of 2026-09-22. In the canonical 3000 row the two highest values (2,056 ms in the 2026-09-20 pass 1 and 2,296 ms in the 2026-09-22 pass) are cells with an uneven proxy spread (one engine unreported, 2 and 3 Caddy health events). Without them the row reads 1,758 ms (n = 2) and the FPGA-vs-CPU figure at 3000 is -20 % instead of -28 %. Source: exec/prefill-amx-vs-fpga-20260921/fpga-campaign-rows.json (ingest_fpga.py over the perf.json files).</p>
+<p>Reading. Both the AMX kernel and the FPGA remove the quadratic attention cost that the AVX path pays, and the FPGA removes more of it: at 8192 the AMX kernel halves the AVX prefill and the FPGA halves it again. The CPU build moves the cold FPGA prefill by 2 to 8 % (the AMX build is faster in all seven cold pass-pairs: n = 3 at 1024, n = 2 at 4096 and 8192). So the card sets most of the cold number, not all of it. The warm FPGA numbers at 4096 to 6144 are hybrids of FPGA and CPU attention in every pass (the card's K/V space was exhausted, subsection above), the 7168 numbers in 2 of 6 pass-cells, and the 8192 numbers from round 6 to 8 of 10 on. So the cold cells are the ones to quote for long prompts. Decode TPS in the same cells stays in the FPGA's favour (at 8192: 118 TPS with FPGA attention and the AMX build, mean of three passes, against 60 TPS with AMX on the CPU).</p>
+<h2>6. Is AMX plus FPGA attention better than FPGA attention alone?</h2>
+<p>Question (jhan, 2026-09-22): from the data so far, is it a pattern that the AMX build with attention on the FPGA beats the AVX build with attention on the FPGA, for both prefill and decode? The comparison below holds the attention mode fixed (FPGA) and changes only the CPU build: canonical AMX deb against the nightly deb (no AMX code). The two arms ran as separate passes on the same evening or afternoon, and the comparison pairs pass 1 with pass 1, pass 2 with pass 2, pass 3 with pass 3 (three warm passes per arm, two or three cold runs per arm and length). The VNNI-K deb is listed separately at the end.</p>
+<div class="short"><p><b>Answer.</b></p>
+<p><b>Prefill: yes in warm cells from prompt 4096 up, resolved over three passes. In cold cells the AMX build is faster by 2 to 8 %. At 1536 and 3000 the difference is not resolved.</b> In the warm cells at 4096 to 8192 the AMX build prefilled 33 to 48 % faster than the AVX build (means of the per-pass deltas, 3 paired passes per cell). It was faster in every one of the 15 paired passes (per-pass range -51.7 to -23.3 %). The Welch t over the three pass means per arm is -9.4 to -4.4. At 2048 the mean is -15.0 % (-22.5, -17.7, -4.6 % per pass, t -2.8): the AMX build faster in all three passes, by a varying margin. At 1536 the mean is -6.2 % (-1.6, -13.1, -3.8 %, t -1.4) and at 3000 -2.0 % (+0.7, -8.2, +1.5 %, t -0.3). Neither is resolved. In the cold cells the AMX build is faster in every run: -7.5 % at 1024 (n = 3, t -8.9), -4.3 % at 4096 and -2.4 % at 8192 (n = 2 each). At prompt 1024 the pairs of the earlier campaigns read -2.3 % to +1.6 % (n = 1 to 6), and at tp4 the AVX build was faster in both pairs (+1.6 %, resolved in runtron with Welch t +3.7). So at 1024 the sign depends on the campaign and on tp. With 8 or 2 users on one engine and no prefix-cache reuse (runtron, section 7) the two builds prefill within 2 % of each other under FPGA attention (-2.0 to +0.3 %, n = 3 per cell). The AMX build is faster in 5 of the 6 cells there. The paired t is -7.9 to -17 in four cells and -0.7 and +1.8 in the other two. The two arms did not see the same prefix-cache share in a paired warm cell (table below). Per uncached prompt token the warm gains from 4096 up are 27 to 44 % (33 to 48 % raw). The cause of the warm gain is not settled (section 5). At 4096 and 5120 it co-occurs in every pass with the card's K/V space running out. There nearly every new shard placement failed (81 to 114 % of the new placements, est.), so both arms scored nearly all new context on the CPU, where the AMX kernel replaces the AVX loop. At 6144 56 to 78 % of the new placements failed. That is a measured co-occurrence, not a measured cause. The gain also appears at 2048 (-15.0 %), where no shard had failed in any pass and none could have been inherited. At 7168 (-30.1, -38.0, -30.0 % in the three pairs) shards inherited from the exhausted cells may have kept their CPU attention without a new warning (section 5), so that cell settles nothing.</p>
+<p><b>Decode: no at prompt 1024 and in cold cells. Not resolved in warm long-prompt cells.</b> At prompt 1024 the two builds differ by at most 2 % in every pair (-2.0 % to +0.5 % in the earlier campaigns, -0.6, +1.7, +0.8 % in this campaign's three cold runs). In the cold cells at 4096 and 8192 the difference is +0.6 to +0.7 % (n = 2 each). In the warm cells from 4096 up the means favour the AMX build by +1.5 to +8.8 % TPS. The per-pass deltas, however, run from -9.1 to +22.2 % and change sign inside 4 of the 5 cells (4096, 5120, 7168, 8192). So the warm decode direction is not resolved with three passes. With 8 users on one engine and no prefix-cache reuse (runtron, section 7) the two builds decode within 1.2 % of each other in every cell (n = 3). The warm TPS itself lies 12 to 33 % below the cold TPS at the same prompt length. The VNNI-K build is the opposite case: it decodes 4 to 13 % slower under FPGA attention (issue 4500, the GitHub issue on the VNNI-K decode loss under FPGA attention).</p></div>
+<div class="fig"><svg viewBox="0 0 1100 594" width="100%" role="img" aria-label="AMX build against AVX build under FPGA attention: TTFT and decode TPS change per prompt length" style="max-width:1100px;font-family:system-ui,sans-serif">
+<text x="16" y="24" font-size="15" font-weight="600" fill="#0b0b0b">AMX build against AVX build, both with attention on the FPGA</text>
+<text x="16" y="44" font-size="12" fill="#52514e">Left: TTFT change (negative = the AMX build prefills faster). Right: decode TPS change (positive = the AMX build decodes faster). qwen3-4b.</text>
+<text x="16" y="60" font-size="12" fill="#52514e">Rows above the horizontal line: this campaign, tp2, 2 users per engine. Dot = mean of the paired per-pass deltas (2 or 3 passes per arm), pale bar = their range.</text>
+<text x="16" y="76" font-size="12" fill="#52514e">warm = later cells of a pass, cold = fresh engines. Rows below the line: prompt-1024 pairs from earlier campaigns (tp4 = 4 users per engine, runtron = 8 users in one process).</text>
+<text x="535.0" y="104" font-size="12" font-weight="600" fill="#0b0b0b" text-anchor="middle">TTFT: AMX build relative to AVX build, percent</text>
+<line x1="380.0" y1="122" x2="380.0" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="380.0" y="558" font-size="10" fill="#898781" text-anchor="middle">-55</text>
+<line x1="424.3" y1="122" x2="424.3" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="424.3" y="558" font-size="10" fill="#898781" text-anchor="middle">-45</text>
+<line x1="468.6" y1="122" x2="468.6" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="468.6" y="558" font-size="10" fill="#898781" text-anchor="middle">-35</text>
+<line x1="512.9" y1="122" x2="512.9" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="512.9" y="558" font-size="10" fill="#898781" text-anchor="middle">-25</text>
+<line x1="557.1" y1="122" x2="557.1" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="557.1" y="558" font-size="10" fill="#898781" text-anchor="middle">-15</text>
+<line x1="601.4" y1="122" x2="601.4" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="601.4" y="558" font-size="10" fill="#898781" text-anchor="middle">-5</text>
+<line x1="645.7" y1="122" x2="645.7" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="645.7" y="558" font-size="10" fill="#898781" text-anchor="middle">+5</text>
+<line x1="690.0" y1="122" x2="690.0" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="690.0" y="558" font-size="10" fill="#898781" text-anchor="middle">+15</text>
+<text x="895.0" y="104" font-size="12" font-weight="600" fill="#0b0b0b" text-anchor="middle">decode TPS: AMX build relative to AVX build, percent</text>
+<line x1="740.0" y1="122" x2="740.0" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="740.0" y="558" font-size="10" fill="#898781" text-anchor="middle">-20</text>
+<line x1="774.4" y1="122" x2="774.4" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="774.4" y="558" font-size="10" fill="#898781" text-anchor="middle">-15</text>
+<line x1="808.9" y1="122" x2="808.9" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="808.9" y="558" font-size="10" fill="#898781" text-anchor="middle">-10</text>
+<line x1="843.3" y1="122" x2="843.3" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="843.3" y="558" font-size="10" fill="#898781" text-anchor="middle">-5</text>
+<line x1="877.8" y1="122" x2="877.8" y2="544" stroke="#898781" stroke-width="1.5"/>
+<text x="877.8" y="558" font-size="10" fill="#898781" text-anchor="middle">+0</text>
+<line x1="912.2" y1="122" x2="912.2" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="912.2" y="558" font-size="10" fill="#898781" text-anchor="middle">+5</text>
+<line x1="946.7" y1="122" x2="946.7" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="946.7" y="558" font-size="10" fill="#898781" text-anchor="middle">+10</text>
+<line x1="981.1" y1="122" x2="981.1" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="981.1" y="558" font-size="10" fill="#898781" text-anchor="middle">+15</text>
+<line x1="1015.6" y1="122" x2="1015.6" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="1015.6" y="558" font-size="10" fill="#898781" text-anchor="middle">+20</text>
+<line x1="1050.0" y1="122" x2="1050.0" y2="544" stroke="#e1e0d9" stroke-width="1"/>
+<text x="1050.0" y="558" font-size="10" fill="#898781" text-anchor="middle">+25</text>
+<text x="370" y="138" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 1024, cold</text>
+<line x1="623.6" y1="134" x2="590.3" y2="134" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="584.3" y1="134" x2="595.6" y2="134" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 1024, cold: per pass -6.3, -7.4, -8.9 %</title></line>
+<circle cx="590.3" cy="134" r="5" fill="#eb6834" stroke="#8f2f0c" stroke-width="2"><title>prompt 1024, cold: -7.5 %</title></circle>
+<text x="575.3" y="138" font-size="10" fill="#0b0b0b" text-anchor="end">-7.5 %</text>
+<line x1="877.8" y1="134" x2="882.2" y2="134" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="873.4" y1="134" x2="889.6" y2="134" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 1024, cold: per pass -0.6, +1.7, +0.8 %</title></line>
+<circle cx="882.2" cy="134" r="5" fill="#eb6834" stroke="#8f2f0c" stroke-width="2"><title>prompt 1024, cold: +0.6 %</title></circle>
+<text x="898.6" y="138" font-size="10" fill="#0b0b0b" text-anchor="start">+0.6 %</text>
+<text x="370" y="164" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 1536, warm</text>
+<line x1="623.6" y1="160" x2="596.2" y2="160" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="565.5" y1="160" x2="616.5" y2="160" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 1536, warm: per pass -1.6, -13.1, -3.8 %</title></line>
+<circle cx="596.2" cy="160" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 1536, warm: -6.2 %</title></circle>
+<text x="556.5" y="164" font-size="10" fill="#0b0b0b" text-anchor="end">-6.2 %</text>
+<line x1="877.8" y1="160" x2="875.4" y2="160" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="868.0" y1="160" x2="881.2" y2="160" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 1536, warm: per pass +0.5, -0.1, -1.4 %</title></line>
+<circle cx="875.4" cy="160" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 1536, warm: -0.4 %</title></circle>
+<text x="859.0" y="164" font-size="10" fill="#0b0b0b" text-anchor="end">-0.4 %</text>
+<text x="370" y="190" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 2048, warm</text>
+<line x1="623.6" y1="186" x2="557.3" y2="186" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="523.8" y1="186" x2="603.1" y2="186" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 2048, warm: per pass -22.5, -17.7, -4.6 %</title></line>
+<circle cx="557.3" cy="186" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 2048, warm: -15.0 %</title></circle>
+<text x="514.8" y="190" font-size="10" fill="#0b0b0b" text-anchor="end">-15.0 %</text>
+<line x1="877.8" y1="186" x2="881.7" y2="186" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="875.0" y1="186" x2="889.1" y2="186" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 2048, warm: per pass -0.4, +1.6, +0.5 %</title></line>
+<circle cx="881.7" cy="186" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 2048, warm: +0.6 %</title></circle>
+<text x="898.1" y="190" font-size="10" fill="#0b0b0b" text-anchor="start">+0.6 %</text>
+<text x="370" y="216" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 3000, warm</text>
+<line x1="623.6" y1="212" x2="614.8" y2="212" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="587.3" y1="212" x2="630.4" y2="212" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 3000, warm: per pass +0.7, -8.2, +1.5 %</title></line>
+<circle cx="614.8" cy="212" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 3000, warm: -2.0 %</title></circle>
+<text x="578.3" y="216" font-size="10" fill="#0b0b0b" text-anchor="end">-2.0 %</text>
+<line x1="877.8" y1="212" x2="881.7" y2="212" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="873.0" y1="212" x2="891.9" y2="212" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 3000, warm: per pass +2.0, -0.7, +0.4 %</title></line>
+<circle cx="881.7" cy="212" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 3000, warm: +0.6 %</title></circle>
+<text x="900.9" y="216" font-size="10" fill="#0b0b0b" text-anchor="start">+0.6 %</text>
+<text x="370" y="242" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 4096, cold</text>
+<line x1="623.6" y1="238" x2="604.7" y2="238" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="604.6" y1="238" x2="604.8" y2="238" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 4096, cold: per pass -4.3, -4.2 %</title></line>
+<circle cx="604.7" cy="238" r="5" fill="#eb6834" stroke="#8f2f0c" stroke-width="2"><title>prompt 4096, cold: -4.3 %</title></circle>
+<text x="595.6" y="242" font-size="10" fill="#0b0b0b" text-anchor="end">-4.3 %</text>
+<line x1="877.8" y1="238" x2="882.2" y2="238" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="882.0" y1="238" x2="882.4" y2="238" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 4096, cold: per pass +0.6, +0.7 %</title></line>
+<circle cx="882.2" cy="238" r="5" fill="#eb6834" stroke="#8f2f0c" stroke-width="2"><title>prompt 4096, cold: +0.6 %</title></circle>
+<text x="891.4" y="242" font-size="10" fill="#0b0b0b" text-anchor="start">+0.6 %</text>
+<text x="370" y="268" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 4096, warm</text>
+<line x1="623.6" y1="264" x2="435.4" y2="264" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="394.5" y1="264" x2="496.9" y2="264" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 4096, warm: per pass -47.1, -28.6, -51.7 %</title></line>
+<circle cx="435.4" cy="264" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 4096, warm: -42.5 %</title></circle>
+<text x="505.9" y="268" font-size="10" fill="#0b0b0b" text-anchor="start">-42.5 %</text>
+<line x1="877.8" y1="264" x2="925.4" y2="264" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="815.3" y1="264" x2="1030.4" y2="264" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 4096, warm: per pass +7.6, -9.1, +22.2 %</title></line>
+<circle cx="925.4" cy="264" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 4096, warm: +6.9 %</title></circle>
+<text x="1039.4" y="268" font-size="10" fill="#0b0b0b" text-anchor="start">+6.9 %</text>
+<text x="370" y="294" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 5120, warm</text>
+<line x1="623.6" y1="290" x2="459.1" y2="290" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="423.4" y1="290" x2="486.5" y2="290" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 5120, warm: per pass -45.2, -35.2, -31.0 %</title></line>
+<circle cx="459.1" cy="290" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 5120, warm: -37.1 %</title></circle>
+<text x="495.5" y="294" font-size="10" fill="#0b0b0b" text-anchor="start">-37.1 %</text>
+<line x1="877.8" y1="290" x2="888.0" y2="290" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="818.1" y1="290" x2="925.7" y2="290" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 5120, warm: per pass +7.0, -8.7, +6.1 %</title></line>
+<circle cx="888.0" cy="290" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 5120, warm: +1.5 %</title></circle>
+<text x="934.7" y="294" font-size="10" fill="#0b0b0b" text-anchor="start">+1.5 %</text>
+<text x="370" y="320" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 6144, warm</text>
+<line x1="623.6" y1="316" x2="408.9" y2="316" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="394.4" y1="316" x2="426.3" y2="316" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 6144, warm: per pass -44.5, -51.7, -49.2 %</title></line>
+<circle cx="408.9" cy="316" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 6144, warm: -48.5 %</title></circle>
+<text x="435.3" y="320" font-size="10" fill="#0b0b0b" text-anchor="start">-48.5 %</text>
+<line x1="877.8" y1="316" x2="938.5" y2="316" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="893.3" y1="316" x2="973.7" y2="316" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 6144, warm: per pass +2.3, +13.9, +10.3 %</title></line>
+<circle cx="938.5" cy="316" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 6144, warm: +8.8 %</title></circle>
+<text x="982.7" y="320" font-size="10" fill="#0b0b0b" text-anchor="start">+8.8 %</text>
+<text x="370" y="346" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 7168, warm</text>
+<line x1="623.6" y1="342" x2="478.7" y2="342" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="455.3" y1="342" x2="490.8" y2="342" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 7168, warm: per pass -30.1, -38.0, -30.0 %</title></line>
+<circle cx="478.7" cy="342" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 7168, warm: -32.7 %</title></circle>
+<text x="446.3" y="346" font-size="10" fill="#0b0b0b" text-anchor="end">-32.7 %</text>
+<line x1="877.8" y1="342" x2="936.0" y2="342" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="854.5" y1="342" x2="979.7" y2="342" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 7168, warm: per pass +14.0, +14.8, -3.4 %</title></line>
+<circle cx="936.0" cy="342" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 7168, warm: +8.5 %</title></circle>
+<text x="988.7" y="346" font-size="10" fill="#0b0b0b" text-anchor="start">+8.5 %</text>
+<text x="370" y="372" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 8192, cold</text>
+<line x1="623.6" y1="368" x2="613.0" y2="368" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="611.2" y1="368" x2="614.9" y2="368" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 8192, cold: per pass -2.0, -2.8 %</title></line>
+<circle cx="613.0" cy="368" r="5" fill="#eb6834" stroke="#8f2f0c" stroke-width="2"><title>prompt 8192, cold: -2.4 %</title></circle>
+<text x="602.2" y="372" font-size="10" fill="#0b0b0b" text-anchor="end">-2.4 %</text>
+<line x1="877.8" y1="368" x2="882.7" y2="368" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="877.5" y1="368" x2="887.9" y2="368" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 8192, cold: per pass -0.0, +1.5 %</title></line>
+<circle cx="882.7" cy="368" r="5" fill="#eb6834" stroke="#8f2f0c" stroke-width="2"><title>prompt 8192, cold: +0.7 %</title></circle>
+<text x="896.9" y="372" font-size="10" fill="#0b0b0b" text-anchor="start">+0.7 %</text>
+<text x="370" y="398" font-size="11" fill="#0b0b0b" text-anchor="end">prompt 8192, warm</text>
+<line x1="623.6" y1="394" x2="477.0" y2="394" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="425.4" y1="394" x2="520.5" y2="394" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 8192, warm: per pass -44.7, -23.3, -31.3 %</title></line>
+<circle cx="477.0" cy="394" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 8192, warm: -33.1 %</title></circle>
+<text x="529.5" y="398" font-size="10" fill="#0b0b0b" text-anchor="start">-33.1 %</text>
+<line x1="877.8" y1="394" x2="905.8" y2="394" stroke="#8f2f0c" stroke-width="2"/>
+<line x1="850.4" y1="394" x2="966.3" y2="394" stroke="#8f2f0c" stroke-width="7" stroke-opacity="0.25" stroke-linecap="round"><title>prompt 8192, warm: per pass +12.9, +3.3, -4.0 %</title></line>
+<circle cx="905.8" cy="394" r="5" fill="#8f2f0c" stroke="#8f2f0c" stroke-width="2"><title>prompt 8192, warm: +4.1 %</title></circle>
+<text x="975.3" y="398" font-size="10" fill="#0b0b0b" text-anchor="start">+4.1 %</text>
+<line x1="16" y1="407.0" x2="1084" y2="407.0" stroke="#898781" stroke-width="1"/>
+<text x="370" y="424" font-size="11" fill="#0b0b0b" text-anchor="end">1024 whole 3bda tp2, CI harness, 09-18 (canon-ci vs nightl</text>
+<line x1="623.6" y1="420" x2="613.5" y2="420" stroke="#898781" stroke-width="2"/>
+<rect x="608.5" y="415" width="10" height="10" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>1024 whole 3bda tp2, CI harness, 09-18 (canon-ci vs nightly): -2.3 %</title></rect>
+<text x="604.5" y="424" font-size="10" fill="#0b0b0b" text-anchor="end">-2.3 %</text>
+<line x1="877.8" y1="420" x2="877.5" y2="420" stroke="#898781" stroke-width="2"/>
+<rect x="872.5" y="415" width="10" height="10" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>1024 whole 3bda tp2, CI harness, 09-18 (canon-ci vs nightly): -0.0 %</title></rect>
+<text x="868.5" y="424" font-size="10" fill="#0b0b0b" text-anchor="end">-0.0 %</text>
+<text x="370" y="450" font-size="11" fill="#0b0b0b" text-anchor="end">1024 whole 3bda tp4, CI harness, 09-18 (canon-ci vs nightl</text>
+<line x1="623.6" y1="446" x2="630.5" y2="446" stroke="#898781" stroke-width="2"/>
+<rect x="625.5" y="441" width="10" height="10" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>1024 whole 3bda tp4, CI harness, 09-18 (canon-ci vs nightly): +1.6 %</title></rect>
+<text x="639.5" y="450" font-size="10" fill="#0b0b0b" text-anchor="start">+1.6 %</text>
+<line x1="877.8" y1="446" x2="865.0" y2="446" stroke="#898781" stroke-width="2"/>
+<rect x="860.0" y="441" width="10" height="10" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>1024 whole 3bda tp4, CI harness, 09-18 (canon-ci vs nightly): -1.9 %</title></rect>
+<text x="856.0" y="450" font-size="10" fill="#0b0b0b" text-anchor="end">-1.9 %</text>
+<text x="370" y="476" font-size="11" fill="#0b0b0b" text-anchor="end">1024 runtron tp2, 8 users, 09-16 (wedperf-attr, n = 6)</text>
+<line x1="623.6" y1="472" x2="620.9" y2="472" stroke="#898781" stroke-width="2"/>
+<rect x="615.9" y="467" width="10" height="10" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>1024 runtron tp2, 8 users, 09-16 (wedperf-attr, n = 6): -0.6 %</title></rect>
+<text x="611.9" y="476" font-size="10" fill="#0b0b0b" text-anchor="end">-0.6 %</text>
+<line x1="877.8" y1="472" x2="881.1" y2="472" stroke="#898781" stroke-width="2"/>
+<rect x="876.1" y="467" width="10" height="10" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>1024 runtron tp2, 8 users, 09-16 (wedperf-attr, n = 6): +0.5 %</title></rect>
+<text x="890.1" y="476" font-size="10" fill="#0b0b0b" text-anchor="start">+0.5 %</text>
+<text x="370" y="502" font-size="11" fill="#0b0b0b" text-anchor="end">1024 runtron tp4, 8 users, 09-16 (wedperf-attr, n = 6)</text>
+<line x1="623.6" y1="498" x2="630.5" y2="498" stroke="#898781" stroke-width="2"/>
+<rect x="625.5" y="493" width="10" height="10" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>1024 runtron tp4, 8 users, 09-16 (wedperf-attr, n = 6): +1.6 %</title></rect>
+<text x="639.5" y="502" font-size="10" fill="#0b0b0b" text-anchor="start">+1.6 %</text>
+<line x1="877.8" y1="498" x2="864.0" y2="498" stroke="#898781" stroke-width="2"/>
+<rect x="859.0" y="493" width="10" height="10" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>1024 runtron tp4, 8 users, 09-16 (wedperf-attr, n = 6): -2.0 %</title></rect>
+<text x="855.0" y="502" font-size="10" fill="#0b0b0b" text-anchor="end">-2.0 %</text>
+<text x="715.0" y="578" font-size="11" fill="#898781" text-anchor="middle">dark dot = warm cell, light dot = cold cell, pale bar = range over the passes, hollow square = earlier prompt-1024 pair</text>
+</svg><p class="cap">Figure 4. AMX build minus AVX build, both with FPGA attention, as a percentage of the AVX build. Rows above the horizontal line are this campaign's cells (fpgacanon = the canonical AMX deb with FPGA attention, against fpgabase = the nightly deb with FPGA attention, paired by pass number: 3 passes for warm cells, 3 runs at 1024 and 2 runs at 4096 and 8192 for cold cells). The dot is the mean of the per-pass deltas, the pale bar their range. Rows below the line are the prompt-1024 pairs of earlier campaigns: the whole-machine CI cells of 2026-09-18 (canon-ci against the same-night nightly) and the runtron cells of 2026-09-16 (n = 6 each). Exact values in the tables below.</p></div>
+<ul>
+<li><b>Prefill, warm cells.</b> 1536: -6.2 %, 2048: -15.0 %, 3000: -2.0 %, 4096: -42.5 %, 5120: -37.1 %, 6144: -48.5 %, 7168: -32.7 %, 8192: -33.1 % (means of the per-pass deltas). From 4096 up every one of the 15 paired passes favours the AMX build. At 2048 and 1536 all three passes favour it, by margins from 2 to 23 %. At 3000 the sign changes between passes (+0.7, -8.2, +1.5 %).</li>
+<li><b>Prefill, cold cells.</b> 1024: -7.5 %, 4096: -4.3 %, 8192: -2.4 % (n = 3 at 1024, n = 2 at 4096 and 8192, the AMX build faster in every run). The AVX-side 1024 value (554 ms, three runs within 2 ms) is 25 to 45 ms above that cell's history (section 5). Prompt-1024 pairs from the earlier campaigns: -2.3 %, +1.6 %, -0.6 %, +1.6 %.</li>
+<li><b>Decode, all cells.</b> 1024 cold: +0.6 %, 1536 warm: -0.4 %, 2048 warm: +0.6 %, 3000 warm: +0.6 %, 4096 cold: +0.6 %, 4096 warm: +6.9 %, 5120 warm: +1.5 %, 6144 warm: +8.8 %, 7168 warm: +8.5 %, 8192 cold: +0.7 %, 8192 warm: +4.1 % (means of the per-pass deltas; per-pass values in the table). Prompt-1024 pairs from the earlier campaigns: -0.0 %, -1.9 %, +0.5 %, -2.0 %.</li>
+<li><b>Reading.</b> The warm cells at 4096 to 6144 ran with the card's K/V space exhausted in every pass (section 5). tron logged 244 to 434 "lose HW attention" warnings per pass-cell there (one per shard per engine, HW = the FPGA), and the recorded fallback counter agrees with those counts. The affected shards were scored on the CPU for both prefill and decode. On the CPU the AMX kernel replaces the AVX loop. So in those three cells the AMX build's gains (37 to 48 % lower TTFT, +1.5 to +8.8 % TPS on average) include AMX against AVX on the share of attention that moved to the CPU. That share is not a gain of the FPGA path itself. The gain at 2048 (-15.0 %) is not explained by fallback: no shard had failed before or during any 2048 cell (hypothesis in section 5: cached-prefix pages scored on the CPU). At 7168 (-32.7 %, no new failure in 4 of 6 pass-cells) inherited degraded shards may have run CPU attention without a warning, so that cell is not evidence either way. Three FPGA-arm cells had one engine restart during the cell (fpgabase pass 2 at 2048, fpgabase pass 3 at 7168, fpgacanon pass 3 at 1536, section 5), which adds noise to those pairs. At 8192 the two arms also differ in how much fell back (85, 53, 42 warnings per pass in the AVX arm against 36, 87, 80 in the AMX arm). That difference adds noise to the 8192 comparison. In the cold cells (no warning) the card holds every shard. The CPU keeps only the own-chunk triangle (each query's own 128-token chunk, section 4). The CPU build then lowers TTFT by 2 to 8 % and changes TPS by at most 1.7 %. Under FPGA attention the warm decode is 12 to 33 % slower than the cold decode at the same prompt length. Hypothesis: the fallback to CPU attention causes part of that loss. Test: a perfetto trace of one warm 2048 request, AMX build against kill switch.</li>
+</ul>
+<h3>The record</h3>
+<div class="tw"><table class="num"><thead><tr><th>cell (this campaign)</th><th>passes (paired)</th><th>TTFT, AVX build (ms, mean +/- sd)</th><th>TTFT, AMX build (ms, mean +/- sd)</th><th>TTFT change, mean of the per-pass deltas</th><th>per-pass TTFT change</th><th>Welch t (TTFT)</th><th>TTFT change per uncached prompt token, mean (per pass)</th><th>decode TPS, AVX build</th><th>decode TPS, AMX build</th><th>TPS change, mean</th><th>per-pass TPS change</th><th>prefix-cache hits AVX / AMX (%, per pass)</th></tr></thead><tbody>
+<tr><td>prompt 1024, cold</td><td>3</td><td>554 +/- 1</td><td>512 +/- 8</td><td>-7.5 %</td><td>-6.3, -7.4, -8.9</td><td>-8.9</td><td>-7.5 % (-6.3, -7.4, -8.9)</td><td>185.1</td><td>186.2</td><td>+0.6 %</td><td>-0.6, +1.7, +0.8</td><td>1, 1, 1 / 1, 1, 1</td></tr>
+<tr><td>prompt 1536, warm</td><td>3</td><td>804 +/- 43</td><td>754 +/- 45</td><td>-6.2 %</td><td>-1.6, -13.1, -3.8</td><td>-1.4</td><td>-7.3 % (-9.2, -10.5, -2.2)</td><td>176.0</td><td>175.4</td><td>-0.4 %</td><td>+0.5, -0.1, -1.4</td><td>21, 15, 13 / 15, 17, 15</td></tr>
+<tr><td>prompt 2048, warm</td><td>3</td><td>1,048 +/- 101</td><td>885 +/- 16</td><td>-15.0 %</td><td>-22.5, -17.7, -4.6</td><td>-2.8</td><td>-11.2 % (-10.6, -14.1, -8.9)</td><td>174.0</td><td>175.0</td><td>+0.6 %</td><td>-0.4, +1.6, +0.5</td><td>18, 24, 31 / 29, 27, 28</td></tr>
+<tr><td>prompt 3000, warm</td><td>3</td><td>1,435 +/- 56</td><td>1,409 +/- 128</td><td>-2.0 %</td><td>+0.7, -8.2, +1.5</td><td>-0.3</td><td>-6.8 % (-6.5, -6.2, -7.6)</td><td>167.8</td><td>168.7</td><td>+0.6 %</td><td>+2.0, -0.7, +0.4</td><td>34, 35, 30 / 29, 37, 23</td></tr>
+<tr><td>prompt 4096, cold</td><td>2</td><td>3,057 +/- 8</td><td>2,927 +/- 7</td><td>-4.3 %</td><td>-4.3, -4.2</td><td>-16.6</td><td>-4.3 % (-4.3, -4.2)</td><td>159.7</td><td>160.7</td><td>+0.6 %</td><td>+0.6, +0.7</td><td>0, 0 / 0, 0</td></tr>
+<tr><td>prompt 4096, warm</td><td>3</td><td>4,155 +/- 640</td><td>2,338 +/- 120</td><td>-42.5 %</td><td>-47.1, -28.6, -51.7</td><td>-4.8</td><td>-40.5 % (-41.8, -33.0, -46.6)</td><td>106.9</td><td>113.4</td><td>+6.9 %</td><td>+7.6, -9.1, +22.2</td><td>33, 42, 33 / 39, 38, 39</td></tr>
+<tr><td>prompt 5120, warm</td><td>3</td><td>5,731 +/- 461</td><td>3,582 +/- 186</td><td>-37.1 %</td><td>-45.2, -35.2, -31.0</td><td>-7.5</td><td>-43.3 % (-44.1, -39.1, -46.8)</td><td>89.0</td><td>89.9</td><td>+1.5 %</td><td>+7.0, -8.7, +6.1</td><td>39, 38, 50 / 40, 34, 36</td></tr>
+<tr><td>prompt 6144, warm</td><td>3</td><td>6,767 +/- 793</td><td>3,467 +/- 171</td><td>-48.5 %</td><td>-44.5, -51.7, -49.2</td><td>-7.0</td><td>-44.4 % (-38.9, -48.6, -45.7)</td><td>93.9</td><td>102.0</td><td>+8.8 %</td><td>+2.3, +13.9, +10.3</td><td>47, 38, 47 / 52, 42, 50</td></tr>
+<tr><td>prompt 7168, warm</td><td>3</td><td>5,029 +/- 282</td><td>3,377 +/- 118</td><td>-32.7 %</td><td>-30.1, -38.0, -30.0</td><td>-9.4</td><td>-28.2 % (-35.7, -40.3, -8.6)</td><td>117.8</td><td>127.2</td><td>+8.5 %</td><td>+14.0, +14.8, -3.4</td><td>50, 53, 35 / 46, 52, 50</td></tr>
+<tr><td>prompt 8192, cold</td><td>2</td><td>6,898 +/- 29</td><td>6,734 +/- 12</td><td>-2.4 %</td><td>-2.0, -2.8</td><td>-7.4</td><td>-2.4 % (-2.0, -2.8)</td><td>133.4</td><td>134.4</td><td>+0.7 %</td><td>-0.0, +1.5</td><td>0, 0 / 0, 0</td></tr>
+<tr><td>prompt 8192, warm</td><td>3</td><td>6,200 +/- 708</td><td>4,105 +/- 411</td><td>-33.1 %</td><td>-44.7, -23.3, -31.3</td><td>-4.4</td><td>-27.2 % (-42.6, -25.5, -13.6)</td><td>113.8</td><td>118.1</td><td>+4.1 %</td><td>+12.9, +3.3, -4.0</td><td>46, 46, 32 / 48, 45, 46</td></tr>
+</tbody></table></div>
+<div class="tw"><table class="num"><thead><tr><th>prompt-1024 pairs, both arms FPGA attention (this campaign's cold cell included)</th><th>n (AMX / AVX)</th><th>TTFT, AVX build (ms)</th><th>TTFT, AMX build (ms)</th><th>TTFT change</th><th>TPS, AVX build</th><th>TPS, AMX build</th><th>TPS change</th><th>note</th><th>source</th></tr></thead><tbody>
+<tr><td>whole 3bda, tp2, 4 engines x 2 users, CI harness (canon-ci 2026-09-18 vs the 2026-09-18 nightly)</td><td>1 / 1</td><td>528</td><td>516</td><td>-2.3 %</td><td>186.3</td><td>186.2</td><td>-0.0 %</td><td>canonical deb 0594dc54 vs nightly deb 3faba6d0. Mean over 13 nightly runs (2026-09-05 to 09-17): 509.5 ms, 185.67 TPS</td><td><code>exec/results/canon-ci-20260918/canon/summary.txt:36; exec/results/ci-mimic-20260918/reference/nightly-0918.arm.json</code></td></tr>
+<tr><td>whole 3bda, tp4, 2 engines x 4 users, CI harness (canon-ci vs the 2026-09-18 nightly)</td><td>1 / 1</td><td>636</td><td>646</td><td>+1.6 %</td><td>148.8</td><td>146.1</td><td>-1.9 %</td><td>mean over 13 nightly runs (2026-09-05 to 09-17): 635.2 ms, 145.18 TPS</td><td><code>exec/results/canon-ci-20260918/canon/summary.txt:37; exec/results/ci-mimic-20260918/reference/nightly-0918.arm.json</code></td></tr>
+<tr><td>whole 3bda, tp2, 4 engines x 2 users, CI harness (this campaign, q4b-fpga 2026-09-21/22, the cold 1024 cells of the three passes)</td><td>3 / 3</td><td>554</td><td>512</td><td>-7.5 %</td><td>185.1</td><td>186.2</td><td>+0.6 %</td><td>fpgacanon passes 1-3 (520, 513, 504 ms) vs fpgabase passes 1-3 (555, 554, 553 ms), prompt-1024 cells. The AVX side is 25 to 45 ms above the cell's history; against the 13-night mean (509.5 ms) the AMX side reads +0.5 %</td><td><code>exec/results/q4b-fpga-20260921/fpgacanon-pass1/perf.json; exec/results/q4b-fpga-20260921/fpgabase-pass1/perf.json</code></td></tr>
+<tr><td>runtron, tp2, 8 users, our half (wedperf-attr 2026-09-16)</td><td>6 / 6</td><td>3,214</td><td>3,195</td><td>-0.6 %</td><td>124.8</td><td>125.4</td><td>+0.5 %</td><td>canonical c7844ca2ce vs AVX eb2de0265a; separate blocks</td><td><code>exec/results/wedperf-attr-20260916/summary.md:25-26</code></td></tr>
+<tr><td>runtron, tp4, 8 users, our half (wedperf-attr 2026-09-16)</td><td>6 / 6</td><td>2,253</td><td>2,288</td><td>+1.6 %</td><td>132.3</td><td>129.7</td><td>-2.0 %</td><td>same binaries as the tp2 row</td><td><code>exec/results/wedperf-attr-20260916/summary.md:22-23</code></td></tr>
+</tbody></table></div>
+<div class="tw"><table class="num"><thead><tr><th>VNNI-K build against AVX build, both FPGA attention, prompt 1024</th><th>TTFT, AVX (ms)</th><th>TTFT, VNNI-K (ms)</th><th>TTFT change</th><th>TPS, AVX</th><th>TPS, VNNI-K</th><th>TPS change</th><th>note</th><th>source</th></tr></thead><tbody>
+<tr><td>whole 3bda, tp2, CI harness (ci-mimic target vs the 2026-09-18 nightly)</td><td>528</td><td>504</td><td>-4.5 %</td><td>186.3</td><td>176.8</td><td>-5.1 %</td><td>VNNI-K deb 29a8a547; client under CPU pressure 27-48 % in the target run</td><td><code>exec/results/ci-mimic-20260918/target-pass1/summary.txt:36</code></td></tr>
+<tr><td>whole 3bda, tp4, CI harness (ci-mimic target vs the 2026-09-18 nightly)</td><td>636</td><td>629</td><td>-1.1 %</td><td>148.8</td><td>133.4</td><td>-10.3 %</td><td>the issue-4500 decode loss</td><td><code>exec/results/ci-mimic-20260918/target-pass1/summary.txt:37</code></td></tr>
+<tr><td>our half, tp2, 1 engine x 2 users, CI harness (issue-4500 campaign, measurement block m6 = rinzler plus the CI client on our half, n = 2)</td><td>762</td><td>700</td><td>-8.2 %</td><td>192.2</td><td>183.9</td><td>-4.3 %</td><td>VNNI-K deb vs nightly deb. With the kill switch the VNNI-K deb gives 762.5 ms and 184.5 TPS</td><td><code>exec/results/issue4500-20260918/m6/summary.md:5-8</code></td></tr>
+<tr><td>our half, tp4, 1 engine x 4 users, CI harness (issue-4500 campaign, block m6, n = 2)</td><td>848</td><td>809</td><td>-4.7 %</td><td>156.3</td><td>135.4</td><td>-13.4 %</td><td>with the kill switch: 814.5 ms and 144.62 TPS</td><td><code>exec/results/issue4500-20260918/m6/summary.md:10-12</code></td></tr>
+</tbody></table></div>
+<p class="cap">Top: this campaign's cells (client-side TTFT and decode TPS per user, harness means over 8 users x 10 rounds per pass; mean and sd over the passes per arm; the change columns are the mean of the per-pass deltas and the per-pass deltas themselves; Welch t over the pass means of the two arms; the per-uncached-token column divides each pass's TTFT by its prompt tokens not served from the prefix cache before taking the delta, because the two arms saw different prefix-cache shares in the same cell). Middle: canonical-AMX against AVX pairs at prompt 1024 with FPGA attention on both sides (this campaign's cold cells included as one row with their three-run means). Bottom: the VNNI-K deb against the AVX deb at prompt 1024, where the decode loss of issue 4500 shows. Sources are in the source column and in section 9 (Data files).</p>
+<h2>7. Eight users on one engine: the runtron campaign of 2026-09-22</h2>
+<p>Question (jhan, 2026-09-22): was a 4096- or 8192-token prompt with 8 users per engine tested? For CPU attention yes (runtron, 8 users at prompt 8192, the vnnik-20260914 campaign, not shown on this page), for FPGA attention no. This campaign fills that gap with both attention modes and both builds in one interleaved run: exec/q4b-rt8u-20260922/campaign.sh on our half of delphi-3bda (one tp2 engine, cards 90 and 93), 3 repetitions, each repetition running every cell for the AVX build and the AMX build under CPU attention and under FPGA attention before the next repetition starts. Cells: 8 users at prompt 1024, 2048, 4096 and 8192, and 2 users at 4096 and 8192, 256 generated tokens requested per user (runtron counts 253 generated tokens in every run, the last 3 are the stop sequence). Builds: the AVX build is tron at eb2de0265a (main before PR 3879, runtron.pre3879), the AMX build is main at c7844ca2ce (runtron.main0916). USE_HW_ATTN=0 selects CPU attention. At 16:58 UTC the campaign stopped the idle production engines through platformd (after the guard's 10-minute idle check). At 18:12 UTC it started them again through platformd. One earlier attempt at 16:36 UTC was stopped by the campaign's own watcher after 10 s, because platformd had restarted the engines that the guard had stopped with systemctl. That attempt is excluded. Every one of the 72 kept runs is complete.</p>
+<div class="fig"><svg viewBox="0 0 1100 528" width="100%" role="img" aria-label="runtron: prefill time and decode TPS per user for four arms at 8 or 2 users on one engine" style="max-width:1100px;font-family:system-ui,sans-serif">
+<text x="16" y="24" font-size="15" font-weight="600" fill="#0b0b0b">One engine, 8 or 2 users at once (runtron, 2026-09-22): prefill time and decode speed for the four arms</text>
+<text x="16" y="44" font-size="12" fill="#52514e">Left: prefill of all users' prompts in one batch, seconds, log axis (shorter = better). Right: decode tokens per second per user (higher = better). Mean of 3 repetitions, sd below 1 %.</text>
+<circle cx="22" cy="64" r="5" fill="#86b6ef"/>
+<text x="32" y="68" font-size="11" fill="#0b0b0b">AVX build + CPU attention</text>
+<circle cx="272" cy="64" r="5" fill="#1c5cab"/>
+<text x="282" y="68" font-size="11" fill="#0b0b0b">AMX build + CPU attention</text>
+<circle cx="522" cy="64" r="5" fill="#eb6834"/>
+<text x="532" y="68" font-size="11" fill="#0b0b0b">AVX build + FPGA attention</text>
+<circle cx="772" cy="64" r="5" fill="#8f2f0c"/>
+<text x="782" y="68" font-size="11" fill="#0b0b0b">AMX build + FPGA attention</text>
+<text x="455.0" y="86" font-size="12" font-weight="600" fill="#0b0b0b" text-anchor="middle">prefill time of the batch, seconds (log axis)</text>
+<text x="870.0" y="86" font-size="12" font-weight="600" fill="#0b0b0b" text-anchor="middle">decode TPS per user</text>
+<line x1="260.0" y1="100" x2="260.0" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="260.0" y="498" font-size="10" fill="#898781" text-anchor="middle">2</text>
+<line x1="337.6" y1="100" x2="337.6" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="337.6" y="498" font-size="10" fill="#898781" text-anchor="middle">5</text>
+<line x1="396.3" y1="100" x2="396.3" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="396.3" y="498" font-size="10" fill="#898781" text-anchor="middle">10</text>
+<line x1="455.0" y1="100" x2="455.0" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="455.0" y="498" font-size="10" fill="#898781" text-anchor="middle">20</text>
+<line x1="532.6" y1="100" x2="532.6" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="532.6" y="498" font-size="10" fill="#898781" text-anchor="middle">50</text>
+<line x1="591.3" y1="100" x2="591.3" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="591.3" y="498" font-size="10" fill="#898781" text-anchor="middle">100</text>
+<line x1="650.0" y1="100" x2="650.0" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="650.0" y="498" font-size="10" fill="#898781" text-anchor="middle">200</text>
+<line x1="710.0" y1="100" x2="710.0" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="710.0" y="498" font-size="10" fill="#898781" text-anchor="middle">0</text>
+<line x1="755.7" y1="100" x2="755.7" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="755.7" y="498" font-size="10" fill="#898781" text-anchor="middle">25</text>
+<line x1="801.4" y1="100" x2="801.4" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="801.4" y="498" font-size="10" fill="#898781" text-anchor="middle">50</text>
+<line x1="847.1" y1="100" x2="847.1" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="847.1" y="498" font-size="10" fill="#898781" text-anchor="middle">75</text>
+<line x1="892.9" y1="100" x2="892.9" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="892.9" y="498" font-size="10" fill="#898781" text-anchor="middle">100</text>
+<line x1="938.6" y1="100" x2="938.6" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="938.6" y="498" font-size="10" fill="#898781" text-anchor="middle">125</text>
+<line x1="984.3" y1="100" x2="984.3" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="984.3" y="498" font-size="10" fill="#898781" text-anchor="middle">150</text>
+<line x1="1030.0" y1="100" x2="1030.0" y2="484" stroke="#e1e0d9" stroke-width="1"/>
+<text x="1030.0" y="498" font-size="10" fill="#898781" text-anchor="middle">175</text>
+<text x="250" y="138" font-size="11" fill="#0b0b0b" text-anchor="end">8 users, prompt 1024</text>
+<line x1="260" y1="168" x2="1030" y2="168" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="317.6" cy="120" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 8 users, prompt 1024: 3.95</title></circle>
+<text x="325.6" y="123.5" font-size="9.5" fill="#0b0b0b">3.9 s</text>
+<circle cx="840.6" cy="120" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 8 users, prompt 1024: 71.45</title></circle>
+<text x="848.6" y="123.5" font-size="9.5" fill="#0b0b0b">71</text>
+<circle cx="298.3" cy="132" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 8 users, prompt 1024: 3.14</title></circle>
+<text x="306.3" y="135.5" font-size="9.5" fill="#0b0b0b">3.1 s</text>
+<circle cx="856.1" cy="132" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 8 users, prompt 1024: 79.89</title></circle>
+<text x="864.1" y="135.5" font-size="9.5" fill="#0b0b0b">80</text>
+<circle cx="300.1" cy="144" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 8 users, prompt 1024: 3.21</title></circle>
+<text x="308.1" y="147.5" font-size="9.5" fill="#0b0b0b">3.2 s</text>
+<circle cx="937.1" cy="144" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 8 users, prompt 1024: 124.20</title></circle>
+<text x="945.1" y="147.5" font-size="9.5" fill="#0b0b0b">124</text>
+<circle cx="299.8" cy="156" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 8 users, prompt 1024: 3.20</title></circle>
+<text x="307.8" y="159.5" font-size="9.5" fill="#0b0b0b">3.2 s</text>
+<circle cx="938.4" cy="156" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 8 users, prompt 1024: 124.93</title></circle>
+<text x="946.4" y="159.5" font-size="9.5" fill="#0b0b0b">125</text>
+<text x="250" y="198" font-size="11" fill="#0b0b0b" text-anchor="end">8 users, prompt 2048</text>
+<line x1="260" y1="228" x2="1030" y2="228" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="405.5" cy="180" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 8 users, prompt 2048: 11.14</title></circle>
+<text x="413.5" y="183.5" font-size="9.5" fill="#0b0b0b">11.1 s</text>
+<circle cx="792.4" cy="180" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 8 users, prompt 2048: 45.08</title></circle>
+<text x="800.4" y="183.5" font-size="9.5" fill="#0b0b0b">45</text>
+<circle cx="369.2" cy="192" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 8 users, prompt 2048: 7.26</title></circle>
+<text x="377.2" y="195.5" font-size="9.5" fill="#0b0b0b">7.3 s</text>
+<circle cx="806.4" cy="192" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 8 users, prompt 2048: 52.73</title></circle>
+<text x="814.4" y="195.5" font-size="9.5" fill="#0b0b0b">53</text>
+<circle cx="361.2" cy="204" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 8 users, prompt 2048: 6.60</title></circle>
+<text x="369.2" y="207.5" font-size="9.5" fill="#0b0b0b">6.6 s</text>
+<circle cx="927.7" cy="204" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 8 users, prompt 2048: 119.05</title></circle>
+<text x="935.7" y="207.5" font-size="9.5" fill="#0b0b0b">119</text>
+<circle cx="359.5" cy="216" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 8 users, prompt 2048: 6.48</title></circle>
+<text x="367.5" y="219.5" font-size="9.5" fill="#0b0b0b">6.5 s</text>
+<circle cx="929.6" cy="216" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 8 users, prompt 2048: 120.08</title></circle>
+<text x="937.6" y="219.5" font-size="9.5" fill="#0b0b0b">120</text>
+<text x="250" y="258" font-size="11" fill="#0b0b0b" text-anchor="end">8 users, prompt 4096</text>
+<line x1="260" y1="288" x2="1030" y2="288" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="503.3" cy="240" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 8 users, prompt 4096: 35.38</title></circle>
+<text x="511.3" y="243.5" font-size="9.5" fill="#0b0b0b">35.4 s</text>
+<circle cx="758.3" cy="240" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 8 users, prompt 4096: 26.43</title></circle>
+<text x="766.3" y="243.5" font-size="9.5" fill="#0b0b0b">26</text>
+<circle cx="448.9" cy="252" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 8 users, prompt 4096: 18.60</title></circle>
+<text x="456.9" y="255.5" font-size="9.5" fill="#0b0b0b">18.6 s</text>
+<circle cx="767.3" cy="252" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 8 users, prompt 4096: 31.31</title></circle>
+<text x="775.3" y="255.5" font-size="9.5" fill="#0b0b0b">31</text>
+<circle cx="419.1" cy="264" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 8 users, prompt 4096: 13.09</title></circle>
+<text x="427.1" y="267.5" font-size="9.5" fill="#0b0b0b">13.1 s</text>
+<circle cx="863.8" cy="264" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 8 users, prompt 4096: 84.14</title></circle>
+<text x="871.8" y="267.5" font-size="9.5" fill="#0b0b0b">84</text>
+<circle cx="418.2" cy="276" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 8 users, prompt 4096: 12.94</title></circle>
+<text x="426.2" y="279.5" font-size="9.5" fill="#0b0b0b">12.9 s</text>
+<circle cx="865.5" cy="276" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 8 users, prompt 4096: 85.03</title></circle>
+<text x="873.5" y="279.5" font-size="9.5" fill="#0b0b0b">85</text>
+<text x="250" y="318" font-size="11" fill="#0b0b0b" text-anchor="end">8 users, prompt 8192</text>
+<line x1="260" y1="348" x2="1030" y2="348" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="608.9" cy="300" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 8 users, prompt 8192: 123.11</title></circle>
+<text x="616.9" y="303.5" font-size="9.5" fill="#0b0b0b">123.1 s</text>
+<circle cx="736.5" cy="300" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 8 users, prompt 8192: 14.52</title></circle>
+<text x="744.5" y="303.5" font-size="9.5" fill="#0b0b0b">15</text>
+<circle cx="538.3" cy="312" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 8 users, prompt 8192: 53.50</title></circle>
+<text x="546.3" y="315.5" font-size="9.5" fill="#0b0b0b">53.5 s</text>
+<circle cx="741.2" cy="312" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 8 users, prompt 8192: 17.09</title></circle>
+<text x="749.2" y="315.5" font-size="9.5" fill="#0b0b0b">17</text>
+<circle cx="488.5" cy="324" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 8 users, prompt 8192: 29.71</title></circle>
+<text x="496.5" y="327.5" font-size="9.5" fill="#0b0b0b">29.7 s</text>
+<circle cx="822.5" cy="324" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 8 users, prompt 8192: 61.51</title></circle>
+<text x="830.5" y="327.5" font-size="9.5" fill="#0b0b0b">62</text>
+<circle cx="486.8" cy="336" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 8 users, prompt 8192: 29.12</title></circle>
+<text x="494.8" y="339.5" font-size="9.5" fill="#0b0b0b">29.1 s</text>
+<circle cx="822.5" cy="336" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 8 users, prompt 8192: 61.50</title></circle>
+<text x="830.5" y="339.5" font-size="9.5" fill="#0b0b0b">61</text>
+<text x="250" y="378" font-size="11" fill="#0b0b0b" text-anchor="end">2 users, prompt 4096</text>
+<line x1="260" y1="408" x2="1030" y2="408" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="386.8" cy="360" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 2 users, prompt 4096: 8.94</title></circle>
+<text x="394.8" y="363.5" font-size="9.5" fill="#0b0b0b">8.9 s</text>
+<circle cx="895.7" cy="360" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 2 users, prompt 4096: 101.57</title></circle>
+<text x="903.7" y="363.5" font-size="9.5" fill="#0b0b0b">102</text>
+<circle cx="332.2" cy="372" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 2 users, prompt 4096: 4.69</title></circle>
+<text x="340.2" y="375.5" font-size="9.5" fill="#0b0b0b">4.7 s</text>
+<circle cx="918.8" cy="372" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 2 users, prompt 4096: 114.16</title></circle>
+<text x="926.8" y="375.5" font-size="9.5" fill="#0b0b0b">114</text>
+<circle cx="299.0" cy="384" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 2 users, prompt 4096: 3.17</title></circle>
+<text x="307.0" y="387.5" font-size="9.5" fill="#0b0b0b">3.2 s</text>
+<circle cx="1006.7" cy="384" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 2 users, prompt 4096: 162.27</title></circle>
+<text x="1014.7" y="387.5" font-size="9.5" fill="#0b0b0b">162</text>
+<circle cx="299.3" cy="396" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 2 users, prompt 4096: 3.18</title></circle>
+<text x="307.3" y="399.5" font-size="9.5" fill="#0b0b0b">3.2 s</text>
+<circle cx="1005.2" cy="396" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 2 users, prompt 4096: 161.44</title></circle>
+<text x="1013.2" y="399.5" font-size="9.5" fill="#0b0b0b">161</text>
+<text x="250" y="438" font-size="11" fill="#0b0b0b" text-anchor="end">2 users, prompt 8192</text>
+<line x1="260" y1="468" x2="1030" y2="468" stroke="#e1e0d9" stroke-width="1"/>
+<circle cx="492.0" cy="420" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 2 users, prompt 8192: 30.94</title></circle>
+<text x="500.0" y="423.5" font-size="9.5" fill="#0b0b0b">30.9 s</text>
+<circle cx="824.3" cy="420" r="4.5" fill="#86b6ef" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + CPU attention, 2 users, prompt 8192: 62.52</title></circle>
+<text x="832.3" y="423.5" font-size="9.5" fill="#0b0b0b">63</text>
+<circle cx="421.2" cy="432" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 2 users, prompt 8192: 13.41</title></circle>
+<text x="429.2" y="435.5" font-size="9.5" fill="#0b0b0b">13.4 s</text>
+<circle cx="841.2" cy="432" r="4.5" fill="#1c5cab" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + CPU attention, 2 users, prompt 8192: 71.75</title></circle>
+<text x="849.2" y="435.5" font-size="9.5" fill="#0b0b0b">72</text>
+<circle cx="370.2" cy="444" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 2 users, prompt 8192: 7.34</title></circle>
+<text x="378.2" y="447.5" font-size="9.5" fill="#0b0b0b">7.3 s</text>
+<circle cx="957.6" cy="444" r="4.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>AVX build + FPGA attention, 2 users, prompt 8192: 135.41</title></circle>
+<text x="965.6" y="447.5" font-size="9.5" fill="#0b0b0b">135</text>
+<circle cx="369.0" cy="456" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 2 users, prompt 8192: 7.25</title></circle>
+<text x="377.0" y="459.5" font-size="9.5" fill="#0b0b0b">7.2 s</text>
+<circle cx="959.8" cy="456" r="4.5" fill="#8f2f0c" stroke="#fcfcfb" stroke-width="1.5"><title>AMX build + FPGA attention, 2 users, prompt 8192: 136.60</title></circle>
+<text x="967.8" y="459.5" font-size="9.5" fill="#0b0b0b">137</text>
+<text x="645.0" y="518" font-size="11" fill="#898781" text-anchor="middle">Within a row the four dots are the four arms, in legend order from top to bottom. Source: exec/results/q4b-rt8u-20260922/summary.json.</text>
+</svg><p class="cap">Figure 5. runtron on one engine: prefill time of the whole batch (log axis) and decode TPS per user, four arms, mean of 3 repetitions (256 generated tokens requested, 253 counted). The prefill time is runtron's "Parsing the prompt took" value, the wall time of the batched prefill of all users' prompts (the users' values agree to the millisecond). It is not the CI harness's per-request TTFT of sections 1 to 6 (Words used here).</p></div>
+<ul>
+<li><b>FPGA attention against AMX on the CPU, same AMX build.</b> Prefill at 8 users: 0.98x at 1024 (the FPGA is 2 % slower), 1.12x at 2048, 1.44x at 4096 and 1.84x at 8192 (53.5 s against 29.1 s for 8 prompts of 8192 tokens). At 2 users: 1.48x at 4096 and 1.85x at 8192. Decode at 8 users: 1.6x at 1024 to 3.6x at 8192 (61.5 against 17.1 TPS per user). The same picture as the CI harness (section 5): equal at 1024, the FPGA ahead from 2048 up, most at 8192.</li>
+<li><b>AMX build against AVX build, CPU attention.</b> Prefill -57 to -20 % (123.1 s to 53.5 s at 8 users and 8192, 2.3x), decode +11.8 to +18.5 %, every paired t above 20 in magnitude. This is the AMX gain jhan recalled (2x at 8192), measured again with 8 users on one engine and 3 repetitions.</li>
+<li><b>AMX build against AVX build, FPGA attention.</b> Prefill -2.0 to +0.3 % (-589 to +11 ms on batches of 3 to 30 s), decode -0.5 to +1.1 %. The paired t is -7.9 to -17 at 2048 to 8192 with 8 users and -13.4 at 2 users and 8192. Those 1 to 2 % prefill gains are therefore resolved, and small. The 1024 cell (-0.3 %, t -0.7) and the 2-user 4096 cell (+0.3 %, t +1.8) show no resolved difference. Decode changes by at most 1.2 % in every cell. Five decode cells are not resolved (|t| at most 3.2). One (2 users, prompt 4096) is resolved at -0.5 % (t -4.5), a change too small to matter. Without a warm prefix cache the AMX build brings the FPGA path 0 to 2 % on prefill and nothing on decode. This is the runtron counterpart of the cold CI-harness cells of section 6 (2 to 8 % there) and of the decode &quot;no&quot;.</li>
+<li><b>No HBM exhaustion.</b> All 72 runs logged 0 &quot;lose HW attention&quot; warnings, including 8 users at 8192 (72 shards of 1024 tokens per engine: 9 per user for 8192 prompt plus 256 generated tokens, 36 per card, about 10.9 GB over the two cards, est.). Every runtron process starts with an empty prefix cache and sends one batch, so no older shards occupy the card. The exhaustion of section 5 is an effect of the warm prefix cache holding shards of earlier requests, not of the request size.</li>
+</ul>
+<h3>The record</h3>
+<div class="tw"><table class="num"><thead><tr><th>cell</th>
+<th>AVX build + CPU attention<br>prefill s / TPS per user</th>
+<th>AMX build + CPU attention<br>prefill s / TPS per user</th>
+<th>AVX build + FPGA attention<br>prefill s / TPS per user</th>
+<th>AMX build + FPGA attention<br>prefill s / TPS per user</th>
+</tr></thead><tbody>
+<tr><td>8 users, prompt 1024</td>
+<td>3.95 +/- 0.01 / 71.4 +/- 0.2 (n = 3)</td>
+<td>3.14 +/- 0.01 / 79.9 +/- 0.2 (n = 3)</td>
+<td>3.21 +/- 0.03 / 124.2 +/- 0.6 (n = 3)</td>
+<td>3.20 +/- 0.00 / 124.9 +/- 0.8 (n = 3)</td>
+</tr>
+<tr><td>8 users, prompt 2048</td>
+<td>11.14 +/- 0.00 / 45.1 +/- 0.1 (n = 3)</td>
+<td>7.26 +/- 0.00 / 52.7 +/- 0.1 (n = 3)</td>
+<td>6.60 +/- 0.03 / 119.0 +/- 0.9 (n = 3)</td>
+<td>6.48 +/- 0.01 / 120.1 +/- 0.5 (n = 3)</td>
+</tr>
+<tr><td>8 users, prompt 4096</td>
+<td>35.38 +/- 0.02 / 26.4 +/- 0.0 (n = 3)</td>
+<td>18.60 +/- 0.04 / 31.3 +/- 0.1 (n = 3)</td>
+<td>13.09 +/- 0.02 / 84.1 +/- 0.2 (n = 3)</td>
+<td>12.94 +/- 0.01 / 85.0 +/- 0.5 (n = 3)</td>
+</tr>
+<tr><td>8 users, prompt 8192</td>
+<td>123.11 +/- 0.11 / 14.5 +/- 0.0 (n = 3)</td>
+<td>53.50 +/- 0.23 / 17.1 +/- 0.0 (n = 3)</td>
+<td>29.71 +/- 0.08 / 61.5 +/- 0.4 (n = 3)</td>
+<td>29.12 +/- 0.10 / 61.5 +/- 0.3 (n = 3)</td>
+</tr>
+<tr><td>2 users, prompt 4096</td>
+<td>8.94 +/- 0.01 / 101.6 +/- 0.6 (n = 3)</td>
+<td>4.69 +/- 0.03 / 114.2 +/- 0.3 (n = 3)</td>
+<td>3.17 +/- 0.01 / 162.3 +/- 0.4 (n = 3)</td>
+<td>3.18 +/- 0.00 / 161.4 +/- 0.3 (n = 3)</td>
+</tr>
+<tr><td>2 users, prompt 8192</td>
+<td>30.94 +/- 0.06 / 62.5 +/- 0.0 (n = 3)</td>
+<td>13.41 +/- 0.05 / 71.8 +/- 0.2 (n = 3)</td>
+<td>7.34 +/- 0.03 / 135.4 +/- 0.7 (n = 3)</td>
+<td>7.25 +/- 0.02 / 136.6 +/- 0.5 (n = 3)</td>
+</tr>
+</tbody></table></div>
+<p class="cap">Mean +/- sample sd over the 3 repetitions. Prefill in seconds (runtron &quot;Parsing the prompt took&quot;, the batched prefill of all users' prompts), TPS = decode tokens per second per user. Source: exec/results/q4b-rt8u-20260922/summary.md and summary.json (summarize.py over rt-results.txt).</p>
+<div class="tw"><table class="num"><thead><tr><th>cell</th><th>FPGA + AMX build against CPU + AMX build: prefill (x faster)</th><th>same: decode TPS (x faster)</th><th>FPGA + AMX build against CPU + AVX build: prefill (x faster)</th><th>AMX build against AVX build, CPU attention: prefill / TPS (paired t)</th><th>AMX build against AVX build, FPGA attention: prefill / TPS (paired t)</th><th>HBM exhaustion warnings (all 12 runs of the cell)</th></tr></thead><tbody>
+<tr><td>8 users, prompt 1024</td><td>0.98x</td><td>1.56x</td><td>1.23x</td><td>-20.4 % (t -68) / +11.8 % (t +50)</td><td>-0.3 % = -10 ms (t -0.7) / +0.6 % (t +2.4)</td><td>0</td></tr>
+<tr><td>8 users, prompt 2048</td><td>1.12x</td><td>2.28x</td><td>1.72x</td><td>-34.8 % (t -1373) / +17.0 % (t +137)</td><td>-1.9 % = -125 ms (t -13.3) / +0.9 % (t +1.3)</td><td>0</td></tr>
+<tr><td>8 users, prompt 4096</td><td>1.44x</td><td>2.72x</td><td>2.73x</td><td>-47.4 % (t -535) / +18.5 % (t +165)</td><td>-1.1 % = -141 ms (t -17.0) / +1.1 % (t +3.2)</td><td>0</td></tr>
+<tr><td>8 users, prompt 8192</td><td>1.84x</td><td>3.60x</td><td>4.23x</td><td>-56.5 % (t -936) / +17.7 % (t +91)</td><td>-2.0 % = -589 ms (t -7.9) / -0.0 % (t -0.0)</td><td>0</td></tr>
+<tr><td>2 users, prompt 4096</td><td>1.48x</td><td>1.41x</td><td>2.81x</td><td>-47.5 % (t -567) / +12.4 % (t +24)</td><td>+0.3 % = +11 ms (t +1.8) / -0.5 % (t -4.5)</td><td>0</td></tr>
+<tr><td>2 users, prompt 8192</td><td>1.85x</td><td>1.90x</td><td>4.27x</td><td>-56.6 % (t -463) / +14.8 % (t +72)</td><td>-1.3 % = -96 ms (t -13.4) / +0.9 % (t +2.7)</td><td>0</td></tr>
+</tbody></table></div>
+<p class="cap">Ratios are of the means (x faster = the reference divided by the compared arm for prefill, the compared arm divided by the reference for TPS). Percentages are AMX build minus AVX build in percent of the AVX build, with the paired t over the 3 repetitions (repetition k of one arm against repetition k of the other). HBM exhaustion = the count of &quot;lose HW attention&quot; warning lines in the 12 run logs of the cell (4 arms x 3 repetitions).</p>
+<h2>8. What was measured on 2026-09-21/22, and what remains</h2>
+<p>The campaign exec/q4b-fpga-20260921/ is the measurement the first version of this page asked for (FPGA-attention cells at prompts 1536 to 8192 in the nightly layout), run on the platformd 0.11 layout (Rhys upgraded delphi-3bda on 2026-09-21: engines are named entries default-0 to default-3 with their own ingress ports, the harness provisions them through the explicit config and a test proxy on port 80. Our wrappers were updated the same evening).</p>
+<ul>
+<li>Arms run: fpgabase (nightly deb, FPGA attention), fpgacanon (canonical AMX deb, FPGA attention), canon (canonical deb, CPU attention, one same-day pass). Each pass = the 9 cells of the 2026-09-20 grid. Cold cells = single-cell driver runs at 4096 and 8192 for both FPGA arms, two per arm and length.</li>
+<li>Kept from before: the 2026-09-20 CPU-attention series (nightly deb and canonical deb, 3 passes each) and its cold check cell at 8192. The CPU-attention arms were not re-run beyond the one canonical pass (jhan, 2026-09-22).</li>
+<li>Done after the 2026-09-22 nightly (13:20 to 16:25 UTC): passes 2 and 3 of the two FPGA arms and a second cold cell per arm at 4096 and 8192, with the card allocator free space and the software-fallback count recorded per cell (they confirm the exhaustion reading, section 5). Done the same afternoon (16:58 to 18:12 UTC): the runtron campaign exec/q4b-rt8u-20260922/ (8 users on one engine on our half, prompts 1024 to 8192, plus 2 users at 4096 and 8192, both attention modes and both builds, 3 repetitions), section 7. Not measured and not planned: a cold CPU-attention cell at 4096, a cold AVX cell at 8192, and the VNNI-K deb under FPGA attention at long prompts (optional arm fpgavnnik).</li>
+<li>Noise: three passes per FPGA arm. The pass-to-pass sd of the warm TTFT is 16 to 128 ms below 4096 and 118 to 793 ms from 4096 up (the AVX arm is the noisier one from 4096 up, sd 282 to 793 ms against 118 to 411 ms). The two cold runs of one arm at one length are 10 to 41 ms apart (sd 7 to 29 ms). The CPU series' 3-pass sd was 1 to 25 ms at 1024 and 350 to 1230 ms at 8192.</li>
+</ul>
+<h2>9. Caveats and provenance</h2>
+<ul>
+<li>The only same-binary, same-day CI-harness pairs (p0perf-20260913) change two things at once: the FPGA arm also set the kill switch. Its CPU share therefore ran AVX. The code reading says the AMX dense-page kernel does not run on the prompt's attention under FPGA attention unless DMA lags. By that reading the kill switch should not matter there. The data are mixed on this (section 3 at prompt 1024, and section 6 shows 33 to 48 % in warm cells from 4096 up, three passes each, with the two candidate causes in section 5). So the +4.6 % / -1.9 % may include a kill-switch effect of unknown sign.</li>
+<li>Before 2026-09-22 no campaign interleaved CPU-attention and FPGA-attention repetitions. The runtron campaign of that day (section 7) did, inside each of its 3 repetitions, and reports the attention-mode comparison as ratios of means. Earlier, runtron ran them in blocks 8 minutes to about 2 hours apart (wedperf: CPU 18:34 to 19:37 UTC and FPGA 19:46 to 19:59, wedperf-attr: CPU 21:50 to 22:03 and FPGA 22:11 to 23:54). The whole-machine pair spans two campaigns two days apart. No paired t for attention mode exists in sections 1 to 5. The Welch t values there compare separate blocks.</li>
+<li>At prompt 1024 in the earlier campaigns (sections 1 to 3) the FPGA-side n is small: one pass in canon-ci and the nightly, n = 1 in vnnik4-models, n = 2 in wedperf. Only wedperf-attr (n = 6) and p0perf-20260913 (n = 3) have repeats there. The 2026-09-21/22 campaigns of sections 5 to 7 have 3 passes or repetitions per arm. The four wedperf pairs (n = 3 against 2) have about 1 degree of freedom.</li>
+<li>Client host load inflates client-side TTFT. The ci-mimic base arm (556 ms) ran on a saturated client and is not used for a delta. The ci-mimic target arm (504 ms) ran at client CPU pressure 27 to 48 %. q4b-swattn recorded no client CPU pressure. The nightly's runner never does.</li>
+<li>No canonical-AMX CPU-attention runtron cell at tp4 exists on the same day as an FPGA cell. The tp4 canonical row in figure 1 pairs two different builds (544ca05c7a against c7844ca2ce) and is drawn hollow.</li>
+<li>FPGA-attention cells above prompt 1024 (sections 5 and 6) are three passes per arm, run on 2026-09-21 evening and 2026-09-22 afternoon (UTC), with pass-to-pass sd of 16 to 128 ms below 4096 and 118 to 793 ms from 4096 up. Their warm values depend on the prefix-cache share of the cell (12 to 54 %) and, at 4096 to 6144, on the share of attention that fell back to the CPU when the card's K/V space ran out (section 5). Hypothesis for the fpgabase line not being monotone: both shares vary from cell to cell, so the TTFT does not track the uncached-token count alone. The cold cells have neither dependence.</li>
+<li>At prompt 1024 (sections 1 to 3) the runtron 8-user TTFT is the batched prefill of 8 prompts of 1024 tokens. The CI-harness TTFT is per request with 2 or 4 prompts per engine. Their ratio there (about 4.3x at tp2, 2.6x at tp4) is a layout effect, not an attention-path effect. Section 7 uses the same runtron measure at 2048 to 8192 and never mixes it with CI-harness values.</li>
+</ul>
+<h3>Data files</h3>
+<div class="tw"><table><thead><tr><th>campaign</th><th>what</th><th>file</th></tr></thead><tbody>
+<tr><td>p0perf-20260913</td><td>CI harness, our half, off/on/fpga, one binary 544ca05c7a; runtron off/on</td><td><code>exec/results/p0perf-20260913/summary.md lines 12-17 (CI table), 44-61 (CI per-rep), 6-9 and 20-43 (runtron); summary.json</code></td></tr>
+<tr><td>wedperf-20260916</td><td>runtron cpu and fpga blocks, base eb2de0265a vs target ff680c8020</td><td><code>exec/results/wedperf-20260916/summary.md lines 21-34 (means); summary.json cells[].reps[].ttft_s (per-rep)</code></td></tr>
+<tr><td>wedperf-attr-20260916</td><td>runtron attribution: base / mid c7844ca2ce / target, cpu and fpga</td><td><code>exec/results/wedperf-attr-20260916/summary.md lines 13-27 (means); summary.json (per-rep)</code></td></tr>
+<tr><td>vnnik4-20260915, vnnik4-models-20260915</td><td>runtron cpu (base vs ab) and the fpga cell (base vs new), 2026-09-15</td><td><code>exec/results/vnnik4-20260915/summary.md lines 9-10; exec/results/vnnik4-models-20260915/results.txt lines 58-97</code></td></tr>
+<tr><td>q4b-swattn-20260919</td><td>CI harness, whole machine, CPU attention, nightly deb vs canonical deb, 9 prompts</td><td><code>exec/results/q4b-swattn-20260919/summary.txt lines 3-13; summary.json (cache_hit_pct, engine_requests); RUNBOOK.md lines 33-39 (check cell)</code></td></tr>
+<tr><td>q4b-fpga-20260921</td><td>CI harness, whole machine, FPGA attention (nightly deb, canonical deb) + one canonical CPU pass; cold cells at 4096 / 8192; platformd 0.11</td><td><code>exec/results/q4b-fpga-20260921/&lt;tag&gt;/perf.json (fpgabase-pass1, fpgacanon-pass1, canon-pass1, *-cold-p4096, *-cold-p8192); RUNBOOK.md; exec/prefill-amx-vs-fpga-20260921/fpga-campaign-rows.json</code></td></tr>
+<tr><td>q4b-rt8u-20260922</td><td>runtron, our half, one tp2 engine, 8 or 2 users, prompts 1024 to 8192, CPU and FPGA attention, AVX build (eb2de0265a) and AMX build (c7844ca2ce), 3 repetitions (2026-09-22 16:58 to 18:12 UTC)</td><td><code>exec/results/q4b-rt8u-20260922/summary.md, summary.json, rt-results.txt, rt/&lt;cell&gt;__&lt;attn&gt;__&lt;arm&gt;__rep&lt;k&gt;.log</code></td></tr>
+<tr><td>canon-ci-20260918</td><td>CI harness, whole machine, canonical deb, FPGA attention (2026-09-18 23:48 UTC)</td><td><code>exec/results/canon-ci-20260918/canon/summary.txt lines 36-37; canon/driver.log</code></td></tr>
+<tr><td>ci-mimic-20260918</td><td>CI harness, whole machine, nightly deb and VNNI-K deb, FPGA attention</td><td><code>exec/results/ci-mimic-20260918/base-pass1/summary.txt and target-pass1/summary.txt lines 36-37; caveats.html</code></td></tr>
+<tr><td>nightly 2026-09-18</td><td>the 2026-09-18 nightly perf log (GitHub run 35303980268): qwen3-4b tp2 528 ms, tp4 636 ms</td><td><code>exec/results/ci-mimic-20260918/reference/nightly-0918.arm.json lines 896, 999; nightly-35303980268.log</code></td></tr>
+<tr><td>nightly reference</td><td>13 nights (2026-09-05 to 09-17) of the nightly's qwen3-4b TTFT</td><td><code>exec/results/nightly_stats.json</code></td></tr>
+<tr><td>issue4500-20260918</td><td>runtron FPGA-attention blocks m1-m4; block m6 rinzler + CI client on our half</td><td><code>exec/results/issue4500-20260918/summary.md lines 9-20; exec/results/issue4500-20260918/m6/summary.md lines 5-12</code></td></tr>
+<tr><td>vnnik-20260914</td><td>runtron CPU attention at prompts 1024 / 2048 / 8192</td><td><code>exec/results/vnnik-20260914/summary.md:9-20</code></td></tr>
+<tr><td>workflows</td><td>extraction rows (253), the three code readings, and the 162 verification findings</td><td><code>exec/prefill-amx-vs-fpga-20260921/rows-extracted.json, pairs.json; journals wf_258257df-233, wf_89cf57ff-912</code></td></tr>
+</tbody></table></div>
+</main>
