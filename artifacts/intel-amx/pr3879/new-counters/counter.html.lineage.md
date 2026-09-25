@@ -1,0 +1,112 @@
+# Lineage inventory for artifacts/intel-amx/pr3879/new-counters/counter.html
+
+One line per source file: canonical path | repo path or left-behind reason | bytes.
+
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/build-attnbase.txt | artifacts/intel-amx/exec/results/attnstats-20260924/build-attnbase.txt | 1158
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/build-attnhead.txt | artifacts/intel-amx/exec/results/attnstats-20260924/build-attnhead.txt | 1427
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/exit-reports.txt | artifacts/intel-amx/exec/results/attnstats-20260924/exit-reports.txt | 15299
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/objdump-check.txt | artifacts/intel-amx/exec/results/attnstats-20260924/objdump-check.txt | 4232
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt-results.txt | artifacts/intel-amx/exec/results/attnstats-20260924/rt-results.txt | 92784
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/summary.json | artifacts/intel-amx/exec/results/attnstats-20260924/summary.json | 12301
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/summary.md | artifacts/intel-amx/exec/results/attnstats-20260924/summary.md | 2640
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/tests-attnbase.txt | artifacts/intel-amx/exec/results/attnstats-20260924/tests-attnbase.txt | 0
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/tests-attnhead-t_amx_dispatch_dtype.out | artifacts/intel-amx/exec/results/attnstats-20260924/tests-attnhead-t_amx_dispatch_dtype.out | 16531
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/tests-attnhead-t_amx_numerics.out | artifacts/intel-amx/exec/results/attnstats-20260924/tests-attnhead-t_amx_numerics.out | 3417
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/tests-attnhead-t_attn_stats.out | artifacts/intel-amx/exec/results/attnstats-20260924/tests-attnhead-t_attn_stats.out | 13116
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/tests-attnhead-t_llama_unit.out | artifacts/intel-amx/exec/results/attnstats-20260924/tests-attnhead-t_llama_unit.out | 44133
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/tests-attnhead-t_page_share_counters.out | artifacts/intel-amx/exec/results/attnstats-20260924/tests-attnhead-t_page_share_counters.out | 3570
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/tests-attnhead.txt | artifacts/intel-amx/exec/results/attnstats-20260924/tests-attnhead.txt | 518
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/tests-on-t_attn_stats.out | artifacts/intel-amx/exec/results/attnstats-20260924/tests-on-t_attn_stats.out | 13116
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/tests-on-t_llama_unit.out | artifacts/intel-amx/exec/results/attnstats-20260924/tests-on-t_llama_unit.out | 54800
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/build-attnbase.done | left behind (provenance) | 3
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/build-attnbase.log | left behind (provenance) | 5807
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/build-attnhead.done | left behind (provenance) | 3
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/build-attnhead.log | left behind (provenance) | 4716
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/fuse-poll.log | left behind (provenance) | 62886
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base2__rep1.log | left behind (provenance) | 21011
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base2__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21011
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base2__rep2.log | left behind (provenance) | 20729
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base2__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20729
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base2__rep3.log | left behind (provenance) | 20877
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base2__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20877
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base__rep1.log | left behind (provenance) | 21109
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21109
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base__rep2.log | left behind (provenance) | 21007
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21007
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base__rep3.log | left behind (provenance) | 20736
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20736
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__head__rep1.log | left behind (provenance) | 21133
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__head__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21133
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__head__rep2.log | left behind (provenance) | 20923
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__head__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20923
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__head__rep3.log | left behind (provenance) | 20865
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__head__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20865
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headkill__rep1.log | left behind (provenance) | 23189
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headkill__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 23189
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headon__rep1.log | left behind (provenance) | 23361
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 23361
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headon__rep2.log | left behind (provenance) | 23069
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 23069
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headon__rep3.log | left behind (provenance) | 23219
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 23219
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base2__rep1.log | left behind (provenance) | 25607
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base2__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25607
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base2__rep2.log | left behind (provenance) | 25410
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base2__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25410
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base2__rep3.log | left behind (provenance) | 25411
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base2__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25411
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base__rep1.log | left behind (provenance) | 25402
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25402
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base__rep2.log | left behind (provenance) | 25269
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25269
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base__rep3.log | left behind (provenance) | 25404
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__base__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25404
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__head__rep1.log | left behind (provenance) | 25604
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__head__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25604
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__head__rep2.log | left behind (provenance) | 25416
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__head__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25416
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__head__rep3.log | left behind (provenance) | 25411
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__head__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25411
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__headon__rep1.log | left behind (provenance) | 27966
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__headon__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 27966
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__headon__rep2.log | left behind (provenance) | 27770
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__headon__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 27770
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__headon__rep3.log | left behind (provenance) | 27783
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p8192__cpu__headon__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 27783
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/summary.err | left behind (provenance) | 0
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/build-attnhead2.txt | artifacts/intel-amx/exec/results/attnstats-20260924b/build-attnhead2.txt | 1415
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/exit-reports.txt | artifacts/intel-amx/exec/results/attnstats-20260924b/exit-reports.txt | 11691
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/objdump-check-head2.txt | artifacts/intel-amx/exec/results/attnstats-20260924b/objdump-check-head2.txt | 4232
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt-results.txt | artifacts/intel-amx/exec/results/attnstats-20260924b/rt-results.txt | 33776
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/summary.json | artifacts/intel-amx/exec/results/attnstats-20260924b/summary.json | 3896
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/summary.md | artifacts/intel-amx/exec/results/attnstats-20260924b/summary.md | 1568
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/tests-attnhead2-t_amx_dispatch_dtype.out | artifacts/intel-amx/exec/results/attnstats-20260924b/tests-attnhead2-t_amx_dispatch_dtype.out | 17450
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/tests-attnhead2-t_amx_numerics.out | artifacts/intel-amx/exec/results/attnstats-20260924b/tests-attnhead2-t_amx_numerics.out | 3417
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/tests-attnhead2-t_heterogeneous_scheduler.out | artifacts/intel-amx/exec/results/attnstats-20260924b/tests-attnhead2-t_heterogeneous_scheduler.out | 11571
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/tests-attnhead2-t_llama_unit.out | artifacts/intel-amx/exec/results/attnstats-20260924b/tests-attnhead2-t_llama_unit.out | 73054
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/tests-attnhead2-t_page_share_counters.out | artifacts/intel-amx/exec/results/attnstats-20260924b/tests-attnhead2-t_page_share_counters.out | 3571
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/tests-attnhead2.txt | artifacts/intel-amx/exec/results/attnstats-20260924b/tests-attnhead2.txt | 532
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/tests-badvalue-attn_stats.out | artifacts/intel-amx/exec/results/attnstats-20260924b/tests-badvalue-attn_stats.out | 26873
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/tests-on-t_heterogeneous_scheduler.out | artifacts/intel-amx/exec/results/attnstats-20260924b/tests-on-t_heterogeneous_scheduler.out | 14587
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/tests-on-t_llama_unit.out | artifacts/intel-amx/exec/results/attnstats-20260924b/tests-on-t_llama_unit.out | 80751
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/build-attnhead2.done | left behind (provenance) | 3
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/build-attnhead2.log | left behind (provenance) | 3776
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__base3__rep1.log | left behind (provenance) | 20983
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__base3__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20983
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__base3__rep2.log | left behind (provenance) | 21123
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__base3__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21123
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__base3__rep3.log | left behind (provenance) | 20719
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__base3__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20719
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__head2__rep1.log | left behind (provenance) | 21022
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__head2__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21022
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__head2__rep2.log | left behind (provenance) | 21013
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__head2__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 21013
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__head2__rep3.log | left behind (provenance) | 20736
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__head2__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 20736
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__headon2__rep1.log | left behind (provenance) | 24815
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__headon2__rep1.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 24815
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__headon2__rep2.log | left behind (provenance) | 25018
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__headon2__rep2.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 25018
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__headon2__rep3.log | left behind (provenance) | 24866
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/rt/q3-4b-tp2-8u-p1024__cpu__headon2__rep3.log.attempt1 | left behind (duplicate (held by the compact result text of the same directory)) | 24866
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924b/summary.err | left behind (provenance) | 0
