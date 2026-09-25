@@ -1,0 +1,35 @@
+export const meta = {
+  name: 'map-reviewer-points-pr4557',
+  description: 'Extract the reviewing maintainer\'s points from his PR #4424 review and API sketch, map each to PR #4557 (addressed here / deferred to #4424 / not addressed; same as or different from his suggestion), verify each mapping with two refuters',
+  phases: [{ title: 'Extract' }, { title: 'Map' }, { title: 'Refute' }],
+}
+const S = '/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a726337-9373-4eb4-935f-269e8630de97/scratchpad'
+const REPO = '/home/jhan/workspace/ai-runs/tron-issue4525'
+const COMMON = `
+Context: PR #4557 of positron-ai/tron (branch jhan-kv-typed-tensors, HEAD 1c87d66926, 5 commits on origin/main 996f58ec82, worktree ${REPO}) is the response to two comments the reviewing maintainer left on PR #4424: his review (${S}/ben-review-5270587330.md) and his API sketch (${S}/ben-comment-5765866077.md). PR #4557 covers the packed V plane and the native K plane only; the packed-K types (k_vnni_layout etc.) are deferred to PR #4424 (PR order item 2 of issue #4525). The design that PR #4557 implements is the text ${S}/design.txt (its section "Decision record and reviewer questions" has Q1-Q4 and D5 with the chosen deviations from the sketch, and section 2 discusses the reviewer's comments). The PR description draft is ${S}/pr-body.md.
+READ-ONLY: do not edit files, do not run builds, do not ssh, do not use gh to post; use git/grep/file reads in ${REPO} (git diff origin/main HEAD; the new headers h/tron/tensor/v_vnni.hpp and h/tron/tensor/kv_cache_fwd.hpp; h/tron/models/kv_cache.hpp; h/tron/kernels/amx_attn_iface.hpp; src/tron/kernels/amx_attn.cpp; t/t_llama_unit.cpp). Never name the reviewer; say "the reviewer".`
+const POINTS = { type: 'object', properties: { points: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, source: { type: 'string' }, quote: { type: 'string' }, summary: { type: 'string' } }, required: ['id', 'source', 'quote', 'summary'] } } }, required: ['points'] }
+const MAPPING = { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string', enum: ['addressed in 4557', 'partly addressed in 4557', 'deferred to 4424', 'not addressed', 'not applicable'] }, how: { type: 'string' }, evidence: { type: 'string' }, differs: { type: 'boolean' }, difference: { type: 'string' }, reason: { type: 'string' } }, required: ['id', 'status', 'how', 'evidence', 'differs', 'difference', 'reason'] }
+const VERDICT = { type: 'object', properties: { refuted: { type: 'boolean' }, reason: { type: 'string' }, corrected_status: { type: 'string' }, corrected_text: { type: 'string' } }, required: ['refuted', 'reason'] }
+phase('Extract')
+const ex = await agent(`${COMMON}
+TASK: read the two comment files and list every DISTINCT point the reviewer makes: each requirement, design element, rule or expectation (for example: no bare bf16 pointers; follow the tensor/dtensor/expr precedent; introduce a vnni_tensor type with the usual tensor operations and row-wise load/store; separate layout, storage and views; a k_vnni_layout and a v_vnni_layout with offset(); a vnni_view carrying layout and constness with a private pointer constructor, mutable-to-const conversion only, at(), no data()/pointer conversion/operator[]; span-like const semantics; an aligned vnni_tensor storage with as_view() lvalue-only; preserve the zero-initialization invariant and add no clearing to hot allocation paths; the arena must construct the storage type, no casting of SIMD arrays; typed bulk operations store_row/load_row per layout with std::span arguments and conversions; a typed store_block for K; layout header does not include attention kernels; detail::vnni_access escape hatch not for ordinary cache/attention code; kv_block selects storage at compile time (K by k_vnni::layout_on, V by TRON_CHUNK_SIZE), same bytes and alignment; page accessors return typed views (k_packed); kernel signatures take typed views (packed_k_page, packed_v_page); the AVX-512 fallback takes packed_k_page; kernels extract the pointer once and keep the instruction sequence; the compile-error examples; his own doubt about the separate k_vnni_layout). Number them B01, B02, ... in the order they appear, quote the sentence(s) verbatim, and give a one-line summary. Do not merge distinct points; do not invent points that are not in the text.`, { label: 'extract-points', phase: 'Extract', schema: POINTS })
+const points = ex?.points ?? []
+log(`${points.length} points extracted`)
+const results = await pipeline(
+  points,
+  p => agent(`${COMMON}
+TASK: map ONE reviewer point to PR #4557.
+POINT ${p.id} (${p.source}): "${p.quote}"
+Summary: ${p.summary}
+Determine from the code at HEAD (not from the description): status = addressed in 4557 / partly addressed in 4557 / deferred to 4424 (the K-packed side) / not addressed / not applicable. Say HOW it is addressed with file:line evidence (quote the code). Say whether PR #4557 does it DIFFERENTLY from the reviewer's suggestion (differs = true when the mechanism, type shape, name or rule is not what he sketched; false when it follows the sketch). Describe the difference concretely (his: ...; PR #4557: ...) and the recorded reason (design decision record Q1-Q4/D5 in ${S}/design.txt, or a code comment or Note in the PR, or the PR description; say "no recorded reason" if none). Be precise about names: the PR's types are v_vnni_tensor<Rows, Cols>, v_vnni_view<T, Rows, Cols>, v_vnni_row<T, Cols>, detail::v_vnni_access (plane, pair_base), free functions append_v_row / load_row / copy_token taking const_view/view row arguments (not std::span), aliases native_k_view / const_native_k_view, kernels qk_rowmajor_128x4(const_native_k_view<64,128>, ...) and weights_times_v_128x4(v_vnni_view<const bf16,64,128>, ...), Note [KV block lifetime] (placement-new of kv_block arrays over the arena), Note [Packed V layout].`, { label: `map:${p.id}`, phase: 'Map', schema: MAPPING }),
+  (m, p) => parallel([1, 2].map(i => () => agent(`${COMMON}
+You are refuter ${i} of 2. Check this mapping of reviewer point ${p.id} ("${p.quote}") against the code at HEAD and the design text. Refute if the status is wrong, the evidence does not hold, the "differs" verdict or the described difference is inaccurate, or the reason is misattributed. Otherwise confirm; correct wording where needed.
+MAPPING: status=${m?.status}; how=${m?.how}; evidence=${m?.evidence}; differs=${m?.differs}; difference=${m?.difference}; reason=${m?.reason}`, { label: `refute:${p.id}:${i}`, phase: 'Refute', schema: VERDICT })))
+    .then(vs => ({ point: p, mapping: m, votes: vs.filter(Boolean) })),
+)
+const all = results.filter(Boolean)
+const kept = all.filter(r => r.votes.filter(v => v.refuted).length < 2)
+const refuted = all.filter(r => r.votes.filter(v => v.refuted).length >= 2)
+log(`${kept.length} mappings kept, ${refuted.length} refuted by both`)
+return { kept, refuted }

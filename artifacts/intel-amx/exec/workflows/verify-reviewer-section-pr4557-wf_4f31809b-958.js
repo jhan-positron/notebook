@@ -1,0 +1,18 @@
+export const meta = {
+  name: 'verify-reviewer-section-pr4557',
+  description: 'Fact-check and plain-English-check the new "Response to the reviewer" section of the PR #4557 description against the code and the verified point mappings',
+  phases: [{ title: 'Verify' }],
+}
+const S = '/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a726337-9373-4eb4-935f-269e8630de97/scratchpad'
+const REPO = '/home/jhan/workspace/ai-runs/tron-issue4525'
+const COMMON = `
+READ-ONLY (no edits, no builds, no ssh, no gh posting). The section under check is ${S}/section-reviewer.md (it is also inserted in ${S}/pr-body.md before "## Status"). It responds to the reviewer's two comments on PR #4424, saved verbatim at ${S}/ben-review-5270587330.md and ${S}/ben-comment-5765866077.md. The code is the worktree ${REPO} at HEAD 1c87d66926 (git diff 996f58ec82 HEAD is the PR diff). The verified per-point mappings (44 points, with refuter votes) are summarised in ${S}/ben-mapping-summary.txt; the design's decision record is in ${S}/design.txt (Q1-Q4, D5). Never name the reviewer. Return concrete findings: the exact phrase, the problem, the corrected phrase; at most 15, most important first; do not invent findings.`
+const SCHEMA = { type: 'object', properties: { findings: { type: 'array', items: { type: 'object', properties: { severity: { type: 'string', enum: ['major', 'minor', 'note'] }, phrase: { type: 'string' }, problem: { type: 'string' }, fix: { type: 'string' } }, required: ['severity', 'phrase', 'problem', 'fix'] } }, verdict: { type: 'string' } }, required: ['findings', 'verdict'] }
+phase('Verify')
+const r = await parallel([
+  () => agent(`${COMMON}
+LENS: facts. For every table row check (1) that the point is really in the reviewer's text and is paraphrased faithfully, (2) that the "In PR #4557" cell is true at HEAD (quote file:line), (3) that the "Same as suggested?" verdict and its decision id (Q1-Q4, D5) match the design record and the mapping summary, (4) that no point of the two comments is missing from the tables and none is invented, (5) that the Summary counts (17 same, 6 same rule other shape, 6 different with recorded reason, 1 without, 5 deferred; 35 sketch points; 5 review points) are right, and (6) that the claim about q_packed (pack_q_group_128x4 output still a bare pointer, unchanged from main, not cache storage) is true.`, { label: 'verify:facts', phase: 'Verify', schema: SCHEMA }),
+  () => agent(`${COMMON}
+LENS: plain-English Check mode. Rules: (1) define every code name, acronym, metric and project term at first use or in the description's existing "Words used here" table (read ${S}/pr-body.md to see which terms are already defined there: packed V, VNNI, native K, bf16/fp32/fp16, AMX/AVX-512/AVX2, software path, 16/8-lane build, AMX-on/off build, kill switch, owner/view/row, retained/sliding slot, arena/chunk, even/odd partner rule, Note [Name], FPGA, QK/PV, arm, A/B, band, shape, TPS/TTFT, rc, delphi-3bda); (2) one claim per sentence (split on because/since/which means/so that/semicolons); (3) numbers carry units and a plain meaning where needed; (4) citations follow sentences; (5) not applicable (section, not a whole document); (6) no idioms, metaphors or uncommon words; (7) bullets or blank lines separate separate points; (8) short sentences, no semicolons, at most one subordinate clause. Table cells count as prose when they carry sentences. Report each violation with rule number, exact phrase and fix.`, { label: 'verify:english', phase: 'Verify', schema: SCHEMA }),
+])
+return r.filter(Boolean)

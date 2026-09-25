@@ -1,0 +1,1080 @@
+qwen3-4b prefill: AMX or FPGA
+
+## Prefill on qwen3-4b: attention on the CPU with AMX against attention on the FPGA
+
+Answer to jhan's question of 2026-09-21: "Among the tests performed at qwen3-4b, comparing prefill performance between AMX (canonical, VNNI-K) and Attention-on-FPGA, which is better?" Every number comes from campaign result files under exec/results/ (extraction workflow wf_258257df-233 with 14 agents and verification workflow wf_89cf57ff-912 with 10 agents, both 2026-09-21. Section 5 added 2026-09-22 from the q4b-fpga-20260921 campaign). Generator: exec/prefill-amx-vs-fpga-20260921/gen_page.py.
+
+Short version.
+
+At prompt 1024, prefill takes about the same time with the AMX kernel on the CPU as with attention on the FPGA (every matched pair within -1.9 % to +4.6 % for the canonical build). From prompt 2048 up the FPGA is faster at every length, most at the longest prompts: a cold 8192-token prefill takes 6.7 s on the FPGA with the AMX build, or 6.9 s with the AVX build, against 12.7 s with the AMX kernel on the CPU (1.9x) in the CI harness, and 8 prompts of 8192 tokens on one engine take 29 s on the FPGA against 54 s with the AMX kernel on the CPU (1.8x) and 123 s with the old AVX kernel in runtron (2.3x for AMX against AVX, section 7). Under FPGA attention the AMX build lowers the warm TTFT by 33 to 49 % from prompt 4096 up in every one of three passes (cause not settled: the card's K/V space ran out in the 4096 to 6144 cells of every pass, but the gain also appears at 2048 and 7168 where it did not), and without a warm prefix cache the two builds are within 8 % on TTFT and 2 % on decode in the CI harness and within 2 % on both in runtron with 8 users (sections 6 and 7).
+
+## Words used here
+
+tron, runtron, rinzler, engine, FPGA, tp2 / tp4
+tron is the inference program under test. runtron is its command-line tool (one process, no HTTP). rinzler is the production server around tron. One running rinzler is one engine. FPGA (field-programmable gate array) = the accelerator card. tp2 / tp4 = two / four FPGA cards per engine.
+
+prefill, TTFT, TPS
+prefill = processing the prompt before the first generated token. TTFT = time to first token. TPS = generated tokens per second per user (decode speed). Two different TTFT numbers appear on this page and are never mixed. (a) runtron's server-side "Parsing the prompt took" time. For 8 users this is the wall time of the batched prefill of all 8 prompts (the 8 values agree to the millisecond). (b) The CI harness's client-side stopwatch from the HTTP request to the first streamed chunk. It is the mean over all users x 10 rounds (8 users = 80 samples on the whole machine, 4 users = 40 samples in the our-half cells). It also contains the proxy hop, tokenization and the first sampling step.
+
+CI, CI harness, the nightly
+CI = continuous integration, the automated test run. The nightly = the CI run that starts at 03:30 UTC every night on delphi-3bda and installs that day's tron deb. The CI harness = the nightly's own client program (systems_test), which we also run by hand.
+
+attention on the CPU / on the FPGA, K/V, HBM, DMA
+tron scores attention either on CPU worker threads (USE_HW_ATTN=0, "CPU attention") or on the FPGA card (USE_HW_ATTN unset, the production and nightly default for ingested models such as qwen3-4b, "FPGA attention" or "AoF"). K/V = the attention keys and values saved per prompt token. HBM = high-bandwidth memory, the card's own memory, which holds a copy of the K/V. DMA = direct memory access, the copy of K/V from host memory to the card. Even with FPGA attention a share of the prompt's attention stays on the CPU (section 4).
+
+AVX, canonical AMX, VNNI-K, kill switch, deb
+AVX = the CPU attention kernel of tron before PR 3879 (AVX-512 vector instructions). An AMX build also runs it when the kill switch TRON_AMX_DISABLE=1 is set. Canonical AMX = the AMX (Intel Advanced Matrix Extensions) page kernel of PR 3879 on the normal row-major K layout. VNNI-K = PR 4424, which stores K in place in the VNNI (Intel Vector Neural Network Instructions) pair-interleaved layout. deb = a tron Debian package as the nightly installs it. The nightly deb has no AMX code. Its build preset does not set TRON_AMX_DISPATCH.
+
+our half, whole 3bda, nightly layout, platformd, Caddy
+delphi-3bda is the test machine (Intel Granite Rapids, 8 FPGA cards). "Our half" = socket 1 with cards 90/93/b9/bc. "Whole 3bda, nightly layout" = 4 tp2 engines (or 2 tp4 engines) started by platformd (the service that starts and places the engines) behind the Caddy reverse proxy, 8 users in total, 2 (tp2) or 4 (tp4) users per engine. This is the nightly's own shape.
+
+campaign names, arm names, issue 4500
+p0perf, wedperf, wedperf-attr, vnnik4, canon-ci, ci-mimic, q4b-swattn, issue4500, q4b-fpga = the result directories under exec/results/ that hold each measurement run. Section 8 lists their files. Arm names of the q4b-fpga campaign: fpgabase = the nightly deb with FPGA attention, fpgacanon = the canonical AMX deb with FPGA attention, canon = the canonical deb with CPU attention. issue 4500 = the GitHub issue on the VNNI-K decode loss under FPGA attention.
+
+prefix cache, tree node, conversation seeds, cold and warm prompts, perfetto
+prefix cache = rinzler reuses the K/V of a prompt start it has already processed. It stores the prefixes as a tree, one node per stored prefix. A warm request hits it, a cold one does not. conversation seeds = the fixed prompt texts each simulated user of the CI harness starts from, reused inside a pass. perfetto = the timeline tracing tool tron writes its spans to.
+
+pre-cell AMX probe (AMX-busy probe), engine journal, driver, FUSE stats, shard
+pre-cell AMX probe = before every cell our campaign driver reads the EXE.AMX_BUSY hardware counter on the engine processes for 20 s while it sends 4 streaming requests of its own (about 1,100 tokens each). The count is proof that AMX instructions ran. It measures the probe's own traffic in the state the engines are in at that moment, not the cell that follows. engine journal = the systemd log of the rinzler engines (journalctl -u rinzler@*). driver = our campaign script that provisions the engines and runs the harness cells (exec/q4b-fpga-20260921/st_ci_perf.py). FUSE stats = the file-like interface through which an engine exposes its counters (FUSE = Filesystem in Userspace). shard = the card-side copy of 1024 tokens of one request's K/V, placed on one card.
+
+repetition, paired t, runtron.pre3879 / runtron.main0916
+repetition = one full round of all cells, arms and attention modes of the runtron campaign (section 7); the campaign ran 3, interleaved, so drift in the machine touches every arm alike. paired t = the mean of the per-repetition differences (repetition k of one arm minus repetition k of the other) divided by their standard error. runtron.pre3879 = runtron built from main before PR 3879 (eb2de0265a, the AVX build); runtron.main0916 = runtron built from main on 2026-09-16 (c7844ca2ce, the canonical AMX build).
+
+Welch t, Welch df, n, sd
+n = repetitions the mean is over. sd = sample standard deviation over those repetitions. Welch t = (FPGA mean minus CPU mean) divided by the standard error of that difference with unequal variances. Welch df = the degrees of freedom of that test. With n = 2 on one side the df is about 1, and a two-sided p of 0.05 then needs |t| above 12.7 (4.3 at df 2, 2.8 at df 4). So a |t| of 3 means "three standard errors", not "resolved", in the low-df rows. With n = 1 on one side no t exists.
+
+## 1. The comparison at prompt 1024
+
+Prefill with attention on the FPGA, relative to prefill with attention on the CPU (qwen3-4b, prompt 1024)
+Each dot: (FPGA-attention TTFT minus CPU-attention TTFT) as a percentage of the CPU-attention TTFT. Left of zero = the FPGA prefill is faster.
+The colour is the CPU attention kernel the FPGA arm is compared with. Hollow dot = the two sides are different builds.
+
+AVX (no AMX code, or kill switch)
+
+canonical AMX (PR 3879)
+
+AMX + VNNI-K (PR 4424)
+
+-25 %
+
+-20 %
+
+-15 %
+
+-10 %
+
+-5 %
+
++0 %
+
++5 %
+
++10 %
+FPGA prefill faster
+CPU prefill faster
+TTFT of the FPGA-attention arm relative to the CPU-attention arm (percent of the CPU arm)
+CI harness (client-side TTFT, 2 or 4 users per engine)
+our half, tp2, 2 users/engine, one binary (09-13)
+
+AVX: CPU 909 ms (n=3) vs FPGA 761 ms (n=3) = -16.3 %, -148 ms, Welch t -55.4
+-16.3 %
+canonical AMX: CPU 727 ms (n=3) vs FPGA 761 ms (n=3) = +4.6 %, +34 ms, Welch t +14.0
++4.6 %
+our half, tp4, 4 users/engine, one binary (09-13)
+
+AVX: CPU 952 ms (n=3) vs FPGA 839 ms (n=3) = -11.8 %, -113 ms, Welch t -30.4
+-11.8 %
+canonical AMX: CPU 856 ms (n=3) vs FPGA 839 ms (n=3) = -1.9 %, -16 ms, Welch t -5.7
+-1.9 %
+whole 3bda, tp2, nightly layout, one deb (09-18 / 09-20)
+
+canonical AMX: CPU 517 ms (n=3) vs FPGA 516 ms (n=1) = -0.3 %, -1 ms, Welch t -
+-0.3 %
+whole 3bda, tp2, nightly layout, nightly deb (09-18 / 09-20)
+
+AVX: CPU 674 ms (n=3) vs FPGA 528 ms (n=1) = -21.7 %, -146 ms, Welch t -
+-21.7 %
+runtron (server-side prefill of 8 prompts in one batch)
+tp2, 8 users, 09-16 (wedperf)
+
+AVX: CPU 3,945 ms (n=3) vs FPGA 3,191 ms (n=2) = -19.1 %, -754 ms, Welch t -52.4
+-19.1 %
+VNNI-K: CPU 3,087 ms (n=3) vs FPGA 3,150 ms (n=2) = +2.0 %, +63 ms, Welch t +6.4
++2.0 %
+tp2, 8 users, 09-16 (wedperf-attr)
+
+AVX: CPU 3,943 ms (n=2) vs FPGA 3,214 ms (n=6) = -18.5 %, -729 ms, Welch t -74.0
+-18.5 %
+canonical AMX: CPU 3,156 ms (n=2) vs FPGA 3,195 ms (n=6) = +1.2 %, +39 ms, Welch t +8.2
++1.2 %
+VNNI-K: CPU 3,091 ms (n=2) vs FPGA 3,161 ms (n=6) = +2.3 %, +70 ms, Welch t +10.6
++2.3 %
+tp2, 8 users, 09-15 (vnnik4)
+
+canonical AMX: CPU 3,141 ms (n=2) vs FPGA 3,155 ms (n=1) = +0.4 %, +14 ms, Welch t -
++0.4 %
+VNNI-K: CPU 3,083 ms (n=2) vs FPGA 3,162 ms (n=1) = +2.6 %, +80 ms, Welch t -
++2.6 %
+tp4, 8 users, 09-16 (wedperf)
+
+AVX: CPU 2,464 ms (n=3) vs FPGA 2,273 ms (n=2) = -7.7 %, -191 ms, Welch t -10.9
+-7.7 %
+VNNI-K: CPU 2,121 ms (n=3) vs FPGA 2,252 ms (n=2) = +6.1 %, +130 ms, Welch t +3.9
++6.1 %
+tp4, 8 users, canonical, two builds (09-13 / 09-16)
+
+canonical AMX: CPU 2,200 ms (n=6) vs FPGA 2,288 ms (n=6) = +4.0 %, +89 ms, Welch t +12.9
++4.0 %
+Figure 1. One row per setup. One dot per CPU kernel the FPGA arm is compared with. In the two "our half" CI rows and the "one deb" whole-machine row the CPU and FPGA arms are the same binary. In the runtron rows both arms are the same binary per colour, but the CPU and FPGA cells ran in separate blocks 8 minutes to about 2 hours apart. Exact values, n, t and df are in the table below.
+
+Canonical AMX on the CPU against the FPGA. Same binary 544ca05c7a, CI harness, our half, 2026-09-13. At tp2, 727 ms against 761 ms (+4.6 %, t +14.0). At tp4, 856 ms against 839 ms (-1.9 %, t -5.7). The sign flips between tp2 and tp4. The FPGA arm of this campaign also had the kill switch set. Block m6 of issue 4500 measured that switch at +62 ms in the same layout for the VNNI-K deb, so the tp2 gap lies between about -4 % and +4.6 %. Same deb 0594dc54 on the whole machine in the nightly layout: 517 ms against 516 ms (-0.3 %, one pass on the FPGA side). Runtron, 8 prompts in one batch: +0.4 % to +1.2 %. Over all five canonical pairs the FPGA arm is slower in three and faster in two. The two pairs nearest zero (-0.3 % and +0.4 %) have n = 1 on the FPGA side and are not resolved.
+
+VNNI-K on the CPU against the FPGA. Only runtron pairs exist. No CI-harness run of the VNNI-K deb with CPU attention was ever made. The FPGA arm is slower by +2.0 % to +6.1 % in all four pairs (tp2 +2.0 to +2.6 %, tp4 +6.1 %). The tp4 value rests on two FPGA repetitions 67 ms apart (Welch t +3.9 with about 1 degree of freedom), so its size is not resolved. The direction is resolved by the wedperf-attr tp2 pair (n = 6 on the FPGA side, t +10.6) and by the same sign in all four pairs.
+
+AVX on the CPU against the FPGA. The FPGA arm is faster by 8 % to 22 % in every pair. This is the comparison the nightly would see today. The nightly deb has no AMX code.
+
+Reading. The AMX kernel and the FPGA remove about the same amount of prefill time from the AVX baseline at this prompt length. Which one is a few percent faster depends on tp and on the harness. Within one setup the difference is resolved (t +14.0 at tp2, t -5.7 at tp4, against a run-to-run sd of 2 to 5 ms). Its sign changes between setups, so no single winner exists at this prompt length. The differences are of the size of the setup differences between the two sides: the kill switch on the p0perf FPGA arm (62 ms in block m6), separate blocks 8 minutes to 2 hours apart in runtron, and two days on the whole machine. Decode TPS, which was not the question, favours the FPGA by 24 to 57 % in the two cited cell sets (CI harness our half +24 to +37 %, runtron vnnik4 +47 to +57 %) [exec/results/p0perf-20260913/summary.md:14,16; exec/results/vnnik4-models-20260915/results.txt:70,90 with vnnik4-20260915/summary.md:9-10]. In the wedperf runtron cells that gain is +13 % (VNNI-K, tp4) to +75 % (AVX, tp2) [exec/results/wedperf-20260916/summary.md:21-24,31-34].
+
+## The record: every matched pair (the last row pairs two builds)
+
+harness | setup | CPU kernel | CPU-attention TTFT, ms (n) | FPGA-attention TTFT, ms (n) | FPGA minus CPU, ms | percent of CPU | Welch t | Welch df | note |
+
+CI harness | our half, tp2, 2 engines x 2 users, one binary 544ca05c7a, 2026-09-13 | AVX | 909 +/- 3.8 (3) | 761 +/- 2.6 (3) | -148 | -16.3 % | -55.4 | 3.6 | |
+
+CI harness | our half, tp2, 2 engines x 2 users, one binary 544ca05c7a, 2026-09-13 | canonical AMX | 727 +/- 3.2 (3) | 761 +/- 2.6 (3) | +34 | +4.6 % | +14.0 | 3.9 | the FPGA arm ran with the kill switch (its CPU share is AVX). Block m6 measured that switch at +62 ms in this layout for the VNNI-K deb, so the canonical-vs-FPGA gap here lies between about -4 % and +4.6 % |
+
+CI harness | our half, tp4, 1 engine x 4 users, one binary 544ca05c7a, 2026-09-13 | AVX | 952 +/- 4.4 (3) | 839 +/- 4.7 (3) | -113 | -11.8 % | -30.4 | 4.0 | |
+
+CI harness | our half, tp4, 1 engine x 4 users, one binary 544ca05c7a, 2026-09-13 | canonical AMX | 856 +/- 1.5 (3) | 839 +/- 4.7 (3) | -16 | -1.9 % | -5.7 | 2.4 | the FPGA arm ran with the kill switch, so its CPU share is AVX |
+
+CI harness | whole 3bda, tp2, 4 engines x 2 users, one deb 0594dc54, 2026-09-18 vs 09-20 | canonical AMX | 517 +/- 1.2 (3) | 516 (1) | -1 | -0.3 % | - | - | FPGA side is one pass (n = 1). The night-to-night sd of this cell is 7.2 ms. Same client host on both sides |
+
+CI harness | whole 3bda, tp2, 4 engines x 2 users, nightly deb 3faba6d0, 2026-09-18 vs 09-20 | AVX | 674 +/- 24.6 (3) | 528 (1) | -146 | -21.7 % | - | - | FPGA side is the 2026-09-18 nightly (remote client). The 13-night mean is 509.5 +/- 7.2 ms. CPU side: base pass 3 (702 ms) had an uneven Caddy spread (22 / 22 / 0 / 20 requests per engine) and 2 Caddy health events. Passes 1 and 2 alone give 660 ms and -20.1 % |
+
+runtron | tp2, 2026-09-16 (wedperf) | AVX | 3,945 +/- 2.7 (3) | 3,191 +/- 20.2 (2) | -754 | -19.1 % | -52.4 | 1.0 | |
+
+runtron | tp2, 2026-09-16 (wedperf) | VNNI-K | 3,087 +/- 4.4 (3) | 3,150 +/- 13.3 (2) | +63 | +2.0 % | +6.4 | 1.1 | |
+
+runtron | tp2, 2026-09-16 (wedperf-attr) | AVX | 3,943 +/- 3.8 (2) | 3,214 +/- 23.2 (6) | -729 | -18.5 % | -74.0 | 5.7 | |
+
+runtron | tp2, 2026-09-16 (wedperf-attr) | canonical AMX | 3,156 +/- 2.3 (2) | 3,195 +/- 10.8 (6) | +39 | +1.2 % | +8.2 | 5.9 | |
+
+runtron | tp2, 2026-09-16 (wedperf-attr) | VNNI-K | 3,091 +/- 3.3 (2) | 3,161 +/- 15.0 (6) | +70 | +2.3 % | +10.6 | 5.9 | |
+
+runtron | tp2, 2026-09-15 (vnnik4) | canonical AMX | 3,141 +/- 4.0 (2) | 3,155 (1) | +14 | +0.4 % | - | - | FPGA side n = 1. CPU cells logged at debug level, FPGA cells at info level |
+
+runtron | tp2, 2026-09-15 (vnnik4) | VNNI-K | 3,083 +/- 9.4 (2) | 3,162 (1) | +80 | +2.6 % | - | - | FPGA side n = 1. CPU side forced TRON_K_VNNI_BLOCK=1 and TRON_K_VNNI_STRIPE=1 by env, the FPGA side ran the binary's defaults (not recorded) |
+
+runtron | tp4, 2026-09-16 (wedperf) | AVX | 2,464 +/- 5.0 (3) | 2,273 +/- 24.3 (2) | -191 | -7.7 % | -10.9 | 1.1 | |
+
+runtron | tp4, 2026-09-16 (wedperf) | VNNI-K | 2,121 +/- 7.4 (3) | 2,252 +/- 47.5 (2) | +130 | +6.1 % | +3.9 | 1.0 | the two FPGA repetitions are 67 ms apart (2218 and 2285 ms), so the size of this delta is not resolved (about 1 degree of freedom) |
+
+runtron | tp4, canonical: CPU 544ca05c7a (09-13) vs FPGA c7844ca2ce (09-16 attr) | canonical AMX | 2,200 +/- 6.1 (6) | 2,288 +/- 15.8 (6) | +89 | +4.0 % | +12.9 | 6.4 | different builds and days (no same-binary canonical tp4 pair exists). Hollow marker |
+
+The runtron TTFT is the batched prefill of 8 prompts. The CI-harness TTFT is a per-request client-side value with 2 or 4 users per engine. The two are not comparable with each other, only within a row. The 1-user smoke runs of vnnik4 (VNNI-K build, CPU 432 ms with n = 2, FPGA 416 ms with n = 1) are left out: the CPU smoke ran under a machine load of 99 to 121 with no free hugepages. Sources are listed in section 9.
+
+## 2. The production-like view
+
+Whole delphi-3bda in the nightly layout (4 tp2 engines behind Caddy, 2 users each), prompt 1024
+Client-side TTFT in ms, mean of 8 users x 10 rounds. CPU-attention bars: q4b-swattn 2026-09-20, mean of 3 passes.
+FPGA-attention bars: one pass each (canon-ci 2026-09-19, ci-mimic 2026-09-18, the nightly of 2026-09-18).
+Night-to-night spread of the nightly cell: 509.5 +/- 7.2 ms over 13 nights. Each FPGA bar is one pass,
+so a difference between two bars under about 20 ms is not resolved.
+attention on the CPU (USE_HW_ATTN=0)
+attention on the FPGA (USE_HW_ATTN unset, the nightly default)
+
+0
+
+100
+
+200
+
+300
+
+400
+
+500
+
+600
+
+700
+TTFT, ms (client side)
+nightly deb (AVX) + CPU attention
+nightly deb, CPU attention (q4b-swattn, 3 passes, 2026-09-20): 674 ms, n=3
+674 ms
+nightly deb (AVX) + FPGA attention [2026-09-18 nightly]
+nightly deb, FPGA attention (the 2026-09-18 nightly itself, remote client): 528 ms, n=1
+528 ms
+canonical AMX deb + CPU attention
+canonical AMX deb, CPU attention (q4b-swattn, 3 passes, 2026-09-20): 517 ms, n=3
+517 ms
+canonical AMX deb + FPGA attention
+canonical AMX deb, FPGA attention (canon-ci, 1 pass, 2026-09-18 23:48 UTC): 516 ms, n=1
+516 ms
+VNNI-K deb + FPGA attention (no CPU-attention run exists)
+VNNI-K deb, FPGA attention (ci-mimic target, 2026-09-18): 504 ms, n=1
+504 ms
+Figure 2. The same deb 0594dc54 gives 517 ms with CPU attention (q4b-swattn, 2026-09-20) and 516 ms with FPGA attention (canon-ci, 2026-09-18). The nightly deb (AVX) gives 674 ms with CPU attention (q4b-swattn, 2026-09-20) and 528 ms with FPGA attention in the nightly of 2026-09-18 (remote client). Each FPGA bar is one pass. A difference between two FPGA bars under about 20 ms (two sd of a two-night difference) is not resolved.
+
+Three caveats on this figure. The CPU-attention bars (q4b-swattn) and the canonical-AMX FPGA bar (canon-ci) used the same client host (claude-agentsrv). canon-ci measured its client lightly loaded (CPU pressure 0 to 5 %). q4b-swattn did not record its client load. The nightly bar used the remote CI runner, whose load is never recorded. The ci-mimic run of the nightly deb with FPGA attention on 2026-09-18 gave 556 ms, but its client host was CPU-saturated during that arm, so the same-day nightly (528 ms) is the number used here [exec/results/ci-mimic-20260918/caveats.html]. The 674 ms bar includes base pass 3 (702 ms), which had an uneven Caddy spread (22 / 22 / 0 / 20 requests per engine) and 2 Caddy health events [exec/results/q4b-swattn-20260919/summary.txt:13]. Passes 1 and 2 alone give 660 ms.
+
+## 3. With FPGA attention, does the CPU build still matter for prefill?
+
+layout | tp | AVX build (nightly deb 3faba6d0, or runtron eb2de0265a) | canonical AMX build (deb 0594dc54, or runtron c7844ca2ce) | VNNI-K build (deb 29a8a547, or runtron ff680c8020) | VNNI-K build + kill switch | source |
+
+whole 3bda, 4 engines x 2 users, CI harness | 2 | 528 (nightly 09-18, remote client), 556 (ci-mimic, saturated client), 13-night mean 509.5 +/- 7.2 | 516 (canon-ci, client pressure 0 to 5 %) | 504 (ci-mimic, client pressure 27 to 48 %, so an upper bound) | - | canon-ci, ci-mimic, nightly-0918.arm.json, nightly_stats.json |
+
+whole 3bda, 2 engines x 4 users, CI harness | 4 | 636 (nightly 09-18), 13-night mean 635.2 +/- 10.1 | 646 | 629 | - | same |
+
+our half, 1 engine x 2 users, CI harness (issue 4500 block m6, n = 2) | 2 | 762 | - | 700 | 762 | issue4500 m6/summary.md:5-8 |
+
+our half, 1 engine x 4 users, CI harness (block m6, n = 2) | 4 | 848 | - | 809 | 814 | issue4500 m6/summary.md:10-12 |
+
+runtron, 8 users (wedperf-attr, n = 6) | 2 | 3,214 | 3,195 | 3,161 | - | wedperf-attr summary.md:25-27 |
+
+runtron, 8 users (wedperf-attr, n = 6) | 4 | 2,253 | 2,288 | 2,231 | - | wedperf-attr summary.md:22-24 |
+
+runtron, 8 users (issue 4500 block m1, 2026-09-18/19, n = 3) | 2 | - | 3,189 (c7844ca2ce), 3,207 (PR 4424 code, layout off) | 3,189 and 3,161 (two identical binaries) | 3,205 | issue4500 summary.md:9-14 |
+
+runtron, 8 users (block m1, n = 3) | 4 | - | 2,333 (c7844ca2ce), 2,347 (layout off) | 2,260 and 2,227 | 2,192 | issue4500 summary.md:15-20 |
+
+At prompt 1024, once the FPGA scores attention, the CPU build changes prefill by a few percent at most. The sign depends on the build and on tp. At longer prompts with a warm prefix cache the AMX build lowers it by 33 to 49 % from 4096 up (means over three passes, section 6). The cause of that warm gain is not settled (section 5 names two candidate mechanisms).
+
+VNNI-K build against AVX build. Faster in every cell: -8 % at 2 users per engine on our half (762 to 700 ms, n = 2, Welch t -35), -5 % at 4 users (848 to 809 ms), -4.5 % on the whole machine at tp2 (528 to 504 ms, one pass each, client under pressure on the 504 side), -1.7 % (tp2) and -1.0 % (tp4) in runtron with 8 prompts.
+
+Canonical build against AVX build. Not resolved at tp2 (516 against 528 ms on the whole machine, one pass each). Against the 13-night mean of 509.5 ms the canonical deb reads +1.3 %. Slightly slower at tp4 (runtron 2,288 against 2,253 ms, +1.6 %, n = 6 per side, Welch t +3.7, and on the whole machine 646 against 636 ms, one pass each).
+
+The kill switch on the VNNI-K deb. At tp2 it gives the AVX number back (762 ms against 762 ms for the nightly deb). At tp4 it does not (814 ms with the switch against 848 ms for the nightly deb, -4.0 %, Welch t -21.5). So at tp4 most of the VNNI-K deb's -4.7 % is a difference between the two debs, not the AMX kernel. In runtron block m1 at tp4 the kill-switch arm (2,192 ms) is the fastest of the five arms.
+
+Hypothesis (unmeasured): the -8 % at 2 users per engine comes from prompt K/V whose DMA to the card had not finished when the next 128-token forward was scheduled. Those pages were then scored on the CPU as dense pages, where the AMX kernel applies (section 4). Test: a perfetto trace of one prefill with the "Attention Ready / Pending" and "attention: hw wait" spans per forward, AMX build against kill switch, on the same engine.
+
+## 4. What runs where during prefill (from the tron source)
+
+Read from the PR 4424 tree (30c4ac82cb) by three agents and checked by two more. Line numbers are from that tree. The FPGA prefill path and its constants are the same in main of 2026-09-10 (1279137d). The AMX statements exist only in the PR tree, because that main predates the PR 3879 merge. The file:line evidence is in the workflow journals.
+
+A prompt is fed to the model 128 tokens per user per forward pass (default of TRON_PER_USER_PROMPT_CHUNK_LIMIT, which no deployment file on delphi-3bda sets). A 1024-token prompt is 8 forwards. With 8 users in one runtron batch, each forward carries 8 x 128 = 1024 prompt tokens. That fits one forward under either reading of the per-forward budget (1024 tokens for the ingested plugin's one minibatch, or tron's 4096-token mask capacity). That is why all 8 users finish prefill on the same pass [h/libtron.hpp:197-203; src/tron/generation/context.cpp:40-42; ingest/src/TronCpp.hs:262-263; h/tron/scheduler/full.hpp:1692-1699; h/tron/models/ranged_mask.hpp:20].
+
+With FPGA attention, the queries of forward k are scored on the FPGA against the K/V of forwards 1..k-1 that already sit in the card's HBM. The first forward (positions 0..127) runs entirely on the CPU: no K/V of the prompt is on the card yet, and the FPGA takes a query only once 128 tokens (positions 0..127, up to the engagement point 127) are DMA-complete in HBM. The engagement point is the default 127. USE_HW_ATTN=N moves it to the next 64-token page boundary minus 1. Every query's own 128-token chunk (the causal triangle) is always scored on the CPU. So is any K/V above the first 4-token group whose DMA had not completed when the forward was planned: the FPGA covers a contiguous DMA-complete prefix, and everything above the first gap stays on the CPU [h/libpos.hpp:90; h/pos/config.hpp:98; h/tron/scheduler/full.hpp:1913-1919, 2755-2800; src/tron/models/ranged_mask.cpp:73-86; h/tron/models/model.hpp:2495-2513].
+
+With CPU attention, the AMX page kernel scores the queries of forward k against the full 64-token pages of forwards 1..k-1 (a page is "dense" for a query when it is fully visible). The own-chunk triangle runs the AVX path in every build [h/tron/models/self_attention.hpp:1383-1394, 1546-1556].
+
+Therefore the FPGA and the AMX kernel replace the same part of the work when the DMA keeps up with the forwards: the cross-chunk rectangles, about 87 % (est.) of the 524,800 causal (query, key) pairs of a 1024-token prompt. The remaining 13 % (est., 66,048 pairs) runs on the CPU with the AVX path in both modes. In an FPGA-attention run the AMX dense-page kernel does not touch the prompt's own attention unless DMA lags, a KV slot is configured software-only, or a shard lost its HBM allocation. The AMX build still packs each query's Q group and holds the tile configuration for every attention call, a small fixed cost that is the only AMX-build effect on the FPGA path when no DMA lags [h/tron/models/self_attention.hpp:1228-1256].
+
+Extra work inside TTFT in the FPGA path: (1) staging each group of 4 tokens into the card's layout (gof::populate) and 36 DMA descriptors per group per layer [src/tron/gof.cpp:159-222; h/tron/models/model.hpp:3146-3300]. (2) One FPGA pass per at most 32 queries per layer (MAX_B, which the card's activation-slot budget or HWATTN_MAX_B can lower), and each pass re-reads the resident K/V [h/tron/models/model.hpp:2580-2650; src/pos/worker.cpp:969-975]. (3) The unpack and join of each pass's result on the attention workers [h/tron/models/self_attention.hpp:843-895, 1024-1050].
+
+prefill of one 1024-token prompt, FPGA attention on (8 forwards of 128 tokens)
+
+forward 1 positions 0..127 CPU only (no K/V on the card yet)
+
+forward k positions (k-1)*128..k*128-1
+
+FPGA : 128 queries x K/V of forwards 1..k-1 already in HBM
+
+(a contiguous DMA-complete prefix)
+
+CPU : 128 queries x own chunk (causal triangle), AVX path
+
++ K/V above the first DMA gap, if any
+
+host : save K/V -> stage 4-token groups -> DMA (async,
+
+visible to the plan of forward k+1 at the earliest)
+
+same prompt, CPU attention (USE_HW_ATTN=0)
+
+forward k AMX page kernel : 128 queries x dense pages of forwards 1..k-1
+
+AVX path : 128 queries x own chunk (causal triangle)
+
+Text diagram. Durations are not to scale. "dense page" = a 64-token KV page fully visible to the query.
+
+Why the two are equal at 1024 (a reading of the data, not a measurement of the parts). In the CI cells on our half, replacing AVX by AMX on the cross-chunk part removed 181 ms (909 to 727) at tp2. Moving that part to the FPGA removed 148 ms (909 to 761). On the whole machine the two removals were 157 ms (674 to 517, one campaign, same client and day) and about 146 ms (est., 674 from q4b-swattn on 2026-09-20 against 528 from the 2026-09-18 nightly on a different client host). The FPGA path carries its staging, launch and join overhead inside TTFT. The AMX path carries the page kernel's own time. At this prompt length the two costs are of the same size.
+
+## 5. Longer prompts: the measured FPGA curve (campaign q4b-fpga-20260921)
+
+Measured 2026-09-21 22:35 to 2026-09-22 01:17 UTC on the whole of delphi-3bda in the nightly layout (platformd 0.11, 4 tp2 engines behind the test proxy, 2 users per engine, 1536 generated tokens) with the same harness, prompts and cells as the 2026-09-20 CPU-attention series. FPGA-attention driver runs so far: 7 with the nightly deb, 7 with the canonical AMX deb (one 9-cell pass and two cold cells each). The CPU-attention arms are the 2026-09-20 series (3 passes each) plus one canonical pass of 2026-09-22 and the cold check cell of 2026-09-19, not re-run further (jhan). Every engine's environment was checked after each provisioning: no USE_HW_ATTN=0 in the FPGA arms, exactly one in the CPU arms. Every FPGA-arm cell spread its 80 requests 20 / 20 / 20 / 20 over the four engines. The canonical CPU pass of 2026-09-22 has one exception: engine default-1 restarted before its prompt-3000 cell (spread 22 / not recorded / 20 / 22, 3 Caddy health events, 2,296 ms). That cell stays in the n = 4 mean and is flagged in the table caption. The campaign took two launches: the first ran the fpgabase pass and stopped at the switch to the canonical deb (an idle-test bug in dut.sh, see the runbook's incident log), the relaunch at 23:37 UTC ran the other six tags, and the binary check of every later run shows the intended deb.
+
+Prefill against prompt length, measured: attention on the FPGA against attention on the CPU
+CI harness, whole delphi-3bda, 4 tp2 engines x 2 users, client-side TTFT in ms (mean over 8 users x 10 rounds), mean of the passes.
+Lines: the cells of a pass (prompt 1024 cold, the others warm: 12 to 54 % prefix-cache hits). Squares: cold cells (fresh engines). End labels: the 8192 warm means. Both axes logarithmic.
+
+nightly deb (AVX) + CPU attention
+
+canonical AMX deb + CPU attention
+
+nightly deb (AVX) + FPGA attention
+
+canonical AMX deb + FPGA attention
+
+0.3 s
+
+0.5 s
+
+1 s
+
+2 s
+
+5 s
+
+10 s
+
+20 s
+
+1024
+
+1536
+
+2048
+
+3000
+
+4096
+
+5120
+
+6144
+
+7168
+
+8192
+prompt length, tokens (log scale)
+TTFT, client side, ms (log scale)
+
+nightly deb (AVX) + CPU attention, prompt 1024: 674 ms (n = 3)
+nightly deb (AVX) + CPU attention, prompt 1536: 1,181 ms (n = 3)
+nightly deb (AVX) + CPU attention, prompt 2048: 1,683 ms (n = 3)
+nightly deb (AVX) + CPU attention, prompt 3000: 3,361 ms (n = 3)
+nightly deb (AVX) + CPU attention, prompt 4096: 5,468 ms (n = 3)
+nightly deb (AVX) + CPU attention, prompt 5120: 8,086 ms (n = 3)
+nightly deb (AVX) + CPU attention, prompt 6144: 11,092 ms (n = 3)
+nightly deb (AVX) + CPU attention, prompt 7168: 13,238 ms (n = 3)
+nightly deb (AVX) + CPU attention, prompt 8192: 15,764 ms (n = 3)
+
+canonical AMX deb + CPU attention, prompt 1024: 518 ms (n = 4)
+canonical AMX deb + CPU attention, prompt 1536: 817 ms (n = 4)
+canonical AMX deb + CPU attention, prompt 2048: 1,078 ms (n = 4)
+canonical AMX deb + CPU attention, prompt 3000: 1,967 ms (n = 4)
+canonical AMX deb + CPU attention, prompt 4096: 2,794 ms (n = 4)
+canonical AMX deb + CPU attention, prompt 5120: 3,792 ms (n = 4)
+canonical AMX deb + CPU attention, prompt 6144: 4,569 ms (n = 4)
+canonical AMX deb + CPU attention, prompt 7168: 5,712 ms (n = 4)
+canonical AMX deb + CPU attention, prompt 8192: 6,929 ms (n = 4)
+canonical AMX deb + CPU attention, prompt 8192, cold: 12,743 ms (n = 1)
+
+nightly deb (AVX) + FPGA attention, prompt 1024: 554 ms (n = 3)
+nightly deb (AVX) + FPGA attention, prompt 1536: 804 ms (n = 3)
+nightly deb (AVX) + FPGA attention, prompt 2048: 1,048 ms (n = 3)
+nightly deb (AVX) + FPGA attention, prompt 3000: 1,435 ms (n = 3)
+nightly deb (AVX) + FPGA attention, prompt 4096: 4,155 ms (n = 3)
+nightly deb (AVX) + FPGA attention, prompt 5120: 5,731 ms (n = 3)
+nightly deb (AVX) + FPGA attention, prompt 6144: 6,767 ms (n = 3)
+nightly deb (AVX) + FPGA attention, prompt 7168: 5,029 ms (n = 3)
+nightly deb (AVX) + FPGA attention, prompt 8192: 6,200 ms (n = 3)
+nightly deb (AVX) + FPGA attention, prompt 4096, cold: 3,057 ms (n = 2)
+nightly deb (AVX) + FPGA attention, prompt 8192, cold: 6,898 ms (n = 2)
+
+canonical AMX deb + FPGA attention, prompt 1024: 512 ms (n = 3)
+canonical AMX deb + FPGA attention, prompt 1536: 754 ms (n = 3)
+canonical AMX deb + FPGA attention, prompt 2048: 885 ms (n = 3)
+canonical AMX deb + FPGA attention, prompt 3000: 1,409 ms (n = 3)
+canonical AMX deb + FPGA attention, prompt 4096: 2,338 ms (n = 3)
+canonical AMX deb + FPGA attention, prompt 5120: 3,582 ms (n = 3)
+canonical AMX deb + FPGA attention, prompt 6144: 3,467 ms (n = 3)
+canonical AMX deb + FPGA attention, prompt 7168: 3,377 ms (n = 3)
+canonical AMX deb + FPGA attention, prompt 8192: 4,105 ms (n = 3)
+canonical AMX deb + FPGA attention, prompt 4096, cold: 2,927 ms (n = 2)
+canonical AMX deb + FPGA attention, prompt 8192, cold: 6,734 ms (n = 2)
+nightly deb (AVX) + CPU, warm 8192: 15.8 s
+canonical AMX deb + CPU, warm 8192: 6.9 s
+nightly deb (AVX) + FPGA, warm 8192: 6.2 s
+canonical AMX deb + FPGA, warm 8192: 4.1 s
+Figure 3. Client-side TTFT against prompt length for the four arms, mean over the passes of each cell. Inside a pass only the prompt-1024 cell meets fresh engines. The later cells reuse the same conversation seeds, and 12 to 54 % of their prompt tokens come from the prefix cache, so the lines above 1024 are warm numbers. The end labels are the 8192 warm means. Squares mark cold cells (single-cell driver runs on fresh engines, mean of two runs for the FPGA arms): the FPGA arms at 4096 and 8192, and the canonical CPU arm at 8192 (the 2026-09-19 check cell, one run).
+
+Cold prefill at prompt 8192 (fresh engines, no prefix cache). AMX kernel on the CPU 12,743 ms (the 2026-09-19 check cell, n = 1) against FPGA attention 6,734 ms with the AMX build and 6,898 ms with the AVX build (n = 2 each, the two cold runs of one arm within 30 ms). The FPGA prefill is 1.9x faster (-47 %). The CPU build behind the FPGA changes the cold number by -2 %. No cold AVX-CPU cell exists at 8192. The CPU cell ran under platformd 0.10.7 on 2026-09-19, the FPGA cells under 0.11.0 on 2026-09-22. At 1024 the 2026-09-22 canonical pass reproduces the 0.10.7 value within 1 % (518 against 516 to 518 ms), so the layout change is not expected to move the 8192 cell either (hypothesis: no same-layout cold CPU cell at 8192 exists).
+
+Cold prefill at prompt 4096. FPGA attention 2,927 ms (AMX build) and 3,057 ms (AVX build), n = 2 each. No cold CPU-attention cell exists at 4096 (no single-cell CPU-attention run at 4096 was made). The warm canonical CPU cell is 2,794 ms with 33 to 38 % prefix-cache hits, so the cold CPU value is higher than that (est.).
+
+Warm prefill at prompt 8192 (the passes' last cell). AVX on the CPU 15,764 ms, AMX on the CPU 6,929 ms (2.3x faster than AVX, the 2x jhan recalled), FPGA attention 4,105 ms with the AMX build (1.7x faster than AMX on the CPU) and 6,200 ms with the AVX build. From AVX on the CPU to FPGA attention with the AMX build the warm prefill at 8192 shrinks 3.8x.
+
+FPGA against CPU, canonical AMX deb, per prompt length (warm cells, FPGA minus CPU in percent of CPU). 1536: -8 %, 2048: -18 %, 3000: -28 %, 4096: -16 %, 5120: -6 %, 6144: -24 %, 7168: -41 %, 8192: -41 %. At 1024 (cold) 512 against 518 ms (-1 %). The FPGA is faster at every prompt length from 2048 up. The gap is largest at the longest prompts (-41 % at 7168, -41 % at 8192) and is not steady in between (-28 % at 3000, -16 % at 4096, -6 % at 5120). The warm cells at 4096 to 6144 are hybrids of FPGA and CPU attention in every pass (the card's K/V space was exhausted, subsection below), the 7168 cells in 2 of 6 pass-cells, and the 8192 cells from round 6 to 8 of 10 on. So the clean long-prompt comparison is the cold one: 6,734 against 12,743 ms at 8192. With three FPGA passes and four CPU passes per warm cell, the Welch t of FPGA against CPU is 1536: -1.6, 2048: -10.8, 3000: -3.7, 4096: -6.0, 5120: -1.6, 6144: -5.4, 7168: -24.3, 8192: -8.1: resolved (|t| above 4.3, the two-sided 5 % bound at 2 degrees of freedom) at 2048, 4096, 6144, 7168, 8192, weak at 1536, 3000, 5120.
+
+FPGA against CPU, nightly deb (AVX), per prompt length (warm cells). 1536: -32 %, 2048: -38 %, 3000: -57 %, 4096: -24 %, 5120: -29 %, 6144: -39 %, 7168: -62 %, 8192: -61 %. At 1024 (cold) 554 against 674 ms (-18 %). This is the pair the nightly would see if it switched qwen3-4b from FPGA attention to CPU attention without AMX: prefill would take 1.2x (1024) to 2.6x (7168) longer. The nightly-deb FPGA value at 1024 (554 ms, mean of three passes that agree within 2 ms, platformd 0.11) is 25 to 45 ms above the same cell's history (528 ms on 2026-09-18, 509.5 +/- 7.2 ms over 13 nights). The agreement across passes makes it a systematic offset of this layout and client, not an outlier (hypothesis: the test proxy on port 80 or the client host; not measured). With the history values the 1024 ratio is 1.3x.
+
+Why the AMX build helps only the warm cells under FPGA attention: two candidate mechanisms, neither proven for every cell. The measurements first (means of the per-pass deltas over 3 paired passes per cell, section 6). The AMX build lowers the warm TTFT by 33 to 48 % from prompt 4096 up, and in every one of the 15 paired passes (-52 to -23 %). At 2048 it lowers it by 15 % on average (-22.5, -17.7, -4.6 % per pass). At 1536 and 3000 the means are -6.2 and -2.0 %, with Welch t -1.4 and -0.3, so not resolved. In the cold cells it lowers TTFT by 2 to 8 % (n = 2 to 3 per cell). Mechanism 1, measured as a co-occurrence (next subsection): in every pass the 4096, 5120 and 6144 cells ran with the card's K/V space exhausted from round 1 until 60 to 99 % of the cell. Part of those cells' attention therefore ran on the CPU. On the CPU the AMX kernel replaces the AVX loop. Mechanism 1 cannot explain three cases. The 2048 cells had no exhaustion warning in any pass and still read -15 % on average. The 7168 cells had no warning in 4 of the 6 pass-cells and read -30.1, -38.0, -30.0 % in the three pairs. At 8192 the first warning of either arm came in round 6 to 8 of 10, and in the first pass the AMX build's TTFT over rounds 1 to 6 was 3,695 ms against 5,545 ms (-33 %, means of the harness's per-round values, 8 users per round). Mechanism 2, a hypothesis: in a warm request the K/V pages (64-token blocks) that come from the prefix cache are scored on the CPU while the card's copy lags (the DMA-lag rule of section 4), and the AMX kernel covers that work. Evidence in the same direction, not proof: in the first FPGA pass the pre-cell AMX probe (defined under Words used here) read 16 to 21 billion AMX-busy cycles in the five warm-state windows that had no exhaustion warning, against 10.6 to 13.4 billion on fresh engines and 32.6 and 32.3 billion in the two windows where the card was full (fpgacanon arm, one 20 s window per cell, more cycles = more attention work ran through the AMX kernel). The probe measures its own 4 requests, not the cell. Test that would settle it: a perfetto trace of one warm 2048 request, AMX build against kill switch. The per-card fallback counter, recorded per cell since the second launch, confirms the exhaustion counts but cannot separate the two mechanisms.
+
+## The card ran out of K/V space in the warm long-prompt cells
+
+The engine journal (the systemd log of the four rinzler engines) of the two campaign windows (2026-09-21 22:30 to 2026-09-22 01:30 UTC and 2026-09-22 13:00 to 16:30 UTC) holds 8,506 warnings of the form "HBM bypass space exhausted, caller degrades to SW attention" followed by "shard base tok_ix N: 36 of 36 slots lose HW attention" [exec/results/q4b-fpga-20260921/hbm-journal-20260921.txt, hbm-journal-20260922.txt]. HBM is the card's memory. A shard is the card-side copy of 1024 tokens of one request's K/V, placed on one of the engine's two cards. One warning means one shard could not be placed on its card, and that shard's attention ran on the CPU instead. 6,851 warnings fall inside cells (between the harness's start and end time of a cell). The other 1,655 fall in the 30 s gaps between cells of the 6 FPGA passes: after the 3000, 4096 and 5120 cells in every pass (6, 6 and 6 of 6 passes), after the 6144 cell in 2 passes, never after 7168. In those gaps our campaign driver (the script that provisions the engines and runs the harness cells) runs the pre-cell AMX probe, which sends 4 streaming requests of its own (about 1,100 tokens each). The gap warnings name only shard bases 0 and 1024. So they are the probe's own requests, which could not place even their first shard. They show that the card was already full when each 3000 cell ended and stayed full to the start of the 6144 cell. The first warning of the first window is at 22:45:30 UTC, 12 s after the prompt-3000 cell of the first FPGA pass ended and 19 s before the first round of its prompt-4096 cell. None of the warnings fall in the CPU-attention pass or in the 8 cold cells. None appear in any earlier FPGA-attention run at prompt 1024: 0 warnings in the 190 runtron logs of issue 4500, wedperf, wedperf-attr and vnnik4-models, and 0 in the 9 engine logs of the p0perf-20260913 CI cells.
+
+cell | passes | warnings per pass | fallback counter per pass (recorded from the second launch on) | share of the cell's shard placements (est.) | first warning (round of 10) | last warning (% of the cell) | free space after the cell, lowest card (MiB) | reading |
+
+nightly deb (AVX) + FPGA attention, prompt 1024, warm | 3 | 0, 0, 0 | -, 0, 0 | - | -, -, - | -, -, - | -, 24,536, 24,392 | clean: every shard on the card |
+
+nightly deb (AVX) + FPGA attention, prompt 1536, warm | 3 | 0, 0, 0 | -, 0, 0 | - | -, -, - | -, -, - | -, 17,480, 17,624 | clean: every shard on the card |
+
+nightly deb (AVX) + FPGA attention, prompt 2048, warm | 3 | 0, 0, 0 | -, 0, 0 | - | -, -, - | -, -, - | -, 9,272, 10,280 | clean: every shard on the card |
+
+nightly deb (AVX) + FPGA attention, prompt 3000, warm | 3 | 0, 0, 0 | -, 0, 0 | - | -, -, - | -, -, - | -, 488, 1,208 | clean: every shard on the card |
+
+nightly deb (AVX) + FPGA attention, prompt 4096, warm | 3 | 372, 292, 379 | -, 292, 379 | 61 to 79 % of 480 | 1, 1, 1 | 99, 98, 99 | -, 56, 56 | exhausted through the whole cell in every pass |
+
+nightly deb (AVX) + FPGA attention, prompt 5120, warm | 3 | 434, 361, 402 | -, 361, 402 | 64 to 78 % of 560 | 1, 1, 1 | 98, 98, 99 | -, 56, 56 | exhausted through the whole cell in every pass |
+
+nightly deb (AVX) + FPGA attention, prompt 6144, warm | 3 | 274, 355, 305 | -, 355, 305 | 43 to 56 % of 640 | 1, 1, 1 | 76, 99, 80 | -, 56, 5,096 | exhausted from round 1 until 76 to 99 % of the cell |
+
+nightly deb (AVX) + FPGA attention, prompt 7168, warm | 3 | 0, 98, 0 | -, 98, 0 | 14 % of 720 | -, 1, - | -, 86, - | -, 5,096, 5,384 | exhausted in 1 of 3 passes (from round 1, until 86 % of the cell) |
+
+nightly deb (AVX) + FPGA attention, prompt 8192, warm | 3 | 85, 53, 42 | -, 53, 42 | 5 to 11 % of 800 | 7, 7, 8 | 95, 99, 94 | -, 56, 56 | clean until round 6 to 7, exhausted after |
+
+nightly deb (AVX) + FPGA attention, prompt 4096, cold | 2 | 0, 0 | -, 0 | - | -, - | -, - | -, 20,072 | clean: fresh engines, every shard on the card |
+
+nightly deb (AVX) + FPGA attention, prompt 8192, cold | 2 | 0, 0 | -, 0 | - | -, - | -, - | -, 15,608 | clean: fresh engines, every shard on the card |
+
+canonical AMX deb + FPGA attention, prompt 1024, warm | 3 | 0, 0, 0 | -, 0, 0 | - | -, -, - | -, -, - | -, 24,392, 24,392 | clean: every shard on the card |
+
+canonical AMX deb + FPGA attention, prompt 1536, warm | 3 | 0, 0, 0 | -, 0, 0 | - | -, -, - | -, -, - | -, 17,192, 16,760 | clean: every shard on the card |
+
+canonical AMX deb + FPGA attention, prompt 2048, warm | 3 | 0, 0, 0 | -, 0, 0 | - | -, -, - | -, -, - | -, 9,416, 9,416 | clean: every shard on the card |
+
+canonical AMX deb + FPGA attention, prompt 3000, warm | 3 | 0, 0, 0 | -, 0, 0 | - | -, -, - | -, -, - | -, 488, 488 | clean: every shard on the card |
+
+canonical AMX deb + FPGA attention, prompt 4096, warm | 3 | 376, 390, 284 | -, 390, 284 | 59 to 81 % of 480 | 1, 1, 1 | 98, 98, 98 | -, 56, 56 | exhausted through the whole cell in every pass |
+
+canonical AMX deb + FPGA attention, prompt 5120, warm | 3 | 425, 434, 430 | -, 434, 430 | 76 to 78 % of 560 | 1, 1, 1 | 98, 98, 97 | -, 56, 56 | exhausted through the whole cell in every pass |
+
+canonical AMX deb + FPGA attention, prompt 6144, warm | 3 | 293, 244, 290 | -, 244, 290 | 38 to 46 % of 640 | 1, 1, 1 | 79, 60, 99 | -, 5,528, 56 | exhausted from round 1 until 60 to 99 % of the cell |
+
+canonical AMX deb + FPGA attention, prompt 7168, warm | 3 | 0, 0, 30 | -, 0, 30 | 4 % of 720 | -, -, 1 | -, -, 25 | -, 4,376, 4,520 | exhausted in 1 of 3 passes (from round 1, until 25 % of the cell) |
+
+canonical AMX deb + FPGA attention, prompt 8192, warm | 3 | 36, 87, 80 | -, 87, 80 | 4 to 11 % of 800 | 8, 6, 6 | 99, 94, 94 | -, 56, 56 | clean until round 5 to 7, exhausted after |
+
+canonical AMX deb + FPGA attention, prompt 4096, cold | 2 | 0, 0 | -, 0 | - | -, - | -, - | -, 20,072 | clean: fresh engines, every shard on the card |
+
+canonical AMX deb + FPGA attention, prompt 8192, cold | 2 | 0, 0 | -, 0 | - | -, - | -, - | -, 15,608 | clean: fresh engines, every shard on the card |
+
+Passes in tag order (pass 1, 2, 3 for warm cells, the two single-cell runs for cold cells). One warning per shard per engine (a shard sits on one card). Fallback counter = the engines' sw_fallback_total FUSE stat, summed over the 4 engines x 2 cards, as the difference across the cell. It is recorded from the second launch on (passes 2 and 3 and the second cold cells); a dash = not recorded. Share (est.) = warnings divided by the cell's shard placements, est. as 80 requests x ceil((prompt + 1536 generated tokens) / 1024) shards of 1024 tokens. First warning = the round (of 10) in which the first warning of the cell fell. Last warning = its position as a percentage of the cell's wall time. Free space = the allocator's free_total after the cell on the card with the least, in MiB (56 MiB = 59,113,472 B = the residue of a full card). Cells with 0 warnings ran with every shard on the card. Source: exec/prefill-amx-vs-fpga-20260921/hbm-exhaustion-cells.json (hbm_cells.py maps the journal lines and the recorded counters onto the perf.json cell windows).
+
+What the card holds (tron source at 30c4ac82cb, read 2026-09-22, and the recorded counters). The card-side K/V allocator (the code that hands out card memory to shards) manages one 1 GiB address range, fixed at compile time. Every allocation occupies that range on each of the card's 32 memory channels (the card's independent memory ports). So a card offers 32 GiB of K/V space, which is what the engines' FUSE stats report (FUSE = Filesystem in Userspace, the file-like interface through which an engine exposes its counters; capacity 34,359,738,368 bytes on every device). The FPGA weights share that space. One 1024-token shard of qwen3-4b (36 layers) takes 4.5 MiB per channel, which is 144 MiB per card. If the weights took none of the space, a card would hold 227 shards (1 GiB / 4.5 MiB), about 232,000 tokens (est.). The recorded free space after the four second-launch cold cells gives the real figure: about 30 to 32 GB free per card on fresh engines (est.: free_total after the cell plus that cell's own shards, 20 requests x ceil((prompt + 1536) / 1024) x 144 MiB per engine over its two cards), out of 34.4 GB. So the weights and fixed allocations take about 2.4 to 4.3 GB per card (est.), and a card holds about 199 to 211 shards (est.), roughly 200,000 to 215,000 tokens. A shard is released only when the host prefix cache evicts its tree node (the prefix cache stores prompt prefixes as a tree, one node per stored prefix). A request ending does not release its shard. Every warning names the largest free block at that moment: 0x3000 (12 KiB) on the lower-numbered card of every engine and 0x5800 (22 KiB) on the other (4,259 and 4,247 lines), constant through both windows. The recorded free_total in the exhausted cells is 59,113,472 B (56.4 MiB) on every card that warned, in every pass. 56 MiB free in blocks of at most 22 KiB, against 144 MiB per shard, means the space was full. Fragmentation played no part (the first version of this subsection left "full or fragmented" open). No environment variable or config changes the space or the shard size. The fallback counter (sw_fallback_total per device), recorded per cell from the second launch on, equals the journal's warning count in every cell [src/pos/driver.cpp:884-894; src/tron/gof.cpp:34-39, 64-103; h/pos/device.hpp:459-479; h/tron/shard.hpp:8-31; src/pos/alloc.cpp:350-387; h/pos/alloc.hpp:87-93; src/rinzler.cpp:4258-4283].
+
+Reading. Inside a pass the harness reuses the same conversation seeds (the fixed prompt texts each simulated user starts from). The prefix cache therefore keeps the K/V of earlier requests alive. Their shards stay on the card as well. The recorded free space shows the fill (passes 2 and 3, the card with the least): 26 GB after the 1024 cell, 18 GB after 1536, 10 to 11 GB after 2048 and 0.5 to 1.3 GB after 3000. By the end of the 3000 cell the card is full: the probe requests in the gap before 4096 could not place their first shard, in every pass. In the 4096 and 5120 cells the space stayed full through the whole cell in every pass (first warning in round 1, last at 97 to 99 % of the cell, 59 to 81 % of the cells' shard placements failed, est.). In the 6144 cells it was full from round 1 until 60 to 99 % of the cell. In the 7168 cells the space had come free in 4 of the 6 pass-cells (5 to 6 GB free after the cell) and was exhausted in 2 (98, 30 warnings). In the 8192 cells it filled again from round 6 to 8 (4 to 11 % of placements failed, est.). The release during the 6144 and 7168 cells is not measured (hypothesis: the host prefix cache evicted the oldest seeds' nodes during the long 6144 cell, which released their shards). So the warm FPGA numbers at 4096 to 6144 are hybrids of FPGA and CPU attention in every pass, the 7168 numbers are hybrids in 2 pass-cells of 6, and the 8192 numbers are hybrids in their last rounds. The cold cells (fresh engines, no warning) are the clean FPGA-attention numbers at every length. What this does and does not explain about the AMX build's warm gains is in the paragraph before this subsection.
+
+## The record: every cell
+
+prompt length |
+nightly deb (AVX) + CPU attention
+warm mean (passes) / cold |
+canonical AMX deb + CPU attention
+warm mean (passes) / cold |
+nightly deb (AVX) + FPGA attention
+warm mean (passes) / cold |
+canonical AMX deb + FPGA attention
+warm mean (passes) / cold |
+FPGA vs CPU, canonical deb (warm) | FPGA vs CPU, nightly deb (warm) |
+
+1024 |
+- / 674 (3) |
+- / 518 (4) |
+- / 554 (3) |
+- / 512 (3) |
+-1 % |
+-18 % |
+
+1536 |
+1,181 +/- 93 (3) / - |
+817 +/- 58 (4) / - |
+804 +/- 43 (3) / - |
+754 +/- 45 (3) / - |
+-8 % |
+-32 % |
+
+2048 |
+1,683 +/- 101 (3) / - |
+1,078 +/- 30 (4) / - |
+1,048 +/- 101 (3) / - |
+885 +/- 16 (3) / - |
+-18 % |
+-38 % |
+
+3000 |
+3,361 +/- 105 (3) / - |
+1,967 +/- 263 (4) / - |
+1,435 +/- 56 (3) / - |
+1,409 +/- 128 (3) / - |
+-28 % |
+-57 % |
+
+4096 |
+5,468 +/- 295 (3) / - |
+2,794 +/- 59 (4) / - |
+4,155 +/- 640 (3) / 3,057 (2) |
+2,338 +/- 120 (3) / 2,927 (2) |
+-16 % |
+-24 % |
+
+5120 |
+8,086 +/- 635 (3) / - |
+3,792 +/- 143 (4) / - |
+5,731 +/- 461 (3) / - |
+3,582 +/- 186 (3) / - |
+-6 % |
+-29 % |
+
+6144 |
+11,092 +/- 1413 (3) / - |
+4,569 +/- 354 (4) / - |
+6,767 +/- 793 (3) / - |
+3,467 +/- 171 (3) / - |
+-24 % |
+-39 % |
+
+7168 |
+13,238 +/- 1193 (3) / - |
+5,712 +/- 135 (4) / - |
+5,029 +/- 282 (3) / - |
+3,377 +/- 118 (3) / - |
+-41 % |
+-62 % |
+
+8192 |
+15,764 +/- 1232 (3) / - |
+6,929 +/- 516 (4) / 12,743 (1) |
+6,200 +/- 708 (3) / 6,898 (2) |
+4,105 +/- 411 (3) / 6,734 (2) |
+-41 % |
+-61 % |
+
+Client-side TTFT in ms, harness mean over 8 users x 10 rounds. "warm mean (passes)" = mean over the passes with the sd and the pass count. "cold" = single-cell driver runs (and the 2026-09-19 check cell for the canonical CPU arm at 8192). The CPU-attention columns come from the 2026-09-20 campaign (3 passes) plus the canonical pass of 2026-09-22. In the canonical 3000 row the two highest values (2,056 ms in the 2026-09-20 pass 1 and 2,296 ms in the 2026-09-22 pass) are cells with an uneven proxy spread (one engine unreported, 2 and 3 Caddy health events). Without them the row reads 1,758 ms (n = 2) and the FPGA-vs-CPU figure at 3000 is -18 % instead of -26 %. Source: exec/prefill-amx-vs-fpga-20260921/fpga-campaign-rows.json (ingest_fpga.py over the perf.json files).
+
+Reading. Both the AMX kernel and the FPGA remove the quadratic attention cost that the AVX path pays, and the FPGA removes more of it: at 8192 the AMX kernel halves the AVX prefill and the FPGA halves it again. The CPU build moves the cold FPGA prefill by 2 to 8 % (the AMX build is faster in all seven cold pass-pairs: n = 3 at 1024, n = 2 at 4096 and 8192). So the card sets most of the cold number, not all of it. The warm FPGA numbers at 4096 to 6144 are hybrids of FPGA and CPU attention in every pass (the card's K/V space was exhausted, subsection above), the 7168 numbers in 2 of 6 pass-cells, and the 8192 numbers from round 6 to 8 of 10 on. So the cold cells are the ones to quote for long prompts. Decode TPS in the same cells stays in the FPGA's favour (at 8192: 121 TPS with FPGA attention and the AMX build against 60 TPS with AMX on the CPU).
+
+## 6. Is AMX plus FPGA attention better than FPGA attention alone?
+
+Question (jhan, 2026-09-22): from the data so far, is it a pattern that the AMX build with attention on the FPGA beats the AVX build with attention on the FPGA, for both prefill and decode? The comparison below holds the attention mode fixed (FPGA) and changes only the CPU build: canonical AMX deb against the nightly deb (no AMX code). The two arms ran as separate passes on the same evening or afternoon, and the comparison pairs pass 1 with pass 1, pass 2 with pass 2, pass 3 with pass 3 (three warm passes per arm, two or three cold runs per arm and length). The VNNI-K deb is listed separately at the end.
+
+Answer.
+
+Prefill: yes in warm cells from prompt 4096 up, resolved over three passes. In cold cells the AMX build is faster by 2 to 8 %. At 1536 and 3000 the difference is not resolved. In the warm cells at 4096 to 8192 the AMX build prefilled 33 to 48 % faster than the AVX build (means of the per-pass deltas, 3 paired passes per cell). It was faster in every one of the 15 paired passes (per-pass range -51.7 to -23.3 %). The Welch t over the three pass means per arm is -9.4 to -4.4. At 2048 the mean is -15.0 % (-22.5, -17.7, -4.6 % per pass, t -2.8): the AMX build faster in all three passes, by a varying margin. At 1536 the mean is -6.2 % (-1.6, -13.1, -3.8 %, t -1.4) and at 3000 -2.0 % (+0.7, -8.2, +1.5 %, t -0.3). Neither is resolved. In the cold cells the AMX build is faster in every run: -7.5 % at 1024 (n = 3, t -8.9), -4.3 % at 4096 and -2.4 % at 8192 (n = 2 each). At prompt 1024 the pairs of the earlier campaigns read -2.3 % to +1.6 % (n = 1 to 6), and at tp4 the AVX build was faster in both pairs (+1.6 %, resolved in runtron with Welch t +3.7). So at 1024 the sign depends on the campaign and on tp. With 8 users on one engine and no prefix-cache reuse (runtron, section 7) the AMX build prefills 0.3 to 2.0 % faster under FPGA attention (n = 3 per cell, paired t -0.7 to -17). The cause of the warm gain is not settled (section 5). At 4096 to 6144 it co-occurs in every pass with the card's K/V space running out, which moved 38 to 81 % of those cells' shard placements to the CPU (est.), where the AMX kernel replaces the AVX loop. That is a measured co-occurrence, not a measured cause. The gain also appears where nothing fell back: at 2048 (-15.0 %, 0 warnings in all 6 pass-cells) and at 7168 (-30.1, -38.0, -30.0 % in the three pairs, 0 warnings in 4 of the 6 pass-cells).
+
+Decode: no at prompt 1024 and in cold cells. Not resolved in warm long-prompt cells. At prompt 1024 the two builds differ by at most 2 % in every pair (-2.0 % to +0.5 % in the earlier campaigns, -0.6, +1.7, +0.8 % in this campaign's three cold runs). In the cold cells at 4096 and 8192 the difference is +0.6 to +0.7 % (n = 2 each). In the warm cells from 4096 up the means favour the AMX build by +1.5 to +8.8 % TPS. The per-pass deltas, however, run from -9.1 to +22.2 % and change sign inside 4 of the 5 cells (4096, 5120, 7168, 8192). So the warm decode direction is not resolved with three passes. With 8 users on one engine and no prefix-cache reuse (runtron, section 7) the two builds decode within 1.2 % of each other in every cell (n = 3). The warm TPS itself lies 12 to 33 % below the cold TPS at the same prompt length. The VNNI-K build is the opposite case: it decodes 4 to 13 % slower under FPGA attention (issue 4500, the GitHub issue on the VNNI-K decode loss under FPGA attention).
+
+AMX build against AVX build, both with attention on the FPGA
+Left: TTFT change (negative = the AMX build prefills faster). Right: decode TPS change (positive = the AMX build decodes faster). qwen3-4b.
+Rows above the horizontal line: this campaign, tp2, 2 users per engine. Dot = mean of the paired per-pass deltas (2 or 3 passes per arm), pale bar = their range.
+warm = later cells of a pass, cold = fresh engines. Rows below the line: prompt-1024 pairs from earlier campaigns (tp4 = 4 users per engine, runtron = 8 users in one process).
+TTFT: AMX build relative to AVX build, percent
+
+-55
+
+-45
+
+-35
+
+-25
+
+-15
+
+-5
+
++5
+
++15
+decode TPS: AMX build relative to AVX build, percent
+
+-20
+
+-15
+
+-10
+
+-5
+
++0
+
++5
+
++10
+
++15
+
++20
+
++25
+prompt 1024, cold
+
+prompt 1024, cold: per pass -6.3, -7.4, -8.9 %
+prompt 1024, cold: -7.5 %
+-7.5 %
+
+prompt 1024, cold: per pass -0.6, +1.7, +0.8 %
+prompt 1024, cold: +0.6 %
++0.6 %
+prompt 1536, warm
+
+prompt 1536, warm: per pass -1.6, -13.1, -3.8 %
+prompt 1536, warm: -6.2 %
+-6.2 %
+
+prompt 1536, warm: per pass +0.5, -0.1, -1.4 %
+prompt 1536, warm: -0.4 %
+-0.4 %
+prompt 2048, warm
+
+prompt 2048, warm: per pass -22.5, -17.7, -4.6 %
+prompt 2048, warm: -15.0 %
+-15.0 %
+
+prompt 2048, warm: per pass -0.4, +1.6, +0.5 %
+prompt 2048, warm: +0.6 %
++0.6 %
+prompt 3000, warm
+
+prompt 3000, warm: per pass +0.7, -8.2, +1.5 %
+prompt 3000, warm: -2.0 %
+-2.0 %
+
+prompt 3000, warm: per pass +2.0, -0.7, +0.4 %
+prompt 3000, warm: +0.6 %
++0.6 %
+prompt 4096, cold
+
+prompt 4096, cold: per pass -4.3, -4.2 %
+prompt 4096, cold: -4.3 %
+-4.3 %
+
+prompt 4096, cold: per pass +0.6, +0.7 %
+prompt 4096, cold: +0.6 %
++0.6 %
+prompt 4096, warm
+
+prompt 4096, warm: per pass -47.1, -28.6, -51.7 %
+prompt 4096, warm: -42.5 %
+-42.5 %
+
+prompt 4096, warm: per pass +7.6, -9.1, +22.2 %
+prompt 4096, warm: +6.9 %
++6.9 %
+prompt 5120, warm
+
+prompt 5120, warm: per pass -45.2, -35.2, -31.0 %
+prompt 5120, warm: -37.1 %
+-37.1 %
+
+prompt 5120, warm: per pass +7.0, -8.7, +6.1 %
+prompt 5120, warm: +1.5 %
++1.5 %
+prompt 6144, warm
+
+prompt 6144, warm: per pass -44.5, -51.7, -49.2 %
+prompt 6144, warm: -48.5 %
+-48.5 %
+
+prompt 6144, warm: per pass +2.3, +13.9, +10.3 %
+prompt 6144, warm: +8.8 %
++8.8 %
+prompt 7168, warm
+
+prompt 7168, warm: per pass -30.1, -38.0, -30.0 %
+prompt 7168, warm: -32.7 %
+-32.7 %
+
+prompt 7168, warm: per pass +14.0, +14.8, -3.4 %
+prompt 7168, warm: +8.5 %
++8.5 %
+prompt 8192, cold
+
+prompt 8192, cold: per pass -2.0, -2.8 %
+prompt 8192, cold: -2.4 %
+-2.4 %
+
+prompt 8192, cold: per pass -0.0, +1.5 %
+prompt 8192, cold: +0.7 %
++0.7 %
+prompt 8192, warm
+
+prompt 8192, warm: per pass -44.7, -23.3, -31.3 %
+prompt 8192, warm: -33.1 %
+-33.1 %
+
+prompt 8192, warm: per pass +12.9, +3.3, -4.0 %
+prompt 8192, warm: +4.1 %
++4.1 %
+
+1024 whole 3bda tp2, CI harness, 09-18 (canon-ci vs nightl
+
+1024 whole 3bda tp2, CI harness, 09-18 (canon-ci vs nightly): -2.3 %
+-2.3 %
+
+1024 whole 3bda tp2, CI harness, 09-18 (canon-ci vs nightly): -0.0 %
+-0.0 %
+1024 whole 3bda tp4, CI harness, 09-18 (canon-ci vs nightl
+
+1024 whole 3bda tp4, CI harness, 09-18 (canon-ci vs nightly): +1.6 %
++1.6 %
+
+1024 whole 3bda tp4, CI harness, 09-18 (canon-ci vs nightly): -1.9 %
+-1.9 %
+1024 runtron tp2, 8 users, 09-16 (wedperf-attr, n = 6)
+
+1024 runtron tp2, 8 users, 09-16 (wedperf-attr, n = 6): -0.6 %
+-0.6 %
+
+1024 runtron tp2, 8 users, 09-16 (wedperf-attr, n = 6): +0.5 %
++0.5 %
+1024 runtron tp4, 8 users, 09-16 (wedperf-attr, n = 6)
+
+1024 runtron tp4, 8 users, 09-16 (wedperf-attr, n = 6): +1.6 %
++1.6 %
+
+1024 runtron tp4, 8 users, 09-16 (wedperf-attr, n = 6): -2.0 %
+-2.0 %
+dark dot = warm cell, light dot = cold cell, pale bar = range over the passes, hollow square = earlier prompt-1024 pair
+Figure 4. AMX build minus AVX build, both with FPGA attention, as a percentage of the AVX build. Rows above the horizontal line are this campaign's cells (fpgacanon = the canonical AMX deb with FPGA attention, against fpgabase = the nightly deb with FPGA attention, paired by pass number: 3 passes for warm cells, 3 runs at 1024 and 2 runs at 4096 and 8192 for cold cells). The dot is the mean of the per-pass deltas, the pale bar their range. Rows below the line are the prompt-1024 pairs of earlier campaigns: the whole-machine CI cells of 2026-09-18 (canon-ci against the same-night nightly) and the runtron cells of 2026-09-16 (n = 6 each). Exact values in the tables below.
+
+Prefill, warm cells. 1536: -6.2 %, 2048: -15.0 %, 3000: -2.0 %, 4096: -42.5 %, 5120: -37.1 %, 6144: -48.5 %, 7168: -32.7 %, 8192: -33.1 % (means of the per-pass deltas). From 4096 up every one of the 15 paired passes favours the AMX build. At 2048 and 1536 all three passes favour it, by margins from 2 to 23 %. At 3000 the sign changes between passes (+0.7, -8.2, +1.5 %).
+
+Prefill, cold cells. 1024: -7.5 %, 4096: -4.3 %, 8192: -2.4 % (n = 3 at 1024, n = 2 at 4096 and 8192, the AMX build faster in every run). The AVX-side 1024 value (554 ms, three runs within 2 ms) is 25 to 45 ms above that cell's history (section 5). Prompt-1024 pairs from the earlier campaigns: -2.3 %, +1.6 %, -0.6 %, +1.6 %.
+
+Decode, all cells. 1024 cold: +0.6 %, 1536 warm: -0.4 %, 2048 warm: +0.6 %, 3000 warm: +0.6 %, 4096 cold: +0.6 %, 4096 warm: +6.9 %, 5120 warm: +1.5 %, 6144 warm: +8.8 %, 7168 warm: +8.5 %, 8192 cold: +0.7 %, 8192 warm: +4.1 % (means of the per-pass deltas; per-pass values in the table). Prompt-1024 pairs from the earlier campaigns: -0.0 %, -1.9 %, +0.5 %, -2.0 %.
+
+Reading. The warm cells at 4096 to 6144 ran with the card's K/V space exhausted in every pass (section 5). tron logged 244 to 434 "lose HW attention" warnings per pass-cell there (one per shard per engine, HW = the FPGA), and the recorded fallback counter agrees with those counts. The affected shards were scored on the CPU for both prefill and decode. On the CPU the AMX kernel replaces the AVX loop. So in those three cells the AMX build's gains (37 to 48 % lower TTFT, +1 to +9 % TPS on average) include AMX against AVX on the share of attention that moved to the CPU. That share is not a gain of the FPGA path itself. The gains at 2048 (-15.0 %, 0 warnings in all 6 pass-cells) and at 7168 (-32.7 %, 0 warnings in 4 of 6 pass-cells) are not explained by fallback (hypothesis in section 5: cached-prefix pages scored on the CPU). At 8192 the two arms also differ in how much fell back (85, 53, 42 warnings per pass in the AVX arm against 36, 87, 80 in the AMX arm). That difference adds noise to the 8192 comparison. In the cold cells (no warning) the card holds every shard. The CPU keeps only the own-chunk triangle (each query's own 128-token chunk, section 4). The CPU build then lowers TTFT by 2 to 8 % and changes TPS by at most 1.7 %. Under FPGA attention the warm decode is 12 to 33 % slower than the cold decode at the same prompt length. Hypothesis: the fallback to CPU attention causes part of that loss. Test: a perfetto trace of one warm 2048 request, AMX build against kill switch.
+
+## The record
+
+cell (this campaign) | passes (paired) | TTFT, AVX build (ms, mean +/- sd) | TTFT, AMX build (ms, mean +/- sd) | TTFT change, mean of the per-pass deltas | per-pass TTFT change | Welch t (TTFT) | decode TPS, AVX build | decode TPS, AMX build | TPS change, mean | per-pass TPS change | prefix-cache hits AVX / AMX (%) |
+
+prompt 1024, cold | 3 | 554 +/- 1 | 512 +/- 8 | -7.5 % | -6.3, -7.4, -8.9 | -8.9 | 185.1 | 186.2 | +0.6 % | -0.6, +1.7, +0.8 | 1.2 / 1.2 |
+
+prompt 1536, warm | 3 | 804 +/- 43 | 754 +/- 45 | -6.2 % | -1.6, -13.1, -3.8 | -1.4 | 176.0 | 175.4 | -0.4 % | +0.5, -0.1, -1.4 | 16.4 / 15.5 |
+
+prompt 2048, warm | 3 | 1,048 +/- 101 | 885 +/- 16 | -15.0 % | -22.5, -17.7, -4.6 | -2.8 | 174.0 | 175.0 | +0.6 % | -0.4, +1.6, +0.5 | 24.2 / 27.9 |
+
+prompt 3000, warm | 3 | 1,435 +/- 56 | 1,409 +/- 128 | -2.0 % | +0.7, -8.2, +1.5 | -0.3 | 167.8 | 168.7 | +0.6 % | +2.0, -0.7, +0.4 | 33.0 / 29.5 |
+
+prompt 4096, cold | 2 | 3,057 +/- 8 | 2,927 +/- 7 | -4.3 % | -4.3, -4.2 | -16.6 | 159.7 | 160.7 | +0.6 % | +0.6, +0.7 | 0.3 / 0.3 |
+
+prompt 4096, warm | 3 | 4,155 +/- 640 | 2,338 +/- 120 | -42.5 % | -47.1, -28.6, -51.7 | -4.8 | 106.9 | 113.4 | +6.9 % | +7.6, -9.1, +22.2 | 35.6 / 38.6 |
+
+prompt 5120, warm | 3 | 5,731 +/- 461 | 3,582 +/- 186 | -37.1 % | -45.2, -35.2, -31.0 | -7.5 | 89.0 | 89.9 | +1.5 % | +7.0, -8.7, +6.1 | 42.4 / 36.6 |
+
+prompt 6144, warm | 3 | 6,767 +/- 793 | 3,467 +/- 171 | -48.5 % | -44.5, -51.7, -49.2 | -7.0 | 93.9 | 102.0 | +8.8 % | +2.3, +13.9, +10.3 | 43.7 / 47.8 |
+
+prompt 7168, warm | 3 | 5,029 +/- 282 | 3,377 +/- 118 | -32.7 % | -30.1, -38.0, -30.0 | -9.4 | 117.8 | 127.2 | +8.5 % | +14.0, +14.8, -3.4 | 46.2 / 49.2 |
+
+prompt 8192, cold | 2 | 6,898 +/- 29 | 6,734 +/- 12 | -2.4 % | -2.0, -2.8 | -7.4 | 133.4 | 134.4 | +0.7 % | -0.0, +1.5 | 0.1 / 0.1 |
+
+prompt 8192, warm | 3 | 6,200 +/- 708 | 4,105 +/- 411 | -33.1 % | -44.7, -23.3, -31.3 | -4.4 | 113.8 | 118.1 | +4.1 % | +12.9, +3.3, -4.0 | 41.4 / 46.2 |
+
+prompt-1024 pairs, both arms FPGA attention (this campaign's cold cell included) | n (AMX / AVX) | TTFT, AVX build (ms) | TTFT, AMX build (ms) | TTFT change | TPS, AVX build | TPS, AMX build | TPS change | note | source |
+
+whole 3bda, tp2, 4 engines x 2 users, CI harness (canon-ci 2026-09-18 vs the 2026-09-18 nightly) | 1 / 1 | 528 | 516 | -2.3 % | 186.3 | 186.2 | -0.0 % | canonical deb 0594dc54 vs nightly deb 3faba6d0. Mean over 13 nightly runs (2026-09-05 to 09-17): 509.5 ms, 185.67 TPS | exec/results/canon-ci-20260918/canon/summary.txt:36; exec/results/ci-mimic-20260918/reference/nightly-0918.arm.json |
+
+whole 3bda, tp4, 2 engines x 4 users, CI harness (canon-ci vs the 2026-09-18 nightly) | 1 / 1 | 636 | 646 | +1.6 % | 148.8 | 146.1 | -1.9 % | mean over 13 nightly runs (2026-09-05 to 09-17): 635.2 ms, 145.18 TPS | exec/results/canon-ci-20260918/canon/summary.txt:37; exec/results/ci-mimic-20260918/reference/nightly-0918.arm.json |
+
+whole 3bda, tp2, 4 engines x 2 users, CI harness (this campaign, q4b-fpga 2026-09-21/22, the cold 1024 cells of the three passes) | 3 / 3 | 554 | 512 | -7.6 % | 185.1 | 186.2 | +0.6 % | fpgacanon passes 1-3 (520, 513, 504 ms) vs fpgabase passes 1-3 (555, 554, 553 ms), prompt-1024 cells. The AVX side is 25 to 45 ms above the cell's history; against the 13-night mean (509.5 ms) the AMX side reads +0.5 % | exec/results/q4b-fpga-20260921/fpgacanon-pass1/perf.json; exec/results/q4b-fpga-20260921/fpgabase-pass1/perf.json |
+
+runtron, tp2, 8 users, our half (wedperf-attr 2026-09-16) | 6 / 6 | 3,214 | 3,195 | -0.6 % | 124.8 | 125.4 | +0.5 % | canonical c7844ca2ce vs AVX eb2de0265a; separate blocks | exec/results/wedperf-attr-20260916/summary.md:25-26 |
+
+runtron, tp4, 8 users, our half (wedperf-attr 2026-09-16) | 6 / 6 | 2,253 | 2,288 | +1.6 % | 132.3 | 129.7 | -2.0 % | same binaries as the tp2 row | exec/results/wedperf-attr-20260916/summary.md:22-23 |
+
+VNNI-K build against AVX build, both FPGA attention, prompt 1024 | TTFT, AVX (ms) | TTFT, VNNI-K (ms) | TTFT change | TPS, AVX | TPS, VNNI-K | TPS change | note | source |
+
+whole 3bda, tp2, CI harness (ci-mimic target vs the 2026-09-18 nightly) | 528 | 504 | -4.5 % | 186.3 | 176.8 | -5.1 % | VNNI-K deb 29a8a547; client under CPU pressure 27-48 % in the target run | exec/results/ci-mimic-20260918/target-pass1/summary.txt:36 |
+
+whole 3bda, tp4, CI harness (ci-mimic target vs the 2026-09-18 nightly) | 636 | 629 | -1.1 % | 148.8 | 133.4 | -10.3 % | the issue-4500 decode loss | exec/results/ci-mimic-20260918/target-pass1/summary.txt:37 |
+
+our half, tp2, 1 engine x 2 users, CI harness (issue-4500 campaign, measurement block m6 = rinzler plus the CI client on our half, n = 2) | 762 | 700 | -8.2 % | 192.2 | 183.9 | -4.3 % | VNNI-K deb vs nightly deb. With the kill switch the VNNI-K deb gives 762.5 ms and 184.5 TPS | exec/results/issue4500-20260918/m6/summary.md:5-8 |
+
+our half, tp4, 1 engine x 4 users, CI harness (issue-4500 campaign, block m6, n = 2) | 848 | 809 | -4.7 % | 156.3 | 135.4 | -13.4 % | with the kill switch: 814.5 ms and 144.62 TPS | exec/results/issue4500-20260918/m6/summary.md:10-12 |
+
+Top: this campaign's cells (client-side TTFT and decode TPS per user, harness means over 8 users x 10 rounds per pass; mean and sd over the passes per arm; the change columns are the mean of the per-pass deltas and the per-pass deltas themselves; Welch t over the pass means of the two arms). Middle: canonical-AMX against AVX pairs at prompt 1024 with FPGA attention on both sides (this campaign's cold cells included as one row with their three-run means). Bottom: the VNNI-K deb against the AVX deb at prompt 1024, where the decode loss of issue 4500 shows. Sources are in the source column and in section 9 (Data files).
+
+## 7. Eight users on one engine: the runtron campaign of 2026-09-22
+
+Question (jhan, 2026-09-22): was a 4096- or 8192-token prompt with 8 users per engine tested? For CPU attention yes (runtron, section 5 of the earlier campaigns), for FPGA attention no. This campaign fills that gap with both attention modes and both builds in one interleaved run: exec/q4b-rt8u-20260922/campaign.sh on our half of delphi-3bda (one tp2 engine, cards 90 and 93), 3 repetitions, each repetition running every cell for the AVX build and the AMX build under CPU attention and under FPGA attention before the next repetition starts. Cells: 8 users at prompt 1024, 2048, 4096 and 8192, and 2 users at 4096 and 8192, 256 generated tokens per user. Builds: the AVX build is tron at eb2de0265a (main before PR 3879, runtron.pre3879), the AMX build is main at c7844ca2ce (runtron.main0916). USE_HW_ATTN=0 selects CPU attention. The campaign took over idle production serving through platformd at 16:58 UTC and gave it back at 18:12 UTC.
+
+One engine, 8 or 2 users at once (runtron, 2026-09-22): prefill time and decode speed for the four arms
+Left: prefill of all users' prompts in one batch, seconds, log axis (shorter = better). Right: decode tokens per second per user (higher = better). Mean of 3 repetitions, sd below 1 %.
+
+AVX build + CPU attention
+
+AMX build + CPU attention
+
+AVX build + FPGA attention
+
+AMX build + FPGA attention
+prefill time of the batch, seconds (log axis)
+decode TPS per user
+
+2
+
+5
+
+10
+
+20
+
+50
+
+100
+
+200
+
+0
+
+25
+
+50
+
+75
+
+100
+
+125
+
+150
+
+175
+8 users, prompt 1024
+
+AVX build + CPU attention, 8 users, prompt 1024: 3.95
+3.9 s
+AVX build + CPU attention, 8 users, prompt 1024: 71.45
+71
+AMX build + CPU attention, 8 users, prompt 1024: 3.14
+3.1 s
+AMX build + CPU attention, 8 users, prompt 1024: 79.89
+80
+AVX build + FPGA attention, 8 users, prompt 1024: 3.21
+3.2 s
+AVX build + FPGA attention, 8 users, prompt 1024: 124.20
+124
+AMX build + FPGA attention, 8 users, prompt 1024: 3.20
+3.2 s
+AMX build + FPGA attention, 8 users, prompt 1024: 124.93
+125
+8 users, prompt 2048
+
+AVX build + CPU attention, 8 users, prompt 2048: 11.14
+11.1 s
+AVX build + CPU attention, 8 users, prompt 2048: 45.08
+45
+AMX build + CPU attention, 8 users, prompt 2048: 7.26
+7.3 s
+AMX build + CPU attention, 8 users, prompt 2048: 52.73
+53
+AVX build + FPGA attention, 8 users, prompt 2048: 6.60
+6.6 s
+AVX build + FPGA attention, 8 users, prompt 2048: 119.05
+119
+AMX build + FPGA attention, 8 users, prompt 2048: 6.48
+6.5 s
+AMX build + FPGA attention, 8 users, prompt 2048: 120.08
+120
+8 users, prompt 4096
+
+AVX build + CPU attention, 8 users, prompt 4096: 35.38
+35.4 s
+AVX build + CPU attention, 8 users, prompt 4096: 26.43
+26
+AMX build + CPU attention, 8 users, prompt 4096: 18.60
+18.6 s
+AMX build + CPU attention, 8 users, prompt 4096: 31.31
+31
+AVX build + FPGA attention, 8 users, prompt 4096: 13.09
+13.1 s
+AVX build + FPGA attention, 8 users, prompt 4096: 84.14
+84
+AMX build + FPGA attention, 8 users, prompt 4096: 12.94
+12.9 s
+AMX build + FPGA attention, 8 users, prompt 4096: 85.03
+85
+8 users, prompt 8192
+
+AVX build + CPU attention, 8 users, prompt 8192: 123.11
+123.1 s
+AVX build + CPU attention, 8 users, prompt 8192: 14.52
+15
+AMX build + CPU attention, 8 users, prompt 8192: 53.50
+53.5 s
+AMX build + CPU attention, 8 users, prompt 8192: 17.09
+17
+AVX build + FPGA attention, 8 users, prompt 8192: 29.71
+29.7 s
+AVX build + FPGA attention, 8 users, prompt 8192: 61.51
+62
+AMX build + FPGA attention, 8 users, prompt 8192: 29.12
+29.1 s
+AMX build + FPGA attention, 8 users, prompt 8192: 61.50
+61
+2 users, prompt 4096
+
+AVX build + CPU attention, 2 users, prompt 4096: 8.94
+8.9 s
+AVX build + CPU attention, 2 users, prompt 4096: 101.57
+102
+AMX build + CPU attention, 2 users, prompt 4096: 4.69
+4.7 s
+AMX build + CPU attention, 2 users, prompt 4096: 114.16
+114
+AVX build + FPGA attention, 2 users, prompt 4096: 3.17
+3.2 s
+AVX build + FPGA attention, 2 users, prompt 4096: 162.27
+162
+AMX build + FPGA attention, 2 users, prompt 4096: 3.18
+3.2 s
+AMX build + FPGA attention, 2 users, prompt 4096: 161.44
+161
+2 users, prompt 8192
+
+AVX build + CPU attention, 2 users, prompt 8192: 30.94
+30.9 s
+AVX build + CPU attention, 2 users, prompt 8192: 62.52
+63
+AMX build + CPU attention, 2 users, prompt 8192: 13.41
+13.4 s
+AMX build + CPU attention, 2 users, prompt 8192: 71.75
+72
+AVX build + FPGA attention, 2 users, prompt 8192: 7.34
+7.3 s
+AVX build + FPGA attention, 2 users, prompt 8192: 135.41
+135
+AMX build + FPGA attention, 2 users, prompt 8192: 7.25
+7.2 s
+AMX build + FPGA attention, 2 users, prompt 8192: 136.60
+137
+Within a row the four dots are the four arms, in legend order from top to bottom. Source: exec/results/q4b-rt8u-20260922/summary.json.
+Figure 5. runtron on one engine: prefill time of the whole batch (log axis) and decode TPS per user, four arms, mean of 3 repetitions. The prefill time is runtron's "Parsing the prompt took" value, the wall time of the batched prefill of all users' prompts (the users' values agree to the millisecond). It is not the CI harness's per-request TTFT of sections 1 to 6 (Words used here).
+
+FPGA attention against AMX on the CPU, same AMX build. Prefill at 8 users: 0.98x at 1024 (the FPGA is 2 % slower), 1.12x at 2048, 1.44x at 4096 and 1.84x at 8192 (53.5 s against 29.1 s for 8 prompts of 8192 tokens). At 2 users: 1.48x at 4096 and 1.85x at 8192. Decode at 8 users: 1.6x at 1024 to 3.6x at 8192 (61.5 against 17.1 TPS per user). The same picture as the CI harness (section 5): equal at 1024, the FPGA ahead from 2048 up, most at 8192.
+
+AMX build against AVX build, CPU attention. Prefill -57 to -20 % (123.1 s to 53.5 s at 8 users and 8192, 2.3x), decode +12 to +18 %, every paired t above 20 in magnitude. This is the AMX gain jhan recalled (2x at 8192), measured again with 8 users on one engine and 3 repetitions.
+
+AMX build against AVX build, FPGA attention. Prefill -2.0 to +0.3 % (-589 to +11 ms on batches of 3 to 30 s), decode -0.5 to +1.1 %. The paired t reaches -7.9 to -17 at 2048 to 8192 with 8 users, so those 1 to 2 % prefill gains are real, and small. Decode does not change (|t| at most 4.5, all changes within 1.2 %). Without a warm prefix cache the AMX build brings the FPGA path 1 to 2 % on prefill and nothing on decode. This is the runtron counterpart of the cold CI-harness cells of section 6 (2 to 8 % there) and of the decode "no".
+
+No HBM exhaustion. All 72 runs logged 0 "lose HW attention" warnings, including 8 users at 8192 (80 shards of 1024 tokens per engine, about 11.5 GB over the two cards, est.). Every runtron process starts with an empty prefix cache and sends one batch, so no older shards occupy the card. The exhaustion of section 5 is an effect of the warm prefix cache holding shards of earlier requests, not of the request size.
+
+## The record
+
+cell |
+AVX build + CPU attention
+prefill s / TPS per user |
+AMX build + CPU attention
+prefill s / TPS per user |
+AVX build + FPGA attention
+prefill s / TPS per user |
+AMX build + FPGA attention
+prefill s / TPS per user |
+
+8 users, prompt 1024 |
+3.95 +/- 0.01 / 71.4 +/- 0.2 (n = 3) |
+3.14 +/- 0.01 / 79.9 +/- 0.2 (n = 3) |
+3.21 +/- 0.03 / 124.2 +/- 0.6 (n = 3) |
+3.20 +/- 0.00 / 124.9 +/- 0.8 (n = 3) |
+
+8 users, prompt 2048 |
+11.14 +/- 0.00 / 45.1 +/- 0.1 (n = 3) |
+7.26 +/- 0.00 / 52.7 +/- 0.1 (n = 3) |
+6.60 +/- 0.03 / 119.0 +/- 0.9 (n = 3) |
+6.48 +/- 0.01 / 120.1 +/- 0.5 (n = 3) |
+
+8 users, prompt 4096 |
+35.38 +/- 0.02 / 26.4 +/- 0.0 (n = 3) |
+18.60 +/- 0.04 / 31.3 +/- 0.1 (n = 3) |
+13.09 +/- 0.02 / 84.1 +/- 0.2 (n = 3) |
+12.94 +/- 0.01 / 85.0 +/- 0.5 (n = 3) |
+
+8 users, prompt 8192 |
+123.11 +/- 0.11 / 14.5 +/- 0.0 (n = 3) |
+53.50 +/- 0.23 / 17.1 +/- 0.0 (n = 3) |
+29.71 +/- 0.08 / 61.5 +/- 0.4 (n = 3) |
+29.12 +/- 0.10 / 61.5 +/- 0.3 (n = 3) |
+
+2 users, prompt 4096 |
+8.94 +/- 0.01 / 101.6 +/- 0.6 (n = 3) |
+4.69 +/- 0.03 / 114.2 +/- 0.3 (n = 3) |
+3.17 +/- 0.01 / 162.3 +/- 0.4 (n = 3) |
+3.18 +/- 0.00 / 161.4 +/- 0.3 (n = 3) |
+
+2 users, prompt 8192 |
+30.94 +/- 0.06 / 62.5 +/- 0.0 (n = 3) |
+13.41 +/- 0.05 / 71.8 +/- 0.2 (n = 3) |
+7.34 +/- 0.03 / 135.4 +/- 0.7 (n = 3) |
+7.25 +/- 0.02 / 136.6 +/- 0.5 (n = 3) |
+
+Mean +/- sample sd over the 3 repetitions. Prefill in seconds (runtron "Parsing the prompt took", the batched prefill of all users' prompts), TPS = decode tokens per second per user. Source: exec/results/q4b-rt8u-20260922/summary.md and summary.json (summarize.py over rt-results.txt).
+
+cell | FPGA + AMX build against CPU + AMX build: prefill (x faster) | same: decode TPS (x faster) | FPGA + AMX build against CPU + AVX build: prefill (x faster) | AMX build against AVX build, CPU attention: prefill / TPS (paired t) | AMX build against AVX build, FPGA attention: prefill / TPS (paired t) | HBM exhaustion warnings (all 12 runs of the cell) |
+
+8 users, prompt 1024 | 0.98x | 1.56x | 1.23x | -20.4 % (t -68) / +11.8 % (t +50) | -0.3 % = -10 ms (t -0.7) / +0.6 % (t +2.4) | 0 |
+
+8 users, prompt 2048 | 1.12x | 2.28x | 1.72x | -34.8 % (t -1373) / +17.0 % (t +137) | -1.9 % = -125 ms (t -13.3) / +0.9 % (t +1.3) | 0 |
+
+8 users, prompt 4096 | 1.44x | 2.72x | 2.73x | -47.4 % (t -535) / +18.5 % (t +165) | -1.1 % = -141 ms (t -17.0) / +1.1 % (t +3.2) | 0 |
+
+8 users, prompt 8192 | 1.84x | 3.60x | 4.23x | -56.5 % (t -936) / +17.7 % (t +91) | -2.0 % = -589 ms (t -7.9) / -0.0 % (t -0.0) | 0 |
+
+2 users, prompt 4096 | 1.48x | 1.41x | 2.81x | -47.5 % (t -567) / +12.4 % (t +24) | +0.3 % = +11 ms (t +1.8) / -0.5 % (t -4.5) | 0 |
+
+2 users, prompt 8192 | 1.85x | 1.90x | 4.27x | -56.6 % (t -463) / +14.8 % (t +72) | -1.3 % = -96 ms (t -13.4) / +0.9 % (t +2.7) | 0 |
+
+Ratios are of the means (x faster = the reference divided by the compared arm for prefill, the compared arm divided by the reference for TPS). Percentages are AMX build minus AVX build in percent of the AVX build, with the paired t over the 3 repetitions (repetition k of one arm against repetition k of the other). HBM exhaustion = the count of "lose HW attention" warning lines in the 12 run logs of the cell (4 arms x 3 repetitions).
+
+## 8. What was measured on 2026-09-21/22, and what remains
+
+The campaign exec/q4b-fpga-20260921/ is the measurement the first version of this page asked for (FPGA-attention cells at prompts 1536 to 8192 in the nightly layout), run on the platformd 0.11 layout (Rhys upgraded delphi-3bda on 2026-09-21: engines are named entries default-0 to default-3 with their own ingress ports, the harness provisions them through the explicit config and a test proxy on port 80. Our wrappers were updated the same evening).
+
+Arms run: fpgabase (nightly deb, FPGA attention), fpgacanon (canonical AMX deb, FPGA attention), canon (canonical deb, CPU attention, one same-day pass). Each pass = the 9 cells of the 2026-09-20 grid. Cold cells = single-cell driver runs at 4096 and 8192 for both FPGA arms, two per arm and length.
+
+Kept from before: the 2026-09-20 CPU-attention series (nightly deb and canonical deb, 3 passes each) and its cold check cell at 8192. The CPU-attention arms were not re-run beyond the one canonical pass (jhan, 2026-09-22).
+
+Done after the 2026-09-22 nightly (13:20 to 16:25 UTC): passes 2 and 3 of the two FPGA arms and a second cold cell per arm at 4096 and 8192, with the card allocator free space and the software-fallback count recorded per cell (they confirm the exhaustion reading, section 5). Done the same afternoon (16:58 to 18:12 UTC): the runtron campaign exec/q4b-rt8u-20260922/ (8 users on one engine on our half, prompts 1024 to 8192, plus 2 users at 4096 and 8192, both attention modes and both builds, 3 repetitions), section 7. Not measured and not planned: a cold CPU-attention cell at 4096, a cold AVX cell at 8192, and the VNNI-K deb under FPGA attention at long prompts (optional arm fpgavnnik).
+
+Noise: three passes per FPGA arm. The pass-to-pass sd of the warm TTFT is 16 to 128 ms below 4096 and 118 to 793 ms from 4096 up (the AVX arm is the noisier one from 4096 up, sd 282 to 793 ms against 118 to 411 ms). The two cold runs of one arm at one length agree within 1 to 29 ms. The CPU series' 3-pass sd was 1 to 25 ms at 1024 and 350 to 1230 ms at 8192.
+
+## 9. Caveats and provenance
+
+The only same-binary, same-day CI-harness pairs (p0perf-20260913) change two things at once: the FPGA arm also set the kill switch. Its CPU share therefore ran AVX. The code reading says the AMX dense-page kernel does not run on the prompt's attention under FPGA attention unless DMA lags. By that reading the kill switch should not matter there. The data are mixed on this (section 3 at prompt 1024, and section 6 shows 33 to 49 % in warm cells from 4096 up, three passes each, with the two candidate causes in section 5). So the +4.6 % / -1.9 % may include a kill-switch effect of unknown sign.
+
+No campaign interleaved CPU-attention and FPGA-attention repetitions. runtron ran them in blocks 8 minutes to about 2 hours apart (wedperf: CPU 18:34 to 19:37 UTC and FPGA 19:46 to 19:59, wedperf-attr: CPU 21:50 to 22:03 and FPGA 22:11 to 23:54). The whole-machine pair spans two campaigns two days apart. No paired t for attention mode exists. The Welch t values above compare separate blocks.
+
+FPGA-side n is small: one pass in canon-ci and the nightly, n = 1 in vnnik4-models, n = 2 in wedperf. Only wedperf-attr (n = 6) and p0perf-20260913 (n = 3) have repeats. The four wedperf pairs (n = 3 against 2) have about 1 degree of freedom.
+
+Client host load inflates client-side TTFT. The ci-mimic base arm (556 ms) ran on a saturated client and is not used for a delta. The ci-mimic target arm (504 ms) ran at client CPU pressure 27 to 48 %. q4b-swattn recorded no client CPU pressure. The nightly's runner never does.
+
+No canonical-AMX CPU-attention runtron cell at tp4 exists on the same day as an FPGA cell. The tp4 canonical row in figure 1 pairs two different builds (544ca05c7a against c7844ca2ce) and is drawn hollow.
+
+FPGA-attention cells above prompt 1024 (sections 5 and 6) are three passes per arm, run on 2026-09-21 evening and 2026-09-22 afternoon (UTC), with pass-to-pass sd of 16 to 128 ms below 4096 and 118 to 793 ms from 4096 up. Their warm values depend on the prefix-cache share of the cell (12 to 54 %) and, at 4096 to 6144, on the share of attention that fell back to the CPU when the card's K/V space ran out (section 5). Hypothesis for the fpgabase line not being monotone: both shares vary from cell to cell, so the TTFT does not track the uncached-token count alone. The cold cells have neither dependence.
+
+The runtron 8-user TTFT is the batched prefill of 8 prompts (8 forwards of 1024 tokens each). The CI-harness TTFT is per request with 2 or 4 prompts per engine. Their ratio (about 4.3x at tp2, 2.6x at tp4) is a layout effect, not an attention-path effect.
+
+## Data files
+
+campaign | what | file |
+
+p0perf-20260913 | CI harness, our half, off/on/fpga, one binary 544ca05c7a; runtron off/on | exec/results/p0perf-20260913/summary.md lines 12-17 (CI table), 44-61 (CI per-rep), 6-9 and 20-43 (runtron); summary.json |
+
+wedperf-20260916 | runtron cpu and fpga blocks, base eb2de0265a vs target ff680c8020 | exec/results/wedperf-20260916/summary.md lines 21-34 (means); summary.json cells[].reps[].ttft_s (per-rep) |
+
+wedperf-attr-20260916 | runtron attribution: base / mid c7844ca2ce / target, cpu and fpga | exec/results/wedperf-attr-20260916/summary.md lines 13-27 (means); summary.json (per-rep) |
+
+vnnik4-20260915, vnnik4-models-20260915 | runtron cpu (base vs ab) and the fpga cell (base vs new), 2026-09-15 | exec/results/vnnik4-20260915/summary.md lines 9-10; exec/results/vnnik4-models-20260915/results.txt lines 58-97 |
+
+q4b-swattn-20260919 | CI harness, whole machine, CPU attention, nightly deb vs canonical deb, 9 prompts | exec/results/q4b-swattn-20260919/summary.txt lines 3-13; summary.json (cache_hit_pct, engine_requests); RUNBOOK.md lines 33-39 (check cell) |
+
+q4b-fpga-20260921 | CI harness, whole machine, FPGA attention (nightly deb, canonical deb) + one canonical CPU pass; cold cells at 4096 / 8192; platformd 0.11 | exec/results/q4b-fpga-20260921/<tag>/perf.json (fpgabase-pass1, fpgacanon-pass1, canon-pass1, *-cold-p4096, *-cold-p8192); RUNBOOK.md; exec/prefill-amx-vs-fpga-20260921/fpga-campaign-rows.json |
+
+q4b-rt8u-20260922 | runtron, our half, one tp2 engine, 8 or 2 users, prompts 1024 to 8192, CPU and FPGA attention, AVX build (eb2de0265a) and AMX build (c7844ca2ce), 3 repetitions (2026-09-22 16:58 to 18:12 UTC) | exec/results/q4b-rt8u-20260922/summary.md, summary.json, rt-results.txt, rt/<cell>__<attn>__<arm>__rep<k>.log |
+
+canon-ci-20260918 | CI harness, whole machine, canonical deb, FPGA attention (2026-09-18 23:48 UTC) | exec/results/canon-ci-20260918/canon/summary.txt lines 36-37; canon/driver.log |
+
+ci-mimic-20260918 | CI harness, whole machine, nightly deb and VNNI-K deb, FPGA attention | exec/results/ci-mimic-20260918/base-pass1/summary.txt and target-pass1/summary.txt lines 36-37; caveats.html |
+
+nightly 2026-09-18 | the 2026-09-18 nightly perf log (GitHub run 35303980268): qwen3-4b tp2 528 ms, tp4 636 ms | exec/results/ci-mimic-20260918/reference/nightly-0918.arm.json lines 896, 999; nightly-35303980268.log |
+
+nightly reference | 13 nights (2026-09-05 to 09-17) of the nightly's qwen3-4b TTFT | exec/results/nightly_stats.json |
+
+issue4500-20260918 | runtron FPGA-attention blocks m1-m4; block m6 rinzler + CI client on our half | exec/results/issue4500-20260918/summary.md lines 9-20; exec/results/issue4500-20260918/m6/summary.md lines 5-12 |
+
+vnnik-20260914 | runtron CPU attention at prompts 1024 / 2048 / 8192 | exec/results/vnnik-20260914/summary.md:9-20 |
+
+workflows | extraction rows (253), the three code readings, and the 162 verification findings | exec/prefill-amx-vs-fpga-20260921/rows-extracted.json, pairs.json; journals wf_258257df-233, wf_89cf57ff-912 |

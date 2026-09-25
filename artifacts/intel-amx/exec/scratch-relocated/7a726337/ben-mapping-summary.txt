@@ -1,0 +1,1029 @@
+
+### B01 [PR #4424 review 5270587330, saved commen] Core concern: the VNNI-packed data (the pair-interleaved layout the AMX instructions read) should be encapsulated, because the code passes many raw pointers that say nothing about the layout they poin
+QUOTE: I do wonder whether we can't better encapsulate the VNNI representation. Specifically, my concern is that there are a lot of pointers floating around currently that provide no hints as to the layout of the data to which they point.
+STATUS: partly addressed in 4557 | differs=True
+HOW: Short version: PR #4557 encapsulates the packed V plane (the pair-interleaved V storage the AMX and AVX-512 dot products read) behind an owner, a view and a row type with no public pointer. It also types the native K plane at the AMX kernel boundary. The packed K representation, which is the VNNI data PR #4424 introduces and the reviewer was looking at, is not in this PR and is deferred to #4424. One packed operand still travels as a bare pointer at HEAD: q_packed, the output of pack_q_group_128x4.
+
+What the code at HEAD 1c87d66926 does for packed V:
+- Owner. kv_block::v is a v_vnni_tensor<page_size, head_size> in the 16-lane build. The owner is one 64-byte-aligned bf16 array with as_view() on lvalues only, and as_view() on a temporary is deleted [h/tron/tensor/v_vnni.hpp:241-265; h/tron/models/kv_cache.hpp:2484-2489].
+- View. v_vnni_view<T, Rows, Cols> holds the address formula in a pri
+DIFF: The PR follows the sketch's structure (owner separate from view, private pointer constructor, writable-to-const conversion only, typed kernel arguments, an internal detail::*_access escape hatch, optimized bulk operations kept) but changes the type shape, several names and two rules.
+
+1. Layout carrier. His: a separate layout struct (k_vnni_layout<Tokens, Dims>, v_vnni_layout<Tokens, Dims> with a constexpr offset(token, dim)) passed as the template argument of generic vnni_tensor<Layout> and vnni_view<T, Layout>. PR #4557: one concrete view per layout; v_vnni_view<T, Rows, Cols> holds the formula itself in its private pair_base(), and the owner is v_vnni_tensor<Rows, Cols>. There is no layou
+REASON: Recorded reasons, from the design record (scratchpad/design.txt, section "Decision record and reviewer questions") and the PR body's "Decisions record" table, all labelled Proposed with no reviewer answer recorded:
+- Q1 (formula inside each concrete view, no layout struct): design section 2 says "the address formula belongs in the view rather than in a separate layout type. That addresses the revi
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed with wording corrections. Checked at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525 and in scratchpad/design.txt and scratchpad/pr-body.md. The status "partly addressed in 4557" holds: packed V is fully behind an owner, a view and a row with no public pointer; native K is typed at the QK kernel boundary through an alias that keeps a public pointer constructor; packed K (the VNNI data of PR #4424) is absent from the branch (grep for k_vnni_layout / vnni_tensor / vnni_vie
+     corrected_text: Short version: PR #4557 encapsulates the packed V plane (the pair-interleaved V storage the AMX and AVX-512 dot products read) behind an owner, a view and a row type with no public pointer. It also types the native K plane at the AMX kernel boundary. The packed K representation, which is the VNNI data PR #4424 introduces and the reviewer was looking at, is not in this PR and is deferred to #4424. One packed operand still travels as a bare pointer at HEAD: q_packed, the output of pack_q_group_128
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed with corrections. The status, the "differs" verdict and six of the seven differences hold against HEAD 1c87d66926 and the design text. Corrections needed: (1) the diff stat is wrong: git diff --stat 996f58ec82 HEAD (the recorded base) gives 12 files, 1255 insertions, 414 deletions, not "13 files, 1255 insertions, 601 deletions"; origin/main has since moved to 0759738c66, against which the stat is 22 files, 1406 insertions, 1198 deletions, which includes main's own commits. (2) Two line
+     corrected_text: Short version: PR #4557 puts the packed V plane (the pair-interleaved V storage that the AMX and AVX-512 dot products read) behind an owner, a view and a row type with no public pointer. It also types the native K plane (row-major K) at the AMX kernel boundary. The packed K representation is the VNNI data that PR #4424 introduces and that the reviewer was looking at; it is not in this PR and is deferred to #4424. Two bare-pointer routes into packed data remain at HEAD: q_packed, the output of pa
+
+### B02 [PR #4424 review 5270587330, saved commen] Follow tron's existing precedent: the tensor and dtensor types share one interface built on expr, which lets code convert, slice and compute on tensors of any type; the reviewer wants the same model h
+QUOTE: I think the way I would approach this is to follow the precedent already present in `tron`: we currently have types like `tensor` and `dtensor` which provide a uniform interface based upon `expr`. This allows us to very naturally talk about tensors of various types and convert/slice/compute them fre
+STATUS: partly addressed in 4557 | differs=True
+HOW: Words used here: expr is tron's common read interface for tensor-like types (h/tron/kernels/expr.hpp). At rank 2 and above it gives operator[] that returns a row. At rank 1 it gives chunk(i), which returns one register of fp32 values, and the fallbacks bf16_chunk() and fp16_chunk() built on chunk(). tensor is the host-memory owner (h/tron/tensor/tensor.hpp), view and const_view are the existing non-owning row-major views (h/tron/tensor/view.hpp), and dtensor is the hardware-memory owner (h/tron/hardware/tensor.hpp).
+
+PR #4557 builds the new packed-V view types on expr, as the reviewer asked. v_vnni_view<T, Rows, Cols> inherits expr at rank 2 and its operator[] returns a v_vnni_row. v_vnni_row<T, Cols> inherits expr at rank 1 and implements chunk() with the pair-extraction vector code (16-lane build only). The inherited bf16_chunk() fallback is used unchanged. So a packed V plane reads li
+DIFF: His point (review, saved comment line 5): follow the tensor / dtensor model, one uniform interface built on expr, so that code can "convert/slice/compute them freely". His later API sketch (comment 5765866077, lines 65-101) went the other way on one detail: its vnni_view had no expr base and no operator[] ("There is no data(), pointer conversion, or operator[] that suggests a contiguous row"), only at(). PR #4557: (1) follows the expr model of the review, not the sketch: v_vnni_view and v_vnni_row inherit expr, operator[] returns a logical row with no public pointer, and at() stays bounds-checked (design Q3); (2) narrows the scope to expression reads and the existing bulk row operations: no 
+REASON: Recorded. design.txt section 2, row "#2: typed tensors": "Keep rank-2 expression access and logical row reads. Give bulk load/store and kernel arguments types that identify their layout." design.txt lines 110-112: "Limit the parent: expression reads and existing row operations. Defer slices, iteration, generic expression assignment, and expression constructors until a caller needs them." Decision 
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed with corrections. The status "partly addressed in 4557", the differs=true verdict and the attribution to the design record all hold against the code at HEAD 1c87d66926 and design.txt. Verified: every cited line in expr.hpp (46, 58, 87, 106, 111-116), tensor.hpp (31, 236, 270-274), view.hpp (116-117), hardware/tensor.hpp (200), v_vnni.hpp (105, 126, 130-143, 148, 171, 188-191, 242, 249, 255, 264), kv_cache_fwd.hpp (41-52), kv_cache.hpp (1980-1984, 2499-2503), amx_attn_iface.hpp (222), s
+     corrected_text: HOW: Words used here: expr is tron's common read interface for tensor-like types (h/tron/kernels/expr.hpp). At rank 2 and above it gives operator[] that returns a row. At rank 1 it gives chunk(i), which returns one SIMD chunk of fp32 values (16 lanes in the AVX-512 build, 8 in the AVX2 build), plus the fallbacks bf16_chunk() and fp16_chunk() built on chunk(). tensor is the host-memory owner (h/tron/tensor/tensor.hpp), view and const_view are the existing non-owning row-major views (h/tron/tensor
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. The status "partly addressed", the differs=true verdict, and the reason attribution hold against HEAD 1c87d66926 and design.txt. Every cited code line exists with the quoted content: expr.hpp:46/58/87/106/111-116, tensor.hpp:31/236/270-274, view.hpp:116-117, hardware/tensor.hpp:200, v_vnni.hpp:105/126/134-143/148/171/188-191/242/249/255/264, kv_cache_fwd.hpp:41-52, kv_cache.hpp:1980-1984/2499-2503, amx_attn_iface.hpp:222, self_attention.hpp:1653, t_llama_unit.cpp:3444-3456. The diff c
+     corrected_text: how: Words used here: expr is tron's common read interface for tensor-like types (h/tron/kernels/expr.hpp). At rank 2 and above it gives operator[] that returns a row. At rank 1 it gives chunk(i), which returns one register of fp32 values, and the fallbacks bf16_chunk() and fp16_chunk() built on chunk(). tensor is the host-memory owner (h/tron/tensor/tensor.hpp), view and const_view are the existing non-owning row-major views (h/tron/tensor/view.hpp), and dtensor is the hardware-memory owner (h/
+
+### B03 [PR #4424 review 5270587330, saved commen] Introduce a vnni_tensor type that represents a VNNI-packed two-dimensional (rank-2) tensor.
+QUOTE: Introduce a `vnni_tensor` type which represents a VNNI-packed, rank-2 tensor
+STATUS: partly addressed in 4557 | differs=True
+HOW: PR #4557 introduces the requested type family for the packed V plane. The packed-K instantiation, which is the case PR #4424's review was about, is deferred to PR #4424. Words used here: an owner holds the bytes, a view accesses them without owning them, rank-2 means two coordinates (token, dimension), and expr is Tron's common expression interface for reading stored or computed values.
+
+What exists at HEAD 1c87d66926:
+- Owner: `v_vnni_tensor<Rows, Cols>` is one 64-byte-aligned bf16 array, trivially constructible and copyable, with `as_view()` on lvalues only and the rvalue forms deleted [h/tron/tensor/v_vnni.hpp:241-265].
+- Rank-2 view: `v_vnni_view<T, Rows, Cols>` inherits `expr<v_vnni_view<T, Rows, Cols>, Rows, Cols>`. It holds the packed address formula in its private `pair_base()`. It has a private pointer constructor, converts writable to const only, and offers `operator[]` (a logi
+DIFF: His sketch: one generic owner `vnni_tensor<Layout>` and one generic view `vnni_view<T, Layout>`. The byte mapping lives in separate layout policy structs `k_vnni_layout<Tokens, Dims>` and `v_vnni_layout<Tokens, Dims>`, each with a static `offset(token, dim)`. Storage is `std::array<bf16, Layout::elements>`. One header, h/tron/tensor/vnni.hpp, holds both layouts. The view has `at()` only: "There is no data(), pointer conversion, or operator[] that suggests a contiguous row", and no expr base. Bulk `store_row` / `load_row` take `std::span`. The internal helper is `detail::vnni_access::packed_data`.
+
+PR #4557: per-layout concrete types with the shape as direct template arguments: `v_vnni_tensor
+REASON: Recorded, in the design record and the PR body:
+- Formula in the view, no layout struct: "The issue author's reading was that the address formula belongs in the view rather than in a separate layout type. That addresses the reviewer's reservation about a separate layout type." and "Choose: one concrete view per layout. This repeats a small amount of view plumbing when the child adds packed K. It a
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed. Every claim was checked against the worktree at HEAD 1c87d66926 (git diff origin/main HEAD touches h/tron/tensor/v_vnni.hpp, h/tron/tensor/kv_cache_fwd.hpp, h/tron/models/kv_cache.hpp, h/tron/kernels/amx_attn_iface.hpp, src/tron/kernels/amx_attn.cpp, t/t_llama_unit.cpp), the design text, the PR body draft and the two reviewer files.
+
+Status "partly addressed in 4557" holds. The owner v_vnni_tensor<Rows, Cols> [v_vnni.hpp:241-265] and the rank-2 expression view v_vnni_view<T, Rows, Col
+     corrected_text: how=PR #4557 introduces the requested type family for the packed V plane. The packed-K instantiation, which is the case PR #4424's review was about, is deferred to PR #4424. Words used here: an owner holds the bytes, a view accesses them without owning them, rank-2 means two coordinates (token, dimension), and expr is Tron's common expression interface for reading stored or computed values.
+
+What exists at HEAD 1c87d66926:
+- Owner: `v_vnni_tensor<Rows, Cols>` is one 64-byte-aligned bf16 array, t
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed with wording corrections. Status, evidence, the "differs" verdict and the described difference hold against HEAD 1c87d66926 and the design text. Checks run: every cited line of h/tron/tensor/v_vnni.hpp, h/tron/tensor/kv_cache_fwd.hpp, h/tron/models/kv_cache.hpp, h/tron/kernels/amx_attn_iface.hpp, src/tron/kernels/amx_attn.cpp and t/t_llama_unit.cpp was read and matches the quoted text. `git grep -n "k_vnni\|vnni_layout" HEAD -- h src t` and the unprefixed-name grep both print nothing. 
+     corrected_text: B03: "Introduce a `vnni_tensor` type which represents a VNNI-packed, rank-2 tensor."
+
+Status: partly addressed in PR #4557. PR #4557 introduces the requested type family for the packed V plane. The packed-K instantiation, which is the case the review on PR #4424 was about, is deferred to PR #4424 (PR order item 2 of issue #4525).
+
+Words used here: an owner holds the bytes. A view accesses them without owning them. Rank-2 means two coordinates (token, dimension). expr is Tron's common expression 
+
+### B04 [PR #4424 review 5270587330, saved commen] Give vnni_tensor the usual tensor operations, and in particular row-wise load and store.
+QUOTE: Give that type the usual operations that we expect of `tensor` types and, in particular, the row-wise load/store operations that we need here.
+STATUS: partly addressed in 4557 | differs=True
+HOW: Words used here: "packed V" is the V plane of the KV cache in its pair-interleaved storage order; "expr" is tron's common read interface for tensors and views; "row-wise load/store" means writing or reading one token's row of a plane.
+
+The point has two parts. Part one, the row-wise load and store operations, is addressed for packed V. Part two, "the usual operations that we expect of tensor types", is addressed for reads only. Writes through expressions, slices and iterators are deferred by design decision Q4. The packed-K type that the reviewer's comment was originally about is deferred to PR #4424.
+
+Row-wise load and store (done for packed V):
+- h/tron/tensor/v_vnni.hpp defines three free functions on the typed view. append_v_row writes one token's row from an aligned source row of bf16, fp16 or float. load_row reads one token's row into an aligned destination row of bf16 or float. co
+DIFF: Four concrete differences from the reviewer's sketch (comment 5765866077, sections 2 and 4):
+
+1. Row argument type. His: `store_row(vnni_view<bf16, Layout> dst, size_t token, std::span<const bf16, Dims> src)` and `load_row(vnni_view<const bf16, Layout> src, size_t token, std::span<bf16, Dims> dst)`. PR #4557: `append_v_row(v_vnni_view<bf16, Rows, Cols> dst, size_t token, const_view<Source, true, Dma, seq<Cols>, sseq<1>> src)` and `load_row(v_vnni_view<const bf16, Rows, Cols> src, size_t token, view<Destination, true, Dma, seq<Cols>, sseq<1>> dst)`. The rows are tron's existing contiguous view types, not std::span. They carry the `aligned` flag (always true here) and the caller's DMA flag. So
+REASON: Recorded reasons, one per difference:
+
+1. Row arguments as tron views, not std::span: design.txt section 5, "One cache row-write rule", lines 319-327: "Parameter families, not new wrapper types. ... Dma is deduced from the ordinary contiguous row view: the source of append_v_row or the destination of load_row. The model source already has a view with dma = false. ... The shown alignment flag is tr
+  vote1: refuted=False cs=partly addressed in 4557 :: Short version: the mapping holds. The status "partly addressed in 4557" is right, every cited code line exists at HEAD 1c87d66926 with the quoted content, and the four differences and their recorded reasons match the reviewer's sketch and design.txt. Five wording points need tightening; none changes the verdict.
+
+Confirmed against the code and texts:
+- Row-wise load and store for packed V: append_v_row (v_vnni.hpp:309-311), load_row (376-378), copy_token (419-422) exist with the stated signature
+     corrected_text: HOW (corrected):
+
+Words used here: "packed V" is the V plane of the KV cache in its pair-interleaved storage order; "expr" is tron's common read interface for tensors and views; "row-wise load/store" means writing or reading one token's row of a plane.
+
+The point has two parts. Part one, the row-wise load and store operations, is addressed for packed V. Part two, "the usual operations that we expect of tensor types", is addressed for expression reads and single-element writes. Expression-level w
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed with wording corrections. Every code citation holds at HEAD 1c87d66926 (v_vnni.hpp:105/134/148/171/188/203/249/260-261/292-296/309-311/376-378/419-422; kv_cache.hpp:1980/2190/2586/2604; model.hpp:2830-2831/2843-2844; full.hpp:2760-2764; t_llama_unit.cpp:98/103/434-440/3444; view.hpp:87/209; tensor.hpp:125; grep of v_vnni.hpp for set(/operator=/begin/end()/slice returns nothing). The design.txt quotes at lines 102, 136, 138, 317-327, 333, 383-385, 518-528 hold, and the reviewer quotes m
+     corrected_text: STATUS: partly addressed in 4557
+
+HOW:
+Words used here: "packed V" is the V plane of the KV cache in its pair-interleaved storage order; "expr" is tron's common read interface for tensors and views; "row-wise load/store" means writing or reading one token's row of a plane.
+
+The point has two parts. Part one, the row-wise load and store operations, is addressed for packed V. Part two, "the usual operations that we expect of tensor types", is addressed for reads only. Writes through expressions, g
+
+### B05 [PR #4424 review 5270587330, saved commen] Key rule: no bare bf16_t* pointers passed around without an indication of how the data is laid out.
+QUOTE: The key here is that we really don't want `bf16_t*` values floating around without any indication of how they are laid out.
+STATUS: partly addressed in 4557 | differs=True
+HOW: Words used here: bf16 is the 16-bit floating-point format the KV cache stores. A plane is K or V for one KV head of one 64-token page. Packed V is the pair-interleaved V storage order of the 16-lane build. Native K is the row-major K storage order. A view is a non-owning object that carries a pointer plus its layout as a type. A kernel is one attention computation, here the two AMX (Intel tile matrix) kernels.
+
+The rule is enforced in three parts, and PR #4557 covers two of them.
+
+Part 1, packed V: fully addressed. The V plane is now owned by v_vnni_tensor<Rows, Cols>, whose bf16 array is private [h/tron/tensor/v_vnni.hpp:263-264]. The only way to reach it is as_view(), which returns v_vnni_view<bf16 or const bf16, Rows, Cols> and is deleted on temporaries [v_vnni.hpp:248-261]. The view's pointer constructor is private, its friends are the owner, the other view specializations and detail
+DIFF: The rule itself (no bare bf16* without a layout indication) is followed for the planes in scope. The mechanism, the type shapes and the names differ from the sketch in five ways.
+
+1. Type shape. His: one generic vnni_view<T, Layout> and vnni_tensor<Layout>, with the address formula in separate k_vnni_layout / v_vnni_layout policy types. PR #4557: one concrete family per layout, v_vnni_tensor<Rows, Cols> / v_vnni_view<T, Rows, Cols> / v_vnni_row<T, Cols>, with the formula inside the view's private pair_base() [v_vnni.hpp:228-231]. No Layout template parameter exists.
+
+2. Indexing. His: "There is no data(), pointer conversion, or operator[] that suggests a contiguous row." PR #4557: operator[]
+REASON: Each difference has a recorded reason.
+
+1. Formula inside the view, no Layout policy: decision Q1, "May each concrete view contain its address formula? Yes. Separate V and K owners and views. Keep each family's access plumbing small." [design.txt:132; pr-body.md:70]. Section 2 adds that this answers the reviewer's own doubt about a separate k_vnni_layout type: "Choose: one concrete view per layout
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed with wording corrections. Every citation was checked at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525: v_vnni.hpp lines 63-64, 151-158, 165-169, 186-197, 216-224, 228-231, 248-264, 267-285, 306-311, 373-378, 417-422; kv_cache_fwd.hpp 41-52; amx_attn_iface.hpp 187, 222-225, 234-238; amx_attn.cpp 134, 205; kv_cache.hpp 1217-1222, 1445-1496, 1685, 1939-1971, 1977-1984, 2004, 2033, 2478, 2484-2489, 2499-2510; t_llama_unit.cpp 409-425 (the acceptance probes are constexpr bo
+     corrected_text: Words used here: bf16 is the 16-bit floating-point format the KV cache stores. A plane is K or V for one KV head of one 64-token page. Packed V is the pair-interleaved V storage order of the 16-lane build. Native K is the row-major K storage order. A view is a non-owning object that carries a pointer plus its layout as a type. A kernel is one attention computation, here the two AMX (Intel tile matrix) kernels and the AVX-512 weighted sum.
+
+The rule is enforced in three parts, and PR #4557 covers
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. Every code citation resolves at HEAD 1c87d66926 (5 commits over merge-base 996f58ec82): v_vnni.hpp private data_ (264), private view constructor and friends (216-224), deleted as_view() on temporaries (260-261), detail::v_vnni_access::plane/pair_base (272, 282), typed append_v_row/load_row/copy_token (306-311, 373-378, 417-422); kv_cache.hpp v_storage owner (2484-2489), typed set_v/get_v (1939-1971), v_packed (1977-1984), raw k array and reinterpret_cast in k_view() (2478, 2499-2510),
+     corrected_text: Words used here: bf16 is the 16-bit floating-point format the KV cache stores. A plane is K or V for one KV head of one 64-token page. Packed V is the pair-interleaved V storage order of the 16-lane build. Native K is the row-major K storage order. A view is a non-owning object that carries a pointer plus its layout as a type. A kernel is one attention computation, here the two AMX kernels (AMX is Advanced Matrix Extensions, Intel's tile matrix instruction set). Line numbers are at PR head 1c87d
+
+### B06 [PR #4424 comment 5765866077, saved comme] The sketch is a straw-man starting point, and the reviewer states his own doubt: a separate k_vnni_layout apart from vnni_view may not be necessary.
+QUOTE: On discussing this with our overlords, Claude and I came up with the following straw-man (FWIW, I'm not entirely convinced of the necessity of separate `k_vnni_layout` from `vnni_view` but regardless, it's a starting point):
+STATUS: partly addressed in 4557 | differs=True
+HOW: Words used here: PR is a pull request. Packed V is the value plane of the KV cache stored in the pair-interleaved VNNI order (VNNI = Vector Neural Network Instructions). Native K is the key plane stored row-major, one token's dimensions consecutive. An owner holds the bytes; a view reads them without owning them; a layout type is a separate struct that only computes addresses. A kernel is one attention computation, here the AMX (Intel matrix unit) QK and PV kernels.
+
+B06 has two parts.
+
+Part one: the sketch is a straw-man, a first proposal meant to be changed. PR #4557 treats it that way. It keeps the sketch's structure: an owner type separate from a view type, a private pointer constructor on the view, writable-to-const conversion only, typed kernel arguments, an internal detail access helper, and bulk row operations. It records every deviation from the sketch as a decision row (Q1-Q4, 
+DIFF: His: the layout is its own type. k_vnni_layout<Tokens, Dims> and v_vnni_layout<Tokens, Dims> are structs whose only job is a static offset(token, dim) function [sketch lines 16-50]. One generic vnni_view<T, Layout> and one generic vnni_tensor<Layout> take that layout as a template argument, and the view's at() calls Layout::offset [sketch lines 58-124]. He himself added the doubt that the separate layout type is necessary. One header (h/tron/tensor/vnni.hpp) holds both layouts.
+
+PR #4557: there is no layout type. The view is concrete per layout: v_vnni_view<T, Rows, Cols> holds the address formula in its private pair_base(token) and in at(token, dim) [v_vnni.hpp:203-214, 226-231], and v_vnni
+REASON: Recorded, in the design decision record and in the PR description.
+
+design.txt:104 (decision table, row "#3: interface sketch"): "Keep an aligned owner separate from the view. Put the address formula inside each concrete view. Treat this as this design's choice, pending reviewer agreement."
+
+design.txt:106: "The issue author's reading was that the address formula belongs in the view rather than in
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed. Every code citation holds at HEAD 1c87d66926: v_vnni.hpp:170-171 (view template has no Layout parameter), 203-214 (at() computes the address), 226-231 (pair_base holds the formula), 241-265 (owner has no Layout parameter); kv_cache_fwd.hpp:30-35 (V forward declarations with Rows, Cols only), 39-40 and 41-52 (native K aliases over the existing view/const_view); amx_attn_iface.hpp:222 and 234-235 (typed kernel parameters); amx_attn.cpp:128, 197-198, 205; kv_cache.hpp:2477 and 2483-2488.
+     corrected_text: Words used here: PR is a pull request. Packed V is the value plane of the KV cache stored in the pair-interleaved VNNI order (VNNI = Vector Neural Network Instructions). Native K is the key plane stored row-major, one token's dimensions consecutive. An owner holds the bytes; a view reads them without owning them; a layout type is a separate struct that only computes addresses. A kernel is one attention computation, here the AMX (Intel matrix unit) QK and PV kernels.
+
+B06 has two parts.
+
+Part one
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. The status, the "differs" verdict, the described difference and the reason attribution all hold against HEAD 1c87d66926 and the design text. Verified: (a) the sketch quotes are at the cited lines of the saved comment (k_vnni_layout / v_vnni_layout with static offset() at lines 16-50, vnni_tensor<Layout> and vnni_view<T, Layout> at 58-66, Layout::offset at 84, the doubt sentence at line 3); (b) v_vnni.hpp lines 2-4, 37-43, 170-171, 203-207, 226-231, 241-242, 264 read as quoted; (c) kv_
+     corrected_text: status=partly addressed in 4557
+
+how=Words used here: PR is a pull request. Packed V is the value plane of the KV cache stored in the pair-interleaved VNNI order (VNNI = Vector Neural Network Instructions). Native K is the key plane stored row-major, one token's dimensions consecutive. An owner holds the bytes; a view reads them without owning them; a layout type is a separate struct that only computes addresses. A kernel is one attention computation, here the AMX (Intel matrix unit) QK and PV k
+
+### B07 [PR #4424 comment 5765866077, saved comme] Separate three concepts with distinct roles: layout (defines the byte mapping), storage (owns the bytes) and views (carry the type into kernels).
+QUOTE: I would separate **layout**, **storage**, and **views**. The layout defines the byte mapping; storage owns those bytes; views carry their type into kernels.
+STATUS: partly addressed in 4557 | differs=True
+HOW: Words used here: "owner" is the type that holds the bytes of one V plane (a plane is V for one KV head of one 64-token page). "View" is a non-owning handle that names the plane's type at a function boundary. "Layout" is the formula from (token, dimension) to a byte address.
+
+PR #4557 gives the packed V plane two of the three roles as separate types, and folds the third (the layout) into the view.
+
+- Storage owns the bytes. v_vnni_tensor<Rows, Cols> is one 64-byte-aligned bf16 array with no separate allocation and no initialization [h/tron/tensor/v_vnni.hpp:241-265]: "struct alignas(V_PLANE_ALIGNMENT_64) v_vnni_tensor final { ... as_view() & ... as_view() const& ... as_view() && = delete; ... alignas(V_PLANE_ALIGNMENT_64) bf16 data_[Rows * Cols]; }". kv_block uses it as the V member in the 16-lane build [h/tron/models/kv_cache.hpp:2484-2493]: "using v_storage = v_vnni_tensor<page_size, he
+DIFF: His sketch: three separate entities per layout. A layout struct (k_vnni_layout<Tokens, Dims>, v_vnni_layout<Tokens, Dims>) holds a static constexpr offset(token, dim) and the static_assert shape rules; the view is one generic template vnni_view<T, Layout> that calls Layout::offset; the storage is one generic template vnni_tensor<Layout> holding std::array<bf16, Layout::elements>. One header (h/tron/tensor/vnni.hpp) serves both K and V, and kv_block selects k_storage with std::conditional_t.
+
+PR #4557: two entities per layout, and the V family only. The owner is v_vnni_tensor<Rows, Cols> (a plain bf16 array member, not std::array; template parameters are the shape, not a layout type). The vie
+REASON: Recorded in the design decision record, Q1 [design.txt:132]: "Q1. May each concrete view contain its address formula? Proposed choice: Yes. Separate V and K owners and views. Keep each family's access plumbing small. If rejected: revise section 5 declarations and section 7's child types around a layout-policy template. Record: Proposed; reviewer answer not recorded." Section 2 states the motive [d
+  vote1: refuted=False cs=partly addressed in 4557 (storage and views are separate types; the layout is folded into the view, recorded as open question Q1; packed K deferred to PR #4424) :: Confirmed. Checked at worktree /home/jhan/workspace/ai-runs/tron-issue4525, HEAD 1c87d66926 (5 commits on origin/main 996f58ec82), read-only.
+
+Status "partly addressed in 4557" holds. Two of the reviewer's three roles are separate types (owner v_vnni_tensor at h/tron/tensor/v_vnni.hpp:241-265, view v_vnni_view at :170-234). The third role, layout, is not a type: `git diff origin/main HEAD | grep -E 'vnni_layout|offset\(size_t token'` finds nothing, and kv_cache.hpp has no std::conditional_t or k
+     corrected_text: Words used here: "owner" is the type that holds the bytes of one V plane (a plane is V for one KV head of one 64-token page). "View" is a non-owning handle that names the plane's type at a function boundary. "Layout" is the formula from (token, dimension) to a byte address.
+
+PR #4557 gives the packed V plane two of the three roles as separate types, and folds the third (the layout) into the view.
+
+- Storage owns the bytes. v_vnni_tensor<Rows, Cols> is one 64-byte-aligned bf16 array with no separ
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. Every citation in the mapping holds at HEAD 1c87d66926 of /home/jhan/workspace/ai-runs/tron-issue4525. Storage: v_vnni_tensor<Rows, Cols> is one alignas(64) bf16 array member with lvalue-only as_view() [h/tron/tensor/v_vnni.hpp:241-265]; kv_block holds it as v_storage v in the 16-lane build [h/tron/models/kv_cache.hpp:2484-2489]; the arena placement-news kv_block arrays over the raw bytes [kv_cache.hpp:1445-1481]. Views: v_vnni_view has a private pointer constructor [v_vnni.hpp:222-22
+     corrected_text: Words used here: "owner" is the type that holds the bytes of one V plane (a plane is V for one KV head of one 64-token page). "View" is a non-owning handle that names the plane's type at a function boundary. "Layout" is the formula from (token, dimension) to a byte address. "kv_block" is the struct that holds K and V of one KV head for one page. The "arena" is the one raw-byte allocation that holds all kv_blocks of a cache.
+
+PR #4557 gives the packed V plane two of the three roles as separate ty
+
+### B08 [PR #4424 comment 5765866077, saved comme] Expectation setting: what follows is an API sketch, not compiled code, so details are open to adjustment.
+QUOTE: Below is an API sketch, not a compiled implementation.
+STATUS: not applicable | differs=False
+HOW: The point is a statement about the comment itself, not a request. It says the code that follows is a sketch (an outline of an interface) and not compiled code, so details may change. There is nothing to implement, so no code in PR #4557 can "address" it. What the PR does with the statement: it takes the sketch as the starting point and supplies the compiled counterpart. The sketch's owner/view/access split, its private pointer constructor, its writable-to-const conversion, its lvalue-only as_view(), its detail access helper and its typed kernel parameters all exist as real code in h/tron/tensor/v_vnni.hpp, h/tron/tensor/kv_cache_fwd.hpp, h/tron/kernels/amx_attn_iface.hpp and src/tron/kernels/amx_attn.cpp. The sketch's closing "Consequently" block (wrong argument = compile error) is turned into compile-time test probes in t/t_llama_unit.cpp. The PR also uses the freedom the sentence grant
+DIFF: No mechanism, type shape, name or rule is stated in this point, so there is nothing for PR #4557 to follow or to deviate from. His: a sentence saying the following code is an uncompiled sketch whose details are open. PR #4557: reads the sentence as permission to adjust and does adjust, in five recorded places. Each adjustment is scored under its own point, not here: no separate layout type (the address formula sits inside v_vnni_view, Q1); const at both ranks, view and row (Q2, the sketch had a span-like const rule); operator[] returning a logical row v_vnni_row plus bounds-checked at() (Q3, the sketch excluded indexing); a smaller parent scope (Q4); a typed native-K kernel parameter const_n
+REASON: Recorded in the design text /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a726337-9373-4eb4-935f-269e8630de97/scratchpad/design.txt. Line 104 (request table, row "#3: interface sketch"): "Keep an aligned owner separate from the view. Put the address formula inside each concrete view. Treat this as this design's choice, pending reviewer agreement." Line 106: "The reviewe
+  vote1: refuted=False cs=not applicable :: Status and verdict confirmed. B08 is line 7 of the saved comment (ben-comment-5765866077.md), a statement about the comment itself. Nothing in it can be followed or deviated from, so "not applicable" and differs=false are right.
+
+Evidence checked at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525, all holding:
+- h/tron/tensor/v_vnni.hpp: view struct :170-171, writable-to-read-only conversion :180-185, owner :242, lvalue-only as_view :249-261, private data_ :264, detail::v_vnni_acc
+     corrected_text: how (replace the two sentences "The sketch's closing ... in t/t_llama_unit.cpp." and "The PR also uses the freedom ... 'Requested scope' (D5)."):
+The sketch's closing "Consequently" block (the right view is accepted, the other plane's view and a bare pointer are compile errors) is written for the packed-K kernel qk_vnni_128x4, which is not in this PR. PR #4557 applies the same three-way rule to the two kernels it compiles, qk_rowmajor_128x4 and weights_times_v_128x4, as compile-time test probes 
+  vote2: refuted=False cs=not applicable :: Confirmed. Status "not applicable" is right: sketch line 7 ("Below is an API sketch, not a compiled implementation.") is a statement about the comment, not a request. Every cited code line exists at HEAD 1c87d66926 with the quoted content: v_vnni.hpp:170-171 (v_vnni_view), 242 (aligned owner), 249-261 (lvalue-only as_view), 264 (private data_), 268-286 (detail::v_vnni_access), 309-311/376-378/419-422 (append_v_row, load_row, copy_token); amx_attn_iface.hpp:222 and 234-235; amx_attn.cpp:128 and 1
+     corrected_text: evidence=The sketch statement: saved comment ben-comment-5765866077.md line 7, "Below is an API sketch, not a compiled implementation." Compiled counterparts at HEAD 1c87d66926 (worktree /home/jhan/workspace/ai-runs/tron-issue4525): h/tron/tensor/v_vnni.hpp:170-171 "template <typename T, size_t Rows, size_t Cols> struct v_vnni_view final : expr<v_vnni_view<T, Rows, Cols>, Rows, Cols>"; :180-184 the writable-to-read-only conversion "requires(std::is_const_v<T> && std::same_as<U, std::remove_const
+
+### B09 [PR #4424 comment 5765866077, saved comme] The layout types describe the two existing byte representations (not new ones); both use logical coordinates (token, dimension) and differ only in the physical mapping.
+QUOTE: ## 1. Layouts describe the existing representations
+
+Both use logical coordinates `(token, dimension)`. Their physical mappings differ.
+STATUS: partly addressed in 4557 | differs=True
+HOW: The point has three parts: the types describe the existing byte representations (no new layout), every plane is addressed by the logical coordinates (token, dimension), and only the physical mapping (the formula from coordinates to a memory position) differs between planes. PR #4557 implements all three parts for the two planes in its scope, packed V and native K. The packed-K representation (the reviewer's k_vnni_layout) is deferred to PR #4424, PR order item 2 of issue #4525. That is why the status is "partly".
+
+Packed V, existing representation kept: kv_block::v was the array `bf16s v[page_size / 2][head_size / chunk_size * 2]`, "indexed as [p/2][i/C][i%C][p%2]" (removed lines of the kv_cache.hpp diff). It is now `v_storage v` with `using v_storage = v_vnni_tensor<page_size, head_size>` [h/tron/models/kv_cache.hpp:2484-2489]. The block keeps `static_assert(sizeof(k) == sizeof(v))` [kv
+DIFF: The rule is followed (existing representations, logical (token, dimension) coordinates, one physical mapping per plane). The mechanism that carries the mapping is not the one sketched.
+
+His: a separate layout type per representation, `k_vnni_layout<Tokens, Dims>` and `v_vnni_layout<Tokens, Dims>`, each with `static constexpr size_t offset(size_t token, size_t dim)` and the constants `tokens`, `dims`, `elements`. The layout is a template argument of both the view (`vnni_view<T, Layout>`, with `using layout_type = Layout` and `at()` calling `Layout::offset`) and the owner (`vnni_tensor<Layout>`). Both layouts sit in one header, h/tron/tensor/vnni.hpp. His v layout requires only `Tokens % 2 == 
+REASON: Recorded in the design decision record and the PR description. Q1 ("May each concrete view contain its address formula?"): "Yes. Separate V and K owners and views. Keep each family's access plumbing small." Fallback if rejected: "Revise section 5 declarations and section 7's child types around a layout-policy template." Status: "Proposed; reviewer answer not recorded." [design.txt line 132; PR bod
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed. The status "partly addressed" holds: B09 covers both packed layouts (K and V); PR #4557 at HEAD 1c87d66926 implements packed V (v_vnni_tensor / v_vnni_view / v_vnni_row in h/tron/tensor/v_vnni.hpp) and types native K (native_k_view / const_native_k_view aliases in h/tron/tensor/kv_cache_fwd.hpp:41-52), and no packed-K type exists (grep for k_vnni_layout, v_vnni_layout, layout_type over h/ src/ t/ exits 1). The "differs" verdict is accurate: the sketch carries the address formula in se
+     corrected_text: The point has three parts: the types describe the existing byte representations (no new layout), every plane is addressed by the logical coordinates (token, dimension), and only the physical mapping (the formula from coordinates to a memory position) differs between planes. PR #4557 implements all three parts for the two planes in its scope, packed V and native K. The packed-K representation (the reviewer's k_vnni_layout) is deferred to PR #4424, PR order item 2 of issue #4525. That is why the s
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. The status, the evidence, the "differs" verdict and the attributed reason all hold against the code at HEAD 1c87d66926 and the design text. Four citations need small corrections (listed in corrected_text). Nothing changes the verdict.
+
+Checks made (worktree /home/jhan/workspace/ai-runs/tron-issue4525, read-only):
+
+1. Status "partly addressed". The reviewer's point names two layout types, packed K and packed V. PR #4557 implements the packed-V mapping and the native-K alias. No packed-
+     corrected_text: Four citation fixes; every other sentence of the mapping stands as written.
+
+1. Replace "`bf16s k[page_size][head_size / chunk_size]` is unchanged [kv_cache.hpp:2476-2477]" with "... is unchanged [kv_cache.hpp:2478]" (lines 2476-2477 are the comment above the array). Same fix in the evidence list: "h/tron/models/kv_cache.hpp:2478: alignas(kv_block_alignment) bf16s k[page_size][head_size / chunk_size]; (unchanged by the diff)".
+
+2. Replace "[h/tron/kernels/amx_attn_iface.hpp:222, 236-237]" with "
+
+### B10 [PR #4424 comment 5765866077, saved comme] The layout types live in one header under the tensor directory, h/tron/tensor/vnni.hpp.
+QUOTE: // h/tron/tensor/vnni.hpp
+STATUS: partly addressed in 4557 | differs=True
+HOW: Short version: PR #4557 (the pull request under review) puts the packed-V layout types in a header under h/tron/tensor/, as the reviewer sketched. It does not use his single file name h/tron/tensor/vnni.hpp. It uses two new headers, h/tron/tensor/v_vnni.hpp and h/tron/tensor/kv_cache_fwd.hpp, and leaves the packed-K types for a third header in PR #4424.
+
+Details:
+- The directory matches the sketch. Both new headers sit in h/tron/tensor/ [git diff --stat origin/main HEAD: h/tron/tensor/kv_cache_fwd.hpp 54 lines, h/tron/tensor/v_vnni.hpp 469 lines]. No file named h/tron/tensor/vnni.hpp exists at HEAD 1c87d66926 [ls h/tron/tensor/].
+- h/tron/tensor/v_vnni.hpp holds the V-side layout family: the owner v_vnni_tensor<Rows, Cols>, the matrix view v_vnni_view<T, Rows, Cols>, the logical row v_vnni_row<T, Cols>, the internal address helper detail::v_vnni_access, and the bulk operations append_v_r
+DIFF: His: one header, h/tron/tensor/vnni.hpp, defines both layout types (k_vnni_layout and v_vnni_layout) side by side, and the same file is the natural home of vnni_view, vnni_tensor and detail::vnni_access (saved comment lines 14-50, 57-125, 158-166).
+PR #4557: three files instead of one.
+- h/tron/tensor/v_vnni.hpp: the V family only (v_vnni_tensor, v_vnni_view, v_vnni_row, detail::v_vnni_access, append_v_row / load_row / copy_token, Note [Packed V layout]). The types carry a v_ prefix instead of a shared layout parameter.
+- h/tron/tensor/kv_cache_fwd.hpp: a separate forward-declaration header with the three V declarations and the native_k_view / const_native_k_view aliases. The sketch has no s
+REASON: Recorded, in two parts.
+- The two-file K/V split is recorded as a design choice with no engineering argument attached. design.txt line 528: "The reviewer's sketch used one header, h/tron/tensor/vnni.hpp, for both layouts. The separate K/V files and the v_ prefix are this design's choice." design.txt line 730: "Explicitly retain separate v_vnni.hpp and k_vnni.hpp files. Cite the existing kernels-to
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed. Every checkable claim holds at HEAD 1c87d66926 and in the design text.
+
+Verified against the worktree (read-only git/grep):
+- git diff --stat origin/main HEAD lists h/tron/tensor/kv_cache_fwd.hpp (54 lines) and h/tron/tensor/v_vnni.hpp (469 lines). ls h/tron/tensor/ shows exactly array_like.hpp itensor.hpp kv_cache_fwd.hpp seq.hpp slice.hpp tensor.hpp view.hpp views.hpp v_vnni.hpp. find over the tree returns no vnni.hpp and no *k_vnni* file. grep "k_vnni" across h/ src/ t/ returns not
+     corrected_text: Short version: PR #4557 (the pull request under review) puts the packed-V layout types in a header under h/tron/tensor/, as the reviewer sketched. It does not use his single file name h/tron/tensor/vnni.hpp. It uses two new headers, h/tron/tensor/v_vnni.hpp and h/tron/tensor/kv_cache_fwd.hpp, and leaves the packed-K types for a planned third header in PR #4424.
+
+Details:
+- The directory matches the sketch. Both new headers sit in h/tron/tensor/ [git diff --stat origin/main HEAD: h/tron/tensor/kv
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. Every evidence line checks out at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525: the diff stat (kv_cache_fwd.hpp 54 lines, v_vnni.hpp 469 lines), the ls of h/tron/tensor/ (no vnni.hpp, no k_vnni.hpp; git ls-files over the whole tree lists only h/tron/tensor/v_vnni.hpp), v_vnni.hpp lines 1-6/105/171/242/268/309/376/419, kv_cache_fwd.hpp lines 2-7/30-35/41-52, the include sites (amx_attn_iface.hpp:113, kv_cache.hpp:33, amx_attn.cpp:14-15), the empty grep for k_vnni|nati
+     corrected_text: Short version: PR #4557 (the pull request under review) puts the packed-V layout types in a header under h/tron/tensor/, the directory the reviewer sketched. It does not use his single file name h/tron/tensor/vnni.hpp. It uses two new headers, h/tron/tensor/v_vnni.hpp and h/tron/tensor/kv_cache_fwd.hpp, and leaves the packed-K types for a third header planned in PR #4424.
+
+Details:
+- The directory matches the sketch. Both new headers sit in h/tron/tensor/ [git diff --stat origin/main HEAD: h/tro
+
+### B11 [PR #4424 comment 5765866077, saved comme] A k_vnni_layout<Tokens, Dims> struct: static_asserts Tokens % 16 == 0 and Dims % 32 == 0, constants tokens/dims/elements, and a constexpr offset(token, dim) that maps to K's physical order (32-dim ste
+QUOTE: template <size_t Tokens, size_t Dims>
+struct k_vnni_layout {
+  static_assert(Tokens > 0 && Tokens % 16 == 0);
+  static_assert(Dims > 0 && Dims % 32 == 0);
+
+  static constexpr size_t tokens = Tokens;
+  static constexpr size_t dims = Dims;
+  static constexpr size_t elements = Tokens * Dims;
+
+  static 
+STATUS: deferred to 4424 | differs=True
+HOW: Words used here: k_vnni_layout is the reviewer's sketched struct that maps a packed-K coordinate (token, dim) to its position in memory. VNNI (Vector Neural Network Instructions) is Intel's name for the pair-interleaved operand order. Native K is the row-major K plane that main stores today. PR #4557 does not add k_vnni_layout or any packed-K type. A search of the whole diff (git diff origin/main HEAD) and of the h, src and t trees for "k_vnni" and "vnni_layout" returns zero hits. The K plane keeps its existing row-major array and its existing view types. The only K-side change in this PR is a new alias, const_native_k_view<Rows, Cols>, for the existing const_view type, used as the parameter type of the AMX QK kernel qk_rowmajor_128x4. The PR description lists the packed-K types under "Not covered" as PR order item 2 of issue #4525, which is PR #4424. The V side of this PR shows the shap
+DIFF: The point itself is not implemented in PR #4557, so the difference is a recorded plan plus the V precedent in this PR, not compiled K code. His: a standalone struct k_vnni_layout<Tokens, Dims> in one header h/tron/tensor/vnni.hpp, with static_assert(Tokens % 16 == 0) and static_assert(Dims % 32 == 0), constants tokens/dims/elements, and a public static constexpr offset(token, dim) that the view calls as Layout::offset(); the layout is a template argument of both vnni_tensor<Layout> and vnni_view<T, Layout>. PR #4557 (V side at HEAD, and the design's plan for K in PR #4424): no layout struct at all. The address formula is a private member of the concrete view (v_vnni_view::pair_base plus the 
+REASON: Recorded in the design decision record, question Q1 [design.txt:132]: "Q1. May each concrete view contain its address formula? | Yes. Separate V and K owners and views. Keep each family's access plumbing small. | If rejected: Revise section 5 declarations and section 7's child types around a layout-policy template. | Proposed; reviewer answer not recorded." The rationale [design.txt:106, 110]: "Th
+  vote1: refuted=False cs=deferred to 4424 :: Confirmed with wording corrections. Status holds: no k_vnni or vnni_layout name exists in the diff (git diff origin/main HEAD, rc=1) or in the h, src, t trees at HEAD 1c87d66926, and the PR body lists the packed-K types under "Not covered" as PR order item 2 of #4525 [pr-body.md:177] and says PR #4424 is unchanged [pr-body.md:62]. The differs verdict holds: the sketch puts the formula in a standalone k_vnni_layout::offset() in one header h/tron/tensor/vnni.hpp with vnni_tensor<Layout> and vnni_v
+     corrected_text: Words used here: k_vnni_layout is the reviewer's sketched struct that maps a packed-K coordinate (token, dim) to its position in memory. VNNI (Vector Neural Network Instructions) is Intel's name for the pair-interleaved operand order. Native K is the row-major K plane that main stores today. PR #4557 is the parent PR (branch jhan-kv-typed-tensors, HEAD 1c87d66926). PR #4424 is the packed-K child PR.
+
+How PR #4557 handles this point:
+
+PR #4557 does not add k_vnni_layout or any packed-K type. A se
+  vote2: refuted=False cs=deferred to 4424 :: Confirmed with wording corrections. Every load-bearing claim holds against HEAD 1c87d66926 and the design text:
+- No packed-K type in the PR: `git diff origin/main HEAD | grep -i "k_vnni\|vnni_layout"` and `grep -rn -i "k_vnni\|vnni_layout" h src t` both return nothing (rc=1). Diff touches 13 files; the two new headers are V-side.
+- K storage and kv_block::k_view unchanged: h/tron/models/kv_cache.hpp:2478 `bf16s k[page_size][head_size / chunk_size]` and the two k_view() bodies at 2497-2509 appea
+     corrected_text: Words used here: k_vnni_layout is the reviewer's sketched struct that maps a packed-K coordinate (token, dim) to its position in memory. VNNI (Vector Neural Network Instructions) is an Intel instruction-set extension. Its dot-product instructions read one operand in a pair-interleaved order, and "VNNI layout" here means that order. Native K is the row-major K plane that main stores today.
+
+PR #4557 does not add k_vnni_layout or any packed-K type. A search of the whole diff (git diff origin/main 
+
+### B12 [PR #4424 comment 5765866077, saved comme] A v_vnni_layout<Tokens, Dims> struct: static_asserts Tokens % 2 == 0 and Dims > 0, constants tokens/dims/elements, and a constexpr offset(token, dim) = (token/2)*(2*Dims) + 2*dim + token%2 (each token
+QUOTE: template <size_t Tokens, size_t Dims>
+struct v_vnni_layout {
+  static_assert(Tokens > 0 && Tokens % 2 == 0);
+  static_assert(Dims > 0);
+
+  static constexpr size_t tokens = Tokens;
+  static constexpr size_t dims = Dims;
+  static constexpr size_t elements = Tokens * Dims;
+
+  static constexpr size_t of
+STATUS: partly addressed in 4557 | differs=True
+HOW: Short version: PR #4557 keeps the reviewer's address formula, his even-token-count rule and his positive-dimension rule, but it puts them inside the concrete view type v_vnni_view instead of a standalone v_vnni_layout struct. No type named v_vnni_layout exists at HEAD, and no constexpr offset(token, dim) function exists. The three constants tokens/dims/elements of the sketch have no counterpart (the view carries Rows and Cols as template parameters only).
+
+What is present at HEAD 1c87d66926:
+
+- The formula. Note [Packed V layout] states it in prose: "element (token, d) is at plane[(token / 2) * (2 * D) + 2 * d + token % 2] (in bf16 elements)" [h/tron/tensor/v_vnni.hpp:43]. The code splits it in two steps. The private member v_vnni_view::pair_base(token) returns data_ + (token / V_PAIR_TOKENS_2) * (V_PAIR_TOKENS_2 * Cols) [v_vnni.hpp:229-231]. at() and the row add the rest: pair_base(toke
+DIFF: His: a standalone policy struct v_vnni_layout<Tokens, Dims> with a public static constexpr offset(token, dim) = (token/2)*(2*Dims) + 2*dim + token%2, named constants tokens, dims, elements, and static_asserts Tokens % 2 == 0 and Dims > 0. The owner (vnni_tensor<Layout>) and the view (vnni_view<T, Layout>) both take the layout as a template argument, and at() calls Layout::offset. PR #4557: no layout struct and no offset() function. The formula is split across the private member v_vnni_view::pair_base(token) [v_vnni.hpp:229-231] and the element index "V_PAIR_TOKENS_2 * dim + token % V_PAIR_TOKENS_2" in at() and in v_vnni_row::operator[] [v_vnni.hpp:206, 117]. The owner is v_vnni_tensor<Rows, 
+REASON: Recorded reason: design decision Q1 ("May each concrete view contain its address formula?"), proposed choice "Yes. Separate V and K owners and views. Keep each family's access plumbing small."; fallback if rejected: "Revise section 5 declarations and section 7's child types around a layout-policy template." [design.txt:132]. The status is "Proposed; reviewer answer not recorded." The design's sect
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed against HEAD 1c87d66926 and the design text. Every cited line holds: v_vnni.hpp:43 (prose formula), :107-108/:175-176/:245-246 (Cols > 0 && Cols % chunk_size == 0 on row, view, owner), :173-174/:243-244 (Rows > 0 && Rows % V_PAIR_TOKENS_2 == 0), :117/:123 (row index), :206/:213 (at()), :229-231 (pair_base), :264 (data_[Rows * Cols]), :268-285 (detail::v_vnni_access with plane and pair_base); kv_cache.hpp:2480-2484 and :2489 (formula comment, using v_storage = v_vnni_tensor<page_size, h
+     corrected_text: Short version: PR #4557 keeps the reviewer's address formula, his positive-and-even-token-count rule and his positive-dimension rule, but it puts them inside the concrete view type v_vnni_view instead of a standalone v_vnni_layout struct. No type named v_vnni_layout exists at HEAD, and no constexpr offset(token, dim) function exists. The three named constants tokens/dims/elements of the sketch have no counterpart (the view carries Rows and Cols as template parameters only; the row inherits a siz
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed with four wording corrections. Every code citation in the mapping holds at HEAD 1c87d66926: the formula in Note [Packed V layout] [v_vnni.hpp:43], pair_base [v_vnni.hpp:229-231], at() [:206, :213], the row index [:117, :123], the even-rows and chunk-size static_asserts [:107-108, :173-176, :243-246], the array size [:264], detail::v_vnni_access [:268-285], the kv_block comment and member [kv_cache.hpp:2480-2481, :2484, :2489], the kernel parameter [amx_attn_iface.hpp:235; amx_attn.cpp:
+     corrected_text: Short version: PR #4557 keeps the reviewer's address formula, his even-token-count rule and his positive-dimension rule, but it puts them inside the concrete view type v_vnni_view instead of a standalone v_vnni_layout struct. No type named v_vnni_layout exists at HEAD 1c87d66926 (the newest commit of the PR branch), and no constexpr offset(token, dim) function exists. The sketch's named constants tokens, dims and elements have no named member on any new type; the view carries Rows and Cols as te
+
+### B13 [PR #4424 comment 5765866077, saved comme] The layout static_asserts describe what storage can represent; kernels may be stricter (a representable k_vnni_layout<128, 256> does not mean the current AMX kernel supports it).
+QUOTE: These restrictions describe storage. Kernels can impose stricter restrictions. For example, representing `k_vnni_layout<128, 256>` would not imply that the current AMX kernel supports it.
+STATUS: addressed in 4557 | differs=True
+HOW: The point is a rule about where restrictions live: the storage type says what shapes it can hold, and a kernel (one fixed computation) may accept fewer shapes. PR #4557 follows this rule for the V side (packed V) and for native K.
+
+Storage side. The three packed-V classes carry only storage-representability checks in their class bodies. The owner v_vnni_tensor<Rows, Cols> and the matrix view v_vnni_view<T, Rows, Cols> require an even positive Rows and a positive Cols that is a multiple of chunk_size (16 bf16 values at 16 lanes). The row v_vnni_row<T, Cols> requires the same Cols rule. No class mentions 64 tokens or 128 dims. The cache instantiates the owner from the model's geometry, not from the kernel's shape: `using v_storage = v_vnni_tensor<page_size, head_size>;` [h/tron/models/kv_cache.hpp:2484]. So a shape such as v_vnni_tensor<64, 256> is representable.
+
+Kernel side. Both AMX ker
+DIFF: The rule (storage checks loose, kernel signature fixed) is followed. The mechanism and one bound differ.
+
+His: a separate layout class v_vnni_layout<Tokens, Dims> holds the storage checks `Tokens > 0 && Tokens % 2 == 0` and `Dims > 0`. The view vnni_view<T, Layout> is templated on that layout class and inherits the checks from it. Kernel restrictions live outside, in the kernel.
+
+PR #4557: there is no layout class. The storage checks sit directly in the class bodies of v_vnni_tensor, v_vnni_view and v_vnni_row (three copies of the same static_asserts). The column bound is stricter than his: `Cols > 0 && Cols % chunk_size == 0` (a multiple of 16 at 16 lanes) instead of `Dims > 0`. The kernel 
+REASON: Recorded reasons:
+- No layout class: design decision Q1, "May each concrete view contain its address formula? Yes. Separate V and K owners and views. Keep each family's access plumbing small." (design.txt line 132; status "Proposed; reviewer answer not recorded").
+- Class-body static_asserts, not requires clauses: design.txt line 377, "Do not add class-template requires clauses: the forward declar
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed with corrections. Status "addressed in 4557", the "differs = true" verdict, the described difference and the attributed reasons all hold against HEAD 1c87d66926 and design.txt (quotes at lines 132, 245, 377, 552 verified; the reviewer's sketch text verified in ben-comment-5765866077.md lines 25-53). Every code citation matches the file content at HEAD.
+
+One evidence sentence is inaccurate and must be replaced: "no test instantiates another shape (grep over t/, h/, src/ found none), so 
+     corrected_text: how=The point is a rule about where restrictions live: the storage type says what shapes it can hold, and a kernel (one fixed computation) may accept fewer shapes. PR #4557 follows this rule for the V side (packed V) and for native K.
+
+Storage side. The three packed-V classes carry only storage-representability checks in their class bodies. The owner v_vnni_tensor<Rows, Cols> and the matrix view v_vnni_view<T, Rows, Cols> require an even positive Rows and a positive Cols that is a multiple of ch
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed with one evidence correction and small wording fixes. Every code citation matches HEAD 1c87d66926: the class-body static_asserts (v_vnni.hpp:106-108, 172-176, 243-246), the operation requires clauses (v_vnni.hpp:307, 374), the page and expression constraints (kv_cache.hpp:1945, 1953, 2353-2354), the storage alias from model geometry (kv_cache.hpp:2484), the fixed-shape kernel parameter types (amx_attn_iface.hpp:222, 234-235; amx_attn.cpp:128, 197-198), the separate dispatch gate (amx_a
+     corrected_text: B13 (from the reviewer's API-sketch comment, line 53): "These restrictions describe storage. Kernels can impose stricter restrictions. For example, representing k_vnni_layout<128, 256> would not imply that the current AMX kernel supports it."
+
+Status: addressed in 4557.
+
+How. The point is a rule about where restrictions live. The storage type says what shapes it can hold. A kernel (one fixed computation) may accept fewer shapes. PR #4557 follows this rule for packed V and for native K.
+
+Storage 
+
+### B14 [PR #4424 comment 5765866077, saved comme] A vnni_view<T, Layout> class template over the element type T (bf16 or const bf16 only, enforced by static_assert) and the Layout; it carries layout and constness in its type and exposes layout_type, 
+QUOTE: ## 2. A view carries layout and constness
+
+template <typename T, typename Layout>
+class vnni_view {
+  static_assert(std::same_as<std::remove_const_t<T>, bf16>);
+
+ public:
+  using layout_type = Layout;
+
+  static constexpr size_t tokens = Layout::tokens;
+  static constexpr size_t dims = Layout::dims;
+STATUS: addressed in 4557 | differs=True
+HOW: PR #4557 gives the packed V plane a view class template, v_vnni_view<T, Rows, Cols>, in the new header h/tron/tensor/v_vnni.hpp. A view is a non-owning handle to a plane that knows the address formula. The view carries constness in its element type T: T is bf16 (writable) or const bf16 (read-only), and the class body enforces this with a static_assert on the concept v_vnni_element<T> (the same rule as the reviewer's std::remove_const_t<T> == bf16 check). The view carries the layout in its type name and shape: the packed V address formula lives in the private member pair_base(), and the shape is the two non-type template parameters Rows (tokens) and Cols (dims), each checked by a class-body static_assert. A writable view converts to a read-only one and never the reverse. The kernel boundary uses the type: weights_times_v_128x4 takes v_vnni_view<const bf16, 64, 128>. The forward declaratio
+DIFF: Three concrete differences. (1) Template shape. The reviewer: one generic class vnni_view<T, Layout>, where Layout is a separate layout type (for example k_vnni_layout<64,128>) that supplies tokens, dims and the offset() formula, so one view class serves every packed layout. PR #4557: one view class per layout, v_vnni_view<T, Rows, Cols>, with the shape as two size_t template parameters and the packed V address formula written inside the view (pair_base()). There is no Layout parameter, and the K-packed layout will get its own class (k_vnni_view) in PR #4424. (2) Exposed names. The reviewer: public "using layout_type = Layout;" and "static constexpr size_t tokens / dims". PR #4557: none of t
+REASON: Recorded. Difference (1) and (2): design decision Q1, "May each concrete view contain its address formula? Yes. Separate V and K owners and views. Keep each family's access plumbing small." (design.txt Decision record; PR body Decisions row Q1, marked Proposed, no reviewer answer recorded). The design's section 2 text explains the choice: "one concrete view per layout. This repeats a small amount 
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed against HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525 and the design text. Status, evidence, the differs verdict, the three differences, and the Q1/Q2 attribution all hold. Checks: (a) v_vnni.hpp:97 defines concept v_vnni_element as bf16 or const bf16; :172 static_asserts it in the class body; that is the same accepted set as the sketch's std::same_as<std::remove_const_t<T>, bf16>. (b) :170-176 declare v_vnni_view<T, Rows, Cols> with Rows/Cols static_asserts; :180-184 
+     corrected_text: reason (corrected): Recorded. Differences (1) and (2): design decision Q1, "May each concrete view contain its address formula? Yes. Separate V and K owners and views. Keep each family's access plumbing small." (design.txt line 132; PR body Decisions row Q1, marked Proposed, no reviewer answer recorded). The design's section 2 text explains the choice: "one concrete view per layout. This repeats a small amount of view plumbing when the child adds packed K. It avoids a public layout-policy templa
+  vote2: refuted=False cs=addressed in 4557 for the packed V plane and native K; the packed-K view (k_vnni_view) is deferred to PR #4424 :: Confirmed. Every evidence citation holds at HEAD 1c87d66926 and in the design text. v_vnni.hpp:96-97 defines the concept v_vnni_element (bf16 or const bf16); :172 asserts it in the class body; :180-184 is the constrained writable-to-read-only conversion; :186 carries the comment "A const matrix yields a read-only row"; operator[] const returns v_vnni_row<const bf16, Cols> and at() const returns const bf16&; :222-224 is the private explicit pointer constructor; :228-231 is pair_base() with the ad
+     corrected_text: Optional fourth difference to add if no other reviewer point covers it: (4) Row indexing. The reviewer: "There is no data(), pointer conversion, or operator[] that suggests a contiguous row"; at() is the only element access. PR #4557: v_vnni_view has operator[] returning a logical row v_vnni_row<T, Cols> with no public pointer (v_vnni.hpp:186-197), because the expr (rank-2 expression) interface requires row indexing. Reason: design decision Q3, "May packed views expose logical rows through opera
+
+### B15 [PR #4424 comment 5765866077, saved comme] The only converting constructor turns a mutable view into a const view of the same layout; no other view-to-view conversion is allowed.
+QUOTE:   // Permit mutable-to-const conversion only.
+  template <typename U>
+    requires(std::is_const_v<T> && std::same_as<U, bf16>)
+  vnni_view(vnni_view<U, Layout> other) noexcept
+      : data_(other.data_) {}
+STATUS: addressed in 4557 | differs=False
+HOW: PR #4557 gives v_vnni_view<T, Rows, Cols> (the matrix view of one packed V plane) exactly one converting constructor. It is a constructor template, constrained so that it exists only when the target element type T is const and the source element type U is the non-const form of T. Because the class limits T to bf16 or const bf16 (static_assert on the v_vnni_element concept), the only instance that can exist is v_vnni_view<bf16, R, C> to v_vnni_view<const bf16, R, C>. The constructor copies the private data_ pointer, which it can read because every v_vnni_view specialization is declared a friend of every other. There is no constructor from a const view to a writable view, from a view of another shape, from a K view, or from a bare pointer (the pointer constructor is private). The rule is exercised in a real call: t_amx_numerics passes the writable view of a non-const owner to weights_times
+DIFF: The mechanism and the rule follow the sketch: one constrained constructor template, requires(std::is_const_v<T> && ...), copying data_, with a friend declaration across specializations, and no other view-to-view conversion. Three surface differences exist, none changing the rule. (1) Constraint spelling. His: std::same_as<U, bf16>. PR #4557: std::same_as<U, std::remove_const_t<T>>. The two are equivalent here, because T is limited to bf16 or const bf16 and is_const_v<T> makes T = const bf16, so remove_const_t<T> is bf16. (2) Template parameter list. His: vnni_view<U, Layout> (a layout-policy type parameter). PR #4557: v_vnni_view<U, Rows, Cols> (shape parameters, the address formula inside t
+REASON: Recorded. The design text keeps the reviewer's rule by name: "Retain: private packed storage, restricted construction of views, mutable-to-read-only conversion, typed kernel arguments, and optimized bulk operations." (design.txt line 108) and "View copy and conversion | Copying a view rebinds access. Allow writable-to-read-only conversion only. ... Rows have no cross-constness conversion." (design
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed against HEAD 1c87d66926 and the design text. Every evidence item holds: the single constrained converting constructor at h/tron/tensor/v_vnni.hpp:178-184 (requires is_const_v<T> && same_as<U, remove_const_t<T>>, copies data_); T limited to bf16 / const bf16 by the v_vnni_element concept (:96-97, :172); cross-specialization friend and private pointer constructor (:216-224); class comment (:165-169); static checks in t/t_llama_unit.cpp:413-414 and :426-430; the real conversion in t/t_amx
+     corrected_text: how: PR #4557 gives v_vnni_view<T, Rows, Cols> (the matrix view of one packed V plane) exactly one converting constructor. It is a constructor template. Its constraint allows it only when the target element type T is const and the source element type U is the non-const form of T. The class limits T to bf16 or const bf16 (static_assert on the v_vnni_element concept), so the only instance that can exist is v_vnni_view<bf16, R, C> to v_vnni_view<const bf16, R, C>. The constructor copies the private
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every cited line holds at HEAD 1c87d66926, and the "differs=false" verdict with three surface differences is accurate.
+
+Verified against the worktree /home/jhan/workspace/ai-runs/tron-issue4525:
+- h/tron/tensor/v_vnni.hpp:177-184 is the one constrained converting constructor, quoted exactly. Lines 96-97 (v_vnni_element concept), 165-169 (class comment), 172 (static_assert), 216-224 (friend list and private pointer constructor) match the quotes. The `template <typename U, size_t R, siz
+     corrected_text: PR #4557 gives v_vnni_view<T, Rows, Cols> (the matrix view of one packed V plane) exactly one converting constructor. It is a constructor template, constrained so that it exists only when the target element type T is const and the source element type U is the non-const form of T. Because the class limits T to bf16 or const bf16 (static_assert on the v_vnni_element concept), the only instance that can exist is v_vnni_view<bf16, R, C> to v_vnni_view<const bf16, R, C>. The constructor copies the pr
+
+### B16 [PR #4424 comment 5765866077, saved comme] An at(token, dim) accessor returns a reference to one element after bounds asserts (TRON_ASSERT_LT), using Layout::offset for the physical index.
+QUOTE:   T& at(size_t token, size_t dim) const noexcept {
+    TRON_ASSERT_LT(token, tokens);
+    TRON_ASSERT_LT(dim, dims);
+    return data_[Layout::offset(token, dim)];
+  }
+STATUS: addressed in 4557 | differs=True
+HOW: PR #4557 gives the packed V matrix view, v_vnni_view<T, Rows, Cols>, a bounds-checked element accessor at(token, dim). It asserts both coordinates with TRON_ASSERT_LT (the repository's less-than assertion macro) and then returns a reference to the one element, as the reviewer sketched. The address is computed by the view's own private pair_base(token) helper plus the in-pair offset, not by a Layout::offset policy (see the difference). The accessor comes in two overloads: a non-const one that returns T& (writable on a bf16 view) and a const one that returns const bf16&. A test checks both at compile time (a writable view's at() accepts assignment, a const view's does not) and at run time (at() returns the same bits as the row expression). The K-packed side has no at() in this PR because the packed-K types are deferred to PR #4424; native K reuses the existing row-major view type, which th
+DIFF: Two differences, both in mechanism and const rule; the name, the two-coordinate signature, the TRON_ASSERT_LT bounds checks and the returned reference follow the sketch.
+
+(1) Const rule. His: one accessor, "T& at(size_t token, size_t dim) const noexcept", so a const view object still returns a writable T& for T = bf16 (his text: "As with std::span, a const view object does not make its elements const"). PR #4557: two overloads; the non-const overload returns T&, the const overload returns const bf16& [v_vnni.hpp:203, :210]. So a const v_vnni_view<bf16, ...> object cannot write through at(), which the test asserts [t_llama_unit.cpp:437].
+
+(2) Address computation. His: "return data_[Layout::of
+REASON: Q2 in the design decision record: const at both ranks so that a const view or row cannot mutate elements, following the repository's existing matrix rule (a const matrix returns a read-only row) instead of the sketch's span-like rule. Q1 in the same record: each concrete view holds its own address formula, so there is no separate Layout policy type and no Layout::offset call. Q3 keeps the bounds-c
+  vote1: refuted=False cs= :: Confirmed. Every cited line holds at HEAD 1c87d66926: v_vnni.hpp:203-206 (non-const at() returning T&), :210-213 (const at() returning const bf16&), both asserting token < Rows and dim < Cols with TRON_ASSERT_LT and indexing pair_base(token)[V_PAIR_TOKENS_2 * dim + token % V_PAIR_TOKENS_2]; pair_base at :229-231 is data_ + (token / 2) * (2 * Cols), which equals the sketch's v_vnni_layout::offset formula (token / 2) * (2 * Dims) + 2 * dim + token % 2. The sketch (ben-comment-5765866077.md) has a 
+     corrected_text: status=addressed in 4557 (packed V only; the packed-K instance of the same accessor is deferred to PR #4424 with the packed-K types)
+
+how=PR #4557 gives the packed V matrix view, v_vnni_view<T, Rows, Cols>, a bounds-checked element accessor at(token, dim). It asserts both coordinates with TRON_ASSERT_LT (the repository's less-than assertion macro) and then returns a reference to the one element, as the reviewer sketched. The asserts compare against the view's template parameters Rows and Cols, w
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every evidence line holds at HEAD 1c87d66926 and in the design text. (a) Code: h/tron/tensor/v_vnni.hpp:203-207 is the non-const at() returning T&, :210-214 the const at() returning const bf16&, both with TRON_ASSERT_LT(token, Rows) and TRON_ASSERT_LT(dim, Cols); pair_base at :229-231 is data_ + (token / V_PAIR_TOKENS_2) * (V_PAIR_TOKENS_2 * Cols) with V_PAIR_TOKENS_2 = 2 (:80), so the sum pair_base + 2 * dim + token % 2 equals the sketch's v_vnni_layout::offset formula (token / 2) * 
+     corrected_text: How: PR #4557 gives the packed V matrix view, v_vnni_view<T, Rows, Cols>, a bounds-checked element accessor at(token, dim). It asserts both coordinates with TRON_ASSERT_LT (the repository's less-than assertion macro, h/common/assert.hpp:80; it stays active in release builds) and then returns a reference to the one element, as the reviewer sketched. The address is computed by the view's own private pair_base(token) helper plus the in-pair offset, not by a Layout::offset policy (see the difference
+
+### B17 [PR #4424 comment 5765866077, saved comme] The pointer constructor is private, so ordinary callers cannot relabel an arbitrary row-major pointer as packed data; views normally come from typed storage.
+QUOTE:  private:
+  explicit vnni_view(T* data) noexcept : data_(data) {}
+
+  T* data_;
+
+[...]
+
+The private constructor prevents routine callers from relabelling an arbitrary row-major pointer as packed data. Views normally come from typed storage.
+STATUS: addressed in 4557 | differs=False
+HOW: The packed V view (v_vnni_view, the matrix view of one packed value plane) has a private explicit pointer constructor. Its only friends are the owner (v_vnni_tensor), the internal address helper (detail::v_vnni_access) and other instantiations of the same view template. This is the same friend set the sketch names. The pointer member data_ is private, and the class has no data() accessor and no pointer conversion. Views come only from typed storage: v_vnni_tensor::as_view() on an lvalue owner returns the writable or the read-only view, and the rvalue overloads are deleted. The cache never builds a packed view from a pointer. Every cache-side view comes from kv_block::v.as_view() (page::v_packed, append_v, set_v, get_v, scaled_v). The two layout-specific kernels (weights_times_v_128x4 and detail::scaled_v_expr) reach the plane address only through detail::v_vnni_access::plane, which is th
+DIFF: The constructor rule itself follows the sketch: a private explicit pointer constructor, with the owner, the detail access helper and sibling view instantiations as the only friends, and views obtained from typed storage through as_view(). Three surrounding details differ, none in the rule. (1) Type shape: his view is vnni_view<T, Layout> with friends vnni_tensor<Layout> and detail::vnni_access; PR #4557 has v_vnni_view<T, Rows, Cols> with friends v_vnni_tensor<Rows, Cols> and detail::v_vnni_access, because the address formula sits inside the view (design Q1). (2) Extension: PR #4557 applies the same private-constructor rule to the new logical row type v_vnni_row<T, Cols> (only v_vnni_view ma
+REASON: Design record: "Retain: private packed storage, restricted construction of views, mutable-to-read-only conversion, typed kernel arguments, and optimized bulk operations." [design.txt:108]; "Owners, views, and rows expose no public raw-pointer constructor, data member, or pointer conversion. Only matrix views construct rows from storage." [design.txt:309]; scope bullet "Packed owners and views expo
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed. Every claim in the mapping holds against the code at HEAD 1c87d66926 and against design.txt. Checked items, each with its file and line: (1) v_vnni_view (the matrix view of one packed value plane) declares its pointer constructor under private: with exactly three friend declarations: v_vnni_tensor<Rows, Cols>, detail::v_vnni_access, and sibling instantiations of v_vnni_view [h/tron/tensor/v_vnni.hpp:216-224]. The reviewer's sketch names the same three friends: vnni_view (other instant
+     corrected_text: Replace the last sentence of the evidence field with: "Native K alias h/tron/tensor/kv_cache_fwd.hpp:47-52 names the existing const_view, whose pointer constructor is public [h/tron/tensor/view.hpp:296 "explicit const_view(T const* data = nullptr) noexcept" for the rank-2 view the alias uses; :373 for the rank-1 view]. The compile-time check t/t_llama_unit.cpp:425 "STATIC_REQUIRE(std::is_constructible_v<k_plane_t, const bf16*>);" confirms it." Also add to the "how" field, after "The two layout-s
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed against HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525 and the design text. Status, "differs=false", the three described surrounding differences, and the design attributions all hold. Two citation/wording corrections only.
+
+Verified at HEAD:
+- h/tron/tensor/v_vnni.hpp:216-224 has the private section with friends v_vnni_tensor<Rows, Cols>, detail::v_vnni_access, and the sibling template instantiations, then "explicit v_vnni_view(T* data) noexcept"; :233 "T* data_;". The 
+     corrected_text: how: The packed V view (v_vnni_view, the matrix view of one packed value plane) has a private explicit pointer constructor. Its only friends are the owner (v_vnni_tensor), the internal address helper (detail::v_vnni_access) and other instantiations of the same view template. This is the same friend set the sketch names. The pointer member data_ is private, and the class has no data() accessor and no pointer conversion. Views come only from typed storage: v_vnni_tensor::as_view() on an lvalue own
+
+### B19 [PR #4424 comment 5765866077, saved comme] The view exposes no data(), no pointer conversion and no operator[], because each of those would suggest a contiguous row.
+QUOTE: There is no `data()`, pointer conversion, or `operator[]` that suggests a contiguous row.
+STATUS: addressed in 4557 | differs=True
+HOW: Words used here: the "matrix view" is v_vnni_view<T, Rows, Cols> (one packed V plane of Rows tokens x Cols dims). The "row" is v_vnni_row<T, Cols> (one token's Cols values, read through the packed address formula). "Packed" means the two-token interleaved (VNNI) layout, where a token's values are not adjacent in memory.
+
+Two of the reviewer's three exclusions are followed to the letter. The third is replaced by a mechanism with the same intent, and the change is recorded (see the difference field).
+
+1. No data() accessor. The matrix view has no data() member. Its only pointer is the private member data_ [h/tron/tensor/v_vnni.hpp:233]. The row's only pointer is the private member pair_base_ [v_vnni.hpp:161]. A grep of the header for "data()" or "operator T*" finds only the comment stating the rule [v_vnni.hpp:168].
+
+2. No pointer conversion. Neither type declares a conversion operator. Th
+DIFF: His: the packed view exposes no operator[] at all. Element access is only the bounds-checked at(token, dim), bulk access is store_row / load_row with std::span arguments, and the raw address is reachable only through detail::vnni_access::packed_data. (Saved comment line 101 and the vnni_view class body; section 4.)
+
+PR #4557: the "no data()" and "no pointer conversion" clauses are followed exactly (private data_, private explicit pointer constructor, no conversion operator, writable-to-const view conversion only). The "no operator[]" clause is replaced: v_vnni_view::operator[](token) returns a v_vnni_row by value, and v_vnni_row::operator[](dim) returns one element at the packed offset. The 
+REASON: Recorded reason: design decision Q3 [design.txt line 136]: "May packed views expose logical rows through operator[]? Yes. The sketch excluded indexing because it suggests a contiguous row. The expression interface requires row indexing. Return a logical row with no public pointer and no views<> base. Keep bounds-checked at()." Status in the record: "Proposed; reviewer answer not recorded." The des
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed. Every cited line holds at HEAD 1c87d66926 and in the saved texts. Checked: v_vnni.hpp:165-169 comment (verbatim match), 180-184 converting constructor (writable to read-only only), 186-197 operator[](token) returning v_vnni_row by value, 199-214 at(), 216-233 private friends / explicit private pointer constructor / private data_, 114-124 row operator[](dim) at offset 2*dim+parity, 133-143 row chunk() reading the interleaved pair chunk, 151-162 private row constructor and members, 267-
+     corrected_text: Words used here: the "matrix view" is v_vnni_view<T, Rows, Cols> (one packed V plane of Rows tokens x Cols dims). The "row" is v_vnni_row<T, Cols> (one token's Cols values, read through the packed address formula). "Packed" means the two-token interleaved (VNNI) layout, where a token's values are not adjacent in memory. "expr" is the repository's expression base class (h/tron/kernels/expr.hpp), which reads a rank-2 object row by row through operator[].
+
+Two of the reviewer's three exclusions are
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every cited line holds at HEAD 1c87d66926: data_ is the private member at v_vnni.hpp:233, pair_base_ at :161, the private explicit pointer constructor at :222-224, the private row constructor at :155-158, operator[](token) returning a v_vnni_row by value at :186-197, row operator[](dim) at :114-124, chunk(i) at :133-143, the friend v_vnni_access at :216-218 and :267-285, the bulk-operation callers at :312/:379/:423-424, the kernel at amx_attn.cpp:205, the cache expression at kv_cache.
+     corrected_text: Words used here: the "matrix view" is v_vnni_view<T, Rows, Cols> (one packed V plane of Rows tokens x Cols dims). The "row" is v_vnni_row<T, Cols> (one token's Cols values, read through the packed address formula). "Packed" means the two-token interleaved (VNNI) layout, where a token's values are not adjacent in memory. expr is the repository's common read interface for stored or computed values (h/tron/kernels/expr.hpp).
+
+Two of the reviewer's three exclusions are followed exactly. The third is
+
+### B20 [PR #4424 comment 5765866077, saved comme] at() is for inspection and scalar access only; hot paths must use the bulk operations (store_row/load_row and friends).
+QUOTE: `at()` is useful for inspection and scalar access; hot paths use the bulk operations below.
+STATUS: addressed in 4557 | differs=True
+HOW: Words used here: at() is the bounds-checked accessor for one element (token, dim) of a packed V plane. A hot path is code that runs per token during inference. Bulk operations are the vector routines that move a whole token row at once.
+
+PR #4557 keeps at() as a checked scalar accessor and routes every production V read and write through bulk operations or a typed whole-plane argument.
+
+- at() exists on v_vnni_view<T, Rows, Cols> in two overloads. Both assert the token and dim bounds with TRON_ASSERT_LT. [h/tron/tensor/v_vnni.hpp:199-214]
+- The header's Note [Packed V layout] states the role of at(): direct element writes through a view (at(), row[dim]) serve fixtures. They neither zero the pair partner nor mark the token complete. [h/tron/tensor/v_vnni.hpp:66-69]
+- The bulk route is separate from the checked route. detail::v_vnni_access::pair_base has no bounds check and is used only by
+DIFF: The rule itself (at() for inspection and scalar access, bulk operations on hot paths) is followed as sketched. The shape around it differs in three ways.
+
+1. The signature of at(). His: one method, "T& at(size_t token, size_t dim) const noexcept", so a const view object still hands out a writable element (the std::span rule, sketch lines 80-84 and 103). PR #4557: two overloads. The non-const one returns T&, the const one returns const bf16& [v_vnni.hpp:203, 210]. So a const view is read-only. Tests pin this down [t_llama_unit.cpp:435-437].
+
+2. A second scalar route. His sketch excludes operator[] ("no data(), pointer conversion, or operator[] that suggests a contiguous row", sketch line 101)
+REASON: Recorded reasons, per difference:
+
+1. const at() returns a read-only element: decision Q2 in design.txt:134, "Should const matrix and row objects prevent element mutation? Yes at both ranks. This differs from the sketch's span-like const rule." Status there: "Proposed; reviewer answer not recorded." The PR body repeats the choice [pr-body.md:72 row Q3 context; design.txt:303 interface table].
+
+2. 
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed. Status "addressed in 4557", the "differs" verdict, the three described differences and the recorded reasons all hold against HEAD 1c87d66926, the sketch and design.txt.
+
+Verified at HEAD (worktree /home/jhan/workspace/ai-runs/tron-issue4525):
+- h/tron/tensor/v_vnni.hpp:202-207 and 209-214: two at() overloads, both assert token < Rows and dim < Cols with TRON_ASSERT_LT; the non-const one returns T&, the const one returns const bf16&.
+- v_vnni.hpp:37 opens Note [Packed V layout]; lines 
+     corrected_text: Words used here: at() is the bounds-checked accessor for one element (token, dim) of a packed V plane. A hot path is code that runs per token during inference. Bulk operations are the vector routines that move a whole token row at once.
+
+PR #4557 keeps at() as a checked scalar accessor and routes every production V read and write through bulk operations or a typed whole-plane argument.
+
+- at() exists on v_vnni_view<T, Rows, Cols> in two overloads. Both assert the token and dim bounds with TRON_A
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed with three citation corrections. Status "addressed in 4557" is right. Verified at HEAD 1c87d66926 (5 commits on 996f58ec82; the local origin/main ref has since moved to 0759738c66, so I diffed against 996f58ec82 directly):
+
+- v_vnni.hpp: at() overloads at 203 (T&) and 210 (const bf16&), both with TRON_ASSERT_LT on token and dim [199-214]; Note [Packed V layout] says direct element writes "serve fixtures" [66-69]; detail::v_vnni_access::pair_base has no bounds check and names operator[]
+     corrected_text: how: unchanged from the mapping.
+
+evidence: unchanged, with one clarification of the grep line:
+grep -n "\.at(" over h/tron/models/kv_cache.hpp, h/tron/kernels/amx_attn_iface.hpp, src/tron/kernels/amx_attn.cpp, h/tron/models/self_attention.hpp, h/tron/models/model.hpp, h/tron/scheduler/full.hpp, h/tron/tensor/kv_cache_fwd.hpp, h/tron/tensor/v_vnni.hpp: no matches at HEAD 1c87d66926. The diff against the PR base 996f58ec82 adds ".at(" on two lines, both in t/t_llama_unit.cpp (129 and 3453).
+
+diff
+
+### B21 [PR #4424 comment 5765866077, saved comme] Const semantics follow std::span: a const view object does not make the elements const; only the element type vnni_view<const bf16, Layout> does.
+QUOTE: As with `std::span`, a const view object does not make its elements const. `vnni_view<const bf16, Layout>` does.
+STATUS: addressed in 4557 | differs=True
+HOW: Words used here: a view is a non-owning handle over the packed V plane (v_vnni_view); a row is the one-token expression it returns (v_vnni_row); "const view object" means a view variable declared const; "const element type" means the T = const bf16 template argument.
+
+The point has two halves. PR #4557 implements the second half as sketched and inverts the first half on purpose.
+
+Second half, "vnni_view<const bf16, Layout> makes the elements const": implemented. The element type T is restricted to bf16 or const bf16 [h/tron/tensor/v_vnni.hpp:97, :172]. The writable element accessors return T&, so T = const bf16 gives const bf16& [v_vnni.hpp:115, :203]. The only conversion is writable-to-read-only, with the same requires shape as the sketch [v_vnni.hpp:180-184]. The owner's const as_view() returns v_vnni_view<const bf16, Rows, Cols>, as in the sketch's section 3 [v_vnni.hpp:254-258]. The 
+DIFF: The mechanism matches the sketch, the rule does not.
+
+His (sketch, comment lines 78 and 103): span-like const. One accessor "T& at(size_t token, size_t dim) const noexcept". A const view object still hands out writable bf16& when T = bf16. Only the element type const bf16 makes elements read-only. The sketch has no row type, so there is no const-row question.
+
+PR #4557 (v_vnni.hpp:115-124, :186-214; t_llama_unit.cpp:433-440): deep const at both ranks. Each of at(), the matrix operator[] and the row operator[] has a non-const overload returning T& (or v_vnni_row<T, Cols>) and a const overload returning const bf16& (or v_vnni_row<const bf16, Cols>) regardless of T. So all three of these give r
+REASON: Recorded reason: design decision Q2 [design.txt:134 and :142]. The design chose "Yes at both ranks" and names the deviation: "This differs from the sketch's span-like const rule, where const applies to the view object only." The stated justification is consistency with the repository's existing rank-2 view: "The repository has mixed const behavior. A const matrix returns a read-only row. A const r
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed. Every claim in the mapping matches the code at HEAD 1c87d66926, the design text and the PR body.
+
+Checked against the files (all line numbers verified by reading them):
+- v_vnni.hpp:97 restricts T to bf16 or const bf16. v_vnni.hpp:115/:121 (row) and :188/:194, :203/:210 (matrix) each have a non-const overload returning T& or v_vnni_row<T, Cols> and a const overload returning const bf16& / std::add_const_t<T>& or v_vnni_row<const bf16, Cols>. So a const view object gives read-only elem
+     corrected_text: Two wording corrections only; the rest of the mapping stands as written.
+
+1. In the evidence and the difference text, replace "comment line 78" with "comment line 81" wherever it refers to "T& at(size_t token, size_t dim) const noexcept". Comment line 78 is the sketch's converting constructor. The corrected evidence sentence reads:
+"Reviewer's sketch (comment line 81): "T& at(size_t token, size_t dim) const noexcept" (one const member function returning T&, so a const vnni_view<bf16> still retur
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every substantive claim in the mapping holds against HEAD 1c87d66926 and the design text. Three citations need small corrections; none changes the verdict.
+
+Verified claims:
+- Second half of B21 (const element type makes elements read-only) is implemented as sketched. v_vnni_element restricts T to bf16 or const bf16 [h/tron/tensor/v_vnni.hpp:97, :106, :172]. The non-const accessors return T& [v_vnni.hpp:115, :203], so T = const bf16 yields const bf16&. The only conversion is writable-
+     corrected_text: Replace these passages of the mapping; everything else stands as written.
+
+In "evidence", first line: "Reviewer's sketch (comment line 81): "T& at(size_t token, size_t dim) const noexcept" (one const member function returning T&, so a const vnni_view<bf16> still returns bf16&); comment line 103: "As with `std::span`, a const view object does not make its elements const. `vnni_view<const bf16, Layout>` does.""
+
+In "evidence", the t_llama_unit probe line: "t/t_llama_unit.cpp:126-132 probes "matrix
+
+### B23 [PR #4424 comment 5765866077, saved comme] as_view() is lvalue-only: a mutable overload and a const overload, with both rvalue overloads deleted so a view can not be taken from a temporary.
+QUOTE:   auto as_view() & noexcept {
+    return vnni_view<bf16, Layout>{data_.data()};
+  }
+
+  auto as_view() const & noexcept {
+    return vnni_view<const bf16, Layout>{data_.data()};
+  }
+
+  auto as_view() && = delete;
+  auto as_view() const && = delete;
+STATUS: addressed in 4557 | differs=False
+HOW: PR #4557 gives the packed V owner v_vnni_tensor<Rows, Cols> exactly the four as_view() overloads the reviewer sketched. as_view() is the owner's method that returns a v_vnni_view (the typed, non-owning window onto the plane). The lvalue overloads (called on a named object) exist in a mutable form and a const form. The two rvalue overloads (called on a temporary) are declared "= delete", so a view can not be taken from a temporary owner. The header comment states the rule: "as_view() on a temporary is deleted: a view must not outlive its owner" [h/tron/tensor/v_vnni.hpp:240]. A compile-time test checks the rule: the probe owner_views_temporary<Owner> is "requires { Owner{}.as_view(); }" and the test asserts STATIC_REQUIRE_FALSE(owner_views_temporary<v_owner_t>) [t/t_llama_unit.cpp:122-123, 431-432]. Every production call site calls as_view() on an lvalue kv_block reference, for example "k
+DIFF: The rule, the method name and the overload set are the same as the sketch: one mutable lvalue overload, one const lvalue overload, both rvalue overloads deleted. Only surface details differ, and none changes the rule. His: "auto" return types; the view is brace-constructed from "data_.data()" of a std::array member; the owner is "class alignas(64) vnni_tensor<Layout>". PR #4557: the return types are spelled out as v_vnni_view<bf16, Rows, Cols> and v_vnni_view<const bf16, Rows, Cols>; the view is built through a private explicit constructor from the C array member "bf16 data_[Rows * Cols]"; the owner is "struct alignas(V_PLANE_ALIGNMENT_64) v_vnni_tensor<Rows, Cols> final"; the lvalue overloa
+REASON: The design record adopts the sketch for this point without a deviation: "Provide as_view() & and as_view() const &. Delete both rvalue forms, including const &&." [design.txt:293]. The header comment gives the purpose: "a view must not outlive its owner" [h/tron/tensor/v_vnni.hpp:240]. The PR description repeats it as "as_view() on lvalues only" [pr-body.md:37]. No recorded reason exists for the s
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed against HEAD 1c87d66926 and the design text. The four as_view() overloads are at h/tron/tensor/v_vnni.hpp:248-261 exactly as quoted; the rule comment is at line 240; the compile-time probe and assertion are at t/t_llama_unit.cpp:122-123 and 431-432; the six production call sites are at h/tron/models/kv_cache.hpp:1983, 2190, 2193, 2544, 2586, 2604, and each calls as_view() through kv_block<geometry>(...) or kv_block_at_storage<geometry>(...), which return `auto&` / `auto const&` (kv_cac
+     corrected_text: status=addressed in 4557
+
+how=PR #4557 gives the packed V owner v_vnni_tensor<Rows, Cols> exactly the four as_view() overloads the reviewer sketched. as_view() is the owner's method that returns a v_vnni_view (the typed, non-owning window onto the plane). The lvalue overloads (called on a named object) exist in a mutable form and a const form. The two rvalue overloads (called on a temporary) are declared "= delete", so a view can not be taken from a temporary owner. The header comment states the
+  vote2: refuted=False cs=addressed in 4557 :: The mapping holds. Verified at HEAD 1c87d66926: the four as_view() overloads at h/tron/tensor/v_vnni.hpp:248-261 match the quoted evidence exactly (two lvalue overloads, both rvalue overloads deleted), and the comment at line 240 reads "as_view() on a temporary is deleted: a view must not outlive its owner." The header is new in the PR (469 added lines, nothing on origin/main). The compile-time probe and assertion exist at t/t_llama_unit.cpp:122-123 and 431-432, and v_owner_t is v_vnni_tensor<64
+     corrected_text: how=PR #4557 gives the packed V owner v_vnni_tensor<Rows, Cols> exactly the four as_view() overloads the reviewer sketched. as_view() is the owner's method that returns a v_vnni_view (the typed, non-owning window onto the plane). The lvalue overloads (called on a named object) exist in a mutable form and a const form. The two rvalue overloads (called on a temporary) are declared "= delete", so a view can not be taken from a temporary owner. The header comment states the rule: "as_view() on a tem
+
+### B24 [PR #4424 comment 5765866077, saved comme] Preserve the cache's existing initialization policy: do not remove V's zero-initialization invariant, and do not add implicit clearing (zeroing) to hot allocation paths.
+QUOTE: The implementation would preserve the cache’s existing initialization policy. In particular, introducing this class must not remove V’s zero-initialization invariant or add implicit clearing to hot allocation paths.
+STATUS: addressed in 4557 | differs=False
+HOW: Short version: PR #4557 keeps both halves of the rule. The V zero-partner invariant (every even-token append also writes zeros into the odd token of the same pair) is kept as moved code, and the arena allocation paths gain a placement-new that constructs the kv_block arrays with no initializer, which clears nothing.
+
+Words used here: kv_block = one page-and-head block holding a K plane and a V plane; arena = the raw DMA byte buffer that holds many kv_blocks; placement-new = C++ syntax that starts an object's lifetime at a given address; default-initialization = construction that leaves trivial storage untouched; value-initialization = construction that zero-fills.
+
+1. No clearing added to hot allocation paths. Both allocation functions still call hardware::try_make_unique_dma_for_overwrite (the no-fill allocator) exactly as on origin/main. The only added line is a call to construct_kv_bl
+DIFF: None for this point. The reviewer stated a rule without a mechanism: keep V's zero-initialization invariant, add no implicit clearing to hot allocation paths, and have the page arena construct the actual storage type instead of casting the existing SIMD array. PR #4557 follows all three parts: the invariant lives in the same zeroing instructions moved into append_v_row and copy_token, the arenas construct kv_block arrays with an initializer-free placement-new that emits no code, and no cast of the old array is used. One shape detail of the owner is not what he sketched but does not change the initialization policy: his owner held `std::array<bf16, Layout::elements> data_;`, PR #4557's v_vnni
+REASON: Recorded in the design text and in a code Note, not in Q1-Q4/D5. design.txt line 157 (scope): "Construct typed storage inside the existing arena allocation. Do not obtain it by casting the current SIMD array. Add no clearing to allocation." design.txt lines 441-467 "Arena construction without clearing": prescribes `::new (static_cast<void*>(region_base)) kv_block_t[block_count];` with "No parenthe
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed: status "addressed in 4557", differs=false and the reason attribution all hold against the code at HEAD 1c87d66926 and design.txt. Verified: both allocation functions (kv_cache.hpp:1421-1443) keep the origin/main try_make_unique_dma_for_overwrite call and add only the construct_kv_blocks call (git diff shows no other added line in either function; h/system/memory.hpp:244-256 shows the for_overwrite allocator constructs nothing for uint8_t[]); construct_kv_blocks (1468-1497) placement-n
+     corrected_text: Short version: PR #4557 keeps both halves of the rule. The V zero-partner invariant (every even-token append also writes zeros into the odd token of the same pair) is kept as moved code. The arena allocation paths gain a placement-new that constructs the kv_block arrays with no initializer, which clears nothing.
+
+Words used here: kv_block = one page-and-head block holding a K plane and a V plane; arena = the raw DMA byte buffer that holds many kv_blocks; placement-new = C++ syntax that starts an
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every code claim checks out at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525: (1) allocate_retained_storage (kv_cache.hpp:1421-1431) and allocate_reclaimable_chunk (:1433-1443) still call hardware::try_make_unique_dma_for_overwrite as on origin/main (:1416-1434), and the construct_kv_blocks call is the only added line in each; (2) construct_kv_blocks (:1472-1497) placement-news kv_block_t[n] with no initializer, guarded by trivial-trait static_asserts, and Note [KV bl
+     corrected_text: Short version: PR #4557 keeps both halves of the rule. The V zero-partner invariant (every even-token cache append also writes zeros into the odd token of the same pair) is kept as moved code. The arena allocation paths gain one placement-new that constructs the kv_block arrays with no initializer, which clears nothing.
+
+Words used here: kv_block = one page-and-head block holding a K plane and a V plane; arena = the raw DMA byte buffer that holds many kv_blocks; placement-new = C++ syntax that s
+
+### B25 [PR #4424 comment 5765866077, saved comme] The page arena must construct the real storage type; typed storage must not be obtained by casting an existing SIMD array to vnni_tensor*.
+QUOTE: The page arena must construct the actual storage type. We should not obtain “typed storage” by casting an existing SIMD array to `vnni_tensor*`.
+STATUS: addressed in 4557 | differs=False
+HOW: Words used here: arena = one raw byte buffer that book (the cache owner) allocates for its KV blocks; kv_block = the struct holding K and V for one head in one page; owner = v_vnni_tensor, the type that holds one packed V plane; placement-new = the C++ form `::new (address) T[n]` that creates objects at a given address without allocating.
+
+Three code facts at HEAD 1c87d66926 address the point.
+
+1. The V plane in the 16-lane kv_block IS the owner type, not a SIMD array. kv_cache.hpp:2484-2489: `using v_storage = v_vnni_tensor<page_size, head_size>; ... alignas(kv_block_alignment) v_storage v;`. origin/main had `alignas(kv_block_alignment) bf16s v[page_size / 2][head_size / chunk_size * 2];` at that place. So there is no SIMD array left that could be cast into the owner.
+
+2. Both arena allocation paths construct kv_block arrays over the bytes right after installing them. kv_cache.hpp:1428-
+DIFF: No difference in the rule. The reviewer stated a requirement, not a mechanism: the arena must construct the storage type, and typed storage must not come from casting a SIMD array to `vnni_tensor*`. PR #4557 follows it. His: construct the actual storage type in the page arena; no cast of a SIMD array to the owner pointer. PR #4557: the SIMD V array is replaced by the owner as a kv_block member, and both allocation paths placement-new arrays of kv_block (with the owner inside) over the freshly installed DMA arena bytes, with no initializer, so nothing is cleared. Two details the sketch did not specify, stated for completeness: (a) construction is of kv_block arrays, not of bare owners, becaus
+REASON: Recorded in design.txt, section "Arena construction without clearing" (lines 441-467) and the scope addition at line 157: "Construct typed storage inside the existing arena allocation. Do not obtain it by casting the current SIMD array. Add no clearing to allocation." Line 449 gives the exact form `::new (static_cast<void*>(region_base)) kv_block_t[block_count];`. Lines 451-453: "Require trivial d
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed. Every code claim holds at HEAD 1c87d66926 (worktree /home/jhan/workspace/ai-runs/tron-issue4525). Verified: kv_cache.hpp:2484-2489 (`using v_storage = v_vnni_tensor<page_size, head_size>;` ... `v_storage v;`), the construct_kv_blocks calls at 1428 and 1440, the placement-new forms at 1481 and 1495-1496, the trivial-trait static_asserts at 1476-1479, 1488-1491, 1630-1633 and 2485-2488, the residual `reinterpret_cast<kv_block_t*>` at 1598/1607/1647 and the `reinterpret_cast<bf16*>(&bloc
+     corrected_text: Words used here: arena = one raw byte buffer that book (the cache owner) allocates for its KV blocks; kv_block = the struct holding K and V for one head in one page; owner = v_vnni_tensor, the type that holds one packed V plane; placement-new = the C++ form `::new (address) T[n]` that creates objects at a given address without allocating; merge base = main commit 996f58ec82, the commit the PR's five commits sit on.
+
+Three code facts at HEAD 1c87d66926 address the point.
+
+1. The V plane in the 16
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every cited fact holds at HEAD 1c87d66926: the owner member at kv_cache.hpp:2484-2489 replaces origin/main's SIMD array (origin/main line 2456); both allocation paths call construct_kv_blocks (1428, 1440); the placement-new forms are at 1481 and 1495-1496 with three-trait static_asserts at 1476-1479, 1488-1491, 1630-1633 and 2485-2488; Note [KV block lifetime] is at 1445-1470 with the quoted sentence; v_vnni.hpp has the private view constructor and friends at 216-224, as_view at 249-2
+     corrected_text: Words used here: arena = one raw byte buffer that book (the cache owner) allocates for its KV blocks; kv_block = the struct holding K and V for one head in one page; owner = v_vnni_tensor, the type that holds one packed V plane; placement-new = the C++ form `::new (address) T[n]` that creates objects at a given address without allocating.
+
+Three code facts at HEAD 1c87d66926 address the point.
+
+1. The V plane in the 16-lane kv_block IS the owner type, not a SIMD array. kv_cache.hpp:2484-2489: `u
+
+### B26 [PR #4424 comment 5765866077, saved comme] Bulk operations are separate overloads per layout that keep the existing optimized code; no generic scalar loop in the hot path.
+QUOTE: ## 4. Bulk operations preserve the optimized paths
+
+Use overloads for the two layouts, rather than a generic scalar loop in the hot path:
+STATUS: partly addressed in 4557 | differs=True
+HOW: Short version: the packed-V half of this point is done in PR #4557. The three V bulk operations keep their existing 16-lane vector bodies, and no scalar loop was added on a production path. The packed-K half (typed store_row, load_row, store_block for the packed K layout) is not in this PR and goes to PR #4424 by the PR order of issue #4525.
+
+Words used here: a bulk operation moves one whole token row (or one whole token) in one vector loop. A hot path is code that runs once per token or per page during inference. A scalar loop handles one value per step. An overload is a same-named function chosen by argument type. Packed V is the pair-interleaved V storage of the 16-lane (AVX-512) build. Native K is row-major K storage. An intrinsic is a C function that names one vector instruction. objdump is the tool that prints the machine instructions of a compiled binary.
+
+What PR #4557 does for V
+DIFF: His sketch: one store_row / load_row function template per operation, overloaded on a layout type (`vnni_view<bf16, k_vnni_layout<Tokens, Dims>>` for K, "corresponding overloads for v_vnni_layout" for V). The row argument is `std::span<const bf16, Dims>` (write) or `std::span<bf16, Dims>` (read). K adds a typed store_block. One Layout-generic helper `detail::vnni_access::packed_data(vnni_view<T, Layout>)` returns the packed pointer.
+
+PR #4557 (V only):
+- Type shape: the operations take `v_vnni_view<bf16, Rows, Cols>` (write) or `v_vnni_view<const bf16, Rows, Cols>` (read). There is no layout template parameter. The address formula lives in the concrete view (v_vnni.hpp:229-231).
+- Names: `ap
+REASON: Recorded reasons, by difference:
+- Keep the vector bodies and add nothing generic: design.txt:108 "Retain: ... optimized bulk operations"; design.txt:112 "Limit the parent: expression reads and existing row operations. Defer slices, iteration, generic expression assignment, and expression constructors until a caller needs them."; Q4 (design.txt:138) "Yes. Expression reads and existing typed bulk o
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed, with three wording corrections. Status "partly addressed in 4557" holds. The "differs" verdict and each listed difference hold. The reasons are attributed to the right design lines.
+
+What I verified in the worktree /home/jhan/workspace/ai-runs/tron-issue4525 at HEAD 1c87d66926 (5 commits on origin/main):
+- Reviewer text: section "## 4. Bulk operations preserve the optimized paths" of ben-comment-5765866077.md (lines 131-168) lists store_row and load_row on a layout-typed vnni_view wit
+     corrected_text: Replace these three passages of the "how" text; everything else stands.
+
+(a) Replace "The two layout-specific kernels reach the plane through the small internal helper detail::v_vnni_access: ... The tile loads and the dot-product loop are unchanged; the amx_attn.cpp diff changes only the pointer name and two named constants." with:
+"The two layout-specific kernels reach the plane through the small internal helper detail::v_vnni_access: `const bf16* const v_pairs = detail::v_vnni_access::plane(v_
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. Status, evidence, the "differs" verdict, the described differences and the recorded reasons all hold against HEAD 1c87d66926 (5 commits on origin/main 0759738c66 in /home/jhan/workspace/ai-runs/tron-issue4525) and against design.txt. Checks made, read-only:
+
+1. Point text: ben-comment-5765866077.md:131-168 is section 4 as quoted (overloads per layout, K store_row/load_row/store_block, V overloads with the bf16/fp16/float conversions, layout header without attention kernels, one intern
+     corrected_text: Short version: the packed-V half of this point is done in PR #4557. The three V bulk operations keep their existing 16-lane vector bodies, and no scalar loop was added on a production path. The packed-K half (typed store_row, load_row, store_block for the packed K layout) is not in this PR and goes to PR #4424 by the PR order of issue #4525.
+
+Words used here: a bulk operation moves one whole token row (or one whole token) in one vector loop. A hot path is code that runs once per token or per pag
+
+### B27 [PR #4424 comment 5765866077, saved comme] Free functions store_row(mutable view, token, std::span<const bf16, Dims>) and load_row(const view, token, std::span<bf16, Dims>), with fixed-extent std::span arguments, one overload set per layout in
+QUOTE: template <size_t Tokens, size_t Dims>
+void store_row(
+    vnni_view<bf16, k_vnni_layout<Tokens, Dims>> dst,
+    size_t token,
+    std::span<const bf16, Dims> src) noexcept;
+
+template <size_t Tokens, size_t Dims>
+void load_row(
+    vnni_view<const bf16, k_vnni_layout<Tokens, Dims>> src,
+    size_t to
+STATUS: partly addressed in 4557 | differs=True
+HOW: PR #4557 implements the V half of the point and defers the K half. The V half: three free functions in the new header h/tron/tensor/v_vnni.hpp move one token row in and out of the packed plane and keep the existing vector bodies. append_v_row (the sketch's V store_row, renamed) takes a writable v_vnni_view<bf16, Rows, Cols>, a token index and a read-only contiguous source row [h/tron/tensor/v_vnni.hpp:309-311]. load_row takes a read-only v_vnni_view<const bf16, Rows, Cols>, a token index and a writable contiguous destination row [h/tron/tensor/v_vnni.hpp:376-378]. copy_token moves one token between packed planes [h/tron/tensor/v_vnni.hpp:419-422]. The three functions reach the plane only through detail::v_vnni_access::pair_base [h/tron/tensor/v_vnni.hpp:312, 379, 423-424]. The bodies are the old page::set_v (bf16, fp16, float), page::get_v (bf16, float) and page::append_v code moved out 
+DIFF: Three differences on the V side, all recorded. (1) Name. His: store_row for V, one overload set per layout. PR #4557: append_v_row for the V store. The design says "append_v_row is this design's name for the sketch's V store_row. The name records partner zeroing. The child's K store_row does not zero a partner." [design.txt:317]; the PR body maps the two names the same way ("Map append_v_row to the sketch's V store_row" [design.txt:756]; "append_v_row (one token's row in, under the even/odd partner rule)" [pr-body.md:41]). (2) Row argument type. His: fixed-extent std::span<const bf16, Dims> in and std::span<bf16, Dims> out, bf16 only. PR #4557: the repository's own row types const_view<Sourc
+REASON: Recorded reasons: design.txt:317 (append_v_row name records partner zeroing, which the K store will not do); design.txt:320-327 (existing view/const_view row families instead of new wrapper types, so alignment and DMA flags travel with the row and template deduction picks Dma from the caller's view; aligned=true is a stated precondition); design.txt:329-333 and pr-body.md:41 (bodies moved unchange
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed with wording corrections. Verified at HEAD 1c87d66926 (worktree /home/jhan/workspace/ai-runs/tron-issue4525, base origin/main 996f58ec82): (a) the three V operations exist with the cited signatures (append_v_row h/tron/tensor/v_vnni.hpp:306-311, load_row :373-378, copy_token :417-422), all reach the plane through detail::v_vnni_access::pair_base (:312, :379, :423-424); (b) page::set_v/get_v/append_v forward to them (h/tron/models/kv_cache.hpp:2586, :2604, :2190); (c) the GOF callback w
+     corrected_text: MAPPING (corrected): status=partly addressed in 4557; how=PR #4557 implements the V half of the point and defers the K half. The V half: three free functions in the new header h/tron/tensor/v_vnni.hpp move one token row in and out of the packed plane and keep the existing vector bodies. append_v_row (the sketch's V store_row, renamed) takes a writable v_vnni_view<bf16, Rows, Cols>, a token index and a read-only contiguous source row [h/tron/tensor/v_vnni.hpp:306-311]. load_row takes a read-only 
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. The status, the "differs" verdict, the three described differences and the reasons all hold against HEAD 1c87d66926 and the design text. Checked: append_v_row, load_row and copy_token exist at h/tron/tensor/v_vnni.hpp:306-311, 373-378 and 417-422, are noexcept, take v_vnni_view planes and size_t token indexes, and reach the plane only through detail::v_vnni_access::pair_base (lines 312, 379, 423-424). The concepts v_vnni_source (bf16, fp16, float) and v_vnni_destination (bf16, float) 
+     corrected_text: Status: partly addressed in PR #4557. The V half of the point is implemented; the K half is deferred to PR #4424 (PR order item 2 of issue #4525).
+
+The V half. Three free functions in the new header h/tron/tensor/v_vnni.hpp move one token row in and out of the packed V plane. append_v_row (the sketch's V store_row, renamed) takes a writable v_vnni_view<bf16, Rows, Cols>, a token index and a read-only contiguous source row [h/tron/tensor/v_vnni.hpp:306-311]. load_row takes a read-only v_vnni_view
+
+### B28 [PR #4424 comment 5765866077, saved comme] For K, store_row/load_row wrap the existing scatter/gather implementation (no new algorithm).
+QUOTE: For K, these contain the existing scatter/gather implementation.
+STATUS: deferred to 4424 | differs=False
+HOW: Words used here: K is the key plane of one KV-cache page (64 tokens). Packed K is the VNNI (Vector Neural Network Instructions) pair-interleaved K layout of PR #4424. Scatter/gather are the AVX-512 instructions that write or read one 4-byte lane per cache line; PR #4424 uses them to save and read one token's packed K row. store_row/load_row are the reviewer's names for the typed one-row save and load functions.
+
+The point asks that the K store_row/load_row wrap the existing scatter/gather code and add no new algorithm. PR #4557 contains no K store_row, no K load_row and no scatter/gather code. The scatter/gather implementation exists only in PR #4424, which is not part of this PR. At HEAD the K plane is still the native row-major array, and the K save and K copy paths are unchanged from main: the save writes one row through the existing view's set(), and the copy is a memcpy. The only K 
+DIFF: No difference for this point. His: the K store_row/load_row bodies are the existing scatter/gather implementation, with no new algorithm. PR #4557: does not implement K store_row/load_row at all (the K plane is native and untouched), and the recorded plan for PR #4424 keeps his rule word for word ("Preserve the existing gather/scatter instructions", the bodies "become local to h/tron/tensor/k_vnni.hpp"). The names store_row/load_row are also kept for K in the plan.
+
+Two adjacent differences belong to other points, not to B28, and are listed here only so the section does not miss them: (a) the row argument type. His sketch takes std::span<const bf16, Dims> / std::span<bf16, Dims>. The plan (a
+REASON: Recorded reason for the deferral: the PR scope. PR #4557 is the parent (packed V plane and native K plane only); the packed-K types and their row operations are PR order item 2 of issue #4525 and stay in PR #4424 [pr-body.md:62; design.txt:528, 558, 584]. Decision Q4 ("Is the smaller parent scope sufficient? Yes. Expression reads and existing typed bulk operations. Defer slices, iterators, and gen
+  vote1: refuted=False cs=deferred to 4424 :: Confirmed against HEAD 1c87d66926 with the PR base 996f58ec82 (the merge base; origin/main has since moved to 0759738c66, so a diff against origin/main shows 22 files and main's own changes, and the evidence must cite the merge base). The reviewer's sketch text reads "For K, these contain the existing scatter/gather implementation. A typed store_block() retains the existing masked 16-token transpose/store path." [ben-comment-5765866077.md, section 4], so B28 is quoted correctly. Status "deferred
+     corrected_text: status=deferred to 4424; how=Words used here: K is the key plane of one KV-cache page (64 tokens). Packed K is the VNNI (Vector Neural Network Instructions) pair-interleaved K layout of PR #4424. Scatter/gather are the AVX-512 instructions that write or read one 4-byte lane per cache line; PR #4424 uses them to save and read one token's packed K row. store_row/load_row are the reviewer's names for the typed one-row save and load functions.
+
+The point asks that the K store_row/load_row wrap the e
+  vote2: refuted=False cs=deferred to 4424 :: Confirmed. Checked at HEAD 1c87d66926 against the branch base 996f58ec82 (origin/main has since moved to 0759738c66; the PR's own diff is against the base). Status "deferred to 4424", the "differs=false" verdict and the scope reason all hold. Four wording corrections to the evidence, none of which changes the verdict:
+
+1. Evidence 2 claims "No k_vnni, store_row, load_row or store_block symbol appears in kv_cache.hpp (grep returns none)". This is wrong for load_row: kv_cache.hpp has two load_row 
+     corrected_text: Words used here: K is the key plane of one KV-cache page (64 tokens). Packed K is the VNNI (Vector Neural Network Instructions) pair-interleaved K layout of PR #4424. Scatter/gather are the AVX-512 instructions that write or read one 4-byte lane per cache line; PR #4424 uses them to save and read one token's packed K row. store_row/load_row are the reviewer's names for the typed one-row save and load functions.
+
+The point asks that the K store_row/load_row wrap the existing scatter/gather code a
+
+### B29 [PR #4424 comment 5765866077, saved comme] For K, a typed store_block() keeps the existing masked 16-token transpose/store path (the shared block save).
+QUOTE: A typed `store_block()` retains the existing masked 16-token transpose/store path.
+STATUS: deferred to 4424 | differs=False
+HOW: This point is about packed K only. It asks that the typed block save (store_block, the function that writes up to 16 token rows of K into the packed layout in one operation) keep the existing code path: load 16 native rows, transpose them as 16x16 blocks of 4-byte lanes, then store each result row with a 16-lane mask so absent tokens are not written.
+
+PR #4557 contains no packed K. At HEAD 1c87d66926 a repository-wide search for set_k_block, store_block, transpose_16x16, k_vnni, TRON_K_VNNI and save_k_helper returns no match (git grep over h, src, t, ingest). The K storage stays the existing row-major array. The only K-side change in PR #4557 is the native-K view alias on the QK kernel parameter (D5 scope). The model.hpp diff changes V comments and set_v callers only. It does not touch save_k or the shared block save.
+
+The path the reviewer wants kept exists today on the PR #4424 branch 
+DIFF: PR #4557 implements no part of this point, so it does nothing differently from the sketch. His: a typed store_block() that keeps the masked 16-token transpose/store path. PR #4557: no store_block, no packed K, native K storage and its block-free save unchanged.
+
+For the record, the child plan follows his mechanism but not his file or type names. His sketch puts both layouts in one header, h/tron/tensor/vnni.hpp, and types the destination as vnni_view<bf16, k_vnni_layout<Tokens, Dims>>. The design plans a separate header, h/tron/tensor/k_vnni.hpp, and a concrete k_vnni_view<bf16, Rows, Cols> destination (the Q1 choice: each concrete view holds its own address formula). Those are planned diffe
+REASON: Recorded scope decision, not a disagreement with the point. The design excludes packed K from the first pull request: "Exclude TRON_K_VNNI, the build option that enables packed K, from the first pull request. Also exclude packed-K kernels, helper-thread state, and generated calls to helper threads." [design.txt:201]. Q4 records the smaller parent scope as the chosen answer [design.txt:138; pr-body
+  vote1: refuted=False cs=deferred to 4424 :: Confirmed. Status, "differs=false" and the reason hold against HEAD 1c87d66926 and the design text. Whole-tree git grep at HEAD for k_vnni, TRON_K_VNNI, set_k_block and store_block returns no match; the PR diff against its merge base 996f58ec82 (12 files) has no save_k line; native K storage [kv_cache.hpp:2478] and the k() accessors [:1877-1896] are unchanged; the only K typing is the native-K view aliases [kv_cache_fwd.hpp:42-52] on the QK kernel parameter [amx_attn_iface.hpp:222; amx_attn.cpp:
+     corrected_text: how=This point is about packed K only. It asks that the typed block save (store_block, the function that writes up to 16 token rows of K into the packed layout in one operation) keep the existing code path: load 16 native rows, transpose them as 16x16 blocks of 4-byte lanes, then store each result row, with a 16-lane mask when the block is partial, so absent tokens are not written.
+
+PR #4557 contains no packed K. At HEAD 1c87d66926 a repository-wide search for set_k_block, store_block, transpose
+  vote2: refuted=False cs=deferred to 4424 :: Confirmed. Status "deferred to 4424" is right: at HEAD 1c87d66926 a git grep for set_k_block, store_block, transpose_16x16, k_vnni, TRON_K_VNNI and save_k_helper over h, src, t and ingest returns nothing; native K storage (kv_cache.hpp:2478), the k_view() accessors (kv_cache.hpp:1875-1896) and save_k_impl (model.hpp:2747-2787, per-token k(...).set(kout)) are unchanged against the merge base 996f58ec82; the only K-side change is the typed QK kernel parameter const_native_k_view and its callers (D
+     corrected_text: Point (from the reviewer's API sketch, section "4. Bulk operations preserve the optimized paths"): "A typed `store_block()` retains the existing masked 16-token transpose/store path." [ben-comment-5765866077.md:151]
+
+How: This point is about packed K only. It asks that the typed block save keep the existing code path. store_block is the function that writes up to 16 token rows of K into the packed layout in one operation. The existing path works in 4 steps of 32 dims each. In each step it loads 
+
+### B30 [PR #4424 comment 5765866077, saved comme] For V, the overloads wrap the existing interleave/deinterleave code, including the bf16, fp16 and float conversions.
+QUOTE: For V, the overloads contain the existing interleave/deinterleave operations, including the required BF16, FP16, and float conversions.
+STATUS: addressed in 4557 | differs=True
+HOW: Words used here: packed V is the 16-lane build's pair-interleaved V plane (tokens 2p and 2p+1 alternate value by value). bf16 is the 16-bit brain floating-point format the cache stores. fp16 is the 16-bit IEEE half-precision format. fp32 is the 32-bit float.
+
+PR #4557 moves the packed-V interleave (write) and deinterleave (read) bodies out of page::set_v / page::get_v in h/tron/models/kv_cache.hpp into three typed free functions in the new header h/tron/tensor/v_vnni.hpp. The vector intrinsics are the same as on origin/main.
+
+- append_v_row is the write (interleave) operation. One function template covers the three source element types. A concept restricts Source to bf16, fp16 or float. The bf16 branch widens the 16-bit values with _mm512_cvtepu16_epi32 and keeps their bits. The fp16 branch converts with _mm512_cvtph_ps to fp32, then keeps the upper 16 bits by _mm512_srli_epi32(..., 16).
+DIFF: The content matches the sketch: the existing interleave/deinterleave bodies with their bf16, fp16 and float conversions now live inside the typed V operations. The shape of the operations differs in four ways.
+
+- Name. His: store_row / load_row, the same pair of names for K and V, with "corresponding overloads for v_vnni_layout". PR #4557: the V write is append_v_row. load_row keeps his name. copy_token is an added third operation for the token-to-token copy that book::append needs.
+- How the three source types are selected. His sentence says "the overloads contain" the conversions, and his sketch shows one store_row per layout with a fixed bf16 element type, so the reading is one overload p
+REASON: Recorded reasons, all in design.txt:
+
+- Name: section "One cache row-write rule": "append_v_row is this design's name for the sketch's V store_row. The name records partner zeroing. The child's K store_row does not zero a partner." Also decision row G38: "Map append_v_row to the sketch's V store_row."
+- Row argument type (const_view / view instead of std::span): the same section, "// Parameter fam
+  vote1: refuted=False cs=addressed in 4557 :: CONFIRMED with wording corrections. Checked at HEAD 1c87d66926 against origin/main 0759738c66 (worktree /home/jhan/workspace/ai-runs/tron-issue4525), the sketch text and design.txt.
+
+What holds:
+- Status "addressed in 4557": the three source conversions (bf16 keeps bits via _mm512_cvtepu16_epi32; fp16 via _mm512_cvtph_ps then _mm512_srli_epi32 by 16; float via _mm512_srli_epi32 by 16) and the two destination conversions (float via _mm512_slli_epi32 / mask; bf16 via _mm512_cvtepi32_epi16) all liv
+     corrected_text: HOW (corrected):
+
+Words used here: packed V is the 16-lane build's pair-interleaved V plane (for each dimension, the values of tokens 2p and 2p+1 sit next to each other). bf16 is the 16-bit brain floating-point format the cache stores. fp16 is the 16-bit IEEE half-precision format. fp32 is the 32-bit float.
+
+PR #4557 moves the packed-V interleave (write) and deinterleave (read) bodies out of page::set_v / page::get_v in h/tron/models/kv_cache.hpp into three typed free functions in the new header
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed against HEAD 1c87d66926 (worktree /home/jhan/workspace/ai-runs/tron-issue4525), origin/main 0759738c66 and the scratchpad design.txt. Every code fact in the mapping checks out:
+
+- Concepts at h/tron/tensor/v_vnni.hpp:291-296, append_v_row at :306-312 with the three source branches at :319-328 and the odd-token merge at :351-364, load_row at :373-379 with the two destination branches at :386-391, copy_token at :419 with the four parity branches at :428/:435/:447/:454. Their intrinsics m
+     corrected_text: Words used here: packed V is the 16-lane build's pair-interleaved V plane (tokens 2p and 2p+1 alternate value by value). bf16 is the 16-bit brain floating-point format the cache stores. fp16 is the 16-bit IEEE half-precision format. fp32 is the 32-bit float.
+
+PR #4557 moves the packed-V interleave (write) and deinterleave (read) bodies out of page::set_v / page::get_v in h/tron/models/kv_cache.hpp into three typed free functions in the new header h/tron/tensor/v_vnni.hpp. The vector intrinsics a
+
+### B31 [PR #4424 comment 5765866077, saved comme] Dependency direction: the layout header does not need to include the attention kernels.
+QUOTE: The layout header need not include attention kernels.
+STATUS: addressed in 4557 | differs=True
+HOW: The point has two parts: the dependency direction (the layout header must not include the attention kernels) and the mechanism (physical-address access goes through a small internal helper in namespace detail, used only by the SIMD and AMX kernel implementations).
+
+Dependency direction. The packed-V layout header h/tron/tensor/v_vnni.hpp includes no attention-kernel header. Its 14 includes are standard headers, common/ headers, tron/simd headers, the existing tensor headers (seq.hpp, view.hpp), the new forward-declaration header kv_cache_fwd.hpp, and tron/kernels/expr.hpp. expr.hpp is the expression-template base class (expr<Derived, N>), not an attention kernel; the existing tensor header view.hpp already includes tron/kernels/chunky.hpp, so the tensor-to-kernels/expr include is existing practice. Neither v_vnni.hpp nor kv_cache_fwd.hpp names amx_attn_iface.hpp or self_attention.hpp in 
+DIFF: The rule is the same as the sketch: the layout header includes no attention kernel, and the only route to a physical address is a detail-namespace helper used by the SIMD and AMX kernel implementations. The helper's name and shape, and the header layout, differ.
+
+His: one header h/tron/tensor/vnni.hpp for both K and V layouts; one helper detail::vnni_access with a single static function packed_data(vnni_view<T, Layout> view) returning view.data_, generic over a Layout type parameter; nothing said about how the kernel interface header names the view types.
+
+PR #4557: a V-only header h/tron/tensor/v_vnni.hpp (the K counterpart k_vnni.hpp is left to PR #4424); the helper is detail::v_vnni_acces
+REASON: Recorded in the design decision record and the PR text:
+- Separate helper and header names: "Define detail::v_vnni_access with the V types in h/tron/tensor/v_vnni.hpp. ... The child defines a separate detail::k_vnni_access in h/tron/tensor/k_vnni.hpp." [design.txt:311]; "The reviewer's sketch used one header, h/tron/tensor/vnni.hpp, for both layouts. The separate K/V files and the v_ prefix are th
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed. Every code citation was checked at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525 and holds: v_vnni.hpp:21-35 has the 14 listed includes and no attention-kernel header; kv_cache_fwd.hpp:15-16 includes only <cstddef> and <utility>; amx_attn_iface.hpp:113 newly includes kv_cache_fwd.hpp (origin/main had only <cstddef>, <type_traits>, common/numerics/bf16.hpp); amx_attn.cpp:13-15 as quoted; detail::v_vnni_access at v_vnni.hpp:267-286 with plane() and pair_base(), forward 
+     corrected_text: Corrected reason section (replaces the mapping's "reason"; the "how", "evidence" and "difference" sections stand, except that the citation "[v_vnni.hpp:277-280]" becomes "[v_vnni.hpp:276-279]"):
+
+Recorded in the design decision record and the PR text:
+- Separate helper and header names: "Define detail::v_vnni_access with the V types in h/tron/tensor/v_vnni.hpp. ... The child defines a separate detail::k_vnni_access in h/tron/tensor/k_vnni.hpp." [design.txt:311]; "The reviewer's sketch used one h
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every code fact, line citation and quoted text in the mapping holds at HEAD 1c87d66926 and in the design and PR texts. Four wording corrections, none of which changes the status, the "differs" verdict or the described difference.
+
+Checked and confirmed (worktree /home/jhan/workspace/ai-runs/tron-issue4525):
+- Include list of h/tron/tensor/v_vnni.hpp is exactly the 14 headers listed, at lines 21-35. No attention-kernel header is among them. tron/kernels/expr.hpp defines the expression 
+     corrected_text: Only the passages below change. Every other sentence of the how, evidence, difference and reason fields stands as written.
+
+HOW, first paragraph, second sentence (replace):
+The point has two parts: the dependency direction (the layout header must not include the attention kernels) and the mechanism (physical-address access stays in "a small internal helper used by SIMD and AMX implementations", in namespace detail, and "ordinary cache and attention code should not use it").
+
+HOW, "Escape hatch" 
+
+### B32 [PR #4424 comment 5765866077, saved comme] Physical-address (raw pointer) access lives in one small internal helper, detail::vnni_access::packed_data(view), used by the SIMD and AMX implementations.
+QUOTE: Physical-address access stays in a small internal helper used by SIMD and AMX implementations:
+
+namespace detail {
+struct vnni_access {
+  template <typename T, typename Layout>
+  static T* packed_data(vnni_view<T, Layout> view) noexcept {
+    return view.data_;
+  }
+};
+}
+STATUS: partly addressed in 4557 | differs=True
+HOW: Words used here: "packed V plane" = the V (value) storage of one head in one 64-token page, stored in the pair-interleaved layout that the bf16 dot-product instructions read directly. "pair row" = the 2 x D bf16 values that hold two whole tokens side by side. AMX = Intel's tile matrix instructions. SIMD here = the AVX-512 weighted-sum loop.
+
+The V half of the point is done in PR #4557. The packed-K half is deferred to PR #4424.
+
+PR #4557 defines one internal helper, `detail::v_vnni_access`, in the new header h/tron/tensor/v_vnni.hpp [h/tron/tensor/v_vnni.hpp:267-286]. It is the only route from a packed V view to a raw address. The view's pointer member `data_` and its pointer constructor are private, and the helper is a friend of the view [h/tron/tensor/v_vnni.hpp:218-236]. The helper has two static methods. `plane(view)` returns `view.data_`, which is the reviewer's `packed_data`. `pair
+DIFF: The mechanism is the same: a friend struct in namespace detail that hands out the private pointer, used only by the two layout-specific kernels. The shape, name and reach differ in four ways.
+
+1. Scope over layouts. His: one helper `detail::vnni_access` for both packed layouts, templated on a `Layout` type (`vnni_view<T, Layout>`). PR #4557: a V-only helper `detail::v_vnni_access`, templated on the shape (`v_vnni_view<T, Rows, Cols>`). A separate `detail::k_vnni_access` is planned for PR #4424, in its own header h/tron/tensor/k_vnni.hpp.
+
+2. Method set. His: one method, `packed_data(view)`, returning the plane pointer. PR #4557: two methods. `plane(view)` is his `packed_data` under another n
+REASON: Recorded reasons:
+
+- Separate V helper instead of one generic helper: design.txt:311, row "Internal storage access": "Define detail::v_vnni_access with the V types in h/tron/tensor/v_vnni.hpp. Typed V operations, weights_times_v_128x4, and detail::scaled_v_expr may use it. The weighted-sum expression is the only user in kv_cache.hpp and counts as a V-specific kernel. Page methods, book, and tests 
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed. Status "partly addressed in 4557" holds: HEAD 1c87d66926 defines one internal helper, detail::v_vnni_access [h/tron/tensor/v_vnni.hpp:267-286], the view's pointer constructor and data_ member are private and the helper is a friend [v_vnni.hpp:216-234], and no k_vnni_access exists anywhere in h/, src/ or t/ (grep). The user set is exactly the two layout-specific kernels [src/tron/kernels/amx_attn.cpp:205, h/tron/models/kv_cache.hpp:2357] plus the header's three bulk operations [v_vnni.
+     corrected_text: Words used here: "packed V plane" = the V (value) storage of one head in one 64-token page, stored in the pair-interleaved layout that the bf16 dot-product instructions read directly. "pair row" = the 2 x D bf16 values that hold two whole tokens side by side. AMX = Intel's tile matrix instructions. "SIMD implementations" here = the AVX-512 code that reads or writes the plane directly: the weighted-sum loop in kv_cache.hpp and the bulk save/load/copy operations in the header.
+
+HOW: The V half of 
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. Every cited line holds at HEAD 1c87d66926 (worktree /home/jhan/workspace/ai-runs/tron-issue4525) and in the scratchpad texts. Verified: the helper `detail::v_vnni_access final` with `plane()` and `pair_base()` [h/tron/tensor/v_vnni.hpp:267-286]; the private pointer constructor, private `data_`, and `friend struct detail::v_vnni_access` [v_vnni.hpp:216-236]; the access rule and the `book::fill_random` exception in Note [Packed V layout] [v_vnni.hpp:58-64]; the callers at amx_attn.cpp:2
+     corrected_text: Words used here: "packed V plane" = the V (value) storage of one head in one 64-token page, stored in the pair-interleaved layout that the bf16 dot-product instructions read directly. "pair row" = the 2 x D bf16 values that hold two whole tokens side by side. AMX = Intel's tile matrix instructions. SIMD here = the AVX-512 weighted-sum loop.
+
+HOW (partly addressed in 4557):
+
+The V half of the point is done in PR #4557. The packed-K half is deferred to PR #4424.
+
+PR #4557 defines one internal help
+
+### B33 [PR #4424 comment 5765866077, saved comme] vnni_access is an explicit internal escape hatch, not an absolute access-control boundary; ordinary cache and attention code should not use it.
+QUOTE: This is an explicit internal escape hatch, not an absolute access-control boundary. Ordinary cache and attention code should not use it.
+STATUS: addressed in 4557 | differs=True
+HOW: PR #4557 keeps the reviewer's rule for the packed V plane (the interleaved token-pair storage of V in the 16-lane build). The raw plane pointer of a v_vnni_view is private. One friend helper, detail::v_vnni_access, is the only route from a view to that pointer. The helper is used by exactly three kinds of code at HEAD: the three bulk operations in the same header (append_v_row, load_row, copy_token), the weighted-sum expression detail::scaled_v_expr in kv_cache.hpp, and the AMX PV kernel weights_times_v_128x4 in amx_attn.cpp. A tree-wide grep for "vnni_access" over h/, src/ and t/ finds no other caller: no page method, no book method, no model code, no test. The rule "ordinary cache and attention code should not use it" is written down in the header's Note [Packed V layout], which names the permitted readers and tells cache code, the model, hardware staging and the tests to use the typed
+DIFF: The mechanism is the reviewer's: a struct in namespace detail, befriended by the view, returning the private pointer, with the usage rule stated in prose rather than enforced. The name, scope and shape differ. His: one helper detail::vnni_access for both layouts, in one header vnni.hpp, with one function packed_data(vnni_view<T, Layout>) that returns the plane pointer, and a Layout policy parameter (k_vnni_layout / v_vnni_layout). PR #4557: a V-only helper detail::v_vnni_access in h/tron/tensor/v_vnni.hpp, taking the concrete v_vnni_view<T, Rows, Cols> (no Layout parameter), with two functions: plane(view) (his packed_data) and an added pair_base(view, token), which returns the start of the 
+REASON: Recorded. design.txt Q1 (line 132): "May each concrete view contain its address formula? Yes. Separate V and K owners and views. Keep each family's access plumbing small." (status: Proposed; reviewer answer not recorded). design.txt line 311, row "Internal storage access": "Define detail::v_vnni_access with the V types in h/tron/tensor/v_vnni.hpp. Typed V operations, weights_times_v_128x4, and det
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed. Every item of the mapping holds at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525 and in the design text.
+
+Verified facts:
+- Status "addressed in 4557" holds. The private pointer, the friend declaration, and the helper are at h/tron/tensor/v_vnni.hpp:216-234 (private section, `T* data_;` at :233), :218 (`friend struct detail::v_vnni_access;`) and :267-286 (the helper with `plane` and `pair_base`). The forward declaration and its comment are at :73-77. The usage rule is
+     corrected_text: MAPPING (confirmed, wording refined): status=addressed in 4557; how=PR #4557 keeps the reviewer's rule for the packed V plane (the interleaved token-pair storage of V in the 16-lane build). The raw plane pointer of a v_vnni_view is private. One friend helper, detail::v_vnni_access, is the only route from a view to that pointer. The helper is used by exactly three kinds of code at HEAD: the three bulk operations in the same header (append_v_row, load_row, copy_token), the weighted-sum expression 
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every cited fact holds at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525. (1) Callers: `grep -rn vnni_access h src t` returns exactly the sites the mapping lists: h/tron/tensor/v_vnni.hpp:312 (inside append_v_row, signature at :309), :379 (load_row, :376), :423-424 (copy_token, :419); h/tron/models/kv_cache.hpp:2357 (inside detail::scaled_v_expr, namespace detail opens at :2259, comment at :2345-2348 reads "the one cache-side kernel that takes the plane address"); src/
+     corrected_text: status=addressed in 4557
+
+how=PR #4557 keeps the reviewer's rule for the packed V plane (the V values of one KV head of one 64-token page, stored as interleaved token pairs in the 16-lane build). The raw plane pointer of a v_vnni_view (the matrix view over one plane) is a private member. The view names three friends (C++ types allowed to read its private members): the owner v_vnni_tensor, the helper struct detail::v_vnni_access, and the other instantiations of v_vnni_view. The owner and the othe
+
+### B34 [PR #4424 comment 5765866077, saved comme] kv_block selects its K storage at compile time with std::conditional_t on k_vnni::layout_on<head_size>: vnni_tensor<k_vnni_layout<page_size, head_size>> when on, the existing row-major K storage other
+QUOTE: ## 5. Type the cache storage and kernel boundaries
+
+Conceptually, `kv_block` selects its storage at compile time:
+
+using k_storage = std::conditional_t<
+    k_vnni::layout_on<head_size>,
+    vnni_tensor<k_vnni_layout<page_size, head_size>>,
+    existing_row_major_k_storage>;
+
+k_storage k;
+STATUS: deferred to 4424 | differs=True
+HOW: Short version: PR #4557 does not add the compile-time K storage selection. `kv_block::k` (the per-head, per-page K plane inside the KV cache block) is still the existing row-major array at HEAD 1c87d66926. The selection is planned, in the reviewer's `std::conditional_t` form, for the packed-K child PR #4424.
+
+Details:
+
+- The reviewer's point is K-specific. `std::conditional_t` is the standard C++ helper that picks one of two types from a compile-time boolean. `k_vnni::layout_on<head_size>` is the child PR's compile-time switch for the packed (VNNI) K layout. Neither name exists on main or in PR #4557. `git diff origin/main HEAD | grep -c conditional_t` returns 0 (zero lines). A grep for `conditional_t`, `layout_on` and `k_vnni` in kv_cache.hpp, v_vnni.hpp, kv_cache_fwd.hpp and amx_attn_iface.hpp at HEAD returns no hits.
+- At HEAD, `kv_block::k` keeps the array `bf16s k[page_size][head_si
+DIFF: The mechanism is kept, the owner type shape is not, and the K member itself is untouched in PR #4557.
+
+- His: `kv_block` holds `k_storage k;` where `k_storage = std::conditional_t<k_vnni::layout_on<head_size>, vnni_tensor<k_vnni_layout<page_size, head_size>>, existing_row_major_k_storage>`. The owner is one generic template `vnni_tensor<Layout>` that takes a layout-policy type (`k_vnni_layout`, `v_vnni_layout`) as its argument.
+- PR #4557, K side: `kv_block::k` stays the raw array `bf16s k[page_size][head_size / chunk_size]` [kv_cache.hpp:2478]. No K owner type and no compile-time K selection are added. Native K is typed only at the kernel boundary, through the new aliases `native_k_view` / 
+REASON: Recorded reasons, in the design decision record and the PR body:
+
+- Q1 (design.txt:132, pr-body.md Decisions row Q1): "May each concrete view contain its address formula? Yes. Separate V and K owners and views. Keep each family's access plumbing small." Design section 3 adds: "Choose: one concrete view per layout. This repeats a small amount of view plumbing when the child adds packed K. It avoids
+  vote1: refuted=False cs=deferred to 4424 :: Confirmed. Every evidence claim holds at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525. Checked: kv_block::k is still `bf16s k[page_size][head_size / chunk_size]` at h/tron/models/kv_cache.hpp:2478 and identical at the PR base 996f58ec82 (kv_cache.hpp:2452); the V owner `v_vnni_tensor<page_size, head_size>` is selected with `#if TRON_CHUNK_SIZE == 16` at :2479-2493; `static_assert(sizeof(k) == sizeof(v))` at :2496; k_view() unchanged at :2499-2510; page::v_packed at :1977-1984 r
+     corrected_text: Short version: PR #4557 does not add the compile-time K storage selection. `kv_block::k` (the per-head, per-page K plane inside the KV cache block) is still the existing row-major array at HEAD 1c87d66926. The selection is planned, in the reviewer's `std::conditional_t` form, for the packed-K child PR #4424.
+
+Details:
+
+- The reviewer's point is K-specific. `std::conditional_t` is the standard C++ helper that picks one of two types from a compile-time boolean. `k_vnni::layout_on<head_size>` is th
+  vote2: refuted=False cs=deferred to 4424 :: Confirmed. Status "deferred to 4424" is correct: at HEAD 1c87d66926 kv_block::k is still `bf16s k[page_size][head_size / chunk_size]` [h/tron/models/kv_cache.hpp:2478], byte-identical to origin/main 996f58ec82 [kv_cache.hpp:2452]; `git diff origin/main HEAD | grep -c conditional_t` returns 0; `git grep` for conditional_t|layout_on|k_vnni in kv_cache.hpp, v_vnni.hpp, kv_cache_fwd.hpp, amx_attn_iface.hpp, amx_attn.cpp and t_llama_unit.cpp at HEAD returns no hits. The child branch origin/jhan-amx-v
+     corrected_text: Short version: PR #4557 does not add the compile-time K storage selection. `kv_block::k` (the K plane of one KV head in one KV slot, 64 tokens) is still the existing row-major array at HEAD 1c87d66926. The selection is planned, in the reviewer's `std::conditional_t` form, for the packed-K child PR #4424.
+
+Details:
+
+- The quoted code is K-specific. The section heading covers both planes, and the V half is handled in the third bullet below. `std::conditional_t` is the standard C++ helper that pick
+
+### B35 [PR #4424 comment 5765866077, saved comme] The V storage selection follows the existing TRON_CHUNK_SIZE build condition.
+QUOTE: The V selection follows the existing `TRON_CHUNK_SIZE` condition.
+STATUS: addressed in 4557 | differs=False
+HOW: Words used here: TRON_CHUNK_SIZE is the build constant for the number of fp32 values per vector register (16 in the AVX-512 build, 8 in the AVX2 build). kv_block is the struct that holds the K plane and the V plane of one KV head in one slot. v_vnni_tensor is the new typed owner of a packed V plane.
+
+The V storage selection in kv_block keeps the same preprocessor condition that main already uses. At HEAD, `#if TRON_CHUNK_SIZE == 16` selects `using v_storage = v_vnni_tensor<page_size, head_size>;` and the member `alignas(kv_block_alignment) v_storage v;` [h/tron/models/kv_cache.hpp:2479-2489]. The `#else` branch keeps main's row-major array unchanged: `alignas(kv_block_alignment) bf16s v[page_size][head_size / chunk_size];` [kv_cache.hpp:2491-2492]. On origin/main the same guard selected `bf16s v[page_size / 2][head_size / chunk_size * 2]` in the 16-lane branch. So only the 16-lane member
+DIFF: None. The reviewer asked that V keep the existing TRON_CHUNK_SIZE condition and that both configurations keep their bytes and alignment. PR #4557 keeps the existing `#if TRON_CHUNK_SIZE == 16` preprocessor guard in kv_block and changes only the type of the 16-lane member (from the raw `bf16s v[page_size / 2][head_size / chunk_size * 2]` array to the typed owner `v_vnni_tensor<page_size, head_size>`). The 8-lane branch is byte-for-byte the same text as on main. One small shape note, not a deviation: the reviewer's sketch showed the K selection as a `std::conditional_t` type alias, and described the V selection only as "follows the existing condition". The existing condition is a preprocessor 
+REASON: Not a deviation, so no Q1-Q4 or D5 entry applies. The recorded rule for this point is in the design text: "Guard packed operation bodies and packed-only tests with TRON_CHUNK_SIZE == 16. Retain the existing 8-lane row-major cache." [design.txt line 375], and "Keep packed V class definitions and typed kernel declarations available at both chunk widths. The unconditional fake AMX definitions require
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed against HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525. The status, the "differs=false" verdict and the attribution all hold. Facts checked: (1) kv_block keeps `#if TRON_CHUNK_SIZE == 16` [h/tron/models/kv_cache.hpp:2479], selects `using v_storage = v_vnni_tensor<page_size, head_size>;` [:2484] and `alignas(kv_block_alignment) v_storage v;` [:2489]; the `#else` branch [:2491-2492] is the same two lines as on the base commit 996f58ec82 and on the current origin/main 0759
+     corrected_text: Words used here: TRON_CHUNK_SIZE is the build constant for the number of fp32 values per vector register (16 in the AVX-512 build, 8 in the AVX2 build). kv_block is the struct that holds the K plane and the V plane of one KV head in one slot. v_vnni_tensor is the new typed owner of a packed V plane. bf16s is one SIMD chunk of bf16 values (32 bytes at 16 lanes).
+
+The V storage selection in kv_block keeps the same preprocessor condition that main already uses. At HEAD, `#if TRON_CHUNK_SIZE == 16` 
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every load-bearing claim holds against HEAD 1c87d66926 and merge base 996f58ec82 (git merge-base HEAD origin/main). (1) kv_block keeps `#if TRON_CHUNK_SIZE == 16` / `#else` / `#endif`; the 16-lane branch now selects `using v_storage = v_vnni_tensor<page_size, head_size>;` + `alignas(kv_block_alignment) v_storage v;` [h/tron/models/kv_cache.hpp:2479-2489]; the 8-lane branch `alignas(kv_block_alignment) bf16s v[page_size][head_size / chunk_size];` is identical text to main [HEAD 2490-24
+     corrected_text: Words used here: TRON_CHUNK_SIZE is the build constant for the number of fp32 values per vector register (16 in the AVX-512 build, 8 in the AVX2 build). kv_block is the struct that holds the K plane and the V plane of one KV head in one slot. v_vnni_tensor is the new typed owner of a packed V plane.
+
+The V storage selection in kv_block keeps the same preprocessor condition that main already uses. At HEAD, `#if TRON_CHUNK_SIZE == 16` selects `using v_storage = v_vnni_tensor<page_size, head_size>;
+
+### B36 [PR #4424 comment 5765866077, saved comme] Both the packed and the unpacked configurations keep their current byte layout, size and alignment (no binary change).
+QUOTE: Both packed and unpacked configurations retain their current bytes and alignment.
+STATUS: partly addressed in 4557 | differs=False
+HOW: Words used here: kv_block is the struct that holds one KV head's K plane and V plane for one page. "16-lane" is the AVX-512 build (TRON_CHUNK_SIZE == 16, packed V). "8-lane" is the AVX2 build (row-major V). static_assert is a compile-time check that fails the build when false. alignas(N) forces a type or member to start at a multiple of N bytes.
+
+PR #4557 keeps the bytes and the alignment of every storage configuration it touches. It checks this at compile time.
+
+- Packed V (16-lane): the old member `bf16s v[page_size / 2][head_size / chunk_size * 2]` is replaced by `v_storage v`, where `v_storage = v_vnni_tensor<page_size, head_size>`. The owner holds exactly one array `bf16 data_[Rows * Cols]`. That is page_size * head_size bf16 values, the same count as the old array (for 64 tokens x 128 dimensions: 8,192 bf16 = 16,384 bytes). The owner is `alignas(V_PLANE_ALIGNMENT_64)` (64 bytes) an
+DIFF: None in the rule. The reviewer stated a constraint (keep bytes and alignment in both configurations) and said the V selection follows the existing TRON_CHUNK_SIZE condition. PR #4557 does exactly that: the V storage is selected by the existing `#if TRON_CHUNK_SIZE == 16`, the plane keeps page_size * head_size bf16 values, and the 64-byte alignment is kept. Two additions go beyond the sketch without changing it: (1) compile-time checks (static_assert in kv_cache.hpp, STATIC_REQUIRE in t_llama_unit) that pin the owner size, the owner alignment, the block size and the block alignment; (2) Note [KV block lifetime], a placement-new of kv_block arrays over the raw arenas plus trivial-trait asserts
+REASON: Design record (design.txt), section "Arena construction without clearing", line 443: "A kv_block still contains K followed by V for one head and page. Replace only the 16-lane V array with the packed owner. Keep native K and 8-lane V as their existing arrays. [S8]"; line 451: "Require trivial default construction, copyability, and destruction for both owner and block. Require 64-byte alignment, un
+  vote1: refuted=False cs=partly addressed in 4557 (every V configuration met; the packed-K configuration does not exist yet and is deferred to #4424 with the same rule) :: Confirmed against the worktree at HEAD 1c87d66926 (merge base 996f58ec82). Every cited code line reads as quoted: kv_cache.hpp 2470, 2478 (K, unchanged context line in the PR diff), 2484-2489 (v_storage + trivial-trait static_assert + `alignas(kv_block_alignment) v_storage v`), 2492 (8-lane V, unchanged), 2496 (`sizeof(k) == sizeof(v)`, unchanged), 1626-1629 (block size and alignment static_asserts, pre-existing at main:1561-1564), 652, 1445-1495 (Note [KV block lifetime] + construct_kv_blocks, 
+     corrected_text: Words used here: kv_block is the struct that holds one KV head's K plane and V plane for one page. "16-lane" is the AVX-512 build (TRON_CHUNK_SIZE == 16, packed V). "8-lane" is the AVX2 build (row-major V). static_assert is a compile-time check that fails the build when false. STATIC_REQUIRE is the test framework's form of the same check. alignas(N) forces a type or member to start at a multiple of N bytes. Placement-new is C++ syntax that gives an object a lifetime at an address the program alr
+  vote2: refuted=True cs=partly addressed in 4557 (all three storage configurations that exist on main: packed V, unpacked V, native K; the packed-K configuration exists only in PR #4424 and is deferred there by scope) :: Narrow refutation. The status ("partly addressed in 4557"), the differs=false verdict, and the cited code evidence all hold at HEAD 1c87d66926. One statement inside the "difference" field is false and misattributes item (2). The mapping says: "Two additions go beyond the sketch ... (2) Note [KV block lifetime], a placement-new ... The sketch did not address object lifetime in a raw byte arena." The reviewer's sketch does address it. Its section 3 says: "The implementation would preserve the cach
+     corrected_text: Words used here: kv_block is the struct that holds one KV head's K plane and V plane for one page. "16-lane" is the AVX-512 build (TRON_CHUNK_SIZE == 16, packed V). "8-lane" is the AVX2 build (row-major V). static_assert is a compile-time check that fails the build when false. alignas(N) forces a type or member to start at a multiple of N bytes.
+
+The reviewer's sentence closes a paragraph that covers both selections: the K selection in his code block (packed K or the existing row-major K) and th
+
+### B37 [PR #4424 comment 5765866077, saved comme] Page accessors return typed views, for example k_packed(slot, head) returning kv_block<geometry>(slot, head).k.as_view().
+QUOTE: Page accessors then return typed views:
+
+auto k_packed(kv_slot_id slot, size_t head) const noexcept {
+  return kv_block<geometry>(slot, head).k.as_view();
+}
+STATUS: partly addressed in 4557 | differs=False
+HOW: The sketch's pattern (a const page accessor that fetches the block and returns owner.as_view()) is implemented for the packed V plane and is the only way the AMX PV kernel reaches V. page::v_packed<geometry>(slot, kv_head) const returns kv_block<geometry>(slot, kv_head).v.as_view(), typed as v_vnni_view<const bf16, page_size, geometry.head_size>. The AMX PV call site passes pg.template v_packed<geometry.kv>(slot, kv_head) where it used to pass the raw pointer from page::v_data. page::v_data and kv_block::v_base (the raw-pointer accessors) are removed. The native K plane already had a typed page accessor before this PR: page::k(slot, kv_head) returns kv_block::k_view(), the existing row-major view (the alias native_k_view / const_native_k_view in kv_cache_fwd.hpp names that same type). PR #4557 changes the AMX QK call site to pass that whole-plane view (pg.template k<geometry.kv>(slot, kv
+DIFF: The accessor mechanism follows the sketch. His: "auto k_packed(kv_slot_id slot, size_t head) const noexcept { return kv_block<geometry>(slot, head).k.as_view(); }", a const page accessor returning the block owner's as_view(); his consequences block also names page.v_packed(...) for V. PR #4557: "v_vnni_view<const bf16, page_size, geometry.head_size> v_packed(kv_slot_id slot, size_t kv_head) const noexcept { return kv_block<geometry>(slot, kv_head).v.as_view(); }", the same shape and the same name for V. Two small spelling differences that do not change the mechanism: (1) the return type is written out instead of auto; (2) the returned view is v_vnni_view<const bf16, Rows, Cols> (the address 
+REASON: Recorded. Scope split: design.txt section 2 ("Native K: reuse its current storage and view types. ... The parent changes the K parameter of qk_rowmajor_128x4 from a pointer to the existing read-only matrix view."; "Choose: one concrete view per layout. This repeats a small amount of view plumbing when the child adds packed K."), the accessor table at design.txt line 351 ("Add the const method page
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed. The status "partly addressed in 4557", the evidence, the differs=false verdict and the reason attribution all hold against HEAD 1c87d66926 and design.txt. Checks: (1) page::v_packed exists as a const page accessor returning kv_block<geometry>(slot, kv_head).v.as_view(), typed v_vnni_view<const bf16, page_size, geometry.head_size> [h/tron/models/kv_cache.hpp:1977-1984]; the AMX PV call site passes it [h/tron/models/self_attention.hpp:1680-1682], and the diff removes page::v_data and kv
+     corrected_text: HOW: The sketch's pattern (a const page accessor that fetches the block and returns owner.as_view()) is implemented for the packed V plane and is the only way the AMX PV kernel reaches V. page::v_packed<geometry>(slot, kv_head) const returns kv_block<geometry>(slot, kv_head).v.as_view(), typed as v_vnni_view<const bf16, page_size, geometry.head_size> [h/tron/models/kv_cache.hpp:1977-1984]. The AMX PV call site passes pg.template v_packed<geometry.kv>(slot, kv_head) where it used to pass the raw 
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed with wording corrections. Every code claim holds at HEAD 1c87d66926 (worktree /home/jhan/workspace/ai-runs/tron-issue4525): page::v_packed<geometry>(slot, kv_head) const returns kv_block<geometry>(slot, kv_head).v.as_view() typed v_vnni_view<const bf16, page_size, geometry.head_size> [h/tron/models/kv_cache.hpp:1977-1984]; v_vnni_tensor::as_view has the four overloads with the rvalue ones deleted [h/tron/tensor/v_vnni.hpp:249-261]; kv_block stores `v_storage v` = v_vnni_tensor<page_siz
+     corrected_text: The sketch's pattern (a const page accessor that fetches the block and returns owner.as_view()) is implemented for the packed V plane. It is the only source of the V view in the model's PV call site (h/tron/models/self_attention.hpp). The numerics test feeds the same kernel from a local v_vnni_tensor owner's as_view() instead [t/t_amx_numerics.cpp:227, :259]. page::v_packed<geometry>(slot, kv_head) const returns kv_block<geometry>(slot, kv_head).v.as_view(), typed as v_vnni_view<const bf16, page
+
+### B38 [PR #4424 comment 5765866077, saved comme] A named alias packed_k_page = vnni_view<const bf16, k_vnni_layout<64, 128>> states what the K kernels accept.
+QUOTE: Kernel signatures state precisely what they accept:
+
+using packed_k_page =
+    vnni_view<const bf16, k_vnni_layout<64, 128>>;
+STATUS: partly addressed in 4557 | differs=True
+HOW: The reviewer's point has two parts: a rule (each kernel signature names the exact cache-plane type it accepts, so a wrong plane or a bare pointer is a compile error) and one concrete alias for the packed-K kernel (packed_k_page for qk_vnni_128x4). PR #4557 applies the rule to both AMX kernels that exist on main. qk_rowmajor_128x4 (the native-K score kernel) now takes const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>, a read-only view of the whole 64-token x 128-dim K plane, instead of const bf16* [h/tron/kernels/amx_attn_iface.hpp:222]. weights_times_v_128x4 (the weights-times-values kernel) now takes v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>, the packed V plane view, instead of const bf16* [h/tron/kernels/amx_attn_iface.hpp:234-235]. The kernel bodies extract the pointer once and keep the existing tile loads [src/tron/kernels/amx_attn.cpp:134, :204]. The production caller 
+DIFF: Four concrete differences. (1) Alias shape. His: one short fixed-size alias per kernel parameter, "using packed_k_page = vnni_view<const bf16, k_vnni_layout<64, 128>>;" (and packed_v_page), used as the parameter type. PR #4557: no fixed-size page alias; the kernel declarations spell the full template type, const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> and v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> [amx_attn_iface.hpp:222, :234-235]. The only aliases added are generic over Rows and Cols (native_k_view<Rows, Cols>, const_native_k_view<Rows, Cols>) [kv_cache_fwd.hpp:41-52]. The fixed 64 x 128 aliases k_plane_t and v_plane_t exist only as local names inside the test [t/t_llama_u
+REASON: Recorded reasons cover differences (2), (3) and (4); difference (1) has no recorded reason. (2) Design decision Q1 [design.txt:132]: "May each concrete view contain its address formula? Yes. Separate V and K owners and views. Keep each family's access plumbing small." Design section 2 [design.txt:112]: "Choose: one concrete view per layout. This repeats a small amount of view plumbing when the chi
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed on substance. The status, the "differs" verdict, the four differences and the attributed reasons all hold against HEAD 1c87d66926 and design.txt. Verified: qk_rowmajor_128x4 takes const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> [amx_attn_iface.hpp:222] and weights_times_v_128x4 takes v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> [amx_attn_iface.hpp:234-238]; the old declarations were const bf16* (git diff); the kernels extract the pointer once [amx_attn.cpp:134, :205]; the 
+     corrected_text: Status: partly addressed in PR #4557.
+
+How: The reviewer's point has two parts. The first part is a rule: each kernel signature names the exact cache-plane type it accepts, so a wrong plane or a bare pointer is a compile error. The second part is one concrete alias for the packed-K kernel: packed_k_page for qk_vnni_128x4 [ben-comment-5765866077.md:196-197, :202-205].
+
+PR #4557 applies the rule to both AMX kernels on main that take a cache plane. qk_rowmajor_128x4 (the native-K score kernel) now 
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. Status "partly addressed", differs=true, the four differences and the recorded reasons all hold against HEAD 1c87d66926 and design.txt. Checked: git diff shows both kernel parameters changed from const bf16* to the typed views [amx_attn_iface.hpp:222, :234-235]; kernel bodies extract the pointer once and keep the tile loads [amx_attn.cpp:134, :205]; the production QK call passes the whole K plane where main passed k0.data [self_attention.hpp:1653]; the test probes and the explicit-wra
+     corrected_text: HOW: The reviewer's point has two parts: a rule (each kernel signature names the exact cache-plane type it accepts, so a wrong plane or a bare pointer is a compile error) and one concrete alias for the packed-K kernel (packed_k_page for qk_vnni_128x4). PR #4557 applies the rule to both cache-plane kernels on main (pack_q_group_128x4 takes Q, not a cache plane, and is unchanged). qk_rowmajor_128x4 (the native-K score kernel) now takes const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>, a read-onl
+
+### B39 [PR #4424 comment 5765866077, saved comme] A named alias packed_v_page = vnni_view<const bf16, v_vnni_layout<64, 128>> states what the V kernels accept.
+QUOTE: using packed_v_page =
+    vnni_view<const bf16, v_vnni_layout<64, 128>>;
+STATUS: addressed in 4557 | differs=True
+HOW: The substance of the point is in the PR: the V kernel's cache-plane parameter is a typed read-only packed-V view of the fixed 64-token x 128-dim shape, so the signature states what the kernel accepts, and a bare pointer or a K plane is rejected at compile time. The PR does not add a named alias. It spells the full type at the kernel declaration and at the kernel definition, and the intrinsics-free forward-declaration header h/tron/tensor/kv_cache_fwd.hpp makes that spelling possible in amx_attn_iface.hpp. The production caller passes page::v_packed<geometry.kv>(slot, kv_head), which returns that exact view type. Only the unit test introduces a local alias (v_plane_t) for the same type. The compile-time acceptance probes in t/t_llama_unit.cpp are the PR's counterpart of the reviewer's three "OK / Compile error" example lines.
+DIFF: His: a named alias in the kernel interface, "using packed_v_page = vnni_view<const bf16, v_vnni_layout<64, 128>>;", built on a generic view template whose second argument is a layout-policy type (v_vnni_layout<64, 128>), and the kernel declared as "weights_times_v_128x4(packed_v_page v, ...)". PR #4557: no alias named packed_v_page (or any *_page alias) exists in the production code. The kernel parameter is written out in full as "v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page" at both the declaration [amx_attn_iface.hpp:235] and the definition [amx_attn.cpp:198]. The type shape also differs: v_vnni_view<T, Rows, Cols> is a concrete packed-V view that holds the address formula
+REASON: Partly recorded. The type-shape change (concrete v_vnni_view<T, Rows, Cols> instead of vnni_view<T, Layout>) is design decision Q1 in the "Decision record and reviewer questions" table of design.txt (line 132: "May each concrete view contain its address formula? | Yes. Separate V and K owners and views. Keep each family's access plumbing small."), with the rationale at design.txt line 110: "Choose
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed, with one evidence sentence to correct.
+
+Checked at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525 and in the scratchpad texts.
+
+Status "addressed in 4557" holds. The V kernel's cache-plane parameter is the read-only packed-V view of the fixed 64 x 128 shape at both the declaration [h/tron/kernels/amx_attn_iface.hpp:234-238] and the definition [src/tron/kernels/amx_attn.cpp:197-200]. The body reads the plane through detail::v_vnni_access::plane(v_page) [amx_attn.cpp:205
+     corrected_text: Replace the evidence sentence beginning "No alias in the PR:" with: No alias in the PR: "git diff origin/main HEAD | grep -E -i 'packed_v_page|packed_k_page|using .*_page'" returns no match. The only view aliases the PR adds to production code are native_k_view and const_native_k_view [h/tron/tensor/kv_cache_fwd.hpp:39-50] (diff output lines 1671 and 1677). Optionally append to the reason: The PR description also records Q1 as Proposed, with the wording "v_vnni_view holds the packed formula, and
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed against HEAD 1c87d66926 and the design text. Status, "differs" verdict, the described difference and the reason attribution all hold. Every cited code line checks out: the kernel parameter is "v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page" at the declaration [h/tron/kernels/amx_attn_iface.hpp:234-238] and at the definition [src/tron/kernels/amx_attn.cpp:197-201]; the body reads the plane through detail::v_vnni_access::plane [amx_attn.cpp:205]; the interface header inclu
+     corrected_text: how=The substance of the point is in the PR: the V kernel's cache-plane parameter is a typed read-only packed-V view of the fixed 64-token x 128-dim shape, so the signature states what the kernel accepts, and a bare pointer or a K plane is rejected at compile time. The PR does not add a named alias. It spells the full type at the kernel declaration and at the kernel definition, and the intrinsics-free forward-declaration header h/tron/tensor/kv_cache_fwd.hpp makes that spelling possible in amx_a
+
+### B40 [PR #4424 comment 5765866077, saved comme] The K kernel qk_vnni_128x4 takes packed_k_page as its first argument (the query rows stay a const bf16* pointer in the sketch).
+QUOTE: void qk_vnni_128x4(
+    packed_k_page k,
+    const bf16* q_rows,
+    /* output arguments */) noexcept;
+STATUS: partly addressed in 4557 | differs=True
+HOW: Words used here: PR = pull request. K plane = the key storage of one page (64 tokens) for one KV head. Native K = the row-major K layout on main (one row of 128 bf16 values per token; bf16 = 16-bit brain float). Packed K = the VNNI-interleaved K layout of PR #4424 (VNNI = Vector Neural Network Instructions). View = a non-owning typed reference to storage.
+
+The reviewer's point is about the packed-K kernel qk_vnni_128x4 taking a typed packed_k_page as its first argument. That kernel and every packed-K type are absent at HEAD 1c87d66926. A search of h/, src/ and t/ finds no qk_vnni_128x4, k_vnni_view, k_vnni_tensor or packed_k_page. The packed-K kernel is therefore deferred to PR #4424 (PR order item 2 of issue #4525).
+
+PR #4557 applies the same rule to the one K kernel that exists at HEAD. qk_rowmajor_128x4 (the native-K QK kernel) now takes the whole K plane as a typed view, const_native
+DIFF: His: the K kernel is qk_vnni_128x4 and its first parameter is packed_k_page, an alias for vnni_view<const bf16, k_vnni_layout<64, 128>>, a new packed view type constructible only from the cache's owner (a bare pointer cannot become one). The sketch types only the packed K. It does not type the native row-major K kernel.
+
+PR #4557: the K kernel typed is qk_rowmajor_128x4 (native, row-major K). Its first parameter is const_native_k_view<64, 128>, an alias for the existing const_view<bf16, true, false, seq<64,128>, sseq<128,1>> type, not a new class. That alias can still be built explicitly from a const bf16* (t_llama_unit.cpp:427 requires it; t_amx_numerics.cpp:164 uses it), so the guard is ag
+REASON: Recorded reason for the native-K deviation: design.txt decision record row D5, "Who owns native-K typing? | The issue author requested it. Reuse the existing native-K view type through the new const_native_k_view alias in section 5. Change the native-K kernel parameter. | ... | Requested scope; not presented as reviewer approval." The design section text says: "Native K: reuse its current storage 
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed. Every load-bearing claim holds against HEAD 1c87d66926 and the design text. (1) No packed-K kernel or type exists at HEAD: grep for qk_vnni_128x4, k_vnni_view, k_vnni_tensor, packed_k_page over h/, src/, t/ returns nothing. (2) qk_rowmajor_128x4 takes const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> as its first parameter [h/tron/kernels/amx_attn_iface.hpp:222-225]; the diff against origin/main shows the old "const bf16* k_page". The body extracts "const bf16* const k_rows = k_page.
+     corrected_text: HOW (corrected):
+Words used here: PR = pull request. K plane = the key storage of one page (64 tokens) for one KV head. Native K = the row-major K layout on main (one row of 128 bf16 values per token; bf16 = 16-bit brain float). Packed K = the VNNI-interleaved K layout of PR #4424 (VNNI = Vector Neural Network Instructions). View = a non-owning typed reference to storage.
+
+The reviewer's point is about the packed-K kernel qk_vnni_128x4 taking a typed packed_k_page as its first argument. That ker
+  vote2: refuted=False cs=partly addressed in 4557 :: Confirmed. Every substantive claim checks out at HEAD 1c87d66926 in /home/jhan/workspace/ai-runs/tron-issue4525: (1) qk_vnni_128x4, k_vnni_view, k_vnni_tensor and packed_k_page are absent from h/, src/ and t/ (grep count 0), so the packed-K side is deferred; (2) qk_rowmajor_128x4 takes const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> at h/tron/kernels/amx_attn_iface.hpp:222 and src/tron/kernels/amx_attn.cpp:128, and the diff against origin/main shows the old "const bf16* k_page" parameter; (3)
+     corrected_text: Declaration [h/tron/kernels/amx_attn_iface.hpp:222-225]: "void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page, const bf16* q_packed, float* s, size_t s_stride_floats) noexcept;". Before the PR (git diff origin/main HEAD, same file): "-void qk_rowmajor_128x4(const bf16* k_page,".
+
+Definition [src/tron/kernels/amx_attn.cpp:128-134]: same signature, then "const bf16* const k_rows = k_page.data;" at line 134, followed by the unchanged _tile_loadd calls on k_rows.
+
+Alias 
+
+### B41 [PR #4424 comment 5765866077, saved comme] The V kernel weights_times_v_128x4 takes packed_v_page as its first argument.
+QUOTE: void weights_times_v_128x4(
+    packed_v_page v,
+    /* weight and output arguments */) noexcept;
+STATUS: addressed in 4557 | differs=True
+HOW: The V kernel (weights_times_v_128x4, the AMX product of softmax weights with one page's V plane) takes a typed packed-V view as its first argument at HEAD 1c87d66926. The declaration is `void weights_times_v_128x4(v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page, const float* exp_rows, size_t row_stride_floats, float* o) noexcept;` [h/tron/kernels/amx_attn_iface.hpp:234-238]. The view is passed by value, and the other three arguments are unchanged from the pointer version. The kernel body extracts the plane pointer once, `const bf16* const v_pairs = detail::v_vnni_access::plane(v_page);`, and the tile loads below it keep the existing instruction sequence [src/tron/kernels/amx_attn.cpp:197-204]. This matches the reviewer's sentence "Internally, kernels extract the pointer once and retain the existing instruction sequence." The production caller passes the page accessor direct
+DIFF: The mechanism is the reviewer's (typed view as the first argument by value, pointer extracted once inside, other arguments unchanged, wrong types rejected at compile time). The type shape and the spelling differ. His: `using packed_v_page = vnni_view<const bf16, v_vnni_layout<64, 128>>;` then `void weights_times_v_128x4(packed_v_page v, ...)`. That is one generic `vnni_view` template shared by K and V, whose second template argument is a layout type (`v_vnni_layout<64, 128>`) that carries the address formula, plus a named alias `packed_v_page` in the signature. PR #4557: `v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page`. That is a V-specific view template whose template argumen
+REASON: The type-shape difference (concrete per-layout view instead of a generic view over a layout type) is recorded in the design decision record as Q1: "May each concrete view contain its address formula? Yes. Separate V and K owners and views. Keep each family's access plumbing small." with the fallback "Revise section 5 declarations and section 7's child types around a layout-policy template" and the
+  vote1: refuted=False cs=addressed in 4557 :: Confirmed. Every cited location holds at HEAD 1c87d66926: the declaration [h/tron/kernels/amx_attn_iface.hpp:234-238], the caller [h/tron/models/self_attention.hpp:1680-1682], v_packed [h/tron/models/kv_cache.hpp:1977-1984], the forward declaration [h/tron/tensor/kv_cache_fwd.hpp:32-33], v_vnni_access::plane [h/tron/tensor/v_vnni.hpp:268-274], the amx_pv_accepts probe and the five STATIC_REQUIRE checks [t/t_llama_unit.cpp:115-118, 402-417]. grep for packed_v_page|packed_k_page|v_vnni_layout over
+     corrected_text: how=The V kernel (weights_times_v_128x4, the AMX product of softmax weights with one page's V plane) takes a typed packed-V view as its first argument at HEAD 1c87d66926. The declaration is `void weights_times_v_128x4(v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page, const float* exp_rows, size_t row_stride_floats, float* o) noexcept;` [h/tron/kernels/amx_attn_iface.hpp:234-238]. The view is passed by value. The other three arguments are unchanged from the pointer version on origin/
+  vote2: refuted=False cs=addressed in 4557 :: Confirmed. Every cited location holds at HEAD 1c87d66926: the declaration [h/tron/kernels/amx_attn_iface.hpp:234-238], the definition with the single plane extraction [src/tron/kernels/amx_attn.cpp:197-204], the caller [h/tron/models/self_attention.hpp:1680-1682], page::v_packed [h/tron/models/kv_cache.hpp:1976-1984], the forward declaration [h/tron/tensor/kv_cache_fwd.hpp:32-33], detail::v_vnni_access::plane [h/tron/tensor/v_vnni.hpp:268-274], the amx_pv_accepts probe [t/t_llama_unit.cpp:115-11
+     corrected_text: how: The V kernel (weights_times_v_128x4, the AMX product of the softmax weights with one page's V plane) takes a typed packed-V view as its first argument at HEAD 1c87d66926. The declaration is `void weights_times_v_128x4(v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page, const float* exp_rows, size_t row_stride_floats, float* o) noexcept;` [h/tron/kernels/amx_attn_iface.hpp:234-238]. The view is passed by value. The other three arguments are unchanged from the pointer version at or
+
+### B42 [PR #4424 comment 5765866077, saved comme] The AVX-512 fallback (the non-AMX K path) also takes packed_k_page, not a raw pointer.
+QUOTE: The AVX-512 fallback also takes `packed_k_page`.
+STATUS: deferred to 4424 | differs=True
+HOW: Words used here: AVX-512 is the 512-bit vector instruction set of the software attention path. AMX is the tile-matrix unit the dense-page kernels use. Packed K is the K plane in the VNNI pair-interleaved order that PR #4424 adds. Native K is the row-major K plane (one token's 128 dims stored consecutively) that main and PR #4557 keep. The dotter is the per-token AVX-512 dot-product helper in h/tron/kernels/dotter.hpp.
+
+The reviewer's sentence concerns the non-AMX reader of packed K. In his sketch that reader takes packed_k_page = vnni_view<const bf16, k_vnni_layout<64, 128>> instead of a raw pointer. In PR #4424 that reader is qk_group in h/tron/kernels/k_vnni.hpp.
+
+PR #4557 has no packed-K type and no packed-K reader. The diff against origin/main contains 0 occurrences of k_vnni, packed_k_page or qk_group. h/tron/tensor/kv_cache_fwd.hpp declares only the packed-V types (v_vnni_tensor, v
+DIFF: The rule is kept. The type shape, the type name and the parent-side counterpart differ.
+
+His: the packed-K AVX-512 fallback takes `packed_k_page`, an alias for `vnni_view<const bf16, k_vnni_layout<64, 128>>`. The view is one generic template over a separate layout-policy type. The kernel extracts the pointer once and keeps its instruction sequence.
+
+PR #4557: nothing of this point is implemented, because PR #4557 has no packed K. The recorded plan for PR #4424 gives the fallback `qk_group` the parameter `k_vnni_view<const bf16, 64, 128>`: a concrete view template over element type, rows and columns that holds its own address formula, with no layout-policy type and no `packed_k_page` alias. I
+REASON: Three recorded reasons.
+
+- Deferral: the PR body says "Not in this PR: PR #4424 (the packed-K child) is unchanged. Its rebase onto this parent is PR order item 2 of #4525." [pr-body.md:62]. The design assigns the packed-K reader to the child: "qk_group | The child's AVX-512 query/key score reader in h/tron/kernels/k_vnni.hpp. It is absent from the saved main revision." [design.txt:90] and "Pass k_
+  vote1: refuted=False cs=deferred to 4424 :: Short version: the mapping holds. Status "deferred to 4424" is right, the "differs" verdict is right as a statement about the recorded plan, and the reasons are attributed to the right sources. Four citations need small corrections, and one piece of supporting evidence from the child branch can be added.
+
+Confirmed at HEAD 1c87d66926 (worktree /home/jhan/workspace/ai-runs/tron-issue4525):
+- `git diff origin/main HEAD | grep -c "k_vnni\|packed_k_page\|qk_group"` prints 0. The same count against t
+     corrected_text: Corrected passages only. Every other sentence of the mapping's "how", "evidence", "difference" and "reason" fields stands as written.
+
+In "how", replace "This code is byte-identical to main; PR #4557 changed only comments and the two AMX kernel calls in that file." with:
+"This code is byte-identical to the PR base 996f58ec82. PR #4557 changed 24 lines of that file (12 removed, 12 added): comment lines and the two AMX kernel calls."
+
+In "evidence", replace the sentence "the same lines in origin/m
+  vote2: refuted=False cs=deferred to 4424 :: Confirmed. Status, "differs" verdict, described difference and the three reasons all hold against the code at HEAD 1c87d66926 and the design text. Verified: (1) the PR diff contains 0 occurrences of k_vnni, packed_k_page or qk_group, both against the PR base 996f58ec82 (the merge-base) and against the origin/main tip 0759738c66, and `git grep` at HEAD finds none in the tree; (2) h/tron/tensor/kv_cache_fwd.hpp:30-35 declares only v_vnni_tensor / v_vnni_view / v_vnni_row and :41-53 the native_k_vi
+     corrected_text: Words used here: AVX-512 is the 512-bit vector instruction set of the software attention path. AMX is the tile-matrix unit the dense-page kernels use. Packed K is the K plane in the VNNI pair-interleaved order that PR #4424 adds. Native K is the row-major K plane (one token's 128 dims stored consecutively) that main and PR #4557 keep. The dotter is the per-token AVX-512 dot-product helper in h/tron/kernels/dotter.hpp. The PR base is commit 996f58ec82, the merge-base of the branch with origin/mai
+
+### B43 [PR #4424 comment 5765866077, saved comme] Inside the kernels, the raw pointer is extracted once and the existing instruction sequence is kept, so the generated code does not change.
+QUOTE: Internally, kernels extract the pointer once and retain the existing instruction sequence.
+STATUS: addressed in 4557 | differs=False
+HOW: Both kernels that PR #4557 types take the pointer out of the typed view once, in one const local at the top of the function, and then run the unchanged tile-load and tile-multiply sequence on that local. In qk_rowmajor_128x4 the native K view's public data member is read once (`const bf16* const k_rows = k_page.data;`) and the four `_tile_loadd` calls per step use `k_rows` with the same offsets as before; the diff against origin/main changes only the variable name in those four lines. In weights_times_v_128x4 the packed V plane address is read once through the friend accessor (`const bf16* const v_pairs = detail::v_vnni_access::plane(v_page);`) and the eight `_tile_loadd` calls use `v_pairs`; the offsets are the same values, spelled with the named constants `V_PAIR_TOKENS_2` and `PV_TILES_PER_HALF_4` instead of the literals 2 and 4 (fifth commit 1c87d66926, style only). The software-path
+DIFF: The mechanism is the one the reviewer sketched. His: the kernel receives a typed view, extracts the raw pointer once inside, and keeps the existing instruction sequence. PR #4557: each kernel reads the plane pointer into one const local at its first line and the tile loads are the same intrinsics with the same offsets. Three surrounding points are not what the sketch shows, but they belong to other B-points, not to B43: (1) the view type is v_vnni_view<const bf16, 64, 128> with the address formula inside the concrete view (design Q1), not vnni_view<const bf16, v_vnni_layout<64,128>>; (2) the sketch is silent on how the pointer leaves the view, and PR #4557 uses a friend accessor struct detai
+REASON: Recorded in the design record and the code. design.txt line 311 ("Define detail::v_vnni_access with the V types in h/tron/tensor/v_vnni.hpp. Typed V operations, weights_times_v_128x4, and detail::scaled_v_expr may use it. ... Page methods, book, and tests do not call it."); line 359 ("AMX kernels and test substitutes | Type only the cache-plane arguments below. | Keep other arguments, availability
+  vote1: refuted=False cs=addressed in 4557 for the two kernels it types (weights_times_v_128x4 and qk_rowmajor_128x4); the packed-K kernels the sentence also covers (qk_vnni_128x4 and its AVX-512 fallback) do not exist on main and are deferred to PR #4424 :: Confirmed with two wording corrections. The mechanism, status and "differs=false" verdict hold against HEAD 1c87d66926 and the design text.
+
+What I verified in the worktree (/home/jhan/workspace/ai-runs/tron-issue4525):
+- `git diff origin/main HEAD -- src/tron/kernels/amx_attn.cpp` shows qk_rowmajor_128x4 gains `const bf16* const k_rows = k_page.data;` (line 134) and its four K tile loads per step (lines 145, 148, 151, 154) change only `k_page` -> `k_rows`. weights_times_v_128x4 gains `const bf1
+     corrected_text: Both kernels that PR #4557 types take the pointer out of the typed view once, in one const local at the top of the function, and then run the unchanged tile-load and tile-multiply sequence on that local. In qk_rowmajor_128x4 the native K view's public data member is read once (`const bf16* const k_rows = k_page.data;`, amx_attn.cpp:134) and the four `_tile_loadd` calls per step use `k_rows` with the same offsets as before; the diff against origin/main changes only the variable name in those four
+  vote2: refuted=True cs=addressed in 4557 :: The status (addressed in 4557), the "how" text, the evidence and the differs=false verdict all hold against HEAD 1c87d66926 and the design text. One statement inside the "difference" field is wrong, so the mapping needs a correction rather than a confirmation.
+
+What holds (verified):
+- `git diff 996f58ec82 HEAD -- src/tron/kernels/amx_attn.cpp` shows exactly the described change. qk_rowmajor_128x4 gains `const bf16* const k_rows = k_page.data;` (line 134) and the four `_tile_loadd` lines change 
+     corrected_text: B43 (from the reviewer's API sketch, comment 5765866077): "Internally, kernels extract the pointer once and retain the existing instruction sequence."
+
+Status: addressed in PR #4557. Differs from the sketch: no.
+
+How: both kernels that PR #4557 types read the plane pointer out of the typed view once, into one const local at the top of the function, and then run the unchanged tile-load and tile-multiply sequence on that local.
+- qk_rowmajor_128x4 reads the native K view's public data member once 
+
+### B44 [PR #4424 comment 5765866077, saved comme] Expected type-check outcomes: passing page.k_packed(...) to qk_vnni_128x4 compiles, while passing page.v_packed(...) (implying a v_packed accessor) or a row-major pointer is a compile error.
+QUOTE: Consequently:
+
+qk_vnni_128x4(page.k_packed(...), ...);  // OK
+qk_vnni_128x4(page.v_packed(...), ...);  // Compile error
+qk_vnni_128x4(row_major_pointer, ...);   // Compile error
+STATUS: partly addressed in 4557 | differs=True
+HOW: Short version: PR #4557 implements the three type-check outcomes of this point for the two kernels it ships, the native-K QK kernel and the packed-V PV kernel. The symbols the point names (qk_vnni_128x4, page.k_packed) do not exist at HEAD 1c87d66926. They belong to the packed-K child, PR #4424.
+
+Words used here: QK is the query-key score kernel, PV the weights-times-values kernel. A plane is K or V for one KV head of one 64-token page. A view is a non-owning typed handle to a plane. STATIC_REQUIRE / STATIC_REQUIRE_FALSE are the Catch2 compile-time assertions.
+
+- Outcome 1 (the page accessor is accepted). The QK kernel takes the whole native K plane as a typed view, not a pointer [h/tron/kernels/amx_attn_iface.hpp:222-225]. The production call passes the page accessor directly: pg.template k<geometry.kv>(slot, kv_head) [h/tron/models/self_attention.hpp:1653-1654]. page::k returns kv_bloc
+DIFF: The mechanism follows the sketch: each kernel takes its plane as a typed view by value, the other plane's view and a bare pointer fail to compile. The type shape, the names and one rule differ.
+
+His: one generic packed view type, vnni_view<const bf16, k_vnni_layout<64,128>> (aliased packed_k_page), with the layout as a template policy. The K kernel is qk_vnni_128x4 and takes a packed K page from page.k_packed(...). A row-major pointer is a compile error for that kernel with no exception. The AVX-512 fallback also takes packed_k_page.
+
+PR #4557:
+- No layout-policy template. Each plane has its own type family. v_vnni_view<T, Rows, Cols> carries the packed address formula itself [v_vnni.hpp:170
+REASON: Recorded reasons, all marked Proposed or issue-author scope, none marked as reviewer-agreed:
+
+- Q1 [design.txt:132; pr-body.md Decisions table, row Q1]: "May each concrete view contain its address formula? Yes. Separate V and K owners and views. Keep each family's access plumbing small." Status "Proposed; reviewer answer not recorded." This is why the types are v_vnni_view<T,Rows,Cols> plus a nati
+  vote1: refuted=False cs=partly addressed in 4557 :: Confirmed. Every claim in the mapping was checked against the worktree at HEAD 1c87d66926 (5 commits on origin/main 996f58ec82), the design text, the PR body and the reviewer's sketch.
+
+Status "partly addressed in 4557" holds. The point's three lines name the packed-K kernel qk_vnni_128x4 and the accessor page.k_packed. Neither symbol exists at HEAD: grep over h/, src/ and t/ for k_vnni, k_packed, TRON_K_VNNI and qk_vnni_128x4 hits only xfer_k_packed_entry in h/pos/hwattention.hpp:995,1064 and s
+     corrected_text: Short version: PR #4557 implements the three type-check outcomes of this point for the two kernels it ships, the native-K QK kernel and the packed-V PV kernel. The symbols the point names (qk_vnni_128x4, page.k_packed) do not exist at HEAD 1c87d66926. They belong to the packed-K child, PR #4424.
+
+Words used here: QK is the query-key score kernel, PV the weights-times-values kernel. A plane is K or V for one KV head of one 64-token page. A view is a non-owning typed handle to a plane. STATIC_REQU
+  vote2: refuted=False cs=partly addressed in 4557 (the two kernels this PR ships realise all three outcomes; the packed-K kernel the point names is deferred to PR #4424) :: Confirmed. Every citation in the mapping holds at HEAD 1c87d66926 of /home/jhan/workspace/ai-runs/tron-issue4525: qk_rowmajor_128x4 takes const_native_k_view<64,128> and weights_times_v_128x4 takes v_vnni_view<const bf16,64,128> [h/tron/kernels/amx_attn_iface.hpp:222-225, 234-238]; the production calls pass pg.template k<geometry.kv>(...) and pg.template v_packed<geometry.kv>(...) [h/tron/models/self_attention.hpp:1653-1654, 1680-1682]; page::k returns kv_block::k_view() = const_view<bf16,true,f
+     corrected_text: Short version: PR #4557 implements the three type-check outcomes of this point for the two kernels it ships, the native-K QK kernel and the packed-V PV kernel. The packed-K symbols the point names (qk_vnni_128x4, page.k_packed) do not exist at HEAD 1c87d66926. They belong to the packed-K child, PR #4424 (PR order item 2 of issue #4525).
+
+Words used here: QK is the query-key score kernel, PV the weights-times-values kernel. A plane is K or V for one KV head of one 64-token page. A view is a non-o
+
+### REFUTED B18: The only friends that may use the private constructor and data_ are other vnni_view instantiations, vnni_tensor<Layout> and detail::vnni_access (both forward-declared above the class).
+  mapping status=addressed in 4557 differs=False
+  how=Words used here: a "friend" declaration is the C++ way to let one named class or function use another class's private members. A "private constructor" is one that only the class itself and its friends can call.
+
+PR #4557 applies the reviewer's friend rule to the packed V view exactly as sketched. The view class v_vnni_view<T, Rows, Cols> keeps its pointer constructor and its data_ pointer private.
+  vote: Status "addressed in 4557" and differs=false hold: the three-friend list, private pointer constructor, forward declarations, owner-only view construction, the row's single friend, the five users of detail::v_vnni_access and the compile-time tests are all at the cited lines of HEAD 1c87d66926, and no file outside h/tron/tensor/v_vnni.hpp reads a packed view's .data_ (grep over h/, src/, t/). Two statements in the mapping are wrong. (1) The evidence says "the sketch only declared" the access struct and the difference says "the sketch left it declared only". False: the sketch's section 4 defines  | cs=addressed in 4557
+  vote: The status ("addressed in 4557") and the differs=false verdict hold. Every cited line matches HEAD 1c87d66926: the three friends and the private constructor [h/tron/tensor/v_vnni.hpp:216-233], the forward declarations [v_vnni.hpp:73-77, h/tron/tensor/kv_cache_fwd.hpp:30-35], the row's single friend [v_vnni.hpp:151-158], the conversion [180-184], as_view() [249-258], the access struct [267-285], and the tests [t/t_llama_unit.cpp:421-425]. A grep of h/, src/ and t/ confirms the user list of detail::v_vnni_access: amx_attn.cpp:205, kv_cache.hpp:2357, and v_vnni.hpp:312/379/423/424; no test uses i | cs=addressed in 4557
+
+### REFUTED B22: Storage is vnni_tensor<Layout>, a class aligned to 64 bytes that holds a std::array<bf16, Layout::elements> inline; it is not a separate allocation.
+  mapping status=addressed in 4557 differs=True
+  how=PR #4557 gives packed V an owner type whose only member is one 64-byte-aligned bf16 array held inline. The owner allocates nothing of its own. kv_block::v in the 16-lane build is that owner (v_storage = v_vnni_tensor<page_size, head_size>), replacing main's bf16s v[page_size][head_size / chunk_size] array at the same offset and size. The arenas stay raw DMA byte buffers. Both allocation paths (all
+  vote: Partial refutation. The status (addressed in 4557), the differs=true verdict, the three named deviations and their reasons all hold against HEAD 1c87d66926 and design.txt. Four statements in the mapping are wrong and are fixed in corrected_text.
+
+1. Wrong array named as the one the owner replaces. The mapping says the owner replaces main's "bf16s v[page_size][head_size / chunk_size]" (cited at origin/main kv_cache.hpp:2459). That line is the 8-lane branch, and it is unchanged at HEAD (kv_cache.hpp:2492). The 16-lane array that v_vnni_tensor replaces is "alignas(kv_block_alignment) bf16s v[page | cs=addressed in 4557
+  vote: The core verdict stands (packed V owner = one inline 64-byte-aligned bf16 array, no separate allocation, arena constructs the type in place with no clearing; type shape, name and member type differ from the sketch; packed-K owner deferred to PR #4424). Two statements in the mapping are wrong and several citations are off. (1) Evidence error: the mapping says the owner replaces main's "bf16s v[page_size][head_size / chunk_size]" array at origin/main kv_cache.hpp:2459. That line is the 8-lane #else branch, which PR #4557 keeps unchanged (HEAD kv_cache.hpp:2492). The array the owner replaces in t | cs=addressed in 4557 for packed V; the packed-K owner (k_vnni_tensor) is deferred to PR #4424

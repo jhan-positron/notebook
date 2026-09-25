@@ -1,0 +1,52 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/scratch-relocated/fcd18152/parts/short/p2s.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/exec/scratch-relocated/fcd18152/parts/short/p2s.html
+-->
+<h1>TRON attention concepts: seventeen tokens, one pass</h1>
+<p class="subtle">Short edition: the same mock pass and interactive figures as the full page, a third of the text. TRON is the inference engine that runs LLMs (large language models) on Positron FPGA (accelerator card) hardware plus the host CPU. Source: commit <code>9b11a912ba</code> of <code>~/workspace/tron</code>; file references are relative to that clone.</p>
+
+<div class="short">
+<p><b>Short version.</b> One TRON forward pass (one call of <code>full_scheduler::forward()</code>, which runs every model layer once for the tokens that are due) serves two requests that share a 9-token prompt, and 17 tokens take part, 6 of them queries (tokens whose K/V, the key and value vectors of attention, or logits, the next-token scores, must be computed this pass).</p>
+<p>The traversal of the token tree (the prefix tree that stores every request's tokens, the shared prompt once) numbers the tokens, lists the 5 KV cache pages, and builds one ranged mask (this page's reading of "visible range of K/V") before the 6 queries are cut into 2 minibatches.</p>
+<p>Attention then runs once per layer per minibatch and reads each page through two filters in order: the mask (tree causality, measured in token_ids, this pass's traversal numbering) and, on the windowed layer only, the sliding window (recency, measured in positions, each token's depth in its sequence).</p>
+</div>
+
+<nav class="toc" aria-label="Sections">
+<a href="#tbl">Concept table</a><a href="#s1">1 Mock pass</a><a href="#s2">2 Who owns what</a><a href="#s3">3 KV cache page</a><a href="#s4">4 Visible range</a><a href="#s5">5 Minibatch</a><a href="#s6">6 Kernel</a><a href="#s7">7 Sliding window</a><a href="#s8">8 What exists when</a><a href="#s9">9 Ten pairs</a><a href="#s10">Constants</a><a href="#s11">Insufficient data</a><a href="#s12">Words</a><a href="#s13">The brief</a>
+</nav>
+
+<h2 id="tbl" style="margin-top:8px;border-top:none">Concept table</h2>
+<p>Lifetimes: <span class="pill persist">persistent</span> survives across passes, <span class="pill perpass">per pass</span> lives inside one forward pass, <span class="pill perlayer">per layer or per minibatch</span> is rebuilt inside the pass. Mock names (edges S, B, A, books X, Y, pages P0..P2, Q0..Q1, minibatches MB0, MB1) are introduced in section 1.</p>
+<div class="tablewrap">
+<table class="concepts">
+<thead><tr><th>Concept</th><th>Plain definition</th><th>Parent &rarr; grandparent</th><th>When it exists</th><th>In the mock pass</th></tr></thead>
+<tbody>
+<tr class="target"><td>attention</td>
+<td>One softmax-attention computation for one attention operation (one attention step of the model) and one minibatch, over that minibatch's page list.</td>
+<td>attention operation &rarr; layer &rarr; plugin layer loop (the layer loop in the model-architecture code, such as the llama plugin) &rarr; <code>run_forward</code></td>
+<td><span class="pill perlayer">per (operation, minibatch) call</span></td>
+<td>4 kernel runs (kernel: the routine that computes attention for one minibatch) (<a href="#s6">6</a>, <a href="#s7">7</a>)</td></tr>
+<tr class="target"><td>KV cache page</td>
+<td>A fixed-size block of KV entries inside a book (a block of KV memory holding pages; an edge lives in one book, and a book can hold several edges): 4 entries in the mock, 64 in code. Its bytes persist. <code>lo</code> (token_id of entry 0) and <code>count()</code> (live entries) are rewritten every traversal.</td>
+<td>book &rarr; edge &rarr; node &rarr; token tree</td>
+<td><span class="pill persist">persistent</span> storage.<br><span class="pill perpass">per pass</span> lo, count</td>
+<td>P0..P2 in book X, Q0, Q1 in book Y (<a href="#s3">3</a>)</td></tr>
+<tr class="target"><td>sliding window</td>
+<td>An optional integer W (positions) on one attention operation's config. A query keeps an entry only when q_position &minus; k_position &lt; W. A missing value is INT_MAX: nothing is dropped, the layer is full causal.</td>
+<td>attention operation config &rarr; attention operation (descriptor in model state, the per-model object that outlives passes)</td>
+<td><span class="pill persist">persistent</span> value. Test runs <span class="pill perlayer">per minibatch and per layer</span></td>
+<td>layer 1, W = 6: each query keeps 6 entries (<a href="#s7">7</a>)</td></tr>
+<tr class="target"><td>visible range of K/V</td>
+<td>This page's reading of the phrase: the ranged mask, a list of token_id spans, each with two bitmasks over the queries (<code>SW_REQUIRED</code>: software must compute; <code>HW_AVAILABLE</code>: the FPGA could). <code>visible(job)</code> tests their union.</td>
+<td>token_range &rarr; ranged mask &rarr; traversal &rarr; forward pass</td>
+<td><span class="pill perpass">per pass</span>: final before minibatches exist</td>
+<td>7 ranges over token_ids 0..16, 6 bits each (<a href="#s4">4</a>)</td></tr>
+<tr class="target"><td>minibatch</td>
+<td>A subset of this pass's queries that moves through the layers together, so CPU attention of one minibatch overlaps FPGA matrix multiplications of another. Not a request, not a training batch.</td>
+<td><code>run_forward</code> &rarr; forward pass &rarr; <code>full_scheduler</code> (the per-model scheduler)</td>
+<td><span class="pill perpass">per pass</span>: cut after the mask is final</td>
+<td>MB0 = (b2, a0, a1), MB1 = (a2, a3, a4) (<a href="#s5">5</a>)</td></tr>
+</tbody></table>
+</div>

@@ -1,0 +1,135 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/scratch-relocated/fcd18152/parts/short/p3s.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/exec/scratch-relocated/fcd18152/parts/short/p3s.html
+-->
+<h2 id="s1">1. The mock pass used in every figure</h2>
+<ul>
+<li><b>Request B is decoding</b> (one new token per pass): shared prompt s0..s8 (cached), b0, b1 (cached), b2 (new). B wants logits at b2.</li>
+<li><b>Request A is prefilling</b> (new prompt tokens need K and V): a0..a4 after the same prompt. A wants logits at a4.</li>
+<li><b>The tree</b> has root edge S (an edge is a run of consecutive tokens between two nodes) and child edges B (inserted first, continues S's book X) and A (new book Y). At most one child shares its parent's book [h/tron/scheduler/token_tree.hpp:426].</li>
+<li><b>The model</b> has 2 layers: layer 0 full causal (window INT_MAX), layer 1 sliding window W = 6 positions. One KV head, no FPGA.</li>
+</ul>
+<p>A live token is one in this pass's context. All 17 are live. The 6 tokens whose <code>kv_ready</code> flag is false (no K/V job scheduled yet) become the queries [h/tron/scheduler/full.hpp:2127-2135]. The traversal (<code>compute_forward_args</code>, a depth-first walk) numbers tokens on its descent and builds the mask on its ascent. It gives every live token a token_id (traversal order), records its position (depth in its sequence) and page, gives each query a token_job_id, and pushes each page onto <code>kv_pages[]</code> [h/tron/scheduler/full.hpp:2117]. Four numberings: position (persistent), token_id (per pass), token_job_id (the mask bit), batch_job_ix (slot inside a minibatch).</p>
+
+<div class="fig" id="fig-tree">
+<div class="ctl"><button data-view="lanes" class="on" aria-pressed="true">two sequences</button><button data-view="tree" aria-pressed="false">one tree</button></div>
+<div class="scroll"><svg id="svg-tree" width="760" height="300" viewBox="0 0 760 300" role="img" aria-label="Two request sequences and the token tree they form"></svg></div>
+<div class="legend"><span><i class="sw" style="background:#d9e6f7"></i> edge S, cached</span><span><i class="sw" style="background:var(--orange-100)"></i> edge B, cached</span><span><i class="sw" style="background:var(--orange)"></i> edge B, new</span><span><i class="sw" style="background:var(--aqua)"></i> edge A, new</span><span>thick outline = query</span><span>dot = kv_ready (filled true)</span></div>
+</div>
+
+<div class="fig" id="fig-trav">
+<div class="ctl"><button data-act="step">Step</button><button data-act="play">Play</button><button data-act="reset">Reset</button><label>speed <input type="range" min="120" max="900" value="380" data-act="speed" aria-label="playback interval"></label><span class="subtle" id="trav-status" aria-live="polite"></span></div>
+<div class="scroll"><svg id="svg-trav" width="1010" height="330" viewBox="0 0 1010 330" role="img" aria-label="Traversal filling the per-pass arrays"></svg></div>
+<div class="legend"><span>badge jN = token_job_id</span><span>faded = not yet visited</span></div>
+<p class="take"><b>Takeaway:</b> 17 token_ids, 6 token_job_ids, 5 page_ids are created in the descent and discarded after the pass. b0 (token_id 9) and a0 (token_id 12) share position 9: the mask uses token_ids, the window uses positions.</p>
+</div>
+
+<h2 id="s2">2. Who owns what</h2>
+<p><code>full_scheduler</code> is the first box that contains all five concepts. The page belongs to the persistent token tree. The window's value belongs to persistent model state (the per-model object that outlives passes). The mask, the minibatches, and each attention run belong to one forward pass. Click two chips: the readout shows the lowest common owner and the hand-off point (the box where the two exchange data). They coincide only for attention with visible range and attention with minibatch.</p>
+<div class="fig">
+<div class="ctl" id="own-chips"></div>
+<div id="own-readout" class="readout" aria-live="polite">Select two concepts.</div>
+<div id="own-tree" class="tree"></div>
+<div class="legend"><span><i class="sw" style="background:var(--persist);border-style:solid"></i> solid = persistent</span><span><i class="sw" style="background:var(--perpass);border-style:dashed"></i> dashed = one pass</span><span><i class="sw" style="background:var(--perlayer);border-style:dotted"></i> dotted = one layer or minibatch</span></div>
+</div>
+
+<h2 id="s3">3. KV cache page: persistent storage, two per-pass numbers</h2>
+<p>A page holds 64 entries in code [h/tron/models/kv_cache.hpp:1164], 4 in the mock. <code>lo</code> is the token_id of entry 0, so entry i has token_id <code>lo + i</code> [h/tron/models/kv_cache.hpp:1227]. The kernel (the CPU routine that computes attention for one minibatch) reads entries [0, count()) only [h/tron/models/self_attention.hpp:1403]. A page is <b>pending</b> when a query writes K and V into it this pass, otherwise <b>ready</b> [h/tron/models/model.hpp:1897]. Attention over a pending page waits for the layer's K and V writes through a countdown latch (a counter that releases the work when the writes are done) [h/tron/models/model.hpp:1979]. Pages are freed only by token-cache eviction, never by the end of a pass.</p>
+<div class="fig" id="fig-page">
+<div class="ctl"><span>State:</span><button data-st="0" class="on" aria-pressed="true">before traversal</button><button data-st="1" aria-pressed="false">after traversal</button><button data-st="2" aria-pressed="false">after layer 0 K/V write</button><button data-st="3" aria-pressed="false">after layer 1 K/V write</button><button data-st="4" aria-pressed="false">end of pass</button></div>
+<div class="status" id="page-status" aria-live="polite"></div>
+<div class="scroll"><svg id="svg-page" width="900" height="300" viewBox="0 0 900 300" role="img" aria-label="Two books with their pages through one pass"></svg></div>
+<div class="legend"><span>4 squares per entry = K and V for layers 0 and 1, filled when written</span><span>orange tag = pending</span><span>dotted = not live</span></div>
+<p class="take"><b>Takeaway:</b> the bytes persist. <code>lo</code> and <code>count</code> are rewritten every traversal and stale between passes.</p>
+</div>
+<div class="callout"><div class="bad"><h4>Common confusion</h4><p>A page is a per-pass object.</p></div><div class="good"><h4>Correct picture</h4><p>The page and its bytes persist. Only <code>lo</code> and <code>offset_bound</code> (behind <code>count()</code>) are rewritten by every traversal [h/tron/models/kv_cache.hpp:1475]. FPGA pages (128 tokens) and shards (1024 tokens) are separate copies.</p></div></div>
+
+<h2 id="s4">4. Visible range of K/V: one ranged mask per pass</h2>
+<p>The brief's phrase does not occur in the source. This page reads it as the ranged mask. The mask is the only mechanism that decides which entries a query may read [h/tron/models/kv_cache.hpp:96]. It is a sorted, gap-free list of <code>token_range</code> spans over token_ids [h/tron/models/ranged_mask.hpp:98-99]. Each span carries two disjoint bitmasks indexed by token_job_id, with room for 4096 queries [h/tron/models/ranged_mask.hpp:20]. <code>visible(job)</code> is true when the bit is in either mask [h/tron/models/ranged_mask.hpp:159].</p>
+<p>The mask is built while the traversal climbs back up the tree (the ascent), one edge at a time. When the ascent leaves a query, it sets that query's bit for itself and for every earlier token of the same edge [src/tron/models/ranged_mask.cpp:42-65]. A parent then ORs (combines) its children's masks into its own [h/tron/scheduler/full.hpp:2809]. A query therefore sees exactly its ancestors and itself, never a sibling branch. The kernel's page gate (the whole-page visibility test, section 6) always uses <code>visible()</code>. Inside a page it uses <code>sw_required()</code> only on full layers that use the FPGA, otherwise <code>visible()</code> [h/tron/models/self_attention.hpp:1284-1285; :1406]. In the mock both agree.</p>
+<div class="fig" id="fig-mask">
+<div class="ctl"><button data-act="build">Build on ascent</button><button data-act="step">Step</button><button data-act="reset">Show final</button><span class="subtle">Click a cell to probe one lookup.</span></div>
+<div class="status" id="mask-status" aria-live="polite">Final mask shown.</div>
+<div class="scroll"><svg id="svg-mask" width="960" height="414" viewBox="0 0 960 414" role="group" aria-label="Bitmask table of visible(query, token)"></svg></div>
+<div class="legend"><span><i class="sw" style="background:var(--blue)"></i> visible</span><span>vertical lines = 7 ranges</span><span>brackets = pages</span><span>bit strings read job 5 &hellip; job 0; the rightmost digit is job 0 (b2)</span></div>
+<div id="mask-table" class="tablewrap"></div>
+<p class="take"><b>Takeaway:</b> range boundaries follow tree edges and queries, not page boundaries: range [0,9) spans P0, P1 and entry 0 of P2. The mask says nothing about recency.</p>
+</div>
+<div class="callout"><div class="bad"><h4>Common confusion</h4><p>Visibility lives on each page, or per minibatch, or includes the window.</p></div><div class="good"><h4>Correct picture</h4><p>One mask per pass, built before any minibatch exists, reached through <code>token_id = lo + offset</code>. The window is a separate second test.</p></div></div>
+
+<h2 id="s5">5. Minibatch: a cut of this pass's queries</h2>
+<p>A minibatch (<code>q_batch</code>) is a subset of this pass's queries [h/tron/models/common.hpp:880], made so that CPU attention of one minibatch overlaps FPGA matrix multiplications of another [h/tron/models/model.hpp:223]. The FPGA-less mock still gets 2: <code>chunk_evenly</code> never checks for hardware [h/tron/models/model.hpp:185-261]. It works in five steps:</p>
+<ol>
+<li>Group queries by a tree-affinity label (B and A get gB and gA).</li>
+<li>Cut each group into grains (runs of queries packed as one unit) of at most 8 queries, 2 in the mock.</li>
+<li>Keep the even and odd offsets of one page in the same grain, because they are written together.</li>
+<li>Merge grains greedily toward <code>ceil(n / cap)</code> chunks, where n is the query count and cap is <code>max_minibatch_size</code>.</li>
+<li>Halve a lone chunk.</li>
+</ol>
+<p>A query keeps its token_job_id in any minibatch. Its batch_job_ix (position in <code>items[]</code>) selects its scratchpad slot (a worker's per-query row for partial results).</p>
+<div class="fig" id="fig-mb">
+<div class="ctl"><button data-act="step">Step</button><button data-act="reset">Reset</button><label>constants <select data-act="consts" aria-label="chunking constants"><option value="mock">mock (cap 4, grain 2)</option><option value="llama">llama plugin (cap 128, grain 8)</option><option value="ingest">generated plugin (cap 1024, 1 minibatch)</option></select></label></div>
+<div class="status" id="mb-status" aria-live="polite"></div>
+<div class="scroll"><div id="mb-stage" class="mbstage" style="min-width:840px"></div></div>
+<div class="legend"><span>orange border = label gB</span><span>aqua border = label gA</span></div>
+<p class="take"><b>Takeaway:</b> with mock constants MB0 = (b2, a0, a1) mixes two requests. With the real llama constants the same queries give MB0 = (b2), MB1 = (a0..a4). The mask bits never change.</p>
+</div>
+<p><code>select_relevant_pages</code> builds one page list per minibatch and per layer profile (layers with the same head geometry, window value and hardware use share one profile). A page stays when some query of the minibatch is visible in the range of the page's first entry. On a windowed layer that query must also be within W of the page's first position + count [h/tron/models/model.hpp:2415-2427]. <code>kv_pages[]</code> itself is never trimmed.</p>
+<div class="fig" id="fig-mbpages">
+<div class="scroll"><svg id="svg-mbpages" width="800" height="204" viewBox="0 0 800 204" role="img" aria-label="Per-minibatch page lists for both layers"></svg></div>
+<div class="legend"><span>gray = kept ready page</span><span>orange = kept pending page</span><span>&mdash; = dropped</span></div>
+<p class="take"><b>Takeaway:</b> Q1 is in MB1's list only. On layer 1 MB1 drops P0: P0's first position 0 plus count 4 is 4, and a2, a3, a4 (positions 11, 12, 13) are 7, 8, 9 past it, all &ge; W = 6. MB0 keeps P0 because a0 (position 9) is only 5 past it.</p>
+</div>
+<div class="fig" id="fig-pipe">
+<div class="scroll"><svg id="svg-pipe" width="900" height="230" viewBox="0 0 900 230" role="img" aria-label="Schematic overlap of CPU attention and FPGA matmuls across two minibatches"></svg></div>
+<p class="take"><b>Takeaway:</b> the llama plugin nests layers outside and minibatches inside [h/tron/plugins/llama.hpp:647-697]: the worker threads run one minibatch's attention while the main thread and the FPGA run the other's WO (output projection), MLP (feed-forward block) and next-layer K/V. Durations are schematic.</p>
+</div>
+<div class="callout"><div class="bad"><h4>Common confusion</h4><p>A minibatch is a request, a set of requests, or the context tokens.</p></div><div class="good"><h4>Correct picture</h4><p>A subset of this pass's queries, cut from <code>token_jobs[]</code> after the mask is final, with its own page lists, work plans, Q/O buffers and latches for one pass [h/tron/models/model.hpp:1881; :1826].</p></div></div>
+
+<h2 id="s6">6. Attention: the kernel where the four meet</h2>
+<p>Attention runs once per (operation, minibatch). Worker threads receive page ids in <code>kv_section</code>s (one KV head plus a list of pages) [h/tron/models/common.hpp:735]. Per page and query, in order:</p>
+<ol>
+<li>Page gate: skip the page unless the query is visible in the range of the page's first entry [h/tron/models/self_attention.hpp:1303].</li>
+<li>Whole-page window test: skip when q_position &minus; (first position + count) &ge; W [h/tron/models/self_attention.hpp:1306].</li>
+<li>Entry loop over [0, count()): advance the range at its end, jump over invisible ranges, and drop entries with q_position &minus; k_position &ge; W [h/tron/models/self_attention.hpp:1419-1422]. Otherwise compute the dot product into a per-page score row. After the loop, one deferred-softmax update folds the page into the accumulator (running max m*, running sum s*, running weighted V sum v*) in scratchpad slot batch_job_ix.</li>
+</ol>
+<p>Workers then merge partials into the output rows [h/tron/models/self_attention.hpp:1121].</p>
+<div class="fig" id="fig-walk1">
+<div class="ctl"><label>layer <select data-act="layer"><option value="0">0: full (INT_MAX)</option><option value="1" selected>1: W = 6</option></select></label><label>minibatch <select data-act="mb"></select></label><label>query <select data-act="q"></select></label><button data-act="step">Step</button><button data-act="play">Play</button><button data-act="reset">Reset</button><label>speed <input type="range" min="80" max="700" value="260" data-act="speed" aria-label="playback interval"></label></div>
+<div class="status" data-role="status" aria-live="polite"></div>
+<div class="scroll"><svg data-role="svg" width="900" height="260" viewBox="0 0 900 260" role="img" aria-label="Kernel walk over the minibatch's pages for one query"></svg></div>
+<div class="legend"><span><i class="sw" style="background:var(--blue)"></i> kept</span><span><i class="sw" style="background:var(--grid)"></i> jumped by the mask</span><span><i class="sw" style="background:repeating-linear-gradient(45deg,#fff 0 3px,var(--orange) 3px 5px)"></i> cut by the window</span><span><i class="sw" style="border:2px dashed var(--red)"></i> page skipped by the window</span><span><i class="sw" style="border:1.5px dashed var(--muted)"></i> page gate failed</span><span>faded = not in this minibatch's list</span><span>d = position distance</span></div>
+<p class="take"><b>Takeaway:</b> mask first, window second. Only entries that pass both enter the dot product. The minibatch decides which queries share the run and which slot each gets.</p>
+</div>
+
+<h2 id="s7">7. Sliding window: a second filter, measured in positions</h2>
+<p>The window is one optional integer on an attention operation's config [h/tron/models/kv_cache.hpp:197-198], copied into <code>attention_runtime_configs</code>; a missing value becomes INT_MAX [h/tron/models/model.hpp:660]. Its parent is the attention operation, not the model, page, or mask. GPT-OSS, for example, alternates windowed and full layers [src/tron/gof.cpp:96]. It is applied after the mask at three points: per-minibatch page selection [h/tron/models/model.hpp:2415], the whole-page skip [h/tron/models/self_attention.hpp:1306], and the per-entry skip [:1422]. Distance is in positions. A windowed operation never runs on the FPGA [h/tron/models/self_attention.hpp:482-490]. The traversal, <code>kv_pages[]</code>, and host KV memory do not change. The window saves dot products, and FPGA memory only because windowed layers never copy their K/V to the hardware.</p>
+<div class="fig" id="fig-strips1">
+<div class="ctl"><label>W <input type="range" min="1" max="14" value="6" data-act="w" aria-label="window size"></label><span id="w-label" class="mono">W = 6 (mock value)</span><button data-act="inf">INT_MAX (no window)</button><button data-act="reset6">reset to W = 6</button><label><input type="checkbox" data-act="mbdrop"> show per-minibatch page drops</label></div>
+<div class="scroll"><svg data-role="svg" width="760" height="270" viewBox="0 0 760 270" role="img" aria-label="Kept entries per query on the windowed layer"></svg></div>
+<div class="legend"><span><i class="sw" style="background:var(--blue)"></i> kept</span><span><i class="sw" style="background:var(--grid)"></i> not visible (mask)</span><span><i class="sw" style="background:repeating-linear-gradient(45deg,#fff 0 3px,var(--orange) 3px 5px)"></i> visible but outside the window</span><span>red frame = whole page skipped</span></div>
+<p class="take"><b>Takeaway:</b> at W = 6 every query keeps exactly 6 entries and all 5 pages stay in <code>kv_pages</code>.</p>
+</div>
+<div class="fig" id="fig-dumb">
+<div class="scroll"><svg data-role="svg" width="620" height="290" viewBox="0 0 620 290" role="img" aria-label="Kept entries per query, layer 0 versus layer 1"></svg></div>
+<div class="legend"><span><i class="sw" style="background:var(--muted);border-radius:50%"></i> layer 0 (mask only)</span><span><i class="sw" style="background:var(--blue)"></i> layer 1 (mask and window)</span></div>
+<div id="dumb-table" class="tablewrap"></div>
+<p class="take"><b>Takeaway:</b> only the gray dots differ; every blue mark sits at 6 = W. The window removes 4 to 8 entries per query and frees no host KV memory.</p>
+</div>
+<div class="callout"><div class="bad"><h4>Common confusion</h4><p>A window frees pages, is encoded in the mask, or is measured in token_ids.</p></div><div class="good"><h4>Correct picture</h4><p>One integer per operation, tested by position after the mask. b2 (token_id 11) and a0 (token_id 12) are 2 positions apart, so the same W reaches different tokens.</p></div></div>
+
+<h2 id="s8">8. What exists when</h2>
+<p>One lane per concept: solid = exists, hatched = being built or running, dashed = stale. Columns: step 0 before the pass, steps 1 to 16 of the pass, then the next pass. Code order, not to scale.</p>
+<div class="fig" id="fig-lanes">
+<div class="ctl"><label>step <input type="range" min="0" max="17" value="17" data-act="scrub" style="width:260px" aria-label="step"></label><button data-act="play">Play</button><button data-act="next">Next pass</button></div>
+<div class="status" id="lanes-status" aria-live="polite"></div>
+<div class="scroll"><svg data-role="svg" width="1400" height="545" viewBox="0 0 1400 545" role="img" aria-label="Lifetime lanes across one forward pass"></svg></div>
+<div class="legend"><span>dark, mid, light blue = persistent, per pass, per layer or minibatch (the tag at the right names it)</span><span>bold = the five concepts</span><span>listeners live until fired</span></div>
+<p class="take"><b>Takeaway:</b> page storage and the window value outlive the pass. The mask, minibatches and plans live inside it, and the mask is final (step 3) before the first minibatch exists (step 4).</p>
+</div>
+
+<h2 id="s9">9. All ten pairs: where each pair hands off data</h2>
+<p>Each card names the hand-off box, the relationship, and the mock fact. One pair (attention and sliding window) meets at a persistent box. The other nine meet inside the forward pass.</p>
+<div class="fig"><div id="matrix" class="matrix"></div></div>
