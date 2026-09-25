@@ -1,0 +1,242 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4525/status/remove-dummy-new-claude-r1.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/vnnied-k-in-place/issue4525/status/remove-dummy-new-claude-r1.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Removing the Placement New</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1d2330; --muted: #5b6475; --line: #d8dde6;
+  --card: #f6f8fb; --accent: #1f5fae; --bad: #b3261e; --badbg: #fdecea;
+  --good: #1b7a3d; --goodbg: #e8f5ec; --warn: #8a5a00; --warnbg: #fff4dc;
+  --code: #f1f3f7;
+}
+body { background: var(--bg); color: var(--fg); margin: 0;
+  font: 16px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 1.7em; margin: 0 0 4px; }
+h2 { font-size: 1.3em; margin-top: 2.2em; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+h3 { font-size: 1.08em; margin-top: 1.6em; }
+.sub { color: var(--muted); margin: 0 0 20px; }
+.short { background: var(--card); border-left: 4px solid var(--accent); padding: 12px 16px; border-radius: 4px; }
+code { background: var(--code); padding: 1px 4px; border-radius: 3px; font-size: 0.92em; }
+pre { background: var(--code); padding: 12px 14px; border-radius: 6px; overflow-x: auto; font-size: 0.88em; line-height: 1.45; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.93em; }
+th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+th { background: var(--card); }
+.wrap { overflow-x: auto; }
+.tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 0.82em; font-weight: 600; }
+.t-bad { background: var(--badbg); color: var(--bad); }
+.t-good { background: var(--goodbg); color: var(--good); }
+.t-warn { background: var(--warnbg); color: var(--warn); }
+.chain { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; margin: 10px 0 4px; }
+.box { border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 8px 10px; font-size: 0.88em; min-width: 120px; flex: 1 1 120px; }
+.box b { display: block; font-size: 0.95em; }
+.arrow { align-self: center; color: var(--muted); font-weight: 700; }
+.gap { border: 2px dashed var(--bad); background: var(--badbg); }
+.fix { border: 2px solid var(--good); background: var(--goodbg); }
+.cap { color: var(--muted); font-size: 0.88em; margin: 2px 0 14px; }
+.rec { background: var(--goodbg); border-left: 4px solid var(--good); padding: 10px 14px; border-radius: 4px; }
+.ask { background: var(--warnbg); border-left: 4px solid var(--warn); padding: 10px 14px; border-radius: 4px; }
+dl.words dt { font-weight: 600; margin-top: 6px; }
+dl.words dd { margin: 0 0 0 18px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Removing the placement new in construct_kv_blocks</h1>
+<p class="sub">PR #4557 (typed KV-cache tensors), head 633cb88896. Design scope only, no code changed. Written 2026-09-23.</p>
+
+<div class="short">
+<b>Short version.</b>
+The <code>::new</code> in <code>construct_kv_blocks</code> exists because the cache reads raw DMA pool bytes as <code>kv_block</code> objects that nothing creates, a gap that main already has and that every <code>dmatensor&lt;bf16&gt;</code> buffer shares.
+The placement new does not fully close the gap, because the accessors never use the pointer it returns.
+The recommended design lets the DMA allocator start object lifetimes (one place, zero instructions) and stores each KV arena as one <code>bf16</code> array read only through views, so no <code>kv_block</code> or <code>v_vnni_tensor</code> object lives in pool memory.
+</div>
+
+<h2>Words used here</h2>
+<dl class="words">
+<dt>Lifetime (of an object)</dt><dd>The C++ rule that an object exists only between its creation and its destruction. Reading a member of an object whose lifetime has not started is undefined behavior (UB: the standard gives the program no meaning) [basic.life].</dd>
+<dt>Implicit object creation</dt><dd>A C++20 rule (paper P0593R6): some operations create objects of simple types automatically. The list is <code>malloc</code>, <code>aligned_alloc</code>, <code>calloc</code>, <code>realloc</code>, <code>operator new</code>, <code>std::allocator::allocate</code>, <code>memcpy</code>, <code>memmove</code>, and starting the lifetime of an <code>unsigned char</code> or <code>std::byte</code> array [intro.object]/10-13, [c.malloc], [cstring.syn].</dd>
+<dt>Implicit-lifetime type</dt><dd>A type that implicit object creation may create: a scalar, an array, or a class with a trivial default constructor and a trivial destructor [class.prop]/9. <code>kv_block</code>, <code>v_vnni_tensor</code> and <code>bf16</code> all qualify.</dd>
+<dt>Placement new</dt><dd><code>::new (p) T[n]</code>: starts the lifetime of objects at address <code>p</code> without allocating. For a trivially default-constructible <code>T</code> without <code>()</code> it writes no bytes.</dd>
+<dt><code>std::launder</code></dt><dd>A C++17 function that turns a pointer to old storage into a pointer to the object that now lives there. It generates no instructions.</dd>
+<dt><code>std::start_lifetime_as_array</code></dt><dd>The C++23 library call made for exactly this case (paper P2590R2). Our toolchain does not have it (finding F3).</dd>
+<dt>DMA pool</dt><dd>Tron's own allocator for device-visible memory (<code>dma_allocate_aligned</code>, backed by <code>heap_v2</code> or <code>pos_heap</code> over hugepages). It returns <code>void*</code>.</dd>
+<dt>Arena, chunk</dt><dd>The retained arena is one DMA allocation for all retained KV slots. A reclaimable chunk is one DMA allocation for some pages of the sliding slots (PR #4455).</dd>
+<dt>kv_block</dt><dd>The struct for one KV head of one 64-token page: a K plane followed by a V plane.</dd>
+<dt>Uniform / heterogeneous layout</dt><dd>Uniform: every KV slot has the same head count and head size, so one <code>kv_block</code> type fills the arena. Heterogeneous: slots differ, so one arena holds several <code>kv_block</code> types at byte offsets.</dd>
+<dt>Owner / view</dt><dd><code>v_vnni_tensor</code> owns the packed V bytes. <code>v_vnni_view</code> is a pointer plus the address formula. In the PR, only the owner can create a view.</dd>
+</dl>
+
+<h2>1. Where the gap is</h2>
+<p>Today the cache follows these steps:</p>
+<div class="chain">
+  <div class="box"><b>DMA pool</b><code>dma_allocate_aligned</code> returns <code>void*</code></div>
+  <div class="arrow">&rarr;</div>
+  <div class="box"><b>Typed factory</b><code>try_make_unique_dma_for_overwrite&lt;uint8_t[]&gt;</code>: casts, starts nothing</div>
+  <div class="arrow">&rarr;</div>
+  <div class="box gap"><b>Gap</b>no object lives in the bytes</div>
+  <div class="arrow">&rarr;</div>
+  <div class="box"><b>Cache read</b><code>reinterpret_cast&lt;kv_block_t*&gt;(base)[i]</code></div>
+  <div class="arrow">&rarr;</div>
+  <div class="box"><b>Member use</b><code>.v.as_view()</code>, <code>.k_view()</code></div>
+</div>
+<p class="cap">Red dashed box = the step the standard requires and nobody performs. The PR fills it with <code>construct_kv_blocks</code> inside the cache.</p>
+
+<h3>F1. The gap exists on main, before PR #4557</h3>
+<ul>
+<li>Main's <code>kv_block</code> is already a class with member functions: <code>k_view()</code>, <code>k_at()</code> and <code>v_base()</code> [main h/tron/models/kv_cache.hpp:2449-2497].</li>
+<li>Main reaches it the same way, through <code>reinterpret_cast&lt;kv_block_t*&gt;</code> of arena bytes [main kv_cache.hpp:1533, 1542, 1578].</li>
+<li>Main has no placement new in kv_cache.hpp (<code>grep -c "::new"</code> = 0).</li>
+<li>Member access such as <code>blocks[i].v[i_page]</code> on an object that was never created is the same UB, whether or not the member has a class type [basic.life]/7.</li>
+</ul>
+<p>So the Note's reason ("kv_block::v has a class type whose member functions the cache calls") is true but incomplete. The PR did not create the gap. The PR made it visible, because <code>v_vnni_tensor</code> put the gap into a type the review looked at.</p>
+
+<h3>F2. The gap starts at the allocator, and it is shared by every DMA buffer</h3>
+<ul>
+<li>In production, <code>dma_allocate_aligned</code> is Tron's own pool [src/system/memory.cpp:461-469]. It is not on the implicit-object-creation list. So no object exists in the bytes it returns.</li>
+<li>The typed factories start lifetimes only for types that are not trivially constructible [h/system/memory.hpp:251, 333]. For <code>uint8_t</code>, <code>bf16</code> and <code>kv_block</code> they do nothing.</li>
+<li>Every <code>dmatensor&lt;bf16&gt;</code> buffer (weights, activations) is built by the same factory and read through <code>bf16*</code> [h/tron/hardware/dmatensor.hpp:186-191]. It has the same gap for its <code>bf16</code> elements.</li>
+<li>In the unit-test build, the fake allocator calls <code>aligned_alloc</code> [src/pos/fake.cpp:353-357]. <code>aligned_alloc</code> is on the list. So the unit tests have no gap, even without the placement new. Only production builds have it.</li>
+</ul>
+
+<h3>F3. The C++23 library call is not available</h3>
+<p>The nix toolchain compiles with clang 19 against libstdc++ 14.3.0. A search of that libstdc++ include tree on delphi-3bda (the test server) found no <code>start_lifetime_as</code> (0 files). So <code>std::start_lifetime_as_array</code> cannot replace the placement new today.</p>
+
+<h3>F4. Why the PR's own design needs an object in pool memory</h3>
+<p>The PR's rule is that only the owner (<code>v_vnni_tensor</code>) can create a <code>v_vnni_view</code>: the view has no public pointer constructor. So the cache must find a live owner object inside the arena before it can read V. A live owner in pool memory requires a lifetime start. The placement new is the price of the rule "only the owner creates a view".</p>
+
+<h3>F5. Under the strict rule, the placement new is not enough on its own</h3>
+<ul>
+<li><code>construct_kv_blocks</code> throws away the pointer that <code>::new</code> returns [kv_cache.hpp:1476, 1490-1491].</li>
+<li>The accessors later build their own pointer: <code>reinterpret_cast&lt;kv_block_t*&gt;(kv_blocks_alias)</code> or <code>(storage.base)</code>, starting from a <code>uint8_t*</code> [kv_cache.hpp:1593, 1602, 1642].</li>
+<li>A pointer to old storage refers to a new object automatically only if the new object has the same type as the old one ("transparently replaceable", [basic.life]/8). A <code>kv_block</code> never replaces a <code>uint8_t</code> in that sense.</li>
+<li>So the strict reading needs <code>std::launder</code> at those three cast sites as well. This is the standard example for <code>std::launder</code>: placement new into a byte buffer, then access through a cast of the buffer pointer [ptr.launder].</li>
+</ul>
+<p>Clang and GCC do not use this rule for optimization today. The point is only that the PR's cover is itself incomplete. A design that needs no cover avoids both questions.</p>
+
+<h2>2. Designs that need no construct_kv_blocks</h2>
+
+<h3>Design A. The allocator starts the lifetime</h3>
+<p>Change the typed DMA factories so that they always start the lifetime of <code>U[size]</code>. For a trivially constructible <code>U</code>, this writes nothing and compiles to no instructions. This is the same fact the PR already measured for <code>construct_kv_blocks</code> (objdump of <code>allocate_retained_storage</code>: 0 <code>rep stos</code>, 0 <code>memset</code>).</p>
+<pre>// h/system/memory.hpp, try_make_unique_dma_for_overwrite&lt;T[]&gt; (and the asserting form)
+void* raw = dma_allocate_aligned(size * sizeof(U), size_t(alignment));
+if (raw == nullptr) return unique_dma&lt;T&gt;(nullptr, c_dma_deallocate&lt;T&gt;(0));
+U* array;
+if constexpr (std::is_trivially_default_constructible_v&lt;U&gt;)
+  array = ::new (raw) U[size];   // default-init: starts lifetimes, writes no bytes
+else {
+  array = static_cast&lt;U*&gt;(raw);
+  for (size_t i = 0; i &lt; size; ++i) new (array + i) U;
+}
+return unique_dma&lt;T&gt;(array, size);</pre>
+<ul>
+<li>Closes the gap for every DMA user at once, including <code>dmatensor&lt;bf16&gt;</code> and main's existing <code>kv_block</code> reads.</li>
+<li>The lifetime code lives in the one function that turns raw pool memory into typed storage. That function is the correct owner of this rule.</li>
+<li>With A alone, the uniform layout can allocate <code>kv_block_t[]</code> directly and index a typed pointer. <code>construct_kv_blocks</code> and its three <code>static_assert</code>s are then not needed.</li>
+<li>A alone does not fix the heterogeneous layout. That arena stays <code>uint8_t[]</code> with several block types at byte offsets. Starting a <code>uint8_t</code> array's lifetime does create the blocks implicitly [intro.object]/13. But the <code>reinterpret_cast</code> pointer still points to a <code>uint8_t</code>, so each cast site would need <code>std::launder</code>. That is again code whose only purpose is lifetime, so it does not meet the goal.</li>
+<li>Cost: one change in h/system/memory.hpp, outside the files of PR #4557. It touches every DMA allocation, although for trivial types it adds no instructions. It fits as a small PR of its own ahead of #4557.</li>
+</ul>
+
+<h3>Design B. One typed arena per block type</h3>
+<p>Allocate one <code>kv_block_t[]</code> per (geometry, retention group) instead of one byte arena with byte offsets. Combined with A, every arena is a live typed array from birth.</p>
+<ul>
+<li>No <code>reinterpret_cast</code>, no <code>std::launder</code>, no placement new anywhere in the cache.</li>
+<li>Cost: it rewrites the arena addressing of PRs #4455/#4456 (<code>storage_location</code>, <code>slot_base</code>, <code>slot_page</code>, the retained arena plus reclaimable chunks). It also adds allocations for heterogeneous caches. This is much larger than issue #4525.</li>
+</ul>
+
+<h3>Design C. No block objects in pool memory: one bf16 array per arena, views only (recommended with A)</h3>
+<p>Every K and V plane holds <code>bf16</code> values. So each arena and chunk can be one <code>bf16</code> array. The cache then computes plane addresses by pointer arithmetic inside that array and returns views. No <code>kv_block</code> object and no <code>v_vnni_tensor</code> object ever lives in pool memory.</p>
+<pre>// storage: one live bf16 array per arena (A starts its lifetime)
+hardware::unique_dma&lt;bf16[]&gt; retained_data;          // was unique_dma&lt;uint8_t[]&gt;
+
+// the block becomes geometry, not an object
+template &lt;size_t page_size, size_t head_size&gt;
+struct kv_block_geometry final {
+  static constexpr size_t PLANE_ELEMENTS = page_size * head_size;
+  static constexpr size_t K_OFFSET = 0;
+  static constexpr size_t V_OFFSET = PLANE_ELEMENTS;
+  static constexpr size_t BLOCK_ELEMENTS = 2 * PLANE_ELEMENTS;
+};
+
+// book returns views built from an address inside the live bf16 array
+bf16* block = arena + block_index * geometry::BLOCK_ELEMENTS;
+auto k = view&lt;bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE, seq&lt;page_size, head_size&gt;&gt;{
+    block + geometry::K_OFFSET};
+auto v = detail::v_vnni_access::make_view&lt;bf16, page_size, head_size&gt;(
+    block + geometry::V_OFFSET);                        // book-only factory, see below</pre>
+<ul>
+<li>Every member function call is on a view object on the stack. Those objects are created normally, so their lifetime is not in question.</li>
+<li>Every pool access is <code>bf16*</code> arithmetic inside one array. With A, that array is live. There is no <code>reinterpret_cast</code> of arena memory, no <code>std::launder</code> and no placement new.</li>
+<li>It works the same for the uniform and the heterogeneous layout. Slot byte offsets become element offsets (divide by <code>sizeof(bf16)</code>, 2 bytes). They are already whole blocks, so the division is exact.</li>
+<li>Without A, C leaves the cache with exactly the element-level gap that every <code>dmatensor&lt;bf16&gt;</code> buffer has today. That is consistent with the rest of the codebase. It is not a gap specific to the KV cache.</li>
+</ul>
+<p>What C changes in the PR:</p>
+<div class="wrap"><table>
+<tr><th>Item in PR #4557</th><th>Under design C</th></tr>
+<tr><td><code>construct_kv_blocks</code>, Note [KV block lifetime], <code>RECLAIMABLE_FALSE/TRUE</code> [kv_cache.hpp:1421-1492]</td><td>Removed.</td></tr>
+<tr><td><code>detail::kv_block</code> struct [kv_cache.hpp:2473] and its lifetime <code>static_assert</code>s [:1471, :1483, :1625]</td><td>Replaced by <code>kv_block_geometry</code> constants. The size check (<code>2 * page_size * head_size * sizeof(bf16)</code>, now at :1621-1623) becomes the definition itself.</td></tr>
+<tr><td><code>v_vnni_tensor</code> (owner) [v_vnni.hpp:245-269]</td><td>Removed. <code>v_vnni_view</code> stays. The kernels already take views, not owners (no <code>v_vnni_tensor</code> in amx_attn_iface.hpp).</td></tr>
+<tr><td>Rule "only the owner creates a view" (F4)</td><td>Becomes "only <code>book</code> creates a view": a pointer factory in <code>detail::v_vnni_access</code>, with <code>book</code> as the one caller. The address formula stays private to the view.</td></tr>
+<tr><td><code>kv_block(...)</code> / <code>kv_block_at_storage(...)</code> returning <code>kv_block_t&amp;</code> [:1581-1650]</td><td>Return a small value pair <code>{bf16* k; bf16* v;}</code> or the two views directly.</td></tr>
+<tr><td>Callers <code>.v.as_view()</code> [:1980, :2542, :2585, :2604] and <code>.k_view()</code> [:1883, :1891]</td><td>Call the new view accessors. Same address, so the kernels see the same bytes.</td></tr>
+<tr><td>Tests that build an owner with <code>std::make_unique&lt;v_vnni_tensor&lt;...&gt;&gt;</code> [t/t_amx_numerics.cpp:227, t/t_llama_unit.cpp:412, :455]</td><td>Use an aligned <code>bf16</code> array plus the view factory.</td></tr>
+<tr><td><code>fill_random</code> (whole-block test fill) [:1224]</td><td>Fills the <code>bf16</code> range of each block. Its exemption from the packed-V rule stays as documented.</td></tr>
+</table></div>
+<p>What C gives up:</p>
+<ul>
+<li>The <code>alignas(kv_block_alignment)</code> on the struct no longer enforces plane alignment through the type. An assert on the arena alignment (<code>storage_alignment</code>) and a <code>static_assert</code> that <code>BLOCK_ELEMENTS * sizeof(bf16)</code> is a multiple of 64 bytes must replace it.</li>
+<li>The typed owner in the 8-lane build disappears. That build keeps V row-major and never stored V in the owner anyway (Note [Packed V layout]).</li>
+<li>It departs from the design page's choice of an owner type inside <code>kv_block</code>. That choice was recorded in the design review, so it is a design reversal that needs a line in the PR's decision record.</li>
+</ul>
+
+<h3>Rejected: return to main's plain arrays</h3>
+<p>Keeping <code>kv_block</code> with plain <code>bf16s</code> arrays and deleting the placement new would restore main's state. Main has the same gap without a line that covers it (F1). This hides the UB. It does not remove it.</p>
+
+<h2>3. Comparison</h2>
+<div class="wrap"><table>
+<tr><th>Design</th><th>Lifetime code left in the cache</th><th>UB left (production)</th><th>Size of change</th><th>Files outside #4557</th></tr>
+<tr><td>PR today</td><td><code>construct_kv_blocks</code> (placement new, 2 call sites)</td><td><span class="tag t-warn">strict reading: std::launder missing at 3 casts (F5)</span></td><td>0</td><td>none</td></tr>
+<tr><td>A only</td><td>uniform: none. heterogeneous: <code>std::launder</code> at each cast</td><td><span class="tag t-good">none</span></td><td>small</td><td>memory.hpp</td></tr>
+<tr><td>A + B</td><td>none</td><td><span class="tag t-good">none</span></td><td><span class="tag t-bad">large</span> (arena addressing)</td><td>memory.hpp</td></tr>
+<tr><td>C only</td><td>none</td><td><span class="tag t-warn">bf16 element gap</span> same as every dmatensor</td><td>medium</td><td>none</td></tr>
+<tr><td><b>A + C</b></td><td><b>none</b></td><td><span class="tag t-good">none</span></td><td>small + medium</td><td>memory.hpp</td></tr>
+<tr><td>Main's plain arrays</td><td>none</td><td><span class="tag t-bad">kv_block gap, hidden</span></td><td>small</td><td>none</td></tr>
+</table></div>
+
+<h2>4. Recommendation</h2>
+<div class="rec">
+<ul>
+<li><b>A + C.</b> A puts the only lifetime rule in the allocator, which is where raw memory becomes typed storage. C removes objects from pool memory, so the cache has nothing whose lifetime can be wrong.</li>
+<li>Order: A as a small PR of its own (one function pair in h/system/memory.hpp, codebase-wide, no instruction change for trivial types). Then C in #4557 or in a follow-up commit on it.</li>
+<li>If A is not wanted outside #4557: C alone still removes <code>construct_kv_blocks</code>. The cache is then exactly as defined as every other DMA buffer, and the one remaining gap has a single home in the allocator.</li>
+</ul>
+</div>
+
+<h2>5. How to verify a chosen design</h2>
+<ul>
+<li>Instruction identity: the same objdump comparison as Step F of the PR (the 19 noinline wrappers, plus <code>allocate_retained_storage</code> / <code>allocate_reclaimable_chunk</code>). Expected: identical hot-path bodies, 0 <code>rep stos</code>, 0 <code>memset</code>.</li>
+<li>Bits: the existing t_llama_unit cases "packed V rows keep their bits through set_v, get_v and expression reads" and "Sliding KV chunks reserve and restore transactionally" (44 cases, 252718 assertions on 1c87d66926).</li>
+<li>Numerics: t_amx_numerics (12301 assertions with real AMX, 2060 with the kill switch).</li>
+<li>No lifetime code left: <code>grep -n "::new\|launder\|reinterpret_cast&lt;.*kv_block" h/tron/models/kv_cache.hpp</code> returns nothing.</li>
+</ul>
+
+<h2>6. Open points</h2>
+<div class="ask">
+<ul>
+<li>Decision for you: A + C, C only, or A only (with <code>std::launder</code> in the heterogeneous path).</li>
+<li>Which production models use the heterogeneous layout: <b>Insufficient data</b>. The ingest generator can emit <code>heterogeneous_kv_cache</code> [ingest/src/TronCpp.hs:582-597], and the unit tests cover it. A grep of the generated model plugins of a full build would answer it. This affects how urgent the heterogeneous half is, not the recommendation.</li>
+<li>Toolchain claim F3 covers the libstdc++ that the clang 19 wrapper uses on delphi-3bda. A libc++ build was not checked.</li>
+</ul>
+</div>
+
+</main>
+</body>
+</html>

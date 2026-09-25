@@ -1,0 +1,539 @@
+{
+ "meta": "Reviewed 2026-09-22 UTC by Claude (Fable 5.1) for jhan. Design reviewed: [status/design-new-tensor-type.html](design-new-tensor-type.html), second revision by codex after the [round-2 review](claude-review-design-new-tensor-type-r2.html) (finalized 2026-09-22 06:24 UTC, 121,774 bytes, sha256 5dea1702). Sources pinned to main f46e48ba (the design's snapshot), main 2880c3aa9b (the tip the design's S15-S20 cite), the live main tip 1400fa4481 (fetched 2026-09-22 ~07:00 UTC; none of the design's files changed since 2880c3aa9b) and PR 4424 head 30c4ac82cb.",
+ "words": [
+  [
+   "tron",
+   "the inference program under test; its source is the positron-ai/tron repository"
+  ],
+  [
+   "PR 4424, the child",
+   "the open draft pull request \"VNNI K: store the K cache of 128-dimension heads in the AMX VNNI layout, with a shared block save\" (branch jhan-amx-vnniK, head 30c4ac82cb). After the new parent PR exists, PR 4424 is rebased onto it and is then called the child"
+  ],
+  [
+   "the parent PR",
+   "the new pull request that issue #4525 asks for: typed access to the existing V and K caches on main, with no new layout"
+  ],
+  [
+   "Ben, the reviewer",
+   "the tron maintainer who reviewed PR 4424 on 2026-09-21 (a worker-index question, a review asking for typed tensors, and an API sketch). The revised design calls him \"the reviewer\""
+  ],
+  [
+   "issue #4525",
+   "the GitHub issue codex created for the parent PR; jhan edited its title and first sentence on 2026-09-22 00:10 UTC; unchanged since"
+  ],
+  [
+   "KV cache, K, V",
+   "the saved key (K) and value (V) vectors of earlier tokens; attention reads them"
+  ],
+  [
+   "page, slot, head, D",
+   "a page holds 64 token positions; a slot is the cache region of one layer (or of several layers that share it); a head is one attention head; D is the head size, the number of values per token per head (128 for PR 4424's models)"
+  ],
+  [
+   "bf16",
+   "the 16-bit brain floating-point format used for cached K and V"
+  ],
+  [
+   "AMX, AVX-512, 16-lane and 8-lane builds",
+   "AMX and AVX-512 are CPU instruction sets. tron's vector width TRON_CHUNK_SIZE is 16 fp32 values with AVX-512 (the 16-lane build) and 8 without (the 8-lane build); the 8-lane build stores V row-major, so it has no pair-interleaved V"
+  ],
+  [
+   "packed V (pair-interleaved V)",
+   "today's V storage in the 16-lane build: for each dimension, tokens 2p and 2p+1 sit next to each other. Element offset = (token/2)*(2*D) + 2*dim + token%2"
+  ],
+  [
+   "native K",
+   "today's K storage: one token's D values consecutive in memory (row-major)"
+  ],
+  [
+   "blocked packed K (VNNI K)",
+   "PR 4424's K storage for 128-dimension heads: two consecutive dimensions of one token share a 4-byte unit, and 16 tokens share one 64-byte line"
+  ],
+  [
+   "expr, view, const_view, tensor",
+   "tron's expression interface (h/tron/kernels/expr.hpp), its typed pointer views over regularly laid-out memory and their read-only form (h/tron/tensor/view.hpp), and its owning arrays (h/tron/tensor/tensor.hpp)"
+  ],
+  [
+   "kv_block",
+   "the struct that holds K then V for one head of one slot in one page (h/tron/models/kv_cache.hpp)"
+  ],
+  [
+   "set_v, get_v, append_v, scaled_v, v_data",
+   "today's V functions in kv_cache.hpp: write one token, read one token, copy one token between pages, compute the weighted V sum, and return the raw pointer of a V plane"
+  ],
+  [
+   "save_v_impl",
+   "the model function (h/tron/models/model.hpp) that stores one token's V into the cache during a forward pass; it calls page::set_v"
+  ],
+  [
+   "Zero-Initialized V Slots invariant",
+   "the rule in kv_cache.hpp that every even-token V write zeroes its odd partner row. The weighted sum reads a whole pair even when the token count is odd, and NaN times 0 is NaN, so the padding row must be zero"
+  ],
+  [
+   "arena, book",
+   "an arena is one allocated memory region holding cache blocks; book is the class that owns the arenas and the pages"
+  ],
+  [
+   "EAGLE",
+   "the speculative model; its cache adds one extra physical KV slot and a separate embedding buffer (x_data); it requires uniform geometry"
+  ],
+  [
+   "GOF, page_info",
+   "group of four: four tokens of K and V staged for the FPGA's hardware KV cache; the staging code reaches a page's rows through the page_info callbacks in h/tron/gof.hpp (namespace tron::hardware)"
+  ],
+  [
+   "CI, Nix test build, TRON_AMX_DISPATCH, TRON_K_VNNI",
+   "CI is the automated build and test. The Nix test build is the required CI lane. The two CMake options compile the AMX attention kernels and PR 4424's K layout; the Nix lane sets neither. Issue #3997 tracks the AMX gap"
+  ],
+  [
+   "codex, the design, the second revision",
+   "codex is the agent jhan asked to answer Ben; the design is the page it wrote, status/design-new-tensor-type.html; the second revision is the version finalized 2026-09-22 06:24 UTC (121,774 bytes) after the round-2 review. It is the version reviewed here"
+  ],
+  [
+   "round 1, F.. and C.. ids",
+   "the first Claude review of the original design (2026-09-22 ~03:00 UTC), archived as [claude-review-design-new-tensor-type-r1.html](claude-review-design-new-tensor-type-r1.html). Its 58 retained findings are F01-F59 (finders) and C01-C09 (completeness critic)"
+  ],
+  [
+   "round 2, N.. and M.. ids",
+   "the second Claude review, of the first revision (2026-09-22 ~06:20 UTC), archived as [claude-review-design-new-tensor-type-r2.html](claude-review-design-new-tensor-type-r2.html). It graded the 58 round-1 findings (35 resolved, 20 partly, 3 deferred) and added 64 findings N01-N62 (finders) and M01-M08 (critic). The design cites these ids in brackets, for example [N13]"
+  ],
+  [
+   "round 3, G.. and H.. ids, the 87 open items",
+   "this review. G.. are new findings from the ten finders, H.. from the completeness critic. The 87 open items are the 64 round-2 findings plus the 23 round-1 findings that round 2 graded partly or deferred; section 3 grades each against the second revision"
+  ],
+  [
+   "v_vnni_tensor, v_vnni_view, v_vnni_row, detail::v_vnni_access",
+   "the design's names for the packed-V owner (the aligned array inside the cache block), the typed rank-2 view over it, its logical row expression, and the friend helper that alone may read the packed pointer"
+  ],
+  [
+   "append_v_row, load_row, copy_token",
+   "the design's typed bulk operations: write one token's V row into the packed plane (an even token zeroes its odd partner), read one row out, copy one token between planes. The design adds no copy_plane for V"
+  ],
+  [
+   "kv_cache_fwd.hpp, v_vnni.hpp, k_vnni.hpp",
+   "the design's new headers: a declarations-only header (no intrinsics) that amx_attn_iface.hpp includes, the V definitions header, and the child's K definitions header under h/tron/tensor/"
+  ],
+  [
+   "native_k_view, const_native_k_view",
+   "the design's aliases for today's row-major K view and its read-only form (view / const_view with explicit strides Cols, 1); no new K storage class in the parent"
+  ],
+  [
+   "k_storage, k_vnni_tensor, k_vnni_view, k_packed",
+   "the child's typed K storage as the design specifies it: a std::conditional_t that selects the packed owner for 128-dimension heads and the existing array otherwise, its view, and the accessor that replaces the raw k_vnni_plane pointer"
+  ],
+  [
+   "decision record, Q1-Q4, D5",
+   "the table in design section 2: four questions for Ben with a proposed choice, a fallback if rejected, and a record status, plus D5, the native-K typing scope that jhan requested"
+  ],
+  [
+   "TRON_IGNORE_NAN",
+   "a compile definition that tron sets in every non-Debug GCC/Clang build (src/tron/CMakeLists.txt:293); with it, the generic bf16 conversion does not preserve NaNs whose upper mantissa bits are zero"
+  ],
+  [
+   "page_supports_uniform_kv_access",
+   "a compile-time probe in t/t_llama_unit.cpp:105 that checks a page type offers the uniform K/V accessors; the design has it rewritten for the typed get_v destination"
+  ],
+  [
+   "8-lane baseline limit",
+   "the design's statement that t_llama_unit and t_heterogeneous_scheduler do not compile in the 8-lane build at unmodified main (they call the 16-lane-only set_v/get_v), so the parent's 8-lane acceptance excludes them"
+  ],
+  [
+   "RUN_TESTS, passage marker",
+   "in the required GCP Nix workflow, RUN_TESTS is true only when the test identity has not passed before or the run is a rerun; the passage marker records a passed identity so a later run may skip the tests"
+  ],
+  [
+   "for_each_active_slot, storage_location, slot_base",
+   "book members the design reuses to enumerate physical KV slots with their compile-time geometry, to learn which arena a slot lives in, and to compute its address"
+  ],
+  [
+   "checker, re-grader, finder, verifier, critic, judge",
+   "review agents of this round. A checker graded a batch of known items against the second revision; two re-graders (a source-truth lens and a fairness lens) independently re-graded each; the majority of the three decided. Ten finders looked for new defects; one merge agent removed duplicates; three verifiers tried to refute each candidate; a finding survived when at least two could not. A completeness critic added candidates that went through the same verification. Three judges gave independent implementability verdicts"
+  ],
+  [
+   "resolved, partly, deferred, unresolved, regressed",
+   "disposition statuses; the table in section 3 gives the meaning of each"
+  ],
+  [
+   "blocker, major, minor, note",
+   "severities; the table in section 4 gives the meaning of each"
+  ],
+  [
+   "detail::scaled_v_expr, the weighted V sum",
+   "the struct in kv_cache.hpp that computes the attention-weighted sum of a page's V rows on the AVX-512 path; today it reads the packed plane through a raw pointer. G01 is about how it gets that address under the new types"
+  ],
+  [
+   "t_amx_numerics PV case",
+   "the unit test case that compares the AMX PV kernel (weights times V) with the AVX path; today it hand-packs a std::vector page and passes its pointer to the kernel"
+  ],
+  [
+   "lint-notes",
+   "a separate Make target that checks every 'See Note [X]' comment has a matching Note definition; the required Lint CI check runs it, make lint does not"
+  ]
+ ],
+ "changes_intro": [
+  "The second revision keeps the ten-section structure and grows the page by about 46 percent (83,567 to 121,774 bytes; 8,218 to 11,746 words). Every non-ASCII glyph is now a numeric entity. Codex again changed no production code, posted nothing to GitHub, and edited no issue; the header, section 9 and section 10 say so.",
+  "The table lists the changes an implementer would notice. The word-level diff (979 changed segments) is saved as evidence/claude-review-r3/design-r2-to-r3-wdiff.txt."
+ ],
+ "changes_rows": [
+  [
+   "Short version and header",
+   "\"incorporates the supplied Claude review\"",
+   "\"incorporates the round-2 design review, including its verifier corrections\"; the short version now names the four decisions (own storage type for packed V, layout-specific kernel arguments, native K keeps its storage and view, child adapts to a separate packed-K owner)"
+  ],
+  [
+   "Section 2 decision record",
+   "a \"Questions for the reviewer\" block with four questions and proposed answers",
+   "a table with ID, proposed choice, fallback if rejected, and record status (all \"Proposed; reviewer answer not recorded\"); D5 names jhan as the owner of native-K typing; an owner (the issue assignee), a record place (the parent PR description, Decisions) and a rule for implementing before answers arrive; a \"Proposed issue #4525 text\" block for the assignee to apply"
+  ],
+  [
+   "Section 3 revision table and PR rules",
+   "main tip 98bb8cb2 described; \"Both PRs edit nine of the same files\"",
+   "adds \"The round-2 review last observed main at 2880c3aa9b ... Branch from the commit returned by a new fetch\"; the file-overlap count is gone (remeasure at port time); adds Skip benchmarks / no Run CI rules"
+  ],
+  [
+   "Section 4 constraints",
+   "type constraints only",
+   "a paragraph tying each width rule to its path: set_v needs D divisible by 32, scaled_v_expr supports 64/128/256/512, the 8-lane path needs D/chunk divisible by 8, no new 8-lane V-save wrapper"
+  ],
+  [
+   "Section 5 declarations",
+   "types named; forward declarations of seq/sseq discussed",
+   "a kv_cache_fwd.hpp declarations header with explicit strides and all five view parameters; no DMA parameter on the packed types; the bf16_chunk row corrected (missing override falls back, wrong signature fails to compile); detail::v_vnni_access friend helper; no copy_plane for V; book::fill_random kept as the explicit layout-blind exception; a \"Build and include boundaries\" block (class definitions at both chunk widths, packed bodies 16-lane only); generic-slice lifetime limit stated"
+  ],
+  [
+   "Section 6 behavior",
+   "NaN sentence corrected in round 2; comment sites named loosely",
+   "a NaN bit table for fp32 0x7F800001 under the three conversion paths and the TRON_IGNORE_NAN rule (on in every non-Debug build); adjust_grains_for_partners and token_ix_needed named with the rule that the readiness comment stays unchanged; exact comment-site line ranges at 2880c3aa9b; heterogeneous enumeration through for_each_active_slot filtered by storage_location(...).reclaimable; EAGLE handled by the uniform array only"
+  ],
+  [
+   "Section 7 steps and child",
+   "seven steps; child section kept reinterpret_cast of the K array",
+   "same seven steps plus an rg search command; the child gets a k_storage std::conditional_t selection of k_vnni_tensor, a child interface table (k_packed accessor, typed set_k_row / get_k_row / set_k_block, typed plane copy, page_info scratch), the worker-index merge spelled out (both overload pairs, generated run / run_main_help calls, LoopyTronSpec.hs and t_llama_unit.cpp updates), and t_k_vnni_layout adaptation"
+  ],
+  [
+   "Section 8 verification",
+   "a checks table and three build configurations",
+   "eight behavior-check rows with the failure each detects; four build configurations including a Debug NaN check; the 8-lane baseline limit stated as inferred from source; the AVX-512 host probe and cross-avx512 fallback; CI evidence rules (run URL and attempt, source key, runtime paths, Catch2 lines, failure-only log upload, passage marker, rerun); make lint added and make iwyu-check made optional with the reason; platform-keyed bench records; the full guard refusal list; an objdump procedure with the missing fp16 baseline named; a definition of done"
+  ],
+  [
+   "Section 9 dispositions",
+   "a table with one row per round-1 id and a disposition word",
+   "two grouped tables (round 2, round 1) with a Design response column and a Remaining work or limit column per group; the 16 rejected candidates listed as still rejected"
+  ],
+  [
+   "Section 10 sources",
+   "S1-S14",
+   "S15-S20 added, pinned to 2880c3aa9b (S15-S17, S19-S20) and the child head (S18); a note that the timestamps describe the saved review, not a fresh remote check"
+  ]
+ ],
+ "dispo_intro": [
+  "Each of the 87 open items (64 round-2 findings and 23 round-1 residuals) was checked against the second revision by one checker agent and then independently re-graded by two adversarial re-graders (a source-truth lens and a fairness lens). The status below is the majority of the three; a split vote (three different statuses) keeps the checker's status and is flagged. Where I (the lead) changed a status after reading the votes, the row says so."
+ ],
+ "method": [
+  "This round used the same shape as round 2, with more finders. The lead first re-verified the facts the design relies on (comment-site line ranges, CMake and Nix flags, workflow steps, child names) against the pinned commits and refreshed the live state of main, issue #4525 and PR 4424; that record is evidence/claude-review-r3/lead-verified-facts-r3.md.",
+  "Numbers of this round: 234 agents, 28.2 million tokens, 2 hours 15 minutes; 17 disposition batches (51 agents), 10 finders, 1 merge agent, 52 merged candidates with 156 verifier votes, 1 critic with 4 candidates and 12 votes, 3 judges. The workflow result is evidence/claude-review-r3/workflow-result.json; the inner result (the script's return value) is workflow-result-inner.json."
+ ],
+ "method_bullets": [
+  "Dispositions: 17 batches of 3 to 7 items; per batch one checker and two re-graders (source-truth, fairness); majority of three; batch files in evidence/claude-review-r3/batches/.",
+  "New findings: 10 finders (C++ interface, behavior and arena construction, process and CI, handoff actionability, fidelity to Ben and jhan, simplicity and scope, formulas and page quality, the child's needs, regression hunt on the round-2 to round-3 diff, section-9 honesty audit), plus new defects the checkers found in the fixes; one merge agent deduplicated; three verifiers (source, design-text fairness, intent) per candidate; a finding survived when at least two could not refute it; the lead read every vote before grading.",
+  "Completeness critic after verification; its candidates went through the same three verifiers.",
+  "Three judges (implementer, maintainer, risk) read the design and the review summary independently.",
+  "Limits: no code was compiled or run; no chromium on this host, so the page was checked structurally (ASCII, anchors, links) and not rendered; agents can make mistakes, so every finding carries its evidence and votes; the lead's own reading is not a substitute for Ben's.",
+  "Evidence: evidence/claude-review-r3/ holds the workflow result, findings.json, build_findings.py, gen_review.py, overrides.json, the design text and word diff, the facts file and the batch files."
+ ],
+ "words_extra": [],
+ "restatus": {
+  "M04": "partly"
+ },
+ "residual": {
+  "M04": "In design-r3.txt:350 replace \"Reuse book::for_each_active_slot, which dispatches the physical slot to its compile-time geometry.\" with \"Reuse book::for_each_active_slot, which calls the lambda once per active logical slot index with that slot's compile-time geometry (kv_cache.hpp:1243-1249). Form the physical offset as kv_storage_offset(slot), as fill_random does (:1060-1061).\" Delete the sentence about a logical alias: a fixed layout maps each logical slot to one distinct physical region, so no deduplication is needed (G19).",
+  "N20": "In design-r3.txt:248 add one clause: either \"Rows have no cross-constness conversion; obtain a read-only row from a read-only matrix view\" or \"v_vnni_row<const bf16,D> is constructible from v_vnni_row<bf16,D> through a friend declaration\". In :438 say that the accepted writable-to-read-only conversion is between views (and rows, if chosen), and add STATIC_REQUIRE_FALSE(std::is_constructible_v<v_vnni_view<bf16,R,D>, bf16*>) and the row equivalent so the private-constructor rule has a test (G40).",
+  "N59": "Either revert to h/tron/tensor/vnni.hpp (the one header the reviewer's sketch names) at design-r3.txt:258, :284, :363, :372, :391, :514, or add one clause at :391: \"The reviewer's sketch names h/tron/tensor/vnni.hpp for both layouts; the two-file split and the v_ prefix are this design's choice.\" Both names compile; this is a wording choice, not a defect (G48).",
+  "N42": "Add one clause to design-r3.txt:107: \"Keep the five existing Scope bullets and the three-item PR order list. Add the constraint sentences below as a sixth Scope bullet. In the intro sentence and in PR-order item 3 replace 'Ben's' with 'the reviewing maintainer's', links unchanged.\" (G05, G06, G07)"
+ },
+ "remark": {
+  "N13": "Both round-2 errors are gone: the contract row now says a missing override falls back to the fp32 conversion, a wrong signature can fail to compile, and a missing noexcept does not silently select the fallback [design-r3.txt:247]; section 8 no longer calls the fallback lossy [:440]. Every fact matches expr.hpp:111-116. Optional: add that the fallback costs a shift, a NaN check and a narrow per chunk, so a reader knows it is slower, not wrong.",
+  "N43": "Both \"K-store work\" sites now say block save [design-r3.txt:140, :142], and the Words row bridges blocked packed K to the code's VNNI K layout and names both Notes [:48]. Optional: name page::set_k_block and k_vnni::store_block in that row; they appear in section 7 [:406].",
+  "F41": "The bit table gives the fp32 0x7F800001 example under all three conversion paths, the sentence on TRON_IGNORE_NAN names the build types that define it, and tests select expectations by the macro [design-r3.txt:331-336, :437]. The lead recomputed the bits: 0x7F80 (packed append, +infinity), 0x7F81 (generic, macro absent), 0x7F80 (generic, macro defined). Optional: say the macro is a PUBLIC compile option of the tron target, so test executables see the same value, and cite t/t_bf16.cpp:97-110 as the quiet-NaN precedent.",
+  "M04": "The heterogeneous bullet now names book::for_each_active_slot, the storage_location(...).reclaimable filter, slot_base and the block count, as the corrected recommendation asked [design-r3.txt:350]. One fact in the fix is loose: the helper visits logical slot indices, not physical slots, and the closing sentence warns about a \"logical alias\" that a fixed layout cannot produce (G19). The lead lowered the checkers' resolved to partly for that reason."
+ },
+ "drop": [
+  "H04",
+  "G52"
+ ],
+ "drop_reason": {
+  "H04": "Duplicate: the S17 [Binary output directory] anchor slip is item (c) of G18. Its votes are kept on the votes page.",
+  "G52": "Not a defect: a positive check (all 64 round-2 ids and 58 round-1 ids appear once each in section 9; the rejected lists are right). Recorded under section 6, what the revision gets right."
+ },
+ "regrade": {
+  "G03": "note",
+  "G05": "note",
+  "G14": "note",
+  "G18": "note",
+  "G20": "note",
+  "G27": "note",
+  "G32": "note",
+  "G33": "note",
+  "G49": "minor"
+ },
+ "amend": {
+  "G01": {
+   "title": "scaled_v_expr is not named as a permitted user of detail::v_vnni_access, and its file home was dropped",
+   "kind": "ambiguity",
+   "lead_note": "All three verifiers hold the finding and narrow it: the two rules do not contradict each other, because line 249 forbids the helper to \"cache callers\" and the design never says whether detail::scaled_v_expr is one. The remaining text points to option A: step 2 keeps the typed weighted-sum inputs under kv_cache.hpp [design-r3.txt:373], the v_vnni.hpp operation list has no weighted sum [:253-259, :372], and section 9 says \"Type both weighted-sum constructors\" [:520]. The round-2 sentence that kept scaled_v_expr in kv_cache.hpp was deleted without any finding asking for it [design-wdiff.txt @old 4447]. The verifiers graded this minor because the reading is recoverable. I keep major: all three judges name it as the one sentence that must exist before implementation starts, and the PV weighted sum runs on every decode step, so two implementers must not resolve it differently. The fix is one sentence at :273 and :373 plus naming scaled_v_expr at :249."
+  },
+  "G02": {
+   "lead_note": "Holds 3 of 3. Corrections applied to the recommendation: poison has two meanings on the page (NaN in the padding tests; random values in book::fill_random at :274), so the Words row must say so; RUN_TESTS gates both the Test host and the Test FPGA jobs (gcp-nix.yml:538, :605); \"GCP Nix\" is the name of the required workflow, so define that, not the cloud provider; the TRON_AMX_DISPATCH row was already an optional item of round-1 F23, so that part is an F23 residual. Nine names in eight groups."
+  },
+  "G03": {
+   "title": "Round-2 finding links target the live review filename; the archives now exist",
+   "lead_note": "Holds 3 of 3, lowered to note by the lead. The -r2 archives were created 30 minutes after codex finalized the design, so codex could not link them. This round keeps an anchor for every N.. and M.. id as a disposition row (section 3), so the 64 links still resolve, to the round-3 disposition of each finding, which links on to the archived round-2 text. For precision the next revision should repoint the 64 id links and the two page links to claude-review-design-new-tensor-type-r2.html and -r2-votes.html."
+  },
+  "G05": {
+   "lead_note": "Holds 3 of 3; the intent verifier lowered it to note and the lead agrees: the name replacement in the live issue is F21, which round 2 left to jhan, and the design's deferral of the public edit is acceptable. What remains is a wording gap inside the new block: the role sentence at :118 carries no link, and the block does not say what to do with the two live sentences that carry the three review links. The clause under N42 in section 3 covers it."
+  },
+  "G06": {
+   "lead_note": "Holds 3 of 3. The block calls itself a replacement for the scope paragraphs and names only the reviewer links and a \"checklist\" as things to keep, so a literal application drops the five Scope bullets, including the required-CI bullet and the initialization-rules bullet that covers Ben's zero-initialization invariant. Corrections: the repository rule is AGENTS.md:22-27, and four of the five bullets lose content, not three."
+  },
+  "G07": {
+   "lead_note": "Holds 3 of 3 (one verifier at note). The live issue has a Scope list and a PR order list and no checklist. Both sentences are the design's instructions to the assignee, outside the paste block, so they do not enter the issue. Correction to the recommendation: PR order item 3 is a placement rule with no completion state, so the closing rule should name item 2 only."
+  },
+  "G08": {
+   "title": "Forward declarations of bf16, view and const_view should be spelled with the struct key",
+   "kind": "omission",
+   "lead_note": "Holds 3 of 3 as an omission, not a factual error: the design says \"classes\" and gives no declaration text, while its own block uses the class key for the new types. All three types are structs; clang 19 under -Wall warns (-Wmismatched-tags) in every translation unit that sees both, and no -Werror is set, so this is warning noise, not a build break. Round-2 N14's corrected recommendation already spelled struct view; and struct const_view; as expr.hpp:17-22 does. Drop the sub-claim that the bf16 declaration is redundant: under the design's own include rule the header must forward-declare bf16."
+  },
+  "G09": {
+   "lead_note": "Holds 3 of 3. One verifier reproduced the redeclaration error with g++ 11.4 (\"redeclaration ... with different constraints\"); clang 19 was not available on this host. Corrections: the block has three class forward declarations plus two alias templates, not five templates; the std::conditional_t hazard is conditional on a class-level constraint that fails for a declared geometry (the design's stated constraints hold for all of 64, 128 and 256). The codebase precedent cuts both ways: kv_cache.hpp:538-540 forward-declares scaled_v_expr with its requires-clause repeated, which works only because that header can name chunk_size."
+  },
+  "G10": {
+   "lead_note": "Holds 3 of 3. Corrections: round 2 already claimed the three aliases were required; round 3 extended the claim to shape0() and valid(). The host tensor constructor is at tensor.hpp:270-275. valid() implies a null view state the design never specifies (it does not forbid a default constructor). Two K test readers at t_llama_unit.cpp:703-709 use dim and valid(), but they read the native K view, which the parent keeps."
+  },
+  "G12": {
+   "lead_note": "Holds 3 of 3. Corrections: the repository rule (AGENTS.md:35-38) allows structural assertions with an identifiable consumer or failure mode rather than forbidding them; the design's named consumer never calls bf16_chunk (host tensors read rows through chunk(i), tensor.hpp:81-83), so the decltype check in the suite protects a path nothing in the parent's test plan exercises. Either option in the recommendation closes it."
+  },
+  "G13": {
+   "lead_note": "Holds 3 of 3 (one at note). Corrections: round 2 already named even_part and odd_part with the words \"Reuse this extraction pattern\"; round 3 merged the sentences and dropped \"pattern\", so the text no longer hints that the two private, unused helpers are copied, not called. The better pointer is get_v(float*) (kv_cache.hpp:2416-2431), whose loop the design already moves into v_vnni.hpp as load_row."
+  },
+  "G14": {
+   "lead_note": "Holds 3 of 3 (one at note); lowered to note by the lead. The both-widths rule is round-2 N01's own corrected recommendation, which the design followed. G14 offers a simplification neither round considered: guard the fakes under TRON_AMX_DISPATCH and the rule disappears. Cost of the move: every AMX-off configuration, including the required Nix lane, stops compiling any kernel definition against the typed declarations. The design may adopt or decline this in one sentence."
+  },
+  "G15": {
+   "lead_note": "Holds 3 of 3. Corrections: kind is terminology inconsistency rather than factual error (\"poison\" can mean any sentinel); the word is new in round 3; drop \"must not be read\" from the replacement text, because TEST_CASE \"apply and join page ranges\" reads the random values back as attention inputs (t_llama_unit.cpp:2026-2041). The design's own uses at :300 and :436 mean NaN; :416 means the child's 0xa5a5 sentinel."
+  },
+  "G16": {
+   "lead_note": "Holds 3 of 3 (one at note). Correction: drop the clause that h/tron/tensor/k_vnni.hpp receives the scatter, gather and block-store bodies; round 3 no longer says where those live (that is G17). The stronger reason stands: the K tensor header defines expression types, expr.hpp includes tron/simd/auto.hpp, which includes <immintrin.h>, so the intrinsics-free interface header cannot include it and needs the K forward declarations in kv_cache_fwd.hpp."
+  },
+  "G17": {
+   "lead_note": "Holds 3 of 3. Corrections: drop \"which the round-2 split was meant to end\"; the round-2 aim was only to avoid a tensor/kernel include cycle, and kv_cache.hpp already includes a kernel header (expr.hpp). The defect is that round 2 gave the five typed K operations a header and round 3 took it away (design-wdiff.txt @old 4908-4924), while the S10 row still ties \"vector operations\" to h/tron/kernels/k_vnni.hpp. If the operations move, the three detail helpers (pair_base, pair_row_offsets, transpose_16x16_epi32) move with them; qk_group uses only the constants."
+  },
+  "G18": {
+   "title": "Three cited line ranges end one to two lines off: the V-slots Note, the PV kernel comment, the S17 binary-directory link",
+   "lead_note": "Holds 3 of 3; lowered to note by the lead. Settled facts: the Note is kv_cache.hpp:2055-2065 (2066 is the constructor line; 2054 is public:); the weights_times_v_128x4 comment runs 224-229; the CMAKE_RUNTIME_OUTPUT_DIRECTORY set() is CMakeLists.txt:66 (the link says L67). The design copied \"2055-2066\" and \"224-227\" from the round-2 review's own C06 residual text, so the slip originated in the review; only the S17 link is new. H04 (the same L67 slip) is folded into this finding."
+  },
+  "G19": {
+   "lead_note": "Holds 3 of 3. This is the loose fact inside the M04 fix, so M04 is graded partly this round. Corrections: storage_view_offset_ is also read by refresh_kv_blocks_alias (kv_cache.hpp:1222-1227), not only by the uniform accessor; layer-to-slot sharing exists one level above slot indices, so say \"no two slot indices map to one physical region\" rather than \"no aliasing\". M04's corrected recommendation asked for \"each active logical slot\" and the design wrote \"physical slot\"."
+  },
+  "G20": {
+   "lead_note": "Holds 3 of 3 (one at note); lowered to note by the lead and reclassified as ambiguity: every fact is right, and line 363 plus step 6 list both model.hpp sites by number, so the risk is confusion, not a missed edit. The tension comes from round 2: N27 limited the edit to 209-213 and N28 cross-referenced both sites; the design followed each in a different bullet."
+  },
+  "G21": {
+   "lead_note": "Holds 3 of 3. Measured at 2880c3aa9b over h, src and t: the round-2 pattern already matched 499 lines in 71 files through substring hits (get_vocab_size, set_valid); adding reinterpret_cast raises it to 1,491 lines in 124 files, 944 of them in 70 files the parent never touches. The search was a review list, not a zero-hit test, before and after; the defect is that the design gives no purpose or file scope for the added alternative."
+  },
+  "G22": {
+   "lead_note": "Holds 2 of 3. The design-text verifier refuted the second half: a permitted route is derivable from the fixture rule at :317 (direct element writes) plus owner.as_view(). The source and intent verifiers hold because the design never says that the PV case's std::vector page itself must move into an owner, which fill route to use, or what happens to the test's own interleave formula. Two judges list this among the items to settle before implementation. Corrections: :352 is an arena rule, not a test rule; a memcpy of hand-packed bytes into the trivially copyable owner is legal C++, so the design should state whether tests may do it rather than the finding forbidding it."
+  },
+  "G23": {
+   "lead_note": "Holds 3 of 3 (one at note). Corrected counts: seven assertions change (case 1: :2801, :2808, :2812, :2813-2816; case 2: :3225, :3227, :3231); the :3232 fragment stays true; the design names two. bin/ingest-cabal test and the required Test ingest job catch the leftovers loudly, which is why this is minor."
+  },
+  "G24": {
+   "lead_note": "Holds 3 of 3. Corrections: section 8 states the refresh rule generically at :478 and names only the parent's t_llama_unit; the child section names none of its three changed rows (t_llama_unit, t_amx_numerics, t_k_vnni_layout, all in the granite_rapids_6962p block). Consequence the verifiers added: the required Build Tron job runs bin/slice bench --check, which fails when a registered test has no record, so a port that drops the t_k_vnni_layout row fails the child's CI."
+  },
+  "G25": {
+   "lead_note": "Holds 3 of 3. Corrections: in CI the binding limit is not Slice's 10-run pruning but actions/checkout's default clean, which deletes the untracked logs-<hostname>/ directory at the next job on that runner workspace; the job log shows the Logs: line and one status line per test binary, but no Catch2 case lines. Whether the runners are ephemeral is Insufficient data."
+  },
+  "G26": {
+   "title": "Definition of done does not carry the test-cost record refresh",
+   "lead_note": "Holds 2 of 3; the design-text verifier refuted three of the four items because the labels (:156), the format and lint gate (:477) and the bench rule (:478) are stated as binding rules elsewhere on the page, and the intent verifier narrowed the finding to the cost-record item. The lead follows that narrowing and keeps minor: CI's bin/slice bench --check verifies only that a record exists, so a stale record for a materially changed t_llama_unit fails nothing, and only the definition of done can force the refresh or its recorded deferral. The risk judge also asks the definition of done to require the AMX-on build before the parent leaves draft (see section 8)."
+  },
+  "G27": {
+   "lead_note": "Holds 2 of 3; lowered to note by the lead. The design's prescribed path (a fresh worktree per configuration, :449) makes make BUILD_TYPE=Debug correct, because a hand-configured gen/ has no Make stamp. The hazard is only when a Make-configured RelWithDebInfo gen/ is reused, plus the sentence \"Plain Make defaults can restore RelWithDebInfo\", which is true after a hand configure and false after a Make configure. make t_<name> also runs the whole binary with no Catch2 filter."
+  },
+  "G28": {
+   "lead_note": "Holds 3 of 3. Corrections: the bullet is not new (round 2 had it with the [F48] citation); round 3 swapped the citation to [Host guard], which is the wrong file. The two guard bullets above it carry no link at all, so move [Host guard] to the campaign_guard_acquire bullet (:479) and cite exec/bill-share.sh for the marker and the instance halves. lib-guard.sh mentions Bill only in comments at lines 16, 70 and 305."
+  },
+  "G29": {
+   "kind": "omission",
+   "lead_note": "Holds 3 of 3 as an omission that regresses an accepted round-1 sub-item, not a factual error: nothing at :465 is false, and the cmake_args array is still reachable through the S13 and S17 links. F16 moves from resolved to partly for this reason. The array spans nix/cmake-tron-test-build.nix:79-103."
+  },
+  "G30": {
+   "kind": "omission",
+   "lead_note": "Holds 3 of 3 as lost specificity in the M03 fix, not a factual error: \"wrong packed view types\" can cover a v_vnni_view passed to qk_rowmajor_128x4, but a const_native_k_view passed to weights_times_v_128x4 is not a packed view at all, and the row names no function. \"Kernel arguments\" is the design's own restatement of Ben's request, not his words."
+  },
+  "G31": {
+   "title": "Section 9 row 538 hides the missing objdump inspection item for F38 (the V row unpack)",
+   "lead_note": "Holds 3 of 3 for F38 and is refuted for F35 by two verifiers: the decltype check at :440 detects a missing bf16_chunk override at compile time, so adding bf16_chunk to the objdump list is not needed and row 542 describes that detector correctly. Correction to the recommendation: name the get_v call sites inside t_llama_unit (for example :819, :1575, :2038), not full.hpp's v_head_fn, which is in a different binary."
+  },
+  "G32": {
+   "lead_note": "Holds 3 of 3 (one at note); lowered to note by the lead. The rows 541-552 do name most residual corrections in unlabelled clauses; rows 538 (F30, F38) and 544 (F25, F29, C07) do not. M05's corrected recommendation asked for honest labels and a remaining column, which the revision added, so M05 stays resolved. A cheap fix is a second link per residual id to the round-2 page's Still-needed entry."
+  },
+  "G33": {
+   "title": "S12 identity list omits the common ancestor c7844ca2ce",
+   "lead_note": "Holds 2 of 3; lowered to note by the lead and narrowed to the c7844ca2ce omission, which is also F58's residual. The row-551 cell separates \"source evidence\" (pinned) from \"implementation instructions\" (S12, labelled local), so the design-text verifier read it as true; the wording is at most ambiguous. The identity holds at all six commits including live main (same blob ids)."
+  },
+  "G34": {
+   "lead_note": "Holds 3 of 3 with no narrowing. The minimal fix swaps the two hrefs (or the two label texts). N33 and F29 are partly because of this slip."
+  },
+  "G49": {
+   "lead_note": "The finder graded this a note; all three verifiers grade it minor and the lead follows them. A \"Catch2 passed\" line proves nothing here: both AMX precision cases return before any assertion when available() is false, after a WARN line, and the listener logs passed whenever no assertion failed (testlog.cpp:21-25). Correction: drop t_amx_dispatch_dtype from the kernel-ran evidence; it links CPU fakes and a fake available() that returns true. Name the t_amx_numerics Slice log with no \"AMX unavailable\" WARN line plus a TRON_AMX_DISABLE=1 control run."
+  },
+  "H01": {
+   "lead_note": "Holds 3 of 3. Correction: drop the sentence that the plain dev shell prints an error; the default shell inherits the ingest GHC and Cabal and runs the slower source checker, while nix develop .#lint supplies the compiled one. The parent edits Note [Zero-Initialized V Slots], which eight comments reference, and relocates layout documentation with cross-references, so a malformed Note passes make lint locally and fails the required Lint check."
+  },
+  "H02": {
+   "lead_note": "Holds 3 of 3, child scope only (the parent touches no .hs file). Corrections: :476 already says nix develop; :477 \"Follow the current scoped guides\" routes to ingest/AGENTS.md through the root guide's table, so the gap is selective naming (.github/AGENTS.md is named, ingest/AGENTS.md is not) and a missing make format-haskell command. The child head's Lint job fails at clang-format and stops, so the Fourmolu check has not yet run on the child."
+  },
+  "G35": {
+   "lead_note": "Holds 3 of 3 at note. The header and :90 tie the assignee to jhan-positron; \"the issue author\" and \"the user\" are never tied to that name. \"User\" also means a machine login in the host-guard bullets (:479, :481)."
+  },
+  "G36": {
+   "lead_note": "Holds 3 of 3 at note. The row answers round-2 N05, whose recommended wording was role-only; codex added the first name. The design page is a local file outside jhan's no-names rule for issues, and the paste block itself is role-only, so no change is required."
+  },
+  "G37": {
+   "lead_note": "Holds 3 of 3 at note. This is the N56 residual seen from jhan's request: the step-4 premise that the child's packed-K change becomes local to the new type holds for the owner, the mapping, the row and block save bodies, the plane view and the kernel argument types, and not for the QK algorithm, the shared block save, the generated calls, the scratch callback, the build option or the tests. Correction: the std::conditional_t storage selection itself stays in kv_block, so do not list it as local."
+  },
+  "G38": {
+   "lead_note": "Holds 3 of 3 at note. Both names follow review advice: page::v_view was round-2 N18/N23's recommendation, page::k_packed follows Ben's sketch, which uses both k_packed and v_packed. If the design wants one pattern, v_packed matches the reviewer's expectation; the lines to change are :271, :404 and :520."
+  },
+  "G39": {
+   "lead_note": "Holds 3 of 3 at note. Only the sketch-name mapping was lost; the partner-zeroing semantics survive at :258 and the no-generic-row.set rule at :288. The sketch spells store_row for K and says the V overloads correspond."
+  },
+  "G40": {
+   "lead_note": "Holds 3 of 3 at note. This is the unaddressed part of N20's corrected recommendation, so N20 is graded partly. The heading \"View copy and conversion\" and \"Rows are constructed only by the matrix view\" make no-row-conversion the likelier reading; the design should say so in one clause and make :438 name views."
+  },
+  "G41": {
+   "lead_note": "Holds 3 of 3 at note, narrowed: the model's 16-lane branch already has vs[ix].as_view() (dma = false), so only the GOF scratch and the raw-array test fixtures have no existing view; there the honest value is dma = false, and no packed body reads the flag."
+  },
+  "G42": {
+   "lead_note": "Holds 2 of 3 at note, narrowed to the justification sentence at :349: the cross-slot indexing it cites exists only under uniform reclaimability, while a uniform-geometry layout with mixed retention addresses each slot through slot_base. The rule itself is right for both, because construction runs per allocate_kv_group call."
+  },
+  "G44": {
+   "lead_note": "Holds 3 of 3 at note, reclassified from contradiction to unexplained asymmetry: the V rule at :261 is V-scoped. The caller is the whole-page memcpy in copy_storage_slot (kv_cache.hpp@30c4ac82cb:2107), identified only through the S18 link; the body row should name it and say why K gets a named operation while V relies on the defaulted owner copy."
+  },
+  "G45": {
+   "lead_note": "Holds 3 of 3 at note (one verifier minor). The word changed from \"outside the tensor\" to \"in kernels\" in this revision while addressing N56. The selection is three if constexpr (k_vnni::layout_on<...>) branches in self_attention.hpp, which the design's own Words and S10 call attention code, not kernels."
+  },
+  "G46": {
+   "lead_note": "Holds 3 of 3 at note, narrowed to the save side: get_k_row's load view deduces from the wrapped scratch, but set_k_row's const_view parameter cannot deduce from the writable slice view kout (model.hpp@30c4ac82cb:2861-2864, :2920), because const_view's constructors from view are converting constructors that deduction ignores. The child's test callers are many more than t_k_vnni_layout: about 29 sites in t_llama_unit.cpp and one in t_amx_dispatch_dtype.cpp."
+  },
+  "G47": {
+   "lead_note": "Holds 3 of 3 at note. The most direct guard is kv_cache.hpp@30c4ac82cb:35-39 (#error when TRON_K_VNNI is defined and TRON_CHUNK_SIZE != 16); the CMake FATAL_ERROR is the configure-time guard. The design already says AMX-on fails its width check at :459; only the TRON_K_VNNI link is missing."
+  },
+  "G48": {
+   "lead_note": "Holds 3 of 3 at note. N59's corrected recommendation was conditional (\"if the lead keeps a note at all ... keep vnni.hpp\"); codex chose the original optional rename over the attached correction and states the rationale at :391 and owns it at :514. Harmless: all six mentions are consistent."
+  },
+  "G50": {
+   "lead_note": "Holds 3 of 3 at note. Correction: row 551 needs [Section 4] [Section 10], not section 5; rows 548 and 516 as recommended. All 35 rows follow a one-link convention, so a one-sentence note in the section 9 intro is an acceptable alternative."
+  },
+  "G51": {
+   "lead_note": "Holds 2 of 3 at note. The design does say at :15, :47 and :507 that verifier corrections were incorporated, and the N38 link leads to the block that carries the correction, so the gap is one row's wording."
+  },
+  "H03": {
+   "lead_note": "Holds 3 of 3 at note. Corrections: at 30c4ac82cb the child's h/tron/kernels/k_vnni.hpp includes no tensor header; the include is the design's plan. README.code-org.md labels its list aspirational, live code already includes in both directions, and Ben's sketch itself puts the header under h/tron/tensor, so no reviewer objection is expected; the page may cite the precedent in one sentence."
+  }
+ },
+ "short_version": [
+  "The second revision resolved 60 of the 87 open items (64 round-2 findings plus 23 round-1 residuals). 25 are partly resolved, 2 are deferred to jhan, none is unresolved and none regressed.",
+  "This round found 52 new defects: 1 major, 27 minor, 24 notes. The major one is a single missing sentence: the design no longer says how detail::scaled_v_expr, the weighted V sum in kv_cache.hpp, obtains the packed address under the new access rule (G01). The other items an implementer would stop on are the t_amx_numerics fixture route (G22), the constraint mechanism (G09) and the D5 wording (G04).",
+  "Verdict: accept with changes. All three judges say so; two of three say the design is not yet implementable until G01 and G22 are written. After those two edits and the eleven regressions and residuals listed in section 7, another agent can implement the parent from this page."
+ ],
+ "verdict_tile": "Accept with changes",
+ "verdict_badge": [
+  "warn",
+  "two of three judges: not yet implementable"
+ ],
+ "verdict_sub": "3 of 3 judges; G01 and G22 first, then the section 7 list; see section 8",
+ "changes_outro": [
+  "Two things did not change. The proposed types, the kernel signatures and the seven-step plan are the same as in round 2. And the design still names the reviewer in its Words table while the text it prepares for the issue uses a role only; that is allowed for a local page (G36)."
+ ],
+ "dispo_outro": [
+  "Reading the votes changed one status. The checkers graded M04 resolved; the fix sentence says for_each_active_slot \"dispatches the physical slot\", and G19 shows the helper visits logical slot indices, so I lowered M04 to partly. Four items carry an optional clause next to a resolved status (N13, N43, F41 and now M04's remark); the remark says what is optional, so the two columns agree.",
+  "Fourteen items were decided by a two-to-one majority; none was a three-way split. The three deferred-or-partly issue-body items (F19, F20, F21) and the N42 residual are one edit: the block in design section 2 must keep the live Scope and PR-order lists and replace the two name occurrences with a role, links unchanged."
+ ],
+ "findings_intro": "Ten finders read the second revision through one lens each (C++ interface, behavior and arena construction, process and CI, handoff actionability, fidelity to Ben and jhan, simplicity and scope, formulas and page quality, the child's needs, a regression hunt over the round-2 to round-3 word diff, and a section-9 honesty audit). Their 62 candidates and 19 new defects the disposition checkers found in the fixes were merged into 52 candidates, and each was put to three verifiers who tried to refute it; a finding survived when at least two could not. A completeness critic added four candidates that went through the same verification. Two survivors were dropped by the lead (H04 duplicates G18; G52 is a positive check) and nine were regraded after reading the votes; the Lead's reading row of each finding says why. Severities are the lead's final grades.",
+ "questions_intro": [
+  "Design section 2 now carries a decision record: four questions for Ben (Q1 to Q4) with a proposed choice, a fallback if rejected and a record status, plus D5, the native-K typing scope that jhan requested. The owner is the issue assignee, the record place is the parent PR description, and implementation may start on the proposed choices labelled Proposed. All three judges found the record adequate. The table gives my reading of each row against Ben's three comments (evidence/github-review.json) and jhan's request."
+ ],
+ "questions_rows": [
+  [
+   "Q1. May each concrete view contain its address formula? Proposed: yes; one view per layout, separate V and K owners, no layout-policy template.",
+   "Ben's sketch sections 1 and 2 (layout as a template argument of owner and view) and his own reservation: \"I'm not entirely convinced of the necessity of separate k_vnni_layout from vnni_view\".",
+   "Adequate. The proposed choice follows Ben's stated doubt, and the fallback is the sketch itself, so either answer is implementable. The design also confirms jhan's reading of that reservation (design-r3.txt:71); N11 asks it to state what the reading was."
+  ],
+  [
+   "Q2. Should const matrix and row objects prevent element mutation? Proposed: yes at both ranks, following tron's rank-2 view rule.",
+   "Ben's sketch: \"As with std::span, a const view object does not make its elements const. vnni_view<const bf16, Layout> does.\"",
+   "Adequate, and the question most likely to be answered no, because Ben stated the opposite rule in writing. The design flags the departure and gives a fallback. Keep the const contracts in one table row so a flip is one edit, and settle the row-conversion clause first (N20, G40)."
+  ],
+  [
+   "Q3. May packed views expose logical rows through operator[]? Proposed: yes, returning a logical row expression with no public pointer; keep bounds-checked at().",
+   "Ben's review asked for the expr precedent (\"a uniform interface based upon expr\"); his sketch excluded operator[] because it suggests a contiguous row.",
+   "Adequate. The design resolves the tension between the two comments in favor of expression reads with no pointer route, and names the fallback (remove the row expressions from both families). G12 notes that the mandated bf16_chunk override serves a test-only path."
+  ],
+  [
+   "Q4. Is the smaller parent scope sufficient? Proposed: yes; expression reads and the existing typed bulk operations; slices, iterators and generic writes deferred.",
+   "Ben's review: \"the usual operations that we expect of tensor types and, in particular, the row-wise load/store operations\".",
+   "Adequate. The deferrals are explicit and reasoned. G39 asks to restore the one sentence that mapped append_v_row to the sketch's store_row, so Ben sees the name difference explained; the maintainer judge also asks for a sketch-name to design-name table."
+  ],
+  [
+   "D5. Who owns native-K typing? Requested scope: the issue author; reuse the existing K view type through a new alias and change the native-K kernel parameter.",
+   "jhan's request (\"introduces the new abstraction on VNNI-V and native K\") and the issue title; not part of Ben's sketch.",
+   "Right attribution, one wording slip: the cell says \"reuse the existing view alias\", but const_native_k_view is new in section 5; the view type is what exists (G04). The record is copied into the PR description, so fix the cell before implementation."
+  ],
+  [
+   "What the record still lacks",
+   "jhan's step-4 premise (the child's packed-K change becomes a local change within the new type) and the identity of \"the issue author\", \"the assignee\" and \"the user\".",
+   "Two notes: the premise is answered nowhere, and it holds only in part (G37, N56 residual); the three role labels for one person are never tied together (G35). Neither blocks implementation."
+  ]
+ ],
+ "questions_outro": [
+  "Nothing in the record misquotes Ben. The maintainer judge checked the comment ids and times against the saved JSON and found one phrase stronger than his words: \"the reviewer's uniform-expression requirement\" (design-r3.txt:412) where he wrote \"I think the way I would approach this\"."
+ ],
+ "strengths": [
+  "design-r3.txt:148 labels 2880c3aa9b as saved review evidence and orders a fresh fetch before branching. This matches the live state: main moved to 1400fa4481 with no change to any parent step file (facts-r3.md:38-43).",
+  "design-r3.txt:232-234 gives const_native_k_view explicit strides. That alias is the exact type of the const kv_block::k_view(): row_major<seq<R,C>> is sseq<C,1> (seq.hpp@2880c3aa9b:388-394), and const_view(view const&) at view.hpp@2880c3aa9b:299 converts the writable page::k result.",
+  "design-r3.txt:267 names pg.template k<geometry.kv>(slot, kv_head) as the whole-plane replacement for k0.data. That two-argument overload exists (kv_cache.hpp@2880c3aa9b:1559-1569) and the caller it replaces is self_attention.hpp@2880c3aa9b:1652-1655.",
+  "design-r3.txt:257 says the aligned flag preserves the existing aligned load/store contract. That is right: set_v loads the source with _mm256_load_epi32 and _mm512_load_ps (kv_cache.hpp@2880c3aa9b:2300, 2308, 2339, 2380) and get_v stores with _mm512_store_ps and _mm256_store_si256 (2421, 2455). Every existing test buffer except heterogeneous_scheduler_compile.cpp:441 is alignas(64) or a tensor.",
+  "design-r3.txt:344-347 builds the arena on placement array-new of a trivially default-constructible block. That holds: bf16s is __m256i (simd/types.hpp@2880c3aa9b:26, auto.hpp:54), and kv_block holds only k, v and member functions (kv_cache.hpp@2880c3aa9b:2191-2241).",
+  "design-r3.txt:362-363 lists ten comment sites for the V layout. A grep for 'interleav' over h, src and t at 2880c3aa9b finds no V-layout comment outside those ten sites and the set_v and append_v bodies that move with their code.",
+  "design-r3.txt:452 says the 16-lane AMX-off row matches the required Nix feature combination. Verified: nix/cmake-tron-test-build.nix@2880c3aa9b:79-88 passes -DBUILD_NATIVE=OFF and -DAVX512=ON and no TRON_AMX_DISPATCH.",
+  "design-r3.txt:454 and :457 keep t_amx_dispatch_dtype as the 8-lane target and mark the rest 'Insufficient data'. The target is sound: exercise_page is a function template (t/t_amx_dispatch_dtype.cpp@2880c3aa9b:62-63) and both TEST_CASEs sit under #ifdef TRON_AMX_DISPATCH (:192-214), so its unguarded set_v at :98 is never instantiated at 8 lanes.",
+  "design-r3.txt:477 calls make iwyu-check optional. That holds beyond the SKILL.md rule: the lint recipe (GNUmakefile@2880c3aa9b:693-731), the Nix lint check body and gcp-nix.yml contain no IWYU step.",
+  "design-r3.txt:424 names the direct three-thread calls in t/t_llama_unit.cpp. The child section at t/t_llama_unit.cpp@30c4ac82cb:2773-2782 calls save_k_helper for workers 1 and 2 and save_k(..., N_WORKERS_3) for worker 0, which the 'old positional calls' sentence catches.",
+  "design-r3.txt:486 names gen/t_llama_unit. CMakeLists.txt@2880c3aa9b:66 sets CMAKE_RUNTIME_OUTPUT_DIRECTORY to the binary directory and the native preset's binaryDir is gen (CMakePresets.json@2880c3aa9b:34).",
+  "design-r3.txt:148 says 98bb8cb2 is 79 commits after f46e48ba. git rev-list --count f46e48bab498..98bb8cb22f94 returns 79.",
+  "design-r3.txt:583-584 S19 and S20 anchors point at the right code: test_runtime.py:30-51 (test_identity, passed_sentinel), slice_bench_manifest.py:14 (STANDARD_BENCH_WIDTHS = (1, 2, 4)), bin/slice:1996-2000 (capacity check), :1731-1736 (put_platform_bench), :3676-3684 (whole-box bench), .github/AGENTS.md:19-20.",
+  "design-r3.txt:269 says the v_head_fn callback wraps its aligned scratch. src/tron/gof.cpp@2880c3aa9b:203 declares alignas(64) std::array<bf16, ...> v_scratch and :213 passes per-head offsets of HW_BAKED_HEAD_SIZE elements, so the destination view's alignment precondition holds.",
+  "Section 9 lists every one of the 64 round-2 ids and the 58 retained round-1 ids exactly once, and its rejected-candidate sentence names the right 10 plus 6 ids (G52, a positive check by the section-9 auditor).",
+  "The NaN bit table is right under all three conversion paths; the lead recomputed 0x7F800001 to 0x7F80, 0x7F81 and 0x7F80."
+ ],
+ "edits": [
+  "G01 (major). At design-r3.txt:273 and again in step 2 (:373) write: \"detail::scaled_v_expr stays in kv_cache.hpp. Its 16-lane constructor takes v_vnni_view<const bf16, page_size, head_size>, obtains the pair-tile base once through detail::v_vnni_access, and keeps today's _mm512_load_si512 and _mm512_dpbf16_ps loop, unrolling and addition order (kv_cache.hpp@2880c3aa9b:2066-2109).\" At :249 change \"Cache callers and tests do not use these helpers\" to name scaled_v_expr (and weights_times_v_128x4) as the permitted V-specific users. If the weighted sum is meant to move into v_vnni.hpp instead, say so and list the move in steps 1 and 2.",
+  "G22 (minor, two judges' must-fix). Add to step 6 (:377) or the kernels row (:275): the PV case of t/t_amx_numerics.cpp (:198-227 at 2880c3aa9b) holds its page in a v_vnni_tensor<PAGE_TOKENS_64, HEAD_SIZE_128> owner (16,384 bytes, 64-byte aligned), fills it through the public typed operations (append_v_row from aligned bf16 rows, or element writes per the fixture rule at :317), passes owner.as_view(), and keeps its independent pair-formula check on bytes copied out of the owner, as :416 prescribes for t_k_vnni_layout. State whether a memcpy of hand-packed bytes into the owner is allowed in tests.",
+  "G09 (minor). After \"Type constraints are positive even rows and positive columns divisible by chunk_size.\" (:283) add that every owner, view and row constraint is a static_assert inside the class body, never a requires-clause on the class template: kv_cache_fwd.hpp declares the templates unconstrained and cannot name chunk_size or TRON_CHUNK_SIZE (both live in the intrinsics header), and a redeclaration with different constraints does not compile. Repeat under the k_storage snippet (:399-401).",
+  "G04 (minor). D5 cell (:99): \"Reuse the existing native-K view type (the type kv_block::k_view() returns) through the new const_native_k_view alias of section 5, and change the native-K kernel parameter.\" Name the alias where :267 and :518 say \"The alias\".",
+  "The issue-text block (G06, G07, G05; closes the N42 residual and prepares F19-F21 for jhan). At :107 write that the draft adds a problem paragraph, a terms list and one Scope bullet, replaces no existing Scope bullet and no PR-order item, and replaces the two occurrences of the reviewer's name with \"the reviewing maintainer's\" with the three links unchanged. Replace \"child-adaptation checklist\" at :107 and :120 with \"PR order item 2\" (item 3 is a placement rule). Give the role sentence at :118 its two review links, and add the 8-lane qualification to the packed-V term (F19).",
+  "G19 and M04 (minor). Heterogeneous bullet (:350): the helper calls the lambda once per active logical slot index with that slot's compile-time geometry; form the physical offset as kv_storage_offset(slot), as fill_random does; delete the logical-alias sentence.",
+  "Header homes (G17, G16, N58). At :391 name h/tron/tensor/k_vnni.hpp as the home of the typed K bulk operations (store_row, load_row, store_block, token copy, plane copy) and of detail::k_vnni_access, with the three detail helpers moving with them and h/tron/kernels/k_vnni.hpp keeping only qk_group; add the K forward declarations to kv_cache_fwd.hpp so amx_attn_iface.hpp can declare qk_vnni_128x4 by value without including an intrinsics header; write the paths in full at :249 and :284.",
+  "Regressions of the round-3 edit, one line each: restore \"Adding -DTRON_AMX_DISPATCH=ON to cmake_args in nix/cmake-tron-test-build.nix (lines 79-103)\" at :465 (G29, F16); restore the two kernel-call rejections with function names in the typed-boundary row at :438 (G30, M03); swap the two S18 generated-save-call links (G34, N33, F29); move [Host guard] to the campaign_guard_acquire bullet and cite exec/bill-share.sh for the marker and instance halves at :481 (G28); scope the reinterpret_cast search to kv_cache.hpp and v_vnni.hpp and say what it checks (G21); replace \"poison-fill\" with \"random finite-value fill\" for book::fill_random at :274 and :441 (G15); spell the forward declarations with the struct key and point at expr.hpp:17-22 (G08); fix the three line ranges 2055-2065, 224-229, CMakeLists.txt#L65-L66 (G18).",
+  "Process items: add make lint-notes to the local gate list and name the Note convention for the relocated documentation (H01); name ingest/AGENTS.md and make format-haskell in the child port (H02); carry and refresh the child's three test-cost rows under the section 8 authorization rule (G24); say where the Slice case logs live, that the next checkout deletes them, and what to record when the runner is unreachable (G25); add the cost-record refresh to the definition of done and, per the risk judge, require the 16-lane AMX-on build to compile and the fake dispatch cases to pass before the parent leaves draft (G26); name the t_amx_numerics log without an \"AMX unavailable\" WARN line plus a TRON_AMX_DISABLE=1 control run as the kernel-ran evidence (G49).",
+  "The remaining partly items of section 3, each one sentence at the cited line: M01, N56 (with G37's inside/outside list), F29, N11, M06, N44, F23, F57, F58, F54, F35, N20 (with G40), N50, F38 (with G31), N30, C01, N28 and C06 (same edit), N33, N59 (or keep the rename and say so), N42. Then repoint the 64 round-2 id links and the two page links to claude-review-design-new-tensor-type-r2.html and -r2-votes.html (G03), and refresh section 9 so every row's remaining-work cell names its open residual."
+ ],
+ "verdict_intro": [
+  "Three judges read the design and the review summary independently. Their verdicts agree on accept with changes and split on timing: the implementing agent would start today and stop once, at step 2, on G01; the maintainer and the risk reviewer would not start until G01 and G22 are written. The lead's verdict follows the majority: accept with changes, not yet implementable as written; two sentences away from implementable."
+ ],
+ "verdict_outro": [
+  "What changed since round 2. Round 2 named four major gaps; all four are closed or reduced to wording (N01 resolved, N02 resolved, N03 resolved with G16 and G17 as the header-home residue, N04 resolved). The one major of this round is new: it appeared when the round-3 edit deleted the sentence that kept scaled_v_expr in kv_cache.hpp while tightening the access rule. Every other new finding is a wording, citation or process item, and the checkers found no regression among the 87 known items.",
+  "What the design does not have to do. It compiled nothing and ran nothing; it posted nothing and edited no issue; sw-dev-01 is codex's user rule. None of those is a finding. Ben's answers to Q1 to Q4 are not needed to start: the design says to implement the proposed choices and label them Proposed in the PR description, and all three judges accept that."
+ ]
+}

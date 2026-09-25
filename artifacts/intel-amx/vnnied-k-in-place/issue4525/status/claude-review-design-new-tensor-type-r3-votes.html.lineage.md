@@ -1,0 +1,35 @@
+# Lineage inventory for artifacts/intel-amx/vnnied-k-in-place/issue4525/status/claude-review-design-new-tensor-type-r3-votes.html
+
+One line per source file: canonical path | repo path or left-behind reason | bytes.
+
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B01.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B01.md | 42581
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B02.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B02.md | 26802
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B03.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B03.md | 26938
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B04.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B04.md | 19638
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B05.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B05.md | 28822
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B06.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B06.md | 35515
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B07.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B07.md | 17669
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B08.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B08.md | 31168
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B09.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B09.md | 31067
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B10.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B10.md | 30203
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B11.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B11.md | 26694
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B12.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B12.md | 26693
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B13.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B13.md | 25912
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B14.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B14.md | 19562
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B15.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B15.md | 30503
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B16.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B16.md | 24094
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/B17.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/B17.md | 20703
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/batches/batches.json | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/batches/batches.json | 1006
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/build_findings.py | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/build_findings.py | 8681
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/design-r2-to-r3-wdiff.txt | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/design-r2-to-r3-wdiff.txt | 150693
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/design-round3-links.tsv | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/design-round3-links.tsv | 20731
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/design-round3-sha256.txt | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/design-round3-sha256.txt | 160
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/design-round3-text.txt | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/design-round3-text.txt | 80978
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/findings.json | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/findings.json | 1769122
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/gen_review.py | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/gen_review.py | 26170
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/html2txt.py | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/html2txt.py | 1852
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/lead-verified-facts-r3.md | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/lead-verified-facts-r3.md | 21958
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/overrides.json | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/overrides.json | 63740
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/wdiff.py | artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/claude-review-r3/wdiff.py | 1045
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/workflow-result-inner.json | left behind (provenance: raw workflow output; findings.json holds the built findings) | 2775149
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/claude-review-r3/workflow-result.json | left behind (provenance: raw workflow output; findings.json holds the built findings) | 3166380

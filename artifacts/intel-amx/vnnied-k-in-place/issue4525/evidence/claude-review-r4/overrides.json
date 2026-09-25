@@ -1,0 +1,544 @@
+{
+ "meta": "Reviewed 2026-09-22 UTC by Claude (Fable 5.1) for jhan. Design reviewed: [status/design-new-tensor-type.html](design-new-tensor-type.html), third revision by codex after the [round-3 review](claude-review-design-new-tensor-type-r3.html) (finalized 2026-09-22 16:43 UTC, 168,971 bytes, sha256 d2e9dabf). Sources pinned to main f46e48ba (the design's snapshot), main 2880c3aa9b (the tip the design's S15-S21 cite), the live main tip 0a51385e95 (fetched 2026-09-22 17:05 UTC; one inserted line in model.hpp since 2880c3aa9b, nothing else among the design's files) and PR 4424 head 30c4ac82cb.",
+ "words": [
+  [
+   "tron",
+   "the inference program under test; its source is the positron-ai/tron repository"
+  ],
+  [
+   "PR 4424, the child",
+   "the open draft pull request \"VNNI K: store the K cache of 128-dimension heads in the AMX VNNI layout, with a shared block save\" (branch jhan-amx-vnniK, head 30c4ac82cb). After the new parent PR exists, PR 4424 is rebased onto it and is then called the child"
+  ],
+  [
+   "the parent PR",
+   "the new pull request that issue #4525 asks for: typed access to the existing V and K caches on main, with no new layout"
+  ],
+  [
+   "Ben, the reviewer",
+   "the tron maintainer who reviewed PR 4424 on 2026-09-21 (a worker-index question, a review asking for typed tensors, and an API sketch). The design calls him \"the reviewer\" and, since this revision, no longer names him"
+  ],
+  [
+   "issue #4525",
+   "the GitHub issue codex created for the parent PR; jhan edited its title and first sentence on 2026-09-22 00:10 UTC; unchanged since"
+  ],
+  [
+   "KV cache, K, V",
+   "the saved key (K) and value (V) vectors of earlier tokens; attention reads them"
+  ],
+  [
+   "page, slot, head, D",
+   "a page holds 64 token positions; a slot is the cache region of one layer (or of several layers that share it); a head is one attention head; D is the head size, the number of values per token per head (128 for PR 4424's models)"
+  ],
+  [
+   "bf16",
+   "the 16-bit brain floating-point format used for cached K and V"
+  ],
+  [
+   "AMX, AVX-512, 16-lane and 8-lane builds",
+   "AMX and AVX-512 are CPU instruction sets. tron's vector width TRON_CHUNK_SIZE is 16 fp32 values with AVX-512 (the 16-lane build) and 8 without (the 8-lane build); the 8-lane build stores V row-major, so it has no pair-interleaved V"
+  ],
+  [
+   "packed V (pair-interleaved V)",
+   "today's V storage in the 16-lane build: for each dimension, tokens 2p and 2p+1 sit next to each other. Element offset = (token/2)*(2*D) + 2*dim + token%2"
+  ],
+  [
+   "native K",
+   "today's K storage: one token's D values consecutive in memory (row-major)"
+  ],
+  [
+   "blocked packed K (VNNI K)",
+   "PR 4424's K storage for 128-dimension heads: two consecutive dimensions of one token share a 4-byte unit, and 16 tokens share one 64-byte line; a 16-token by 32-dimension panel is one AMX tile of 1,024 bytes"
+  ],
+  [
+   "expr, view, const_view, tensor",
+   "tron's expression interface (h/tron/kernels/expr.hpp), its typed pointer views over regularly laid-out memory and their read-only form (h/tron/tensor/view.hpp, views.hpp), and its owning arrays (h/tron/tensor/tensor.hpp)"
+  ],
+  [
+   "kv_block",
+   "the struct that holds K then V for one head of one slot in one page (h/tron/models/kv_cache.hpp)"
+  ],
+  [
+   "set_v, get_v, append_v, scaled_v, v_data, v_base",
+   "today's V functions in kv_cache.hpp: write one token, read one token, copy one token between pages, compute the weighted V sum, and return the raw pointer of a V plane (the last two are removed by the design)"
+  ],
+  [
+   "scaled_v_expr",
+   "detail::scaled_v_expr, the expression in kv_cache.hpp that computes the weighted V sum; its 16-lane constructor loads whole 64-byte pair tiles with _mm512_load_si512 and multiplies them with _mm512_dpbf16_ps"
+  ],
+  [
+   "save_v_impl",
+   "the model function (h/tron/models/model.hpp) that stores one token's V into the cache during a forward pass; it calls page::set_v"
+  ],
+  [
+   "Zero-Initialized V Slots invariant",
+   "the rule in kv_cache.hpp (Note [Zero-Initialized V Slots], lines 2055-2065) that every even-token V write zeroes its odd partner row. The weighted sum reads a whole pair even when the token count is odd, and NaN times 0 is NaN, so the padding row must be zero"
+  ],
+  [
+   "arena, book",
+   "an arena is one allocated memory region holding cache blocks; book is the class that owns the arenas and the pages; kv_blocks_alias is the base pointer the uniform-reclaimability accessor indexes across slots"
+  ],
+  [
+   "EAGLE",
+   "the speculative model; its cache adds one extra physical KV slot at the end of the retained arena and a separate embedding buffer (x_data) that holds no kv_block; it requires uniform geometry"
+  ],
+  [
+   "GOF, page_info",
+   "group of four: four tokens of K and V staged for the FPGA's hardware KV cache; the staging code reaches a page's rows through the page_info callbacks in h/tron/gof.hpp (namespace tron::hardware); the V callback (v_head_fn in h/tron/scheduler/full.hpp) unpacks one row into caller-owned scratch"
+  ],
+  [
+   "CI, Nix test build, TRON_AMX_DISPATCH, TRON_K_VNNI, TRON_AMX_DISABLE",
+   "CI is the automated build and test. The Nix test build is the required CI lane (workflow gcp-nix.yml). TRON_AMX_DISPATCH and TRON_K_VNNI are CMake options that compile the AMX attention kernels and PR 4424's K layout; the Nix lane sets neither. TRON_AMX_DISABLE=1 is an environment variable that makes an AMX build take the non-AMX path; it is read once per process. Issue #3997 tracks the AMX gap"
+  ],
+  [
+   "Slice, logs-<host>/run-NNNN, test-cost records",
+   "bin/slice is the repository's test scheduler. It writes one log per test binary under <checkout>/logs-<runner hostname>/run-NNNN and keeps at most 10 such directories. config/test-benchmarks.json holds one duration and memory record per test and platform block (genoa96, genoa32, granite_rapids_6960p, granite_rapids_6962p); bin/slice bench --update or --new refreshes them, bin/slice bench --check only reports missing records"
+  ],
+  [
+   "lint-notes, lint-toolchain, Note [Name]",
+   "make lint-notes runs the checker for the repository's documentation Notes (a Note [Name] heading underlined with ~~~, referenced as See Note [Name]). The required Lint job builds the Nix check lint-toolchain, which ends with make lint-notes"
+  ],
+  [
+   "the generator, TronCpp.hs, LoopyTronSpec.hs",
+   "ingest/src/TronCpp.hs is the Haskell program that emits the model C++ (run() for the main thread, run_main_help for helper threads); ingest/test/LoopyTronSpec.hs asserts the generated call text; bin/ingest-cabal test runs those tests and the required Test ingest job runs them in CI"
+  ],
+  [
+   "the marker",
+   "the file /bill-has-instance-0,2 on delphi-3bda; when present, another user may use the first half of the machine (tron --instance 0,2); jhan's harness always runs on the second half and never changes it; exec/bill-share.sh take/release removes and restores it"
+  ],
+  [
+   "codex, the design, the third revision",
+   "codex is the agent jhan asked to answer Ben; the design is the page it wrote, status/design-new-tensor-type.html; the third revision is the version finalized 2026-09-22 16:43 UTC (168,971 bytes) after the round-3 review. It is the version reviewed here"
+  ],
+  [
+   "round 1, F.. and C.. ids",
+   "the first Claude review of the original design (2026-09-22 ~03:00 UTC), archived as [claude-review-design-new-tensor-type-r1.html](claude-review-design-new-tensor-type-r1.html). Its 58 retained findings are F01-F59 (finders) and C01-C09 (completeness critic)"
+  ],
+  [
+   "round 2, N.. and M.. ids",
+   "the second Claude review, of the first revision (2026-09-22 ~06:20 UTC), archived as [claude-review-design-new-tensor-type-r2.html](claude-review-design-new-tensor-type-r2.html). It graded the 58 round-1 findings (35 resolved, 20 partly, 3 deferred) and added 64 findings N01-N62 (finders) and M01-M08 (critic)"
+  ],
+  [
+   "round 3, G.. and H.. ids",
+   "the third Claude review, of the second revision (2026-09-22 ~09:30 UTC), archived as [claude-review-design-new-tensor-type-r3.html](claude-review-design-new-tensor-type-r3.html). It graded the 87 open items (60 resolved, 25 partly, 2 deferred) and added 52 findings G01-G51 (finders; G11 and G43 rejected, G52 dropped) and H01-H03 (critic; H04 dropped). The design cites these ids in brackets, for example [G01]"
+  ],
+  [
+   "round 4, J.. and L.. ids, the 79 open items",
+   "this review. J.. are new findings from the ten finders, L.. from the completeness critic. The 79 open items are the 52 round-3 findings plus the 27 items round 3 graded partly or deferred; section 3 grades each against the third revision"
+  ],
+  [
+   "v_vnni_tensor, v_vnni_view, v_vnni_row, detail::v_vnni_access",
+   "the design's names for the packed-V owner (the aligned array inside the cache block), the typed rank-2 view over it, its logical row expression, and the helper in h/tron/tensor/v_vnni.hpp that alone may return the packed pointer; the design permits typed V operations, weights_times_v_128x4 and scaled_v_expr to use it"
+  ],
+  [
+   "append_v_row, load_row, copy_token",
+   "the design's typed bulk operations: write one token's V row into the packed plane (an even token zeroes its odd partner), read one row out, copy one token between planes. append_v_row is the design's name for the sketch's V store_row. The design adds no copy_plane for V"
+  ],
+  [
+   "kv_cache_fwd.hpp, v_vnni.hpp, k_vnni.hpp",
+   "the design's new headers under h/tron/tensor/: a declarations-only header (no intrinsics) that amx_attn_iface.hpp includes, the V definitions header, and the child's K definitions header (the child's existing h/tron/kernels/k_vnni.hpp keeps only qk_group)"
+  ],
+  [
+   "native_k_view, const_native_k_view",
+   "the design's new aliases for today's row-major K view types; const_native_k_view<64, 128> becomes the K parameter of qk_rowmajor_128x4"
+  ],
+  [
+   "page::v_packed, page::k_packed",
+   "the design's read-only accessors returning the packed V view (parent, 16-lane build only) and the packed K view (child)"
+  ],
+  [
+   "t_amx_numerics, bf16_rne, qk_inputs",
+   "the test t/t_amx_numerics.cpp that compares the real AMX kernels with scalar references; bf16_rne is its round-to-nearest-even helper; qk_inputs is its 64-byte-aligned K and Q fixture struct; its PV case builds the packed V page by hand in a std::vector today"
+  ],
+  [
+   "Q1 to Q4, D5, the decision record",
+   "design section 2's four questions for Ben (address formula in the view; const at both ranks; logical rows through operator[]; the smaller parent scope) with a proposed choice, a fallback and a record status, plus D5, the native-K typing scope jhan requested; the record is copied into the parent PR description"
+  ],
+  [
+   "resolved / partly / deferred / unresolved / regressed",
+   "the five disposition statuses of section 3; their meanings are given above the table"
+  ],
+  [
+   "blocker / major / minor / note",
+   "the four severities of section 4; their meanings are given above the table"
+  ],
+  [
+   "source, design-text and intent lenses",
+   "the three verifier roles: one checks every fact against the source at the pinned commit, one reads the whole design for fairness, one weighs whether the defect matters for an implementable parent that Ben will accept"
+  ],
+  [
+   "draft gating, Run CI, ready_for_review",
+   "in the required GCP Nix workflow the product jobs (Build ingest, Build model traces, Prepare Tron build inputs, and through them Build Tron, Test host, Test FPGA and Test) run for a pull request only when it is not a draft or carries the Run CI label; a draft pull request runs only the Lint, CI machinery and Fresh Cabal plan jobs. ready_for_review is the GitHub event that fires when a draft is promoted; it is one of the workflow's pull_request triggers"
+  ],
+  [
+   "dmatensor, btensor, host executor",
+   "dmatensor is tron's owning array in DMA-safe memory (h/tron/hardware/dmatensor.hpp); its views carry dma = true. hardware::btensor is the bf16 dmatensor the tp1, tp2 and tp4 executors use for the model's V buffer. The host executor uses a plain tensor whose views carry dma = false; t_llama_unit's model cases use that executor"
+  ]
+ ],
+ "changes_intro": [
+  "The third revision keeps the ten-section structure and grows the page by about 39 percent (121,774 to 168,971 bytes; 11,746 to 15,133 words). Every non-ASCII glyph stays a numeric entity. Codex again changed no production code, posted nothing to GitHub, and edited no issue; the header, section 9 and section 10 say so.",
+  "The table lists the changes an implementer would notice. The word-level diff (210 changed segments, 1,474 words deleted and 4,861 inserted) is saved as evidence/claude-review-r4/design-r3-to-r4-wdiff.txt."
+ ],
+ "changes_rows": [
+  [
+   "Short version and header",
+   "\"incorporates the round-2 design review, including its verifier corrections\"; \"narrows 8-lane work, makes conversion checks depend on the build mode\"",
+   "\"incorporates the round-3 review and its verifier corrections\"; \"specifies packed-storage access, fixture construction, template constraints, and the remaining verification steps\""
+  ],
+  [
+   "Section 1 Words",
+   "the reviewer named (\"Ben, the Tron maintainer\"); no rows for poison, Catch2, GCP Nix, the generator, qk_group or jhan's roles",
+   "seven new rows: live token and live count (page::count()), issue author / assignee / user = jhan-positron, poison versus book::fill_random's random fill, Catch2 and STATIC_REQUIRE, GCP Nix / RUN_TESTS / passage marker, the generator (TronCpp.hs, run(), run_main_help), qk_group; the Build constants row names the header of PAGE_TOKENS_64 and HEAD_SIZE_128, TRON_AMX_DISPATCH and TRON_AMX_DISABLE=1; the reviewer is identified by role only; the Finding IDs row adds G and H and says which letters come from finders and which from the critic"
+  ],
+  [
+   "Section 2 decisions and issue text",
+   "\"The issue author's reading identifies the reviewer's concern correctly\"; D5 \"reuse the existing view alias\"; the issue block called itself a replacement for the problem, terms and scope paragraphs and referred to a child-adaptation checklist",
+   "the reading is stated (the address formula belongs in the view, not in a separate layout type); a new Child scope bullet says which packed-K changes become local to the type and which stay outside; D5 says \"the new const_native_k_view alias\"; the issue block is an additive draft: keep the five Scope bullets verbatim and the PR order list, insert the problem and terms before Scope, add one sixth Scope bullet, replace the name with \"the reviewing maintainer\" in the intro and in PR order item 3 with all three links kept, \"Part of #4525\" is not a closing keyword, close after PR order item 2"
+  ],
+  [
+   "Section 4 mapping",
+   "\"Within each 16-token by 32-dimension panel, K uses transposed packing\"; \"The 16-lane packed set_v still requires ...\"",
+   "the panel decomposition is written out: base (s * (R / 16) + c) * 512, in-panel offset ((dimension % 32) / 2) * 32 + 2 * (token % 16) + dimension % 2, one AMX B tile per panel; page::set_v is defined at first use"
+  ],
+  [
+   "Section 5 interface",
+   "forward-declared \"the actual bf16, view, and const_view classes\"; five view members \"required by expression consumers\"; a bf16_chunk override with a decltype test; even_part / odd_part to be reused; \"Dma preserves the existing view's DMA flag\"; page::v_view; v_vnni_access forbidden to cache callers with scaled_v_expr unplaced; \"Compile all three packed V types under both widths\"; k_vnni_access \"in its own header\"",
+   "struct-key forward declarations, native_k_view kept \"for symmetry\"; only operator[] and what the host-tensor constructor reads (chunk()); the inherited bf16_chunk fallback with no override (round-3 G12 option A) and the reason it is bit-exact; the extraction copied from get_v(float*) because even_part / odd_part are private; append_v_row named as the sketch's V store_row; rows have no cross-constness conversion; the DMA flag deduced from the caller's view, dma = false for GOF scratch and fixtures; page::v_packed; detail::v_vnni_access lives in v_vnni.hpp and scaled_v_expr is a permitted user (round-3 G01 option A); scaled_v_expr stays in kv_cache.hpp with its loop preserved; fill_random's fill described as random normal values; fakes stay where they are (round-3 G14 declined with a reason); all type constraints as class-body static_asserts, no class-template requires-clauses; header paths spelled out; the kernels-to-tensor include precedent (dotter.hpp, expr.hpp), README.code-org.md's aspirational direction, and the sketch's h/tron/tensor placement cited"
+  ],
+  [
+   "Section 6 behavior",
+   "\"comments that name the moved V operation\"; \"Obtain the physical address only inside the typed implementation\"; uniform array justified by \"the existing uniform accessor's indexing across slots\"; for_each_active_slot \"dispatches the physical slot\", a \"logical alias\" caution; comment sites 2055-2066, 224-227, 31-35",
+   "model.hpp:209-213 and 2816-2820 named; scaled_v_expr gets the pair-tile base once through v_vnni_access; each arena constructed separately, mixed retention has two arenas, the pointer installed by allocate_kv_group is used (kv_blocks_alias is refreshed later), cross-slot indexing exists only in the uniform-reclaimability accessor; the lambda runs once per active logical slot and kv_storage_offset(slot) forms the offset, no deduplication; x_data holds no kv_block; per-site comment wording, a named layout Note in v_vnni.hpp with See Note cross-references; ranges corrected to 2055-2065, 224-229, 30-36"
+  ],
+  [
+   "Section 7 steps and child",
+   "step 6 \"explicit aligned row wrappers\"; one rg pattern including reinterpret_cast; the child's K bulk operations and k_vnni_access had no header; no K forward declarations; no cost-record bullet; K whole-plane copy through \"a typed K plane-copy operation\"; \"Retain query-layout selection in kernels\"; \"both exact-call expectations\"; bin/ingest-cabal test only",
+   "an AMX numerics fixture subsection (v_vnni_tensor owner of 16,384 bytes, bf16_rne source rows, 64 append_v_row calls, owner.as_view(), bytes copied out compared with the independent formula, no memcpy of hand-packed bytes, the QK array wrapped explicitly); the rg search split into a word-boundary caller search and a scoped reinterpret_cast audit; the K typed operations, helpers and k_vnni_access placed in h/tron/tensor/k_vnni.hpp, the kernel header keeps only qk_group and the cache drops its include; K forward declarations added to kv_cache_fwd.hpp so amx_attn_iface.hpp can declare qk_vnni_128x4; a test-cost bullet (three granite_rapids_6962p rows, bench --update / --new, recorded deferral); copy_storage_slot's memcpy at child 2107 replaced by dst_block.k = src_block.k; query-layout and kernel selection stay in self_attention.hpp; explicit read-only source views because deduction ignores conversions; packed K at 8 lanes reported as not applicable (header #error, CMake requires AMX); the seven LoopyTronSpec assertions with their new values; ingest/AGENTS.md, make format-haskell and the required Test ingest check named"
+  ],
+  [
+   "Section 8 verification",
+   "typed-boundary row without function names; a decltype check on bf16_chunk; \"Run applicable dispatch cases if the baseline builds\" in the 8-lane row; Debug row via make BUILD_TYPE=Debug; Nix flag change dropped; PR #4505 named only as a discussion; \"Preserve or link successful runner logs explicitly\"; \"evidence that the kernel ran\"; make format, make lint; [Host guard] on the marker bullet; objdump list without the V row unpack",
+   "the typed-boundary row names the case (t_llama_unit.cpp:84-123, 316-342), the namespace and both kernel rejections; no bf16_chunk override or signature test; the 8-lane row says not to count t_amx_dispatch_dtype and to report 8-lane execution as absent; the Debug row uses a fresh worktree, cmake --build, a case filter, and checks CMakeCache.txt and compile_commands.json because Make's stamp does not track BUILD_TYPE; the AMX-on row must compile and pass its fake dispatch cases before the parent leaves draft; \"-DTRON_AMX_DISPATCH=ON in cmake_args in nix/cmake-tron-test-build.nix:79-103\" restored; PR #4505 described as open and unmerged, deb preset, nightly-only; a log-preservation subsection (Logs: path, runner from Set up job, runtime paths from Restore exact Nix test runtime, next checkout cleans, 10 run directories, unreachable-runner fallback, no other Delphi or Andoria host); an AMX-proof subsection (t_amx_numerics log without the AMX unavailable WARN plus a TRON_AMX_DISABLE=1 control; t_amx_dispatch_dtype proves dispatch only); make lint-notes, the exact lint-toolchain check and the Note convention; [Host guard] on the guard bullet and bill-share.sh for the marker; the V row unpack (get_v to load_row, cvtepi32_epi16 at 2454 and 2462) in the objdump list; the definition of done adds the AMX-on compile, the cost-record refresh or recorded deferral, and what bench --check does and does not detect"
+  ],
+  [
+   "Section 9 dispositions",
+   "two grouped tables (round 2, round 1) with a Design response and a Remaining work column",
+   "\"Disposition of all three review rounds\": a round-3 table (22 rows covering the 52 ids) and a round-1-residuals table (17 rows covering the 23 ids) each with an \"Implementation or external work still pending\" column and bracket links to the design sections; round-2 and round-1 rows updated where the response changed (G12 supersedes the override, v_packed, the N38 correction credited to the round-2 verifiers); G11 and G43 named as rejected"
+  ],
+  [
+   "Section 10 sources",
+   "S1-S20",
+   "S21 added with 31 pinned labels for the round-3 corrections; \"The round-3 review reports main 1400fa4481 at its saved fetch. That is review history\"; S12 adds c7844ca2ce and the 14 September date of the last rule-file change; S13 says the numerical cases return early when the runtime check is false; S18 gains the second generated-call case and swaps the two save-call labels"
+  ]
+ ],
+ "changes_outro": [
+  "Two things did not change. The proposed types, the two kernel signatures and the seven-step plan are the same as in round 3. And the design still links the round-3 ids and the 23 round-1 residual ids to the live review filename, which this round overwrites; every one of those anchors exists on this page (the generator asserts it), and the -r3 archive keeps the round-3 text."
+ ],
+ "rejected_prior_note": {
+  "G52": "Dropped by the round-3 lead: it was a positive check (section 9 lists every id exactly once), not a defect.",
+  "H04": "Dropped by the round-3 lead as a duplicate of G18 (the CMakeLists.txt L67 link)."
+ },
+ "regrade": {
+  "J08": "note",
+  "J11": "note",
+  "J13": "note",
+  "J14": "note",
+  "L01": "note"
+ },
+ "drop": [],
+ "amend": {
+  "J01": {
+   "lead_note": "Holds 3 of 3 (source and intent at minor, design-text at major); the implementer and risk judges list it as the one must-fix. The lead keeps major: the design's own rule at :495 cannot be met on a draft pull request, the page never says so, and an implementer either stalls or asks for the label the design forbids. Corrections folded into the recommendation: :485 is not a gate (only :536 says before leaving draft); the design does name make test-host (:514), which applies the CI runner's host filter, so a collection check exists but is not called one; a user-directed gh workflow run gcp-nix.yml --ref <branch> is a third route, which :497 classes as separate evidence. J36 adds the measurement that the Test host runner is normally not delphi-3bda, so the log fallback at :504 is the usual case, not the exception.",
+   "recommendation": "Add to the CI section after :495: 'The GCP Nix product jobs (Build ingest, Build model traces, Prepare Tron build inputs, and therefore Build Tron, Test host, Test FPGA and Test) do not run for a draft pull request unless it carries the Run CI label [gcp-nix.yml@2880c3aa9b:3-9, 14, 168-171, 294-297, 382-385, 443, 534-536]. Do not add that label without user direction [AGENTS.md:17]. Collection is checked before the first test commit: the new cases live in t_llama_unit, which t/CMakeLists.txt:586-592 registers with LABELS fake and the Test host runner executes through bin/slice run --filter=host [nix/tron-test-environment.nix:31-34]; make test-host applies the same host filter locally, and make list-tests or bin/slice build-targets --build-dir=gen --filter=host lists the collected binaries. Execution evidence attached to the PR exists only after one of three user-directed actions: promoting the parent to ready for review (the stack rule allows this for the PR based on main [AGENTS.md:12-13], and ready_for_review runs the product pipeline), a user-directed Run CI label, or a user-directed rerun. A user-directed gh workflow run gcp-nix.yml --ref <parent-branch> proves collection and execution at the same source but is separate evidence under :497. Complete the 16-lane AMX-on local gate (:480) first, then ask for the promotion; record the run URL and attempt under :496. The Test host runner is normally not delphi-3bda (J36), so plan for the :504 fallback: the per-binary pass of t_llama_unit at that run URL is the execution evidence when the runner is unreachable, and an exception request is needed only if a reused passage marker skips the run and a rerun is refused.' Rewrite :504's last sentences to match."
+  },
+  "J02": {
+   "lead_note": "Holds 3 of 3. Corrections applied: seven names in five groups plus the descriptor pair; define AMX tile itself as well as B tile, citing main's amx_attn_iface.hpp:173-174 and :191-194 for the B operand; the hosts row should say delphi-* runners are Intel Granite Rapids and andoria-* runners are AMD Genoa (README.ci.md:429-434), and sw-dev-01 comes from the design author's own instruction file. Only B tile and descriptor pair touch text an implementer acts on, and both are resolvable from the child source."
+  },
+  "J03": {
+   "lead_note": "Holds 3 of 3 (intent at note). The child's comment says dimension step, the three helpers sit at k_vnni.hpp:109-133 and :148-180 (scatter_row lies between them), and no implementer is misled because :416 moves three existing functions by name. The defect is that the Words row asserts one meaning that the design's own :416 contradicts. The smaller fix is one clause at :416.",
+   "recommendation": "Either replace the last sentence of the Words row (:49) with a two-meaning definition (the design's V pair address in bf16 elements; the child's detail::pair_base(plane, s, token), a byte address inside a packed-K panel: the 4-byte lane of dimension pair 0 of dimension group s for one token, with the panel's 16 pair rows at 64-byte steps), or add one clause at :416: 'the child's detail:: helpers pair_base (a byte-address function, not the V pair_base of section 5), pair_row_offsets and transpose_16x16_epi32 (k_vnni.hpp@30c4ac82cb:109-133 and :148-180)'."
+  },
+  "J04": {
+   "lead_note": "Holds 3 of 3. The revision added the reading that round 3 asked for and dropped the verdict word (correctly) in the same edit, so N11 goes from resolved to partly (lead). The minimal fix keeps codex's new first sentence and replaces the second with the verdict; the input-2-ai citation is optional, as round 3 said. The affected reader is jhan, not the implementer."
+  },
+  "J05": {
+   "lead_note": "Holds 3 of 3 (intent at note). Kind is redundancy, not ambiguity: :114 says the draft is additive and keeps the live sentence with its links, so the applied issue says the same thing twice, one paragraph apart. Cause: the round-3 F19 and F21 residuals asked for the two links inline at :118 while G06 asked to keep the live text, and codex applied both without reconciling them."
+  },
+  "J06": {
+   "lead_note": "Holds 3 of 3 (intent at note). Narrowed: the two labels are imperative meta-text inside the quoted region, and :129 copies the round-3 G05 wording, so the slip is that the design does not say the first sentence of PR order item 3 stays. Under the name-replacement reading of :114 the two instructions agree. The section-9 placement-rule sentence has no body text; add one clause at :131 or drop it from :557."
+  },
+  "J07": {
+   "lead_note": "Holds 3 of 3. The :417 include sub-claim is dropped: t/t_k_vnni_layout.cpp already includes the kernel header (child :25), and :417 names self_attention.hpp because it is the one file that must add an include. What stands is the K helper permission sentence the round-3 G17 correction asked for, so G17 stays partly, plus the unnamed qk_group argument type as a wording nit. The maintainer judge asks for the same sentence.",
+   "recommendation": "In the Internal storage access row (:260) replace the last sentence with: 'The child defines a separate detail::k_vnni_access in h/tron/tensor/k_vnni.hpp. Typed K operations (store_row, load_row, store_block, the token copy), qk_vnni_128x4 in src/tron/kernels/amx_attn.cpp, and k_vnni::qk_group in h/tron/kernels/k_vnni.hpp may use it; each extracts the plane pointer once and keeps its instruction sequence. Page methods, book, model code, and tests do not call it; page::k_packed returns k.as_view() from the owner, and t_k_vnni_layout passes owner.as_view() to qk_group.' In :434 replace 'the corresponding shape to qk_group' with 'the same k_vnni_view<const bf16, 64, 128> to every qk_group instantiation'. Line 417 needs no change: t/t_k_vnni_layout.cpp already includes the kernel header directly."
+  },
+  "J08": {
+   "lead_note": "Holds 3 of 3; lowered to note by the lead after the completeness critic's dispute. Ben's sketch asks the V bulk overloads to contain the existing conversions, and the design's instruction comparison (:523) uses the moved loop as its reference, so merging the float unpack into row.chunk() plus view::set would change the compared code. Worth recording as an option (one shared extraction helper), not as a required change. Citation: the sentence is :272, not :268."
+  },
+  "J09": {
+   "lead_note": "Holds 3 of 3. The lead's own facts file carried the wrong value (dma = false, copied from the round-3 G41 lead note) and marked the sentence defensible; the critic and all three verifiers traced the production buffer to hardware::btensor = dmatensor<bf16> with dma = true (dmatensor.hpp:173, :223-228). Only the host executor's tensor carries false, and that executor is what the t_llama_unit model cases use. The flag is provenance only and append_v_row deduces it, so no wrong bytes follow, but the sentence must change. G41 stays partly for the same reason; the facts file is corrected in section 10.",
+   "recommendation": "Replace 'The model source already has a view with dma = false.' at :270 with: 'The model source vs[ix].as_view() carries the buffer's own DMA flag: true for the hardware btensor of tp1, tp2 and tp4 (a dmatensor; dmatensor.hpp@2880c3aa9b:173, :223-228; btensor.hpp:21), false for the host executor's tensor (tensor.hpp:71-75), which the t_llama_unit model cases use. Wrap it without changing that flag; the flag is provenance only (views.hpp:11-19) and append_v_row deduces Dma.' Keep the next sentence: dma = false for GOF scratch and raw-array test fixtures. Optionally give the wrapping form: slice<geometry.kv.head_size>()(std::as_const(vs[ix]).as_view(), kv_head * geometry.kv.head_size), the slice the 8-lane branch already uses at model.hpp:2836-2838."
+  },
+  "J10": {
+   "lead_note": "Holds 3 of 3. Narrowed: the design calls the searches an audit, not a zero-match test (:405); the defect is that the audit's stated scope (where V-plane address extraction may occur) does not match its command, which greps only reinterpret_cast, while the helper route needs no cast. The friend relation limits who reads the private pointer, not who calls the helper's static function, so a search is the rule's only check."
+  },
+  "J11": {
+   "lead_note": "Holds 3 of 3 (two at note); lowered to note by the lead. Measured at 2880c3aa9b: v_base 61 lines and v_data 23; four are the cache accessors and 80 are FPGA HBM address variables, test buffers and one dump-helper parameter. The design labels the search an audit, and removal of the two accessors is enforced by the AMX-on build, because the only v_data call sits under TRON_AMX_DISPATCH. Correction to the recommendation: a pattern that matches only the two call sites misses the two definitions.",
+   "recommendation": "Keep the wide search as the role audit. Add one sentence after 'Review remaining hits for their intended role.': 'v_base, v_data and fill_random hits outside h/tron/models are FPGA hardware-attention code (HBM address variables, one dump-helper parameter), test buffers and unrelated local helpers, not cache accessors.' For the two removed accessors, grep both the call sites and the definitions (at 2880c3aa9b: kv_cache.hpp:1609, :1612, :2237; self_attention.hpp:1681); a pattern that matches only the call syntax passes with dead definitions left in place."
+  },
+  "J12": {
+   "lead_note": "Holds 3 of 3. The child's identity case breaks in three places (scatter_row moves, qk_rowmajor_128x4 and qk_vnni_128x4 become typed), and the route is derivable from :426-443 but nowhere tied to the case, the same shape as round-3 G22. Corrections: wrap each source row explicitly in const_view<bf16,true,false,seq<128>,sseq<1>> (the deduction rule at :432); the case has no hand-packed bytes, so say fill only through the typed store_row.",
+   "recommendation": "Add one bullet after :443: 'The child's VNNI QK identity case in t/t_amx_numerics.cpp (30c4ac82cb:188-243) replaces its raw vnni_plane struct with a k_vnni_tensor<PAGE_TOKENS_64,HEAD_SIZE_128> owner (16,384 bytes, 64-byte aligned, heap or local). Fill it with 64 typed K store_row calls, each source row in->k + tok * HEAD_SIZE_128 wrapped explicitly in const_view<bf16,true,false,seq<HEAD_SIZE_128>,sseq<1>> (qk_inputs is alignas(64) and each row is 256 bytes), keeping the scrambled token order (stride 37, offset 11). Pass owner.as_view() to qk_vnni_128x4. Wrap in->k in const_native_k_view<PAGE_TOKENS_64,HEAD_SIZE_128> for the qk_rowmajor_128x4 call, as the parent's QK case does. Fill the owner only through the typed store_row; add no test-only pointer constructor or friend. Keep the bit-for-bit score comparison as the check; the case keeps verifying the typed K store plus the kernel's panel addressing against the row-major kernel, as its comment at 30c4ac82cb:193-196 states.'"
+  },
+  "J13": {
+   "lead_note": "Holds 3 of 3 (two at note); lowered to note by the lead and narrowed to one sentence: :452 names model.hpp and TronCpp.hs as the home of shared-save coordination but omits common.hpp, where the child keeps k_store_window_t. The child diff is the declared specification (:411), t/AGENTS.md is linked at :666, and the compiler reports the k_head_fn lambdas. Citations: t/CMakeLists.txt:618; lambdas at t_gof_dma.cpp:347, t_gof_staging_leaks.cpp:137, t_phase1_integration.cpp:857, :890, :943.",
+   "recommendation": "At :452 replace 'Shared-save coordination stays in model.hpp and ingest/src/TronCpp.hs.' with 'Shared-save coordination stays in model.hpp (save_k and its window protocol), common.hpp (the batch's k_store_window_t state) and ingest/src/TronCpp.hs (the generated calls).' Optional: at :415 add 'Register t_k_vnni_layout in t/CMakeLists.txt with add_catch_test and the fake label, and update the k_head_fn lambdas in t/t_gof_dma.cpp, t/t_gof_staging_leaks.cpp and t/t_phase1_integration.cpp to the three-argument shape.'"
+  },
+  "J14": {
+   "lead_note": "Holds 2 of 3; lowered to note by the lead. Section 6 (:376) already names the native K copy as a row-range byte copy, and array branch is the design's own name for the native storage branch (:428), so the section-7 phrase is compressed rather than misleading. Optional rewording only.",
+   "recommendation": "Optional: replace 'Retain the existing array copy in the native branch.' (:434) with 'Retain the native branch's existing row-range memcpy of count rows from k_at(src_begin) to k_at(dst_begin) (child kv_cache.hpp:2117-2127, identical to main kv_cache.hpp:1933-1941).'"
+  },
+  "J15": {
+   "lead_note": "Holds 3 of 3. Narrowed: N49 and N51 have no response left anywhere in section 9; N53's survives under F08 (:581, :631); F31 was resolved in round 2 and was absent from the round-3 row too; row extraction does answer F35 and N52, so only live-count bounds and weighted-sum instructions fit no id in either row. The body carries every response, so this is a table-accuracy regression.",
+   "recommendation": "Replace the :607 response cell with: 'The round-3 G12 choice supersedes the custom bf16_chunk override and its structural test; use the inherited bit-exact fallback (N13). Keep the column rule: positive columns divisible by chunk_size, with set_v's 32-dimension rule stated separately (N49). The packed types carry no DMA template parameter or static DMA flag (N51). The named expression consumer is the host-tensor construction check, which reads chunk() (N52). State the generic expression-slice lifetime limit and add no packed slice API (N53). [Interfaces] [Slice contract]'. Replace the :632 row with: 'Keep class definitions complete in both widths so the unconditional fake kernels compile at 8 lanes (F11). State the column rule beside the sketch's positive-dimension rule and set_v's 32-dimension rule (F31). Use V-specific v_vnni_* names (F32). Adopt the round-3 G12 choice: inherited bf16_chunk fallback, no override or signature test (F35; see the F35 residual row). Name the four build configurations and their CMake flags (F47). [Interfaces] [Mapping] [Build matrix] | Packed-body compilation and the build-matrix runs remain to run. No custom-override proof remains required. |'"
+  },
+  "J16": {
+   "lead_note": "Holds 3 of 3 at note. Correction: add data() accessor, do not substitute it. No public data member is right for tron, whose ordinary view exposes a public data field (view.hpp:40), and the sketch keeps data_ private; the sentence lacks only the accessor.",
+   "recommendation": "Write 'no public raw-pointer constructor, data member, data() accessor, or pointer conversion' at :127 and :259 (add the accessor, keep the data-member exclusion). Optional: in the typed-boundary row (:465) add 'Reject a data() member on packed matrices and rows' beside 'Reject raw-pointer construction'."
+  },
+  "J17": {
+   "lead_note": "Holds 2 of 3 at note. The completion phrase mirrors the issue's own item 2 and the round-3 G07 wording, so the ambiguity is inherited. The closing rule is an instruction outside the paste block; whether to wait for the child's merge stays the assignee's decision."
+  },
+  "J18": {
+   "lead_note": "Holds 3 of 3 at note. Correction: date the issue node by its own updated_at (2026-09-21T23:37:47Z); the file's retrieved_at predates the issue. The Scope bullets and PR order list are identical in both copies, so the paste instructions are unaffected. Unchanged since round 3."
+  },
+  "J19": {
+   "lead_note": "Holds 3 of 3 at note. The :83 list compresses :452 and omits the owner, the plane view and the row expression; the typed kernel argument is a boundary property (:418), not something local to the type, so do not add it to the holds list. The [Child responsibilities] link reaches the full list, so G37 stays resolved."
+  },
+  "J20": {
+   "lead_note": "Holds 2 of 3 at note. The list at :163 is complete for its stated scope (S1-S13 citations); the file is cited only at 2880c3aa9b, whose content equals live main, and the inserted lines add no cache caller. Completeness note only."
+  },
+  "J21": {
+   "lead_note": "Holds 3 of 3 at note. This is the unapplied half of the round-3 G08 source-lens correction (use the same key in kv_cache_fwd.hpp and v_vnni.hpp), so G08 goes to partly (lead). Ben's sketch uses the class key; every type under h/tron/tensor uses struct, so the two inputs disagree and the design must pick. Corrections: GCC also has -Wmismatched-tags but not under -Wall; the clang -Wall claim rests on clang's documentation, not a local run. Citations: tensor.hpp:26 and :31, kv_cache.hpp:1990 and :2191."
+  },
+  "J22": {
+   "lead_note": "Holds 3 of 3 at note. Correction: round-3 G16 asked for all three K forward declarations by name, so :418 follows the review; only the V owner and row declarations are the design's own choice. Prefer the first option (say the two tensor headers include kv_cache_fwd.hpp) over dropping declarations."
+  },
+  "J23": {
+   "lead_note": "Holds 3 of 3 at note. Kind is lost specificity: the round-3 G01 corrections never asked to drop friend. Correction: Ben's sketch befriends the helper from the view only (comment body line 93); write a friend of the V view types, not of owner and row.",
+   "recommendation": "In :260 write 'Define detail::v_vnni_access in h/tron/tensor/v_vnni.hpp. v_vnni_view declares it a friend, as in the reviewer's sketch, and it exposes one static function that returns the plane base pointer of a view.' No other change."
+  },
+  "J24": {
+   "lead_note": "Holds 3 of 3 at note. Only the fixture route at :400 needs the implicit conversion; the production PV call already receives page::v_packed's read-only view. The sketch's converting constructor is non-explicit, so the intended form is derivable; one word closes it."
+  },
+  "J25": {
+   "lead_note": "Holds 3 of 3 at note. The phrase is the round-3 G01 option-A wording adopted verbatim, so the review coined it. The word once excludes a per-iteration fetch; the residual gap is that tile means a 1,024-byte AMX panel in Words (:49) and a 64-byte bf16x32 vector here, and the design never says what detail::v_vnni_access returns."
+  },
+  "J26": {
+   "lead_note": "Holds 3 of 3 at note. A one-character fix; the range already covers the get_v call at 2654-2655."
+  },
+  "J27": {
+   "lead_note": "Holds 3 of 3 at note. The parameter family (:266) and the deduction rule (:270) are stated; only the head-row slice expression is missing, and the 8-lane branch three lines below shows it. Correction: do not hard-code bf16; the buffer scalar is executor-dependent (bf16 for btensor, fp16 for htensor, float for the host tensor), which is why set_v has three overloads."
+  },
+  "J28": {
+   "lead_note": "Holds 2 of 3 at note. G22 is resolved as corrected: round 3 asked the design to state the policy and prefer the append route, and it did, with a reason. The one useful residual is ordering: run the byte comparison before the kernel call so a write-path failure is reported as a layout failure. The request to reopen the byte-copy route is dropped.",
+   "recommendation": "Optional. After 'Copy bytes out of the trivially copyable owner into a plain test buffer and compare them.' (:401) add: 'Run this byte comparison before the kernel call, so an append_v_row failure is reported as a layout failure and not as a numerics failure.' The prohibition on copying hand-packed bytes stays; it is the policy round 3 asked the design to state."
+  },
+  "J30": {
+   "lead_note": "Holds 3 of 3 at note. Correction: bin/ci/test_build_test_stage.py does read the Build Tron step but asserts nothing about the K-layout flag, so the ported line executes only in a directed dispatch on the child branch (README.ci.md:90 gives the command) or through publish-deb.yml."
+  },
+  "J31": {
+   "lead_note": "Holds 3 of 3 at note. The design already adapts the layout suite to standalone owners (:443) and places the consumer there (:439); the missing sentence is that a standalone-owner check needs no TRON_K_VNNI=ON configuration, so only page-level packed-K cases remain the section-8 obligation. The :495 evidence rule still applies to every new case."
+  },
+  "J32": {
+   "lead_note": "Holds 3 of 3 at note. Correction: the sentence is new in this revision (the round-3 row had no caller list) and copies the uncorrected round-3 G46 recommendation, so G46 stays partly. store_k_block has two branches (the kout slice view and the conv[0] scratch)."
+  },
+  "J34": {
+   "lead_note": "Holds 3 of 3 at note. Kind is ambiguity: under a joint reading the sentence is true; the distributive reading misplaces the selection. The round-3 G45 corrections asked this summary bullet for a separate sentence; the row at :434 is fixed, so G45 stays resolved with this residual noted in its remark."
+  },
+  "J35": {
+   "lead_note": "Holds 2 of 3 at note. The named build host sw-dev-01 has AVX-512 (AMD Ryzen 9 9950X, round-2 record), so the condition does not arise on the documented path, and with REMOTE=1 make test-host routes the run through Slice. An optional clause at :486 is enough.",
+   "recommendation": "Optional clause after 'Run the resulting binary only on compatible hardware.' at :486: 'On such a host make test-host itself exits 1 with Cannot run test-host: cross-compiled for AVX-512, unless REMOTE=1 routes the Slice run to the pool [GNUmakefile@2880c3aa9b:227-231, 243-247, 901-903].' The named build host sw-dev-01 has AVX-512, so no further change is needed."
+  },
+  "J36": {
+   "lead_note": "Holds 3 of 3 at note (source at minor). Kind is omission: the design states no frequency. Measured this round through the read-only GitHub API: none of the 31 to 41 most recent executed Test host jobs ran on delphi-3bda-0 (runners seen: delphi-3af6-0, andoria-02-0, delphi-3bd6-0, andoria-14-0, delphi-17cf-0, andoria-09-0), and the delphi-3bda runner service was disabled at the last notebook check. So the :504 fallback is the usual case; this feeds the J01 paragraph.",
+   "recommendation": "Add after 'Preserve logs immediately if the runner is accessible within the permitted host scope.' at :503: 'The Test host job runs on any runner labeled self-hosted, fpga, test, avx512; delphi-3bda-0 is one of six such runners (README.ci.md:421-434) and is stopped at night. In the most recent runs none of the executed Test host jobs landed on it, so expect the fallback below to be the normal case and plan the evidence route of the CI section accordingly.' Do not assert an unmeasured frequency; cite the measurement date."
+  },
+  "J37": {
+   "lead_note": "Holds 3 of 3 at note. Kind is omission: :819 and :1575 take the bf16 overload (narrowing at 2454 and 2462), :2038 takes the float overload (shift at 2420, mask at 2429). The lead's facts file named :819 and :2038 as the bf16 callers; corrected in section 10."
+  },
+  "J39": {
+   "lead_note": "Holds 3 of 3 at note. An over-statement, not a fabrication: the AMX-off compile of the fakes checks class completeness at the fixed shape and return-type and noexcept agreement; a parameter-list drift compiles silently as an unused overload and is caught only in the AMX-on link. The phrase echoes the round-3 lead note on G14."
+  },
+  "J40": {
+   "lead_note": "Holds 3 of 3 at note. Cheapest fix: point [AMX-on checks] at #tests, as the G14 G47 and G27 rows already do, or give the Build configurations heading an id."
+  },
+  "J41": {
+   "lead_note": "Holds 3 of 3 at note. A missed edit: the neighbouring M05 row changed from both to all three review rounds; this intro did not.",
+   "recommendation": "Replace with: 'The archived round-1 findings remain linked below. The round-2 and round-3 reviews identified incomplete corrections in the first and second revisions. This table records the current response without treating planned implementation or external issue edits as completed.'"
+  },
+  "J42": {
+   "lead_note": "Holds 3 of 3 at note. The -r3-votes.html archive exists since 17:25 UTC with id anchors for G11 and G43, so the design can link it directly. The design was finalized before the archive existed, so this is next-revision work.",
+   "recommendation": "After 'The rejected round-3 candidates G11 and G43 remain rejected.' add '[Round-3 votes and corrections] <claude-review-design-new-tensor-type-r3-votes.html>' (the archive exists and carries id anchors for G11 and G43). After the round-1 list add '[Round-1 votes and corrections] <claude-review-design-new-tensor-type-r1-votes.html>'. Name the rejected ids that the 'Keep append_v_row ...' sentence answers (N19, N21, N54)."
+  },
+  "J43": {
+   "lead_note": "Holds 3 of 3 at note. Not a codex defect: the -r3 archive was created about 43 minutes after the design was finalized. This page keeps an anchor for all 75 linked ids (49 G, 3 H, 19 F, 4 C; G12 is linked twice), so no link goes dead; each lands on the round-4 disposition row, which links on to -r3.html. The next revision should repoint the 77 hrefs and the Words rows at :46-47."
+  },
+  "J44": {
+   "lead_note": "Holds 2 of 3 at note. The label names the linked code accurately (the base class's override check plus fallback); optional relabel only."
+  },
+  "J45": {
+   "lead_note": "Holds 3 of 3 at note. Widen the range to #L2767-L2784 or the finding's L2764-L2787. An unchanged main-thread call would compile under the merged signature with N_WORKERS_3 bound to worker_ix and fail the design's own index assertion at run time, which is why the body's positional-call search matters.",
+   "recommendation": "Change the S18 [Direct worker test calls] href to t/t_llama_unit.cpp#L2767-L2784 at 30c4ac82cb (the one-thread call at 2767, the helper calls at 2779-2780 and the main-thread positional call at 2783-2784), or to #L2764-L2787."
+  },
+  "J46": {
+   "lead_note": "Holds 3 of 3 at note. The Haskell step is :235-238 at 2880c3aa9b and live main; #L235-L238 matches the body sentence, which names only the Haskell tests."
+  },
+  "L01": {
+   "lead_note": "Holds 2 of 3; lowered to note by the lead. The rg search (:405-407), step 6, the Changed-callers row and the mandatory AMX-on compile (:480, :536) reach all 16 set_v call sites, including t_amx_dispatch_dtype.cpp:98, which only the AMX-on build instantiates. Listing them at :281 is parity with the get_v row, not a gap an implementer falls into. Citations: exercise_page spans :62-162; the tensor sources are at 2530, 2701 and 2788.",
+   "recommendation": "Optional, for parity with the get_v row. Append to :281: 'Rewrite the 16 raw-pointer callers at saved-main t_llama_unit.cpp:142, 796, 1554, 1723, 1923, 2533, 2535, 2568, 2569, 2690, 2705, 2721, 2792, 2802 (sources already 64-byte aligned), t_amx_dispatch_dtype.cpp:98 inside the function template exercise_page (instantiated only from the TEST_CASE under #ifdef TRON_AMX_DISPATCH at 192-209, so only the AMX-on build compiles it), and t/heterogeneous_scheduler_compile.cpp:443 (the fixture that gains alignas(64) at :270).'"
+  },
+  "L02": {
+   "lead_note": "Holds 3 of 3 (intent at note). page::scaled_v is one body outside every width block and today passes .v[0] to both constructors; the design types them differently and says only constructed internally from the block. Both builds fail to compile until the branch is written, so the risk is a stall, not wrong bytes. Corrections: the 8-lane const_view cast replaces the v_base cast the design removes (kv_cache.hpp:2237-2240), the existing 8-lane row view's public .data pointer is a second route, and the :283 rule came from round-2 N23 and forbids page-level accessors only.",
+   "recommendation": "At :286 add: 'page::scaled_v (kv_cache.hpp:2252-2262) is one body for both widths and passes kv_block<geometry>(slot, kv_head).v[0] to both constructors. Give it a TRON_CHUNK_SIZE branch: at 16 lanes pass the block owner's v.as_view(); under #else construct the const_view named in this row from the block, either with one reinterpret_cast of the bf16s array in the pattern of kv_block::k_view() const (this cast replaces the v_base cast the design removes) or from the existing 8-lane row view's public .data pointer. Say which, and name the result in the audit sentence at :405.' Optionally state that :283 forbids page-level 8-lane accessors only, so a detail-level kv_block::v_view() const under #else is permitted."
+  },
+  "L03": {
+   "lead_note": "Holds 2 of 3 at note. The design's mechanism (dependent requires checks under STATIC_REQUIRE) already forces unevaluated checks, so the omission is the missing reason, not a missing constraint. Citation: src/tron/CMakeLists.txt:219-220, not :193."
+  },
+  "L04": {
+   "lead_note": "Holds 2 of 3 at note. Section 2 retains the sketch's restricted view construction (:79) and :465 pins the observable contract; the parent section still names no friend and no helper member. One clause at :259-260 closes it, and the maintainer judge asks for the same. The ids J23 and J07 in the claim are this round's ids.",
+   "recommendation": "At :259 add: 'The view's pointer constructor is private. v_vnni_tensor and detail::v_vnni_access are its friends, as in the retained sketch, and the writable-to-read-only converting constructor is implicit. detail::v_vnni_access exposes one static function that returns the plane base pointer of a view. The child mirrors this for k_vnni_tensor, k_vnni_view and detail::k_vnni_access.'"
+  }
+ },
+ "restatus": {
+  "N11": "partly",
+  "G08": "partly"
+ },
+ "residual": {
+  "G15": "At :287 replace 'and existing lifecycle-test callers' with 'and its two callers: TEST_CASE fixed KV layout addresses each slot geometry (t/t_llama_unit.cpp@2880c3aa9b:761, calls at :784-785) and TEST_CASE apply and join page ranges (:1953, call at :2008, which reads the random values back as K and V inputs)'. Optional: 'through page::set_v (16-lane) or page::v().set (8-lane)'.",
+  "G35": "In section 2 use one label for the person: replace 'issue author' at :77, :82 and :106 with 'the issue assignee' (already tied to the login at :7 and :97), or add to the Words row at :57: 'Section 2 says issue author for the scope request in issue #4525 and assignee for the GitHub actions; both are jhan-positron.'",
+  "G17": "Add to :260 after 'The child defines a separate detail::k_vnni_access in h/tron/tensor/k_vnni.hpp.': 'Typed K operations and the K-specific kernels qk_group and qk_vnni_128x4 may use it. Page methods, book, and tests do not call it.' (J07 carries the full wording.)",
+  "H01": "After 'make lint-notes' at :514 add: 'In the default nix develop shell, make lint-notes compiles bin/lint-notes with the ingest GHC and Cabal; nix develop .#lint --accept-flake-config supplies the prebuilt tron-lint-notes. make lint alone does not run the Note checker.' Write 'when defining, editing, or moving Notes' so the ~~~ rule also covers the new layout Note at :380; the ~~~ line starts at the Note [ column on the next line.",
+  "G46": "Replace 'in model save paths, copy paths, and affected test callers' at :432 with 'in model.hpp store_k_block (the kout slice view at child model.hpp:2920; the conv[0] scratch at :2924), in the uniform-geometry forwarding overloads kv_cache.hpp@30c4ac82cb:1752-1764 whose const bf16* and bf16* parameters become the typed views, and in the set_k_row and get_k_row callers of t/t_llama_unit.cpp, t/t_k_vnni_layout.cpp and t/t_amx_dispatch_dtype.cpp:101. copy_storage_slot calls neither routine.' (J32.)",
+  "G41": "Replace 'The model source already has a view with dma = false.' at :270 with the executor-dependent sentence given under J09, and optionally the slice expression the 8-lane branch already uses.",
+  "N11": "Change the second sentence of :77 to 'That reading is right on the point the reviewer raised: his reservation concerns only a separate layout type.' Optionally add [Request to codex] <../../input-2-ai/codex-add-tensor-type.md> after it, because the saved GitHub JSON does not contain the reading. (J04.)",
+  "G08": "Add after :245: 'Define v_vnni_tensor, v_vnni_view, v_vnni_row and the child's k_vnni_* types with the class key, matching these declarations (the sketch uses class; every type under h/tron/tensor uses struct, and a struct/class mismatch draws clang's -Wmismatched-tags under -Wall).' (J21.)"
+ },
+ "remark": {
+  "G15": "The terminology defect is fixed: the fill_random row says random normal-distribution fill, the section-8 lifecycle row says random whole-block fill, the Words row separates NaN and 0xa5a5 poison from the random fill, and test NaNs are traced to page::set_v. All three graders still want the two callers named, as the corrected recommendation asked.",
+  "G35": "The Words row exists and its facts are right (both GitHub logins are jhan-positron; the second sense of user in the host-guard bullets is covered). The second step of the recommendation, one label in section 2, is not applied: issue author at :77, :82 and :106 and assignee at :97, :112, :114 and :131 still alternate.",
+  "G17": "Five of six parts are in the body: the typed K operations, the three helpers and detail::k_vnni_access move to h/tron/tensor/k_vnni.hpp (:416), the kernel header keeps only qk_group and the cache drops its include (:417), the paths are written in full, and Q1 says each family's plumbing. The sentence naming who may use detail::k_vnni_access is still missing (J07).",
+  "H01": "The body now names make lint-notes, the exact lint-toolchain command and the Note format (:514), and every checked fact is right (GNUmakefile:675-685, bin/ci/run-lint-checks.sh:7 and :18, flake.nix:2233, bin/lint-notes:21-31). The checker and the source re-grader still want the shell requirement of the checker stated and the ~~~ rule extended to the new Note; the fairness re-grader graded it resolved.",
+  "G46": "The rule and its reason are now in the row (:432): construct read-only source views explicitly because deduction ignores the conversion. All three graders still want the callers named, as every round-3 correction asked, and the phrase copy paths removed: the child's copy code calls neither set_k_row nor get_k_row (J32).",
+  "G41": "The two asked-for parts are in :270: Dma is deduced from the caller's view, and dma = false is named for the GOF scratch and the raw-array fixtures. The added sentence about the model source states the wrong value (J09); the lead's facts file had endorsed it and is corrected in section 10.",
+  "N11": "Majority resolved (checker and fairness re-grader); the lead lowers it to partly with the source re-grader and J04: the reading is now stated, as round 3 asked, but the same edit dropped the verdict that the round-3 text carried (identifies the reviewer's concern correctly). One clause restores it.",
+  "G08": "All three graders resolved: the existing bf16, view and const_view are declared with the struct key and without defaults (:243-245), which is right (views.hpp:22-34, expr.hpp:17-22). The lead lowers it to partly with J21: the round-3 source-lens correction also asked the design to state the key of the new definitions, and the page still does not.",
+  "N42": "Resolved by majority. The instruction at :114 carries the three-part clause (keep the five Scope bullets and the PR order list; add the sixth bullet; replace the name in both places with the links kept) and the assignee is named. The source re-grader's residual is the data member wording, carried as J16 (add data() accessor).",
+  "H02": "Resolved by majority: ingest/AGENTS.md is named before the generator edit (:415) and make format-haskell runs before bin/ingest-cabal test inside nix develop (:451), matching ingest/AGENTS.md:25-28 and GNUmakefile:762-764. The fairness re-grader wanted the mechanism sentence (the required Lint check runs fourmolu --mode check over ingest; make format and make lint do not); optional.",
+  "N56": "Resolved by majority: the one-place list exists at :452 with file names for every item, and the opening sentence answering the request's expectation is at :83 with a link to the child section. The fairness re-grader wanted the score readers named (qk_group in h/tron/kernels/k_vnni.hpp, qk_vnni_128x4 in amx_attn_iface.hpp); optional. J13 and J34 correct two clauses of the same bullet.",
+  "G45": "Resolved by majority: the row at :434 now says query-layout and kernel selection stay in self_attention.hpp, which matches the three if constexpr branches at child :1365, :1436 and :1574. The summary bullet at :452 pairs the selection with the score kernels under one reading (J34, note).",
+  "G37": "Resolved. The Child scope bullet at :83 answers the request's step-4 premise, places storage selection outside the type (the round-3 correction) and links the child section that holds the full list. J19 notes that the bullet compresses that list.",
+  "G01": "Resolved. The design adopts round-3 option A at every place the corrected recommendation named: scaled_v_expr stays in kv_cache.hpp, is a permitted user of detail::v_vnni_access and the only one in that file, obtains the pair-tile base once, and keeps its _mm512_load_si512 and _mm512_dpbf16_ps loop (:260, :286, :346, :390). Every source fact checked holds. Two notes follow from the rewrite: the word friend was dropped (J23) and pair-tile base is undefined (J25).",
+  "G22": "Resolved. The fixture subsection (:397-403) gives the PV case a v_vnni_tensor<64,128> owner, 64 append_v_row calls from bf16_rne rows, owner.as_view() at the kernel call, a byte comparison against the independent formula, an unchanged numerical reference, and the policy on hand-packed bytes. J24 asks for the word implicit on the view conversion the route relies on; J28 suggests running the byte comparison first.",
+  "G14": "Resolved. The design keeps the fakes where they are and gives its reason (avoid an extra test refactor), which is the decline option round 3 offered. The section-9 cell over-states what the AMX-off compile checks (J39).",
+  "G05": "Resolved. The block now says which two live sentences change and keeps all three links; the applied text would carry the two review links twice (J05) and the item-3 instruction can be read as a whole-item replacement (J06).",
+  "G06": "Resolved. The draft is additive: keep the five Scope bullets verbatim and the PR order list, insert the problem and terms before Scope, add one sixth Scope bullet.",
+  "G07": "Resolved. The closing rule names PR order item 2 and defines its completion; item 3 is not part of the rule. J17 notes the completion criterion is a branch state, as in the issue's own item 2.",
+  "G12": "Resolved. The design adopts option A: no override, no member-pointer assertion, the inherited fallback with the reason it preserves the stored bits under either NaN policy (:258), and the host-tensor consumer reads chunk() (:253, :467). J44 notes the S15 label still says override detection.",
+  "G21": "Resolved. The caller search and the scoped reinterpret_cast audit are separate commands with a stated purpose and file scope (:405-407); the design says the second is an audit, not a zero-match test. J10 and J11 refine the patterns.",
+  "G24": "Resolved. The child bullet at :420 names the three changed granite_rapids_6962p records, the bench --update and --new commands, the platform-block rule and the recorded deferral; the child diff confirms exactly those three rows.",
+  "G25": "Resolved. The new subsection (:500-504) names the Logs: path, the runner and runtime paths and where to read them, the next-checkout deletion, the 10-run retention, the unreachable-runner fallback and the host rule; every fact checked holds (bin/slice:114, :4181; test_runtime.py:134). J36 measures that the fallback is the usual case.",
+  "G26": "Resolved. The definition of done now carries the cost-record refresh or recorded deferral and what bench --check detects (:537).",
+  "G29": "Resolved. The concrete Nix change (-DTRON_AMX_DISPATCH=ON in cmake_args in nix/cmake-tron-test-build.nix:79-103) is restored at :492 under a separate CI scope decision.",
+  "G30": "Resolved. The typed-boundary row names the case, the namespace and both kernel rejections (:465). L03 notes the reason the checks must stay unevaluated is not stated.",
+  "G49": "Resolved. The AMX-proof subsection (:506-508) names the t_amx_numerics log without the AMX unavailable warning, the TRON_AMX_DISABLE=1 control run and the fact that t_amx_dispatch_dtype proves dispatch only.",
+  "F16": "Resolved. The exact Nix flag change is back (:492), PR #4505 is described as open and unmerged with nightly-only scope (:498), and the manual workflow URL rule stands (:498).",
+  "F35": "Resolved. The design chose G12's smaller interface (no override, inherited fallback, extraction mechanics from get_v) and says so at :258, :262 and :590; the round-2 residual about a cost clause is superseded by that choice."
+ },
+ "short_version": [
+  "The third revision resolved 71 of the 79 open items (52 round-3 findings plus 27 residuals from earlier rounds). 8 are partly resolved, each a one-sentence wording gap; none is unresolved and none regressed.",
+  "This round found 47 new defects: 1 major, 11 minor, 35 notes. The major one is a process gap, not a design error: the design demands proof that the required Test host job executed the new tests before a test is committed, a draft pull request runs no Test host job, and the page names no route to that evidence (J01). One new sentence on the production write path is wrong (the model's V buffer carries dma = true, not false; J09); it cannot produce wrong bytes, but it must change.",
+  "Verdict: accept with minor edits, implementable now. All three judges say so; two ask for the J01 paragraph before the first test commit. After that paragraph and the one-sentence edits listed in section 7, another agent can build the parent from this page."
+ ],
+ "verdict_tile": "Accept with minor edits",
+ "verdict_badge": [
+  "ok",
+  "3 of 3 judges"
+ ],
+ "verdict_sub": "implementable now; J01 (CI route) before the first test commit, J09 (dma sentence) before step 3; see section 8",
+ "dispo_intro": [
+  "Each of the 79 open items (the 52 round-3 findings G01-G51 without G11 and G43, H01-H03, and the 27 items round 3 graded partly or deferred) was checked against the third revision by one checker agent and then independently re-graded by two adversarial re-graders (a source-truth lens and a fairness lens). The status below is the majority of the three; where I (the lead) changed a status after reading the votes, the row says so."
+ ],
+ "dispo_outro": [
+  "Reading the votes changed two statuses, both downward. N11: the checker and the fairness re-grader graded it resolved because the reading is now stated, but the same edit dropped the verdict word the round-3 text carried, which is what J04 reports; partly. G08: all three graders resolved it because the existing types now carry the struct key, but the round-3 source-lens correction also asked for the key of the new definitions, which J21 reports is still unstated; partly. Six items were partly by majority (G15, G35, G17, H01, G46, G41). Eleven items had at least one dissenting vote; none was a three-way split.",
+  "Every partly item is one sentence away from resolved, and section 7 lists the sentences. The two round-3 deferred items (F20, F21) are now resolved: the design prepared the exact issue text and left the public edit to the assignee, which is what round 1 asked for."
+ ],
+ "findings_intro": "Ten finders read the third revision through one lens each (C++ interface, behavior and arena construction, process and CI, handoff actionability, fidelity to Ben and jhan, simplicity and scope, formulas and page quality, the child's needs, a regression hunt over the round-3 to round-4 word diff, and a section-9 honesty audit). Their 46 candidates and 16 new defects the disposition checkers found in the fixes were merged into 46 candidates (16 duplicates folded, none dropped), and each was put to three verifiers who tried to refute it; a finding survived when at least two could not. A completeness critic added four candidates that went through the same verification. 47 survived and 3 were rejected. The lead dropped none, regraded five to note after reading the votes (J08, J11, J13, J14, L01) and folded the verifiers' corrections into the recommendations; the Lead's reading row of each finding says why. Severities are the lead's final grades.",
+ "questions_intro": [
+  "Design section 2 carries the decision record: four questions for Ben (Q1 to Q4) with a proposed choice, a fallback if rejected and a record status, plus D5, the native-K typing scope jhan requested. All three judges found the record adequate. The table gives my reading of each row against Ben's three comments (evidence/github-review.json) and jhan's request."
+ ],
+ "questions_rows": [
+  [
+   "Q1. May each concrete view contain its address formula? Proposed: yes; one view per layout, separate V and K owners, no layout-policy template.",
+   "Ben's sketch sections 1 and 2 and his reservation: \"I'm not entirely convinced of the necessity of separate k_vnni_layout from vnni_view\".",
+   "Adequate and unchanged since round 3. The paragraph under the table now states jhan's reading (the address formula belongs in the view) but no longer says it is right; J04 restores the verdict clause in one sentence."
+  ],
+  [
+   "Q2. Should const matrix and row objects prevent element mutation? Proposed: yes at both ranks.",
+   "Ben's sketch: \"As with std::span, a const view object does not make its elements const. vnni_view<const bf16, Layout> does.\"",
+   "Adequate; the departure is flagged with a fallback. The row-conversion clause that round 3 asked for is now in the contract row (rows have no cross-constness conversion, :259)."
+  ],
+  [
+   "Q3. May packed views expose logical rows through operator[]? Proposed: yes, a logical row expression with no public pointer; keep bounds-checked at().",
+   "Ben's review asked for the expr precedent; his sketch excluded operator[] because it suggests a contiguous row.",
+   "Adequate. The maintainer judge notes one phrase stronger than Ben's words survives at :439 (\"the reviewer's uniform-expression requirement\"; he wrote \"I think the way I would approach this\")."
+  ],
+  [
+   "Q4. Is the smaller parent scope sufficient? Proposed: yes; expression reads and the existing typed bulk operations; slices, iterators and generic writes deferred.",
+   "Ben's review: \"the usual operations that we expect of tensor types and, in particular, the row-wise load/store operations\".",
+   "Adequate. append_v_row is now mapped to the sketch's V store_row (:266). One departure from the sketch is still stated nowhere: the row operations take tron's const_view and view where the sketch used std::span; the maintainer judge accepts it (the tron view carries the aligned and dma flags) but asks the page to say so, together with the sketch-name to design-name table round 3 requested."
+  ],
+  [
+   "D5. Who owns native-K typing? Requested scope: the issue author; reuse the existing K view type through the new const_native_k_view alias.",
+   "jhan's request and the issue title; not part of Ben's sketch.",
+   "Right, and the round-3 wording slip is fixed (\"the new const_native_k_view alias\"). G35 notes that section 2 still alternates between issue author and assignee for the same person."
+  ],
+  [
+   "What the record still lacks",
+   "The sketch-name to design-name table (round-3 maintainer ask), the std::span departure, and the CI route to execution evidence.",
+   "The first two are one table and one sentence for Ben's benefit. The third is J01, the one item that gates the implementer, and belongs in section 8, not in the record."
+  ]
+ ],
+ "questions_outro": [
+  "Nothing in the record misquotes Ben. The maintainer judge re-checked the comment ids and times against the saved JSON (18:24:52; 18:53:47; 18:58:31 edited 18:59:58 UTC) and confirmed that lines 301 and 416 now name his header path h/tron/tensor/vnni.hpp correctly."
+ ],
+ "edits": [
+  "J01 (major, with J36). After :495 add the CI route paragraph given under J01: the product jobs are draft-gated; collection is checked locally with make test-host or make list-tests; execution evidence attached to the PR comes only from a user-directed promotion to ready for review (allowed for the PR based on main), a user-directed Run CI label or a user-directed rerun; a directed gh workflow run is separate evidence under :497; complete the AMX-on local gate first; the Test host runner is normally not delphi-3bda, so plan for the :504 fallback. Rewrite the last sentences of :504 to match.",
+  "J09 and G41 (minor; wrong fact on the production write path). At :270 replace the dma = false sentence with the executor-dependent one under J09; optionally give the slice expression the 8-lane branch already uses (J27).",
+  "L02, J07 with G17, J23, L04 and J25 (the V and K access mechanics, one sentence each). At :286 say that page::scaled_v gains a TRON_CHUNK_SIZE branch and how the 8-lane const_view is built. At :260 name who may use detail::k_vnni_access (typed K operations, qk_vnni_128x4, qk_group) and that page methods, book and tests do not, write the qk_group argument type at :434, say the helper is a friend of the view types and returns the plane base pointer, and define pair-tile base (today's data member) once.",
+  "J04 with N11, J05, J06 and G35 (section 2). Restore the verdict clause at :77. In the issue block, keep one of the two link sentences (say which), move the two labels out of the quoted region, give PR order item 3 in full, and use one label for jhan in section 2.",
+  "J15, J41, J40, J42 and J43 (section 9 bookkeeping). Restore the per-id responses in the :607 and :632 cells; fix the round-1 table intro; point [AMX-on checks] at #tests; link the round-3 and round-1 votes pages; in the next revision repoint the 77 live-page hrefs to -r3.html and update the Words rows at :46-47.",
+  "J12, J32 with G46, J13, J34 and J19 (the child section). Add the identity-case fixture bullet after :443; name the set_k_row callers at :432 and delete copy paths; add common.hpp to :452 and split its selection sentence; list the owner, plane view and row expression at :83.",
+  "Words and wording (J02, J03, G15, J16, J21 with G08, J24, H01). Add rows for B tile and AMX tile, the hosts, worktree, the host-guard words and the descriptor pair; disambiguate pair_base; name fill_random's two callers; add data() accessor at :127 and :259; state the class key of the new definitions; write implicit for the view conversion at :259; extend the lint-notes sentence at :514.",
+  "Notes to take or leave (no change required): J08, J10, J11, J14, J17, J18, J20, J22, J26, J28, J30, J31, J35, J37, J39, J44, J45, J46, L01, L03. Each carries an exact fix in its recommendation."
+ ],
+ "verdict_intro": [
+  "Three judges read the design and the review summary independently. All three give accept with minor edits and say the design is implementable now; all three find the decision record adequate. The implementing agent would build steps 1 to 6 from the page and stop once, at the first test commit, on the CI route (J01). The maintainer judge lists no must-fix and asks for a sketch-name to design-name table and two wording fixes. The risk reviewer checked the numerics, lifetime and concurrency rules against source and found them right; the one consequential gap is CI. The lead's verdict follows: accept with minor edits, implementable now, with the J01 paragraph written before the first test commit and the J09 sentence before step 3."
+ ],
+ "verdict_outro": [
+  "What changed since round 3. Round 3 had one design major (G01, where scaled_v_expr obtains the packed address) and two items two judges refused to start without (G22, the numerics fixture route; G09, the constraint mechanism). All three are resolved in the body with every fact checked. The round-3 partly count fell from 25 to 8. This round's one major is a process paragraph the design's own rules require; none of the 47 findings changes what gets built, and the checkers found no regression among the 79 known items. Four minors are wording on the production path or the record (J09, J04, J05, J06); the rest are mechanism sentences a compiler would otherwise surface (L02, J07, J12) or bookkeeping (J15).",
+  "What the design does not have to do. It compiled nothing and ran nothing; it posted nothing and edited no issue; sw-dev-01 is codex's user rule; main moving by one line since 2880c3aa9b is covered by its relocate rule. None of those is a finding. Ben's answers to Q1 to Q4 are not needed to start: the design says to implement the proposed choices and label them Proposed in the PR description, and all three judges accept that."
+ ],
+ "method": [
+  "This round used the round-3 shape. The lead first re-verified the facts the new text relies on (the self_attention.hpp block range, the panel formula against k_vnni::index, the seven LoopyTronSpec assertions, the Slice log path and retention, the lint-toolchain check, the child's 8-lane guard, the three cost-record rows, the fixture lines of t_amx_numerics) against the pinned commits and refreshed the live state of main, issue #4525, PR 4424 and PR 4505; that record is evidence/claude-review-r4/lead-verified-facts-r4.md. Two of the lead's pre-round facts were wrong and are corrected below.",
+  "Numbers of this round: 216 agents, 26.3 million tokens, 2 hours 7 minutes; 17 disposition batches (51 agents), 10 finders, 1 merge agent, 46 merged candidates with 138 verifier votes, 1 critic with 4 candidates and 12 votes, 3 judges. The workflow result is evidence/claude-review-r4/workflow-result.json; the inner result (the script's return value) is workflow-result-inner.json."
+ ],
+ "method_bullets": [
+  "Dispositions: 17 batches of 3 to 6 items; per batch one checker and two re-graders (source-truth, fairness); majority of three; batch files in evidence/claude-review-r4/batches/, built from the round-3 findings by build_inputs.py.",
+  "New findings: 10 finders (the same ten lenses as round 3, with the regression hunt over the round-3 to round-4 word diff and the section-9 audit over the four disposition tables), plus 16 new defects the checkers found in the fixes; one merge agent deduplicated; three verifiers (source, design-text fairness, intent) per candidate; a finding survived when at least two could not refute it; the lead read every vote before grading and folded the corrections into the recommendations.",
+  "Completeness critic after verification; its four candidates went through the same three verifiers. The critic also disputed the lead's facts file (see the next bullet) and the severity of J08, which the lead accepted.",
+  "Lead errors corrected: (1) lead-verified-facts-r4.md called the design's sentence at :270 defensible on the strength of the round-3 G41 lead note (dma = false); the production V buffer is hardware::btensor, a dmatensor with dma = true, so the sentence is wrong (J09) and the facts file now carries a correction block. (2) The same file named t_llama_unit.cpp:819 and :2038 as the bf16 get_v callers; the bf16 callers are :819 and :1575, and :2038 is a float caller (J37). (3) The round-3 facts file gave the self_attention.hpp width-check block as 31-37; it is 30-36, as the design says.",
+  "Three judges (implementer, maintainer, risk) read the design and the review summary independently.",
+  "Limits: no code was compiled or run; no chromium on this host, so the page was checked structurally (ASCII, anchors, links) and not rendered; the Test host runner measurement (J36) is a read-only GitHub API sample of the most recent runs, not a full history; agents can make mistakes, so every finding carries its evidence and votes; the lead's own reading is not a substitute for Ben's.",
+  "Evidence: evidence/claude-review-r4/ holds the workflow result, findings.json, build_inputs.py, build_findings.py, gen_review.py, overrides-static.json, make_overrides.py, overrides.json, the design text and word diff, the link table, the facts file and the batch files. The round-3 pages are archived as claude-review-design-new-tensor-type-r3.html and -r3-votes.html."
+ ],
+ "r3_resolved_intro": "Round 3 graded these 60 items resolved: 50 round-2 findings and 10 round-1 residuals. This round did not re-grade them; the rows are kept so that every earlier id keeps an anchor on this page."
+}

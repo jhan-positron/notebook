@@ -1,0 +1,582 @@
+Revised implementation design · incorporates the supplied Claude review · no production code changed
+
+Typed cache tensors for packed V and native K
+
+Issue #4525 · Assigned to jhan-positron · Repository: positron-ai/tron
+
+Short version
+
+Give saved keys and values types that identify their order in memory. This refactor is independent of pull request #4424, which will later use these types for its new key layout. Keep the first change small: typed access, expression reads, and the existing bulk row operations.
+
+This revision incorporates the supplied design review. The interface choices below are concrete proposals; the reviewer questions remain open before implementation. Review dispositions record accepted fixes, deferred scope, and recommendations that require separate work.
+
+TermsReview requestPR splitLayoutsInterfacesPreserved behaviorImplementation stepsVerificationReview dispositionsSources
+
+1. Words used here
+
+  Term                                          Meaning
+  --------------------------------------------- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Tron, main, pull request                      Tron is this repository’s inference system. main is the integration branch. A pull request (PR) proposes code changes for review.
+  Q, K, V, KV cache                             Q, K, and V are a token’s query, key, and value vectors. The KV cache stores earlier keys and values for attention.
+  Tensor, rank, row-major                       A tensor holds values indexed by coordinates. Rank is the number of coordinates needed to select a value. A rank-2 tensor is a matrix. Row-major storage places the values of each row consecutively in memory.
+  VNNI, native K, packed V, blocked packed K    VNNI means Vector Neural Network Instructions. Here, “packed” means the values are ordered for vector or matrix instructions. Native K stores one token’s dimensions consecutively. Packed V alternates values from two adjacent tokens within each dimension. PR #4424’s blocked packed K groups dimension pairs within token blocks. These are different layouts.
+  bf16, fp16, fp32, NaN                         bf16 is the 16-bit brain floating-point format. fp16 is the standard 16-bit half-precision format. fp32 is the standard 32-bit single-precision format. NaN is a floating-point “not a number” value.
+  SIMD, AVX2, AVX-512, chunk, lane              SIMD means single instruction, multiple data values. AVX2 and AVX-512 are processor instruction families for vector operations. A chunk contains 8 or 16 fp32 values in the selected build. A lane is one value’s position in a vector.
+  AMX, QK, PV                                   AMX means Intel Advanced Matrix Extensions. QK computes query–key scores. PV combines attention weights with values.
+  expr, tensor, dtensor                         expr is Tron’s common interface for reading computed or stored values. tensor stores values in host memory. dtensor stores values in a form used by hardware operations.
+  Page, slot, geometry, plane, attention head   A page holds 64 token positions. A slot is a cache region used by one layer or shared by several layers. An attention head uses one set of query, key, and value vectors. Geometry specifies the head count and the dimension count per head. A plane holds K or V for one head in one page.
+  book, arena, EAGLE                            book owns cache pages and their memory allocations. An arena is one allocated memory region. EAGLE is the speculative model with an additional cache storage region.
+  DMA, FPGA, GOF                                DMA means direct memory access. FPGA means field-programmable gate array. GOF means group of four: four tokens of K and V prepared for the hardware cache. Its page_info callbacks are in tron::hardware.
+  CI, Slice, Nix, fake                          CI means continuous integration: automated builds and tests. Slice is the repository’s test scheduler. Nix supplies the build environment with fixed tool versions. A fake-hardware test uses simulated hardware through the pos_fake library.
+  Owner and view                                The owner contains the values and controls how long they remain valid. A view accesses those values without owning their storage.
+  Layout and mapping                            The layout is the order of values in memory. The mapping calculates a value’s address from its coordinates.
+  Logical row and slice                         A logical row contains one token’s dimensions, regardless of storage order. A slice selects rows or dimensions without copying their values.
+  Kernel and dispatch                           A kernel performs a specific computation. Dispatch selects which kernel to call.
+  First and dependent pull requests             The first pull request introduces this interface on main. PR #4424 will depend on it. The diagrams call these the parent and child.
+  Commit, base, head, common ancestor           A commit records one version of the code. A pull request’s base is the version it changes. Its head is its latest commit. The common ancestor is the latest commit shared by both branches.
+  const                                         A C++ qualifier that prevents changes through that access.
+  Scalar and vector operations                  A scalar operation processes one value. A vector operation processes several values together.
+  Mask                                          A set of bits that selects which token positions an operation may read or write.
+  Claude, reviewer                              In the original review thread, Claude is the assistant used by the reviewer to draft an interface sketch. The supplied local review is a later critique of this design. The two documents have different roles.
+  seq, sseq, template                           seq names a compile-time list of dimensions; sseq names signed strides. A C++ template defines a family of types or functions.
+  Build constants                               PAGE_TOKENS_64 names the 64-token page size. HEAD_SIZE_128 names the 128-dimension kernel width. TRON_CHUNK_SIZE is 16 or 8 fp32 values per vector operation, selected by TRON_AVX512_ENABLED. The CMake option AVX512 selects that build feature.
+  Proposed V types                              v_vnni_tensor owns packed V. v_vnni_view accesses a packed V matrix. v_vnni_row reads one logical row. The v_ prefix distinguishes them from the child's k_vnni_* types.
+  Tools and checks                              rg searches text. objdump displays compiled instructions. IWYU means Include What You Use, the repository's include dependency check. A translation unit is one compiled C++ source file with its included headers.
+  Valid token row                               A row whose cache values are available to the current reader.
+
+The cache terms are also defined in the project glossary. [CONTEXT.md]
+
+2. Review request and proposed decisions
+
+The problem is that a bare bf16* pointer does not identify the cache layout. The same pointer type can describe native K, packed V, or the child's blocked packed K. The proposed types make those kernel arguments distinct. [Saved review text]
+
+  Request                Source, 21 September 2026 UTC                   Decision
+  ---------------------- ----------------------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  #1: worker index       Comment 4065141577, 18:24:52                    Separate from tensor representation. Change save_k, the key-save function, and its generated calls in the child PR.
+  #2: typed tensors      Review 5270587330, 18:53:47                     Keep rank-2 expression access and logical row reads. Give bulk load/store and kernel arguments types that identify their layout.
+  #3: interface sketch   Comment 5765866077, 18:58:31; edited 18:59:58   Keep an aligned owner separate from the view. Put the address formula inside each concrete view. Treat this as this design's choice, pending reviewer agreement.
+
+The interpretation of the reviewer's reservation is right: it concerns a separate layout type. In the sketch, the layout is a template argument of both the owner and the view. It is not an ownership stage between them. The reviewer expressed doubt about that separation, rather than a final decision. [Saved review text]
+
+-   Retain: private packed storage, restricted construction of views, mutable-to-read-only conversion, typed kernel arguments, and optimized bulk operations.
+-   Choose: one concrete view per layout. This repeats a small amount of view plumbing when the child adds packed K. It avoids a public layout-policy template.
+-   Limit the parent: expression reads and existing row operations. Defer slices, iteration, generic expression assignment, and expression constructors until a caller needs them.
+-   Native K: reuse its current storage and view types. Typing the native-K kernel argument is the requested parent scope beyond the reviewer's packed-tensor sketch.
+
+OwnerAligned array inside the cache block.
+
+→
+
+Concrete viewShape and address calculation.
+
+→
+
+Typed operationLogical rows or a layout-specific kernel.
+
+Questions for the reviewer before implementation
+
+Use the choices below to review this design. They are proposals, not recorded reviewer approval. The document revision does not require answering them now.
+
+  Question                                                           Proposed answer
+  ------------------------------------------------------------------ -----------------------------------------------------------------------------------------------------------------------------------------------------------------
+  May the address formula live in each concrete view?                Yes. Use separate V and K families with separate owners. Keep the duplicated conversion and access plumbing small.
+  Should a const view object prevent mutation of its elements?       Yes, at both matrix and row rank. A const matrix yields a read-only row; a const row yields a read-only element. This differs from the sketch's span-like rule.
+  May the view provide operator[] as well as at(token, dimension)?   Yes. The expression interface requires row indexing. Retain at() as an equivalent bounds-checked spelling.
+  Is the smaller parent scope sufficient?                            Yes. Include expression reads and typed bulk operations; defer the general tensor write and slice interfaces.
+
+The repository has mixed const behavior: a const matrix returns a read-only row, while a const rank-1 view can return a writable element. This design chooses the matrix rule for both new types. It does not claim a uniform repository precedent. [S3]
+
+A future PR reply should link issue #4525 and these questions. This revision sends no message and changes no GitHub issue or PR.
+
+3. Add the tensor interface to main first
+
+mainNative K.
+Packed V in AVX-512.
+Row-major V in AVX2.
+
+→
+
+Parent: issue #4525Typed storage access.
+Same bytes and algorithms.
+Rows support expression reads.
+
+→
+
+Child: PR #4424Blocked packed K.
+Changed QK algorithm.
+Threads share the K-store work.
+
+The interface improves access to the existing cache layouts. The first pull request needs no new AMX feature. It does not change how threads divide the K-store work.
+
+  Revision                                        Exact commit                               Use
+  ----------------------------------------------- ------------------------------------------ ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Older source snapshot                           f46e48bab498c0c07825f3e3d38d6ffa42d4af9b   Source for S1–S13 main citations. This is the older PR base, not the main tip at design time.
+  Reviewed PR #4424 head                          30c4ac82cbb6959f7e4f66b29efb36f5e0749b48   GitHub and the local checkout used this same commit during the design review.
+  Common ancestor                                 c7844ca2ceb73e59268b3fcfe3465c3cfae77325   Use this to identify the child’s original changes.
+  Main tip recorded when the design was written   98bb8cb22f947574c6a2f36abd807e1e747d4916   Commit dated 19 September 2026, 17:25:58 UTC. It is 79 commits after the older source snapshot. The supplied review later records main moving again; this table does not claim a current remote tip.
+
+At the reviewed main revision, K uses row-major storage. V already uses paired-token storage in the build with 16 fp32 values per vector instruction. The cache header is unchanged between the common ancestor, the older source snapshot, and the recorded main tip. [Review source audit] The tensor interface can therefore be added independently of PR #4424. [S1] [Recorded comparison]
+
+-   Fetch origin/main before branching. Re-locate the S1–S13 citations before editing: self_attention.hpp, model.hpp, common.hpp, t_llama_unit.cpp, and t/CMakeLists.txt changed after the older snapshot. [F05]
+-   Do not copy whole files from the PR #4424 branch into the first pull request. Main contains separate model and CI changes made after the branches diverged.
+-   A direct comparison of main with PR #4424 includes more than that pull request’s changes. It also includes main changes absent from the older branch.
+-   Exclude TRON_K_VNNI, the build option that enables packed K, from the first pull request. Also exclude packed-K kernels, helper-thread state, and generated calls to helper threads.
+-   Only the PR based on main may become ready for review. Keep #4424 draft until its parent merges. Add Skip benchmarks to both PRs. Do not add Run CI without explicit user direction. These are repository rules. [S12]
+
+4. Keep token and dimension indexing unchanged
+
+Use (token, dimension) for all cache planes. The view changes how those coordinates select a stored value.
+
+Example: the order of values in memory
+
+A and B identify two tokens. The digits identify four dimensions. Each cell is one bf16 value. This is a layout illustration, not a timing measurement.
+
+Native rows
+
+A0
+
+A1
+
+A2
+
+A3
+
+B0
+
+B1
+
+B2
+
+B3
+
+Packed V
+
+A0
+
+B0
+
+A1
+
+B1
+
+A2
+
+B2
+
+A3
+
+B3
+
+Only the order in memory changes. A row still contains one token’s dimensions.
+
+  Representation        Position from the start of the plane, in bf16 elements                                                             Where selected
+  --------------------- ------------------------------------------------------------------------------------------------------------------ ------------------------------------------------------------------------------------------------------------------------
+  Native K and AVX2 V   token * D + dimension                                                                                              First pull request. Keep the existing row-major path.
+  Packed V              (token / 2) * (2 * D) + 2 * dimension + token % 2                                                                  First pull request, for V in the build with 16 fp32 values per vector instruction.
+  Blocked packed K      ((((dimension / 32) * (R / 16) + token / 16) * 16 + (dimension % 32) / 2) * 16 + token % 16) * 2 + dimension % 2   PR #4424 only. Keep the existing layout-selection condition. Keep the kernel restricted to 64 tokens × 128 dimensions.
+
+R is the stored token count. D is the stored dimension count. The packed-K formula uses groups of 32 dimensions and groups of 16 tokens. Within a tile, K uses the transposed packing idea. Across the plane, its 16-token and 32-dimension block order is also required; swapping the two plane coordinates alone is insufficient. [S1] [S10]
+
+The new V storage type requires a positive even number of rows. Its column count must be positive and divisible by chunk_size, the selected SIMD width. This satisfies the sketch’s positive-dimension rule. The 16-lane packed set_v still requires widths divisible by 32 dimensions. The 8-lane forwarding wrapper retains its existing contiguous-row constraints; scaled_v_expr still supports 64, 128, 256, or 512 dimensions. Type constraints do not expand kernel support.
+
+Computed size and mapping checks
+
+  Plane       Shape                        Elements checked                                                      Plane size
+  ----------- ---------------------------- --------------------------------------------------------------------- --------------
+  V           64 tokens × 64 dimensions    4,096 bf16 elements                                                   8,192 bytes
+  V           64 tokens × 128 dimensions   8,192 bf16 elements                                                   16,384 bytes
+  V           64 tokens × 256 dimensions   16,384 bf16 elements                                                  32,768 bytes
+  V           64 tokens × 512 dimensions   32,768 bf16 elements                                                  65,536 bytes
+  Blocked K   64 tokens × 128 dimensions   8,192 bf16 elements and 7 selected coordinates with known positions   16,384 bytes
+
+The script lists values in storage order and checks every calculated position against that list. All positions match. This checks the formulas in the design. It does not test a C++ implementation. [Script] [Results]
+
+5. Interface design
+
+These declarations specify the proposal. They have not been compiled. Keep the types in namespace tron and follow the repository's attributes and formatting.
+
+    template <size_t Rows, size_t Cols> class v_vnni_tensor;
+    template <typename T, size_t Rows, size_t Cols> class v_vnni_view;
+    template <typename T, size_t Cols> class v_vnni_row;
+
+    template <size_t Rows, size_t Cols>
+    using native_k_view = view<bf16, true, false, seq<Rows, Cols>>;
+    template <size_t Rows, size_t Cols>
+    using const_native_k_view = const_view<bf16, true, false, seq<Rows, Cols>>;
+
+Owner and expression reads
+
+-   v_vnni_tensor contains a 64-byte-aligned bf16 array. It allocates no separate memory. Default construction leaves values uninitialized. Keep default construction, copying, and destruction trivial.
+-   The owner does not inherit expr. Its interface is as_view() & and as_view() const &. Delete both rvalue forms, including const &&. Keep same-type copy and move operations defaulted. Store no pointer to its own array.
+-   v_vnni_view<T,R,D> inherits expr<view_type,R,D>. v_vnni_row<T,D> inherits expr<row_type,D>. Restrict T to bf16 or const bf16.
+-   The row stores its pair address and even/odd position by value. It remains valid after a temporary view object disappears, while the owner remains alive. Set dma = false: logical row values are not consecutive in memory.
+-   Supply the shape and element aliases required by the existing expression consumers. Keep dim, element, const_element, shape0(), and valid() consistent with existing views. Do not inherit views<>, whose leaf rows must be contiguous.
+-   Leave the rank-1 expression concept unchanged. Existing host tensors and hardware tensors read the matrix through its row expressions. Native K remains compatible with dotter, the existing query/key dot-product helper. [S2] [S3] [S4]
+
+  Operation                                               Contract
+  ------------------------------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  matrix[token][dimension], matrix.at(token, dimension)   Assert bounds using repository assertions. Non-const writable access changes only that element. Const matrix access yields a read-only row.
+  const v_vnni_row<bf16,D> indexing                       Return read-only element access. An explicitly read-only row always rejects mutation, regardless of the row object's own const qualifier.
+  row.chunk(i)                                            Return fp32 values in logical order. Read pair chunk i at pair_base + 2 * chunk_size * i. Extract the even or odd half with vector instructions.
+  bf16s bf16_chunk(size_t i) const noexcept               Use this exact non-template override signature. Extract stored bf16 bits directly. The expression base detects the override through its member function; a different signature can silently select conversion instead.
+  View copy / conversion                                  Copying a view rebinds access. Allow writable-to-read-only conversion only. No public pointer constructor, .data member, or pointer conversion for packed views.
+  Raw storage access                                      detail::vnni_access is the internal friend used only by tensor operations and layout-specific kernels. It is an implementation boundary, not a security boundary.
+
+For the 16-lane build, a pair chunk loads 32 bf16 elements in 64 bytes. The existing even_part shifts each 32-bit lane left by 16 bits; odd_part masks the high 16 bits. Reuse this extraction pattern for fp32 reads and narrow the selected halves for bf16 reads. A stride-2 ordinary row view has the right addresses but uses scalar extraction; it is not the bulk-read implementation. [S5] [F35]
+
+One cache row-write rule
+
+append_v_row is this design's name for the sketch's V store_row. The name records its cache semantics: an even destination zeros its odd partner; an odd destination preserves its even partner. There is no generic packed row.set(expr) in the parent.
+
+    // Signature families: Source is bf16, fp16, or float.
+    append_v_row(writable_v_view dst, size_t token, contiguous_source_row src);
+    load_row(readonly_v_view src, size_t token, contiguous_destination_row dst);
+    copy_token(writable_v_view dst, size_t dst_token,
+               readonly_v_view src, size_t src_token);
+    copy_plane(v_owner& dst, v_owner const& src);
+
+The names writable_v_view and contiguous_source_row above describe parameter families, not additional types to implement.
+
+-   Packed overloads take v_vnni_view<bf16,R,D> or v_vnni_view<const bf16,R,D>. Sources use the existing contiguous row view with the caller's scalar type and alignment. Preserve those properties at the call site.
+-   append_v_row moves today's set_v vector bodies into h/tron/tensor/vnni.hpp. Keep even-token write and partner zeroing in one pass without a destination read. Odd-token writes merge into the initialized pair.
+-   load_row moves today's get_v loops. Support the existing bf16 and float destinations needed by its callers. Wrap caller-owned scratch in an existing contiguous view; add no scratch-view type.
+-   copy_token moves the four even/odd branches of today's append_v. An even destination zeros its partner. An odd destination preserves it. Retain the existing restrictions on overlap and fresh destination ranges.
+-   copy_plane copies identical-layout owners byte for byte. Cache range splitting and completion copying remain in cache code.
+-   The row-major V overload is a thin forwarder to existing contiguous .set(). It never clears another row.
+
+Existing callers and their replacements
+
+  Existing interface                         Parent action                                                                                                                                Caller contract
+  ------------------------------------------ -------------------------------------------------------------------------------------------------------------------------------------------- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  page::k, kv_block::k_view                  Keep existing storage and native row/matrix views. Add no page::k_tensor.                                                                    Native K gets aliases and a typed kernel parameter, not a new storage class.
+  page::set_v                                Keep the name and (slot, kv_head, i_page) arguments. Replace the source pointer with a typed contiguous row view. Forward to append_v_row.   save_v_impl → page::set_v → append_v_row. Preserve completion notifications after the store.
+  page::get_v                                Keep the name. Wrap or accept a typed destination and call load_row.                                                                         full.hpp's v_head_fn callback keeps caller-owned scratch and returns that scratch after unpacking.
+  page::v, page::v_ptr in the 8-lane build   Keep the contiguous-row path and hardware callback contract.                                                                                 The model's save path may forward through the unified typed set_v wrapper; its conversion remains the old row .set().
+  page::v_data, kv_block::v_base             Remove after all callers migrate. Add page::v_tensor<geometry>(slot, head).                                                                  Return the packed or row-major view selected by the build. Const pages return read-only views.
+  page::append_v                             Keep the name; call copy_token.                                                                                                              Use both blocks' kv_block_at_storage<geometry>(offset, kv_head).v.as_view() in the packed path. No new accessor by storage offset.
+  page::scaled_v, detail::scaled_v_expr      Keep the page method. Give the expression constructor a typed packed V view.                                                                 Keep scales, live-token count, and scratch as separate arguments. The 16-lane packed bound is (count + 1) / 2 * 2; the 8-lane row-major bound is count. Neither uses the view’s static row count.
+  AMX kernels and test substitutes           Type only the cache-plane arguments, as below.                                                                                               Keep remaining argument order, availability checks, numerical operations, output sizes, and alignment.
+
+    void qk_rowmajor_128x4(
+        const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+        const bf16* q_packed, float* s, size_t s_stride_floats) noexcept;
+
+    void weights_times_v_128x4(
+        v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page,
+        const float* exp_rows, size_t row_stride_floats, float* o) noexcept;
+
+Build and include boundaries
+
+-   Compile all three packed V types under both TRON_CHUNK_SIZE == 8 and == 16. Derive a pair chunk's width from chunk_size. Keep row-major V in the 8-lane cache; the packed type still must be complete for the unconditionally compiled AMX test substitutes.
+-   Use the same typed kernel declarations in both builds. Do not retain raw-pointer declarations for the 8-lane build. Type constraints are positive even rows and positive columns divisible by chunk_size; keep stricter constraints on individual operations.
+-   Keep amx_attn_iface.hpp free of processor intrinsics. Forward-declare the packed view and the existing five-parameter view/const_view templates. Spell native dimensions and strides with std::integer_sequence, or share a small intrinsics-free declarations header.
+-   seq and sseq are aliases, not class templates that can be forward-declared. Do not repeat template defaults. Include complete tensor definitions only where callers or function definitions need them, including the fake AMX definitions. [Header-boundary finding]
+
+Explicitly deferred
+
+No packed slices or iterators; no generic row.set, set_pair, matrix.set, or owner expression constructor/assignment; no runtime shapes or general transpose interface. Leave h/tron/tensor/slice.hpp unchanged. Existing ordinary tensors may still be constructed from a packed view's read expressions. This scope decision removes the unneeded odd-boundary slice-write and temporary-slice lifetime questions.
+
+6. Behavior the implementation must preserve
+
+V padding and write ordering
+
+A packed-V weighted sum rounds an odd live-token count up to a complete pair. The unused odd row must be zero: a NaN multiplied by a zero weight still contaminates the sum. The row-major path reads exactly the live-token count. [S5]
+
+Reused pairOld even rowOdd row: NaN poison
+
+→
+
+Append even tokenNew even valuesOdd row: all zero
+
+→
+
+Append odd tokenEven values preservedNew odd values
+
+The even append must clear the partner every time the pair is reused. This is an operation sequence, not a timing diagram.
+
+  Write                   Destination read?                    Partner result
+  ----------------------- ------------------------------------ -------------------------------------------------------------------
+  Even cache append       No                                   Odd row becomes zero
+  Odd cache append        Yes, pair must be initialized        Even row is preserved
+  Direct element update   No read of other elements required   Other elements unchanged; this does not establish cache readiness
+
+-   Production packed-V row writes use page::set_v or page::append_v. Both call the typed append/copy operations. Direct element mutation is useful for fixtures; it must not replace cache append.
+-   Keep V pair writes sequential. A new view type does not make read/modify/write stores safe across threads.
+-   Keep adjust_grains_for_partners, the scheduler's pair-preserving work partition, in model.hpp. Keep token_ix_needed, the partner-readiness rule, in common.hpp. Their layout knowledge remains necessary outside the tensor. Update their explanatory comments. [C02]
+-   Completion counters, token allocation, live-token selection, EAGLE slot remapping, dependency notifications, and hardware submission remain cache/model responsibilities.
+
+Conversions and weighted sums
+
+  Path                                Required behavior
+  ----------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  Native K and 8-lane row-major V     Keep existing row-view .set() conversion. Do not substitute packed V conversion or clear adjacent rows.
+  Packed V append from bf16           Preserve exact input bits. No float round trip.
+  Packed V append from fp16 / float   Keep today's conversion to fp32 and upper-16-bit truncation. Do not substitute general expression conversion.
+  Expression reads                    bf16_chunk() preserves stored bits. Existing destination types retain their own conversion rules.
+  scaled_v_expr                       Keep the live count separate from the storage shape. Keep pair rounding only in the 16-lane packed path; the 8-lane row-major path reads exactly count rows. Preserve supported widths, weight conversion, unrolled loops, and addition order. Obtain the physical address only inside the typed implementation.
+
+Packed set_v can turn an fp32 NaN with no upper mantissa bits into infinity when it discards the lower bits. Generic fp32s_to_bf16s, the expression conversion helper, sets the lowest retained mantissa bit when the exponent is all ones and discarded bits are nonzero. It skips that correction when TRON_IGNORE_NAN is defined. This preserves a NaN but does not necessarily make it a quiet NaN. Neither path rounds to nearest. Preserve each existing path separately. [S5] [S7]
+
+Arena construction without clearing
+
+book keeps ownership of the retained and reclaimable byte arenas. A kv_block still contains K followed by V for one head and page. Replace only the 16-lane V array with the packed owner. Keep native K and 8-lane V as their existing arrays. [S8]
+
+    // Default-initialize the array at its allocated address.
+    // No parentheses or braces after the array bound.
+    ::new (static_cast<void*>(region_base)) kv_block_t[block_count];
+
+-   Require trivial default construction, copyability, and destruction for both owner and block. Require 64-byte alignment, unchanged K/V offsets, and the existing block byte size. Keep the element storage uninitialized until written.
+-   Do not use std::construct_at(p), T(), or T{} here. For the proposed trivial owner they value-initialize and clear storage. The pinned standard library does not provide the proposed std::start_lifetime_as alternative; remove that option. [F12] [F40]
+-   Run the construction helper in book::allocate_kv_group after installing a successful allocation, before publishing access. Both initial allocation and restore_reclaimable_kv_storage use this path. Preserve the early return for zero-byte arenas.
+-   For uniform geometry, construct one array over the just-allocated arena’s complete contiguous block region. Its bound is the checked arena byte count divided by sizeof(kv_block_t). This matches the existing uniform accessor's indexing across slots.
+-   For heterogeneous geometry, enumerate physical storage offsets once and select only slots in the just-allocated arena. Restoring the reclaimable arena must not restart objects in the retained arena. Use the slot specifications to choose each region's compile-time head width and head count. layout_t::storage_location identifies its arena; slot_base gives arena + n_pages * byte_offset. Construct geometry.n_kv_heads * n_pages blocks at that address. Do not construct the same region again for a logical alias.
+-   Include the physical EAGLE KV slot once, with the primary geometry. Do not touch x_data, the separate EAGLE embedding buffer; it contains no KV blocks. Construction cannot rely solely on the logical active-slot loop, which omits that extra physical slot. [C01] [C09]
+-   Preserve failed-allocation and unpublished-restoration behavior. Do not construct in an accessor or cast an existing SIMD array object into the new owner.
+-   Views expire when the arena is released, replaced, or destroyed. Do not retain them across restore. Append of an even token initializes a pair without reading it; append of an odd token requires the even partner to have been initialized.
+
+Verify the construction form with the pinned compiler. Check the optimized allocation/restore paths for no memory-clearing loop or call. Test lifetime handling through mixed-geometry allocation, release, restore, and failure paths. A successful cast alone does not establish the required object lifetime.
+
+Copies and hardware preparation
+
+-   Preserve whole-plane byte copies, the four source/destination token-parity combinations, page-boundary splitting, overlap restrictions, and completion-state copying.
+-   FPGA preparation still consumes dimension-ordered bf16 rows. The parent keeps native K directly readable and unpacks V into the existing caller-owned buffer.
+-   Keep the parent's hardware::page_info K callback shape. The extra K scratch parameter belongs to the child. [S9]
+-   Update Note [Zero-Initialized V Slots], the cache V-layout note, and comments naming v_data or physical V indexing. Describe the new call chain without weakening the partner-zero rule. [C06]
+
+7. Implementation steps and files
+
+Build the parent on a fresh branch from fetched main. Record the exact starting commit. The existing jhan-amx-vnniK checkout is the child; do not copy whole files from it into the parent.
+
+  Step                                         Files                                                                                                         Change and completion check
+  -------------------------------------------- ------------------------------------------------------------------------------------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  1. Types and bulk V operations               h/tron/tensor/vnni.hpp (new)                                                                                  Implement V owner, view, read-only expression operations, append, load, token copy, and plane copy. Keep the existing vector bodies here. No include of an attention kernel header. No change to slice.hpp.
+  2. Cache integration and lifetimes           h/tron/models/kv_cache.hpp                                                                                    Use the owner in the 16-lane block, construct arrays at allocation/restore, and implement the accessor mapping. Check byte sizes, alignment, EAGLE storage, all geometries, and allocation failure. Keep typed scaled_v_expr here unless a real include dependency requires a separate header.
+  3. Model save and scheduler rules            h/tron/models/model.hpp, comments in h/tron/models/common.hpp                                                 Keep save_v_impl → page::set_v → append_v_row. Wrap source rows without changing type or alignment. Preserve pair scheduling, completion counters, and notifications. Update comments on partner scheduling.
+  4. Kernel signatures and attention callers   h/tron/models/self_attention.hpp, h/tron/kernels/amx_attn_iface.hpp, src/tron/kernels/amx_attn.cpp            Use typed cache arguments. Keep the interface header free of intrinsics. Keep algorithms, dispatch, query packing, and output requirements unchanged.
+  5. Copies and hardware rows                  kv_cache.hpp, h/tron/scheduler/full.hpp                                                                       Move physical V indexing into typed operations. Keep page-boundary splitting and GOF callbacks. Remove v_data and v_base after all callers migrate.
+  6. Tests and comments                        t/t_llama_unit.cpp, t/t_amx_numerics.cpp, t/t_amx_dispatch_dtype.cpp, t/heterogeneous_scheduler_compile.cpp   Update real and fake kernel signatures and source-row fixtures. The heterogeneous scheduler source is also a set_v/page::k caller. Extend existing behavior cases only for uncovered contracts. Update layout Notes and comments alongside the code.
+  7. Checks                                    Existing build/test tooling and test-cost records                                                             Run the applicable commands in section 8. Record the required suite's collected and executed cases. Preserve the separately tracked AMX CI gap.
+
+Search all callers before removing accessors. A suitable quoted search is rg -n "v_base|v_data|set_v|get_v|append_v|scaled_v|qk_rowmajor_128x4|weights_times_v_128x4" h src t. Search again after migration to detect obsolete names in code and comments.
+
+Then adapt PR #4424 as a stacked child
+
+The chosen plan is a stack: #4424 is based on the parent branch while the parent is open. Prefer reconstructing the child's changes as a few topical commits on the completed parent, using its existing diff as the specification. Do not replay the old 22-commit sequence blindly through rewritten interfaces. Preserve the old child head locally before replacing any branch history.
+
+1.  Once the parent PR exists, change #4424's GitHub base with gh pr edit 4424 --base <parent-branch>. Keep it draft. These are future implementation steps, not actions performed by this document update.
+2.  Resolve both change sets: main's changes since c7844ca2ce, then the parent's interface changes. The supplied review's merge check found an include conflict in common.hpp; the attention restructure in self_attention.hpp needs semantic review even where Git merges automatically. Both PRs edit nine of the same files. [F15]
+3.  Port the K mapping and vector routines from h/tron/kernels/k_vnni.hpp, existing t/t_k_vnni_layout.cpp cases, the generator change in ingest/src/TronCpp.hs, and the packed-K workflow flag as focused changes. Port the attention, scratch callback, and shared-save behavior onto the parent's interfaces. Do not restore old parent code.
+4.  Define k_vnni_tensor, k_vnni_view, and its row expression in h/tron/tensor/k_vnni.hpp. This header contains the K mapping and storage operations without including attention kernels. Let h/tron/kernels/k_vnni.hpp include it for the software score reader, avoiding a tensor/kernel include cycle.
+5.  Keep k_vnni::layout_on<head_size>, the compile-time layout selector. Keep the existing 64-token × 128-dimension kernel limit. Runtime AMX availability must not reinterpret stored bytes.
+6.  Implement the worker-index request in save_k and ingest/src/TronCpp.hs. Preserve main's intervening generator changes. Keep counters and readiness outside storage.
+7.  After the parent merges, verify #4424's base is main, retarget it if needed, and rebase the child onto updated main. Check the resulting diff before promoting it. Keep Skip benchmarks; do not add Run CI without user direction.
+
+  Child interface                    Required change
+  ---------------------------------- --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  page::k                            Keep native overloads and their !layout_on restrictions. Add a typed packed-plane accessor only for the packed layout.
+  page::k_vnni_plane                 Remove the raw-pointer accessor. Its replacement returns k_vnni_view<const bf16,64,128>.
+  page::set_k_row, page::get_k_row   Keep names. Call typed store_row/load_row, moving scatter_row/gather_row address calculations into the K type's operations.
+  page::set_k_block                  Keep the name. Call typed store_block(view, block, mask, rows). Keep 16 independent source rows, with null for absent token lanes. Do not require a contiguous 16-row source buffer.
+  Copy and score readers             Use typed K token/plane copies and typed qk_vnni_128x4/qk_group arguments. Keep optimized arithmetic and query-layout selection outside the tensor.
+  hardware::page_info K callback     Add the child's scratch parameter. The caller owns 64-byte-aligned scratch; the returned row pointer is valid only until that scratch is reused. Consume it before the next token overwrites it. [S14]
+
+K stores differ from V stores. A K token owns separate 4-byte lanes in a shared cache line. Its row store may use a lane scatter or a lane-masked store; it must never read, merge, and rewrite a whole 64-byte line. Several workers can write different token lanes of that line during Note [Shared block save]. Keep that contract alongside Note [K VNNI storage]. [S10] [C05]
+
+Adapt t_k_vnni_layout to create actual aligned k_vnni_tensor owners and call typed store/load/block/reader operations through as_view(). Retain the independent index expectations. For physical-byte checks, copy the trivially copyable owner's object representation into a test buffer. Do not use detail::vnni_access to recreate raw production calls.
+
+8. Verification and acceptance
+
+This deliverable is a design revision. No Tron build, inference run, benchmark, or hardware test was run for the revised design. Artifact checks are recorded separately from the implementation checks required below.
+
+Behavior checks for the implementing agent
+
+  Contract and existing suite                                               Evidence required                                                                                                                                                                                                                                                                                      Failure detected
+  ------------------------------------------------------------------------- ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ -------------------------------------------------------------------------------------------------------
+  V append and padding: t_llama_unit                                        Retain scaled_v padding NaN. Poison the odd row, append its even partner through the exact page::set_v used by save_v_impl, then compute a weighted sum with live count 1. Check the expected finite result. Exercise bf16, fp16, and float source rows and all four token-copy parity combinations.   A cache caller accidentally uses a partner-preserving write and exposes poison to the rounded-up sum.
+  Bits and conversions: closest existing cache cases                        Use independently specified expected bit patterns around truncation boundaries, infinity, and NaN. Verify bf16 bulk load/copy exactly. Keep packed append and generic expression conversion expectations separate.                                                                                     A moved operation changes conversion or corrupts bf16 payloads.
+  Typed function boundaries: compile checks in an existing required suite   Reject raw pointers and packed V at native-K kernel calls; reject native K at packed-V calls. Reject read-only writes, const-row mutation, reverse const conversion, and rvalue-owner views. Accept writable-to-read-only conversion.                                                                  Wrong layouts or expired owners accepted at a real caller boundary.
+  Expression reads: existing tensor/cache suite                             Construct an ordinary host tensor from the packed matrix view. Check row chunks and exact bf16 copies with independent patterns. Use an existing hardware tensor fixture if it already supports this input.                                                                                            The new type cannot be consumed by expr, or silently takes a lossy fallback.
+  Storage and cache lifecycle: t_llama_unit                                 Retain mixed-geometry append, EAGLE, release/restore, failed-allocation, completion, whole-page and partial-page cases. Check block size/offset/alignment contracts and trivial type traits. Verify construction adds no clear operation in optimized code.                                            Bad region enumeration, wrong storage lifetime, unwanted clearing, or changed readiness.
+  All changed callers                                                       Build t_heterogeneous_scheduler, whose source is t/heterogeneous_scheduler_compile.cpp. Build AMX test substitutes as well as real definitions in the configurations below.                                                                                                                            Hidden source-pointer callers or inconsistent function definitions.
+  Child only                                                                Retain layout, shared-save, and AMX numerical cases. Use typed owners. Check disjoint worker lane writes followed by correct reads of all 16 block rows. Check masked-out rows and per-row source pointers. Run K packing on/off and runtime TRON_AMX_DISABLE=1, which disables AMX selection.         Cross-token K races, bad mask behavior, wrong layout interpretation, or early completion.
+
+Extend the smallest existing case that lacks the required observation. Do not duplicate existing coverage. Call a case a regression test only if it reproduces a known defect. Never count a placeholder success or a hardware-unavailable early return as execution of the feature. [S12]
+
+Build configurations
+
+Use separate build directories at the recorded baseline and parent head. Use identical compilers and flags for each pair. Run the relevant existing targets through the repository's documented build commands.
+
+  Configuration           CMake configuration                                          Coverage limit
+  ----------------------- ------------------------------------------------------------ ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  16-lane, AMX code off   cmake --preset native -DAVX512=ON -DTRON_AMX_DISPATCH=OFF    Reviewed required Nix tests use this feature combination. Confirm collection and execution of each changed behavior case.
+  16-lane, AMX code on    cmake --preset native -DAVX512=ON -DTRON_AMX_DISPATCH=ON     Compile real kernels and run applicable fake dispatch cases. Real numerical cases require AMX-capable hardware and proof that the kernel ran.
+  8-lane, AMX code off    cmake --preset native -DAVX512=OFF -DTRON_AMX_DISPATCH=OFF   No reviewed required or manual CI lane covers this configuration. Establish the unmodified-baseline result before attributing a failure to the parent. Include unconditional fake AMX definitions.
+
+The parent does not introduce TRON_K_VNNI, the blocked-K build option. The child adds builds with it enabled and disabled. After adapting the child, rebuild and run t_llama_unit in both modes to check main's attention changes as well as the new interfaces.
+
+CI ownership and limits
+
+At the cited source snapshot, required Nix tests leave TRON_AMX_DISPATCH off. The manual CMake workflow already enables AMX; the child's change adds packed K. Neither fact proves required PR coverage of AMX. [S13]
+
+-   Required AMX compilation/execution is separately tracked by issue #3997. The parent references that issue and does not claim to close it.
+-   Adding -DTRON_AMX_DISPATCH=ON to cmake_args in nix/cmake-tron-test-build.nix is a CI change for the user and CI owners to decide. It is not an implicit parent requirement or an authorization to edit CI.
+-   Place new parent behavior coverage in required t_llama_unit cases. Keep AMX-only case changes to adapting existing signatures/fixtures until their required execution is resolved. Under the repository test policy, new tests cannot be committed without required-suite execution evidence or the user's explicit exception.
+-   Run a manual workflow only when the user directs it. Post-merge nightly runs, including the nightly path discussed in the review, are not PR-gating evidence. Do not add a Run CI label as part of this refactor.
+-   For the child, resolve required execution of its packed-K tests separately before claiming coverage. A green disabled-feature test is insufficient.
+
+Commands and execution hosts
+
+-   Read the repository's run-tron-tests skill before implementation testing. Run bin/slice route before substantial execution. Routing selects the host path; it does not authorize a workload.
+-   Use nix develop --accept-flake-config and the pinned toolchain. Build on sw-dev-01, the authorized development server. Use only delphi-3bda for real hardware tests.
+-   Run targeted suites first, then required checks: make format, make iwyu-check, make build-test, and make test-host. Follow current scoped instructions for exact target arguments. Report skipped checks by name.
+-   Use bin/slice bench --update t_llama_unit to refresh measured test-cost records when warranted and authorized. Do not insert estimated durations. Its default whole-machine execution needs the user's direction on the shared host.
+-   On delphi-3bda, source ~/workspace/intel-AMX/exec/lib-guard.sh and call campaign_guard_acquire before a campaign. It checks the CI lease and takes a lock between this user's campaigns; it does not reserve the machine against CI.
+-   CI is busy only when /run/lock/systems-test-ci.lease exists, has state == "busy", and has a future expires_at_epoch. Re-check ci_took_dut between long runs and stop if CI takes the host. Clock windows are advisory.
+-   Follow the shared-host assignment of the second socket, --instance 1,2, and check the other user's /bill-has-instance-0,2 marker. Whole-machine measurements require user direction. Never launch the real driver there without an explicit instance. [F48]
+
+Instruction comparison and performance acceptance
+
+1.  Record the parent's actual main baseline commit and head. Build both with the same pinned compiler, preset, optimization flags, and feature options. Start with the 16-lane AMX-enabled configuration above.
+2.  Run objdump -d --no-show-raw-insn -C on both built t_llama_unit binaries. Inspect the caller bodies containing bf16/fp16/float even and odd V appends, packed token copies, weighted V sums, and arena allocation/restore. These helpers are often forced inline; absence of a standalone helper symbol is not a passed comparison.
+3.  Keep a compact baseline/head instruction record for the same call-site regions. Check vector extraction/merge instructions and vdpbf16ps, the vector bf16 dot product. Check for new calls, memset, repeated scalar stores, scalar dimension loops, extra even-write destination reads, and arena clears.
+4.  Define a material change as any new call, loss of the vector path, added destination read on the even path, memory-clearing operation, or changed arithmetic/reduction order. Investigate any increase in instructions or loads/stores. Instruction counts are a review signal, not a measurement of runtime.
+5.  Remove an introduced behavior change or explain the compiler difference. If an unexplained hot-path change remains, compare repeated controlled timings against the same baseline on the authorized host. Preserve the CI lease and shared-host restrictions.
+
+Insufficient data: there is no parent implementation or runtime measurement here. No speedup or regression threshold is claimed. The child's older performance results cannot establish the cost of these new types.
+
+Definition of done for the parent
+
+-   The reviewer questions have recorded answers, and the implemented interface matches them.
+-   Cache-plane kernel arguments carry the intended layout. Packed physical addresses are confined to tensor operations and layout-specific kernels. Native K uses its existing types.
+-   The page save path preserves V partner zeroing and conversion bits. Storage size, lifetimes, completion, copies, and fallback paths are unchanged.
+-   Required tests collect and execute the new behavior coverage. Enabled AMX and 8-lane validation are reported separately; absent execution is named explicitly.
+-   The parent is independently reviewable on main. The child adaptation has its own validation and remaining CI obligations.
+
+Revised-document checks: HTML and source links · local revision audit · desktop/mobile rendering. These do not establish C++ correctness.
+
+9. Disposition of the supplied review
+
+The table covers all 58 findings retained by the review, including its nine later corrections. Acceptance means the design text addresses the finding; it does not mean the implementation or reviewer approval is complete.
+
+  Review finding                        Status                                      Resolution
+  ------------------------------------- ------------------------------------------- -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  F01 F10 F13 F30 F38 F39 F42 F46 C03   Accepted                                    Named save/load/copy call chains and all existing accessor outcomes. Native K retains its current type. Live count stays separate from shape. [Design section]
+  F02 F03 F04 F26 F51 F52               Accepted; reviewer answers pending          Distinguish the sketch from this design. Specify const behavior at both ranks, keep at() and expression indexing, and list concrete reviewer questions. [Design section]
+  F05 F50                               Corrected historical record                 Correct the main ancestry label and independent-parent wording. Date old issue evidence; do not claim a fresh remote status. [Design section]
+  F08 F34 F37                           Scope reduced explicitly                    Defer slices, iteration, generic assignment, and owner expression construction. The owner is not an expression. No shared slice-header change. [Design section]
+  F11 F31 F32 F35 F47                   Accepted with concrete contracts            Use v_vnni names, both chunk widths, exact bf16 override, distinct type/kernel shape rules, and explicit build flags. [Design section]
+  F12 F40 F56 C01 C09                   Accepted; array extent clarified            Default-initialize actual block arrays. One array per uniform arena; one per heterogeneous physical slot. Include EAGLE KV, exclude embeddings. [Design section]
+  F14 F15 F25 F29 F45 C04 C05 C07       Accepted as future child work               Specify stacked base, topical reconstruction, accessor changes, lane-sized K stores, typed-owner tests, generator file, and scratch lifetime. [Design section]
+  F16 C08                               Coverage gap separated from scope           Reference issue #3997. Keep required parent behavior tests in the existing suite; no implicit CI rewrite or manual dispatch. [Design section]
+  F17 F48 F49                           Accepted; measurement limits retained       Define call-site disassembly checks, required commands, lease semantics, and shared-host limits. Do not equate instruction counts with runtime. [Design section]
+  F19 F20 F21                           Documented; external issue edits deferred   Add a standalone problem statement, glossary, ownership restrictions, and role-based attribution here. Updating the public issue or posting a reply is outside this HTML revision. [Design section]
+  F23 F24 F27 F28                       Accepted                                    Expand the glossary, correct GOF, repair navigation/evidence links, and draw the poisoned-pair reuse sequence. [Design section]
+  F41                                   Accepted; example corrected                 Preserve packed/generic conversion differences. Limit the NaN-to-infinity example to fp32 input; the review’s fp16 example omitted instruction-level NaN handling. [Design section]
+  F43                                   Accepted; declaration advice corrected      Keep the interface header intrinsics-free. seq and sseq are aliases; forward-declare the actual view classes with explicit shape and stride types. [Design section]
+  F54 F57 F58 F59                       Recorded; no new implementation scope       Clarify per-tile versus whole-plane K mapping. Preserve pinned source evidence and validate links again. Keep a local light-theme HTML artifact. [Design section]
+  C02 C06                               Accepted                                    Retain scheduler partner rules outside storage and update the layout Notes and obsolete accessor comments. [Design section]
+
+The review rejected F06, F07, F09, F18, F22, F33, F36, F44, F53, and F55 as defects. This revision does not reinstate them as defects. The generic-write scope discussed in F09 is nevertheless deferred as part of the smaller-parent choice in F08. The explicit rvalue overloads also retain the useful clarification discussed under F36. [Review verdicts]
+
+The public issue and PR reply recommendations remain separate work. The saved issue files are historical evidence, not a current status report. No review recommendation is treated as authorization to publish a message, change a PR, or start a hardware campaign.
+
+10. Sources and saved files
+
+The source links below refer to the exact commits reviewed for this design. In the source links below, “Main” means the older snapshot f46e48bab498c0c07825f3e3d38d6ffa42d4af9b. “Child” means 30c4ac82cbb6959f7e4f66b29efb36f5e0749b48. The implementing agent must relocate these references on fetched main. The supplied review records activity on 22 September 2026; its timestamps describe that saved review, not a fresh remote check by this revision.
+
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ID                                | Evidence                                                                                                                                                           |
++===================================+====================================================================================================================================================================+
+| S1                                | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The cache defines its K/V storage and row views. [Cache source]                                                                                                |
+|                                   | -   The SIMD header selects the vector instruction implementation. [SIMD source]                                                                                   |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S2                                | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The expression interface defines matrix and row access. [Expression source]                                                                                    |
+|                                   | -   The views hierarchy requires contiguous rows: adjacent row values must occupy adjacent memory. [Views source]                                                  |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S3                                | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The view type defines logical access operations. [View source]                                                                                                 |
+|                                   | -   Indexing a const matrix returns read-only access. [Const indexing source]                                                                                      |
+|                                   | -   The slice code selects the operation for each input type. [Slice source]                                                                                       |
+|                                   | -   The tensor owner accepts a matrix expression. [Tensor source]                                                                                                  |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S4                                | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The hardware tensor accepts expression inputs. [Hardware tensor source]                                                                                        |
+|                                   | -   The dotter helper requires specific contiguous view types. [Dot-product source]                                                                                |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S5                                | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   An unused partner row must contain zero. [Padding rule]                                                                                                        |
+|                                   | -   The V write operations convert each supported source type. [V write source]                                                                                    |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S6                                | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The model saves K/V values in the required order. [Model source]                                                                                               |
+|                                   | -   The cache tracks completed writes with counters. [Completion source]                                                                                           |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S7                                | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The SIMD code defines general bf16 conversion. [Conversion source]                                                                                             |
+|                                   | -   The DMA tensor reads bf16 expressions without converting their values. [DMA tensor source]                                                                     |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S8                                | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The cache allocates arena memory. [Allocation source]                                                                                                          |
+|                                   | -   The cache accesses storage blocks and checks their sizes. [Block access source]                                                                                |
+|                                   | -   The cache defines how released storage is restored. [Restore source]                                                                                           |
+|                                   | -   The bf16 type defines its default construction behavior. [bf16 source]                                                                                         |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S9                                | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   Append handles even/odd row positions and copies cache state. [Append source]                                                                                  |
+|                                   | -   Data preparation for hardware extracts logical rows. [Staging source]                                                                                          |
+|                                   | -   The GOF callback interface defines how hardware preparation receives rows. [Callback source]                                                                   |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S10                               | Child sources.                                                                                                                                                     |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The packed-K code defines address calculations and vector operations. [Packed-K source]                                                                        |
+|                                   | -   Attention code chooses the query orientation and score implementation. [Attention source]                                                                      |
+|                                   | -   The model coordinates K saves across workers. [Worker coordination source]                                                                                     |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S11                               | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The build registers the cache and model unit-test program. [Test registration]                                                                                 |
+|                                   | -   The tests check logical row access. [Row tests]                                                                                                                |
+|                                   | -   The tests append cache data across different slot geometries. [Append tests]                                                                                   |
+|                                   | -   The tests place NaNs in unused rows and reuse storage. [Padding tests]                                                                                         |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S12                               | Local instructions.                                                                                                                                                |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The repository guide sets project-wide rules. [Repository guide]                                                                                               |
+|                                   | -   The test guide sets test-specific rules. [Test guide]                                                                                                          |
+|                                   | -   The test skill explains how to choose safe build and test commands. [Test execution skill]                                                                     |
+|                                   |                                                                                                                                                                    |
+|                                   | These links open the local working checkout. The supplied review compared the rule files at its pinned revisions; re-read the current rules before implementation. |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S13                               | Main sources.                                                                                                                                                      |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The Nix build lists its compiler and feature options. [Nix build source]                                                                                       |
+|                                   | -   The AMX build option defaults to disabled. [AMX option]                                                                                                        |
+|                                   | -   The build includes the AMX implementation only when its option is enabled. [AMX build source]                                                                  |
+|                                   | -   With AMX disabled, the dispatch test reports success without testing dispatch. [Dispatch placeholder source]                                                   |
+|                                   | -   With AMX disabled, the numerical test reports success without testing AMX results. [Numerical placeholder source]                                              |
+|                                   | -   The CI guide distinguishes the current workflow from the older manual workflow. [CI guide]                                                                     |
+|                                   | -   Child: The older manual workflow enables packed K in addition to its existing AMX option. [Child workflow]                                                     |
+|                                   | -   Child: The AMX test returns early when the processor cannot execute AMX. [AMX availability check]                                                              |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| S14                               | Child scratch-buffer contract.                                                                                                                                     |
+|                                   |                                                                                                                                                                    |
+|                                   | -   The callbacks require caller-owned aligned scratch. [Callback contract]                                                                                        |
+|                                   | -   Hardware preparation consumes the per-head rows before reusing the buffers for the next token. [Scratch lifetime]                                              |
++-----------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+Historical evidence: issue-verification.json and issue-body.md record the issue created on 21 September 2026, before the user’s rename and wording change recorded at 00:10–00:11 UTC on 22 September. The old source-audit.json key stale_origin_main is a labeling error; that commit is newer than the cited source snapshot. Preserve these records without treating their labels as current facts. [F05] [F50]
+
+Historical saved files: Recorded GitHub review and issue details · original issue assignment · original issue body · source audit · formula checks · original generated-file checks.
+
+This revision changes the local design and its validation artifacts. No production code, issue, PR, or remote machine was changed.
