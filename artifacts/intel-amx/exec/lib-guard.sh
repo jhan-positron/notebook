@@ -244,6 +244,22 @@ rinzler_min_active_age() {  # 0 = every active rinzler@N unit has been active >=
   done
   return 0
 }
+rinzler_stop_serving() {
+  # Stop the production engines. platformd 0.11 (delphi-3bda since 2026-09-21) supervises the engines: a unit stopped with
+  # systemctl is started again within about a minute, which made the q4b-rt8u campaign's first run stop itself at
+  # 2026-09-22 16:36 UTC (WATCH-STOP rinzler@N unit active). So when platformd answers on GUARD_PLATFORMD (default
+  # http://localhost:8080) the engines are taken down through its API (POST /api/inference/down, the same call dut.sh
+  # serving-down makes) and we wait up to 180 s for every rinzler@N unit to leave the active state. Without platformd the
+  # old systemctl stop is used. Production comes back through POST /api/inference/up (dut.sh serving-up) or the nightly.
+  local pd=${GUARD_PLATFORMD:-http://localhost:8080} r i now; now=$(date -u +%FT%TZ)
+  if r=$(curl -s -m 5 "$pd/api/inference/status" 2>/dev/null) && [ -n "$r" ]; then
+    GUARD_STOP_VIA=platformd
+    echo "$now GUARD takeover: platformd answers, taking serving down through POST $pd/api/inference/down: $(curl -s -m 60 -X POST "$pd/api/inference/down" 2>/dev/null | head -c 160)"
+    for i in $(seq 1 36); do rinzler_active || return 0; sleep 5; done
+    echo "$(date -u +%FT%TZ) GUARD takeover: rinzler@N units still active 180 s after the platformd down request"; return 1
+  fi
+  sudo -n systemctl stop rinzler@0 rinzler@1 rinzler@2 rinzler@3
+}
 rinzler_takeover_if_idle() {
   local now epoch j rc traffic busy probe note sso conns f young hp=${GUARD_HUGEPAGES_DIR:-/dev/hugepages}
   now=$(date -u +%FT%TZ); epoch=$(date +%s)
@@ -271,8 +287,9 @@ rinzler_takeover_if_idle() {
   echo "$now GUARD takeover: rinzler units active; journal-request-lines=${traffic:-?} non-idle-stats-lines=${busy:-?} $note remote-conns=${conns:-?}"
   { [ "${traffic:-1}" -eq 0 ] && [ "${busy:-1}" -eq 0 ] && [ "${conns:-1}" -eq 0 ]; } || return 1
   echo "$now GUARD takeover: all checks passed, stopping rinzler@0..3 (lease free, units idle for 10 min)"
-  if ! sudo -n systemctl stop rinzler@0 rinzler@1 rinzler@2 rinzler@3; then
-    echo "$now GUARD takeover: systemctl stop returned nonzero, slice files kept"; return 1
+  GUARD_STOP_VIA=systemctl
+  if ! rinzler_stop_serving; then
+    echo "$now GUARD takeover: $GUARD_STOP_VIA stop returned nonzero, slice files kept"; return 1
   fi
   GUARD_TAKEOVER_LAST=$epoch
   sleep 5
