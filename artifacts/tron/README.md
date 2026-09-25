@@ -129,3 +129,10 @@ The existing `random/` mapping uses `claude-agentsrv:/home/jhan/workspace/random
   - origin: `claude-agentsrv:/tmp/tron-concepts-validation.json`. Copy retained at the original path.
 
 Validation results describe the original concept-page session. The handoff records which checks preceded the final edits. No inference benchmark was run for this page.
+
+## Batch: 2026-09-24 SCOPE:auto run (Claude, claude-agentsrv)
+
+- `random/from-claude/tron-concepts-short-verify-wf_2f31720c-b2b.js` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/tron-concepts-short-verify-wf_2f31720c-b2b.js` (5094 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/fcd18152-9ade-458a-935d-031499cd5ec4/workflows/scripts/tron-concepts-short-verify-wf_2f31720c-b2b.js` (relocated 2026-09-24). Workflow script: the verification run of the short edition (Workflow 4 of that session). Related: [claude_20260919-20260920_internalize-concepts-md-directives.md](../../handoffs/claude_20260919-20260920_internalize-concepts-md-directives.md).
+- `memory/ci-merge-audit-0922-0923.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/ci-merge-audit-0922-0923.md` (2450 bytes). Memory note; the canonical file is edited in place by Claude Code. Related: [claude_20260923_amx-benchmark-tps-regression-between-ci-runs.md](../../handoffs/claude_20260923_amx-benchmark-tps-regression-between-ci-runs.md).
+- `random/from-claude/TRON-concepts-claude-short.html` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/TRON-concepts-claude-short.html` (124612 bytes). The 3,031-word short edition of TRON-concepts-claude.html (a document, not a report page). Related: [claude_20260919-20260920_internalize-concepts-md-directives.md](../../handoffs/claude_20260919-20260920_internalize-concepts-md-directives.md).
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/tron/random/from-claude/TRON-concepts-claude-short.html
