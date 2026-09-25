@@ -35,7 +35,7 @@ Explain domain modeling (agreeing on terms and relationships), install its missi
 - `claude-agentsrv:/home/jhan/workspace/tron` — Read-only source checkout used for the terminology audit, commit `98bb8cb22`.
 
 
-Preservation proposals for this chat (the approval report lists exact byte counts):
+Preserved files for this chat (the approval report records the approved paths and original byte counts):
 
 - `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/grilling/SKILL.md` — `artifacts/codex-setup/skills/grilling/SKILL.md`
 - `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/grilling/agents/openai.yaml` — `artifacts/codex-setup/skills/grilling/agents/openai.yaml`

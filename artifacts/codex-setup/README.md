@@ -65,3 +65,29 @@ Root mappings: `handoff-prompt-20260919/` maps to `claude-agentsrv:/home/jhan/tm
   - Related handoff: [codex_20260919_install-grill-with-docs-skill.md](../../handoffs/codex_20260919_install-grill-with-docs-skill.md)
 
 Left behind: the temporary Git fixture used in the review was deleted after the check. Its outcome is recorded in the review and transcript. It cannot be restored as raw test output. The adopted prompt and its prior revision are already preserved in Git history.
+
+
+## Codex handoff preservation — 2026-09-24
+
+Short version: Preserved the approved authored outputs and compact validation records. Canonical means the original working copy. The user approved this batch and its listed relocation paths.
+
+Root mapping additions: `skills/grilling/` and `skills/domain-modeling/` mirror the matching installed folders under `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/`. These operational installations are not transcript scratch files. The dependency source is mattpocock/skills; the exact installed upstream revision was not recorded.
+
+- `skills/grilling/SKILL.md` — installed skill dependency.
+  - Canonical: `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/grilling/SKILL.md`
+  - Related handoffs: handoffs/codex_20260920_grill-with-docs-performance-vocabulary.md
+- `skills/grilling/agents/openai.yaml` — installed skill dependency.
+  - Canonical: `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/grilling/agents/openai.yaml`
+  - Related handoffs: handoffs/codex_20260920_grill-with-docs-performance-vocabulary.md
+- `skills/domain-modeling/ADR-FORMAT.md` — installed skill dependency.
+  - Canonical: `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/domain-modeling/ADR-FORMAT.md`
+  - Related handoffs: handoffs/codex_20260920_grill-with-docs-performance-vocabulary.md
+- `skills/domain-modeling/CONTEXT-FORMAT.md` — installed skill dependency.
+  - Canonical: `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/domain-modeling/CONTEXT-FORMAT.md`
+  - Related handoffs: handoffs/codex_20260920_grill-with-docs-performance-vocabulary.md
+- `skills/domain-modeling/SKILL.md` — installed skill dependency.
+  - Canonical: `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/domain-modeling/SKILL.md`
+  - Related handoffs: handoffs/codex_20260920_grill-with-docs-performance-vocabulary.md
+- `skills/domain-modeling/agents/openai.yaml` — installed skill dependency.
+  - Canonical: `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/domain-modeling/agents/openai.yaml`
+  - Related handoffs: handoffs/codex_20260920_grill-with-docs-performance-vocabulary.md
