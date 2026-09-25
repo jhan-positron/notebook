@@ -471,14 +471,8 @@ repo so accidental workspace deletion cannot destroy them.
   This relocation copy, folder creation included, is the one write into
   a canonical folder this prompt allows, and only on approval. Direction
   otherwise stays canonical -> repo. This supersedes the 2026-09-18
-  practice of registering the session-store path itself as canonical
-  (`artifacts/intel-amx/README.md` lines 722-725). At the next run,
-  propose a `relocate:` line for those two entries too, change each
-  entry's canonical path, `git mv` the mirror if its layout path
-  changes, and commit as `Refresh artifact: <topic>/<file>`. The README
-  sentence that describes those two entries (line 477 on 2026-09-19)
-  may be corrected in that commit. Delete this one-time instruction
-  from the prompt once it is done.
+  practice of registering the session-store path itself as canonical;
+  the two entries registered that way were relocated on 2026-09-20.
 - Registry: each `artifacts/<topic>/README.md` lists every preserved file
   with its canonical `<host>:<absolute path>`, what it is, and related
   handoffs. That README is the source of truth for refresh.
