@@ -15,10 +15,12 @@ Apply these rules to code you write or modify. When reviewing code, flag violati
 - Append the variable's value to its name, separated by an underscore.
 - For values containing punctuation or spaces, use an uppercase representation valid in a C++ identifier.
 - When editing a value in source code, rename the variable and update its uses so the suffix matches the new value.
+- Literal values include true, false, 0 and 1. List any exception instead of applying it silently.
 
 ```cpp
 constexpr int DAYS_PER_WEEK_7 = 7;
 constexpr int MAX_RETRIES_3 = 3;
+bool ROW_ALIGNED_TRUE = true;
 ```
 
 ## Braces
