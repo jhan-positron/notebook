@@ -1,0 +1,202 @@
+diff --git a/ingest/src/LoopyTron.hs b/ingest/src/LoopyTron.hs
+index 3be9b2be58..a10fc29d27 100644
+--- a/ingest/src/LoopyTron.hs
++++ b/ingest/src/LoopyTron.hs
+@@ -84,7 +84,7 @@ process mod@(L.Module env literalCpps function inputTokenRemappings logitsMunge)
+       Left err -> panic $ "LoopyTron.process:" <+> pretty err
+       Right summaries -> summaries
+   liveness = LA.lifetimeAnalysisWithKernelAccesses accessSummaries mod
+-  (bufferAssignment, launcherAssignment, prepareSchedule, rwSchedule) =
++  (bufferAssignment, launcherAssignment, _, prepareSchedule, rwSchedule) =
+     either error id $
+       BR.computeBufferAssignment
+         env
+diff --git a/ingest/src/LoopyTron/BufferReuse.hs b/ingest/src/LoopyTron/BufferReuse.hs
+index ff454d6c08..ccf45fe8fa 100644
+--- a/ingest/src/LoopyTron/BufferReuse.hs
++++ b/ingest/src/LoopyTron/BufferReuse.hs
+@@ -11,6 +11,8 @@ module LoopyTron.BufferReuse
+   , LauncherAssignment
+   , LauncherDisposition (..)
+   , launcherDisposition
++  , RoutingAssignment
++  , canonicalRouting
+   , PrepareSchedule
+   , ReadWriteSchedule (..)
+   , computeBufferAssignment
+@@ -77,6 +79,20 @@ launcherDisposition (LauncherAssignment assignments) name =
+         "launcherDisposition: no launcher analysis for matmul weight "
+           ++ show name
+ 
++-- | Assigns each routing-typed intermediate to the canonical Loopy
++-- name of the slot it shares. The canonical owner is the first user
++-- (by 'lbFirstWrite'); later users are assigned to that owner's
++-- planned routing field.
++newtype RoutingAssignment = RoutingAssignment (Map (Name Loopy) (Name Loopy))
++
++-- | Resolve a routing intermediate to the canonical owner of its
++-- shared slot. Total: canonical owners map to themselves, and names
++-- absent from the assignment (non-routing names, or dead routings,
++-- which are filtered out and declare their own 'MoeRoutingInfo') map
++-- to themselves. The owner is the field key when lowering materialises the plan.
++canonicalRouting :: RoutingAssignment -> Name Loopy -> Name Loopy
++canonicalRouting (RoutingAssignment m) name = M.findWithDefault name name m
++
+ -- | Maps Time -> Loopy variables whose channels need to be prepared before that statement.
+ -- Note [PrepareSchedule Uses Loopy Names]
+ -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+@@ -134,6 +150,11 @@ data BufferShape = BufferShape
+ data LauncherShape = LauncherShape [Cpp.Expr] (Maybe T.MoeLauncherInfo)
+   deriving (Eq)
+ 
++-- | Shape key for routing slot compatibility: two routings can share
++-- a slot iff their (numExperts, topK) match.
++data RoutingShape = RoutingShape Int Int
++  deriving (Eq)
++
+ -- | Per-kind interface: how to compare shapes, how to allocate a fresh
+ -- ident, and how to record an assignment in the appropriate output
+ -- map. Parameterised over the shape and ident types of a slot pool.
+@@ -143,13 +164,12 @@ data SlotKind shape ident = SlotKind
+   , kindRecord :: Name Loopy -> ident -> State AssignState ()
+   }
+ 
+--- | What kind of slot a candidate participates in. The shape (when
+--- present) is carried by the constructor so downstream code does not
+--- need to re-extract it from the Loopy type. Routings have no shape
+--- yet — they are scheduled but do not participate in slot reuse.
++-- | What kind of slot a candidate participates in. The shape is
++-- carried by the constructor so downstream code does not need to
++-- re-extract it from the Loopy type.
+ data CandKind
+   = BufferCand BufferShape
+-  | RoutingCand
++  | RoutingCand RoutingShape
+ 
+ -- | Internal record for scheduling candidates (buffers and MoE routings).
+ data Candidate = Candidate
+@@ -163,6 +183,7 @@ data Candidate = Candidate
+ -- | State maintained during buffer assignment.
+ data AssignState = AssignState
+   { _asAssignment :: BufferAssignment
++  , _asRoutingAssignment :: RoutingAssignment
+   , _asSchedule :: PrepareSchedule
+   , _asRWSchedule :: ReadWriteSchedule
+   }
+@@ -199,6 +220,16 @@ iterSpaceCompatible (Just (S.QBatchItemsExpertPairs _ k1)) (Just (S.QBatchItemsE
+   k1 == k2
+ iterSpaceCompatible a b = a == b
+ 
++routingKind :: SlotKind RoutingShape (Name Loopy)
++routingKind =
++  SlotKind
++    { kindShapeCompat = (==)
++    , kindFreshIdent = \candName -> return candName
++    , kindRecord = \candName ident ->
++        asRoutingAssignment %= \(RoutingAssignment m) ->
++          RoutingAssignment (M.insert candName ident m)
++    }
++
+ -- | Compute buffer assignment with reuse for variables with non-overlapping
+ -- lifetimes and compatible requirements.
+ -- Returns a 'BufferAssignment' covering all 'L.Intermediate' binders and a
+@@ -214,7 +245,12 @@ computeBufferAssignment
+   -- ^ result binder of the program
+   -> Either
+        String
+-       (BufferAssignment, LauncherAssignment, PrepareSchedule, ReadWriteSchedule)
++       ( BufferAssignment
++       , LauncherAssignment
++       , RoutingAssignment
++       , PrepareSchedule
++       , ReadWriteSchedule
++       )
+ computeBufferAssignment envStmts funcStmts liveness@(LA.LivenessAnalysis usages) returnName = do
+   (candidates, standalone) <- extractCandidates envStmts liveness returnName
+   let sorted = sortBy (comparing (LA.lbFirstWrite . candBounds)) candidates
+@@ -228,13 +264,18 @@ computeBufferAssignment envStmts funcStmts liveness@(LA.LivenessAnalysis usages)
+           (\a n -> insertAssignment n (freshBufferName n a) a)
+           emptyBufferAssignment
+           standalone
+-  let AssignState assignment schedule rwSchedule =
++  let AssignState assignment routingAssignment schedule rwSchedule =
+         execState
+-          (assignAll sorted [])
+-          (AssignState seeded M.empty emptyReadWriteSchedule)
++          (assignAll sorted [] [])
++          ( AssignState
++              seeded
++              (RoutingAssignment M.empty)
++              M.empty
++              emptyReadWriteSchedule
++          )
+   launcherAssign <-
+     computeLauncherAssignment envTypes funcStmts usages assignment
+-  return (assignment, launcherAssign, schedule, rwSchedule)
++  return (assignment, launcherAssign, routingAssignment, schedule, rwSchedule)
+  where
+   -- Declared Loopy type of every env binder, for resolving weight shapes
+   -- and MoE routing parameters of launcher candidates.
+@@ -262,7 +303,7 @@ extractCandidates stmts (LA.LivenessAnalysis usages) retName = do
+     ]
+   candidateKind (L.Array scalarTy iterSpace width) =
+     [BufferCand (BufferShape scalarTy iterSpace width)]
+-  candidateKind (L.MoeRoutingType _ _) = [RoutingCand]
++  candidateKind (L.MoeRoutingType n k) = [RoutingCand (RoutingShape n k)]
+   candidateKind _ = []
+   -- Each entry yields zero or more reuse candidates and/or names needing
+   -- a standalone buffer.
+@@ -289,7 +330,7 @@ extractCandidates stmts (LA.LivenessAnalysis usages) retName = do
+             | otherwise -> Right ([], [])
+    where
+     -- Only buffer-typed vars get a standalone buffer; routings have their
+-    -- own scheduling path in assignAll.
++    -- own MoeRoutingInfo path in LoopyTron.
+     standalone = case kind of
+       BufferCand _ -> [varName]
+       _ -> []
+@@ -422,23 +463,22 @@ moeLauncherShapeFor weight routing envTypes = do
+   launcherShapeFor weight envTypes (Just (T.MoeLauncherInfo n k))
+ 
+ -- | Greedy assignment driver: process candidates in first-write order,
+--- routing each to the appropriate per-kind pool. Buffers share slots
+--- via 'assignOne'; routings do not yet participate in reuse and are
+--- scheduled directly against their own name.
++-- routing each to the appropriate per-kind pool. Buffers and routings
++-- share 'assignOne'; the only kind-specific dispatch is which pool to
++-- update and which 'SlotKind' to use.
+ assignAll
+   :: [Candidate]
+   -> [Slot BufferShape (Name ('Tron 'Buffer))]
++  -> [Slot RoutingShape (Name Loopy)]
+   -> State AssignState ()
+-assignAll [] _ = return ()
+-assignAll (cand : rest) bufPool = case candKind cand of
++assignAll [] _ _ = return ()
++assignAll (cand : rest) bufPool routPool = case candKind cand of
+   BufferCand shape -> do
+     bufPool' <- assignOne bufferKind cand shape bufPool
+-    assignAll rest bufPool'
+-  RoutingCand -> do
+-    let prepTime = schedulePrepareTime (LA.Time 0) (LA.lbFirstWrite (candBounds cand))
+-    schedulePrepareAt (candChannelReq cand) prepTime (candName cand)
+-    scheduleSyncFor (candChannelReq cand) (candBounds cand) (candName cand)
+-    assignAll rest bufPool
++    assignAll rest bufPool' routPool
++  RoutingCand shape -> do
++    routPool' <- assignOne routingKind cand shape routPool
++    assignAll rest bufPool routPool'
+ 
+ -- | Find a compatible slot in the given pool, or allocate a fresh
+ -- one. In both cases, record the assignment and schedule the channel
+@@ -512,8 +552,8 @@ scheduleChannelPrepare (LA.NeedsChannel _ _) prepTime nm =
+ -- buffer or routing.
+ --
+ -- Each candidate is scheduled exactly once per lifetime (guaranteed by
+--- sorted-by-firstWrite processing and disjoint lifetimes in
+--- findCompatibleSlot on the buffer side; routings are not reused), so
++-- sorted-by-firstWrite processing and disjoint lifetimes enforced by
++-- findSlot for both buffers and routings), so
+ -- reading and writing use the same direct insertion pattern: start at
+ -- lbFirst{Read,Write}, finish at lbLast{Read,Write}.
+ --

@@ -1,0 +1,112 @@
+[
+  {
+    "body": "## Summary\n\nRemove unused fallback `tensor_latch` state and methods to clarify that the channel backing owns synchronization.\nThis is a behavior-preserving refactor.\n\nFallback channels wait for all producers through a latch owned by `channel_fallback_latch_backing`. The default `tensor_latch` selects that backing but is never instantiated by it, leaving its own latch field and runtime methods unused.\n\nRemove that unused instance interface and retain the backing alias and static metadata. The accompanying comment now identifies the backing as the owner of the whole-phase latch.\n",
+    "mergeCommit": {
+      "oid": "50b89c7ce0ecf0792df4a56eaf207d989cceb0fe"
+    },
+    "mergedAt": "2026-09-24T22:52:13Z",
+    "number": 4578,
+    "title": "Remove unused fallback tensor_latch instance interface",
+    "url": "https://github.com/positron-ai/tron/pull/4578"
+  },
+  {
+    "body": "## Summary\n\nAdd distinct C++ placement roles for attention key and value projections so placement policies can identify them without inspecting tensor names.\n\n## Role representation\n\nPlacement requests currently distinguish ordinary tensors, MoE routers, and expert weights. Extend that classification with `attention_key_projection_tensor` and `attention_value_projection_tensor`, following the existing pattern of variant alternatives, named request constructors, and role predicates.\n\nThis PR supplies the C++ representation. Subsequent PRs preserve ingest's existing K/V semantics in generated placement requests, then use those roles to place K and V on separate device groups. Generated requests and device placement remain unchanged at this layer.\n",
+    "mergeCommit": {
+      "oid": "409b61c70ab75d4fe0d14514636c9f47c477bc72"
+    },
+    "mergedAt": "2026-09-24T22:52:13Z",
+    "number": 4559,
+    "title": "Represent attention K and V placement roles",
+    "url": "https://github.com/positron-ai/tron/pull/4559"
+  },
+  {
+    "body": "## Summary\n\nSelect channel storage from each latch's readiness scope so latches no longer depend on concrete channel backing types. This is a behavior-preserving refactor.\n\n## Readiness and storage selection\n\nEach `tensor_latch` previously selected its channel storage through a `backing` template alias. This required `threading.hpp` to forward-declare backing types implemented alongside `channel` in `models/common.hpp`. Each latch also declared an unused `is_fallback` flag, duplicating the classification supplied by its backing.\n\nA latch now declares a `readiness_scope` describing when its results become readable:\n\n- `whole_phase`: all items become readable after every producer finishes the phase. The channel uses one shared countdown latch.\n- `per_item`: items can become readable independently. The channel stores one tensor latch per item; that latch retains its existing payload-based, explicitly signaled, or tile-level readiness mechanism.\n\nThe channel selects a `channel_backing` specialization from that scope at compile time. This puts storage selection alongside the channel while letting latches describe readiness without naming channel implementation types. The backing methods and synchronization operations are unchanged.",
+    "mergeCommit": {
+      "oid": "ea9d5121a13b873f66b1667b0fdb6f44150e1d2c"
+    },
+    "mergedAt": "2026-09-25T00:27:08Z",
+    "number": 4581,
+    "title": "Select channel storage by the latch's readiness scope",
+    "url": "https://github.com/positron-ai/tron/pull/4581"
+  },
+  {
+    "body": "## Summary\n\nPreserve attention K and V semantics in generated placement requests so C++ placement policies can distinguish the two projections.\n\n## Preserve the existing classification\n\nIngest already recognizes checkpoint keys such as `model.layers.11.self_attn.k_proj.weight` as `WeightK`. When declaring these weights during Loopy-to-Tron lowering, however, both roles fall through to `OrdinaryTensor`, so generated visitors lose the distinction for placement.\n\nCarry `WeightK` and `WeightV` into distinct Tron placement kinds, then emit the corresponding `attention_key_projection_tensor(...)` and `attention_value_projection_tensor(...)` requests in the generated tensor visitor. This uses the existing semantic annotations; C++ does not need to reinterpret checkpoint names. Q remains an ordinary placement request.\n\nThe preceding PR supplies the C++ request constructors. Existing placement policies handle these new roles through their ordinary paths, so device placement is unchanged here. The following PR uses the distinction to place K and V on separate device groups.\n\n## Validation\n\nExtend the existing placement-classification test with explicitly annotated weights named `key_matrix`, `value_matrix`, and `query_matrix`. It checks that K and V retain distinct placement kinds and emit their corresponding C++ requests, while Q remains ordinary, demonstrating that propagation follows the semantic annotations rather than the tensor names.\n",
+    "mergeCommit": {
+      "oid": "dbeb404fe1d2ba732c0819f0253da43c23965607"
+    },
+    "mergedAt": "2026-09-25T16:15:19Z",
+    "number": 4560,
+    "title": "Preserve attention K and V roles in generated placement requests",
+    "url": "https://github.com/positron-ai/tron/pull/4560"
+  },
+  {
+    "body": "LoopyTron's routing binding stores the original Loopy variable and generated Tron routing-field name as positional arguments to `EnvInfo`. Adding metadata to that binding requires updating positional construction and pattern matches throughout lowering.\n\nGroup those values in a `RoutingEnvInfo` record and use named fields at construction and lookup sites. This is a representation-only refactor that prepares the binding to hold the logical router ID in the next PR; ID allocation and routing-field allocation keep their existing behavior.\n",
+    "mergeCommit": {
+      "oid": "ae9051dfaa44bfbfe3a00a802c9eeb6730f7ca7a"
+    },
+    "mergedAt": "2026-09-26T02:16:17Z",
+    "number": 4483,
+    "title": "ingest: Give routing environment bindings a record",
+    "url": "https://github.com/positron-ai/tron/pull/4483"
+  },
+  {
+    "body": "The reuse analysis can assign compatible MoE routings to one storage slot, but LoopyTron currently discards that assignment and declares separate fields and guard channels. Apply the assignment during lowering so those routings share storage while retaining their distinct logical router identities.\n\n## Materializing the shared slot\n\nAs an illustrative example, suppose the analysis assigns `routing_b` to the slot owned by `routing_a`, the earlier writer. Both routing names now resolve to one generated field. Each routing operation populates that field for its own consumers.\n\nLowering carries the assignment in `envRoutingAssignment`. It resolves each routing to its canonical owner, then uses `stateRoutingFieldByOwner` to find or create that owner's field. Each logical routing gets its own environment binding pointing to the shared field, and the field combines their source provenance.\n\nThe field is created on the first encounter of any slot member. This handles an alias declared before its owner: declaration order does not change the owner selected by the lifetime analysis.\n\nChannel creation also reuses the shared field's existing guard channel. The preparation and read/write schedules already refer to logical Loopy names; resolving those names through their bindings now directs successive uses to the same channel, synchronizing access to the shared storage.\n\n## Logical identity and stack scope\n\nEach logical routing retains its own `RoutingEnvInfo` and `MoeRouterId`. Schedules and expert-weight placement continue to use that logical ID even when multiple bindings point to the same field.\n\nEarlier stack entries supply the reuse analysis and separation of logical identity from storage. This PR materializes that plan. Generated code still reconstructs the routing object with `emplace` on each use; in-place rebuilding is a subsequent change.\n\n## Validation\n\nThe added lowering tests check that compatible, separated routings produce one field owned by the earliest writer, including when the alias is declared first. Generated-C++ checks verify that only the owner field is declared, that the two-router fixture constructs two expert schedules, and that the weights retain distinct router IDs in their placement coordinates.\n",
+    "mergeCommit": {
+      "oid": "44d4d5e31354d9e2e1bfea3402f67fb924e348c5"
+    },
+    "mergedAt": "2026-09-26T03:27:24Z",
+    "number": 4461,
+    "title": "ingest: Materialize shared MoE routing fields",
+    "url": "https://github.com/positron-ai/tron/pull/4461"
+  },
+  {
+    "body": "Each MoE routing step currently constructs a fresh `moe_routing`, discarding the previous object's vector storage even when successive steps use the same state field. This change rebuilds that object in place so its routing buffers retain capacity across routing steps and forward passes.\n\n## Rebuild the routing without replacing its storage\n\nModel state now holds a `moe_routing<N, K>` directly instead of an optional that is replaced on each build. Both routing builders fill a caller-owned object through an output parameter. Generated C++ and the handwritten MoE implementation adopt this API, including the handwritten forced-routing path.\n\nIllustrative pseudocode for generated routing:\n\n```cpp\n// Before: construct a new object and replace the previous one.\nrouting.emplace(build_moe_routing_from_indices(...));\n\n// After: rebuild the existing object, retaining its buffers.\nbuild_moe_routing_from_indices(..., routing);\n```\n\n`moe_routing::reset` clears and refills the per-expert row lists, the flat expert-ordered token/slot list, and the token-to-batch-rank map while preserving their allocated capacity. Later builds reuse those allocations when their sizes fit; larger batches or more imbalanced expert assignments can still grow the buffers.\n\nThe routing holds a rebindable pointer to the caller-owned per-token selections, allowing default construction followed by an in-place build. Those selections must remain alive through subsequent routing use. Reset also recomputes the active experts and invalidates every old batch rank before assigning current ranks, preventing tokens absent from the new batch from retaining a stale rank. Expert views, schedules, and routing statistics consume the persistent object directly.\n\nThe existing routing channel continues to publish the routing only after worker 0 has finished rebuilding it and constructing its expert-matmul schedules, so helper workers cannot consume partially rebuilt state.\n\n## Stack scope\n\nThe parent, [#4461](https://github.com/positron-ai/tron/pull/4461), makes compatible routings with sufficiently separated lifetimes share a state field while preserving their logical router identities. This layer lets the object in that field retain its internal vector capacity across uses. Routing ownership, compatibility checks, and logical router identity come from the preceding stack layers.\n",
+    "mergeCommit": {
+      "oid": "8cb45a553bc108d5c32489383512dfb7e0941d0b"
+    },
+    "mergedAt": "2026-09-26T04:14:03Z",
+    "number": 2750,
+    "title": "tron: Rebuild moe_routing in place across forward passes",
+    "url": "https://github.com/positron-ai/tron/pull/2750"
+  },
+  {
+    "body": "Generated MoE body kernels distribute activation work with nested expert/row loops and per-expert offset arithmetic. Use the router's existing `expert_major` vector to express the same worker assignment with one strided loop.\n\n[#3895](https://github.com/positron-ai/tron/pull/3895) fixed helper imbalance by continuing row-to-helper assignment across expert boundaries: previously, every expert's first row went to helper 0. It implemented this global assignment with a running row count and modulo arithmetic inside the nested traversal. The router already exposed the desired row sequence in `expert_major` when that PR landed, so this change simplifies its implementation while retaining its balancing behavior.\n\nWith tracing, channel operations, and kernel arithmetic omitted, the generated traversal changes from:\n\n```cpp\nsize_t n_prior_rows = 0;\nfor (const expert_id expert : routing->active_experts()) {\n  const size_t n_rows = routing->per_expert[expert].size();\n  const size_t first_row_ix =\n    (actual_worker_ix + n_actual_workers - n_prior_rows % n_actual_workers)\n    % n_actual_workers;\n  for (size_t row_ix = first_row_ix; row_ix < n_rows; row_ix += n_actual_workers) {\n    auto [token, slot] = routing->expert_row(expert, expert_row_id(row_ix));\n    token_slot_id<4> ix(token, slot);\n    // Process ix.\n  }\n  n_prior_rows += n_rows;\n}\n```\n\nto:\n\n```cpp\nfor (size_t row_ix = actual_worker_ix;\n     row_ix < routing->expert_major.size();\n     row_ix += n_actual_workers) {\n  token_slot_id<4> ix = routing->expert_major[row_ix];\n  // Process ix.\n}\n```\n\nThe constructor builds `expert_major` by concatenating the same experts' rows in the same order. Both loops assign global row `r` to helper `r % n_actual_workers`, preserving the existing balance across expert boundaries. Main-thread exclusion, single-worker behavior, trace placement, per-row channel waits/writes, and kernel arithmetic stay unchanged.\n\nThe accompanying comments clarify that expert-major order means grouping by ascending expert ID; matmul dispatch and completion can occur in a different order.\n\nThe existing MoE code-generation test checks the flat loop's worker offset, full row bound, stride, and token-slot lookup.\n",
+    "mergeCommit": {
+      "oid": "425cab5761b52a767b7c4abecd61fbe28078495f"
+    },
+    "mergedAt": "2026-09-27T18:53:56Z",
+    "number": 4492,
+    "title": "Iterate generated MoE kernels over flat expert rows",
+    "url": "https://github.com/positron-ai/tron/pull/4492"
+  },
+  {
+    "body": "`moe_routing` exposes writable per-expert and flattened row containers, although both must agree with each other and with the cached active-expert IDs. Make the two containers private and expose read-only views, preventing callers from independently modifying either representation.\n\nThe routing API distinguishes the three kinds of access:\n\n```cpp\nrouting.active_experts();        // Existing API: one ID per nonempty expert.\nrouting.rows_for(expert);        // This expert's (token, slot) tuples.\nrouting.rows_in_expert_order();  // Encoded token-slot IDs, grouped by expert ID.\n```\n\n`rows_for()` returns a span of const tuples indexed by `expert_row_id`; `rows_in_expert_order()` returns a span of const encoded IDs. Generated and handwritten activation loops, matmul preparation and readiness handling, and statistics use these accessors instead of accessing the vectors directly.\n\nThe views borrow the existing storage, preserving row element types, construction, allocations, and ordering. This establishes the access boundary separately from the following changes to row representation and storage.\n",
+    "mergeCommit": {
+      "oid": "3480ca23a0b9d0e2cb2e80c676655d302235790a"
+    },
+    "mergedAt": "2026-09-27T23:01:41Z",
+    "number": 4493,
+    "title": "Expose read-only MoE routing row views",
+    "url": "https://github.com/positron-ai/tron/pull/4493"
+  },
+  {
+    "body": "`moe_routing` stores each routed row as a `(token, slot)` tuple in its per-expert vectors and as an encoded `token_slot_id` in its flat vector. Use encoded IDs in both, giving the two row views the same element type and allowing construction of the flat sequence to copy those IDs directly.\n\nThis changes `rows_for(expert)` from a view of const tuples to a view of const encoded IDs. Its current callers use only row counts and indices. Callers that need a tuple use `expert_row(expert, row)`, which now decodes the stored ID and preserves its existing tuple return value.\n\nThe per-expert vectors and flat vector remain separate, with the same row ordering and worker assignment. This isolates the row representation and accessor type change so the following storage-consolidation PR can preserve those accessor signatures.\n",
+    "mergeCommit": {
+      "oid": "ee2d5be0f1c08b110bc84f187eb22b4b95965159"
+    },
+    "mergedAt": "2026-09-27T23:32:38Z",
+    "number": 4494,
+    "title": "Use encoded token-slot IDs for per-expert rows",
+    "url": "https://github.com/positron-ai/tron/pull/4494"
+  },
+  {
+    "body": "Shared Dice currently rejects payload options by name, blocking Runtron memory tuning and compatible placement requests. This change forwards payload arguments and moves placement decisions into native startup: compare explicit requests with the authenticated grant, accept compatible settings, and report requested versus permitted resources for conflicts.\n\n- Preserve `SYSTEM_CONFIG` tuning through local wrappers, the daemon, and remote submit/runner/bridge paths while keeping instance ownership with Dice and the remote reservation.\n- Preflight CLI and environment placement together against an independent trusted resource-map snapshot. Check device subsets, CPU roles and SMT siblings, NUMA nodes, matching instances, alternate maps, and the supported hugepage cleanup base. Retain accepted placement when startup parses the environment again.\n- Default shared-Dice Runtron and Rinzler wrappers to **48 one-GiB hugepages per process**, independent of card count. Preserve explicit sizing and existing environment precedence. Other payloads and legacy execution retain their existing defaults.\n- Add STE-style comments explaining the grant, transport, placement, and cleanup boundaries, plus wrapper/native behavioral coverage and CI wiring.\n\nThis is an interim startup-validation approach. CPU/NUMA payload options do not guide scheduling; `--instance` still requests the partition. Dice does not reserve memory or enforce every thread's later affinity. Alternate maps currently must match the full `instance_slices` list as well as selected resources. Deployment requires both the updated Dice package and rebuilt payload binaries.\n\nRebased onto `main` at `e789670271` on 2026-09-25. Resolved the benchmark conflict by retaining upstream Glimmer measurements and this PR's `t_system` measurements. The PR's source edits and benchmark changes are preserved.\n\nValidation after this rebase and the native quoting fix:\n\n- Nix Slice check: 741 Slice tests and 2 selected Dice tests passed. The focused wrapper, remote envelope, Slice placement and daemon quoting checks also passed.\n- Isolated Dice suite: 210 passed, 7 existing skips.\n- C++/Python formatting, Python syntax, and `git diff --check` passed.\n- Native builds and native/host tests were not rerun. The real Runtron override test against an updated service remains deferred.\n\nEarlier validation on `main` at `98bb8cb22f`:\n\n- Nix Slice check: 729 Slice tests and 2 selected Dice tests passed.\n- Isolated Dice suite: 210 passed, 7 existing skips.\n- Focused `t_system` build and full `make build-test` passed, including Runtron and Rinzler binaries. C++/Python formatting and `git diff --check` passed.\n- Native `t_system` execution was queued and canceled before running because shared Dice capacity was occupied. `make test-host` has not been rerun. Earlier native/host results predate the rebase.\n- The real Runtron hugepage override test against an updated service remains deferred; no service deployment or restart was performed. Wrapper/parser tests do not prove real page allocation.\n\nThe transport quoting review issue is fixed: Python now uses the native `std::quoted` rules, preserving literal apostrophes/backslashes and option-like text inside quoted values.\n\nOutstanding review fixes remain before merge:\n\n- **P1:** Fix missing/unmatched-map fallback selection: a truthy default YAML Null node can reach map accessors and assert. Reject unsupported one-CPU serving before initialization; it currently leaves no worker after reserving the coordinator.\n- **P2:** Check effective driver CPU capacity against selected devices. Propagate NUMA binding failures and reject malformed numeric memory options with actionable errors. Stop early native instance discovery at `--` so prompt text cannot select a FUSE instance directory.\n- Correct stale handoff/quoting documentation and comments; align the alternate-map description with the stronger shape-list comparison above.\n",
+    "mergeCommit": {
+      "oid": "15b1877fc2e4d0227cd51e08d7288c8b219a275d"
+    },
+    "mergedAt": "2026-09-26T02:16:17Z",
+    "number": 4465,
+    "title": "Dice: pass through payload arguments and validate grant placement",
+    "url": "https://github.com/positron-ai/tron/pull/4465"
+  }
+]
