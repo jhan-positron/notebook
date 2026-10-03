@@ -315,3 +315,7 @@ Recipe: exec/tilec-20260917/build.sh (waits on ci_lease_busy + campaign flock).
 
 
 Index detail moved here 2026-09-18 (was only in MEMORY.md): 2026-09-14/15: branch jhan-amx-vnniK (worktree VNNIed-K-in-place/tron-VNNIed-K); REBASED ONTO MAIN 2026-09-15/16: FINAL HEAD ff680c8020 (18 commits; 17 rebased + cost row), built + 4 unit tests + cabal + host suite + clang-format all pass on 3bda (exec/results/vnnik5-20260916); backup branch jhan-amx-vnniK-pre-main-rebase = a73caff563; PUSHED 2026-09-17: PR head 30c4ac82cb (jhan 04ffeedccb + 3 comment/style commits, built + 4 unit tests pass on 3bda, exec/tilec-20260917); perf cells vs a MAIN base binary still open; issue #4444 = token divergence + kill-switch rollback contract (Note item 4 stale under TRON_K_VNNI); report status/main-rebase-20260915/rebase-report.html; campaigns exec/vnnik*-2026091[456]/; traps
+
+NOTE 2026-09-25: the flipped-orientation paragraph at the end of Note [QK orientation] (h/tron/kernels/amx_attn_iface.hpp:214-223)
+STAYS. A request to move it into the PR 4424 description was pasted by mistake (jhan: "please ignore"); the move was done and fully
+reverted (branch back at 30c4ac82cb, PR body restored byte-identical). Do not redo it.
