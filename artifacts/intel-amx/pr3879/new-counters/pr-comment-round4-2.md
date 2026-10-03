@@ -1,0 +1,33 @@
+## Leaf samples from the round-4 run (head 04da001cb5)
+
+The stderr summary at the end of the run (qwen-3-4b tp2, 8 users, prompt 1024, 256 tokens, CPU attention, delphi-3bda, 2026-09-29). The class label carries the rule: `decode_like/all_jobs_with_listener` is the 255 decode steps, `prompt_or_mixed/some_jobs_without_listener` is the 8 prefill forwards.
+
+```
+[attn-stats] decode_like/all_jobs_with_listener totals: {...,"ready_amx_visits":10278144,
+ "ready_amx_k_tokens":657801216,"ready_avx_full_page_visits":0,...,"pending_avx_visits":580608,
+ "pending_avx_k_tokens":18579456,"pending_amx_visits":6912,"pending_amx_k_tokens":442368,...,
+ "attn_jobs":183600,"busy_cycles":95886519154,"wall_cycles_w0":6227932522,"wall_max_cycles_w0":3832876,
+ "period_cycles_w0":8017787702,"period_count_w0":8925,...,"join_wait_cycles":2028688892,"fpga_k_tokens":0,...}
+[attn-stats] decode_like/all_jobs_with_listener forwards: {"forwards":255,"wall_cycles":8610367272,
+ "wall_max_cycles":48796864,"fpga_queries":0,"token_jobs":2040,"listener_jobs":2040,"kv_only_jobs":0,
+ "n_attn_workers_min":20,"n_attn_workers_max":20,"token_jobs_by_path_set":{"none":0,"avx":0,"amx":24,
+ "avx+amx":2016,"fpga":0,"fpga+avx":0,"fpga+amx":0,"fpga+avx+amx":0}}
+[attn-stats] prompt_or_mixed/some_jobs_without_listener totals: {...,"ready_amx_visits":16515072,...,
+ "pending_avx_visits":3538944,...,"pending_avx_full_page_visits":1216512,"attn_jobs":5760,
+ "busy_cycles":52874188338,...,"join_wait_cycles":5367417044,...}
+[attn-stats] prompt_or_mixed/some_jobs_without_listener forwards: {"forwards":8,"wall_cycles":8605423498,
+ ...,"token_jobs":8192,"listener_jobs":64,"kv_only_jobs":8128,"n_attn_workers_min":20,"n_attn_workers_max":20,
+ "token_jobs_by_path_set":{"none":0,"avx":1024,"amx":0,"avx+amx":7168,...}}
+```
+
+Worker leaves, read live in a repeat of the same run (snapshot at decode forward 142 of 255). The rows of the main helpers (pool workers 0 to 6) read zero. The attention rows are pool workers 7 to 26:
+
+```
+decode_like_worker_0   {"worker":0,...,"ready_amx_visits":0,...,"attn_jobs":0,"busy_cycles":0,"join_wait_cycles":0}
+decode_like_worker_7   {"worker":7,...,"ready_amx_visits":348075,"ready_amx_k_tokens":22276800,...,
+                        "attn_jobs":5817,"busy_cycles":2904283836,"join_wait_cycles":47550692}
+decode_like_worker_26  {"worker":26,...,"ready_amx_visits":285048,...,"pending_avx_visits":45536,...,
+                        "attn_jobs":5764,"busy_cycles":2840390470,"join_wait_cycles":111578888}
+```
+
+In words, for the decode steps: 97.3 % of the K tokens scored in software went through the AMX kernel (658 M of 677 M). The rest went through the AVX loop on the partial pending page. Every generated token used AMX, and all but 24 also used AVX. For prefill: 1.06 G K tokens on AMX (the ready pages of earlier chunks) and 152 M on AVX (the current chunk's own pages). The forward wall (T1) sums to 8.61 G cycles over the 255 decode steps, which is 12.5 ms per step at 2.7 GHz. The split was 20 attention workers in every forward of both classes, so `active_workers` is 20. The software join wait (T5) is 2.03 G cycles over the 183,600 decode jobs (4.1 us per job, 2.1 % of the busy time T2) and 5.37 G cycles over the 5,760 prefill jobs (345 us per job, 10.2 % of T2). Every prefill forward carried one 128-token chunk of each of the 8 users: 1,024 token jobs with 8 listeners (the chunk-final tokens), so 8,128 of the 8,192 prefill jobs stored K and V only.

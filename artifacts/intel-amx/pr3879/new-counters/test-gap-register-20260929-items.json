@@ -1,0 +1,719 @@
+[
+ {
+  "unit": "T1 note_forward_wall at its production site: h/tron/scheduler/full.hpp:2093-2102 (full_scheduler::forward, fn header :1968; reads state.self_attn_state.stats->enabled, rdtsc pair around state.forward(...))",
+  "covered_by": "t/t_trace_passes_host.cpp:95 `no_work_finished = primary->forward();` in TEST_CASE \"Host scheduler selects primary trace passes around real forwards\" (:58), real full_scheduler on llama-3-8b-host (:74, CMake t/CMakeLists.txt:223-226). Hook-only: t/t_attn_stats.cpp:244-249 (\"attn-stats timers: ...\" :202).",
+  "strength": "executed-only",
+  "evidence": "full.hpp:2093 `const bool attn_stats_enabled = state.self_attn_state.stats->enabled;` :2097-2100 `if (attn_stats_enabled) { ...note_forward_wall(rdtsc() - t_forward); }`. The state's stats object is built with `attn_stats::env_enabled()` (self_attention.hpp:495-497); env_enabled reads getenv(\"TRON_ATTN_STATS\") (attn_stats.hpp:142-153). No test or CMake ENVIRONMENT sets TRON_ATTN_STATS (git grep: only t_attn_stats.cpp:342 as a JSON string; CMake ENVIRONMENT lines :375-509 carry other vars). So every scheduler test runs the `attn_stats_enabled == false` branch; nothing asserts forwards[cls].forwards or wall_cycles after a real forward. t_attn_stats.cpp:244-249 calls note_forward_wall(CYCLES_2000/1000) directly and CHECKs forwards==2, wall_cycles==3000, wall_max==2000 (hook only, no production path).",
+  "gap_note": "Needs a real forward with stats enabled. Smallest test: in t_trace_passes_host.cpp after get_scheduler (:74) replace `primary->state.self_attn_state.stats` with `std::make_shared<model_stats>(true, ...)` (same pattern as t_llama_unit.cpp:2190-2202; safe: leaves hold weak_ptr, self_attention.hpp:470-475), run one forward (:95), then CHECK(load_relaxed(stats->forwards[decode_like].forwards) + load_relaxed(stats->forwards[prompt_or_mixed].forwards) == 1) and CHECK(wall_cycles > 0 for that class). The class is chosen at model.hpp:1745-1748 (decode_like iff n_listeners == token_jobs.size())."
+ },
+ {
+  "unit": "T2 busy cycles at the production site: h/tron/models/self_attention.hpp:852-855 in run_attention_job (`t_end = rdtsc(); attn_elapsed += t_end; if (stats_enabled) stats_ref.note_attn_job(worker_ix, layer.i, attn_elapsed, t_end - t_entry);`)",
+  "covered_by": "t/heterogeneous_scheduler_compile.cpp:527-528 `state->run_attention_job<geometry>(&q_batch, operation, queries, query_channel, output, observed, 0, 1)` and :574-575 `state->run_attention_job<software_geometry, 2>(...)` in TEST_CASE \"hardware attention configuration uses KV-slot identity\" (:292), SECTION \"Q reuse waits for software work and hardware completion per minibatch\" (:428); real heterogeneous_outer_state (:307), binary t_heterogeneous_scheduler with ENVIRONMENT USE_HW_ATTN=1 (CMake :579-582). Hook-only: t/t_attn_stats.cpp:232-236.",
+  "strength": "executed-only",
+  "evidence": "model.hpp:2103-2116 forwards to self_attn_state.run_attention_job with `cached_operation_uses_hw(...)`. self_attention.hpp:803-804 `attn_stats::model_stats& stats_ref = *stats; const bool stats_enabled = stats_ref.enabled;` and that `stats` is the ctor's env_enabled() object (:495-497) because this test never replaces it (grep of heterogeneous_scheduler_compile.cpp for `stats` finds only STATS_DISABLED_FALSE at :398). So :854 `if (stats_enabled)` is false and note_attn_job never runs under a test. The section asserts only output values (:552-553, :577-578), not attn_jobs/busy_cycles. compile_generated_attention_calls (:162, run_attention_job at :188/:196/:204) is never called: only its address is taken at :238-239 ([[maybe_unused]]), so those three calls are compile-only. t_attn_stats.cpp:232-236 calls note_attn_job(WORKER_0/WORKER_1, LAYER_2, 100, ...) directly and CHECKs attn_jobs==2, busy_cycles==200.",
+  "gap_note": "Needs run_attention_job driven with stats->enabled == true. Smallest test: in the Q-reuse section, before :527 replace `state->self_attn_state.stats` with an enabled model_stats (facts from heterogeneous_model; n_workers = state->self_attn_state.attn.size(), n_layers = heterogeneous_model::n_layers) and call `stats->begin_forward(forward_class::decode_like, 1)` (sets current_class, attn_stats.hpp:357-365); after `worker.get()` (:544) CHECK(sum_layer(decode, operation.binding.model_layer.i).attn_jobs == batch_ix + 1) and CHECK(busy_cycles > 0)."
+ },
+ {
+  "unit": "T3 wall cycles on worker 0 at the production site: h/tron/models/self_attention.hpp:805-806 (`t_entry = stats_enabled ? rdtsc() : UNSET_CYCLES_0`) and :855 (`t_end - t_entry` passed as wall_cycles)",
+  "covered_by": "Same production driver as T2: t/heterogeneous_scheduler_compile.cpp:527-528 and :574-575 (worker_ix 0). Hook-only: t/t_attn_stats.cpp:232-238.",
+  "strength": "executed-only",
+  "evidence": "self_attention.hpp:805-806 takes the UNSET_CYCLES_0 arm when stats_enabled is false, which is the case in every test (see T2 evidence). attn_stats.hpp:413-416 adds wall_cycles only for WORKER_0; t_attn_stats.cpp:237-238 CHECKs wall_cycles == CYCLES_250 and wall_max_cycles == CYCLES_250 from a direct call, so the WORKER_0 filter is asserted at hook level only. No test compares a production wall value against the busy value.",
+  "gap_note": "Same fixture as T2. Add CHECK(sums.wall_cycles >= sums.busy_cycles) for worker 0: the job in the Q-reuse section waits on upstream_kvs_ready (:518, released at :533) between t_entry (:805) and the busy start (attn_elapsed starts after query_channel.start_reading, :812 onward), so wall must exceed busy by the software_pending wait (:531-532 proves that wait is >= 20 ms)."
+ },
+ {
+  "unit": "T4 layer period at the production site: h/tron/models/self_attention.hpp:807-808 (`if (stats_enabled && worker_ix == attn_stats::WORKER_0) stats_ref.note_attn_job_entry_w0(binding.operation.i, layer.i, t_entry);`)",
+  "covered_by": "Production: t/heterogeneous_scheduler_compile.cpp:527 then :574 run two different operations (operations[1] then operations[2]) on worker 0 in the same batch loop, but with stats off. Hook-only: t/t_attn_stats.cpp:217-229.",
+  "strength": "executed-only",
+  "evidence": "self_attention.hpp:807 `if (stats_enabled && worker_ix == attn_stats::WORKER_0)` is false in every test (stats_enabled false, see T2). attn_stats.hpp:388-401: the period closes only when the operation id changes and t4_last_operation != NO_OPERATION, and begin_forward (:357-365) resets t4_last_operation. t_attn_stats.cpp:217-224 CHECKs period_count==1, period_cycles==1700 after two operation-0 entries and one operation-1 entry; :227-229 CHECKs that a new begin_forward does not close the previous layer. Nothing drives the production sequence (begin_forward at model.hpp:1745 -> entry hooks at :808) with stats on.",
+  "gap_note": "Same fixture as T2. The Q-reuse section already runs operation[1] (:527) then operation[2] (:574) on worker 0 inside one batch iteration: with stats enabled and one begin_forward per batch_ix, CHECK(sum_layer(decode, operations[1].binding.model_layer.i).period_count == 1) and period_cycles > 0 after :575, and period_count == 0 for operations[2]'s layer (no successor)."
+ },
+ {
+  "unit": "T5 rdtsc pair in the stream_hw_joins wait loop with a REAL accumulator: h/tron/models/self_attention.hpp:1131-1132 (`t_wait = join_wait_cycles ? rdtsc() : UNSET_CYCLES_0`) and :1147 (`if (join_wait_cycles) *join_wait_cycles += rdtsc() - t_wait;`)",
+  "covered_by": "NONE for the non-null branch. Null-branch drivers: t/t_llama_unit.cpp:2825-2827 and :2874-2876 (both `/*join_wait_cycles=*/nullptr`, inside check_page_range_reductions :2230, reached from TEST_CASE \"apply and join page ranges\" :2890 via :2894); t/heterogeneous_scheduler_compile.cpp:399-400 run_joins(..., true, STATS_DISABLED_FALSE) which passes nullptr at self_attention.hpp:1306.",
+  "strength": "none",
+  "evidence": "Every caller passes nullptr: t_llama_unit.cpp:2827 `/*join_wait_cycles=*/nullptr`, :2876 `finish_job, /*join_wait_cycles=*/nullptr`; run_joins :1304-1306 passes `stats_enabled ? &join_wait_cycles : nullptr` and stats_enabled is false in the two run_joins drivers (hetero :398 STATS_DISABLED_FALSE; hetero :527 via run_attention_job with env-off stats). So `*join_wait_cycles += ...` at :1147 never executes under any test. The wait loop itself IS entered by t_llama_unit.cpp:2874-2876: the passes are released only from finish_job (:2864-2872) and the watchdog CHECK_FALSE(timed_out) at :2878 proves the loop ended by release, not by timeout; the loop is also entered by hetero :399 (CHECK(waiting_for_other == timeout) :419). Those tests assert join results (finish order :2879-2885, output values :421-425), not any wait counter.",
+  "gap_note": "Producer and fixture already exist. Smallest test: in t_llama_unit.cpp:2874 declare `uint64_t wait_cycles = 0;` and pass `&wait_cycles`; after watchdog.join() CHECK(wait_cycles > 0) (the join provably waited). In the fully-ready loop at :2825 pass `&wait_cycles` and CHECK(wait_cycles == 0) (all passes complete and sections_left == 0 at :2797-2799, so `progressed` stays true and the wait loop :1129-1147 is never entered)."
+ },
+ {
+  "unit": "T5 accumulator and note_join_wait at the production site in run_joins: h/tron/models/self_attention.hpp:1188-1189 (`uint64_t join_wait_cycles = UNSET_CYCLES_0`), :1304-1306 (`stats_enabled ? &join_wait_cycles : nullptr`), :1315 (`if (stats_enabled) stats->note_join_wait(worker_ix, layer.i, join_wait_cycles);`)",
+  "covered_by": "t/heterogeneous_scheduler_compile.cpp:398-400 `run_joins<geometry>(&q_batch, operation, output, 0, 2, true, STATS_DISABLED_FALSE)` in SECTION \"mixed attention retains both contributions regardless of readiness order\" (:319); t/heterogeneous_scheduler_compile.cpp:527 via run_attention_job -> self_attention.hpp:842-843 `run_joins<geometry>(..., uses_hw, stats_enabled)`. Hook-only: t/t_attn_stats.cpp:240-242 and :429-433.",
+  "strength": "executed-only",
+  "evidence": "hetero :398 `constexpr bool STATS_DISABLED_FALSE = false;` is the only explicit run_joins call in the tree (git grep run_joins over t/: only this file and self_attention callers). The :527 path inherits stats_enabled from :804 (env off). Therefore :1306 always yields nullptr and :1315 never runs. attn_stats.hpp:420-423 note_join_wait ignores cycles == 0; t_attn_stats.cpp:240-242 CHECKs join_wait_cycles == CYCLES_100 after note_join_wait(100) and note_join_wait(0); :429-433 CHECKs the prompt class receives CYCLES_50. Both are direct hook calls.",
+  "gap_note": "Smallest test: in hetero SECTION :319 replace `state->self_attn_state.stats` with an enabled model_stats and call begin_forward(decode_like, 2) before :396, pass `true` instead of STATS_DISABLED_FALSE at :400, and after `worker.get()` (:417) CHECK(sum_layer(decode, operation.binding.model_layer.i).join_wait_cycles > 0). The section already proves the join waited (CHECK(waiting_for_other == std::future_status::timeout) :419), so a zero counter would fail the CHECK."
+ },
+ {
+  "unit": "run_joins software-only poll, untimed at HEAD: h/tron/models/self_attention.hpp:1258 (`if (!join_hw && plan_state.sections_left[kv_head]) continue;  // poll`), join_hw computed at :1251 (`uses_hw && !q_batch->hw_plan.empty()`), finish_all_jobs at :1308 and :1311",
+  "covered_by": "t/heterogeneous_scheduler_compile.cpp:574-575 `state->run_attention_job<software_geometry, 2>(...)` (software operation[2], heterogeneous geometry -> :1310-1311 branch) in SECTION :428. No test asserts any timer for this path.",
+  "strength": "none",
+  "evidence": "self_attention.hpp:1251-1258: with uses_hw false (cached_operation_uses_hw for operation[2]; hetero :315 shows only attention_op_id(1) uses hw) join_hw is false and the loop spins on :1258 until sections_left drops. No rdtsc pair surrounds :1255-1258; join_wait_cycles (:1188) stays 0 on this path, so note_join_wait at :1315 would early-return (attn_stats.hpp:421 `cycles == 0`) even with stats on. The :574 call is single-worker (n_attn_workers 1, sections_left already 0 after its own run_sections), so the spin is never taken. hetero :577-578 CHECKs output == 3.0f only. README.stats.md:260 describes T5 as join_wait_cycles without a software-only case.",
+  "gap_note": "Design gap, not only a test gap: the software-only join has no timer at HEAD, so no counter can be asserted. If T5 should cover it, wrap :1255-1258 in a rdtsc pair that adds to join_wait_cycles when the `continue` is taken, then add a two-worker test (n_attn_workers 2, sections_left[0] = 1 held by the test, released from a second thread after a bounded delay, as hetero :383-396 does for produce_software) and CHECK(sum_layer(...).join_wait_cycles > 0). If the poll is meant to stay untimed, record that decision next to :1258 and in README.stats.md:260."
+ },
+ {
+  "unit": "join_hw == true path from run_joins into stream_hw_joins: h/tron/models/self_attention.hpp:1299-1306 (`if constexpr (geometry == hardware_geometry) { if (join_hw) { ... stream_hw_joins(..., stats_enabled ? &join_wait_cycles : nullptr); }`)",
+  "covered_by": "t/heterogeneous_scheduler_compile.cpp:398-400 (run_joins with uses_hw=true; hw_plan non-empty via set_passes at :340-348 region and hw_attn resize :325) and :527 (run_attention_job on operation[1], `cached_operation_uses_hw(attention_op_id(1))` REQUIREd true at :315; passes set at :500-505).",
+  "strength": "executed-only",
+  "evidence": "Both drivers reach :1304 with nullptr (stats off, see T5 items). The sections assert join correctness: :421-425 output == expected mix of software and hardware partials for both readiness orders (hardware_first GENERATE), :552-553 output == expected per batch, :555-556 the pending waits. Nothing reads join_wait_cycles, attn_jobs or any timer row. The hardware_first order (:383-396, :403-411) is the branch where the wait loop ends on software readiness (:1135 break); the other order ends on `ready(...)` (:1143); both are executed, neither timed under a test.",
+  "gap_note": "Covered by the fixture in the run_joins T5 item: enabling stats in SECTION :319 turns the existing two GENERATE orders (hardware_first true/false, worker_zero_valid) into four asserted T5 cases with one CHECK(join_wait_cycles > 0) each."
+ },
+ {
+  "unit": "Timer hooks under an ENABLED state through any production path (cross-cutting): the only tests that build an enabled model_stats are t/t_llama_unit.cpp:2190-2202 and t/t_amx_dispatch_dtype.cpp:131-143, and both drive apply_page_range only",
+  "covered_by": "t/t_llama_unit.cpp:2203-2216 (TEST_CASE \"pending attention waits for invisible writers on the same page\" :2073-2074) and t/t_amx_dispatch_dtype.cpp:162-190 (exercise_page) assert visit tallies; NONE for T1..T5.",
+  "strength": "none",
+  "evidence": "t_llama_unit.cpp:2200-2202 `state.self_attn_state.stats = std::make_shared<...>(STATS_ON_TRUE, ...)` then :2203-2205 apply_page_range only; CHECKs at :2210-2215 read visits/k_tokens/avx_full_page_visits, none of attn_jobs, busy_cycles, wall_cycles, period_*, join_wait_cycles, forwards. t_amx_dispatch_dtype.cpp:140-143 same construction; :164-166 apply_page_range only; REQUIREs at :178-189 are visit/k_token fields. run_attention_job, run_joins, stream_hw_joins and full_scheduler::forward are never called on a state whose stats->enabled is true (grep results above).",
+  "gap_note": "The two existing enabled-state fixtures show the replacement idiom is accepted (comment at t_llama_unit.cpp:2184-2189: safe because the FUSE tree is never initialized in the binary). Reusing that idiom in heterogeneous_scheduler_compile.cpp (T2..T5 items) and t_trace_passes_host.cpp (T1 item) closes every timer gap without a new binary or model reference."
+ },
+ {
+  "unit": "env_enabled() h/tron/models/attn_stats.hpp:142-153 (unset -> false; \"1\" -> true; other value -> warn + false; static cache = read once)",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "git grep at HEAD over t/ for TRON_ATTN_STATS / setenv(\"TRON_ATTN_STATS\") finds nothing. t_attn_stats.cpp:73-76 make_stats passes a bool directly. Production call self_attention.hpp:496 runs in every test that builds a model state with the variable unset, so only the nullptr branch (:145) executes, and no CHECK reads the result.",
+  "gap_note": "The static local (:143) makes one process = one value, so a single binary cannot test all three branches. Smallest fix: split the parse into a pure `inline bool parse_switch(const char*)` (nullptr, \"1\", \"0\", \"true\") called by env_enabled, and add a t_attn_stats case with 4 CHECKs. Also a warn-count check via a spdlog test sink for the \"other value\" branch."
+ },
+ {
+  "unit": "model_stats ctor attn_stats.hpp:299-320 (on: rows/fpga/path_bits allocated + info log; off: nothing allocated)",
+  "covered_by": "t/t_attn_stats.cpp:277-294 \"with the switch off, nothing is allocated...\"; t/t_attn_stats.cpp:130-133 \"rows: a tally goes to its pass...\"",
+  "strength": "asserted",
+  "evidence": ":281 CHECK_FALSE(stats->enabled); :282 CHECK(stats->rows.empty()); :283 CHECK(stats->fpga.empty()). On: :133 REQUIRE(stats->enabled) and :138 stats->row(...) (row() asserts index < n_workers/n_layers :327-329) would abort if rows were not sized N_CLASSES_2*n_workers*n_layers (:312).",
+  "gap_note": "path_bits.resize(n_workers) (:314) is asserted only indirectly (token_path_span returns nullptr when path_bits is short; no CHECK on path_bits.size())."
+ },
+ {
+  "unit": "~model_stats attn_stats.hpp:322-324 (print_report(stderr) on destruction when enabled)",
+  "covered_by": "t/t_attn_stats.cpp:112-512 every case that calls make_stats(STATS_ON_TRUE) (e.g. :132, :164, :212) destroys the object at scope end",
+  "strength": "executed-only",
+  "evidence": ":323 `if (enabled) print_report(stderr);` runs at each case's end; nothing captures stderr, no CHECK depends on it. print_report(FILE*) itself is asserted separately (:447-483).",
+  "gap_note": "Redirect stderr (freopen to a tmpfile, or dup2) around the destruction of a busy make_stats(true) object and CHECK the \"[attn-stats] model\" line appears; with the switch off CHECK nothing is written."
+ },
+ {
+  "unit": "token_path_span attn_stats.hpp:347-354 (worker >= path_bits.size() -> nullptr, n=0; else the worker's vector)",
+  "covered_by": "t/t_llama_unit.cpp:2204-2206 (via apply_page_range self_attention.hpp:1455-1456); t/t_amx_dispatch_dtype.cpp:164-166",
+  "strength": "executed-only",
+  "evidence": "Both tests build model_stats with workers = attn.size() (t_llama_unit.cpp:2201-2202, t_amx_dispatch_dtype.cpp:141-142) and never call begin_forward, so worker < path_bits.size() and n = 0 (inner vector empty). No CHECK reads path bits. The worker >= size branch (:348-351) runs in no test.",
+  "gap_note": "In t_attn_stats: `size_t n = 99; CHECK(stats->token_path_span(N_WORKERS_3, n) == nullptr); CHECK(n == 0);` and after begin_forward(cls, 5): `CHECK(n == 5)` for WORKER_0."
+ },
+ {
+  "unit": "begin_forward attn_stats.hpp:357-365 enabled branch (class stored, fpga_bits assigned, path_bits grown, t4_last_operation reset)",
+  "covered_by": "t/t_attn_stats.cpp:161-200 \"path sets: bits from every worker and the FPGA plan fold per forward\"; :202-275 \"timers ...\" (T4 reset :227-229, class switch :255-258)",
+  "strength": "asserted",
+  "evidence": "Class: :255-258 note_fpga_pass after begin_forward(prompt_or_mixed) lands in CLASS_PROMPT_1 not CLASS_DECODE_0. fpga_bits/path_bits sized: :168-176 note_token_path/note_fpga_query for jobs 0..4 then end_forward fold checked at :181-184 (bits ignored if vectors were not grown). T4 reset: :227-229 CHECK period_count == 0 after a new forward's first entry.",
+  "gap_note": ""
+ },
+ {
+  "unit": "begin_forward / end_forward attn_stats.hpp:358, :448 `if (!enabled) return;` guards",
+  "covered_by": "t/t_attn_stats.cpp:277-294 \"with the switch off ...\"",
+  "strength": "asserted",
+  "evidence": ":284-286 begin_forward + end_forward on an off object then CHECK(load_relaxed(forwards[CLASS_DECODE_0].token_jobs) == 0). Without the guard end_forward :463 would add 5 and :451 would read the empty fpga_bits (abort under _GLIBCXX_ASSERTIONS, t/CMakeLists.txt:598).",
+  "gap_note": ""
+ },
+ {
+  "unit": "note_token_path attn_stats.hpp:370-374 in-range write",
+  "covered_by": "t/t_attn_stats.cpp:161-200 \"path sets ...\"",
+  "strength": "asserted",
+  "evidence": ":168-175 seven calls; :181 CHECK avx+amx set == 2, :182 fpga+avx == 1, :184 none == 1; :175 empty visit adds no bit (path_bit :129-133 returns 0). CAVEAT: production apply_page_range does NOT call note_token_path; it writes path_bits through token_path_span (self_attention.hpp:1455-1456, :1619-1621). note_token_path has no production caller at HEAD (git grep).",
+  "gap_note": "See the apply_page_range path-bit unit below: the production writer is untested."
+ },
+ {
+  "unit": "note_token_path attn_stats.hpp:371 out-of-range guard (worker >= path_bits.size(), token_job >= vector size)",
+  "covered_by": "t/t_attn_stats.cpp:268-269 (in \"timers ...\")",
+  "strength": "asserted",
+  "evidence": ":268 note_token_path(N_WORKERS_3, 0, avx) and :269 note_token_path(WORKER_0, N_TOKEN_JOBS_5, avx). No CHECK reads the histogram afterwards (no end_forward follows). The guard is enforced only because t_llama_unit is built with _GLIBCXX_ASSERTIONS (t/CMakeLists.txt:598): removing the guard makes path_bits[3] / path_bits[0][5] abort. Marked asserted on that basis; by value it is executed-only.",
+  "gap_note": "Add `stats->end_forward(N_TOKEN_JOBS_5)` after :269 and CHECK token_jobs_by_path_set[0] == 5 so the guard is asserted by value, not only by the assertion build."
+ },
+ {
+  "unit": "add_visits attn_stats.hpp:380-385 normal path (row of current class, worker, layer, pass)",
+  "covered_by": "t/t_attn_stats.cpp:420-445 \"classes: rows and FPGA counters follow the forward class ...\"; t/t_llama_unit.cpp:2204-2219 (production caller self_attention.hpp:1649-1654, pending pass); t/t_amx_dispatch_dtype.cpp:162-188 (ready pass)",
+  "strength": "asserted",
+  "evidence": "t_attn_stats :427 add_visits(WORKER_1, LAYER_2, tally, PASS_READY_0) under prompt class -> :431 CHECK sum_layer(CLASS_PROMPT_1, LAYER_2).visits_all(AMX) == 1 and :435 decode class == 0. t_llama_unit :2211-2212 CHECK visits[PASS_PENDING_1][avx] == half, k_tokens == half*half; :2217 CHECK avx_full_page_visits[PENDING] == 0. t_amx_dispatch_dtype :179-188 REQUIRE amx/avx visits == calls, k_tokens == calls*n_tokens, avx_full_page_visits[READY] == calls for the non-dense full page.",
+  "gap_note": ""
+ },
+ {
+  "unit": "add_visits attn_stats.hpp:382 guard `worker >= n_workers`",
+  "covered_by": "t/t_attn_stats.cpp:264 (in \"timers ...\")",
+  "strength": "executed-only",
+  "evidence": ":264 add_visits(N_WORKERS_3, LAYER_0, tally, READY); :270 CHECK sum_layer(CLASS_DECODE_0, LAYER_0).visits_all(AVX) == 0. Without the guard row(0,3,0) = rows[(0*3+3)*4+0] = rows[12] = class 1 worker 0 layer 0 (formula :330): in range, the CHECK at :270 (class 0) would not see it. Only TRON_ASSERT_LT(worker, n_workers) at :328 would fire.",
+  "gap_note": "Add `CHECK(stats->sum_layer(CLASS_PROMPT_1, LAYER_0).visits_all(IX_AVX_1) == 0)` after :269 (also covers the note_attn_job worker guard, see below)."
+ },
+ {
+  "unit": "add_visits attn_stats.hpp:382 guard `layer >= n_layers`",
+  "covered_by": "t/t_attn_stats.cpp:265 (in \"timers ...\")",
+  "strength": "asserted",
+  "evidence": ":265 add_visits(WORKER_0, N_LAYERS_4, tally, READY). Without the guard row(0,0,4) = rows[4] = worker 1 layer 0 (formula :330) and :270 sum_layer(CLASS_DECODE_0, LAYER_0).visits_all(AVX) sums workers 0..2 of layer 0 -> would read 1, CHECK fails.",
+  "gap_note": ""
+ },
+ {
+  "unit": "add_visits attn_stats.hpp:382 guard `tally.n_visits == 0`",
+  "covered_by": "t/t_attn_stats.cpp:273-274 (in \"timers ...\")",
+  "strength": "executed-only",
+  "evidence": ":273 add_visits(WORKER_0, LAYER_0, visit_tally{}, READY); :274 CHECK visits_all(EMPTY) == 0. An empty tally adds zeros through worker_layer_row::add (:221-227), so the CHECK passes with or without the guard. The guard is a no-touch optimisation (:272 comment) that no value can observe.",
+  "gap_note": "Unobservable by value; a test would need a row write hook. Accept as executed-only or drop the guard from the assertion list."
+ },
+ {
+  "unit": "add_visits attn_stats.hpp:382 guard `!enabled`",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "No test calls add_visits on an off object (the off case :277-294 calls only begin_forward/end_forward/render_*). Production gates the call with stats_enabled (self_attention.hpp:1649) so the branch is unreachable from production, but the public hook has the guard.",
+  "gap_note": "One line in the off case: `stats->add_visits(WORKER_0, LAYER_0, tally, PASS_READY_0);` before :282 (rows.empty() then also proves no allocation happened on the call)."
+ },
+ {
+  "unit": "note_attn_job_entry_w0 attn_stats.hpp:388-401 (T4: period from first job of one operation to first job of the next; same operation no period; forward reset)",
+  "covered_by": "t/t_attn_stats.cpp:202-229 \"timers: T2 per worker, T3 on worker 0, T4 by operation change, T5 wait\"",
+  "strength": "asserted",
+  "evidence": ":217-219 entries op0@1000, op0@1300, op1@2700; :221-223 CHECK period_count == 1, period_cycles == 1700, period_max == 1700 (second minibatch of op0 starts no period); :224 layer 1 period_count == 0 (last layer has no successor); :227-229 after begin_forward the first entry closes nothing.",
+  "gap_note": "Guard `t4_last_layer < n_layers` (:391) and `!enabled` (:390) have no test. Production call self_attention.hpp:807-808 runs in no test with the switch on (see run_attention_job unit)."
+ },
+ {
+  "unit": "note_attn_job attn_stats.hpp:405-417 (T2 on every worker, T3 wall + max on worker 0 only)",
+  "covered_by": "t/t_attn_stats.cpp:232-238 (in \"timers ...\"); :428,:432,:436 (in \"classes ...\")",
+  "strength": "asserted",
+  "evidence": ":232-233 worker 0 busy 100 wall 250, worker 1 busy 100 wall 2000; :235 attn_jobs == 2, :236 busy == 200, :237 wall == 250 (worker 1's 2000 not added = worker-0-only rule), :238 wall_max == 250. Class routing: :432 prompt attn_jobs == 1, :436 decode == 0.",
+  "gap_note": ""
+ },
+ {
+  "unit": "note_attn_job attn_stats.hpp:409 guard (worker >= n_workers; layer >= n_layers; !enabled)",
+  "covered_by": "t/t_attn_stats.cpp:266 (worker guard only)",
+  "strength": "executed-only",
+  "evidence": ":266 note_attn_job(N_WORKERS_3, LAYER_0, 100, 100); :271 CHECK sum_layer(CLASS_DECODE_0, LAYER_0).attn_jobs == 0. Without the guard row(0,3,0) = rows[12] = class 1 worker 0 layer 0 (in range), so :271 (class 0) cannot see it; only TRON_ASSERT_LT :328 would. The layer guard and the !enabled guard are not exercised.",
+  "gap_note": "Add `stats->note_attn_job(WORKER_0, N_LAYERS_4, CYCLES_100, CYCLES_100)` (lands in worker 1 layer 0 without the guard -> :271 fails) and CHECK class 1 layer 0 attn_jobs == 0 for the worker guard."
+ },
+ {
+  "unit": "note_join_wait attn_stats.hpp:420-423 (T5 add)",
+  "covered_by": "t/t_attn_stats.cpp:240-242 (in \"timers ...\"); :429,:433 (in \"classes ...\")",
+  "strength": "asserted",
+  "evidence": ":240 note_join_wait(WORKER_1, LAYER_2, 100); :242 CHECK join_wait_cycles == 100. :429 under prompt class, :433 CHECK prompt layer 2 join_wait == 50.",
+  "gap_note": ""
+ },
+ {
+  "unit": "note_join_wait attn_stats.hpp:421 guard `cycles == 0`",
+  "covered_by": "t/t_attn_stats.cpp:241",
+  "strength": "executed-only",
+  "evidence": ":241 note_join_wait(WORKER_1, LAYER_2, 0); :242 CHECK == 100. Adding 0 without the guard gives the same value, so the CHECK cannot fail. The guard only avoids a row touch.",
+  "gap_note": "Unobservable by value (same as the n_visits==0 guard). The worker/layer out-of-range guards of note_join_wait (:421) have no call at all: add `note_join_wait(N_WORKERS_3, LAYER_2, CYCLES_100)` and `note_join_wait(WORKER_1, N_LAYERS_4, CYCLES_100)` then CHECK class 1 / worker 2 layer 0 join_wait == 0."
+ },
+ {
+  "unit": "note_fpga_pass attn_stats.hpp:427-433 (k_tokens + query_passes per class, layer)",
+  "covered_by": "t/t_attn_stats.cpp:250-258 (in \"timers ...\")",
+  "strength": "asserted",
+  "evidence": ":250-251 two passes of (1024, 8); :252 CHECK k_tokens == 2048, :253 query_passes == 16; :255-258 after begin_forward(prompt) a pass lands in CLASS_PROMPT_1 and CLASS_DECODE_0 stays 2048.",
+  "gap_note": ""
+ },
+ {
+  "unit": "note_fpga_pass attn_stats.hpp:429 guard `layer >= n_layers` (and `!enabled`)",
+  "covered_by": "t/t_attn_stats.cpp:267",
+  "strength": "executed-only",
+  "evidence": ":267 note_fpga_pass(N_LAYERS_4, 1, 1). Without the guard fpga_at(0, 4) = fpga[4] = class 1 layer 0 (fpga size 8, no assert in fpga_at :338-340), and no later CHECK reads class 1 layer 0 fpga counters in that case (case ends :275). !enabled branch never called.",
+  "gap_note": "Add `CHECK(load_relaxed(stats->fpga_at(CLASS_PROMPT_1, LAYER_0).k_tokens) == 0)` after :267; call note_fpga_pass on the off object and CHECK fpga.empty() still (no crash)."
+ },
+ {
+  "unit": "note_forward_wall attn_stats.hpp:436-442 (T1: forwards, wall sum, wall max, per class)",
+  "covered_by": "t/t_attn_stats.cpp:244-249 (in \"timers ...\"); :430,:434,:437 (in \"classes ...\")",
+  "strength": "asserted",
+  "evidence": ":244-245 walls 2000 and 1000; :246 forwards == 2, :247-248 wall_cycles == 3000, :249 wall_max == 2000. Class: :434 prompt forwards == 1, :437 decode == 0.",
+  "gap_note": "`!enabled` guard (:437) has no call on an off object."
+ },
+ {
+  "unit": "end_forward attn_stats.hpp:447-464 (fold path bits | fpga bits per job into token_jobs_by_path_set, clear bits, add token_jobs)",
+  "covered_by": "t/t_attn_stats.cpp:176-199 (in \"path sets ...\")",
+  "strength": "asserted",
+  "evidence": ":179 token_jobs == 5; :181-184 histogram cells avx+amx 2, fpga+avx 1, fpga 1, none 1; :185-189 render_forwards exact substring; :195-198 second forward with cleared bits counts all 5 under \"none\" (proves :455 bits[job] = 0 and :360 fpga_bits.assign).",
+  "gap_note": "TRON_ASSERT_LT(set, 8) at :460 is unreachable without corrupting the vectors; no test, acceptable."
+ },
+ {
+  "unit": "note_fpga_query attn_stats.hpp:468-472 (fpga bit for the job + fpga_queries count)",
+  "covered_by": "t/t_attn_stats.cpp:171-172, :180, :182-183 (in \"path sets ...\")",
+  "strength": "asserted",
+  "evidence": ":171-172 note_fpga_query(1), (2); :180 CHECK fpga_queries == 2; :182 fpga+avx == 1 (job 1), :183 fpga == 1 (job 2).",
+  "gap_note": "Branch `token_job >= fpga_bits.size()` (:470, counts the query but sets no bit) has no test: add note_fpga_query(N_TOKEN_JOBS_5) and CHECK fpga_queries == 3 while the histogram is unchanged. `!enabled` (:469) untested."
+ },
+ {
+  "unit": "sum_layer / sum_worker attn_stats.hpp:524-537 and layer_sums::add/add_sums/visits_all/k_tokens_all :482-522",
+  "covered_by": "t/t_attn_stats.cpp:130-159 \"rows: a tally goes to its pass, and layer and worker sums agree\"; :438-444 (add_sums via render_totals)",
+  "strength": "asserted",
+  "evidence": ":142-149 per-pass and all-pass sums over workers; :151 other layer 0; :153-155 sum_worker view; :157-158 class separation. :439-442 two rows in different layers sum to ready_amx_visits 2 / k_tokens 128 in render_totals (add_sums :500-516).",
+  "gap_note": "max fields in add_sums (:511, :514) are only exercised with one non-zero row; a two-row max test is missing (minor)."
+ },
+ {
+  "unit": "render_summary attn_stats.hpp:587-600 and active_workers :573-585",
+  "covered_by": "t/t_attn_stats.cpp:287 (off), :338,:342 (\"leaves: JSON ...\"), :357 (FUSE on), :407 (FUSE off), :503-506 (eagle)",
+  "strength": "asserted",
+  "evidence": ":287 \"on\":false; :338 \"active_workers\":96 (every worker got attn_jobs at :317); :342 \"switch\":\"TRON_ATTN_STATS=1\"; :357 \"on\":true via leaf; :503-506 \"eagle\":true / false.",
+  "gap_note": "active_workers with a partly idle pool (some workers with attn_jobs == 0) is not tested; model_id, amx_compiled/available, n_kv_heads... fields never checked by value."
+ },
+ {
+  "unit": "render_totals attn_stats.hpp:604-621 (on: counts + fpga sums; off: \"{}\")",
+  "covered_by": "t/t_attn_stats.cpp:290,:292 (off); :324-337 (keys, size limit); :440-444 (sums); :364,:371,:383,:386,:389,:392,:397 (via FUSE leaves); :476 (via print_report)",
+  "strength": "asserted",
+  "evidence": ":290 CHECK render_totals(CLASS_DECODE_0) == \"{}\"; :334-337 keys ready_amx_visits, pending_avx_k_tokens, fpga_k_tokens, fpga_k_tokens_x_kv_heads; :330 size < MAX_STRING_LENGTH with 96x128 rows; :441-442 \"ready_amx_visits\":2 / \"ready_amx_k_tokens\":128.",
+  "gap_note": "fpga_k_tokens_x_kv_heads value (= fpga_k * n_kv_heads, :568) is checked for presence only, not by value."
+ },
+ {
+  "unit": "render_forwards attn_stats.hpp:625-644",
+  "covered_by": "t/t_attn_stats.cpp:185-189 (exact JSON), :291,:293 (off \"{}\"), :341, :409,:411 (FUSE off), :480-482 (report)",
+  "strength": "asserted",
+  "evidence": ":185-189 CHECK find of the full \"fpga_queries\":2,\"token_jobs\":5,\"token_jobs_by_path_set\":{...} text; :291 == \"{}\".",
+  "gap_note": ""
+ },
+ {
+  "unit": "render_layer attn_stats.hpp:646-657 / render_worker :659-668 (on: layer/worker key + counts; off: key only)",
+  "covered_by": "t/t_attn_stats.cpp:485-490 \"leaves when off: layer and worker leaves are valid JSON objects\"; :339-340,:344-346 (on); :366-370 (FUSE)",
+  "strength": "asserted",
+  "evidence": ":488 == \"{\"layer\":2}\"; :489 == \"{\"worker\":1}\"; :346 layer leaf carries 1000*96 ready_amx_visits; :366-367 leaf decode_like_layer_0 has \"ready_avx_k_tokens\":17.",
+  "gap_note": ""
+ },
+ {
+  "unit": "print_report attn_stats.hpp:672-706 (off -> nothing; on + nothing counted -> nothing; else summary, per-class totals/forwards/per-layer line)",
+  "covered_by": "t/t_attn_stats.cpp:447-483 \"exit report: prints only with the switch on and something counted\"",
+  "strength": "asserted",
+  "evidence": ":465 off -> empty; :467 idle on -> empty; :473-482 CHECK \"[attn-stats] model test-model:\", \"decode_like/all_jobs_with_listener totals: {\", \"pending_avx_k_tokens\":17, the per-layer line \"0=0/0/0 1=0/0/0 2=0/17/0 3=0/0/0\", and the prompt forwards line.",
+  "gap_note": "The `any` path via forwards[cls].forwards != 0 with zero visits (:675-677) is not tested: add a case that calls only note_forward_wall and CHECKs a non-empty report."
+ },
+ {
+  "unit": "is_safe_model_id attn_stats.hpp:712-722",
+  "covered_by": "t/t_attn_stats.cpp:414-417 (\"a/b\"), :507-511 (\"bad\\\"id\")",
+  "strength": "asserted",
+  "evidence": ":415-417 register_fuse_files(make_stats(true, \"a/b\")) then CHECK_FALSE get_file_handle(\"/model/a/b/attention/summary\"); :508-511 same for a quoted id.",
+  "gap_note": "Empty id (:713) and leading dot (:714) branches untested. Note: t_llama_unit.cpp:2201 and t_amx_dispatch_dtype.cpp:141 build production-style stats with id \"\", which is_safe rejects; harmless there because FUSE is never initialized in those binaries."
+ },
+ {
+  "unit": "register_fuse_files attn_stats.hpp:738-774 (leaf set on/off, weak_ptr read after death, takeover by a later state, re-register, eagle prefix)",
+  "covered_by": "t/t_attn_stats.cpp:349-398 \"FUSE leaves: registered once per model id, read live, empty after the state is gone\"; :400-418 (off set); :492-511 (eagle)",
+  "strength": "asserted",
+  "evidence": ":357 summary on; :359 no .skip; :364-372 totals/layer/worker/prompt totals read live; :374-375 layer_3 exists, layer_4 does not; :382-389 twin takeover then \"{}\" after twin dies; :391-393 re-register restores; :396-397 \"{}\" after the state is gone. Off: :408-413 totals/forwards \"{}\", no layer_0/worker_0 leaf. Eagle: :503 attention_eagle/summary.",
+  "gap_note": "Guard `!fuse::stats::is_initialized()` (:740) is executed by every production ctor call (self_attention.hpp:499) in binaries that never initialize FUSE (t_llama_unit, t_amx_dispatch_dtype, heterogeneous_scheduler_compile) but no CHECK proves the no-op: add `tron::fuse::stats::unmount(); register_fuse_files(stats);` then initialize and CHECK_FALSE get_file_handle(prefix+\"/summary\"). The takeover info log (:744-748) is not asserted (values are)."
+ },
+ {
+  "unit": "self_attention state ctor hooks h/tron/models/self_attention.hpp:483-500 (header_facts from the model, env_enabled(), cfg.id, is_eagle, attn.size(), n_layers, register_fuse_files)",
+  "covered_by": "every test that builds a model state: t/t_llama_unit.cpp:2073-2230 and :2230-2905 (check_page_range_reductions), t/t_amx_dispatch_dtype.cpp:63-150, t/heterogeneous_scheduler_compile.cpp:292-307",
+  "strength": "executed-only",
+  "evidence": "The ctor runs with TRON_ATTN_STATS unset, so stats->enabled == false in every state; t_llama_unit.cpp:2200-2202 and t_amx_dispatch_dtype.cpp:140-142 then REPLACE the member with a hand-built model_stats. No CHECK reads the ctor-built object (facts.n_kv_heads, kv_mul, head_size, n_layers, page_size, n_workers == attn.size(), amx_compiled/available, id, is_eagle).",
+  "gap_note": "In t_llama_unit, before replacing the member: `CHECK_FALSE(state.self_attn_state.stats->enabled); CHECK(stats->facts.page_size == page::page_size); CHECK(stats->facts.n_kv_heads == n_kv_heads); CHECK(stats->n_workers == state.self_attn_state.attn.size()); CHECK(stats->n_layers == n_layers)`. Enabled-through-env needs setenv(\"TRON_ATTN_STATS\",\"1\") before the first state of a binary (static cache :143)."
+ },
+ {
+  "unit": "prepare_uniform_hw_attention note_fpga_pass call self_attention.hpp:629-637 (K tokens = sum of tok_ix+1 per query, n_queries = B)",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "git grep at HEAD over t/ for prepare_uniform_hw_attention finds no test call; launch_hw_attention appears only in the compile-only plugin body t/heterogeneous_scheduler_compile.cpp:190-206 (instantiated at :754-755, not driven). The unit test at t_attn_stats.cpp:250-258 covers the hook, not the production sum.",
+  "gap_note": "Needs a fake-device test that reaches prepare_uniform_hw_attention with a q_batch of B queries and known last_hw_token_pos, with stats replaced by an enabled model_stats; CHECK fpga_at(cls, layer).k_tokens == sum(tok_ix+1) and query_passes == B. Heavier: a 3bda run with TRON_ATTN_STATS=1 and the FPGA path is the practical check (machine test)."
+ },
+ {
+  "unit": "run_attention_job hooks self_attention.hpp:803-808 (t_entry, T4 entry on worker 0) and :852-855 (T2 busy, T3 wall)",
+  "covered_by": "t/heterogeneous_scheduler_compile.cpp:527-528, :574-575 (SECTION \"Q reuse waits for software work and hardware completion per minibatch\" of \"hardware attention configuration uses KV-slot identity\" :292)",
+  "strength": "executed-only",
+  "evidence": "The state is built at :306 with the env unset -> stats_enabled false (:804), so :806 takes UNSET_CYCLES_0, :807 and :854 skip the hooks. No test runs run_attention_job with an enabled model_stats; sum_layer(...).attn_jobs is never checked after a real job.",
+  "gap_note": "Before :527 replace `state->self_attn_state.stats` with an enabled model_stats (as t_llama_unit.cpp:2190-2203 does); after `state->finish_attention_job` CHECK sum_layer(decode, layer).attn_jobs == 1, busy_cycles > 0, wall_cycles > 0 (worker 0), period_count == 0 (single operation)."
+ },
+ {
+  "unit": "run_joins stats_enabled parameter self_attention.hpp:1185-1189, :1305-1306 (T5 accumulator pointer), :1315 (note_join_wait)",
+  "covered_by": "t/heterogeneous_scheduler_compile.cpp:398-400 (SECTION \"mixed attention retains both contributions regardless of readiness order\")",
+  "strength": "executed-only",
+  "evidence": ":398 STATS_DISABLED_FALSE passed at :400, so :1306 passes nullptr and :1315 is skipped. The task text names cases at :319-427 and :428+; at HEAD the only run_joins test call is :399-400.",
+  "gap_note": "Same section, add a GENERATE(false, true) for stats_enabled: with true and an enabled model_stats in the state, CHECK sum_layer(decode, layer).join_wait_cycles > 0 (the section already proves the worker waited >= 20 ms at :417-424: waiting_for_other == timeout)."
+ },
+ {
+  "unit": "stream_hw_joins T5 timing self_attention.hpp:1027 (join_wait_cycles*), :1131-1132 (t_wait), :1147 (accumulate)",
+  "covered_by": "t/t_llama_unit.cpp:2825-2827 and :2874-2876 (in check_page_range_reductions, \"apply and join page ranges\" :2890)",
+  "strength": "executed-only",
+  "evidence": "Both calls pass /*join_wait_cycles=*/nullptr (:2827, :2876), so :1132 takes UNSET_CYCLES_0 and :1147 is skipped. The rdtsc pair never executes in any test.",
+  "gap_note": "In the :2856-2880 delayed-release case (the watchdog proves the join waited), pass `&wait` (uint64_t wait = 0) and CHECK(wait > 0); in the :2823-2827 loop pass &wait and CHECK the sum is finite and, with everything already complete, CHECK(wait == 0) is not guaranteed (the loop enters the wait only when nothing progressed), so assert only the delayed case."
+ },
+ {
+  "unit": "apply_page_range per-visit hooks self_attention.hpp:1451-1456 (bool copy, tally, token_path_span), :1617-1618 (tally.record), :1649-1654 (add_visits with pass)",
+  "covered_by": "t/t_llama_unit.cpp:2073-2230 \"pending attention waits for invisible writers on the same page\" (:2204-2219); t/t_amx_dispatch_dtype.cpp:162-188 \"AMX dispatch rejects non-bf16 queries and partial pages\" (:228-244)",
+  "strength": "asserted",
+  "evidence": "t_llama_unit :2211-2217 CHECK pending avx visits == half, k_tokens == half*half, amx == 0, empty == 0, ready avx == 0, avx_full_page == 0. t_amx_dispatch_dtype :179-188 REQUIRE amx visits == calls iff dense, avx otherwise, k_tokens == calls*n_tokens, avx_full_page_visits[READY] == calls for the full non-dense page, pending avx == 0.",
+  "gap_note": "The `pending ? PASS_PENDING_1 : PASS_READY_0` selector (:1653) is asserted from both sides (pending in t_llama_unit, ready in t_amx_dispatch_dtype). The off branch (stats_enabled false) runs in check_page_range_reductions (:2436, :2504, :2705, :2768) with the ctor-built off object, no assertion."
+ },
+ {
+  "unit": "apply_page_range path-bit write self_attention.hpp:1619-1621 (`if (tok_ix.i < n_path_bits) path_bits[tok_ix.i] |= path_bit(served)`) = the production writer of token_jobs_by_path_set",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "In both enabled-stats tests no begin_forward runs, so token_path_span returns n = 0 (path_bits inner vectors empty after ctor :314) and the branch at :1619 is false on every visit. The histogram is only tested through note_token_path (t_attn_stats.cpp:168-175), which production code never calls (git grep at HEAD: no caller outside the test).",
+  "gap_note": "In t_llama_unit.cpp:2073 case: call `stats->begin_forward(forward_class::decode_like, consumer->items.size())` before :2204 and `stats->end_forward(consumer->items.size())` after :2206, then CHECK load_relaxed(stats->forwards[decode].token_jobs_by_path_set[PATH_BIT_AVX_1]) == half and [0] == consumer->items.size() - half (or the exact split the fixture gives). Same in t_amx_dispatch_dtype for the amx bit."
+ },
+ {
+  "unit": "page_tok_result.served self_attention.hpp:1867 (amx), :1919 (empty), :1951 (avx)",
+  "covered_by": "t/t_llama_unit.cpp:2429-2430 (empty, in check_page_range_reductions); t/t_amx_dispatch_dtype.cpp:179-182 (amx vs avx via tallies); t/t_llama_unit.cpp:2211-2214 (avx)",
+  "strength": "asserted",
+  "evidence": ":2430 REQUIRE(result.served == visit_path::empty) for a fully excluded page; t_amx :180 amx visits == calls when dense, :182 avx == calls otherwise.",
+  "gap_note": ""
+ },
+ {
+  "unit": "model::forward begin_forward/end_forward calls h/tron/models/model.hpp:1745-1750 (class rule n_listeners == token_jobs.size() -> decode_like)",
+  "covered_by": "NONE with the switch on",
+  "strength": "executed-only",
+  "evidence": "Any generate-style test that runs model::forward executes :1745 and :1750 with the ctor-built off object (env unset), returning at attn_stats.hpp:358/:448. No test builds a forward with an enabled model_stats, so the class rule and the fold of real path bits are unasserted. The rule itself is only mirrored in t_attn_stats through explicit forward_class arguments (:165, :195).",
+  "gap_note": "A t_generate_mock-style case with setenv(\"TRON_ATTN_STATS\",\"1\") before the first state, one prompt forward then one decode forward, CHECK forwards[prompt].forwards == 1 and forwards[decode].forwards == 1 via the state's stats (or the FUSE leaves)."
+ },
+ {
+  "unit": "model.hpp note_fpga_query call :2730-2737 (jobs whose hw_plan.by_job[i].devices is non-empty)",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "Gated by stats->enabled (:2730); no test runs the FPGA launch path with an enabled model_stats. git grep over t/ finds note_fpga_query only in t_attn_stats.cpp:171-172.",
+  "gap_note": "Same fixture as the note_fpga_pass gap (fake device + enabled stats): CHECK fpga_queries == number of jobs with devices and the fpga bit in token_jobs_by_path_set after end_forward."
+ },
+ {
+  "unit": "full_scheduler T1 h/tron/scheduler/full.hpp:2093-2102 (rdtsc around state.forward, note_forward_wall)",
+  "covered_by": "NONE with the switch on",
+  "strength": "executed-only",
+  "evidence": ":2093 reads stats->enabled (false in every test binary), :2094-2095 takes UNSET_CYCLES_0, :2099 skips. Scheduler tests (t/CMakeLists.txt full_scheduler binaries, e.g. :301-327) execute only the off branch.",
+  "gap_note": "Part of the env-on scheduler test above: CHECK forwards[cls].wall_cycles > 0 and wall_max_cycles >= wall_cycles / forwards."
+ },
+ {
+  "unit": "visit_tally::record attn_stats.hpp:184-192 (visits, k_tokens, avx_full_page_visits branch-free, n_visits)",
+  "covered_by": "t/t_attn_stats.cpp:112-128 \"tally: one visit per path, K tokens per visit, full AVX pages\"",
+  "strength": "asserted",
+  "evidence": ":119-124 per-path visits and k_tokens; :126 avx_full_page_visits == 1 (only the 64-token AVX visit); :127 n_visits == 4.",
+  "gap_note": ""
+ },
+ {
+  "unit": "worker_layer_row::add attn_stats.hpp:221-227 (per pass)",
+  "covered_by": "t/t_attn_stats.cpp:130-159",
+  "strength": "asserted",
+  "evidence": ":138-140 add to READY / PENDING rows; :143-147 the pass index is checked (ready amx 1, pending avx 1, pending amx 0).",
+  "gap_note": ""
+ },
+ {
+  "unit": "inc_relaxed / max_relaxed / load_relaxed attn_stats.hpp:157-168",
+  "covered_by": "t/t_attn_stats.cpp:223 (period_max), :238 (wall_max), :249 (forward wall_max); :317-321 (inc_relaxed fill)",
+  "strength": "asserted",
+  "evidence": ":249 wall_max == 2000 after walls 2000 then 1000 proves max_relaxed keeps the larger; :247-248 sum 3000 proves the add.",
+  "gap_note": ""
+ },
+ {
+  "unit": "README.stats.md:233-262 contract (off: summary on:false, totals/forwards \"{}\"; on: layer/worker leaves; eagle prefix; no reset; stderr summary)",
+  "covered_by": "t/t_attn_stats.cpp:277-294, :400-418, :349-398, :492-511, :447-483",
+  "strength": "asserted",
+  "evidence": ":288-293 cites the README contract and CHECKs \"{}\"; :360-370 \"no reset\" (next read carries the new counts); :503 attention_eagle.",
+  "gap_note": ""
+ },
+ {
+  "unit": "apply_page_range hoisted stats bool + path-bit span: h/tron/models/self_attention.hpp:1451-1456 (`stats_enabled = stats_ref.enabled`, `path_bits = stats_enabled ? token_path_span(scratchpad, n_path_bits) : nullptr`)",
+  "covered_by": "ON: t/t_llama_unit.cpp:2200-2206 'pending attention waits for invisible writers on the same page' [page_range]; t/t_amx_dispatch_dtype.cpp:140-166 'AMX dispatch rejects non-bf16 queries and partial pages'. OFF: t/t_llama_unit.cpp:2436-2438, 2504-2511, 2705-2712, 2768-2775 'apply and join page ranges' (state built by the ctor, TRON_ATTN_STATS unset)",
+  "strength": "asserted",
+  "evidence": "self_attention.hpp:1452 `const bool stats_enabled = stats_ref.enabled;` gates 1617 and 1649; t_llama_unit.cpp:2200-2202 replaces `state.self_attn_state.stats` with STATS_ON_TRUE, then 2211 `CHECK(sums.visits[PASS_PENDING_1][avx] == half)`; t_amx_dispatch_dtype.cpp:179-188 REQUIREs on sum_layer. Off state: no test sets TRON_ATTN_STATS (git grep over t/ finds only t_attn_stats.cpp:342, a label string), so every other apply_page_range call runs with enabled=false; no CHECK reads the stats afterwards.",
+  "gap_note": "ON arm asserted. OFF arm is executed-only: a stray row write would abort under -D_GLIBCXX_ASSERTIONS (t/CMakeLists.txt:592-599, rows is empty at attn_stats.hpp:311-313) but nothing CHECKs that rows stay empty. Smallest test: after t_llama_unit.cpp:2436 (stats off) CHECK(state.self_attn_state.stats->rows.empty()) and CHECK_FALSE(stats->enabled)."
+ },
+ {
+  "unit": "token_path_span (attn_stats.hpp:347-354), called from self_attention.hpp:1456",
+  "covered_by": "t/t_llama_unit.cpp:2204 and t/t_amx_dispatch_dtype.cpp:164 (stats on, but begin_forward never called)",
+  "strength": "executed-only",
+  "evidence": "attn_stats.hpp:314 `path_bits.resize(n_workers)` (inner vectors empty until begin_forward at :362); both tests replace stats (t_llama_unit.cpp:2200, t_amx_dispatch_dtype.cpp:140) and never call begin_forward, so :352-353 returns data() with n = 0. The `worker >= path_bits.size()` branch (:348-351) is never reached: t_attn_stats.cpp never calls token_path_span (grep: 0 hits).",
+  "gap_note": "Needs a begin_forward before apply_page_range (see the path-bit write item). For the nullptr branch: in t_attn_stats.cpp, `size_t n = 1; CHECK(stats->token_path_span(N_WORKERS_3, n) == nullptr); CHECK(n == 0);` and for an off object (rows/path_bits empty) `token_path_span(WORKER_0, n)` == nullptr."
+ },
+ {
+  "unit": "per-visit tally record: self_attention.hpp:1617-1618 `stats_tally.record(visit.served, relevant_k_tokens, page::page_size)` -> visit_tally::record attn_stats.hpp:184-192",
+  "covered_by": "t/t_llama_unit.cpp:2211-2217 'pending attention waits for invisible writers on the same page'; t/t_amx_dispatch_dtype.cpp:179-188 'AMX dispatch rejects non-bf16 queries and partial pages' (4 sections :231-243); tally in isolation t/t_attn_stats.cpp:112-128",
+  "strength": "asserted",
+  "evidence": "t_llama_unit.cpp:2211 `CHECK(sums.visits[PASS_PENDING_1][avx] == half)`, :2212-2213 `k_tokens[PASS_PENDING_1][avx] == half * half`; t_amx_dispatch_dtype.cpp:184-185 `REQUIRE(sums.k_tokens_all(dense ? amx : avx) == calls * n_tokens)`; t_attn_stats.cpp:119-127 per-path visits, k_tokens, avx_full_page_visits, n_visits.",
+  "gap_note": ""
+ },
+ {
+  "unit": "per-token path-bit write: self_attention.hpp:1619-1621 `if (tok_ix.i < n_path_bits) path_bits[tok_ix.i] |= path_bit(visit.served)`",
+  "covered_by": "NONE for the write body. The guard line executes under t_llama_unit.cpp:2204 and t_amx_dispatch_dtype.cpp:164 with n_path_bits == 0, so the body never runs. The fold is asserted only through the hook-level twin note_token_path (attn_stats.hpp:370-374) in t/t_attn_stats.cpp:161-200 'attn-stats path sets'",
+  "strength": "none",
+  "evidence": "self_attention.hpp:1619 `if (tok_ix.i < n_path_bits)` with n_path_bits set at :1456 from token_path_span, which returns n = 0 because begin_forward (attn_stats.hpp:357-365) is never called in either stats-on test; production never calls note_token_path (grep in self_attention.hpp/model.hpp: 0 hits), t_attn_stats.cpp:168-175 drives note_token_path directly.",
+  "gap_note": "Needs begin_forward before the visit loop and end_forward after it. Smallest test: in t_amx_dispatch_dtype.cpp exercise_page, call `stats->begin_forward(forward_class::decode_like, 1)` before apply_page_range at :164 and `stats->end_forward(1)` after it, then `REQUIRE(load_relaxed(stats->forwards[decode].token_jobs_by_path_set[dense ? PATH_BIT_AMX_2 : PATH_BIT_AVX_1]) == calls)`. To also prove the index is tok_ix.i (token_job_id) and not batch_job_ix, use items in non-identity order (as t/heterogeneous_scheduler_compile.cpp:329 does with {token_job_id(1), token_job_id(0)}) with begin_forward(cls, 2) and assert the set of job 1 only."
+ },
+ {
+  "unit": "row add per call with pass index: self_attention.hpp:1649-1654 `add_visits(scratchpad, layer, stats_tally, pending ? PASS_PENDING_1 : PASS_READY_0)` -> attn_stats.hpp:380-385, worker_layer_row::add :221-227",
+  "covered_by": "pending=true: t/t_llama_unit.cpp:2204-2217 (call passes `/*pending=*/true` at :2206); pending=false (default arg self_attention.hpp:1444): t/t_amx_dispatch_dtype.cpp:164-188; rows in isolation t/t_attn_stats.cpp:130-159",
+  "strength": "asserted",
+  "evidence": "t_llama_unit.cpp:2211 pending avx == half and :2216 `CHECK(sums.visits[PASS_READY_0][avx] == 0)`; t_amx_dispatch_dtype.cpp:186 `avx_full_page_visits[PASS_READY_0] == ...` and :188 `visits[PASS_PENDING_1][avx] == 0`; t_attn_stats.cpp:138-147 ready vs pending slots.",
+  "gap_note": "Both pass arms asserted through production. Note: both production tests read sum_layer(decode_like, 0) with current_class at its default 0 (attn_stats.hpp:285), so class routing inside add_visits (:384 `row(current_class_ix(), ...)`) is asserted through production only for class 0; see the class-routing items."
+ },
+ {
+  "unit": "served path amx: self_attention.hpp:1856-1867 (packed Q present and is_dense_amx_page true -> `return {range_hint, page_size, visit_path::amx}`)",
+  "covered_by": "t/t_amx_dispatch_dtype.cpp:231-234 section 'host_bf16, full page: one pack, one QK, one PV; a second call with new queries packs again' -> :179-180, :184-185",
+  "strength": "asserted",
+  "evidence": "t_amx_dispatch_dtype.cpp:153 `dense = packs && n_tokens == page_size`; :179-180 `REQUIRE(sums.visits_all(amx) == (dense ? calls : 0))`; :184-185 k_tokens_all(amx) == calls * 64. The AMX entry points are CPU fakes (:201-225), `available()` returns true at :203-205, so the classification is asserted with the dispatch gate real and the kernels faked.",
+  "gap_note": "Asserted with fake kernels only; the real amx_attn.cpp path has no counting test (t_llama_unit has kv_mul 1 at :2081-2087 and 8 KV heads/16 heads = kv_mul 2 at :2236-2240, both ineligible per amx_attn_iface.hpp:163-164)."
+ },
+ {
+  "unit": "served path avx: self_attention.hpp:1871-1951 dotter loop -> `return {range_hint, relevant_k_tokens, visit_path::avx}`",
+  "covered_by": "t/t_llama_unit.cpp:2211-2213 (kv_mul 1, AMX ineligible, half of the page visible per query); t/t_amx_dispatch_dtype.cpp:181-185 sections :235-237 (partial page 63 tokens), :238-240 (host float), :241-243 (host_fp16)",
+  "strength": "asserted",
+  "evidence": "t_llama_unit.cpp:2212-2213 `k_tokens[PASS_PENDING_1][avx] == half * half` (half queries x half visible K tokens, mask at :2133-2137); t_amx_dispatch_dtype.cpp:181-182 `visits_all(avx) == (dense ? 0 : calls)`, :184-185 k_tokens == calls * n_tokens.",
+  "gap_note": ""
+ },
+ {
+  "unit": "avx_full_page_visits (AMX-eligible volume served by AVX): attn_stats.hpp:176-190, recorded via self_attention.hpp:1618",
+  "covered_by": "nonzero: t/t_amx_dispatch_dtype.cpp:186-187 in sections :238-243 (host float / host_fp16, full page: dense=false, n_tokens == page_size); zero: :235-237 (63 tokens), t/t_llama_unit.cpp:2217; tally level t/t_attn_stats.cpp:125-126",
+  "strength": "asserted",
+  "evidence": "t_amx_dispatch_dtype.cpp:186-187 `REQUIRE(sums.avx_full_page_visits[PASS_READY_0] == (!dense && n_tokens == page_size ? calls : 0))`; t_attn_stats.cpp:126 `CHECK(tally.avx_full_page_visits == 1)` after one full AVX page and one 17-token page.",
+  "gap_note": "The cause asserted is 'query scalar not bf16' (amx_qp == nullptr because eligible<> is false, amx_attn_iface.hpp:163-164). The two other causes named in the comment at attn_stats.hpp:177-179, kill switch and a full page failing is_dense_amx_page (self_attention.hpp:1695-1697: range boundary inside the page, sliding window), have no test; see the kill-switch item."
+ },
+ {
+  "unit": "served path empty through apply_page_range: self_attention.hpp:1916-1919 `if (relevant_k_tokens == 0) return {range_hint, 0, visit_path::empty}` -> tally slot empty, row visits[pass][empty]",
+  "covered_by": "Return value only: t/t_llama_unit.cpp:2416-2431 (direct apply_page_tok call, both window_excludes_all arms) `REQUIRE(result.served == visit_path::empty)` at :2430. Through apply_page_range with stats on: NONE (t_llama_unit.cpp:2215 and t_amx_dispatch_dtype.cpp:183 assert empty == 0 only). With stats off: t/t_llama_unit.cpp:2436-2438 uses_hw=true arm (from :2892-2894) where the mask at :2352 gives the hw-owned range no sw_required queries",
+  "strength": "executed-only",
+  "evidence": "t_llama_unit.cpp:2425-2430 asserts the `served` field of the direct call; t_llama_unit.cpp:2215 `CHECK(sums.visits_all(empty) == 0)`; no test with stats on produces relevant_k_tokens == 0 inside apply_page_range (both stats-on fixtures make every visited page score >= 1 token: :2133-2137, t_amx_dispatch_dtype.cpp:115-119).",
+  "gap_note": "Needs a visit that passes the page-level gates (self_attention.hpp:1572-1597) yet scores nothing: a hw-owned range under uses_hw=true with a section too small for dismiss_workless_ranges (self_attention.hpp:1489: pages x items < 64). Smallest test: in t_amx_dispatch_dtype.cpp exercise_page add a variant whose mask puts query 0 in hw_mask only (`mask.add_range(0, n_tokens, {}, visible)`, the :2421-2423 form) and calls apply_page_range with uses_hw=true; REQUIRE(sums.visits[PASS_READY_0][empty] == 1) and k_tokens[READY][empty] == 0 and avx visits == 0."
+ },
+ {
+  "unit": "kill switch TRON_AMX_DISABLE=1 -> amx_attn_h128g4::available() false -> amx_on false (self_attention.hpp:1512) -> amx_qp nullptr (:1603-1610) -> AVX visit with avx_full_page_visits",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "t_amx_dispatch_dtype.cpp:203-205 `bool available() noexcept { return true; }` (the fake never returns false); git grep TRON_AMX_DISABLE over t/ at HEAD: 0 hits; amx_attn_iface.hpp:167-170 documents the switch inside available(). The equality claimed at attn_stats.hpp:179-180 (kill-switch avx_full_page_visits == AMX-on amx visits + its avx_full_page_visits) is asserted nowhere.",
+  "gap_note": "Needs a fake available() under test control. Smallest test: in t_amx_dispatch_dtype.cpp make the fake read a file-static `bool fake_available = true;`, add a section 'host_bf16, full page, available()=false' that sets it false and runs exercise_page<host_bf16>(64): REQUIRE(probe.pack_calls == 0), amx visits == 0, avx visits == calls, avx_full_page_visits[READY] == calls. (exercise_page's `dense`/`packs` at :151-153 would need an `amx_available` parameter.)"
+ },
+ {
+  "unit": "add_visits guards: attn_stats.hpp:382 `!enabled || tally.n_visits == 0 || worker >= n_workers || layer >= n_layers` and class routing :384 `row(current_class_ix(), worker, layer)`",
+  "covered_by": "Hook level: t/t_attn_stats.cpp:260-274 'attn-stats timers...' (out-of-range worker/layer ignored, empty tally adds nothing); class routing t/t_attn_stats.cpp:420-445 'attn-stats classes'. Through production: only class 0 (t_llama_unit.cpp:2209-2210, t_amx_dispatch_dtype.cpp:176-177)",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:264-265 add_visits with N_WORKERS_3 / N_LAYERS_4 then :270 `CHECK(sum_layer(CLASS_DECODE_0, LAYER_0).visits_all(IX_AVX_1) == 0)`; :273-274 empty tally; :426-427 begin_forward(prompt_or_mixed) + add_visits then :431 prompt class == 1 and :435 decode class == 0.",
+  "gap_note": "The prompt_or_mixed routing of a production visit (begin_forward(prompt_or_mixed) then apply_page_range) is not asserted; the smallest closing test is the begin_forward addition described in the path-bit item with cls = prompt_or_mixed and sum_layer(CLASS_PROMPT_1, 0) checked, sum_layer(CLASS_DECODE_0, 0) == 0."
+ },
+ {
+  "unit": "page_tok_result struct and size static_assert: self_attention.hpp:1789-1801",
+  "covered_by": "compile time in every build of the header (t_llama_unit, t_amx_dispatch_dtype, libtron); field use asserted at t/t_llama_unit.cpp:2429-2430",
+  "strength": "asserted",
+  "evidence": "self_attention.hpp:1798-1801 `static_assert(sizeof(page_tok_result) == sizeof(std::pair<int, const token_range*>) && std::is_trivially_copyable_v<page_tok_result>, ...)`; t_llama_unit.cpp:2429 `REQUIRE(result.relevant_k_tokens == 0)`, :2430 `REQUIRE(result.served == visit_path::empty)`.",
+  "gap_note": ""
+ },
+ {
+  "unit": "FPGA pass counter call site: self_attention.hpp:629-637 in prepare_uniform_hw_attention (`fpga_k_tokens += tok_ix_arr[qi] + 1` over B queries, `note_fpga_pass(layer.i, fpga_k_tokens, B)`)",
+  "covered_by": "NONE for the call site. Hook only: t/t_attn_stats.cpp:250-258 'attn-stats timers...' (note_fpga_pass sums and class routing), :267 (layer out of range ignored)",
+  "strength": "none",
+  "evidence": "git grep prepare_uniform_hw_attention over t/ at HEAD: 0 hits (only set_passes is called directly, t/heterogeneous_scheduler_compile.cpp:499, t/t_phase2_integration.cpp:683). t_attn_stats.cpp:250-253 `note_fpga_pass(LAYER_2, 1024, 8)` twice -> k_tokens 2048, query_passes 16; :256-258 class of the moment.",
+  "gap_note": "The untested piece is the K-token arithmetic (relative_hw_tok_ix at :593-611, inclusive index + 1). Needs a hw-capable state with a hw_plan whose passes carry shards (base_tok_ix) and queries (last_hw_token_pos): the heterogeneous fixture in t/heterogeneous_scheduler_compile.cpp:301-317 plus a pass like :339-348 with `pass.shards` set. Smallest test: stats replaced with STATS_ON_TRUE, one pass, 2 queries with last_hw_token_pos 10 and 20 in one shard at base 0, call prepare_uniform_hw_attention(&q_batch, operation, queries, true), CHECK(fpga_at(0, layer).k_tokens == 11 + 21) and query_passes == 2. The function then builds a launcher (:639 onward), so the fixture must tolerate that (fake device as in hsc:342)."
+ },
+ {
+  "unit": "FPGA query bit call site: h/tron/models/model.hpp:2730-2738 in construct_hw_plan (:2497) `if (!q_batch->hw_plan.by_job[i].devices.empty()) note_fpga_query(q_batch->items[i].i)`",
+  "covered_by": "NONE for the call site. Hook only: t/t_attn_stats.cpp:171-172, 180-183 'attn-stats path sets' (fpga_queries count, fpga bit folded into the path set)",
+  "strength": "none",
+  "evidence": "Tests build hw_plan by hand and bypass construct_hw_plan: t/heterogeneous_scheduler_compile.cpp:339-348 (`q_batch.hw_plan.resize(2)` ... `index_passes_by_job`) and :496-503 (`set_passes`). t_attn_stats.cpp:171 `stats->note_fpga_query(1)`, :180 `CHECK(load_relaxed(fc.fpga_queries) == 2)`, :182-183 fpga+avx and fpga sets.",
+  "gap_note": "Needs construct_hw_plan driven with hw_plan_entries and an engagement point (model.hpp:2561-2580), or a scheduler forward on the heterogeneous fake device. Smallest test: after a hand-built plan is not enough (the hook is inside construct_hw_plan); so in heterogeneous_scheduler_compile.cpp, with stats on and begin_forward(cls, n), run the real planner for one minibatch and CHECK forwards[cls].fpga_queries == number of jobs with by_job[i].devices non-empty, then end_forward and CHECK token_jobs_by_path_set[PATH_BIT_FPGA_4] (or fpga+avx) == that number."
+ },
+ {
+  "unit": "forward class rule: model.hpp:1745-1748 `begin_forward(n_listeners == token_jobs.size() ? decode_like : prompt_or_mixed, token_jobs.size())` (n_listeners = in_listener_index.size(), model.hpp:1671)",
+  "covered_by": "Executed with stats off by scheduler tests that run a real forward: t/t_trace_passes_host.cpp:95 `primary->forward()` (full_scheduler on 'llama-3-8b-host', :2, :74); t/t_token_cache.cpp:97-100 dead_query on mock<host> (:89-91). Hook-level class separation: t/t_attn_stats.cpp:195-199, :420-445",
+  "strength": "executed-only",
+  "evidence": "attn_stats.hpp:358 `if (!enabled) return;` is the only line reached in those tests (TRON_ATTN_STATS unset, sa.hpp:496 passes env_enabled()). No test computes a forward with stats on: git grep for TRON_ATTN_STATS / env_enabled / setenv over t/ finds no switch setting (t_token_cache.cpp:412 sets TRON_DEFRAG_BOOKS_DEPTH only).",
+  "gap_note": "The rule itself (listener count vs token-job count) is asserted nowhere. Smallest test: a mock-model forward with one listener per token job -> CHECK(load_relaxed(stats->forwards[decode_like].forwards) == 1) via note_forward_wall/ token_jobs, then a 2-job forward with 1 listener -> forwards[prompt_or_mixed].token_jobs == 2. The state must carry an enabled stats object: either setenv(\"TRON_ATTN_STATS\",\"1\") before the first state construction in that process (attn_stats.hpp:143 caches the value once) or replace `self_attn_state.stats` after construction as t_llama_unit.cpp:2200 does (safe only while the FUSE tree is not initialized, self_attention.hpp:472-474)."
+ },
+ {
+  "unit": "end_forward call site after plugin_state.run: model.hpp:1749-1750 (fold of path bits + fpga bits, TRON_ASSERT_LT on the set index attn_stats.hpp:460)",
+  "covered_by": "Executed with stats off by t/t_trace_passes_host.cpp:95 and t/t_token_cache.cpp:97-100 (returns at attn_stats.hpp:448). Hook level asserted: t/t_attn_stats.cpp:176-199 (sets, clearing between forwards), :284-286 (off: token_jobs stays 0)",
+  "strength": "executed-only",
+  "evidence": "model.hpp:1750 `self_attn_state.stats->end_forward(token_jobs.size());` runs with enabled=false in every existing forward test; t_attn_stats.cpp:179-184 CHECK token_jobs == 5 and the four sets; :197-198 next forward counts 'none' == 5.",
+  "gap_note": "Same forward-with-stats-on test as the class-rule item: after one decode forward on a CPU-attention mock, CHECK(load_relaxed(forwards[decode].token_jobs) == n_jobs) and the sum over token_jobs_by_path_set == n_jobs, with the avx set == n_jobs when AMX is ineligible."
+ },
+ {
+  "unit": "state ctor: self_attention.hpp:483-499 (env_enabled(), header_facts amx_compiled/amx_available/shape, model_stats construction, register_fuse_files)",
+  "covered_by": "Executed by every model state construction in tests (e.g. t/t_llama_unit.cpp:2107, t/t_amx_dispatch_dtype.cpp:104, t/heterogeneous_scheduler_compile.cpp:306), always with enabled=false. register_fuse_files asserted only with test-built objects: t/t_attn_stats.cpp:349-398, :400-418, :492-512",
+  "strength": "executed-only",
+  "evidence": "env_enabled (attn_stats.hpp:142-153) is never asserted: no test sets TRON_ATTN_STATS to '1' or to another value (grep), t_attn_stats.cpp:342 checks the summary label string only. The ctor's facts (amx_compiled, amx_available, n_kv_heads...) are overwritten by the tests' replacement objects (t_llama_unit.cpp:2191-2202, t_amx_dispatch_dtype.cpp:132-142).",
+  "gap_note": "env_enabled caches one value per process (attn_stats.hpp:143 static const), so an in-binary test can only assert the state of one value. Smallest test: split the parser into a pure `switch_on(const char* value)` and CHECK switch_on(nullptr)==false, switch_on(\"1\")==true, switch_on(\"0\")==false / \"true\"==false; or a dedicated small binary with setenv(\"TRON_ATTN_STATS\",\"1\") before building a state and CHECK(state.self_attn_state.stats->enabled)."
+ },
+ {
+  "unit": "run_joins stats_enabled plumbing (self_attention.hpp:1185-1189, 1306, 1315) reached from run_attention_job (:843); run_sections -> apply_page_range (:1171)",
+  "covered_by": "t/heterogeneous_scheduler_compile.cpp:397-401 'mixed attention retains both contributions regardless of readiness order' passes STATS_DISABLED_FALSE; stream_hw_joins nullptr accumulator at t/t_llama_unit.cpp:2825-2827, :2874-2876",
+  "strength": "executed-only",
+  "evidence": "heterogeneous_scheduler_compile.cpp:398-400 `constexpr bool STATS_DISABLED_FALSE = false; run_joins<geometry>(&q_batch, operation, output, 0, 2, true, STATS_DISABLED_FALSE)`; plan.n_sections = {0} at :333 so no apply_page_range visit occurs in that case. No test calls run_joins or run_attention_job with stats on; note_join_wait is asserted only at hook level (t_attn_stats.cpp:240-242).",
+  "gap_note": "Outside the visits lens except that run_sections is the production caller of apply_page_range (:1171) and no test drives apply_page_range through run_attention_job with stats on. Closing test = the forward-with-stats-on test above (it goes through run_attention_job -> run_sections -> apply_page_range on the pool workers, and asserts sum_layer per class)."
+ },
+ {
+  "unit": "env_enabled: TRON_ATTN_STATS unset returns false (h/tron/models/attn_stats.hpp:144-145)",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "attn_stats.hpp:144 `const char* value = std::getenv(\"TRON_ATTN_STATS\");` :145 `if (value == nullptr) return false;`. `git grep TRON_ATTN_STATS -- t/` finds only t/t_attn_stats.cpp:342, a check on the summary's \"switch\" string, not a call of env_enabled(). Every test constructs model_stats with a literal bool (t_attn_stats.cpp:73-76, t_llama_unit.cpp:2197-2201, t_amx_dispatch_dtype.cpp:138-141).",
+  "gap_note": "The reader is a function-local static (attn_stats.hpp:143), so one process can observe one value only. Smallest closing test: split the parse out as `inline bool parse_switch(const char* value) noexcept` (nullptr -> false, \"1\" -> true, else warn + false) and have env_enabled() call it; then one TEST_CASE in t_attn_stats.cpp checks parse_switch(nullptr)==false, parse_switch(\"1\")==true, parse_switch(\"0\")==false, parse_switch(\"true\")==false, parse_switch(\" 1\")==false. Without the split, only a CTest ENVIRONMENT property per value (three test rows) can assert it."
+ },
+ {
+  "unit": "env_enabled: exactly \"1\" returns true (attn_stats.hpp:146)",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "attn_stats.hpp:146 `if (std::strcmp(value, \"1\") == 0) return true;`. No test sets the variable or calls env_enabled(); the only consumer is the state constructor at self_attention.hpp:496 `stats = std::make_shared<attn_stats::model_stats>(attn_stats::env_enabled(), ...)`, which every test binary runs with the variable unset.",
+  "gap_note": "Same fix as the unset case: a pure parse function plus one TEST_CASE. A machine check (TRON_ATTN_STATS=1 runtron, then read /model/<id>/attention/summary for \"on\":true) is the only end-to-end proof today."
+ },
+ {
+  "unit": "env_enabled: any other value returns false and logs one warning (attn_stats.hpp:147-150)",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "attn_stats.hpp:147-150 `spdlog::warn(\"TRON_ATTN_STATS='{}' ignored: exactly \\\"1\\\" turns the attention path stats on\", value); return false;`. No test exercises a non-\"1\" value; no spdlog sink is installed in t_attn_stats.cpp (includes spdlog at :24 but never captures output).",
+  "gap_note": "With the parse split, add CHECK(parse_switch(\"0\")==false) and CHECK(parse_switch(\"yes\")==false). To assert the warning text, install a spdlog ostream sink for the test case and CHECK the buffer contains \"TRON_ATTN_STATS='yes' ignored\"."
+ },
+ {
+  "unit": "env_enabled: read once per process, function-local static (attn_stats.hpp:143-152)",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "attn_stats.hpp:143 `static const bool enabled = [] { ... }();` :152 `return enabled;`. No test calls env_enabled() twice or changes the environment between calls.",
+  "gap_note": "Not unit-testable without setenv before and after the first call in a dedicated binary. Document as a design fact; the parse-function split makes the static the only untested line."
+ },
+ {
+  "unit": "Constructor wiring of the switch: model state builds model_stats from env_enabled(), model facts, plugin.is_eagle, then registers FUSE leaves (h/tron/models/self_attention.hpp:483-499)",
+  "covered_by": "t/t_llama_unit.cpp:2073 \"pending attention waits for invisible writers on the same page\" (state built with env unset), t/t_amx_dispatch_dtype.cpp:228 \"AMX dispatch rejects non-bf16 queries and partial pages\", t/heterogeneous_scheduler_compile.cpp:292, t/t_trace_passes_host.cpp:58",
+  "strength": "executed-only",
+  "evidence": "self_attention.hpp:496-499 `stats = std::make_shared<attn_stats::model_stats>(attn_stats::env_enabled(), enclosing_state.cfg.id, enclosing_state.model_ref.plugin.is_eagle, facts, attn.size(), n_layers); attn_stats::register_fuse_files(stats);`. Every listed test builds a model state so this runs with the switch off, then t_llama_unit.cpp:2200-2201 and t_amx_dispatch_dtype.cpp:140-141 overwrite the member with a forced-on object (`state.self_attn_state.stats = std::make_shared<...>(STATS_ON_TRUE, \"\", ...)`). No CHECK reads the constructor-built object's `enabled`, `facts`, `is_eagle` or `n_workers`.",
+  "gap_note": "In the t_llama_unit case at :2184, before replacing the member, add CHECK_FALSE(state.self_attn_state.stats->enabled); CHECK(state.self_attn_state.stats->rows.empty()); CHECK(state.self_attn_state.stats->n_workers == state.self_attn_state.attn.size()); CHECK(state.self_attn_state.stats->facts.page_size == page::page_size). This pins the off default of a real state and the facts wiring."
+ },
+ {
+  "unit": "Off state: constructor allocates no rows, no FPGA counters, no path_bits (attn_stats.hpp:311-319 skipped when !enabled)",
+  "covered_by": "t/t_attn_stats.cpp:277 \"attn-stats: with the switch off, nothing is allocated and the forward hooks return\"",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:280-283 `auto stats = make_stats(STATS_OFF_FALSE); CHECK_FALSE(stats->enabled); CHECK(stats->rows.empty()); CHECK(stats->fpga.empty());` against attn_stats.hpp:311-314 `if (enabled) { rows = ...; fpga = ...; path_bits.resize(n_workers); }`.",
+  "gap_note": "path_bits.empty() is not checked; add CHECK(stats->path_bits.empty()) and CHECK(stats->fpga_bits.empty()) to the same case."
+ },
+ {
+  "unit": "Off state: begin_forward and end_forward return without touching counters (attn_stats.hpp:358, :448)",
+  "covered_by": "t/t_attn_stats.cpp:277 \"attn-stats: with the switch off, nothing is allocated and the forward hooks return\"",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:284-286 `stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5); stats->end_forward(N_TOKEN_JOBS_5); CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].token_jobs) == 0);` against attn_stats.hpp:358 `if (!enabled) return;` and :448 `if (!enabled) return;`. Without the guard, end_forward at :451 would index the empty fpga_bits vector."
+ },
+ {
+  "unit": "Off state: the other hooks return early: add_visits :382, note_attn_job_entry_w0 :390, note_attn_job :409, note_join_wait :421, note_fpga_pass :429, note_forward_wall :437, note_fpga_query :469, note_token_path :371 (attn_stats.hpp)",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "The off case at t_attn_stats.cpp:277-294 calls only begin_forward, end_forward and the renderers. The call sites in self_attention.hpp gate each hook behind `stats_enabled` (:807, :854, :1315, :1617, :1649, :629) and model.hpp:2730 behind `stats->enabled`, so under a real off state the in-hook guards are never reached. Each unguarded hook would index the empty `rows` vector via row() at attn_stats.hpp:330 or `forwards[current_class_ix()]` (:438, safe) or the empty `fpga` vector (:339).",
+  "gap_note": "Add to the off case: call every hook once on the off object (note_attn_job(WORKER_0, LAYER_0, 1, 1); note_attn_job_entry_w0(0, LAYER_0, 1); note_join_wait(WORKER_0, LAYER_0, 1); note_fpga_pass(LAYER_0, 1, 1); note_forward_wall(1); note_fpga_query(0); note_token_path(WORKER_0, 0, visit_path::avx); visit_tally t; t.record(visit_path::avx, 1, PAGE_SIZE_64); add_visits(WORKER_0, LAYER_0, t, PASS_READY_0)) then CHECK every forwards[] counter is 0 and rows/fpga stay empty. t_llama_unit is compiled with -D_GLIBCXX_ASSERTIONS (t/CMakeLists.txt:598), so a missing guard aborts the binary instead of reading out of bounds silently."
+ },
+ {
+  "unit": "Off state at the apply_page_range call site: one bool copied per call, no tally recorded, no add_visits (self_attention.hpp:1451-1456, :1617-1622, :1649-1654)",
+  "covered_by": "t/t_llama_unit.cpp:2230 check_page_range_reductions (apply_page_range calls at :2436, :2504, :2508, :2705, :2709, :2768, :2772 on the constructor-built state, switch off); t/t_llama_unit.cpp:2890 \"apply and join page ranges\"",
+  "strength": "executed-only",
+  "evidence": "self_attention.hpp:1452 `const bool stats_enabled = stats_ref.enabled;` :1456 `stats_enabled ? stats_ref.token_path_span(scratchpad, n_path_bits) : nullptr;` :1617 `if (stats_enabled) {` :1649 `if (stats_enabled) {`. The listed calls run with the state from the constructor (env unset -> enabled=false, self_attention.hpp:496); no CHECK in those cases reads `stats`.",
+  "gap_note": "In \"apply and join page ranges\" (t_llama_unit.cpp:2890), after check_page_range_reductions, add CHECK_FALSE(state.self_attn_state.stats->enabled) and CHECK(state.self_attn_state.stats->rows.empty()) so the off default of the real call site is pinned. The per-call cost contract (\"one byte load and one stack tally\", attn_stats.hpp:15) is not assertable in a unit test."
+ },
+ {
+  "unit": "Off state at run_attention_job: t_entry = UNSET_CYCLES_0, no entry hook, no note_attn_job (self_attention.hpp:803-808, :852-855)",
+  "covered_by": "t/t_trace_passes_host.cpp:58 \"Host scheduler selects primary trace passes around real forwards\" (real full_scheduler forwards with the constructor-built state)",
+  "strength": "executed-only",
+  "evidence": "self_attention.hpp:805-806 `const uint64_t t_entry = stats_enabled ? hardware::system::rdtsc() : attn_stats::UNSET_CYCLES_0;` :807 `if (stats_enabled && worker_ix == attn_stats::WORKER_0) {` :854-855 `if (stats_enabled) stats_ref.note_attn_job(...)`. No test calls run_attention_job directly (grep of t/t_llama_unit.cpp for run_attention_job: no hit); forwards under t_trace_passes_host run it with the switch off. No test runs it with the switch on.",
+  "gap_note": "On-side gap: no unit test asserts T2/T3/T4 from a real run_attention_job. Needs a fixture that runs one attention operation through the pool with a forced-on stats object, then CHECK(sum_layer(cls, layer).attn_jobs == n_attn_workers) and wall_cycles > 0 on worker 0. That is a t_llama_unit-scale fixture, not a t_attn_stats one."
+ },
+ {
+  "unit": "Off state at run_joins / stream_hw_joins: join_wait_cycles accumulator is nullptr, t_wait = UNSET_CYCLES_0, no note_join_wait (self_attention.hpp:1188-1189, :1306, :1315, :1131-1132, :1147)",
+  "covered_by": "t/heterogeneous_scheduler_compile.cpp:319 SECTION \"mixed attention retains both contributions regardless of readiness order\" (run_joins with STATS_DISABLED_FALSE at :398-400); t/t_llama_unit.cpp:2230 check_page_range_reductions (stream_hw_joins with nullptr at :2825-2827 and :2874-2876)",
+  "strength": "executed-only",
+  "evidence": "heterogeneous_scheduler_compile.cpp:398-400 `constexpr bool STATS_DISABLED_FALSE = false; state->self_attn_state.run_joins<geometry>(&q_batch, operation, output, 0, 2, true, STATS_DISABLED_FALSE);` t_llama_unit.cpp:2825-2827 `stream_hw_joins(..., finish_job, /*join_wait_cycles=*/nullptr);`. The CHECKs that follow (:2828 finish_count, :2876-2878 timed_out/finished) assert the join result, not the stats; self_attention.hpp:1147 `if (join_wait_cycles) *join_wait_cycles += ...` is skipped and nothing observes that.",
+  "gap_note": "On-side gap for T5: in the t_llama_unit stream_hw_joins case at :2874, pass `uint64_t wait = 0; ... &wait` in a second run and CHECK(wait > 0) when the watchdog delays the producer, CHECK(wait == 0) when hardware is ready before the join starts. Off-side: the nullptr calls already prove no crash; nothing more is assertable."
+ },
+ {
+  "unit": "Off state at the FPGA hooks: note_fpga_pass in prepare_uniform_hw_attention (self_attention.hpp:629-637) and note_fpga_query in model.hpp:2730-2737",
+  "covered_by": "NONE",
+  "strength": "none",
+  "evidence": "self_attention.hpp:629 `if (stats->enabled) {` ... :636 `stats->note_fpga_pass(layer.i, fpga_k_tokens, B);` model.hpp:2730 `if (self_attn_state.stats->enabled) {` ... :2735 `note_fpga_query(q_batch->items[i].i)`. heterogeneous_scheduler_compile.cpp builds hw_plan by hand (:339-348, :499 set_passes) and never calls prepare_uniform_hw_attention or the model.hpp planner; the hook lines are not reached by any test in either state. The counters themselves are asserted only through direct calls (t_attn_stats.cpp:250-258, :171-183).",
+  "gap_note": "A test would need a fake-device fixture that runs the hardware planner. Smallest: in heterogeneous_scheduler_compile.cpp SECTION at :428 (which calls set_passes at :499), force a stats-on object on the state, run the code path that calls note_fpga_query for the planned jobs, then CHECK(forwards[cls].fpga_queries == number of jobs with devices). If the planner cannot be called in that fixture, mark the two hooks machine-test only (read <class>_forwards fpga_queries under FPGA attention)."
+ },
+ {
+  "unit": "Off state at the forward hooks: begin_forward/end_forward at model.hpp:1745-1750 and T1 at full.hpp:2093-2101",
+  "covered_by": "t/t_trace_passes_host.cpp:58 \"Host scheduler selects primary trace passes around real forwards\" (and the t_kv_oom_* / t_memory_pressure_* forward-running tests listed by grep)",
+  "strength": "executed-only",
+  "evidence": "model.hpp:1745-1750 `self_attn_state.stats->begin_forward(n_listeners == token_jobs.size() ? decode_like : prompt_or_mixed, token_jobs.size()); plugin_state.run(q_batches); self_attn_state.stats->end_forward(token_jobs.size());` full.hpp:2093 `const bool attn_stats_enabled = state.self_attn_state.stats->enabled;` :2099 `if (attn_stats_enabled) {`. These run in every scheduler forward of the listed tests with the switch off; no CHECK reads stats there, and no test runs a forward with the switch on, so the class rule (listener count == token job count) is asserted nowhere.",
+  "gap_note": "Smallest on-side test: in t_trace_passes_host.cpp, after building the scheduler, replace `state.self_attn_state.stats` with a forced-on object (allowed: that binary never initializes the FUSE tree), run the existing forwards, then CHECK(forwards[decode_like].forwards + forwards[prompt_or_mixed].forwards == number of forwards seen by pre_forward_hook) and CHECK(wall_cycles > 0). That also closes the class rule if one forward is a prompt chunk without listeners."
+ },
+ {
+  "unit": "Switch on at the apply_page_range call site: tally per visit, path bit per token job, add_visits per call (self_attention.hpp:1617-1622, :1649-1654)",
+  "covered_by": "t/t_llama_unit.cpp:2073 \"pending attention waits for invisible writers on the same page\" (:2184-2217); t/t_amx_dispatch_dtype.cpp:228 \"AMX dispatch rejects non-bf16 queries and partial pages\" (:129-189)",
+  "strength": "asserted",
+  "evidence": "t_llama_unit.cpp:2211-2217 `CHECK(sums.visits[PASS_PENDING_1][avx] == half); CHECK(sums.k_tokens[PASS_PENDING_1][avx] == half * half); CHECK(sums.visits_all(amx) == 0); ... CHECK(sums.avx_full_page_visits[PASS_PENDING_1] == 0);` t_amx_dispatch_dtype.cpp:179-188 `REQUIRE(sums.visits_all(amx) == (dense ? calls : 0)); ... REQUIRE(sums.visits[PASS_PENDING_1][avx] == 0);`. Both force `enabled` true by replacing the member (t_llama_unit.cpp:2200, t_amx_dispatch_dtype.cpp:140).",
+  "gap_note": "The path bits (self_attention.hpp:1619-1621) are not asserted at the call site: neither test calls begin_forward, so token_path_span returns n=0 (attn_stats.hpp:347-354) and the branch at :1619 is skipped. Add `stats->begin_forward(decode_like, n_jobs)` before apply_page_range in the t_llama_unit case and `stats->end_forward(n_jobs)` after, then CHECK(token_jobs_by_path_set[PATH_BIT_AVX_1] == half)."
+ },
+ {
+  "unit": "page_tok_result carries the served path; the struct stays as small as the pair it replaced (self_attention.hpp:1792-1800, returns at :1867, :1919, :1951)",
+  "covered_by": "t/t_llama_unit.cpp:2230 check_page_range_reductions (:2425-2430); static_assert self_attention.hpp:1797-1800",
+  "strength": "asserted",
+  "evidence": "t_llama_unit.cpp:2429-2430 `REQUIRE(result.relevant_k_tokens == 0); REQUIRE(result.served == tron::attn_stats::visit_path::empty);` covers the empty return at self_attention.hpp:1919. self_attention.hpp:1797-1800 `static_assert(sizeof(page_tok_result) == sizeof(std::pair<int, const token_range*>) && std::is_trivially_copyable_v<page_tok_result>, ...)` fails the build if the struct grows. The avx return (:1951) is asserted indirectly by t_llama_unit.cpp:2211 and the amx return (:1867) by t_amx_dispatch_dtype.cpp:180.",
+  "gap_note": "None needed for the lens."
+ },
+ {
+  "unit": "render_summary: \"on\":false when off, \"on\":true when on, \"switch\":\"TRON_ATTN_STATS=1\", active_workers, eagle flag (attn_stats.hpp:587-600)",
+  "covered_by": "t/t_attn_stats.cpp:277 (off, :287), :349 \"attn-stats FUSE leaves: registered once per model id...\" (:357), :296 \"attn-stats leaves: JSON with the expected keys...\" (:338, :342), :400 (FUSE off, :407), :492 (eagle, :503-505)",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:287 `CHECK(stats->render_summary().find(\"\\\"on\\\":false\") != npos);` :357 `find(\"\\\"on\\\":true\")` :338 `find(\"\\\"active_workers\\\":96,\")` :342 `find(\"\\\"switch\\\":\\\"TRON_ATTN_STATS=1\\\"\")` :503 `find(\"\\\"eagle\\\":true\")` :505 `find(\"\\\"eagle\\\":false\")`.",
+  "gap_note": "The model facts in the summary (n_kv_heads, kv_mul, head_size, n_layers, page_size, n_workers, amx_compiled, amx_available) are never text-asserted; tsc_hz (hardware::system::get_cpu_freq(), :598) neither. Add one CHECK on the exact prefix `{\"on\":true,\"model_id\":\"test-model\",\"eagle\":false,\"amx_compiled\":false,\"amx_available\":false,\"n_kv_heads\":8,\"kv_mul\":4,\"head_size\":128,\"n_layers\":4,\"page_size\":64,\"n_workers\":3,` from test_facts() (:61-71)."
+ },
+ {
+  "unit": "render_totals and render_forwards return \"{}\" when off (attn_stats.hpp:604-621 and :625-644, `if (enabled)` at :606 and :627)",
+  "covered_by": "t/t_attn_stats.cpp:277 (:290-293); t/t_attn_stats.cpp:400 \"attn-stats FUSE leaves: with the switch off only the summary...\" (:408-411)",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:290-293 `CHECK(stats->render_totals(CLASS_DECODE_0) == \"{}\"); CHECK(stats->render_forwards(CLASS_DECODE_0) == \"{}\"); ...` for both classes; :408-411 the same four values read through the FUSE handle. HEAD commit 1430736b2a \"the forwards leaves read {} while the switch is off\" added :627 and these checks."
+ },
+ {
+  "unit": "render_layer and render_worker when off: index-only JSON objects (attn_stats.hpp:646-657, :659-668)",
+  "covered_by": "t/t_attn_stats.cpp:485 \"attn-stats leaves when off: layer and worker leaves are valid JSON objects\"",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:488-489 `CHECK(stats->render_layer(CLASS_DECODE_0, LAYER_2) == \"{\\\"layer\\\":2}\"); CHECK(stats->render_worker(CLASS_DECODE_0, WORKER_1) == \"{\\\"worker\\\":1}\");` against :649 `if (enabled) {` and :662 `if (enabled) {`."
+ },
+ {
+  "unit": "Renderers when on: key set of totals/layer/worker/forwards and the values they carry (put_counts :542-560, put_fpga :564-569, render_totals :604-621, render_forwards :625-644, render_layer :646-657, render_worker :659-668)",
+  "covered_by": "t/t_attn_stats.cpp:296 (:334-346), :161 \"attn-stats path sets...\" (:185-189), :420 \"attn-stats classes...\" (:440-444), :349 (:364-372 via FUSE)",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:334-337 key presence `\"ready_amx_visits\":`, `\"pending_avx_k_tokens\":`, `\"fpga_k_tokens\":`, `\"fpga_k_tokens_x_kv_heads\":`; :344-346 layer sum `\"ready_amx_visits\":96000,`; :185-189 the whole tail of render_forwards from `\"fpga_queries\":2,\"token_jobs\":5,\"token_jobs_by_path_set\":{\"none\":1,...,\"fpga+avx+amx\":0}}`; :441-442 `\"ready_amx_visits\":2,` and `\"ready_amx_k_tokens\":128,`; :364-372 totals/layer/worker leaves through get_value.",
+  "gap_note": "Never value-asserted: `fpga_k_tokens_x_kv_heads` = fpga_k * facts.n_kv_heads (:568) is checked for key presence only; the forwards leaf's `\"forwards\":N,\"wall_cycles\":N,\"wall_max_cycles\":N` text (:630-635) is asserted only through the atomics at :246-249, not through the rendered string; the timer keys of put_counts (`busy_cycles`, `wall_cycles_w0`, `period_*_w0`, `join_wait_cycles`, :553-559) are never text-asserted. Smallest test: after note_fpga_pass(LAYER_2, 1024, 8) CHECK(render_layer(cls, LAYER_2) contains `\"fpga_k_tokens\":1024,\"fpga_k_tokens_x_kv_heads\":8192,\"fpga_query_passes\":8`), and after the timers case CHECK(render_layer contains `\"attn_jobs\":2,\"busy_cycles\":200,\"wall_cycles_w0\":250,\"wall_max_cycles_w0\":250,`)."
+ },
+ {
+  "unit": "Every leaf stays below fuse_sysfs::MAX_STRING_LENGTH = 2048 (attn_stats.hpp:539-540 comment; h/system/fuse_sysfs.hpp:343)",
+  "covered_by": "t/t_attn_stats.cpp:296 \"attn-stats leaves: JSON with the expected keys, below the FUSE string limit\"",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:329-333 `for (auto const* s : {&totals, &layer, &worker, &forwards, &summary}) { CHECK(s->size() < tron::fuse::fuse_sysfs::MAX_STRING_LENGTH); CHECK(s->front() == '{'); CHECK(s->back() == '}'); }` with 96 workers x 128 layers and fill values of 9 and 15 digits (:305-306, :317-321). Computed worst case with every counter at UINT64_MAX (20 digits): totals 1052 bytes, layer 1081 bytes, worker 956 bytes, forwards 445 bytes, summary 372 bytes plus the model id length (emulation of the format strings, script in the scratchpad). The FUSE layer enforces the limit on writes only (src/system/fuse_sysfs.cpp:804 `return -E2BIG`, :904 `return false`); a read callback's string is returned unchecked (:943-945), so this test is the only guard.",
+  "gap_note": "The fill is not the maximum: visits reach 96 x 1000 = 96000 (5-6 digits) and wall_max/period fields stay 0. Change the fill to UINT64_MAX on every field (inc_relaxed of UINT64_MAX-1 on each, max_relaxed on the *_max fields) so the check runs at the 1081-byte worst case. The summary crosses 2048 only for a model id longer than 1676 characters; is_safe_model_id (:712-722) does not bound the length, so add a length bound there or a CHECK that a 64-char id renders under the limit."
+ },
+ {
+  "unit": "print_report: nothing printed when off (attn_stats.hpp:673) or when nothing was counted (:674-685 `if (!any) return`)",
+  "covered_by": "t/t_attn_stats.cpp:447 \"attn-stats exit report: prints only with the switch on and something counted\"",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:464-467 `auto off = make_stats(STATS_OFF_FALSE); CHECK(read_report(*off).empty()); auto idle = make_stats(STATS_ON_TRUE); CHECK(read_report(*idle).empty());` against :673 `if (!enabled) return;` and :685 `if (!any) return;`.",
+  "gap_note": "`any` looks at forwards[cls].forwards (:675-677) and the visits of every row (:678-684) only. Two behaviours are unasserted: (a) any=true through the forwards counter alone (note_forward_wall without visits) prints; (b) a state that recorded only attn_jobs, join_wait_cycles or FPGA passes prints nothing, which hides a run whose software visits were all dismissed but whose FPGA counters are non-zero. Smallest test: `auto fwd = make_stats(STATS_ON_TRUE); fwd->note_forward_wall(1); CHECK_FALSE(read_report(*fwd).empty());` and `auto fpga_only = make_stats(STATS_ON_TRUE); fpga_only->note_fpga_pass(LAYER_0, 1, 1); CHECK(read_report(*fpga_only).empty());` (pins the current rule; change the second expectation if the rule is widened)."
+ },
+ {
+  "unit": "print_report content: model line, per-class totals/forwards lines with CLASS_LABELS, per-layer k_tokens line amx/avx/fpga (attn_stats.hpp:686-705)",
+  "covered_by": "t/t_attn_stats.cpp:447 \"attn-stats exit report...\" (:468-482)",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:473 `find(\"[attn-stats] model test-model:\")`, :474-475 `find(\"[attn-stats] decode_like/all_jobs_with_listener totals: {\")`, :476 `find(\"\\\"pending_avx_k_tokens\\\":17,\")`, :477-479 `find(\"... k_tokens per layer (amx/avx/fpga): 0=0/0/0 1=0/0/0 2=0/17/0 3=0/0/0\")`, :480-482 `find(\"[attn-stats] prompt_or_mixed/some_jobs_without_listener forwards: {\")`.",
+  "gap_note": "The fpga column of the per-layer line (:701) is asserted only as 0; add note_fpga_pass(LAYER_2, 5, 1) to `busy` and expect `2=0/17/5`. The amx column (:699) is asserted only as 0 as well."
+ },
+ {
+  "unit": "Destructor prints the report to stderr when enabled (attn_stats.hpp:322-324)",
+  "covered_by": "t/t_attn_stats.cpp: every case that destroys a STATS_ON_TRUE object (for example :132, :164, :212, :307, :355, :380, :423, :466, :468, :496-498)",
+  "strength": "executed-only",
+  "evidence": "attn_stats.hpp:322-324 `~model_stats() { if (enabled) print_report(stderr); }`. The listed cases destroy on-state objects at scope end; the output goes to the test process's stderr and no CHECK reads it. print_report(FILE*) itself is asserted through a tmpfile at :450-463.",
+  "gap_note": "Not assertable without redirecting stderr; the tmpfile test of print_report covers the body. Optionally CHECK that the off object's destruction prints nothing by dup2-ing stderr to a tmpfile around `make_stats(STATS_OFF_FALSE)` going out of scope; low value."
+ },
+ {
+  "unit": "register_fuse_files: no-op when the stats tree is not initialized (attn_stats.hpp:740)",
+  "covered_by": "t/t_llama_unit.cpp:2073, t/t_amx_dispatch_dtype.cpp:228, t/heterogeneous_scheduler_compile.cpp:292 (constructor at self_attention.hpp:499 runs with fuse::stats never initialized in those binaries)",
+  "strength": "executed-only",
+  "evidence": "attn_stats.hpp:740 `if (!fuse::stats::is_initialized()) return;`. grep of t/ for `stats::initialize(` finds only t_attn_stats.cpp:99 and t_tronstats_convention.cpp, so the three state-building binaries reach :740 and return; no CHECK observes that (get_file_handle on an uninitialized tree returns nothing to compare against). The comment at t_llama_unit.cpp:2188-2190 relies on this fact (\"this binary never initializes the FUSE tree\").",
+  "gap_note": "Smallest test in t_attn_stats.cpp: outside a stats_environment, `tron::fuse::stats::unmount(); register_fuse_files(make_stats(STATS_ON_TRUE)); CHECK_FALSE(tron::fuse::stats::is_initialized());` then inside a fresh stats_environment CHECK_FALSE(get_file_handle(\"/model/test-model/attention/summary\")) to show the early return registered nothing that survives."
+ },
+ {
+  "unit": "register_fuse_files: is_safe_model_id rejects ids that cannot be a path segment or a JSON string (attn_stats.hpp:712-722, :741)",
+  "covered_by": "t/t_attn_stats.cpp:400 (:415-417 \"a/b\"), t/t_attn_stats.cpp:492 (:508-511 \"bad\\\"id\")",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:415-417 `auto bad = make_stats(STATS_ON_TRUE, \"a/b\"); register_fuse_files(bad); CHECK_FALSE(get_file_handle(\"/model/a/b/attention/summary\"));` :508-511 the same for `\"bad\\\"id\"`.",
+  "gap_note": "The empty id (:713) and the leading-dot id (:714) are not asserted, and the empty id is what t_llama_unit.cpp:2201 and t_amx_dispatch_dtype.cpp:141 pass. Add CHECK_FALSE(is_safe_model_id(\"\")); CHECK_FALSE(is_safe_model_id(\".hidden\")); CHECK(is_safe_model_id(\"llama-3.1:8b_v2\")) as direct calls."
+ },
+ {
+  "unit": "register_fuse_files: last-wins takeover by a later state of the same id (make_file returns the existing handle, set_read_callback replaces the callback) and the info log (attn_stats.hpp:744-757; src/system/fuse_sysfs.cpp:150-156, :987-996)",
+  "covered_by": "t/t_attn_stats.cpp:349 \"attn-stats FUSE leaves: registered once per model id, read live, empty after the state is gone\" (:376-393)",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:380-387 `auto twin = make_stats(STATS_ON_TRUE); register_fuse_files(twin); CHECK(leaf_string(prefix + \"/decode_like_totals\").find(\"\\\"ready_avx_visits\\\":0,\") != npos); twin->row(...).add(tally, PASS_PENDING_1); CHECK(... find(\"\\\"pending_avx_visits\\\":1,\"))` proves the twin's callback replaced the first state's; :391-393 re-registration brings the first state back. fuse_sysfs.cpp:150-153 `auto it = file_handles_.find(path); if (it != file_handles_.end()) { if (it->second->is_read_only() == read_only) return it->second;` and :987-993 `node->read_callback_ = std::move(callback);` are the mechanism.",
+  "gap_note": "The info line at attn_stats.hpp:745-747 (\"a new model state takes over the leaves under ...\") is executed by :381 but not captured (executed-only for the log). Also unguarded: fuse_sysfs.cpp:154-155 returns nullptr when the path exists with the other read_only flag, and attn_stats.hpp:752 `handle->set_read_callback(...)` dereferences without a null check. Smallest test: `tron::fuse::stats::make_file(prefix + \"/summary\", std::string{\"x\"}, /*read_only=*/false)` before register_fuse_files(stats) and expect no crash (needs a null check in `leaf` first)."
+ },
+ {
+  "unit": "register_fuse_files: weak_ptr rule, a read after the state is gone returns \"{}\" (attn_stats.hpp:749-756)",
+  "covered_by": "t/t_attn_stats.cpp:349 (:388-389, :395-397)",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:389 `CHECK(leaf_string(prefix + \"/decode_like_totals\") == \"{}\");` right after the twin's scope ends at :388; :396-397 `CHECK(leaf_string(prefix + \"/summary\") == \"{}\"); CHECK(leaf_string(prefix + \"/decode_like_totals\") == \"{}\");` after the first state's scope ends. Mechanism :754-755 `if (auto s = weak.lock()) return ...render(*s); return ...std::string{\"{}\"};`."
+ },
+ {
+  "unit": "register_fuse_files: leaf set when on (summary, <class>_totals, <class>_forwards, <class>_layer_<L> for every layer, <class>_worker_<W>) and when off (no layer/worker leaves, `continue` at :764), no marker file (attn_stats.hpp:758-773)",
+  "covered_by": "t/t_attn_stats.cpp:349 (:357-375), t/t_attn_stats.cpp:400 (:407-413)",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:359 `CHECK_FALSE(get_file_handle(prefix + \"/.skip\"));` :374-375 `CHECK(get_file_handle(prefix + \"/decode_like_layer_3\")); CHECK_FALSE(get_file_handle(prefix + \"/decode_like_layer_4\"));` :412-413 `CHECK_FALSE(get_file_handle(prefix + \"/decode_like_layer_0\")); CHECK_FALSE(get_file_handle(prefix + \"/decode_like_worker_0\"));` :407-411 summary/totals/forwards exist when off.",
+  "gap_note": "The worker leaf bound (:769-771, n_workers leaves) is asserted only for worker_0 (:368-370); add CHECK(get_file_handle(prefix + \"/decode_like_worker_2\")) and CHECK_FALSE(get_file_handle(prefix + \"/decode_like_worker_3\")). The prompt_or_mixed layer/worker leaves are never touched; add one get_file_handle on `/prompt_or_mixed_layer_0`."
+ },
+ {
+  "unit": "EAGLE directory: an EAGLE draft state publishes under attention_eagle/ next to the target's attention/ (attn_stats.hpp:742-743, render_summary eagle flag :592-596)",
+  "covered_by": "t/t_attn_stats.cpp:492 \"attn-stats FUSE leaves: an EAGLE draft state publishes under attention_eagle\"",
+  "strength": "asserted",
+  "evidence": "t_attn_stats.cpp:496-506 `auto draft = make_shared<model_stats>(STATS_ON_TRUE, \"shared-id\", EAGLE_TRUE, ...); auto target = ...NOT_EAGLE_FALSE...; register_fuse_files(draft); register_fuse_files(target); CHECK(leaf_string(\"/model/shared-id/attention_eagle/summary\").find(\"\\\"eagle\\\":true\") != npos); CHECK(leaf_string(\"/model/shared-id/attention/summary\").find(\"\\\"eagle\\\":false\") != npos);` against :742-743 `fmt::format(\"/model/{}/attention{}\", stats->model_id, stats->is_eagle ? \"_eagle\" : \"\")`.",
+  "gap_note": "Three EAGLE facts are untested: (1) the constructor wiring `enclosing_state.model_ref.plugin.is_eagle` (self_attention.hpp:497) is never driven by a draft state (heterogeneous_scheduler_compile.cpp:118 hard-codes `is_eagle = false`); (2) an EAGLE state with the switch off (EAGLE_TRUE appears only with STATS_ON_TRUE), so the off leaf set under attention_eagle/ is unasserted; (3) print_report (:686-687) prints `[attn-stats] model <id>:` without an eagle marker, so target and draft summaries of one id are indistinguishable on stderr, and the \"(EAGLE draft)\" constructor log (:318) is uncaptured. Smallest tests: add `auto off_draft = make_shared<model_stats>(STATS_OFF_FALSE, \"shared-id\", EAGLE_TRUE, ...)` and CHECK the attention_eagle totals read \"{}\" while attention/ totals are untouched; and CHECK(read_report(*draft) contains \"eagle\":true) via the summary JSON on the model line."
+ },
+ {
+  "unit": "Constructor info log when the switch is on (attn_stats.hpp:315-318) and the enable-time facts in that line",
+  "covered_by": "t/t_attn_stats.cpp: every STATS_ON_TRUE construction (for example :132, :212, :355)",
+  "strength": "executed-only",
+  "evidence": "attn_stats.hpp:315-318 `spdlog::info(\"attention path stats on (TRON_ATTN_STATS=1) for model '{}'{}: rows for {} app-pool workers x {} layers\", ...)` runs for every on-state in the tests; no sink captures it.",
+  "gap_note": "Low value; if the warning sink from the env_enabled gap is added, one CHECK on this line costs nothing."
+ }
+]
