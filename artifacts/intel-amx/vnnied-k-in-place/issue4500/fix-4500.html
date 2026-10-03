@@ -1,0 +1,527 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/fix-4500.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/fix-4500.html
+-->
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Issue 4500 fix measured</title><style>
+body{margin:0;background:#ffffff;color:#0b0b0b;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.5;}main{max-width:1080px;margin:0 auto;padding:24px 16px 60px;}h1{font-size:26px;margin:0 0 6px;}h2{font-size:20px;margin:34px 0 10px;border-bottom:1px solid #e1e0d9;padding-bottom:4px;}h3{font-size:16px;margin:22px 0 6px;}p{margin:8px 0;}.meta{color:#52514e;font-size:13px;}.short{background:#f3f2ef;border-left:4px solid #2a78d6;padding:10px 14px;margin:14px 0;}table{border-collapse:collapse;width:100%;font-size:13.5px;margin:10px 0;}th,td{border:1px solid #e1e0d9;padding:5px 8px;text-align:left;vertical-align:top;}th{background:#f3f2ef;}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;}.chart{display:block;max-width:100%;height:auto;margin:12px 0;}.cap{color:#52514e;font-size:13px;margin:0 0 14px;}.ok{background:#e6f4ec;}.warn{background:#fbe3d8;}.mid{background:#fdf3d6;}ul{margin:6px 0 6px 22px;}li{margin:3px 0;}
+</style></head>
+<body><main>
+<h1>Issue #4500: the fix, built and measured (2026-09-29)</h1>
+<ul class="meta">
+<li>Generated 2026-09-29 19:11 UTC. Measured on delphi-3bda (the CI machine), our half (socket 1, cards 90/93/b9/bc). Chain exec/i4500fix-20260928, results exec/results/i4500fix-20260928.</li>
+<li>Branch jhan-amx-vnniK-i4500 on the PR (pull request) #4424 head 30c4ac82cb. Tested commit 617cb8333f (the last of the branch's first three commits 78e2da7511, 78582b7ba3, 617cb8333f), deb commit 98a5accb8b.</li>
+<li>Current branch head f34b0fe2ec: three commits later, re-tested but not re-measured (section 5.3). The branch is local only, and PR #4424 is untouched.</li>
+<li>Every code citation refers to 617cb8333f. Every fact comes from the facts bundle (section 8).</li>
+</ul>
+
+<div class="short"><p><b>Short version.</b> The fix idea for issue #4500 was built on a side branch (not pushed, PR #4424 untouched), and on the two FPGA-attention cells (test configurations) it removes about a third of the loss of the VNNI layout (40 % of the extra step time at tp2, 29 % at tp4). That fix-vs-vnni change is NOT resolved at n = 3 (paired t 1.6 at tp2 and 1.8 at tp4 against the 4.30 threshold), and the generated tokens are identical to the PR head under FPGA attention. Two unit tests failed at the measured commit 617cb8333f, and three later commits (branch head f34b0fe2ec) make all 10 + 42 cases of the two test binaries that had failed pass in both builds, without a re-measurement of throughput or tokens.</p></div>
+
+<h2>1. Words used here</h2>
+<table>
+<tr><th style="width:18%">Term</th><th>Meaning on this page</th></tr>
+<tr><td>tron, runtron, rinzler</td><td>The inference program under test, its command-line tool, and the production server built from it.</td></tr>
+<tr><td>deb</td><td>The rinzler package the nightly CI (continuous-integration run) installs.</td></tr>
+<tr><td>K, KV cache, KV head</td><td>Attention key and value rows per token and layer. One K row = 128 bf16 (16-bit float) values = 256 B per KV head (a K and V store shared by several query heads).</td></tr>
+<tr><td>page, 16-token block</td><td>64 tokens of KV cache, and a quarter of it: 4 KiB of K per KV head, 64 lines of 64 B [k_vnni.hpp:53-65].</td></tr>
+<tr><td>row-major</td><td>One K row as 256 contiguous bytes: 4 whole cache lines.</td></tr>
+<tr><td>VNNI layout</td><td>PR #4424's K layout, read by the AMX kernel directly: one row as 4 B (a bf16 pair) in each of 64 lines. VNNI = Vector Neural Network Instructions.</td></tr>
+<tr><td>AMX</td><td>Intel's matrix (tile) instructions. qk_vnni_128x4 scores a dense page (a whole page visible to the query) with them [self_attention.hpp:1375-1395].</td></tr>
+<tr><td>dotter</td><td>dot_q, the per-row scorer of a row-major K row. qk_group is the scorer for converted VNNI blocks.</td></tr>
+<tr><td>prefill, decode</td><td>The pass over the prompt, and the token-by-token generation after it (one token per user per step).</td></tr>
+<tr><td>FPGA attention, CPU attention</td><td>On the Positron card (fed K rows the CPU stages, that is, copies to the card), or with USE_HW_ATTN=0 on the attention worker threads.</td></tr>
+<tr><td>tp2, tp4</td><td>The model split over 2 cards (90/93) or 4 (90/93/b9/bc).</td></tr>
+<tr><td>engine, cell</td><td>One rinzler serving process with its client streams (users per engine). A cell is one test configuration (model, cards, users per engine, prompt length, attention mode) with one engine. 3 cells x 4 binaries x 3 repetitions = 36 runs.</td></tr>
+<tr><td>TPS</td><td>Decode tokens per second per user (step ms = 1000 / TPS).</td></tr>
+<tr><td>paired t, n, sd</td><td>Mean per-repetition difference (a minus b, ms per step) over its standard error. Resolved = |t| at least 4.30 at n = 3 (12.71 at n = 2), the two-sided 95 % Student's t values. sd = standard deviation over the n repetitions.</td></tr>
+<tr><td>base</td><td>The canonical AMX deb (main's merged AMX code, no K-layout change): main 3faba6d0fd with AMX on in the deb preset (the package's CMake build configuration), row-major K.</td></tr>
+<tr><td>vnni</td><td>That main + the PR #4424 head 30c4ac82cb (the package with the loss on 2026-09-18).</td></tr>
+<tr><td>fix</td><td>vnni + the fix (deb 98a5accb8b in the cells, build 617cb8333f in the smoke and tests).</td></tr>
+<tr><td>nightly</td><td>Today's main as installed, package 2026.09.29-7e5085ed, reference only.</td></tr>
+<tr><td>the chain</td><td>exec/i4500fix-20260928/chain.sh: five unattended steps A to E, each waiting for the CI lease (the nightly's lock file).</td></tr>
+<tr><td>smoke</td><td>Step C: 128 generated tokens of two runtron binaries compared.</td></tr>
+<tr><td>EAGLE</td><td>A speculative-decoding scheme. Here only its storage view: a book (a model's KV cache object) with embedding storage (x_bytes) and its own K layout state.</td></tr>
+</table>
+<p class="meta">Bare file names are under h/tron/models/, h/tron/kernels/ or t/ of the fix worktree (the branch's own checkout of the tron git repository).</p>
+
+<h2>2. What the problem was</h2>
+<ul>
+<li>PR #4424 stores K in the VNNI layout: one token's 256 B row lies as 4 B in each of 64 cache lines, not 4 whole lines [root-cause-debug.html:29].</li>
+<li>Three CPU operations of decode under FPGA attention access it per token [root-cause-debug.html:17, :104-106]:
+ <ul>
+ <li>the K save on the main thread. It does 64 read-for-ownership fetches (the core reads each of the 64 lines before it writes 4 B into it).</li>
+ <li>the K-row gather for the card.</li>
+ <li>the workers' tail scoring (the tokens after the last complete block).</li>
+ </ul></li>
+<li>In the nightly configuration the card launches after the K save. The save is therefore in series with the card [model.hpp:91-105; store-remedies-report.html 0.5; root-cause-debug.html:53]. That configuration is 2 users per engine at tp2, below the early-launch threshold TRON_HWATTN_EARLY_LAUNCH_MIN_B (default 4: a batch of 4 or more users starts the card before the K/V saves).</li>
+<li>A micro-benchmark measured the VNNI store at +350 ns per row over the row-major store [root-cause-debug.html:17]. In runtron (tp2, 8 users) the per-layer K save grew from 4.6 to 20.3 us. That is +0.57 ms per step, 7 % of the 8.0 ms step [store-remedies-report.html 0.5].</li>
+<li>On 2026-09-19 (m6, one batch of cells in the 2026-09-18 issue-4500 campaign, n = 2) the PR #4424 package lost 4.3 % TPS at tp2 (2 users per engine) and 13.4 % at tp4 (4 users) against a nightly package without AMX code [issue4500-20260918/m6/summary.md].</li>
+</ul>
+
+<h2>3. What the fix does</h2>
+<p>A 16-token K block stays row-major until all 16 rows are saved. The main thread then converts it in place, once, at the end of the forward pass that saved the 16th row. Both layouts use the block's own 4 KiB [k_vnni.hpp:240-253]. A decode step thus writes and reads 4 lines per row, not 64 [kv_cache.hpp:709-712].</p>
+<svg class="chart" viewBox="0 0 1000 452" width="100%" role="img" aria-label="Before and after: one token row as 4 whole cache lines versus 4 bytes in each of 64 lines, and the life of a 16-token block">
+<rect x="0" y="0" width="1000" height="452" fill="#ffffff"/>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker></defs>
+<text x="40" y="26" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" text-anchor="start" fill="#0b0b0b" font-weight="bold">Top: one token's 256 B K row, before and after</text>
+<text x="40" y="56" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" text-anchor="start" fill="#0b0b0b" font-weight="bold">Row-major (the fix, until the block's 16th row is saved)</text>
+<rect x="40" y="70" width="96" height="40" rx="3" fill="#1f9d55" fill-opacity="0.35" stroke="#1f9d55" stroke-width="1.5"/>
+<text x="88" y="94" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" text-anchor="middle" fill="#0b0b0b" font-weight="normal">64 B</text>
+<rect x="144" y="70" width="96" height="40" rx="3" fill="#1f9d55" fill-opacity="0.35" stroke="#1f9d55" stroke-width="1.5"/>
+<text x="192" y="94" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" text-anchor="middle" fill="#0b0b0b" font-weight="normal">64 B</text>
+<rect x="248" y="70" width="96" height="40" rx="3" fill="#1f9d55" fill-opacity="0.35" stroke="#1f9d55" stroke-width="1.5"/>
+<text x="296" y="94" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" text-anchor="middle" fill="#0b0b0b" font-weight="normal">64 B</text>
+<rect x="352" y="70" width="96" height="40" rx="3" fill="#1f9d55" fill-opacity="0.35" stroke="#1f9d55" stroke-width="1.5"/>
+<text x="400" y="94" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11.5" text-anchor="middle" fill="#0b0b0b" font-weight="normal">64 B</text>
+<text x="40" y="134" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="normal">4 whole lines per row</text>
+<text x="530" y="56" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" text-anchor="start" fill="#0b0b0b" font-weight="bold">VNNI layout (PR #4424 head, and every converted block)</text>
+<rect x="530" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="531" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="556" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="557" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="582" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="583" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="608" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="609" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="634" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="635" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="660" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="661" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="686" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="687" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="712" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="713" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="738" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="739" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="764" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="765" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="790" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="791" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="816" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="817" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="842" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="843" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="868" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="869" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="894" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="895" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="920" y="66" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="921" y="67" width="4" height="16" fill="#eb6834"/>
+<rect x="530" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="531" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="556" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="557" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="582" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="583" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="608" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="609" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="634" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="635" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="660" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="661" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="686" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="687" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="712" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="713" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="738" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="739" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="764" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="765" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="790" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="791" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="816" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="817" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="842" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="843" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="868" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="869" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="894" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="895" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="920" y="88" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="921" y="89" width="4" height="16" fill="#eb6834"/>
+<rect x="530" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="531" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="556" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="557" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="582" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="583" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="608" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="609" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="634" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="635" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="660" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="661" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="686" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="687" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="712" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="713" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="738" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="739" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="764" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="765" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="790" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="791" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="816" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="817" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="842" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="843" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="868" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="869" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="894" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="895" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="920" y="110" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="921" y="111" width="4" height="16" fill="#eb6834"/>
+<rect x="530" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="531" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="556" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="557" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="582" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="583" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="608" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="609" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="634" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="635" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="660" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="661" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="686" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="687" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="712" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="713" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="738" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="739" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="764" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="765" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="790" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="791" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="816" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="817" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="842" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="843" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="868" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="869" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="894" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="895" y="133" width="4" height="16" fill="#eb6834"/>
+<rect x="920" y="132" width="22" height="18" rx="2" fill="#ffffff" stroke="#e1e0d9" stroke-width="1"/>
+<rect x="921" y="133" width="4" height="16" fill="#eb6834"/>
+<text x="530" y="172" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="normal">4 B in each of 64 lines</text>
+<line x1="40" y1="196" x2="960" y2="196" stroke="#e1e0d9" stroke-width="1"/>
+<text x="40" y="224" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" text-anchor="start" fill="#0b0b0b" font-weight="bold">Bottom: one 16-token block in decode</text>
+<rect x="40" y="246" width="205" height="118" rx="6" fill="#ffffff" stroke="#1f9d55" stroke-width="2"/>
+<text x="142.5" y="268" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" text-anchor="middle" fill="#0b0b0b" font-weight="bold">1. rows 1 to 15 saved</text>
+<text x="142.5" y="290" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">row-major, save_k (main thread)</text>
+<text x="142.5" y="308" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">256 B memcpy per row</text>
+<text x="142.5" y="326" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">row bit: k_rows_saved_</text>
+<text x="142.5" y="344" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">readers: dotter, memcpy</text>
+<line x1="248" y1="305" x2="275" y2="305" stroke="#52514e" stroke-width="2" marker-end="url(#arr)"/>
+<rect x="278" y="246" width="205" height="118" rx="6" fill="#ffffff" stroke="#1f9d55" stroke-width="2"/>
+<text x="380.5" y="268" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" text-anchor="middle" fill="#0b0b0b" font-weight="bold">2. 16th row saved</text>
+<text x="380.5" y="290" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">complete, not converted</text>
+<text x="380.5" y="308" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">queued on pending_k_blocks_</text>
+<line x1="486" y1="305" x2="513" y2="305" stroke="#52514e" stroke-width="2" marker-end="url(#arr)"/>
+<rect x="516" y="246" width="205" height="118" rx="6" fill="#ffffff" stroke="#eb6834" stroke-width="2"/>
+<text x="618.5" y="268" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" text-anchor="middle" fill="#0b0b0b" font-weight="bold">3. forward end (main)</text>
+<text x="618.5" y="290" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">after wait_for_coop_gof():</text>
+<text x="618.5" y="308" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">convert_pending_k_blocks(),</text>
+<text x="618.5" y="326" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">block_to_vnni in place</text>
+<text x="618.5" y="344" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">block bit: k_vnni_blocks_</text>
+<line x1="724" y1="305" x2="751" y2="305" stroke="#52514e" stroke-width="2" marker-end="url(#arr)"/>
+<rect x="754" y="246" width="205" height="118" rx="6" fill="#ffffff" stroke="#eb6834" stroke-width="2"/>
+<text x="856.5" y="268" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12.5" text-anchor="middle" fill="#0b0b0b" font-weight="bold">4. VNNI block, AMX-ready</text>
+<text x="856.5" y="290" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">readers: qk_group (scorer),</text>
+<text x="856.5" y="308" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">gather_row (get_k_row's gather)</text>
+<text x="856.5" y="326" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">all 4 block bits: AMX kernel</text>
+<path d="M856,364 L856,394 L142,394 L142,368" fill="none" stroke="#52514e" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<text x="500" y="418" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">dashed: back to row-major (block_to_rows) by k_forget_row or copy_storage_slot</text>
+</svg>
+<p class="cap">Figure 1. Top: one 256 B row, row-major (green) or VNNI (orange). Bottom: the four states of a block in decode. State 1 is read by the dotter and by memcpy, and state 4 by qk_group and gather_row [kv_cache.hpp:740-746, :1875-1886, :1916-1928; self_attention.hpp:1548-1563, :1596-1610, :1639-1665]. The dashed return path is k_forget_row and copy_storage_slot (book::append's page copy) [kv_cache.hpp:2141-2146, :2204-2241, :2384-2500]. k_forget_row runs from clear_kv_complete_at (the routine called when a new token takes a page offset) under the token-tree lock (the lock over all live requests' tokens).</p>
+<ul>
+<li><b>State bits.</b> Per storage slot (one K and V store of the book) plus an EAGLE entry: k_rows_saved_ (a bit per page offset) and k_vnni_blocks_ (a bit per block). A block bit implies its 16 row bits [kv_cache.hpp:2262-2274]. k_state_ix(slot) picks the entry and asserts slot.i &lt; logical_slot_count() [kv_cache.hpp:2163-2166].</li>
+<li><b>Conversion (states 2 and 3).</b> After wait_for_coop_gof() (the drain of the GOF staging, GOF = group of four tokens staged for the card) the main thread converts each queued block per KV head through a 4 KiB stack copy. It then publishes the block bit with a release store (a reader that sees the bit sees the bytes) [model.hpp:1711-1716, :2820-2825, :3080-3093; kv_cache.hpp:1797-1813, :1843-1866]. A full 16-token prefill run (a run is the consecutive tokens of one block that one save call writes) skips the states. set_k_block still transposes such a block in registers [model.hpp:2945-2980].</li>
+<li><b>Why the forward end, not save_k.</b> A block can be split across two minibatches (groups of 8 tokens) of one pass. The GOF staging gather of the earlier minibatch may then still read the block row-major. At the same time the later minibatch saves the block's last rows. The attention workers read a pending page (the page this step's tokens are written into) only after every writing minibatch counted its latch (a countdown) down [kv_cache.hpp:681-694; model.hpp:2803-2810].</li>
+<li><b>Removed</b> (diff: 8 files, +1132/-100 lines):
+ <ul>
+ <li>set_k_block's present-mask parameter (the bit mask of rows present in the run) is gone [PR head kv_cache.hpp:1726]. The local variable present still ends a run at a repeated offset [model.hpp:2939]. It also feeds the TRON_ASSERT that a 16-token run covers its block [:2964].</li>
+ <li>K_SCATTER_RUN_LEN_1 (the PR head's constant: only a 1-token run took the per-row store path) is gone [PR head model.hpp:2794, :2914]. Now every run of 1 to 15 tokens is row-major (n &lt; K_STORE_BLOCK_16) [model.hpp:2945].</li>
+ <li>The partial-block save of 2 to 15 tokens is gone [amx_attn_iface.hpp:219-226].</li>
+ </ul></li>
+</ul>
+
+<h2>4. How it was tested</h2>
+<table>
+<tr><th>Step</th><th>What</th><th>When (UTC, 2026-09-29)</th><th>Outcome</th></tr>
+<tr><td>A</td><td>Build 617cb8333f (preset cross-avx512, AMX + VNNI K, clang 19, 595 s): runtron and 7 test binaries, 5 run with the fake device (pos_fake, the library that replaces the cards). The 2 t_gof tests need cards.</td><td>13:00:10 to 13:11:10</td><td class="warn">tests-failed-2: 2 of 5 binaries aborted (section 5.3), 3 passed (2076, 4621, 2124 assertions).</td></tr>
+<tr><td>B</td><td>Fix deb from 98a5accb8b (736 s). Its rinzler has 126 AMX tile instructions (proof that the AMX code is compiled in).</td><td>13:11:21 to 13:24:55</td><td class="ok">ok</td></tr>
+<tr><td>C</td><td>Smoke: 12 runtron runs = 3 (vnni, fix, and fix2 = the fix binary run again, so 2 binaries) x 2 attention modes x 2 prompt lengths (1024: every prefill block full, 1000: a row-major tail block left).</td><td>13:25:21 to 13:35:33</td><td class="ok">done, 12 of 12 with return code 0 (section 5.2).</td></tr>
+<tr><td>D</td><td>36 rinzler runs = 3 cells x 4 binaries x 3 repetitions, interleaved (odd repetitions base, vnni, fix, nightly, even ones reversed). Production serving was stopped through platformd (the service manager) from 13:25:31 to 16:42:00 [smoke.log:3-5; logs/i4500fix-20260928.log:302].</td><td>13:35:33 to 16:44:12</td><td class="ok">ok, 36 of 36 (section 5.1).</td></tr>
+<tr><td>E</td><td>Same commit with TRON_K_VNNI=OFF (row-major K, 144 s [build-fixrm.txt]), 3 test binaries.</td><td>16:44:22 to 16:47:22</td><td class="warn">tests-failed-1: the same EAGLE case (section 5.3). t_llama_unit and t_amx_dispatch_dtype passed.</td></tr>
+</table>
+<table>
+<tr><th>Binary</th><th>Path and version</th><th>sha256, first 16 hex characters</th></tr>
+<tr><td>base (cells)</td><td>/var/tmp/jhan/canon-ci-20260918/root/opt/positron/bin/rinzler</td><td>b273a2e1d80f9f24</td></tr>
+<tr><td>vnni (cells)</td><td>/var/tmp/jhan/ci-mimic-20260918/root/opt/positron/bin/rinzler</td><td>3ee9c8f059bc5282</td></tr>
+<tr><td>fix (cells)</td><td>/var/tmp/jhan/i4500fix-20260928/root/opt/positron/bin/rinzler</td><td>ed3abd77386cbe19</td></tr>
+<tr><td>nightly (cells)</td><td>/opt/positron/bin/rinzler, package 2026.09.29-7e5085ed</td><td>8f06ef64b32b9b38</td></tr>
+<tr><td>vnni (smoke)</td><td>/var/tmp/jhan/tron-tilec/gen/runtron, version 2026.09.17-30c4ac82</td><td>-</td></tr>
+<tr><td>fix, fix2 (smoke)</td><td>/var/tmp/jhan/tron-i4500/gen/runtron, version 2026.09.29-617cb833</td><td>-</td></tr>
+</table>
+<p class="cap">The binaries under test and their hashes come from the chain logs [logs/i4500fix-20260928.log:2-6; smoke/smoke.txt].</p>
+<ul>
+<li>Cells: qwen3-4b (4 billion parameters) tp2 with 2 users per engine and tp4 with 4 users, prompt 1024, FPGA attention. llama-3.1-8b (8 billion) tp2 with 8 users, prompt 4096, CPU attention. The two qwen cells are the nightly's loads (the cells of batch m6, section 2). The llama-8b cell is jhan's request of 2026-09-28, with CPU attention as in the nightly [campaign.sh:13-14; README.md:40-42].</li>
+<li>One engine per cell on our half. USE_HW_ATTN unset, TRON_AMX_DISABLE (the AMX kill switch) unset, TRON_USE_SPECULATION=0 [campaign.sh:101-108].</li>
+<li>Client: the nightly's own, tps.py of systems_test (the nightly CI's test suite), run through our st_perf2.py [README.md:42-43; summary.md; systems_test testlib/tps.py:139-150, :219-232]:
+ <ul>
+ <li>sharegpt prompts (a public chat-prompt set) of about the given length: mean 980 tokens at tp2 and 971 at tp4 for prompt 1024, 4075 for prompt 4096.</li>
+ <li>1536 generated tokens per request.</li>
+ <li>10 rounds: one request per user per round, all users started together.</li>
+ <li>TPS is measured between generated tokens 896 and 1024.</li>
+ </ul></li>
+<li>Each cell records the AMX-busy counter (EXE.AMX_BUSY, perf event 0xb7/0x02) on the engine process for 20 s [campaign.sh:88]. The counts are in summary.md, not interpreted here.</li>
+</ul>
+
+<h2>5. Results</h2>
+<h3>5.1 Throughput</h3>
+<svg class="chart" viewBox="0 0 1000 618" width="100%" role="img" aria-label="Dumbbell chart: decode TPS per cell for the four binaries, one row per cell">
+<rect x="0" y="0" width="1000" height="618" fill="#ffffff"/>
+<text x="20" y="20" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="13.5" text-anchor="start" fill="#0b0b0b" font-weight="bold">Decode TPS per cell, mean of 3 repetitions</text>
+<circle cx="28.0" cy="40.0" r="6.5" fill="#2a78d6"/>
+<text x="44" y="44" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="normal">circle = base</text>
+<polygon points="508.0,32.0 516.0,40.0 508.0,48.0 500.0,40.0" fill="#eb6834"/>
+<text x="524" y="44" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="normal">diamond = vnni</text>
+<rect x="21.5" y="55.5" width="13" height="13" fill="#1f9d55"/>
+<text x="44" y="66" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="normal">square = fix</text>
+<circle cx="508.0" cy="62.0" r="6" fill="#ffffff" stroke="#8a8a8a" stroke-width="2.5"/>
+<text x="524" y="66" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="normal">hollow circle = nightly</text>
+<line x1="22.0" y1="84" x2="62.0" y2="84" stroke="#2a78d6" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<text x="76" y="88" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="normal">translucent bar = +-1 sd (standard deviation of the 3 repetitions) in the binary's colour</text>
+<line x1="22" y1="106" x2="62" y2="106" stroke="#c9c8c1" stroke-width="1.5"/>
+<line x1="32" y1="106" x2="52" y2="106" stroke="#0b0b0b" stroke-width="2.5"/>
+<text x="76" y="110" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="normal">black segment = vnni to fix gap (bracket above), grey line = span of the four means</text>
+<text x="20" y="198" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="13.5" text-anchor="start" fill="#0b0b0b" font-weight="bold">qwen3-4b tp2</text>
+<text x="20" y="215" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#52514e" font-weight="normal">2 users per engine, prompt 1024</text>
+<text x="20" y="232" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#52514e" font-weight="normal">FPGA attention</text>
+<line x1="300" y1="260" x2="940" y2="260" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="300.0" y1="260" x2="300.0" y2="265" stroke="#c9c8c1" stroke-width="1"/>
+<text x="300.0" y="279" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">180</text>
+<line x1="460.0" y1="260" x2="460.0" y2="265" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="620.0" y1="260" x2="620.0" y2="265" stroke="#c9c8c1" stroke-width="1"/>
+<text x="620.0" y="279" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">190</text>
+<line x1="780.0" y1="260" x2="780.0" y2="265" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="940.0" y1="260" x2="940.0" y2="265" stroke="#c9c8c1" stroke-width="1"/>
+<text x="940.0" y="279" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">200 TPS</text>
+<text x="288" y="264" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="end" fill="#52514e" font-weight="normal">axis from 180 TPS, not 0</text>
+<line x1="441.1" y1="210" x2="554.4" y2="210" stroke="#eb6834" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="678.6" y1="210" x2="782.9" y2="210" stroke="#2a78d6" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="548.0" y1="210" x2="626.7" y2="210" stroke="#1f9d55" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="751.8" y1="210" x2="772.3" y2="210" stroke="#8a8a8a" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="497.8" y1="210" x2="762.1" y2="210" stroke="#c9c8c1" stroke-width="1.5"/>
+<line x1="497.8" y1="210" x2="587.4" y2="210" stroke="#0b0b0b" stroke-width="2.5"/>
+<circle cx="730.7" cy="210.0" r="7.5" fill="#ffffff"/>
+<circle cx="730.7" cy="210.0" r="6.5" fill="#2a78d6"/>
+<text x="730.7" y="188" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">base 193.5</text>
+<polygon points="497.8,200.0 507.8,210.0 497.8,220.0 487.8,210.0" fill="#ffffff"/>
+<polygon points="497.8,202.0 505.8,210.0 497.8,218.0 489.8,210.0" fill="#eb6834"/>
+<text x="497.8" y="236" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">vnni 186.2</text>
+<rect x="579.9" y="202.5" width="15.0" height="15.0" fill="#ffffff"/>
+<rect x="580.9" y="203.5" width="13" height="13" fill="#1f9d55"/>
+<text x="587.4" y="188" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">fix 189.0</text>
+<circle cx="762.1" cy="210.0" r="7.5" fill="#ffffff"/>
+<circle cx="762.1" cy="210.0" r="6" fill="#ffffff" stroke="#8a8a8a" stroke-width="2.5"/>
+<text x="762.1" y="236" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">nightly 194.4</text>
+<line x1="497.8" y1="162" x2="587.4" y2="162" stroke="#0b0b0b" stroke-width="1.5"/>
+<line x1="497.8" y1="162" x2="497.8" y2="168" stroke="#0b0b0b" stroke-width="1.5"/>
+<line x1="587.4" y1="162" x2="587.4" y2="168" stroke="#0b0b0b" stroke-width="1.5"/>
+<text x="542.6" y="148" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">fix vs vnni +1.50 %, |t| 1.62 of 4.30: not resolved</text>
+<text x="20" y="360" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="13.5" text-anchor="start" fill="#0b0b0b" font-weight="bold">qwen3-4b tp4</text>
+<text x="20" y="377" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#52514e" font-weight="normal">4 users per engine, prompt 1024</text>
+<text x="20" y="394" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#52514e" font-weight="normal">FPGA attention</text>
+<line x1="300" y1="422" x2="940" y2="422" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="300.0" y1="422" x2="300.0" y2="427" stroke="#c9c8c1" stroke-width="1"/>
+<text x="300.0" y="441" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">110</text>
+<line x1="391.4" y1="422" x2="391.4" y2="427" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="482.9" y1="422" x2="482.9" y2="427" stroke="#c9c8c1" stroke-width="1"/>
+<text x="482.9" y="441" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">130</text>
+<line x1="574.3" y1="422" x2="574.3" y2="427" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="665.7" y1="422" x2="665.7" y2="427" stroke="#c9c8c1" stroke-width="1"/>
+<text x="665.7" y="441" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">150</text>
+<line x1="757.1" y1="422" x2="757.1" y2="427" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="848.6" y1="422" x2="848.6" y2="427" stroke="#c9c8c1" stroke-width="1"/>
+<text x="848.6" y="441" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">170 TPS</text>
+<line x1="940.0" y1="422" x2="940.0" y2="427" stroke="#c9c8c1" stroke-width="1"/>
+<text x="288" y="426" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="end" fill="#52514e" font-weight="normal">axis from 110 TPS, not 0</text>
+<line x1="400.6" y1="372" x2="716.9" y2="372" stroke="#eb6834" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="472.6" y1="372" x2="730.6" y2="372" stroke="#1f9d55" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="708.5" y1="372" x2="747.6" y2="372" stroke="#2a78d6" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="908.8" y1="372" x2="918.5" y2="372" stroke="#8a8a8a" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="558.7" y1="372" x2="913.7" y2="372" stroke="#c9c8c1" stroke-width="1.5"/>
+<line x1="558.7" y1="372" x2="601.6" y2="372" stroke="#0b0b0b" stroke-width="2.5"/>
+<circle cx="728.1" cy="372.0" r="7.5" fill="#ffffff"/>
+<circle cx="728.1" cy="372.0" r="6.5" fill="#2a78d6"/>
+<text x="728.1" y="350" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">base 156.8</text>
+<polygon points="558.7,362.0 568.7,372.0 558.7,382.0 548.7,372.0" fill="#ffffff"/>
+<polygon points="558.7,364.0 566.7,372.0 558.7,380.0 550.7,372.0" fill="#eb6834"/>
+<text x="558.7" y="398" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">vnni 138.3</text>
+<rect x="594.1" y="364.5" width="15.0" height="15.0" fill="#ffffff"/>
+<rect x="595.1" y="365.5" width="13" height="13" fill="#1f9d55"/>
+<text x="601.6" y="350" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">fix 143.0</text>
+<circle cx="913.7" cy="372.0" r="7.5" fill="#ffffff"/>
+<circle cx="913.7" cy="372.0" r="6" fill="#ffffff" stroke="#8a8a8a" stroke-width="2.5"/>
+<text x="913.7" y="398" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">nightly 177.1</text>
+<line x1="558.7" y1="324" x2="601.6" y2="324" stroke="#0b0b0b" stroke-width="1.5"/>
+<line x1="558.7" y1="324" x2="558.7" y2="330" stroke="#0b0b0b" stroke-width="1.5"/>
+<line x1="601.6" y1="324" x2="601.6" y2="330" stroke="#0b0b0b" stroke-width="1.5"/>
+<text x="580.2" y="310" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">fix vs vnni +3.39 %, |t| 1.81 of 4.30: not resolved</text>
+<text x="20" y="522" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="13.5" text-anchor="start" fill="#0b0b0b" font-weight="bold">llama-8b tp2</text>
+<text x="20" y="539" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#52514e" font-weight="normal">8 users per engine, prompt 4096</text>
+<text x="20" y="556" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="start" fill="#52514e" font-weight="normal">CPU attention</text>
+<line x1="300" y1="584" x2="940" y2="584" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="300.0" y1="584" x2="300.0" y2="589" stroke="#c9c8c1" stroke-width="1"/>
+<text x="300.0" y="603" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">39.5</text>
+<line x1="380.0" y1="584" x2="380.0" y2="589" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="460.0" y1="584" x2="460.0" y2="589" stroke="#c9c8c1" stroke-width="1"/>
+<text x="460.0" y="603" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">40.5</text>
+<line x1="540.0" y1="584" x2="540.0" y2="589" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="620.0" y1="584" x2="620.0" y2="589" stroke="#c9c8c1" stroke-width="1"/>
+<text x="620.0" y="603" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">41.5</text>
+<line x1="700.0" y1="584" x2="700.0" y2="589" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="780.0" y1="584" x2="780.0" y2="589" stroke="#c9c8c1" stroke-width="1"/>
+<text x="780.0" y="603" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">42.5</text>
+<line x1="860.0" y1="584" x2="860.0" y2="589" stroke="#c9c8c1" stroke-width="1"/>
+<line x1="940.0" y1="584" x2="940.0" y2="589" stroke="#c9c8c1" stroke-width="1"/>
+<text x="940.0" y="603" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="middle" fill="#52514e" font-weight="normal">43.5 TPS</text>
+<text x="288" y="588" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="11" text-anchor="end" fill="#52514e" font-weight="normal">axis from 39.5 TPS, not 0</text>
+<line x1="303.2" y1="534" x2="328.8" y2="534" stroke="#2a78d6" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="869.6" y1="534" x2="892.0" y2="534" stroke="#eb6834" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="844.0" y1="534" x2="866.4" y2="534" stroke="#1f9d55" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="324.0" y1="534" x2="336.8" y2="534" stroke="#8a8a8a" stroke-width="5" opacity="0.28" stroke-linecap="round"/>
+<line x1="316.0" y1="534" x2="880.8" y2="534" stroke="#c9c8c1" stroke-width="1.5"/>
+<line x1="880.8" y1="534" x2="855.2" y2="534" stroke="#0b0b0b" stroke-width="2.5"/>
+<circle cx="316.0" cy="534.0" r="7.5" fill="#ffffff"/>
+<circle cx="316.0" cy="534.0" r="6.5" fill="#2a78d6"/>
+<text x="316.0" y="512" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">base 39.60</text>
+<polygon points="880.8,524.0 890.8,534.0 880.8,544.0 870.8,534.0" fill="#ffffff"/>
+<polygon points="880.8,526.0 888.8,534.0 880.8,542.0 872.8,534.0" fill="#eb6834"/>
+<text x="880.8" y="560" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">vnni 43.13</text>
+<rect x="847.7" y="526.5" width="15.0" height="15.0" fill="#ffffff"/>
+<rect x="848.7" y="527.5" width="13" height="13" fill="#1f9d55"/>
+<text x="855.2" y="512" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">fix 42.97</text>
+<circle cx="330.4" cy="540.0" r="7.5" fill="#ffffff"/>
+<circle cx="330.4" cy="540.0" r="6" fill="#ffffff" stroke="#8a8a8a" stroke-width="2.5"/>
+<text x="330.4" y="566" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="normal">nightly 39.69</text>
+<line x1="855.2" y1="486" x2="880.8" y2="486" stroke="#0b0b0b" stroke-width="1.5"/>
+<line x1="855.2" y1="486" x2="855.2" y2="492" stroke="#0b0b0b" stroke-width="1.5"/>
+<line x1="880.8" y1="486" x2="880.8" y2="492" stroke="#0b0b0b" stroke-width="1.5"/>
+<text x="940" y="472" font-family="system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" text-anchor="end" fill="#0b0b0b" font-weight="normal">fix vs vnni -0.37 %, |t| 3.35 of 4.30: not resolved</text>
+</svg>
+<p class="cap">Figure 2. Means of 3 repetitions, each row on its own axis (none from 0). Shape and label, not colour, identify the binary. <b>Takeaway: in both FPGA-attention rows the fix lies between vnni and base. Its distance from vnni is inside the run-to-run spread at n = 3. On llama-8b fix and vnni are equal within 0.4 %.</b></p>
+<table>
+<tr><th>Cell</th><th>Binary</th><th class="num">mean TPS</th><th class="num">sd TPS</th><th class="num">step ms</th><th class="num">TTFT ms (time to first token)</th></tr>
+<tr><td rowspan="4">qwen3-4b tp2</td><td>base</td><td class="num">193.46</td><td class="num">1.63</td><td class="num">5.169</td><td class="num">707</td></tr>
+<tr><td>vnni</td><td class="num">186.18</td><td class="num">1.77</td><td class="num">5.371</td><td class="num">709</td></tr>
+<tr><td>fix</td><td class="num">188.98</td><td class="num">1.23</td><td class="num">5.292</td><td class="num">697</td></tr>
+<tr><td>nightly</td><td class="num">194.44</td><td class="num">0.32</td><td class="num">5.143</td><td class="num">705</td></tr>
+<tr><td rowspan="4">qwen3-4b tp4</td><td>base</td><td class="num">156.82</td><td class="num">2.14</td><td class="num">6.377</td><td class="num">865</td></tr>
+<tr><td>vnni</td><td class="num">138.30</td><td class="num">17.30</td><td class="num">7.231</td><td class="num">817</td></tr>
+<tr><td>fix</td><td class="num">142.99</td><td class="num">14.11</td><td class="num">6.993</td><td class="num">821</td></tr>
+<tr><td>nightly</td><td class="num">177.12</td><td class="num">0.53</td><td class="num">5.646</td><td class="num">818</td></tr>
+<tr><td rowspan="4">llama-8b tp2</td><td>base</td><td class="num">39.60</td><td class="num">0.08</td><td class="num">25.252</td><td class="num">13421</td></tr>
+<tr><td>vnni</td><td class="num">43.13</td><td class="num">0.07</td><td class="num">23.185</td><td class="num">13444</td></tr>
+<tr><td>fix</td><td class="num">42.97</td><td class="num">0.07</td><td class="num">23.271</td><td class="num">13468</td></tr>
+<tr><td>nightly</td><td class="num">39.69</td><td class="num">0.04</td><td class="num">25.194</td><td class="num">13471</td></tr>
+</table>
+<p class="cap">Table 1. Means over n = 3, cells as in section 4 [summary.md].</p>
+<table>
+<tr><th>Cell</th><th>a vs b</th><th class="num">delta ms per step (sd)</th><th class="num">delta TPS %</th><th class="num">paired t</th><th>resolved (|t| at least 4.30)</th></tr>
+<tr><td rowspan="3">qwen3-4b tp2</td><td>vnni vs base</td><td class="num">+0.202 (0.054)</td><td class="num">-3.77</td><td class="num">+6.49</td><td class="ok">yes</td></tr>
+<tr><td>fix vs base</td><td class="num">+0.123 (0.067)</td><td class="num">-2.32</td><td class="num">+3.17</td><td class="mid">no</td></tr>
+<tr><td>fix vs vnni</td><td class="num">-0.080 (0.085)</td><td class="num">+1.50</td><td class="num">-1.62</td><td class="mid">no</td></tr>
+<tr><td rowspan="3">qwen3-4b tp4</td><td>vnni vs base</td><td class="num">+0.935 (0.966)</td><td class="num">-11.81</td><td class="num">+1.68</td><td class="mid">no</td></tr>
+<tr><td>fix vs base</td><td class="num">+0.664 (0.710)</td><td class="num">-8.82</td><td class="num">+1.62</td><td class="mid">no</td></tr>
+<tr><td>fix vs vnni</td><td class="num">-0.271 (0.259)</td><td class="num">+3.39</td><td class="num">-1.81</td><td class="mid">no</td></tr>
+<tr><td rowspan="3">llama-8b tp2</td><td>vnni vs base</td><td class="num">-2.068 (0.069)</td><td class="num">+8.92</td><td class="num">-51.58</td><td class="ok">yes</td></tr>
+<tr><td>fix vs base</td><td class="num">-1.981 (0.092)</td><td class="num">+8.51</td><td class="num">-37.47</td><td class="ok">yes</td></tr>
+<tr><td>fix vs vnni</td><td class="num">+0.086 (0.045)</td><td class="num">-0.37</td><td class="num">+3.35</td><td class="mid">no</td></tr>
+</table>
+<p class="cap">Table 2. Delta = a minus b per repetition, ms per step (positive = a slower) [summary.md]. Nightly vs base: +0.51 % (t -0.90) at tp2, +12.94 % (t -12.32, resolved) at tp4, +0.23 % (t -2.08) on llama-8b.</p>
+<ul>
+<li>The "about a third": at tp2 vnni adds 0.202 ms per step over base. The fix removes 0.080 ms of that (40 %). At tp4 it removes 0.271 of 0.935 ms (29 %). Both are ratios of unresolved means.</li>
+<li>The tp4 sd of 17.30 (vnni) and 14.11 TPS (fix) comes from one slow repetition: 118.4 and 127.0 TPS in repetition 2 against 146 to 154 TPS in repetitions 1 and 3 [summary.json]. A similar spread was seen at tp4 with the VNNI package on 2026-09-19: sd 7.30 TPS at n = 2, that is, the two repetitions differed by about 10 TPS [m6/summary.md]. The cause is not yet known.</li>
+<li>The nightly is +12.94 % above base at tp4, cause not yet known. Hypothesis: this is the tp4 rise first seen on the 2026-09-23 nightly (172.12 TPS, +12.4 % over the seven earlier nights) [CI-test/status/CI-AMX-row-20260923.html, outside the facts bundle]. The measurement that would confirm it: the nightly's qwen-3-4b tp4 row over the nights since 09-23, against the canonical base of this page.</li>
+</ul>
+
+<h3>5.2 Tokens (smoke)</h3>
+<table>
+<tr><th>Attention</th><th>Prompt (tokens)</th><th>fix vs fix2 (A/A: the same binary twice)</th><th>fix vs vnni (PR head)</th></tr>
+<tr><td>FPGA</td><td>1024</td><td class="ok">identical, 128 of 128 tokens</td><td class="ok">identical</td></tr>
+<tr><td>FPGA</td><td>1000</td><td class="ok">identical</td><td class="ok">identical</td></tr>
+<tr><td>CPU (USE_HW_ATTN=0)</td><td>1024</td><td class="ok">identical</td><td class="mid">first difference at token 52, 65 of 128 differ</td></tr>
+<tr><td>CPU (USE_HW_ATTN=0)</td><td>1000</td><td class="ok">identical</td><td class="mid">first difference at token 6, 114 of 128 differ</td></tr>
+</table>
+<p class="cap">qwen3-4b tp2, 1 user, temperature 0 (greedy: always the top-scoring token), --pay-for-determinism, seed 1 [smoke.sh:2-8; smoke/smoke.txt].</p>
+<ul>
+<li>A CPU-attention difference is of an allowed kind. The fix scores a tail block with the dotter, the PR head with qk_group. Both add the same VDPBF16PS products (the bf16 dot-product instruction of AVX-512, Intel's 512-bit vector instructions) in a different fp32 (32-bit float) order. A score can therefore differ at a bf16 tie (two candidate tokens with equal scores at bf16 precision). One flipped greedy token changes all later ones [k_vnni.hpp:311-313; smoke.sh:6-8].</li>
+<li>Not yet proven to be only that: 128 greedy tokens cannot tell a tie flip from a numerics defect. The proof would be a forced run (teacher forcing with --force-feed-text-token-file) of both binaries at prompt 1000. It would compare the Top-k Logits record (tron's dump of a step's highest per-word scores, the logits) at the first divergent step, token 6.</li>
+<li>Identical FPGA-attention rows are consistent with equal K bytes reaching the card, not a proof. A dump of the K plane (the K storage bytes) or a checksum of the staged rows would be one.</li>
+</ul>
+
+<h3>5.3 Unit tests</h3>
+<table>
+<tr><th style="width:11%">Item</th><th>Failure 1</th><th>Failure 2</th></tr>
+<tr><td>Test</td><td>t_k_vnni_layout, "the EAGLE storage view keeps its own K layout state" [t/t_k_vnni_layout.cpp:713]</td><td>t_llama_unit, "apply and join page ranges" [t/t_llama_unit.cpp:1873], the code block "Excluded rows must not resolve K, even when the book has no active KV slots" [:2055-2081]</td></tr>
+<tr><td>Abort</td><td>TRON_ASSERT(storage_valid_) "KV cache DMA allocation failed" (DMA = card-visible memory) in the book constructor [kv_cache.hpp:969]. Return code 134 (abort signal).</td><td>TRON_ASSERT_LT(slot.i, book.logical_slot_count()) "got 0 &gt;= 0", INFO window_excludes_all=0. Return code 134.</td></tr>
+<tr><td>New or pre-existing</td><td>New, added in 617cb8333f.</td><td>Pre-existing: the case from 2024-07-16, the code block from main commit ea3122b9147 (2026-09-11). The fix's 21 lines in this case act on another book [t_llama_unit.cpp:1926-1946].</td></tr>
+<tr><td>Cause (code reading)</td><td>The book type uniform_kv_cache&lt;1, kv_geometry{1,128}, 0&gt; has x_bytes = 0. eagle_compatible is therefore false. The constructor returns before setting storage_valid_ [t_k_vnni_layout.cpp:424-425, :723-724; kv_cache.hpp:888, :1219-1240, :1282-1283].</td><td>Commit 78e2da7511 reads the per-slot K layout state before the token loop of apply_page_tok (the per-page software attention loop). That read calls k_state_ix, whose assert slot.i &lt; logical_slot_count() is 0 &lt; 0 for the zero-slot book [self_attention.hpp:1608-1609; kv_cache.hpp:2163-2165].</td></tr>
+<tr><td>Classification</td><td class="mid">Test defect: the same build's t_llama_unit allocated EAGLE books with x_bytes &gt; 0 [t_llama_unit.cpp:376-379]. The machine load in the chain log does not explain it.</td><td class="warn">Most likely a fix defect, exposed by a pre-existing test of a contract from main. Deterministic (not intermittent): the same test passed on 2026-09-16 (VNNI build, branch head 65a1c41d72) [vnnik5-20260916/tests-final.txt].</td></tr>
+<tr><td>Cases that never ran</td><td>2 of 10 [:782, :819]. 7 of the 8 run passed, the main state test [:578] included.</td><td>4 of 42 (38 ran): the fix's modified save_k case [:2593] and 3 pre-existing cases (lines 2180, 2224, 2403).</td></tr>
+<tr><td>Step E (row-major build)</td><td>The same abort, 7 passed of 8 run: independent of the layout, a test defect.</td><td>42 passed of 42, the save_k case included: specific to the VNNI build.</td></tr>
+</table>
+<p>The abort stacks are not symbolized (mapped to source lines). addr2line (the GNU tool that maps an address to a source line) rejects these clang-19 binaries. Their DWARF 5 (debug-information format) data uses form 0x23, an attribute encoding this addr2line version does not handle. The failure-2 assert site (k_state_ix, kv_cache.hpp:2164, while :2120, :2127 and :2134 carry the same text) is therefore inferred from the code path.</p>
+<p><b>After the chain.</b> The branch gained three commits after the chain (diff 617cb8333f..f34b0fe2ec: 3 files, +63/-33 lines):</p>
+<ul>
+<li>63740b0232 (2026-09-29 09:53 UTC-7), test side (t_k_vnni_layout.cpp, t_llama_unit.cpp): the EAGLE-view case builds its book from a type with x_bytes = 16 (failure 1's remedy), and "apply and join page ranges" records its rows after the pages get their tokens.</li>
+<li>675df85c94 (10:12), code side (self_attention.hpp, +15/-9): the software loop reads the page's layout state at the first relevant token, not before it (failure 2's first code remedy), and the AMX gate (the check that decides whether a page goes to the AMX kernel) reads it only after the dense-page test [later-commits-code.diff].</li>
+<li>f34b0fe2ec (10:26), test side (t_llama_unit.cpp): "apply and join page ranges" now feeds the VNNI build the same K values the row-major build scores (the commit's subject line calls this "the row-major build's K instance").</li>
+</ul>
+<p>The body of commit 63740b0232 attributes both failures to the tests ("failed two test setups, not the code"), while this page classes failure 2 as most likely a code defect, and the code change 675df85c94 followed 19 minutes later. The two readings are recorded here, not reconciled.</p>
+<p>Re-test at f34b0fe2ec on delphi-3bda:</p>
+<ul>
+<li>VNNI build (tests-retest.txt): t_k_vnni_layout 10 passed of 10 (90983 assertions), t_llama_unit 42 passed of 42 (130625 assertions).</li>
+<li>Row-major build (tests-retestrm.txt): 10 passed of 10 (90978 assertions) and 42 passed of 42 (130670 assertions).</li>
+<li>The save_k case is among the passes [tests-retest-t_llama_unit.out:402].</li>
+<li>Build logs: build-retest.log and build-retestrm.log (done 10:28 and 10:30 UTC-7).</li>
+<li>The TPS cells (step D) and the smoke (step C) were NOT re-run at f34b0fe2ec. The 675df85c94 change to self_attention.hpp is therefore unmeasured for throughput and tokens.</li>
+</ul>
+
+<h2>6. Reading: what the numbers say and do not say</h2>
+<ul>
+<li>They say: llama-8b keeps the VNNI gain (Table 2). The FPGA-attention loss shrinks, and no fix-vs-vnni pair is resolved.</li>
+<li>They do not say that the fix works, nor why two thirds of the loss remain. Hypotheses, each with its deciding measurement:
+ <ul>
+ <li>H1: the forward-end conversion is a new serial main-thread cost (4 KiB read and written per block per KV head). Measure: a TRON_CHECKPOINT span (tron's timing macro) around convert_pending_k_blocks().</li>
+ <li>H2: the row-major tail readers still cost more than base. Measure: Perfetto (the tracing tool) spans of the workers' pending section and the staging copy, fix against base.</li>
+ <li>H3: the per-row save is still slower than base (row-bit bookkeeping). Measure: the root-cause page's per-layer K-save micro-benchmark (section 2) on the fix binary.</li>
+ <li>H4: an AMX-side part remains at tp4 (the kill switch recovered +6.8 % TPS there on 2026-09-19 [m6/summary.md]). Measure: fix with TRON_AMX_DISABLE=1 against fix, n = 3.</li>
+ <li>H5: the tp4 two-group spread hides the effect. Measure: 6 or more repetitions of the two qwen cells.</li>
+ </ul></li>
+</ul>
+
+<h2>7. Open items and decisions for jhan</h2>
+<ol>
+<li><b>Re-measure at f34b0fe2ec before pushing.</b> Run the chain again (with the chain's settings COMMIT_FIX=f34b0fe2ec and a matching COMMIT_DEB) for the smoke and the TPS cells, which 675df85c94 may have changed.</li>
+<li><b>Push or not.</b> Not now. Ready means the re-measurement above, more qwen repetitions (H5), and the forced-run logits check (section 5.2).</li>
+<li><b>Comment on issue #4500.</b> 0 comments as of 2026-09-29T18:26Z (GitHub check: open, last updated 2026-09-18). Its four options: a row-major staging copy, a tuned gather, the layout off for FPGA-attention models, accepting the loss [store-remedies-report.html 0.5]. This fix is a fifth. Posting is jhan's decision.</li>
+<li><b>EAGLE + VNNI coverage.</b> The EAGLE-view case of t_k_vnni_layout (failure 1's case) passes at f34b0fe2ec in both builds [tests-retest-t_k_vnni_layout.out:62; tests-retestrm-t_k_vnni_layout.out:62]. Whether it reaches k_state_ix's EAGLE branch and k_forget_row's EAGLE entry was not checked.</li>
+<li><b>OOM-rescue race.</b> Can the OOM-rescue (out-of-memory recovery) append that runs mid-forward race the in-place transposes of copy_storage_slot? The code comment Note [K VNNI storage] states that the tree-lock rule covers it. No test does.</li>
+<li><b>The tp4 base.</b> The nightly is +12.94 % above base at tp4, cause not yet known, and any tp4 claim should name its base.</li>
+</ol>
+
+<h2>8. Where the data is</h2>
+<ul>
+<li>Results: /home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/ (summary.md, summary.json, cells/ with 36 folders of perf.json, meta.json, amx_busy.txt and proof.txt, smoke/, smoke.log, tests-fix*, tests-fixrm*, build-*, and tests-retest* and build-retest* for the branch head). Logs: exec/logs/i4500fix-20260928-chain.log and i4500fix-20260928.log. Scripts: exec/i4500fix-20260928/ (README.md, chain.sh, campaign.sh, smoke.sh, st_perf2.py, summarize.py, retest.sh).</li>
+<li>Worktrees: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/tron-i4500 (branch jhan-amx-vnniK-i4500, now at f34b0fe2ec). On 3bda: /var/tmp/jhan/tron-i4500 (VNNI build), tron-i4500rm (row-major), tron-i4500deb (deb [build-deb.sh:12]), /var/tmp/jhan/i4500fix-20260928/ (fix.deb, root/).</li>
+<li>References under /home/jhan/workspace/intel-AMX/: exec/results/issue4500-20260918/m6/summary.md, VNNIed-K-in-place/issue4500/root-cause-debug.html, VNNIed-K-in-place/status/store-remedies-report.html (0.5), CI-test/status/CI-AMX-row-20260923.html.</li>
+<li>Facts bundle: /tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/6602673a-67f7-41a1-a988-b02f4f109ac7/scratchpad/fix4500/facts-bundle.md (section "LATER COMMITS AND RE-TEST" for the branch head) and later-commits-code.diff beside it.</li>
+</ul>
+
+</main></body></html>
