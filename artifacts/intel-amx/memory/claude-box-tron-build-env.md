@@ -60,3 +60,10 @@ for real AMX runs use delphi-3bda per [[delphi-3bda-hardware]]. Related: [[claud
 - 2026-09-16: on claude-box the symlink ~/.nix-profile/bin/nix is DANGLING (target missing), so no nix develop / clang-format here. Run the repo clang-format on delphi-3bda instead: ssh delphi-3bda "cd <worktree> && ~/.nix-profile/bin/nix develop --accept-flake-config -c clang-format --dry-run --Werror <file>" (worktrees under ~/workspace are NFS-shared; grep the new text on 3bda first, attr-cache trap).
 
 UPDATE 2026-09-24: nix is gone from claude-box (see [[block-store-animation-page]]). For clang-19 syntax-only checks without delphi-3bda use ~/workspace/ai-runs/lcheck/lcheck.sh (zig 0.14.0 clang + headers mirrored from 3bda; README there). clang-format 19 runs via `uvx --from clang-format==19.1.7`.
+
+- UPDATE 2026-09-30: nix is BACK on claude-box (Determinate Nix 3.21.0, /nix/store present, ~/.nix-profile/bin/nix
+  works). The PR 4596 worktree ~/workspace/ai-runs/tron-attn-stats has a configured gen/ (clang++-19 from the nix
+  store, RelWithDebInfo, TRON_AMX_DISPATCH=ON, BUILD_INGEST_MODELS=OFF). Build: `~/.nix-profile/bin/nix develop
+  --accept-flake-config --command bash -c 'ninja -C gen -j 20 t_llama_unit ...'`; clang-format 19.1.7 is inside the
+  shell; run tests with `env -u SYSTEM_CONFIG ./gen/t_xxx --skip-benchmarks` (recipe: exec/counter-20260922/r5/buildtest-run1/run.sh).
+TRAP (2026-10-01, Bash tool in claude-box): `cd DIR && ...` prints a directory listing of DIR before the command output (a shell hook), and the cwd resets after each call; use absolute paths and `git -C DIR` instead of cd.
