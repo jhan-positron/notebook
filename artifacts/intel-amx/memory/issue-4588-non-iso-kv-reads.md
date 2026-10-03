@@ -41,10 +41,10 @@ Verified facts worth reusing (all at c73e7fb2f9 unless noted):
 - Fix precedents: closed draft #4584 (9380012de5) has the const bf16* stepping form for scaled_v_expr
   (2227-2249, 2385-2408) and cast-free 8-lane views; c73e7fb2f9 is the K1 pattern (bf16 k[page_size*head_size]).
 
-2026-09-24 ~01:30 UTC: jhan removes the four-line comment from the code. Issue body rewritten (v5): the issue is now
+2026-09-24 ~01:30 UTC: jhan planned to remove the four-line comment from the code (CORRECTION 2026-09-30: git shows no such commit on any ref; the paragraph is still at c73e7fb2f9; Ben's PR #4698 removes it, see [[pr4557-ben-review-response]]). Issue body rewritten (v5): the issue is now
 the record of the three reads, the permalink at c73e7fb2f9 is the only trace of the comment, "keep the code and the
 comment" options became "keep the code as is, with this issue as the record". Saved copy updated.
 
 **How to apply:** cite #4588 when the reads are discussed on #4557/#4587; when a fix lands, update the issue, not a
-new one. Do not expect the comment in kv_cache.hpp after c73e7fb2f9; line numbers after 1458 shift once it is gone.
+new one. The comment IS still in kv_cache.hpp at c73e7fb2f9 (:1459-1462) until #4698 lands; line numbers after 1458 shift once it is gone.
 Related: [[pr4587-alloc-creates-blocks]], [[issue4525-implementation]], [[no-names-in-github-issues]].
