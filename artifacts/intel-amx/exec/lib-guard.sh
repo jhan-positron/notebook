@@ -271,16 +271,20 @@ rinzler_takeover_if_idle() {
   if ! young=$(rinzler_min_active_age 600); then echo "$now GUARD takeover: ${young:-a unit} active for less than 10 min, serving left running"; return 1; fi
   j=$(sudo -n journalctl -q -u 'rinzler@*' --since '-10 min' --no-pager 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] || { echo "$now GUARD takeover: journalctl failed (rc=$rc), serving left running"; return 1; }
-  probe=$(sudo -n journalctl -u 'rinzler@*' -n 1 -o cat --no-pager 2>/dev/null) || true
-  [ -n "$probe" ] || { echo "$now GUARD takeover: journal not readable (no last line), serving left running"; return 1; }
+  # The last 6 journal lines: an idle SYSTEM_STATS line is followed by two more #EVT# lines
+  # ("Harvester stats", "0 history events"), so the idle line is not the last line (2026-09-29).
+  probe=$(sudo -n journalctl -u 'rinzler@*' -n 6 -o cat --no-pager 2>/dev/null) || true
+  [ -n "$probe" ] || { echo "$now GUARD takeover: journal not readable (no last lines), serving left running"; return 1; }
   if [ -n "$j" ]; then
     traffic=$(printf '%s\n' "$j" | grep -v '#EVT#' | grep -icE 'session|request|prompt|generat|token') || true
     busy=$(printf '%s\n' "$j" | grep 'SYSTEM_STATS' | grep -vc 'Open=0, Closed=0, Busy=0') || true
     note="window=10min"
-  elif printf '%s\n' "$probe" | grep -q 'SYSTEM_STATS.*Open=0, Closed=0, Busy=0'; then
-    traffic=0; busy=0; note="window=empty,last-line=idle-stats"   # idle units log stats at growing intervals; the last line says idle
+  elif printf '%s\n' "$probe" | grep -q 'SYSTEM_STATS.*Open=0, Closed=0, Busy=0' \
+       && ! printf '%s\n' "$probe" | grep 'SYSTEM_STATS' | grep -qv 'Open=0, Closed=0, Busy=0' \
+       && ! printf '%s\n' "$probe" | grep -v '#EVT#' | grep -qiE 'session|request|prompt|generat|token'; then
+    traffic=0; busy=0; note="window=empty,last-lines=idle-stats"   # idle units log stats at growing intervals; the last stats line says idle
   else
-    echo "$now GUARD takeover: journal empty for the last 10 min and the last line is not an idle SYSTEM_STATS line, serving left running"; return 1
+    echo "$now GUARD takeover: journal empty for the last 10 min and the last 6 lines hold no idle SYSTEM_STATS line (or a non-idle one), serving left running"; return 1
   fi
   sso=$(sudo -n ss -Htn state established '( sport >= :3000 and sport <= :3020 ) or ( sport >= :13000 and sport <= :13020 )' 2>/dev/null) || sso='ss-failed - - unknown:0'   # an ss failure counts as a connection
   conns=$(printf '%s\n' "$sso" | awk 'NF && $4 !~ /^127\.0\.0\.1:/' | wc -l)
