@@ -1,0 +1,241 @@
+diff --git a/h/system/memory.hpp b/h/system/memory.hpp
+index fcb66243aa..5e8592a811 100644
+--- a/h/system/memory.hpp
++++ b/h/system/memory.hpp
+@@ -166,21 +166,34 @@ inline constexpr dma_allocation_t dma_allocation{};
+ 
+ // Note [DMA allocation creates objects]
+ // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-// In C++, a call of any function named operator new[] creates objects in the
+-// memory it returns ([intro.object]). The objects created are the ones the
+-// program goes on to use. This covers implicit-lifetime types only ([class.prop]):
+-// for example scalars, arrays, and classes with a trivial constructor and
+-// destructor. dma_allocate_aligned is an ordinary function, so its memory holds
+-// no objects. So try_make_unique_dma_for_overwrite gets its memory through the
+-// wrapper below. The wrapper writes no bytes.
++// The KV book (struct book in tron/models/kv_cache.hpp) reads its arenas as
++// arrays of kv_block objects that no code ever constructs. C++ allows that
++// only for implicit-lifetime types: types that an allocation may create
++// without a constructor call. In short, these are scalars, arrays, and
++// classes with a trivial constructor and destructor ([basic.types.general],
++// [class.prop]). Such objects come into existence only through a short list
++// of operations: a call of a function named operator new or operator new[],
++// std::malloc and its relatives, std::memcpy and std::memmove, std::bit_cast,
++// and starting the lifetime of an unsigned char or std::byte array
++// ([intro.object]). Each of them creates, in the memory it hands back or
++// fills, the objects that the program goes on to use.
++//
++// dma_allocate_aligned is not on that list. It is an ordinary function, so
++// the memory it returns holds no objects. A cast of that memory to kv_block*
++// creates none either. A member access through such a pointer is undefined
++// behavior ([basic.life]). Compiler warnings and sanitizers do not catch it.
++// So try_make_unique_dma_for_overwrite gets its memory through the wrapper
++// below, a function named operator new[]. That call creates the objects. The
++// wrapper writes no bytes and runs no constructor.
+ //
+ // Call the wrapper directly, never from a new-expression. An array
+ // new-expression may ask for extra bytes ([expr.new]), and dma_deallocate would
+ // not free them.
+ //
+ // No test fails if a caller goes back to calling dma_allocate_aligned directly.
+-// The unit-test allocator (aligned_alloc in src/pos/fake.cpp) creates objects
+-// by itself, so the tests behave the same either way.
++// The unit-test allocator (aligned_alloc in src/pos/fake.cpp) is on the list
++// above ([c.malloc]). So it creates the objects by itself, and the tests behave
++// the same either way.
+ TRON(nodiscard, inline)
+ void* operator new[](size_t bytes,
+     tron::hardware::dma_allocation_t,
+diff --git a/h/tron/kernels/amx_attn_iface.hpp b/h/tron/kernels/amx_attn_iface.hpp
+index 8aa90bbc0c..c5224bbac1 100644
+--- a/h/tron/kernels/amx_attn_iface.hpp
++++ b/h/tron/kernels/amx_attn_iface.hpp
+@@ -227,7 +227,7 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+ // Weights-times-values for one page: O = P[4][64] . V_page, where P (the
+ // exponentiated scores, i.e. the unnormalized softmax weights) comes from the
+ // caller's fp32 exp rows (converted to bf16 inside) and v_page is the page's
+-// packed V plane (v_vnni_view, see Note [Packed V layout] in
++// packed V plane (v_vnni_view, see Note [VNNI Packed V layout] in
+ // h/tron/tensor/v_vnni.hpp), consumed in place as the B operand. `o` MUST hold
+ // 16 * 128 fp32 (8192 bytes, aligned to 64 bytes, row stride 128 floats);
+ // see Note [Tile stores write 16 rows].
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index aace7e5a34..b83294116b 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -571,7 +571,7 @@ void log_kv_footprint(int64_t delta_bytes, int64_t delta_books) {
+ // per-arena prefix byte offsets, and whether a model-layer prefix may select
+ // fewer logical slots. Allocation, physical addressing, page completion, append,
+ // packed-V storage (through the typed operations of h/tron/tensor/v_vnni.hpp,
+-// see Note [Packed V layout]), and EAGLE views therefore have one implementation.
++// see Note [VNNI Packed V layout]), and EAGLE views therefore have one implementation.
+ //
+ // Uniform storage retains its [slot][head][page] ordering. A value-described
+ // layout replaces the constant slot stride with retention-group prefix byte
+@@ -1218,7 +1218,7 @@ public:
+   // For testing only.  Writes raw bf16 data that bypasses the zero-init
+   // V slot invariant (see Note [Zero-Initialized V Slots]). This whole-block
+   // fill is the one documented exception to the typed packed-V access rule
+-  // (see Note [Packed V layout] in h/tron/tensor/v_vnni.hpp): it interprets no
++  // (see Note [VNNI Packed V layout] in h/tron/tensor/v_vnni.hpp): it interprets no
+   // coordinates and marks no token complete.
+   template <typename Gen>
+   void fill_random(Gen& gen) noexcept {
+@@ -1459,7 +1459,7 @@ private:
+   // Some reads stay outside ISO C++ and rely on the compiler: scaled_v_expr
+   // steps through V with vector pointers, fill_storage_slot walks one bf16
+   // pointer across K and V, and the 8-lane V accessors read the bf16s (SIMD
+-  // vector) array v as bf16 values.
++  // vector) array v as bf16 values. Issue #4588 tracks these three reads.
+ 
+   void clear_kv_storage() noexcept {
+     retained_data.reset();
+@@ -1894,7 +1894,7 @@ struct alignas(64) page final {
+ 
+   // The actual V data for a token in this page.
+ #if TRON_CHUNK_SIZE == 16
+-  // Packed V: the plane is a v_vnni_tensor (see Note [Packed V layout] in
++  // Packed V: the plane is a v_vnni_tensor (see Note [VNNI Packed V layout] in
+   // h/tron/tensor/v_vnni.hpp), pair-interleaved for the SIMD dot products, so
+   // it is not compatible with the general `view` machinery. V is therefore
+   // written one aligned source row at a time (set_v -> append_v_row), read back
+@@ -2293,7 +2293,7 @@ private:
+ public:
+   // Note [Zero-Initialized V Slots]
+   // ~~~~~~~~~~~~~~~~~~~~~~~~~~
+-  // V data is stored as interleaved bf16 pairs (see Note [Packed V layout] in
++  // V data is stored as interleaved bf16 pairs (see Note [VNNI Packed V layout] in
+   // h/tron/tensor/v_vnni.hpp): pair p holds tokens (2p, 2p+1). When count is
+   // odd, the loop below rounds up to process the padding slot.
+   // IEEE 754: NaN * 0.0 = NaN, so any NaN in the padding slot propagates
+@@ -2311,7 +2311,7 @@ public:
+   //
+   // The plane arrives as its typed view. This weighted sum is the one
+   // cache-side kernel that takes the plane address (through v_vnni_access,
+-  // Note [Packed V layout]). Its dot-product loop reads pair rows directly.
++  // Note [VNNI Packed V layout]). Its dot-product loop reads pair rows directly.
+   // Page methods, book and tests go through the typed operations instead.
+   scaled_v_expr(const tensor<page_size>& scales,
+       v_vnni_view<const bf16, page_size, head_size> v_page,
+@@ -2447,7 +2447,7 @@ struct alignas(kv_block_alignment) kv_block {
+ #if TRON_CHUNK_SIZE == 16
+   // and v is the packed plane (the typed owner v_vnni_tensor): element (p, i)
+   // sits at bf16 index (p/2) * 2 * head_size + 2 * i + p%2. Layout: see
+-  // Note [Packed V layout] in h/tron/tensor/v_vnni.hpp; pair invariant: see
++  // Note [VNNI Packed V layout] in h/tron/tensor/v_vnni.hpp; pair invariant: see
+   // Note [Zero-Initialized V Slots].
+   using v_storage = v_vnni_tensor<page_size, head_size>;
+   static_assert(std::is_trivially_default_constructible_v<v_storage> &&
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index e98afba76e..d5747fbf5a 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -209,7 +209,7 @@ std::vector<std::vector<int>> chunk_evenly(size_t n_token_jobs,
+   // Fix grains not to split even/odd token pairs.  For any given KV page,
+   // we have to keep the even and odd token offsets in the same minibatch,
+   // because packed V stores them in the same SIMD values (see
+-  // Note [Packed V layout] in h/tron/tensor/v_vnni.hpp): `page.set_v` of the
++  // Note [VNNI Packed V layout] in h/tron/tensor/v_vnni.hpp): `page.set_v` of the
+   // odd token merges into the pair its even partner wrote, and so would race
+   // with itself if different threads were to try to save the two halves of
+   // such a pair separately.
+@@ -2818,7 +2818,7 @@ public:
+           operation_is_hardware_candidate(operation);
+       // Take care: we can't just split the items across threads, because
+       // packed V stores the even-offset and odd-offset tokens of any given
+-      // page in the same SIMD values (see Note [Packed V layout] in
++      // page in the same SIMD values (see Note [VNNI Packed V layout] in
+       // h/tron/tensor/v_vnni.hpp): the odd token's append merges into its
+       // even partner's pair, and so would race with ourselves if different
+       // threads were to try to save the two halves of such a pair separately.
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 813d55558b..6d22084f58 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -30,7 +30,7 @@
+ #if defined(TRON_AMX_DISPATCH) && TRON_CHUNK_SIZE != 16
+ // The AMX PV kernel (see Note [AMX attention dispatch]) consumes the
+ // pair-interleaved V layout, which only exists when TRON_CHUNK_SIZE == 16
+-// (see Note [Packed V layout] in h/tron/tensor/v_vnni.hpp). A chunk-8 build
++// (see Note [VNNI Packed V layout] in h/tron/tensor/v_vnni.hpp). A chunk-8 build
+ // would compile but pair wrong tokens - fail loudly instead.
+ #error "TRON_AMX_DISPATCH requires TRON_CHUNK_SIZE == 16 (pair-interleaved V layout)"
+ #endif
+diff --git a/h/tron/tensor/kv_cache_fwd.hpp b/h/tron/tensor/kv_cache_fwd.hpp
+index fb126ff1e3..4dfdd0aec9 100644
+--- a/h/tron/tensor/kv_cache_fwd.hpp
++++ b/h/tron/tensor/kv_cache_fwd.hpp
+@@ -4,7 +4,7 @@
+ // h/tron/kernels/amx_attn_iface.hpp can name the views in kernel signatures.
+ // The packed V definitions live in h/tron/tensor/v_vnni.hpp. The native K
+ // aliases are defined below and name the view types of h/tron/tensor/view.hpp.
+-// See Note [Packed V layout] in v_vnni.hpp.
++// See Note [VNNI Packed V layout] in v_vnni.hpp.
+ 
+ #include <cstddef>
+ #include <utility>
+diff --git a/h/tron/tensor/v_vnni.hpp b/h/tron/tensor/v_vnni.hpp
+index 9b6be095b7..b36fb74a36 100644
+--- a/h/tron/tensor/v_vnni.hpp
++++ b/h/tron/tensor/v_vnni.hpp
+@@ -3,7 +3,7 @@
+ // that holds the bytes (v_vnni_tensor), a matrix view that knows the address formula
+ // (v_vnni_view), a logical-row expression (v_vnni_row), and the vector
+ // operations that move whole token rows in and out (append_v_row, load_row,
+-// copy_token). See Note [Packed V layout].
++// copy_token). See Note [VNNI Packed V layout].
+ //
+ // Words used here: A plane is V for one KV head of one 64-token page.
+ // AVX-512 and AVX2 are the 512-bit and the 256-bit x86 vector instruction families;
+@@ -28,8 +28,8 @@
+ #include "tron/tensor/seq.hpp"
+ #include "tron/tensor/view.hpp"
+ 
+-// Note [Packed V layout]
+-// ~~~~~~~~~~~~~~~~~~~~~~
++// Note [VNNI Packed V layout]
++// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ // In the 16-lane (AVX-512) build the V plane of a kv_block stores token pairs
+ // interleaved: for each dimension d, the values of tokens 2p and 2p + 1 sit
+ // next to each other. With D dimensions per token, element (token, d) is at
+@@ -39,7 +39,8 @@
+ // so one "pair row" of 2 * D bf16 holds two whole tokens. One 64-byte vector
+ // load at pair_base + 2 * 16 * i yields dims [16 * i, 16 * i + 16) of both tokens.
+ // In every 32-bit lane the even token sits in the low 16 bits and the odd token
+-// in the high 16 bits. That is the B-operand layout of the bf16 dot product
++// in the high 16 bits. That is the VNNI layout (named after Intel's Vector
++// Neural Network Instructions): the B-operand layout of the bf16 dot product
+ // instructions (VDPBF16PS and the AMX tile multiply). The weighted sum
+ // (detail::scaled_v_expr in kv_cache.hpp) and the AMX PV kernel
+ // (amx_attn_h128g4::weights_times_v_128x4) therefore read the plane in place.
+@@ -66,7 +67,7 @@ namespace tron {
+ 
+ namespace detail {
+ // The one route from a packed view to its plane address, for the two
+-// layout-specific kernels (Note [Packed V layout]) and the operations below.
++// layout-specific kernels (Note [VNNI Packed V layout]) and the operations below.
+ struct v_vnni_access;
+ }  // namespace detail
+ 
+@@ -228,7 +229,7 @@ private:
+   : data_(data) {}
+ 
+   // First element of the pair row holding `token`: the address formula of
+-  // Note [Packed V layout].
++  // Note [VNNI Packed V layout].
+   TRON(nodiscard, inline, pure)
+   T* pair_base(size_t token) const noexcept {
+     return data_ + (token / V_PAIR_TOKENS_2) * (V_PAIR_TOKENS_2 * Cols);
+diff --git a/src/tron/kernels/amx_attn.cpp b/src/tron/kernels/amx_attn.cpp
+index 061d6da3e2..9c3b7cdb84 100644
+--- a/src/tron/kernels/amx_attn.cpp
++++ b/src/tron/kernels/amx_attn.cpp
+@@ -218,7 +218,7 @@ void weights_times_v_128x4(
+     size_t row_stride_floats,
+     float* o) noexcept {
+   // The packed plane's first element; pair row s*16 starts s*16*2*128 elements
+-  // later (Note [Packed V layout] in h/tron/tensor/v_vnni.hpp). This kernel is
++  // later (Note [VNNI Packed V layout] in h/tron/tensor/v_vnni.hpp). This kernel is
+   // one of the two layout-specific readers allowed to take the plane address.
+   const bf16* const v_pairs = detail::v_vnni_access::plane(v_page);
+   // o holds 16 rows x 128 floats; see Note [Tile stores write 16 rows].

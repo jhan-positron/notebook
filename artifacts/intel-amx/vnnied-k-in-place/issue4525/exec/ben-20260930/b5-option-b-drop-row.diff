@@ -1,0 +1,278 @@
+diff -ru a/h/tron/tensor/kv_cache_fwd.hpp b/h/tron/tensor/kv_cache_fwd.hpp
+--- a/h/tron/tensor/kv_cache_fwd.hpp
++++ b/h/tron/tensor/kv_cache_fwd.hpp
+@@ -28,15 +28,12 @@
+ // - v_vnni_tensor holds one bf16 array of [Rows tokens * Cols dimensions]. The
+ //   array starts at an address that is a multiple of 64 bytes.
+ // - v_vnni_view refers to that array and computes where each token's values are.
+-// - v_vnni_row refers to one token's Cols values. v_vnni_view::operator[] returns it.
+-// The view and the row own no memory. In both, T = bf16 allows writes, and
+-// T = const bf16 is read-only.
++// The view owns no memory. T = bf16 allows writes, and T = const bf16 is
++// read-only.
+ template <size_t Rows, size_t Cols>
+ struct v_vnni_tensor;
+ template <typename T, size_t Rows, size_t Cols>
+ struct v_vnni_view;
+-template <typename T, size_t Cols>
+-struct v_vnni_row;
+ 
+ // Native K: the existing row-major plane view of the KV cache (kv_block::k_view),
+ // spelled with its explicit strides so this header needs no default argument
+diff -ru a/h/tron/tensor/v_vnni.hpp b/h/tron/tensor/v_vnni.hpp
+--- a/h/tron/tensor/v_vnni.hpp
++++ b/h/tron/tensor/v_vnni.hpp
+@@ -1,7 +1,7 @@
+ #pragma once
+ // This file defines typed access to the packed V plane of the KV cache: an owner
+ // that holds the bytes (v_vnni_tensor), a matrix view that knows the address formula
+-// (v_vnni_view), a logical-row expression (v_vnni_row), and the vector
++// (v_vnni_view), and the vector
+ // operations that move whole token rows in and out (append_v_row, load_row,
+ // copy_token). See Note [Packed V layout].
+ //
+@@ -21,7 +21,6 @@
+ #include "common/attributes.hpp"
+ #include "common/numerics/bf16.hpp"
+ #include "common/numerics/fp16.hpp"
+-#include "tron/kernels/expr.hpp"
+ #include "tron/simd/auto.hpp"
+ #include "tron/simd/types.hpp"
+ #include "tron/tensor/kv_cache_fwd.hpp"
+@@ -47,10 +46,10 @@
+ // The 8-lane (AVX2) build keeps V row-major and does not use these types for
+ // storage. The classes are still defined there, so that declarations naming
+ // them (the AMX kernel signatures and their CPU fakes) compile. The vector
+-// operations and the row expression's chunk reads exist only at 16 lanes.
++// operations exist only at 16 lanes.
+ //
+-// Who may compute a packed address: the row expression (v_vnni_row), the
+-// typed operations in this header, and the two layout-specific kernels named
++// Who may compute a packed address: the typed operations in this header, and
++// the two layout-specific kernels named
+ // above, which reach the plane through detail::v_vnni_access. Cache code, the
+ // model, hardware staging and the tests use the typed operations or the page
+ // accessors built on them (page::set_v, page::get_v, page::append_v,
+@@ -60,7 +59,7 @@
+ // Writing rules are the cache's: see Note [Zero-Initialized V Slots] in
+ // kv_cache.hpp. In short, appending an even token also zeroes its odd partner,
+ // and appending an odd token merges into an initialized pair. Direct element
+-// writes through a view (at(), row[dim]) do neither; they serve fixtures.
++// writes through a view (at()) do neither; they serve fixtures.
+ 
+ namespace tron {
+ 
+@@ -94,85 +93,13 @@
+ template <typename T>
+ concept v_vnni_element = std::same_as<T, bf16> || std::same_as<T, const bf16>;
+ 
+-// One logical row (one token's Cols dimensions) of a packed V plane, read as a
+-// rank-1 expression (the rank is the number of indices: row[dim] takes one).
+-// Only v_vnni_view::operator[] constructs rows. A row keeps its pair address
+-// and parity by value. So a row stays usable after the matrix view it came from
+-// is gone, for as long as the owner lives. A const row (or a row of const bf16)
+-// yields read-only elements.
+-template <typename T, size_t Cols>
+-struct v_vnni_row final : expr<v_vnni_row<T, Cols>, Cols> {
+-  static_assert(v_vnni_element<T>, "a packed V row holds bf16 or const bf16");
+-  static_assert(
+-      Cols > 0 && Cols % chunk_size == 0, "a packed V row spans whole SIMD chunks");
+-
+-  // Element `dim` of this token. Writable only through a non-const row of bf16.
+-  // Writing an element neither clears the pair partner nor marks the token
+-  // complete (page::mark_v_complete does that); see
+-  // Note [Zero-Initialized V Slots] in kv_cache.hpp.
+-  TRON(nodiscard, inline, pure)
+-  T& operator[](size_t dim) noexcept {
+-    TRON_ASSERT_LT(dim, Cols);
+-    return pair_base_[V_PAIR_TOKENS_2 * dim + parity_];
+-  }
+-
+-  TRON(nodiscard, inline, pure)
+-  std::add_const_t<T>& operator[](size_t dim) const noexcept {
+-    TRON_ASSERT_LT(dim, Cols);
+-    return pair_base_[V_PAIR_TOKENS_2 * dim + parity_];
+-  }
+-
+-#if TRON_CHUNK_SIZE == 16
+-  // Dims [16 * i, 16 * i + 16) of this token as fp32, in logical order: one 64-byte
+-  // load of the pair chunk, then either the even (low) half of every lane
+-  // shifted up into the upper 16 bits, or the odd (high) half kept there by a
+-  // mask. The upper 16 bits are where a bf16 sits inside an fp32. The lower 16
+-  // bits stay zero, so the inherited bf16_chunk() fallback (which truncates)
+-  // returns exactly the stored bits.
+-  TRON(nodiscard, inline, pure)
+-  fp32s chunk(size_t i) const noexcept {
+-    TRON_ASSERT_LT(i, Cols / chunk_size);
+-    const bf16x32 both =
+-        _mm512_load_si512(pair_base_ + V_PAIR_TOKENS_2 * chunk_size * i);
+-    if (parity_ == 0) {
+-      return _mm512_castsi512_ps(_mm512_slli_epi32(both, BF16_BITS_16));
+-    }
+-    return _mm512_castsi512_ps(
+-        _mm512_and_si512(both, _mm512_set1_epi32(V_ODD_TOKEN_LANE_MASK_0XFFFF0000)));
+-  }
+-#else
+-  // The 8-lane build stores V row-major, so a packed row is never read as an
+-  // expression. Deleting chunk() makes such a read a compile error instead of
+-  // the inherited expr::chunk forwarding to itself.
+-  fp32s chunk(size_t) const noexcept = delete;
+-#endif  // TRON_CHUNK_SIZE == 16
+-
+-private:
+-  template <typename U, size_t R, size_t C>
+-  friend struct v_vnni_view;
+-
+-  TRON(inline)
+-  v_vnni_row(T* pair_base, size_t parity) noexcept
+-  : pair_base_(pair_base)
+-  , parity_(parity) {}
+-
+-  // First element of this token's pair row.
+-  T* pair_base_;
+-
+-  // 0 if this row is the even token of its pair, 1 if it is the odd token
+-  // (token % 2). Element `dim` sits at pair_base_[2 * dim + parity_]. chunk()
+-  // uses it to pick the low (even) or the high (odd) 16 bits of every lane.
+-  size_t parity_;
+-};
+-
+-// A packed V plane of [Rows tokens * Cols dimensions], read as a rank-2
+-// expression of logical rows (two indices: view[token][dim]). Views come only
++// A packed V plane of [Rows tokens * Cols dimensions]. Views come only
+ // from an owner (v_vnni_tensor::as_view). A writable view (bf16) converts to a
+ // read-only one (const bf16), never the reverse. There is no public pointer
+ // constructor, no data() accessor and no pointer conversion: a bare pointer
+ // does not say which layout it points at.
+ template <typename T, size_t Rows, size_t Cols>
+-struct v_vnni_view final : expr<v_vnni_view<T, Rows, Cols>, Rows, Cols> {
++struct v_vnni_view final {
+   static_assert(v_vnni_element<T>, "a packed V plane holds bf16 or const bf16");
+   static_assert(Rows > 0 && Rows % V_PAIR_TOKENS_2 == 0,
+       "packed V pairs tokens, so a plane has an even number of rows");
+@@ -187,19 +114,6 @@
+   v_vnni_view(v_vnni_view<U, Rows, Cols> other) noexcept
+   : data_(other.data_) {}
+ 
+-  // Logical row of one token. A const matrix yields a read-only row.
+-  TRON(nodiscard, inline, pure)
+-  v_vnni_row<T, Cols> operator[](size_t token) noexcept {
+-    TRON_ASSERT_LT(token, Rows);
+-    return v_vnni_row<T, Cols>(pair_base(token), token % V_PAIR_TOKENS_2);
+-  }
+-
+-  TRON(nodiscard, inline, pure)
+-  v_vnni_row<const bf16, Cols> operator[](size_t token) const noexcept {
+-    TRON_ASSERT_LT(token, Rows);
+-    return v_vnni_row<const bf16, Cols>(pair_base(token), token % V_PAIR_TOKENS_2);
+-  }
+-
+   // Bounds-checked element (token, dim). Writing through it neither clears the
+   // pair partner nor marks the token complete (page::mark_v_complete does
+   // that); see Note [Zero-Initialized V Slots].
+@@ -280,7 +194,7 @@
+   // First element of the pair row holding `token`. No bounds check here: this
+   // is the route of the bulk save/load/copy operations, whose callers (the
+   // page methods) already index inside the page, and page::set_v never checked
+-  // it either. Checked element access goes through operator[] and at().
++  // it either. Checked element access goes through at().
+   template <typename T, size_t Rows, size_t Cols>
+   TRON(nodiscard, inline, pure)
+   static T* pair_base(v_vnni_view<T, Rows, Cols> v, size_t token) noexcept {
+diff -ru a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -125,14 +125,8 @@
+ constexpr bool owner_views_temporary = requires { Owner{}.as_view(); };
+ 
+ template <typename Matrix>
+-constexpr bool matrix_row_writes = requires(Matrix& m) { m[0][0] = bf16{}; };
+-
+-template <typename Matrix>
+ constexpr bool matrix_at_writes = requires(Matrix& m) { m.at(0, 0) = bf16{}; };
+ 
+-template <typename Row>
+-constexpr bool row_writes = requires(Row& r) { r[0] = bf16{}; };
+-
+ template <typename Page>
+ constexpr bool page_k_accepts_raw_index =
+     requires(Page& page) { page.k(size_t{0}, 0, 0); };
+@@ -410,7 +404,6 @@
+       amx_attn_h128g4::HEAD_SIZE_128>;
+   using v_owner_t =
+       v_vnni_tensor<amx_attn_h128g4::PAGE_TOKENS_64, amx_attn_h128g4::HEAD_SIZE_128>;
+-  using v_row_t = v_vnni_row<bf16, amx_attn_h128g4::HEAD_SIZE_128>;
+   STATIC_REQUIRE(amx_qk_accepts<k_plane_t>);
+   STATIC_REQUIRE_FALSE(amx_qk_accepts<const bf16*>);
+   STATIC_REQUIRE_FALSE(amx_qk_accepts<bf16*>);
+@@ -420,29 +413,21 @@
+   STATIC_REQUIRE_FALSE(amx_pv_accepts<const bf16*>);
+   STATIC_REQUIRE_FALSE(amx_pv_accepts<bf16*>);
+   STATIC_REQUIRE_FALSE(amx_pv_accepts<k_plane_t>);
+-  // Packed views and rows come only from an owner; a bare pointer does not say
++  // Packed views come only from an owner; a bare pointer does not say
+   // which layout it points at. The native K alias keeps its explicit pointer
+   // wrap: that view type is the existing row-major view.
+   STATIC_REQUIRE_FALSE(std::is_constructible_v<v_plane_mut_t, bf16*>);
+   STATIC_REQUIRE_FALSE(std::is_constructible_v<v_plane_t, const bf16*>);
+   STATIC_REQUIRE_FALSE(std::is_default_constructible_v<v_plane_t>);
+-  STATIC_REQUIRE_FALSE(std::is_constructible_v<v_row_t, bf16*, size_t>);
+   STATIC_REQUIRE(std::is_constructible_v<k_plane_t, const bf16*>);
+-  // Writable-to-read-only is the only conversion; rows do not convert.
++  // Writable-to-read-only is the only conversion.
+   STATIC_REQUIRE(std::is_convertible_v<v_plane_mut_t, v_plane_t>);
+   STATIC_REQUIRE_FALSE(std::is_convertible_v<v_plane_t, v_plane_mut_t>);
+-  STATIC_REQUIRE_FALSE(std::is_convertible_v<v_row_t,
+-      v_vnni_row<const bf16, amx_attn_h128g4::HEAD_SIZE_128>>);
+   // A view must not outlive its owner: no view of a temporary owner.
+   STATIC_REQUIRE_FALSE(owner_views_temporary<v_owner_t>);
+-  // const at both ranks means read-only elements; a writable view writes.
+-  STATIC_REQUIRE(matrix_row_writes<v_plane_mut_t>);
++  // A const view means read-only elements; a writable view writes.
+   STATIC_REQUIRE(matrix_at_writes<v_plane_mut_t>);
+-  STATIC_REQUIRE_FALSE(matrix_row_writes<v_plane_mut_t const>);
+   STATIC_REQUIRE_FALSE(matrix_at_writes<v_plane_mut_t const>);
+-  STATIC_REQUIRE_FALSE(matrix_row_writes<v_plane_t>);
+-  STATIC_REQUIRE_FALSE(row_writes<v_row_t const>);
+-  STATIC_REQUIRE(row_writes<v_row_t>);
+   // The owner is one aligned plane, trivial to construct, copy and destroy. The
+   // KV arena's DMA allocation creates the kv_blocks that hold it (Note [KV block
+   // lifetime]). A trivial constructor and destructor are enough for C++ to create
+@@ -3219,7 +3204,7 @@
+ #if TRON_CHUNK_SIZE == 16
+ // The typed packed-V operations (h/tron/tensor/v_vnni.hpp) carry the bodies
+ // that used to live in page::set_v / page::get_v, and page::v_packed exposes
+-// the plane as a rank-2 expression. This case pins the contracts a move can
++// the plane as a typed view. This case pins the contracts a move can
+ // silently change and the value tests above (finite random data compared as
+ // floats) cannot see:
+ // - a bf16 source row is stored bit for bit, infinities and NaNs included;
+@@ -3228,9 +3213,8 @@
+ //   sits only in the discarded bits stores as infinity (the generic
+ //   fp32s_to_bf16s conversion would keep it a NaN when TRON_IGNORE_NAN is off);
+ // - get_v returns the stored bits, as bf16 or as the upper half of each fp32;
+-// - a host tensor built from page::v_packed sees every token's logical row,
+-//   which exercises the row expression's even/odd extraction for both parities.
+-TEST_CASE("packed V rows keep their bits through set_v, get_v and expression reads",
++// - at() on page::v_packed sees every token's stored bits for both parities.
++TEST_CASE("packed V rows keep their bits through set_v, get_v and at()",
+     "[kv_data]") {
+   static constexpr size_t HEAD_SIZE_64 = 64;
+   static constexpr size_t N_SLOTS_1 = 1;
+@@ -3450,15 +3434,11 @@
+     }
+   }
+ 
+-  SECTION("a host tensor reads the packed plane as logical rows") {
++  SECTION("at() reads the packed plane by (token, dim)") {
+     auto const plane = page->template v_packed<geometry>(slot, 0);
+-    tensor<page_t::page_size, HEAD_SIZE_64> host(plane);
+     for (size_t token = 0; token < page_t::page_size; ++token) {
+       for (size_t dim = 0; dim < HEAD_SIZE_64; ++dim) {
+         CAPTURE(token, dim);
+-        REQUIRE(as_bits(host[token][dim]) == static_cast<uint32_t>(pattern(token, dim))
+-                                                 << BF16_BITS_16);
+-        REQUIRE(plane[token][dim].to_bits() == pattern(token, dim));
+         REQUIRE(plane.at(token, dim).to_bits() == pattern(token, dim));
+       }
+     }

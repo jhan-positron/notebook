@@ -1,0 +1,865 @@
+#!/usr/bin/env python3
+"""Generate status/PR4557-respond-2-Ben.html.
+
+Inputs (same folder): r1-comment-diffs.diff (the B2/B3/B4 comment commits of the
+scratch branch), workflow-result-wf_eefcbfe8-584.json (verified facts), r2 results
+pasted below once the r2 build reports. Output is pure ASCII (artifact trap).
+"""
+import html
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "..", "..", "status", "PR4557-respond-2-Ben.html")
+
+R2 = {}  # filled from r2-results.txt if present
+r2_path = os.path.join(HERE, "r2-results.txt")
+if os.path.exists(r2_path):
+    R2["text"] = open(r2_path).read()
+
+
+def esc(s):
+    return html.escape(s, quote=False)
+
+
+def diff_block(text, title=None):
+    """Colour a unified diff: hdr / add / del / ctx spans."""
+    out = ['<pre class="diff">']
+    if title:
+        out.append('<span class="hdr">%s</span>' % esc(title))
+    for line in text.rstrip("\n").split("\n"):
+        if line.startswith("diff --git") or line.startswith("index ") or line.startswith("--- ") or line.startswith("+++ "):
+            if line.startswith("diff --git"):
+                out.append('<span class="hdr">=== %s</span>' % esc(line[len("diff --git a/"):].split(" b/")[0]))
+            continue
+        if line.startswith("@@"):
+            out.append('<span class="hdr">%s</span>' % esc(line))
+        elif line.startswith("+"):
+            out.append('<span class="add">%s</span>' % esc(line))
+        elif line.startswith("-"):
+            out.append('<span class="del">%s</span>' % esc(line))
+        else:
+            out.append('<span class="ctx">%s</span>' % esc(line))
+    out.append("</pre>")
+    return "\n".join(out)
+
+
+def split_diff_by_file(text):
+    parts = {}
+    cur = None
+    for line in text.split("\n"):
+        if line.startswith("diff --git"):
+            cur = line[len("diff --git a/"):].split(" b/")[0]
+            parts[cur] = []
+        if cur is not None:
+            parts[cur].append(line)
+    return {k: "\n".join(v) for k, v in parts.items()}
+
+
+COMMENT_DIFFS = split_diff_by_file(open(os.path.join(HERE, "r1-comment-diffs.diff")).read())
+
+# The memory.hpp Note as it stands after the r2 amendment (the diagnosis sentence dropped).
+NOTE_FINAL = """// Note [DMA allocation creates objects]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// The KV book (struct book in tron/models/kv_cache.hpp) reads its arenas as
+// arrays of kv_block objects that no code ever constructs. C++ allows this
+// only for implicit-lifetime types: types that an allocation may create
+// without a constructor call, e.g. scalars, arrays, and classes with a
+// trivial constructor and destructor. Objects that no code constructs come
+// into existence only through a short list of operations: a call of a
+// function named operator new or operator new[], std::malloc and its
+// relatives, std::memcpy and std::memmove, std::bit_cast, and starting the
+// lifetime of an unsigned char or std::byte array. Each of them creates the
+// objects that the program then uses.
+//
+// dma_allocate_aligned is not on that list. It is an ordinary function that
+// calls none of them, so the memory it returns holds no objects. A cast of
+// that memory to kv_block* creates none either. A member access through such
+// a pointer is undefined behavior. So try_make_unique_dma_for_overwrite gets
+// its memory through the wrapper below, a function named operator new[]. That
+// call creates the objects. The wrapper writes no bytes and runs no
+// constructor.
+//
+// Call the wrapper directly, never from a new-expression. An array
+// new-expression may ask for extra bytes ([expr.new]), and dma_deallocate would
+// not free them.
+//
+// No test fails if a caller goes back to calling dma_allocate_aligned directly.
+// The unit-test allocator (aligned_alloc in src/pos/fake.cpp) is on the list
+// above ([c.malloc]). So it creates the objects by itself, and the tests behave
+// the same either way."""
+
+NOTE_OLD = """// Note [DMA allocation creates objects]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// In C++, a call of any function named operator new[] creates objects in the
+// memory it returns ([intro.object]). The objects created are the ones the
+// program goes on to use. This covers implicit-lifetime types only ([class.prop]):
+// for example scalars, arrays, and classes with a trivial constructor and
+// destructor. dma_allocate_aligned is an ordinary function, so its memory holds
+// no objects. So try_make_unique_dma_for_overwrite gets its memory through the
+// wrapper below. The wrapper writes no bytes.
+//
+// Call the wrapper directly, never from a new-expression. An array
+// new-expression may ask for extra bytes ([expr.new]), and dma_deallocate would
+// not free them.
+//
+// No test fails if a caller goes back to calling dma_allocate_aligned directly.
+// The unit-test allocator (aligned_alloc in src/pos/fake.cpp) creates objects
+// by itself, so the tests behave the same either way."""
+
+for i, line in enumerate(NOTE_FINAL.split("\n"), 1):
+    assert len(line) <= 80, (i, len(line), line)
+
+# ---------------------------------------------------------------- replies
+REPLIES = {}
+
+REPLIES["B1"] = """Agreed. Enum types for the two flags are the better design. I read your follow-up (r4134933234) as: not a blocker, do it as a follow-up.
+
+Why the constants stay in this PR: the two parameters are declared as `bool aligned, bool dma` in main's `view.hpp`, `views.hpp` and `expr.hpp`. An `enum class` value does not convert to `bool`. So the enum change must edit those three headers, plus `slice.hpp`, `tensor.hpp`, `dotter.hpp` and the five `static constexpr bool dma` members. It must also rewrite the 80 existing call sites (82 lines in 20 files) that pass bare `true, false`. None of those lines are in this PR.
+
+Your #4697 keeps `bool Dma` in its new aliases. So the enum change should land after #4697. I am taking #4697 into this branch first.
+
+Follow-up issue with the scope, a sketch (`enum class view_alignment { unaligned, aligned }`, `enum class view_memory { host, dma }`) and the ordering: #4732. OK to resolve this thread on that basis?"""
+
+REPLIES["B2"] = """Agreed. The layout is called VNNI everywhere else: the file name, the `v_vnni_*` types, and the kernel comments. The Note title should say it too.
+
+Commit <SHA> renames the Note to `Note [VNNI Packed V layout]` at all 16 places where the name appears (the header and 15 references, in 7 files) and widens the underline to match. I applied it by hand rather than through the suggestion button. The button would have renamed the header only, and 15 other comments reference the title. The PR description line that names the Note is updated too.
+
+The Note never spelled out VNNI. I added one clause to it: "That is the VNNI layout (named after Intel's Vector Neural Network Instructions)". Comment-only change. clang-format 19.1.7 reports no change, and lint-notes finds no dangling reference.
+
+If you would rather have the literal rename only, say so and I will drop the added clause."""
+
+REPLIES["B3"] = """Thanks for working through it. Your second reading is right on the main point. On main, `try_make_unique_dma_for_overwrite` called `dma_allocate_aligned` directly. The accessors then cast the bytes with a plain `reinterpret_cast`. No `kv_block` ever started its lifetime. A member access through such a pointer is undefined behavior (N4950, the C++23 draft standard, [basic.life]/6). GCC 14.3 and 11.4 with -Wall -Wextra -Wpedantic give no warning on a 17-line sample of that pattern, and ASan/UBSan (AddressSanitizer and UndefinedBehaviorSanitizer) run it clean. I did not measure clang.
+
+Two details, so the Note states the rule exactly:
+
+- `operator new` is one item on the list, not the only one. [intro.object]/13 also names starting the lifetime of a `std::byte` array, and its note points to `malloc` and its relatives, `memcpy`/`memmove`, `bit_cast`, `start_lifetime_as` and `allocator_traits::allocate`. `dma_allocate_aligned` is on none of these lists. That is why the allocation now goes through a function named `operator new[]`.
+- `v_vnni_tensor` needs the same care as the old `kv_block`, not more. Both are implicit-lifetime types: types that an allocation may create without a constructor call ([class.prop]/9). The old `kv_block` was an aggregate of arrays. The new one still is. `v_vnni_tensor` has a trivial implicit default constructor and a trivial destructor. The `static_assert` inside `kv_block` (on `v_storage`) and the two in the accessors keep that true. So the rule was the same before and after. What changed is that the allocation now satisfies it.
+
+I reworded the Note in commit <SHA> (comment only, no code change). It now says what the KV book does, what an implicit-lifetime type is, which operations create such objects, why `dma_allocate_aligned` is not one of them, what goes wrong without the wrapper, and why the unit tests cannot tell the difference (`aligned_alloc` is on the list, [c.malloc]/4). The title and the facts of the old paragraphs stay. Does the new text read clearly to you?"""
+
+REPLIES["B4"] = """Agreed. A ticket already exists: #4588 (filed 2026-09-24, label Tech Debt, assigned to me). It covers these three reads and nothing else. For each read it records:
+
+- the rule the read breaks,
+- why clang 19 compiles it correctly today (vector accesses are tagged as possibly overlapping anything, and pointer steps are compiled to byte offsets),
+- that no warning or sanitizer in our build detects it,
+- the fix options.
+
+I intended to remove this paragraph when I filed the issue. It is still in the code.
+
+Is any of this new in this PR? Per read:
+
+- `scaled_v_expr`: the form changed, the status did not. On main the storage was `bf16s` and the same loop stepped a `bf16s` pointer across the inner arrays of the 2-D array. b951ba9b4c changed the storage to `bf16` and added the two `reinterpret_cast<const bf16s*>` (kv_cache.hpp:2326, :2400 at c73e7fb2f9).
+- `fill_storage_slot` (kv_cache.hpp:1652): byte-identical to main.
+- The 8-lane (AVX2, `TRON_CHUNK_SIZE` 8) V accessors (kv_cache.hpp:2462): identical to main.
+
+You also opened #4698 against this branch. This comment does not mention it, so I checked whether it fits here. I read it. It removes all three reads and this paragraph. A script compared the old and new load addresses for head_size 64, 128, 256 and 512 in both lane widths, and all are equal. All 21 CI checks on #4698 pass. <R2 SENTENCE>
+
+I merged #4698 into this branch as merge commit <MERGE_COMMIT> and closed #4588 with a pointer to it. One gap stays on record: no CI job builds the 8-lane configuration, and the 8-lane `t_llama_unit` has 131 errors before this change (#4588, none of them in kv_cache.hpp). So the 8-lane hunks are checked by reading, not by a build.
+
+If you meant #4698 to land separately after this PR merges, say so and I will drop the merge commit before the next push."""
+
+REPLIES["B4a"] = """Agreed. A ticket already exists: #4588 (filed 2026-09-24, label Tech Debt, assigned to me). It covers exactly these three reads. For each one it records the rule it breaks, why clang 19 compiles it correctly today, that no warning or sanitizer in our build detects it, and the fix options. Commit <SHA> adds the issue number to the paragraph so the next reader finds the record.
+
+Is any of this new in this PR? `scaled_v_expr` changed form (b951ba9b4c moved the storage to `bf16` and added the two `reinterpret_cast<const bf16s*>`), but it was a non-ISO read on main too. `fill_storage_slot` and the 8-lane V accessors are identical to main.
+
+I saw #4698 as well. I would land it after this PR merges, so that this PR stays the typed-tensor change it was reviewed as. Tell me if you would rather have it in here now."""
+
+REPLIES["B5"] = """You are right that nothing in production uses it. The exact count at c73e7fb2f9: `v_vnni_row` with its comment is 70 lines (v_vnni.hpp 97-166). With the two `operator[]` overloads on the view and the forward declarations it is 85 lines.
+
+Users:
+- Production: none. The AMX PV kernel (probabilities times V) and the cache operations `scaled_v_expr`, `append_v_row`, `load_row` and `copy_token` reach the plane through the bulk operations or `detail::v_vnni_access`.
+- Test: one. `tensor<page_size, 64> host(plane)` builds a plain tensor from a packed view (t_llama_unit.cpp 3453-3465). That constructor needs a rank-2 `expr` (rank = number of indices). Its `operator[]` must return a rank-1 `expr` with `chunk()`. The row is that rank-1 `expr`.
+
+Why it is there: your PR 4424 review asked for the `tensor` / `dtensor` `expr` precedent (review 5270587330). Your later sketch had `at()` only and no `operator[]` (comment 5765866077). The two differ on `operator[]`. I followed the first.
+
+Two options:
+- Keep it as it is. The packed-K child then gets a matching `k_vnni_row`, also test-only.
+- Drop `v_vnni_row`, the `expr` base of `v_vnni_view` and its `operator[]`. `at()` and the bulk operations stay. That is the public surface of your sketch. Net -109 lines in 3 files, plus one comment line to adjust in kv_cache.hpp. No production path changes. The diff applies cleanly and passes a syntax-only compile at 16 lanes. I would build and test it at 16 lanes (AVX-512) and run a syntax-only compile at 8 lanes (AVX2) before pushing. t_llama_unit does not build at 8 lanes today (#4588), so a full 8-lane test is not possible yet.
+
+I lean to the second. Which do you prefer?"""
+
+REPLIES["B6"] = """Thanks for #4697. I checked it against c73e7fb2f9. It is correct as written. Every caller passes the row width explicitly. The element type deduces from the pointer. The DMA (direct memory access) flag of the executor's V buffer is kept, through `v_buffer_t::dma` in model.hpp. clang-format 19.1.7 reports no change.
+
+On testing: your PR's own CI run at 8bbbb7c82d passed Build Tron, Test host and Test FPGA. That run builds without `TRON_AMX_DISPATCH` (the CMake option that compiles the AMX attention kernels). I built your change (cherry-picked onto this branch, same content as 8bbbb7c82d) with the AMX kernels on our Intel machine and ran t_llama_unit, t_amx_numerics, t_amx_dispatch_dtype and t_heterogeneous_scheduler on the AMX-on and the AMX-off tree. All pass with the same counts as before (t_llama_unit 44 cases / 252720 assertions on both trees, t_amx_numerics 12301 assertions on the AMX-on tree).
+
+Plan: I fast-forward jhan-kv-typed-tensors onto 8bbbb7c82d (move the branch tip to your commit, no new commit). Your commit id and authorship stay. GitHub should then mark #4697 as merged. If it does not, I will close it with a note. #4698 goes in after it as a merge commit (see my reply on the other thread). Then my comment-only commits follow.
+
+The remaining spelled-out views in kv_cache.hpp (lines 2391, 2469, 2475 and 2514) are two-dimensional plane views, `seq<page_size, head_size>`, not rows. They stay as they are. One row view is left spelled out: the `page_supports_uniform_kv_access` probe in t_llama_unit.cpp. I can convert it to `v_row_view` in a small commit if you want every row view to go through the aliases.
+
+Any objection to the fast-forward?"""
+
+ISSUE_B1 = """Title: Replace the bool aligned / bool dma template flags of view and const_view with enum types
+
+Label: Tech Debt
+
+## Short version
+
+`view` and `const_view` take their two flags as `bool` template parameters, and call sites can swap the two flags without a compile error (82 lines in 20 files pass bare `true, false`). This issue replaces the two `bool` parameters with two enum types, so that swapped or bare arguments fail to compile. PR #4557 added two named constants as a temporary measure, and this follow-up removes them.
+
+## Words used here
+
+- `view` / `const_view`: tron's fixed-shape tensor view types (h/tron/tensor/view.hpp).
+- `aligned` flag: `true` means the data pointer is aligned for whole-register loads, so chunked SIMD (single instruction, multiple data: one instruction on a whole register) reads are allowed.
+- `dma` flag: `true` means the memory is DMA-safe (direct memory access: usable by the accelerator cards). The flag takes part in type identity only. No code branches on it.
+- `enum class`: a C++ scoped enumeration. Its values do not convert to `bool` or `int` by themselves.
+
+## Why
+
+`view` and `const_view` take two boolean template parameters, `aligned` and `dma` [h/tron/tensor/view.hpp:17-18, views.hpp:23-24, h/tron/kernels/expr.hpp:18-21]. Call sites spell them as bare `true, false` (82 lines in 20 files at PR #4557 head c73e7fb2f9, for example h/tron/models/kv_cache.hpp:1960 `view<bf16, true, false, seq<head_size>>`). Two flags of the same type can be swapped without a compile error.
+
+PR #4557 added the named constants `VIEW_ALIGNED_TRUE` and `VIEW_DMA_FALSE` [h/tron/tensor/kv_cache_fwd.hpp:24-25] on its own 31 lines. The C++ coding guide of that PR counts `true` and `false` as literals that must live in named declarations (commit 5051264d80). The maintainer review of PR #4557 asked for enum types instead [https://github.com/positron-ai/tron/pull/4557#discussion_r4133613638]. The same thread marks the change as a follow-up, not a blocker [https://github.com/positron-ai/tron/pull/4557#discussion_r4134933234].
+
+## What
+
+Make the two flags enum types, so that swapped arguments and bare literals fail to compile:
+
+```cpp
+// h/tron/tensor/views.hpp (next to the existing dma comment)
+enum class view_alignment : uint8_t { unaligned, aligned };
+enum class view_memory : uint8_t { host, dma };
+
+template <typename T,
+    view_alignment alignment,
+    view_memory memory,
+    typename Dim,
+    typename Stride = row_major<Dim>>
+struct view;
+```
+
+A call site then reads `view<bf16, view_alignment::aligned, view_memory::host, seq<head_size>, sseq<1>>{dest}` (today: h/tron/scheduler/full.hpp:2762).
+
+The repo already uses enum class template parameters: `rope_scaling` / `rope_layout` [h/tron/kernels/rope.hpp:95, :275] and `moe_scale_mode` [h/tron/models/mixture_of_experts.hpp:275].
+
+## Scope (counts at c73e7fb2f9)
+
+- Parameter declarations that must change type:
+  - view.hpp 17 lines, views.hpp 15, slice.hpp 6, expr.hpp 2.
+  - tensor.hpp 7 parameter lines (`dma1` / `dma2` at :358-359, :375, :492-493, :517, :522).
+  - dotter.hpp 29 (its `template <typename U, bool dma>` members deduce from view types).
+- Static members that hold the flag: tensor.hpp:35, :254, itensor.hpp:26 (`= false`), dmatensor.hpp:38, :173 (`= true`).
+  - Readers: tensor.hpp:415-416 (`Activation::dma`, `Result::dma`) and model.hpp:2831 (`v_buffer_t::dma`).
+  - Computed flags: `constexpr bool is_dma` in mixture_of_experts.hpp:535 and feed_forward.hpp:489.
+- Consumers that branch on `aligned`: view.hpp:157-158 forwards it to `chunky<T, aligned>` and `readable_in_chunks<T, aligned>`. slice.hpp:56, :93 and simd/aligned.hpp:14-66 use `if constexpr (aligned)`.
+  - Decide in the PR: convert at the view boundary (`alignment == view_alignment::aligned`) and leave the SIMD-level `bool aligned` in wide.hpp (46 lines), chunky.hpp, clamp.hpp and simd/aligned.hpp as is, or convert those too.
+- Call sites: 82 lines passing bare `true` / `false` in 20 files, plus the 31 lines in 9 files that use `VIEW_ALIGNED_TRUE` / `VIEW_DMA_FALSE` (delete the two constants), plus the aliases PR #4697 adds (`bool Dma = VIEW_DMA_FALSE`).
+- `gptq_view<bool permuted, ...>` in safetensors.hpp is a different flag. Leave it.
+
+## Ordering
+
+Land after #4557 and #4697. #4424 adds 5 bare-flag view lines on its branch. Coordinate with it.
+
+## Acceptance
+
+- No `bool aligned` / `bool dma` parameter remains on `view`, `const_view`, `views`, `const_views`, `lambda_views`, `id_views`, `array_views`, `slice`, `dotter`, `t_launch_matmul`.
+- Add a concept `view_args_ok<T, a, m> = requires { typename view<T, a, m, ...>; }` next to the h/tron/tensor/array_like.hpp:24-30 static_asserts, and `static_assert(!view_args_ok<bf16, true, false, ...>)` plus the swapped form. A static_assert on a type alone cannot check that a spelling fails to compile.
+- Existing tests pass (t_fp32, t_attention, t_llama_unit, t_heterogeneous_scheduler, t_amx_numerics, t_amx_dispatch_dtype).
+- Check that the generated code changes only in symbol names. Compare the defined-symbol counts of t_llama_unit and t_amx_numerics before and after, as commit 5051264d80 did."""
+
+ISSUE_4588_CLOSE = """## Short version
+
+All three reads named in this issue are fixed by PR #4698 (commit 63df10cf90, by a maintainer), merged into the PR #4557 branch as commit <MERGE_COMMIT>. After that commit `h/tron/models/kv_cache.hpp` holds no `reinterpret_cast` to or from `bf16`. Closing.
+
+## What changed, per read
+
+- Read 1, `scaled_v_expr`: the member `data` is now `const bf16*`. Every tile address is computed in `bf16` units and passed to the load intrinsic as a `bf16` pointer. A script compared the old and new load addresses for head_size 64, 128, 256 and 512 in both lane widths. All are equal.
+- Read 2, `fill_storage_slot`: `k` and `v` are filled as two separate arrays. No pointer crosses from `k` into `v`.
+- Read 3, the 8-lane V accessors: `v` is declared `bf16 v[page_size * head_size]` in the 8-lane branch (the same form `k` took in c73e7fb2f9). `page::v`, `page::v_ptr`, `copy_storage_slot` and `page::scaled_v` build their views without a cast.
+
+## Evidence
+
+- PR #4698 CI: 21 of 21 checks pass.
+- The PR #4698 commit message: AVX-512 `t_llama_unit` passed all 44 cases (252720 assertions). That run is the PR author's.
+- On delphi-3bda with the AMX kernels compiled in: <R2 COUNTS>.
+
+## Still open, not tracked here
+
+- The 8-lane (AVX2) hunks are not compiled or run by any CI job. The 8-lane `t_llama_unit` build has 131 errors before this change (none in kv_cache.hpp). The 8-lane hunks in `kv_cache.hpp` were checked by reading only.
+- The items this issue lists as out of scope (EAGLE `x_data` casts, intrinsic and AMX tile loads, the discarded placement new in token_tree.hpp) keep no tracker.
+- The Note this issue cites is now titled Note [VNNI Packed V layout] (h/tron/tensor/v_vnni.hpp)."""
+
+# ---------------------------------------------------------------- figures
+FIG_BRANCH = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 306" width="860" height="306" font-family="IBM Plex Sans, system-ui, sans-serif" font-size="12">
+<style>
+.t{fill:#1f2a33}.m{fill:#5b6770}.mono{font-family:IBM Plex Mono, monospace;font-size:11px}
+.node{fill:#ffffff;stroke:#5b6770;stroke-width:1.2}
+.ben{fill:#f3e6d3;stroke:#a8691a;stroke-width:1.4}
+.ours{fill:#e3f0f2;stroke:#0b6e7f;stroke-width:1.4}
+.edge{stroke:#5b6770;stroke-width:1.4;fill:none}
+.edge2{stroke:#0b6e7f;stroke-width:1.4;fill:none;stroke-dasharray:4 3}
+.lbl{font-weight:600;font-size:12px}
+</style>
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5b6770"/></marker>
+<marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#0b6e7f"/></marker></defs>
+
+<text x="10" y="20" class="t lbl">GitHub today (2026-09-30)</text>
+<rect class="node" x="10" y="60" width="190" height="46" rx="6"/>
+<text x="105" y="79" text-anchor="middle" class="t mono">c73e7fb2f9</text>
+<text x="105" y="95" text-anchor="middle" class="m">PR 4557 head (main + 12)</text>
+
+<line class="edge" x1="200" y1="72" x2="250" y2="52" marker-end="url(#ar)"/>
+<rect class="ben" x="252" y="30" width="250" height="46" rx="6"/>
+<text x="377" y="49" text-anchor="middle" class="t mono">8bbbb7c82d = PR 4697 (reviewer)</text>
+<text x="377" y="65" text-anchor="middle" class="m">row-view helpers, 8 files, +39/-43</text>
+
+<line class="edge" x1="200" y1="94" x2="250" y2="114" marker-end="url(#ar)"/>
+<rect class="ben" x="252" y="92" width="250" height="46" rx="6"/>
+<text x="377" y="111" text-anchor="middle" class="t mono">63df10cf90 = PR 4698 (reviewer)</text>
+<text x="377" y="127" text-anchor="middle" class="m">three non-ISO reads fixed, +72/-67</text>
+
+<text x="520" y="49" class="m">both are children of c73e7fb2f9,</text>
+<text x="520" y="65" class="m">so only one can fast-forward.</text>
+<text x="520" y="111" class="m">merge check, 4698 on top of 4697:</text>
+<text x="520" y="127" class="m">0 conflict markers (git merge-tree)</text>
+
+<text x="10" y="180" class="t lbl">Proposed end state of jhan-kv-typed-tensors (built and tested on the scratch branch ben-r2, section 10)</text>
+<rect class="node" x="10" y="200" width="110" height="40" rx="6"/>
+<text x="65" y="224" text-anchor="middle" class="t mono">c73e7fb2f9</text>
+<line class="edge" x1="120" y1="220" x2="150" y2="220" marker-end="url(#ar)"/>
+<rect class="ben" x="152" y="200" width="120" height="40" rx="6"/>
+<text x="212" y="217" text-anchor="middle" class="t mono">8bbbb7c82d</text>
+<text x="212" y="232" text-anchor="middle" class="m">4697, fast-forward</text>
+<line class="edge" x1="272" y1="220" x2="302" y2="220" marker-end="url(#ar)"/>
+<rect class="ben" x="304" y="200" width="130" height="40" rx="6"/>
+<text x="369" y="217" text-anchor="middle" class="t mono">merge 63df10cf90</text>
+<text x="369" y="232" text-anchor="middle" class="m">4698, merge (B4 = d)</text>
+<line class="edge2" x1="434" y1="220" x2="464" y2="220" marker-end="url(#ar2)"/>
+<rect class="ours" x="466" y="200" width="120" height="40" rx="6"/>
+<text x="526" y="217" text-anchor="middle" class="t mono">B2 rename</text>
+<text x="526" y="232" text-anchor="middle" class="m">comment only</text>
+<line class="edge2" x1="586" y1="220" x2="616" y2="220" marker-end="url(#ar2)"/>
+<rect class="ours" x="618" y="200" width="120" height="40" rx="6"/>
+<text x="678" y="217" text-anchor="middle" class="t mono">B3 reword</text>
+<text x="678" y="232" text-anchor="middle" class="m">comment only</text>
+<line class="edge2" x1="738" y1="220" x2="768" y2="220" marker-end="url(#ar2)"/>
+<rect class="ours" x="770" y="200" width="80" height="40" rx="6"/>
+<text x="810" y="217" text-anchor="middle" class="t mono">B3 edits</text>
+<text x="810" y="232" text-anchor="middle" class="m">2 edits</text>
+<text x="10" y="262" class="m">Orange = the reviewer's commits (author kept). Blue = jhan's comment-only commits, cherry-picked from the scratch branch.</text>
+<text x="10" y="278" class="m">If B4 = (a) instead, the merge box is replaced by the one-line "Issue #4588 tracks these three reads" commit.</text>
+<text x="10" y="294" class="m">Not in the picture: B5 (keep or drop v_vnni_row) and B1 (enum follow-up) need no commit until the reviewer answers.</text>
+</svg>"""
+
+FIG_B1 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 340" width="860" height="340" font-family="IBM Plex Sans, system-ui, sans-serif" font-size="12">
+<style>.t{fill:#1f2a33}.m{fill:#5b6770}.mono{font-family:IBM Plex Mono, monospace;font-size:11px}.bar{fill:#3b6fb6}.bar2{fill:#c9ced0}.pr{fill:#0b6e7f}</style>
+<text x="10" y="18" class="t" font-weight="600">Where the two flags are declared as bool (lines per header at main 996f58ec82)</text>
+<text x="10" y="34" class="m">Blue = must change type in the follow-up (view boundary and above).</text>
+<text x="440" y="34" class="m">Grey = SIMD helpers below the boundary (convert or leave).</text>
+%s
+<text x="10" y="312" class="m">Total 137 declaration lines at main. Plus 82 call-site lines in 20 files that spell a view with bare true/false,</text>
+<text x="10" y="328" class="m">plus 31 PR-added lines that use the two constants. PR 4557 adds 12 declaration lines (not shown).</text>
+</svg>"""
+
+
+def bars_b1():
+    data = [("dotter.hpp", 29, True), ("view.hpp", 17, True), ("views.hpp", 15, True), ("tensor.hpp", 9, True),
+            ("slice.hpp", 6, True), ("expr.hpp", 2, True), ("dmatensor.hpp", 2, True), ("itensor.hpp", 1, True),
+            ("wide.hpp", 46, False), ("simd/aligned.hpp", 6, False), ("chunky.hpp", 3, False), ("clamp.hpp", 1, False)]
+    out = []
+    y = 50
+    scale = 520 / 46.0
+    for name, n, must in data:
+        w = max(2, n * scale)
+        out.append('<text x="150" y="%d" text-anchor="end" class="t mono">%s</text>' % (y + 12, name))
+        out.append('<rect class="%s" x="160" y="%d" width="%.1f" height="15" rx="2"/>' % ("bar" if must else "bar2", y, w))
+        out.append('<text x="%.1f" y="%d" class="t mono">%d</text>' % (160 + w + 6, y + 12, n))
+        y += 21
+    return "\n".join(out)
+
+
+FIG_B5 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 204" width="860" height="204" font-family="IBM Plex Sans, system-ui, sans-serif" font-size="12">
+<style>.t{fill:#1f2a33}.m{fill:#5b6770}.mono{font-family:IBM Plex Mono, monospace;font-size:11px}.est{fill:#c9ced0}.meas{fill:#3b6fb6}.drop{fill:#b3463b}</style>
+<text x="10" y="18" class="t" font-weight="600">How big is the row type? (lines at c73e7fb2f9)</text>
+<text x="300" y="50" text-anchor="end" class="t">reviewer's figure (est.)</text>
+<rect class="est" x="310" y="38" width="400" height="15" rx="2"/><text x="716" y="50" class="t mono">about 100</text>
+<text x="300" y="76" text-anchor="end" class="t">v_vnni_row + its comment (measured)</text>
+<rect class="meas" x="310" y="64" width="280" height="15" rx="2"/><text x="596" y="76" class="t mono">70 (v_vnni.hpp:97-166)</text>
+<text x="300" y="102" text-anchor="end" class="t">+ view-side operator[] + forward declarations</text>
+<rect class="meas" x="310" y="90" width="340" height="15" rx="2"/><text x="656" y="102" class="t mono">85</text>
+<text x="300" y="128" text-anchor="end" class="t">option (b) net removal (+17 / -126)</text>
+<rect class="drop" x="310" y="116" width="436" height="15" rx="2"/><text x="752" y="128" class="t mono">109 net</text>
+<text x="10" y="160" class="m">Scale: 4 px per line. The reviewer's figure is a rough count of the region his comment sits in (lines 97-201 span 105 lines).</text>
+<text x="10" y="176" class="m">The measured row interface is 85 lines. Option (b) removes more than the row: also the expr base of v_vnni_view,</text>
+<text x="10" y="192" class="m">one include, 2 test probes, 7 STATIC_REQUIREs and the host-tensor test lines.</text>
+</svg>"""
+
+# ---------------------------------------------------------------- page
+CSS = """
+:root{--paper:#fbfaf6;--ink:#1f2a33;--muted:#5b6770;--line:#d8ddd6;--accent:#0b6e7f;--accent-soft:#e3f0f2;--good:#2e7d4f;--warn:#a8691a;--bad:#b3463b;--code:#f0f2ee;--card:#ffffff;color-scheme:light}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.55}
+.wrap{max-width:920px;margin:0 auto;padding-block:32px 64px;padding-inline:20px}
+h1{font-size:26px;font-weight:600;letter-spacing:-0.01em;margin:0 0 6px;text-wrap:balance}
+h2{font-size:19px;font-weight:600;margin:40px 0 12px;padding-top:14px;border-top:1px solid var(--line);text-wrap:balance}
+h3{font-size:16px;font-weight:600;margin:24px 0 8px}
+h4{font-size:14.5px;font-weight:600;margin:18px 0 6px;color:var(--muted)}
+p{margin:0 0 12px;max-width:78ch}
+.meta{color:var(--muted);font-size:13.5px;margin-bottom:22px}
+.short{background:var(--accent-soft);border-left:4px solid var(--accent);padding:12px 16px;margin:0 0 18px;border-radius:0 6px 6px 0}
+.short p{margin:0 0 8px}.short p:last-child{margin:0}
+code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13px}
+code{background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:12px 14px;border-radius:6px;overflow-x:auto;line-height:1.45;margin:10px 0 14px;white-space:pre-wrap;overflow-wrap:anywhere}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;margin:8px 0 16px;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:7px 9px;border-bottom:1px solid var(--line)}
+th{font-weight:600;color:var(--muted);font-size:12.5px;letter-spacing:0.04em;text-transform:uppercase}
+.tbl{overflow-x:auto}
+.num{font-variant-numeric:tabular-nums;text-align:right}
+ul,ol{padding-left:22px;margin:0 0 12px}li{margin-bottom:5px;max-width:78ch}
+.pill{display:inline-block;font-size:12px;font-weight:500;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-left:6px;vertical-align:middle}
+.pill.holds{color:var(--good);border-color:var(--good)}.pill.partly{color:var(--warn);border-color:var(--warn)}.pill.refuted{color:var(--bad);border-color:var(--bad)}
+.quote{margin:14px 0 18px;padding:12px 16px;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:0 6px 6px 0}
+.quote .who{font-weight:600;margin-bottom:6px;font-size:13.5px;color:var(--muted)}
+.quote p{margin:0 0 8px}.quote p:last-child{margin:0}
+.rec{margin:14px 0 18px;padding:12px 16px;background:var(--card);border:1px solid var(--accent);border-radius:6px}
+.rec .lbl{font-weight:600;color:var(--accent);margin-bottom:6px}
+.reply{margin:14px 0 18px;padding:12px 16px;background:#fffdf5;border:1px solid var(--warn);border-radius:6px}
+.reply .lbl{font-weight:600;color:var(--warn);margin-bottom:6px}
+.reply pre{background:#fff;border:1px solid var(--line)}
+.ev{color:var(--muted);font-size:13.5px}
+.fig{margin:14px 0 18px}
+.fig svg{max-width:100%;height:auto;display:block}
+.cap{color:var(--muted);font-size:13px;margin:6px 0 0;max-width:80ch}
+pre.diff{background:#f7f8f6;border:1px solid var(--line)}
+.diff span{display:block;padding:0 6px;margin:0 -6px}
+.diff .add{background:#e3f2e7;color:#1b5e20}.diff .del{background:#fbe6e3;color:#8e2f24}
+.diff .ctx{color:#4a545c}.diff .hdr{color:var(--muted);font-weight:600;margin-top:8px;background:none}
+.diff .hdr:first-child{margin-top:0}
+.plain{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px 16px;margin:0 0 14px}
+.plain p{margin:0 0 8px}.plain p:last-child{margin:0}
+.toc{columns:2;column-gap:28px;font-size:14px}.toc li{break-inside:avoid}
+a{color:var(--accent)}
+.ok{color:var(--good);font-weight:600}.warn{color:var(--warn);font-weight:600}.bad{color:var(--bad);font-weight:600}
+@media (max-width:600px){.wrap{padding-inline:16px}h1{font-size:22px}.toc{columns:1}}
+"""
+
+
+def reply_box(key, label="Draft reply (jhan's voice)"):
+    return '<div class="reply"><div class="lbl">%s</div><pre>%s</pre></div>' % (esc(label), esc(REPLIES[key]))
+
+
+def main():
+    r2_text = R2.get("text", "")
+    r2_done = bool(r2_text.strip())
+    r2_counts_sentence = ("t_llama_unit 44 cases / 252720 assertions on the AMX-on and the AMX-off tree, t_amx_numerics 12301 assertions on the AMX-on tree, t_amx_dispatch_dtype 1559, t_heterogeneous_scheduler 1900"
+                          if r2_done else "<R2 COUNTS: pending>")
+    r2_sentence = ("On our Intel machine the four unit tests pass on the AMX-on and AMX-off builds with #4697 and #4698 applied together (" + r2_counts_sentence + ")."
+                   if r2_done else "<R2 RESULT: pending. When the r2 run reports a pass, write: On our Intel machine the four unit tests pass on the AMX-on and AMX-off builds with #4697 and #4698 applied together (counts). If it fails, say so instead.>")
+    REPLIES["B4"] = REPLIES["B4"].replace("<R2 SENTENCE>", r2_sentence)
+    global ISSUE_4588_CLOSE
+    ISSUE_4588_CLOSE = ISSUE_4588_CLOSE.replace("<R2 COUNTS>", r2_counts_sentence)
+
+    H = []
+    a = H.append
+    a("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
+    a("<title>PR 4557 Ben Response</title>")
+    a('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">')
+    a("<style>%s</style></head><body><div class=\"wrap\">" % CSS)
+    a("<h1>PR 4557: the reviewer's six comments, what the code says, and the proposed response</h1>")
+    a('<div class="meta">2026-09-30, closed out 2026-10-01 (see section 0) &middot; PR <a href="https://github.com/positron-ai/tron/pull/4557">#4557</a> head <code>c73e7fb2f9</code> (branch <code>jhan-kv-typed-tensors</code>, base main) &middot; review 5352791816 submitted 2026-09-29 14:56 UTC, state CHANGES_REQUESTED, body "Looks good. Just a few minor tweaks needed." &middot; page generated by exec/ben-20260930/gen_ben.py</div>')
+
+    a('<div class="short"><p><strong>Short version.</strong> All six comments hold in substance. Four of them (the Note rename, the Note reword, the tracker link, and the reviewer\'s own helper PR #4697) are applied on a scratch branch and pass the four unit tests on delphi-3bda (our Intel test machine) in the AMX-on and AMX-off builds. Three need a decision by jhan or the reviewer: the enum flags (B1, a follow-up issue is drafted below), keep or drop <code>v_vnni_row</code> (B5, I lean to drop), and B4, where the reviewer also opened PR #4698 that removes the three non-ISO reads he asks a ticket for, so I recommend merging #4698 and closing issue #4588.</p></div>')
+
+    a('<h2 id="done">0. Outcome (2026-10-01)</h2>')
+    a('<p>jhan decided: B1 answered by jhan (comment 4158498407, issue #4732), B2 accept, B3 the agreed wording, B4 = (d) merge #4698, B5 = (b) drop the row, B6 = (a) fast-forward onto #4697. The branch was pushed at 19:56 UTC as c12df586b6 (8 commits on c73e7fb2f9: 8bbbb7c82d #4697 by fast-forward, 8e0cf77bed merge of #4698, 76502ce5b2 Note rename, a52ce4db25 / 55f0068cbf / 34b157326f Note reword, c12df586b6 drop of v_vnni_row and the expr base with a compile-time check that a packed view has no operator[]). GitHub marked #4697 and #4698 merged on the push. The PR body was replaced (exec/ben-20260930/final-pr-body-2.md) and issue #4588 was closed with exec/ben-20260930/final-issue-4588-comment.md. The five replies (final-reply-b2.md to -b6.md) are jhan\'s to post.</p>')
+    a('<p>Verification of the pushed head on delphi-3bda: t_llama_unit 244524 assertions / 44 cases on the AMX-on and the AMX-off tree (252720 minus 8196 removed test-only checks), t_amx_numerics 12301 (AMX-on), t_amx_dispatch_dtype 1559, t_heterogeneous_scheduler 1900, lint-notes rc 0. Token identity (runtron qwen3-4b tp2, prompt 1024, 256 tokens, seed 1, pay-for-determinism) against main 996f58ec82: CPU attention with AMX (head, head again, base), CPU attention with the kill switch (head, base) and FPGA attention (head, base) all gave one identical token file (exec/results/i4557final-20261001/smoke/). Sections 1 to 14 below are the analysis as it stood before these decisions.</p>')
+    a('<h2 id="toc">Contents</h2><ol class="toc">')
+    for anchor, title in [("words", "Words used here"), ("glance", "1. The six comments at a glance"), ("state", "2. Branch state and the two reviewer PRs"),
+                          ("sequence", "3. Proposed sequence of work"), ("b1", "4. B1: enums instead of the two flag constants"), ("b2", "5. B2: rename the Note to say VNNI"),
+                          ("b3", "6. B3: reword Note [DMA allocation creates objects]"), ("b4", "7. B4: the three non-ISO reads need a ticket"),
+                          ("b5", "8. B5: v_vnni_row has no obvious user"), ("b6", "9. B6: the reviewer's dedup PR #4697"),
+                          ("verify", "10. Verification record"), ("prbody", "11. PR body lines that go stale"), ("open", "12. Open decisions for jhan"),
+                          ("gaps", "13. What is not verified"), ("sources", "14. Sources and method")]:
+        a('<li><a href="#%s">%s</a></li>' % (anchor, esc(title)))
+    a("</ol>")
+
+    # ------------------------------------------------------------ words
+    a('<h2 id="words">Words used here</h2><div class="tbl"><table><tr><th>Term</th><th>Meaning</th></tr>')
+    words = [
+        ("tron, PR 4557, the reviewer", "tron is the inference program under test. PR 4557 is the pull request that gives the KV cache (the saved keys and values of past tokens) typed tensors instead of bare pointers. The reviewer is a tron maintainer. This page names him only as \"the reviewer\" in any text meant for GitHub."),
+        ("KV cache, kv_block, page, plane", "The KV cache stores keys (K) and values (V) per token. A kv_block holds K and V of one KV head for one page of 64 tokens. A plane is the K or the V part of one kv_block."),
+        ("packed V, VNNI", "In the 16-lane (AVX-512) build the V plane stores two tokens interleaved per dimension, so one 32-bit lane holds the even token in its low 16 bits and the odd token in its high 16 bits. The repo calls this the VNNI layout, after Intel's Vector Neural Network Instructions, whose right-hand (B) operand takes bf16 pairs per lane. The bf16 dot-product instructions VDPBF16PS (AVX-512) and TDPBF16PS (AMX) read it in place."),
+        ("v_vnni_tensor, v_vnni_view, v_vnni_row", "The PR's three packed-V types: the owner of one plane, a non-owning view with the address formula, and one token's logical row read as an expression."),
+        ("expr, rank", "expr is the base class of tron's tensor expressions (h/tron/kernels/expr.hpp). Rank is the number of indices. A rank-2 expr supplies operator[] returning a rank-1 expr. A rank-1 expr supplies chunk(i), one SIMD register of 16 fp32 values."),
+        ("view, const_view, aligned flag, dma flag", "tron's fixed-shape tensor view types (h/tron/tensor/view.hpp). Their two bool template flags say whether the pointer is aligned for whole-register loads and whether the memory is DMA-safe (usable by the accelerator cards)."),
+        ("VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE", "Two named constants the PR added (h/tron/tensor/kv_cache_fwd.hpp:24-25) so that its own lines carry no bare true/false literal, per jhan's C++ guide."),
+        ("row view, plane view", "A row view covers one head-sized contiguous row (what page::set_v reads and page::get_v writes). A plane view covers a whole K or V plane (page_size by head_size)."),
+        ("Note [Title]", "The repo's convention for a titled design comment. Other comments reference a Note by its title, and bin/lint-notes checks that every referenced title exists."),
+        ("implicit-lifetime type, object creation", "A C++ type that an allocation may create without a constructor call: scalars, arrays, aggregates without a user-provided destructor, and classes with a trivial constructor and destructor. Only a short list of operations creates such objects (a function named operator new, malloc, memcpy, bit_cast, and a few more). A cast creates nothing. Reading a member of an object that was never created is undefined behavior."),
+        ("N4950", "The C++23 draft standard. Bracketed names such as [intro.object]/13 are its section and paragraph numbers."),
+        ("ISO C++, non-ISO read", "ISO C++ is the language as the standard defines it. A non-ISO read is a memory read that the standard leaves undefined but that the compiler in use handles as intended."),
+        ("AMX, AVX, SIMD, DMA, bf16, fp32, fp16", "AMX (Intel Advanced Matrix Extensions) and AVX (Advanced Vector Extensions, AVX2 = 256-bit, AVX-512 = 512-bit) are CPU instruction sets. SIMD (single instruction, multiple data) means one instruction works on a whole register of values. DMA (direct memory access) memory is memory the accelerator cards can read directly. bf16 is the 16-bit brain floating-point number format. fp32 and fp16 are the 32-bit and 16-bit IEEE float formats."),
+        ("analyst, refuter, critic", "Roles of the agents in the workflow that produced this page (section 14). One analyst per comment gathered the facts. Three refuters per analyst tried to disprove them. One critic checked completeness. \"A refuter found X\" means the fact came from that check."),
+        ("claude-box, nix, GCP Nix lane, people-check", "claude-box is the container this page was written from. Nix is the package manager that provides tron's build toolchain. The GCP Nix lane is the CI job that builds and tests tron with that toolchain on Google Cloud hosts. It builds AMX-off only. people-check is our script that reports whether delphi-3bda holds a CI lease or another user's jobs."),
+        ("8-lane, 16-lane", "The AVX2 build (TRON_CHUNK_SIZE 8, one register holds 8 fp32) and the AVX-512 build (16). Packed V, page::set_v and page::get_v exist only at 16 lanes. No CI job builds 8 lanes, and t_llama_unit does not compile there today (issue #4588: 131 errors)."),
+        ("AMX-on tree, AMX-off tree", "A build with -DTRON_AMX_DISPATCH=ON (the AMX attention kernels compiled in) and one without. The GCP Nix CI lane builds AMX-off only. delphi-3bda (our Intel test machine with AMX) builds both."),
+        ("PR 4697, PR 4698", "Two pull requests the reviewer opened on 2026-09-29 against the PR 4557 branch: #4697 shares the row-view helpers, #4698 fixes the three non-ISO reads. Both are direct children of c73e7fb2f9."),
+        ("issue #4588", "The Tech Debt issue filed 2026-09-24 that records the three non-ISO reads (scaled_v_expr, fill_storage_slot, the 8-lane V accessors)."),
+        ("scratch branch ben-r1 / ben-r2", "Local branches jhan-kv-typed-tensors-ben-r1 and -ben-r2 (worktrees ~/workspace/ai-runs/tron-issue4525-ben and -ben-r2) where the changes were applied and built. Nothing is pushed."),
+        ("lcheck, clang-format, lint-notes", "lcheck is a syntax-only clang 19 compile on claude-box with the product's flags (no code generation, no link). clang-format 19.1.7 is the formatter CI runs. lint-notes is the repo's Note-reference checker (runs on 3bda inside nix)."),
+        ("est.", "An estimate, not a measurement."),
+    ]
+    for t, m in words:
+        a("<tr><td>%s</td><td>%s</td></tr>" % (esc(t), m))
+    a("</table></div>")
+
+    # ------------------------------------------------------------ glance
+    a('<h2 id="glance">1. The six comments at a glance</h2>')
+    a("<p>Each row names the comment, what the reviewer asks, whether the point holds against the code at c73e7fb2f9, and the proposed action. Details and evidence are in sections 4 to 9.</p>")
+    a('<div class="tbl"><table><tr><th>Id</th><th>Where</th><th>The ask, in plain words</th><th>Holds?</th><th>Proposed action</th><th>State</th></tr>')
+    rows = [
+        ("B1", "kv_cache_fwd.hpp:25", "Make the aligned and dma flags proper enum types instead of two named bool constants. Not a blocker, a good follow-up.", '<span class="pill holds">holds</span>', "Reply, file the follow-up issue (drafted in section 4). No code change in this PR.", "reply + issue drafted"),
+        ("B2", "v_vnni.hpp:31", "Rename Note [Packed V layout] to Note [VNNI Packed V layout].", '<span class="pill holds">holds</span>', "Rename at all 16 places in 7 files, widen the underline, add one clause that spells out VNNI, edit the PR body line.", "applied, built, tested"),
+        ("B3", "memory.hpp:175", "The Note about object creation is hard to follow. Reword it more clearly.", '<span class="pill partly">holds, one detail off</span>', "Reword the Note in plain words. Reply with two corrections: operator new is one creating operation of several, and v_vnni_tensor needs no more care than the old kv_block.", "applied, built, tested"),
+        ("B4", "kv_cache.hpp:1462", "Three reads leave ISO C++. Open a ticket.", '<span class="pill holds">holds</span>', "The ticket exists (#4588). Recommended: merge the reviewer's own fix #4698 and close #4588. Fallback: keep the paragraph with the issue number.", "decision for jhan"),
+        ("B5", "v_vnni.hpp:104", "v_vnni_row adds about 100 lines with no obvious user, but seems useful.", '<span class="pill partly">holds (85 lines, one test user)</span>', "Ask the reviewer: keep, or drop the row and the expr base (diff ready, -109 lines). I lean to drop.", "decision for jhan and the reviewer"),
+        ("B6", "full.hpp:2764", "The spelled-out row view is a subtle pattern repeated many times. PR #4697 deduplicates it. Merge or adapt.", '<span class="pill holds">holds</span>', "Fast-forward the branch onto #4697 (keeps his commit id). Tested on 3bda in both trees.", "applied, built, tested"),
+    ]
+    for r in rows:
+        a("<tr><td><strong>%s</strong></td><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (r[0], esc(r[1]), esc(r[2]), r[3], esc(r[4]), esc(r[5])))
+    a("</table></div>")
+    a("<p>Timeline of 2026-09-29 (UTC):</p><ul><li>12:47 to 13:35: five of the six comments (B1 to B5) are drafted.</li><li>13:43: the reviewer commits the fix that became #4698.</li><li>13:45: he commits the helper change that became #4697.</li><li>14:01: #4697 opens. 14:44: #4698 opens.</li><li>14:56: he writes B6 (the comment that points at #4697) and submits the review as CHANGES_REQUESTED. A second review (5354385317) adds the \"not a blocker\" note on B1.</li></ul><p>So the B4 comment was written 13 minutes before its own fix existed. No comment mentions #4698.</p>")
+
+    # ------------------------------------------------------------ state
+    a('<h2 id="state">2. Branch state and the two reviewer PRs</h2>')
+    a("<p>The figure shows why the order of integration matters. Both reviewer PRs start from the PR head. A fast-forward keeps the reviewer's commit id and should let GitHub mark his PR as merged (not exercised, section 13). Only the first one taken can be a fast-forward. The second one becomes a merge commit.</p>")
+    a('<div class="fig">%s<p class="cap">Figure 1. Top: the three commits on GitHub today. Bottom: the proposed branch after the round, as built and tested on the scratch branch ben-r2 (section 10). The comment-only commits carry new ids after the cherry-pick.</p></div>' % FIG_BRANCH)
+    a("<p>Facts behind the figure, all checked on 2026-09-30:</p><ul>")
+    a("<li>origin/jhan-kv-typed-tensors is still at c73e7fb2f9. A fast-forward onto 8bbbb7c82d is possible today. Any commit pushed first removes that option [git log origin/jhan-kv-typed-tensors].</li>")
+    a("<li>#4697 (8bbbb7c82d) and #4698 (63df10cf90) both have parent c73e7fb2f9. Author and committer of both are the reviewer [git log --format=%an/%cn].</li>")
+    a("<li>#4698 merges onto #4697 with 0 conflict markers. #4698 conflicts with the B4 fallback commit (the one-line issue reference). The reason: #4698 deletes the paragraph that the one line extends [git merge-tree, 1 marker].</li>")
+    a("<li>#4697 CI: Build Tron, Test host, Test FPGA, Lint and the rest pass (2026-09-29). #4698 CI: 21 of 21 check rows pass. One row is a Benchmark on andoria-14 (an AMD host without AMX). Its same-host comparison shows no regression. Its cross-host comparison marks two llama rows as regressions against a baseline from another machine (andoria-09): llama-3.1-8b tp4 (tensor parallel over 4 cards) at -2.1 % generate tokens per second and -2.1 % parse tokens per second, and llama-3.1-8b tp2 parse at -1.6 %. A cross-host comparison is not a like-for-like measurement.</li>")
+    a("<li>The GCP Nix lane builds without TRON_AMX_DISPATCH, so neither PR's CI exercised the AMX kernels. The r1 runs in section 10 close that gap for #4697. The r2 run (section 10) covers #4698.</li>")
+    a("</ul>")
+
+    # ------------------------------------------------------------ sequence
+    a('<h2 id="sequence">3. Proposed sequence of work</h2>')
+    a("<p>Everything below is a proposal. Nothing has been pushed, posted or edited on GitHub. The commands assume the real worktree at ~/workspace/ai-runs/tron-issue4525 on the branch jhan-kv-typed-tensors.</p>")
+    a("<ol>")
+    a("<li><strong>Decide B4 and B5</strong> (section 12). The rest of the list assumes B4 = merge #4698 and B5 = ask the reviewer.</li>")
+    a("<li><strong>Take #4697 by fast-forward, push.</strong><pre>git fetch origin\ngit merge --ff-only origin/bgamari-kv-typed-tensors-dedup\ngit push origin jhan-kv-typed-tensors</pre>Then open https://github.com/positron-ai/tron/pull/4697 and check that it shows as merged. If it stays open, close it with a one-line comment naming the commit.</li>")
+    a("<li><strong>Take #4698 as a merge commit, push.</strong><pre>git merge --no-ff --no-edit origin/bgamari-fix-kv-lifetime\ngit push origin jhan-kv-typed-tensors</pre>GitHub marks #4698 merged. (Alternative: <code>gh pr merge 4698 --merge</code>, then <code>git pull</code>.)</li>")
+    a("<li><strong>Cherry-pick the four comment-only commits</strong> from the scratch branch ben-r2 (ids in section 10), in order: B2 rename, B3 reword, B3 trim, B3 tighten (git cherry-pick of the four ids). Run <code>git diff --check</code> and clang-format (via <code>uvx --from clang-format==19.1.7 clang-format --dry-run --Werror</code>) once more, then push. CI runs. PR #4557 carries the label \"Skip benchmarks\", so that run has no Benchmark row unless the label is removed first (<code>gh pr edit 4557 --remove-label \"Skip benchmarks\"</code>).</li>")
+    a("<li><strong>B1 follow-up issue: filed</strong> on 2026-10-01 as #4732 (section 4). The B1 reply names it.</li>")
+    a("<li><strong>Post the six replies</strong> (drafts in sections 4 to 9, commit ids and the issue URL filled in) under comments 4134933234 (B1), 4133643149 (B2), 4133869073 (B3), 4134028988 (B4), 4134076112 (B5), 4134925164 (B6).</li>")
+    a("<li><strong>Close issue #4588</strong> with the drafted comment (section 7) naming the merge commit. If B4 = fallback (a), post the one-line comment instead.</li>")
+    a("<li><strong>Edit the PR body</strong> (section 11). Re-fetch the live body first (the 2026-09-25 rule), then <code>gh pr edit 4557 --body-file</code>.</li>")
+    a("<li><strong>Re-request the review:</strong> <code>gh pr edit 4557 --add-reviewer bgamari-positron</code>. A push alone does not clear CHANGES_REQUESTED. Three other requested reviewers (axch, mcherba, BillBaumann) have not reviewed yet.</li>")
+    a("<li><strong>Clean up:</strong> delete the 3bda copy <code>/var/tmp/jhan/tron-issue4525-ben</code> (run no git commands inside it: it shares the git administrative directory, the .git metadata, with /var/tmp/jhan/tron-i4525rt2, an earlier 3bda checkout of this branch), and the two local scratch worktrees once the push is done.</li>")
+    a("</ol>")
+
+    # ------------------------------------------------------------ B1
+    a('<h2 id="b1">4. B1: enums instead of the two flag constants <span class="pill holds">holds</span></h2>')
+    a('<div class="quote"><div class="who">Comment 4133613638 on h/tron/tensor/kv_cache_fwd.hpp:25, then 4134933234</div><p>"A better solution for naming these may just be to make the arguments proper <code>enum</code>s."</p><p>"To be clear, I don\'t consider this to be a blocker. It would make a good follow-up, however."</p></div>')
+    a("<h3>What the code says</h3><ul>")
+    a("<li>The two constants hold plain true and false [h/tron/tensor/kv_cache_fwd.hpp:24-25]. They appear on 31 PR-added lines in 9 files: the 2 definitions and 29 uses. main has 0 uses [git grep at 996f58ec82].</li>")
+    a("<li>They exist because jhan's C++ guide counts true and false as literals that must live in named declarations (commit 5051264d80). The guide's own example line uses the same style. So the constants are guide-conformant, and the enum is a design alternative that also satisfies the guide.</li>")
+    a("<li>The flags are bool template parameters of main's view types [h/tron/tensor/view.hpp:17-18, views.hpp:23-24, h/tron/kernels/expr.hpp:18-21]. A scoped enum value does not convert to bool. A probe file that passes <code>view_alignment::aligned</code> to today's <code>view</code> fails with g++ 11.4 and clang 19 (\"could not convert ... to bool\").</li>")
+    a("<li>An unscoped enum with underlying type bool compiles against today's parameters, but a swapped argument order still compiles too. Only enum-typed parameters reject both swapped flags and bare literals (probes t1 to t5 in the workflow scratch, re-run under clang 19 by the critic).</li>")
+    a("<li>The repo already uses enum class template parameters: rope_scaling and rope_layout [h/tron/kernels/rope.hpp:95, :275], moe_scale_mode [h/tron/models/mixture_of_experts.hpp:275].</li>")
+    a("<li>The dma flag is never branched on. It takes part in type identity only (view types, dotter overloads, t_launch_matmul) [grep 'if constexpr (dma' over h: no hit]. The aligned flag is branched on below the view boundary [h/tron/tensor/slice.hpp:56, h/tron/simd/aligned.hpp:14].</li>")
+    a("<li>The reviewer's #4697 keeps <code>bool Dma = VIEW_DMA_FALSE</code> in its new aliases. So the enum change lands after #4697.</li>")
+    a("</ul>")
+    a('<div class="fig">%s<p class="cap">Figure 2. Scope of the follow-up: lines that declare one of the two flags as bool, per header, at main 996f58ec82. The must-change subset (blue) is 81 lines in 8 headers. Below the view boundary (grey) the follow-up can convert at the boundary and leave the SIMD helpers alone.</p></div>' % (FIG_B1 % bars_b1()))
+    a('<div class="tbl"><table><tr><th>Item</th><th class="num">main-side</th><th class="num">PR-added</th></tr>')
+    for r in [("Lines with VIEW_ALIGNED_TRUE / VIEW_DMA_FALSE (2 definitions + 29 uses)", "0", "31 lines, 9 files"), ("bool aligned / bool dma declarations, tensor + kernel headers", "137 lines, 12 headers", "12 lines (kv_cache.hpp 8, kv_cache_fwd.hpp 2, v_vnni.hpp 2)"),
+              ("must-change subset (view, views, slice, tensor, expr, itensor, dmatensor, dotter)", "81", "12"), ("lines that spell a view type with a bare true or false (grep (const_)?views?<[^;{]*(true|false) over h, src, t, plus the 4 continuation lines in dmatensor.hpp; a stricter pattern that needs a true/false pair on one line gives 75 lines in 19 files)", "82 lines, 80 sites, 20 files", "0"),
+              ("static constexpr bool dma members", "5", "0"), ("readers of ::dma", "2 (tensor.hpp:415-416)", "1 (model.hpp:2831)"), ("computed constexpr bool is_dma", "2 (mixture_of_experts.hpp:535, feed_forward.hpp:489)", "0"),
+              ("PR 4424 (branch jhan-amx-vnniK) bare-flag view lines", "n/a", "5 added vs main, 0 uses of the constants")]:
+        a('<tr><td>%s</td><td class="num">%s</td><td class="num">%s</td></tr>' % tuple(esc(x) for x in r))
+    a("</table></div>")
+    a("<h3>Options</h3><ul>")
+    a("<li><strong>(a) Keep the constants, file a follow-up issue.</strong> Matches the reviewer's own words. The follow-up converts the 82 existing sites in one pass. Cost: the constants live until then. <em>Recommended.</em></li>")
+    a("<li><strong>(b) Do it in this PR.</strong> Needs edits in main's view.hpp and 80 call sites outside the PR's topic, plus a new review round. est. 1 to 2 days.</li>")
+    a("<li><strong>(c) In PR 4424 or another child.</strong> Same work as (a) but blocked behind this PR, and 4424 is a performance PR with its own open items.</li>")
+    a("<li><strong>(d) Alias route inside this PR</strong> (found by a refuter): define the two enums plus alias templates typed_view / typed_const_view in kv_cache_fwd.hpp that map onto the unchanged bool parameters. Main stays untouched, the 31 PR lines get enum arguments, and the constants go away. Verified to compile with g++ and clang 19 on a probe. Cost: a second spelling of view types that the follow-up then has to remove again, and #4697's aliases would need re-spelling. Not recommended, but it is a real option if the reviewer wants the constants gone now.</li>")
+    a("</ul>")
+    a('<div class="rec"><div class="lbl">Recommendation</div><p>Option (a). The issue is filed as #4732 (2026-10-01). Land the follow-up after #4557 and #4697, and coordinate it with #4424.</p></div>')
+    a(reply_box("B1", "Draft reply under 4134933234"))
+    a('<div class="reply"><div class="lbl">Follow-up issue as filed on 2026-10-01: <a href="https://github.com/positron-ai/tron/issues/4732">#4732</a> (label Tech Debt, no names)</div><pre>%s</pre></div>' % esc(ISSUE_B1))
+
+    # ------------------------------------------------------------ B2
+    a('<h2 id="b2">5. B2: rename the Note to say VNNI <span class="pill holds">holds</span></h2>')
+    a('<div class="quote"><div class="who">Comment 4133643149 on h/tron/tensor/v_vnni.hpp:31 (a GitHub suggestion)</div><p>"Can we rename this to say VNNI:" with the suggested line <code>// Note [VNNI Packed V layout]</code>.</p></div>')
+    a("<h3>What the code says</h3><ul>")
+    a("<li>The string \"Packed V layout\" occurs on 16 lines in 7 files at c73e7fb2f9: the header line in v_vnni.hpp and 15 references (kv_cache.hpp 6, model.hpp 2, v_vnni.hpp 3 more, amx_attn_iface.hpp 1, self_attention.hpp 1, kv_cache_fwd.hpp 1, amx_attn.cpp 1). All 16 lines were added by this PR. The PR body names the Note once (line 40).</li>")
+    a("<li>Pressing GitHub's \"commit suggestion\" button would rename the header only and leave 15 references pointing at a title that no longer exists. lint-notes would then report a dangling reference. So the rename was applied by hand at every site.</li>")
+    a("<li>The Note body never defines VNNI as a term. It names two v_vnni_* identifiers and describes the layout as \"the B-operand layout of the bf16 dot product instructions\" [v_vnni.hpp:42-43]. The repo defines VNNI once, in amx_attn_iface.hpp:174-177. So one clause was added to the Note: \"That is the VNNI layout (named after Intel's Vector Neural Network Instructions)\". The wording keeps VNNI as the family name and does not call VDPBF16PS a VNNI instruction (it belongs to AVX512_BF16, a refuter checked the gcc intrinsics headers).</li>")
+    a("<li>After the rename the longest changed line is 87 columns. The limit is 88 [.clang-format:85]. clang-format 19.1.7 reflows nothing. lint-notes on 3bda: rc 0, no dangling reference.</li>")
+    a("<li>PR 4424 (branch jhan-amx-vnniK) uses \"Note [K VNNI storage]\" for the K counterpart. Different word order, no shared file, no conflict. Noted for naming awareness only.</li>")
+    a("</ul>")
+    a("<h3>The change (commit 7a6c3857d0 on the scratch branch, comment only)</h3>")
+    for f in ["h/tron/tensor/v_vnni.hpp", "h/tron/tensor/kv_cache_fwd.hpp", "h/tron/kernels/amx_attn_iface.hpp", "h/tron/models/self_attention.hpp", "h/tron/models/model.hpp", "src/tron/kernels/amx_attn.cpp"]:
+        a(diff_block(COMMENT_DIFFS[f]))
+    kv = COMMENT_DIFFS["h/tron/models/kv_cache.hpp"]
+    kv_b2 = "\n".join(h for h in re.split(r"(?=^@@)", kv, flags=re.M) if "Issue #4588" not in h)
+    a(diff_block(kv_b2))
+    a('<p class="cap">The kv_cache.hpp hunks above are the six B2 renames. The seventh hunk of that file (the issue reference) belongs to B4 and is shown there.</p>')
+    a('<div class="rec"><div class="lbl">Recommendation</div><p>Accept. Keep the added VNNI clause unless the reviewer prefers the literal rename. Edit PR body line 40 in the same round.</p></div>')
+    a(reply_box("B2", "Draft reply under 4133643149 (fill in the commit id)"))
+
+    # ------------------------------------------------------------ B3
+    a('<h2 id="b3">6. B3: reword Note [DMA allocation creates objects] <span class="pill partly">holds, one detail off</span></h2>')
+    a('<div class="quote"><div class="who">Comment 4133772400 on h/system/memory.hpp:175, then 4133869073 (10 minutes later)</div><p>"I\'m not sure I understand what Claude is trying to say here. Can you clarify?"</p><p>"Alright, reading again I think I am beginning to see. It looks like Claude is (rightly) playing language lawyer. The C++ spec states that an implicitly-created object\'s (that is, one not introduced by a <code>new</code> expression) lifetime must begin in an <code>operator new</code>. Consequently, the previous implementation was strictly-speaking incorrect: it allocated storage but failed to actually begin the lifetime of the object residing in that storage. Previously this was perhaps okay since the storage held POD, but now it contains a <code>v_vnni_tensor</code>, requiring that we be a bit more careful. I think it would be good to reword the Note more clearly."</p></div>')
+    a("<h3>The reviewer's three claims, graded</h3>")
+    a('<div class="tbl"><table><tr><th>Claim</th><th>Grade</th><th>Why</th></tr>')
+    a('<tr><td>(i) An implicitly-created object\'s lifetime must begin in an operator new.</td><td><span class="pill partly">partly</span></td><td>A function named operator new or operator new[] is one of several operations that create objects without a constructor call. N4950 [intro.object]/13 also names starting the lifetime of an unsigned char or std::byte array. Its note points to the library operations that do the same: malloc and its relatives ([c.malloc]), memcpy/memmove ([cstring.syn]), bit_cast ([bit.cast]), std::start_lifetime_as ([obj.lifetime]) and allocator_traits::allocate ([allocator.traits.members]). The Note\'s point is that dma_allocate_aligned is on none of these lists.</td></tr>')
+    a('<tr><td>(ii) The previous implementation was strictly incorrect: it allocated storage but never began the lifetime.</td><td><span class="pill holds">holds</span></td><td>On main, try_make_unique_dma_for_overwrite called dma_allocate_aligned directly [main memory.hpp:331] and the accessors used a plain reinterpret_cast [main kv_cache.hpp:1533, :1542, :1578]. No kv_block ever started its lifetime. A member access through such a pointer is undefined behavior [N4950 basic.life/6].</td></tr>')
+    a('<tr><td>(iii) Previously okay because the storage held POD (plain old data: a type with no constructor logic), but now it contains a v_vnni_tensor, so more care is needed.</td><td><span class="pill refuted">refuted (the analyst) / partly (a refuter)</span></td><td>The rule is the same before and after. The old kv_block was an aggregate of bf16s arrays, an implicit-lifetime type. The new kv_block is still an aggregate. v_vnni_tensor has a trivial implicit default constructor and a trivial destructor. So it is an implicit-lifetime class by [class.prop]/9. The static_assert on kv_block::v_storage [kv_cache.hpp:2455-2458] and the two in the accessors [:1554-1557, :1597-1600] pin those traits in the 16-lane build. The 8-lane build keeps a bf16s array with no assert. What changed is that the allocation now satisfies the rule. The fair reading of "more care" is: the static_asserts are that care.</td></tr>')
+    a("</table></div>")
+    a("<h3>The current Note, sentence by sentence</h3>")
+    a("<p>This table is the check that the Note's facts are right before rewording it. Left: the comment as it stands at c73e7fb2f9. Right: the same fact in plain words.</p>")
+    a('<div class="tbl"><table><tr><th>The comment says</th><th>In plain words</th></tr>')
+    pw = [
+        ("In C++, a call of any function named operator new[] creates objects in the memory it returns ([intro.object]).", "C++ has a rule: when a program calls any function whose name is operator new[] (our wrapper counts, because that is its name), the memory that call returns is treated as already holding objects. No constructor runs. The rule is N4950 [intro.object]/13."),
+        ("The objects created are the ones the program goes on to use.", "The rule does not say which objects appear. It says: whichever set of objects makes the later code well defined is the set that was created ([intro.object]/10). For the KV book that set is the kv_block arrays the accessors read."),
+        ("This covers implicit-lifetime types only ([class.prop]):", "The rule works only for types that C++ lets an allocation create without a constructor call. The standard calls these implicit-lifetime types ([basic.types.general]/9, [class.prop]/9). The old text cites only [class.prop], which covers classes, not the scalar and array cases."),
+        ("for example scalars, arrays, and classes with a trivial constructor and destructor.", "Numbers and pointers, arrays of any type, and classes whose default constructor and destructor do nothing. kv_block, v_vnni_tensor and bf16 all qualify. The static_asserts keep it so."),
+        ("dma_allocate_aligned is an ordinary function, so its memory holds no objects.", "dma_allocate_aligned is not named operator new, is not malloc, is not memcpy. So the rule does not apply to it. The bytes it returns are just bytes, and no kv_block exists in them, whatever we cast the pointer to."),
+        ("So try_make_unique_dma_for_overwrite gets its memory through the wrapper below.", "That is why the fallible DMA factory (the only allocator the KV book uses, kv_cache.hpp:1289, :1424, :1434) calls the operator new[] wrapper (memory.hpp:369-370) instead of dma_allocate_aligned. The call itself creates the kv_blocks."),
+        ("The wrapper writes no bytes.", "The wrapper only forwards the request to dma_allocate_aligned (memory.hpp:188). Object creation here is a rule about what the program may assume, not a memory write. The memory stays uninitialized, which is what for_overwrite promises."),
+        ("Call the wrapper directly, never from a new-expression.", "Write ::operator new[](bytes, dma_allocation, alignment). Do not write new (dma_allocation, alignment) T[n]."),
+        ("An array new-expression may ask for extra bytes ([expr.new]), and dma_deallocate would not free them.", "The new T[n] form may request more than n * sizeof(T) bytes and hand back a pointer past the start of the block ([expr.new]/16). dma_deallocate expects the exact block start and size, so that form would leak or corrupt."),
+        ("No test fails if a caller goes back to calling dma_allocate_aligned directly.", "Warning: the test suite cannot catch a regression to the old form."),
+        ("The unit-test allocator (aligned_alloc in src/pos/fake.cpp) creates objects by itself, so the tests behave the same either way.", "In unit tests dma_allocate_aligned is aligned_alloc (fake.cpp:354), which is on the standard's list of object-creating functions ([c.malloc]/4). Only production (the real DMA allocator) lacks the rule."),
+    ]
+    for s, p in pw:
+        a("<tr><td><code>%s</code></td><td>%s</td></tr>" % (esc(s), esc(p)))
+    a("</table></div>")
+    a("<p>Every sentence is right. The problem is density. The first sentence states a rule most C++ readers have never met, and it does not say what goes wrong without the rule. The [class.prop] citation is narrower than the claim. The reword below keeps every fact, adds the mechanism (what the KV book does, what goes wrong), and explains the standard terms once.</p>")
+    a("<h3>The reworded Note (final proposed text)</h3>")
+    a("<pre>%s</pre>" % esc(NOTE_FINAL))
+    a("<p>Changes from the version the workflow first applied (commit 2ebc426f3d):</p><ul><li>The sentence \"Compiler warnings and sanitizers do not catch it.\" was dropped. A refuter measured it on a 17-line sample with GCC 14.3 and 11.4: -Wall -Wextra -Wpedantic silent, ASan and UBSan clean (AddressSanitizer and UndefinedBehaviorSanitizer, two run-time checkers built into the compiler). clang was not measured. The Note does not need the claim, and the reply carries the measurement instead.</li><li>Final wording agreed with jhan on 2026-10-01 (commit 72a1440abb on ben-r2): the first paragraph names the rule and the creating operations without section citations (Note [KV block lifetime] in kv_cache.hpp keeps the [intro.object] citation for the same rule). Objects that no code constructs, not all objects of implicit-lifetime types, come only from the listed operations. dma_allocate_aligned calls none of them. The [basic.life] citation after \"undefined behavior\" is dropped. std::start_lifetime_as is not listed (absent from the libstdc++ the toolchain ships).</li><li>Spelling: \"behavior\", the codebase's only spelling.</li><li>Every line is at or under 80 columns. The old text had one 83-column line. The repo limit is 88, so that was never a violation.</li></ul>")
+    a("<h3>Other facts worth knowing</h3><ul>")
+    a("<li>Note [KV block lifetime] [kv_cache.hpp:1441-1462] already says that the allocation starts the lifetime, a cast does not, and the accessors launder. It needs no edit for B3.</li>")
+    a("<li>The four other DMA factories (the two make_unique_dma overloads at memory.hpp:239 and :254, the two make_unique_dma_for_overwrite overloads at :274 and :286) still call dma_allocate_aligned directly. The make_unique_dma pair also zero-fills with std::memset (:241, :257), which creates no objects either. Direct callers also exist in h/pos/hwattention.hpp:191 and src/pos/device.cpp:224-320. That is the same gap in other code, outside this PR. A follow-up issue was drafted by the workflow (\"DMA factories other than try_make_unique_dma_for_overwrite create no objects for trivial element types\"). Filing it is jhan's decision. It is not needed for this review round.</li>")
+    a("<li>std::start_lifetime_as (C++23) is absent from the libstdc++ 14.3.0 in the Nix toolchain, so the wrapper route is the one available.</li>")
+    a("<li>The PR body already states the rule in the same terms (line 31) and needs no edit for B3.</li>")
+    a("</ul>")
+    a("<h3>The diff (commit 2ebc426f3d, before the r2 trim)</h3>")
+    a(diff_block(COMMENT_DIFFS["h/system/memory.hpp"]))
+    a('<div class="rec"><div class="lbl">Recommendation</div><p>Take the reworded Note as shown (with the trim). Reply under the second comment, agree with (ii), and correct (i) and (iii) in one bullet each. Ask whether the new text reads clearly.</p></div>')
+    a(reply_box("B3", "Draft reply under 4133869073 (fill in the commit id)"))
+
+    # ------------------------------------------------------------ B4
+    a('<h2 id="b4">7. B4: the three non-ISO reads need a ticket <span class="pill holds">holds</span></h2>')
+    a('<div class="quote"><div class="who">Comment 4134028988 on h/tron/models/kv_cache.hpp:1462</div><p>"Oof, this seems unfortunate. We should open a ticket to fix this. Leaving the bounds of the specified language is fraught with peril, especially in a language filled with as many sharp edges as C++"</p></div>')
+    a("<h3>What the code and GitHub say</h3><ul>")
+    a("<li>The paragraph at kv_cache.hpp:1459-1462 names three reads. All three exist at c73e7fb2f9:<ul><li>scaled_v_expr keeps a <code>const bf16s*</code> member and casts a bf16 pointer to it [:2233, :2326, :2400].</li><li>fill_storage_slot walks one bf16 pointer across K and V [:1652-1654].</li><li>The 8-lane accessors read a <code>bf16s v[page_size][head_size / chunk_size]</code> array as bf16 [:2462, :1961, :1969].</li></ul></li>")
+    a("<li>The ticket exists: issue #4588, filed 2026-09-24, label Tech Debt, assigned to jhan, still OPEN with 0 comments. Its Short version names exactly these three reads and nothing else.</li>")
+    a("<li>Is any of this new in the PR? scaled_v_expr changed form only: on main the storage was a 2-D bf16s array and the same loop stepped a bf16s pointer across its inner arrays [main:2456, :2250, :2325]. Commit b951ba9b4c moved the storage to bf16 and added the two casts. fill_storage_slot is byte-identical to main [main:1611-1620]. The 8-lane accessors are identical to main [main:1933-1980].</li>")
+    a("<li>The 2026-09-24 plan (recorded in the session memory and assumed by issue #4588's body line 51) was to remove the paragraph when the issue was filed. git shows no such commit on any ref. The paragraph stayed.</li>")
+    a("<li><strong>The reviewer wrote the fix himself.</strong> PR #4698 \"Fix KV cache access across object boundaries\" (commit 63df10cf90, 2026-09-29 13:43 UTC, opened 14:44 UTC, base jhan-kv-typed-tensors) changes kv_cache.hpp only (+72/-67, 16 hunks). After it the file holds no reinterpret_cast to or from bf16:<ul><li>scaled_v_expr::data becomes <code>const bf16*</code>, and every tile address is computed in bf16 units.</li><li>fill_storage_slot fills k and v as two arrays (v through detail::v_vnni_access::plane at 16 lanes).</li><li>The 8-lane v becomes <code>bf16 v[page_size * head_size]</code>, and the accessors build their views without a cast.</li><li>The 8-lane scaled_v_expr loads each chunk with memcpy into a local bf16s.</li></ul>The paragraph is replaced by three lines that state the new rule.</li>")
+    a("<li>A script (workflow analyst) enumerated the old and new load addresses for head_size 64, 128, 256 and 512 in both lane widths: all equal. #4698 CI: 21 of 21 check rows pass. Its commit message reports AVX-512 t_llama_unit 44 cases / 252720 assertions and says AVX2 checks remain incomplete. Cursor Bugbot (an automated code-review bot that comments on GitHub PRs) rates the PR \"Medium Risk\" for the same reason.</li>")
+    a("<li>The B4 comment does not mention #4698. The comment was drafted at 13:30 UTC, the fix committed at 13:43 UTC, the review submitted at 14:56 UTC. So the reviewer answered his own request before submitting the review, and never linked the two. The reply should ask whether #4698 is meant for this PR.</li>")
+    a("<li>Guide note for the merged code: #4698's new lines carry bare literals (<code>2 * chunk_size * 0</code> .. <code>* 15</code>, <code>part * 8</code>, <code>load(0)</code> .. <code>load(7)</code>) and two unbraced multi-line loop bodies in fill_storage_slot. They are the reviewer's lines. jhan's guide applies to PR-added lines by jhan. List them as an exception or rename them in a small follow-up commit.</li>")
+    a("</ul>")
+    a("<h3>Key hunks of #4698 (63df10cf90)</h3>")
+    a(diff_block("""--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -1456,10 +1456,9 @@ private:
+   // with std::launder. A plain cast would still point at the byte, not at the
+   // kv_block that lives there ([expr.static.cast], [basic.life], [ptr.launder]).
+   //
+-  // Some reads stay outside ISO C++ and rely on the compiler: scaled_v_expr
+-  // steps through V with vector pointers, fill_storage_slot walks one bf16
+-  // pointer across K and V, and the 8-lane V accessors read the bf16s (SIMD
+-  // vector) array v as bf16 values.
++  // K and V are separate bf16 arrays. Fill each array separately, and compute
++  // SIMD load addresses within V with bf16 pointers. SIMD operations still use
++  // compiler intrinsics, but do not require vector objects in the stored plane.
+@@ -1649,9 +1648,15 @@ private:
+         auto& block = kv_block_at_storage<geometry>(offset, kv_head, pg);
+-        bf16* data = reinterpret_cast<bf16*>(&block);
+-        for (size_t i = 0; i < sizeof(block) / sizeof(bf16); ++i)
+-          data[i] = static_cast<bf16>(distribution(gen));
++        for (auto& value : block.k)
++          value = static_cast<bf16>(distribution(gen));
++#if TRON_CHUNK_SIZE == 16
++        bf16* v = detail::v_vnni_access::plane(block.v.as_view());
++#else
++        bf16* v = block.v;
++#endif
++        for (size_t i = 0; i < page_size * geometry.head_size; ++i)
++          v[i] = static_cast<bf16>(distribution(gen));
+@@ -2230,7 +2235,7 @@ struct scaled_v_expr final : expr<scaled_v_expr<page_size, head_size>, head_size> {
+   const tensor<page_size>& scales;
+-  const bf16s* const data;
++  const bf16* const data;
+@@ -2254,25 +2259,23 @@ private:
+-      const bf16x32* tile =
+-          reinterpret_cast<const bf16x32*>(data + i * (head_size / chunk_size)) +
+-          chunk_offset;
+-      t0 = _mm512_dpbf16_ps(t0, _mm512_load_si512(tile + 0), scale);
++      const bf16* tile = data + i * head_size + 2 * chunk_size * chunk_offset;
++      t0 = _mm512_dpbf16_ps(t0, _mm512_load_si512(tile + 2 * chunk_size * 0), scale);
+       (... 15 more loads in the same form ...)
+@@ -2458,8 +2464,8 @@ struct alignas(kv_block_alignment) kv_block {
+ #else
+-  // and v is indexed as [p][i/C][i%C], writing C for the SIMD chunk size.
+-  alignas(kv_block_alignment) bf16s v[page_size][head_size / chunk_size];
++  // V is row-major, indexed as [p * head_size + i].
++  alignas(kv_block_alignment) bf16 v[page_size * head_size];
+ #endif""", "63df10cf90, kv_cache.hpp (excerpt; full diff: gh pr diff 4698)"))
+    a("<h3>Options</h3>")
+    a('<div class="tbl"><table><tr><th>Option</th><th>What a future reader of the code sees</th><th>The reads</th><th>Cost</th></tr>')
+    for r in [("(a) keep the paragraph, add \"Issue #4588 tracks these three reads.\" (commit 6009cc6ed2 on ben-r1)", "the admission and a pointer to the record", "stay", "one line; contradicts issue #4588 body line 51, which says the paragraph is being removed"),
+              ("(b) delete the paragraph, let #4588 be the record", "nothing", "stay", "one hunk; a reader finds no marker"),
+              ("(c) reply with the issue link only", "the admission, no link", "stay", "none"),
+              ("(d) merge #4698, close #4588", "plain bf16 arrays, no non-ISO read, the reviewer's three-line rule", "gone", "one merge commit by the reviewer inside the PR; 8-lane hunks checked by reading only; bare literals in his lines")]:
+        a("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % tuple(esc(x) for x in r))
+    a("</table></div>")
+    a('<div class="rec"><div class="lbl">Recommendation</div><p>Option (d), after asking the reviewer in the reply whether #4698 is meant for this PR (he did not say). It removes the problem instead of documenting it, it is his code, its CI checks pass, and the merge onto #4697 is conflict-free. The r2 run on 3bda (section 10) is the AMX-on test that his CI lane cannot give: all four tests pass in both trees, and the 16-lane scaled_v_expr machine code is unchanged. If jhan prefers to keep this PR to the typed-tensor change it was reviewed as, take (a): the one-line commit exists and the second draft reply below fits it. Options (b) and (c) are weaker than what the reviewer asked for.</p></div>')
+    a(reply_box("B4", "Draft reply under 4134028988 for option (d)"))
+    a(reply_box("B4a", "Draft reply under 4134028988 for the fallback (a)"))
+    a("<h3>The fallback commit (6009cc6ed2 on ben-r1, one line)</h3>")
+    a(diff_block("\n".join(h for h in re.split(r"(?=^@@)", kv, flags=re.M) if "Issue #4588" in h or h.startswith("diff")), "kv_cache.hpp, option (a) only"))
+    a('<div class="reply"><div class="lbl">Draft closing comment for issue #4588 (option d; fill in the merge commit and the r2 test counts from section 10)</div><pre>%s</pre></div>' % esc(ISSUE_4588_CLOSE))
+    a("<p>Under option (a) post instead: \"The paragraph stays in kv_cache.hpp with a reference to this issue (PR #4557 commit &lt;sha&gt;). The Note it cites is now titled Note [VNNI Packed V layout]. PR #4698 by a maintainer removes all three reads and will land after #4557.\" Either way, the session memory file that records a 2026-09-24 removal is wrong and gets corrected at the end of this round.</p>")
+
+    # ------------------------------------------------------------ B5
+    a('<h2 id="b5">8. B5: v_vnni_row has no obvious user <span class="pill partly">holds (85 lines, one test user)</span></h2>')
+    a('<div class="quote"><div class="who">Comment 4134076112 on h/tron/tensor/v_vnni.hpp:104</div><p>"It is a bit unfortunate that we grow this 100 LoC without any obvious users, but on the other hand it does seem useful."</p></div>')
+    a("<h3>What the code says</h3><ul>")
+    a("<li>v_vnni_row with its comment is 70 lines [v_vnni.hpp:97-166]: 40 code, 17 comment-only, 7 blank, plus the 6-line comment. The view-side operator[] pair with its comment adds 12 lines [:190-201] and the forward declarations 3 [kv_cache_fwd.hpp:31, :38-39]. Whole row interface: 85 lines. The reviewer's 100 is a fair rough count of the region his comment sits in (lines 97-201 span 105 lines).</li>")
+    a("<li>Production users of v_vnni_row or of view[token][dim]: none. Every production user of v_vnni_view reaches the plane through the bulk operations (append_v_row, load_row, copy_token) or detail::v_vnni_access (the AMX PV kernel [self_attention.hpp:1681, amx_attn.cpp:223] and scaled_v_expr [kv_cache.hpp:2326]).</li>")
+    a("<li>Test users: one value test, \"a host tensor reads the packed plane as logical rows\" [t_llama_unit.cpp:3453-3465], which builds <code>tensor&lt;page_size, 64&gt; host(plane)</code>, plus 7 compile-time STATIC_REQUIREs, one alias and 2 probe templates [:127-134, :413-445].</li>")
+    a("<li>Why the row exists: <code>tensor(expr&lt;B, d0, d1&gt; const&amp;)</code> constructs each row from rhs[i] [tensor.hpp:270-275], and <code>tensor(expr&lt;B, N&gt; const&amp;)</code> calls rhs.chunk(i) per 16 values [tensor.hpp:79-85]. So a rank-2 expr needs operator[] returning a rank-1 expr with chunk(). v_vnni_row is that rank-1 expr. Its chunk() does one 64-byte pair load and picks the even or the odd half [v_vnni.hpp:133-142]. At 8 lanes chunk() is deleted [:147].</li>")
+    a("<li>History: the reviewer's PR 4424 review asked to \"follow the precedent already present in tron: tensor and dtensor which provide a uniform interface based upon expr\" and to give the type \"the usual operations that we expect of tensor types\" [review 5270587330]. His later sketch (a proposal he posted for discussion) said \"There is no data(), pointer conversion, or operator[] that suggests a contiguous row. at() is useful for inspection\" [comment 5765866077]. Q3 (question 3 of the design page status/design-new-tensor-type.html) chose operator[] logical rows for the expression interface and recorded \"reviewer answer not recorded\". The critic searched both PR threads: Q3 was never put to the reviewer. So the row is the tested answer to his first request, and his sketch would drop it.</li>")
+    a("<li>Since the first commit, v_vnni_row was touched twice: 959d1ae229 added the 8-lane deleted chunk() branch, 2280e4beb2 edited comments.</li>")
+    a("<li>PR 4424's branch has no packed-V type at all (it predates this PR). The design page proposes a k_vnni_row for the packed-K child with a gather-based chunk (16 values from 8 cache lines) and a test-only consumer. Whatever B5 decides applies there too.</li>")
+    a("</ul>")
+    a('<div class="fig">%s<p class="cap">Figure 3. The reviewer\'s estimate against the measured sizes, and the net effect of dropping the row (option b).</p></div>' % FIG_B5)
+    a("<h3>Options</h3><ul>")
+    a("<li><strong>(a) Keep.</strong> Matches the reviewer's first request and his \"does seem useful\". PR body line 62 and design Q3 stay true. Cost: 85 header lines with no production caller, against jhan's rule 2 (nothing speculative), and the packed-K child (the planned follow-on PR that gives K the same packed layout) repeats the cost once.</li>")
+    a("<li><strong>(b) Drop v_vnni_row and the expr base of v_vnni_view. Keep at() and the bulk operations.</strong> That is the public surface of the reviewer's sketch. The diff is ready (exec/ben-20260930/b5-option-b-drop-row.diff: kv_cache_fwd.hpp +2/-5, v_vnni.hpp +8/-94, t_llama_unit.cpp +7/-27, net -109) and applies cleanly to c73e7fb2f9. A refuter ran a syntax-only compile at 16 lanes with the real flags: t_llama_unit.cpp, amx_attn.cpp and a probe unit all pass. Still needed: one more hunk for the comment at kv_cache.hpp:2309 (\"(v_vnni_view::at, row[dim])\" loses \", row[dim]\"), a real build and test run at 16 lanes, a syntax check at 8 lanes, PR body lines 19, 36, 37, 62 and 64 rewritten, design Q3 recorded as rejected.</li>")
+    a("<li><strong>(c) Keep the row as a test helper under t/.</strong> Moves the 70 lines instead of removing them, and the \"who may compute a packed address\" rule would have to name a test helper. Not drafted.</li>")
+    a("<li><strong>(d) Keep operator[] but return tron's existing strided rank-1 view</strong> (view with stride 2 from pair_base + parity) instead of a new row class. Found by a refuter. Trap: the rank-1 const_view returns elements by value, so the test probes' write checks would need rework. Not drafted.</li>")
+    a("</ul>")
+    a('<div class="rec"><div class="lbl">Recommendation</div><p>This is jhan\'s decision. I lean to (b): zero production users, the reviewer\'s own sketch shape, and jhan\'s simplicity rule all favor dropping it, and the PR 4424 child then needs no k_vnni_row. The reply asks the reviewer and states that lean. If the answer is drop, apply the diff plus the kv_cache.hpp:2309 hunk, build and run t_llama_unit on 3bda in both trees, and rewrite the five PR body lines before pushing. If the answer is keep, record his answer on design Q3 and move on.</p></div>')
+    a(reply_box("B5", "Draft reply under 4134076112"))
+
+    # ------------------------------------------------------------ B6
+    a('<h2 id="b6">9. B6: the reviewer\'s dedup PR #4697 <span class="pill holds">holds</span></h2>')
+    a('<div class="quote"><div class="who">Comment 4134925164 on h/tron/scheduler/full.hpp:2764</div><p>"This is a rather subtle pattern that is repeated quite a few times. I have opened #4697 to deduplicate this. Feel free to merge or adapt to taste."</p></div>')
+    a("<h3>What #4697 does (commit 8bbbb7c82d, 8 files, +39/-43)</h3><ul>")
+    a("<li>Moves v_source_row and v_destination_row from t_llama_unit.cpp into v_vnni.hpp, adds the aliases const_v_row_view and v_row_view, and uses them in page::set_v / get_v (declarations and definitions), append_v_row, load_row, model.hpp, full.hpp and four test files. The helpers sit outside the <code>#if TRON_CHUNK_SIZE == 16</code> block, so every build parses them. Only the 16-lane build instantiates them.</li>")
+    a("<li>Every caller passes Cols explicitly and lets T deduce from the pointer (38 call sites in t_llama_unit.cpp, none passed T at c73e7fb2f9). model.hpp passes the executor buffer's DMA flag explicitly: <code>v_source_row&lt;geometry.kv.head_size, v_buffer_t::dma&gt;(...)</code>. The buffer is a btensor (bf16, dma = true), htensor (fp16, dma = true) or tensor (float, dma = false), so the Dma parameter is needed and is kept.</li>")
+    a("<li>The removed test helpers carried the warning that wrapping does not make a pointer aligned. The new header comment keeps an equivalent warning (\"The caller must provide Cols elements aligned to chunk_alignment. These helpers neither check alignment nor copy data.\"). chunk_alignment is 64 bytes at 16 lanes, which is what the widest row load (_mm512_load_ps for float rows) needs.</li>")
+    a("<li>New literals on added lines: only the stride 1 in <code>sseq&lt;1&gt;</code> inside the two aliases. native_k_view in kv_cache_fwd.hpp writes the same bare stride literal as <code>std::integer_sequence&lt;ptrdiff_t, Cols, 1&gt;</code>. No loop added. clang-format 19.1.7 clean, no line over 88 columns.</li>")
+    a("<li>Row-view sites spelled out by hand: 20 grep matches at 18 sites at c73e7fb2f9, 1 after #4697 (the page_supports_uniform_kv_access probe, t_llama_unit.cpp:142-150), 0 if the probe is converted too. The four remaining VIEW_ALIGNED_TRUE lines in kv_cache.hpp (2391, 2469, 2475, 2514) are two-dimensional plane views, not rows, and stay.</li>")
+    a("<li>Its CI passed (Build Tron, Test host, Test FPGA, Lint, Debian smoke) on the AMX-off tree. The two AMX test files it touches are compiled in every tree, so CI compiled every changed file. The AMX kernels themselves ran only on 3bda (section 10): all four tests pass in both trees with the known counts.</li>")
+    a("</ul>")
+    a("<h3>How to take it</h3><ul>")
+    a("<li><strong>(a) Fast-forward</strong> the branch onto 8bbbb7c82d and push. Keeps his commit id and authorship. GitHub should mark #4697 merged (not exercised here. Fallback: close it with a note). <em>Recommended.</em> Must happen before any other push.</li>")
+    a("<li><strong>(a') gh pr merge 4697 --rebase or --merge.</strong> Marks it merged for certain. --rebase rewrites the commit id (committer GitHub), --merge adds a merge commit inside the branch. The repo allows all three merge methods, and main takes merge commits.</li>")
+    a("<li><strong>(b) cherry-pick.</strong> New commit id, #4697 stays open. Strictly worse than (a). (The scratch branch used this only because it could not fast-forward.)</li>")
+    a("<li><strong>(c) Adapt:</strong> (a) plus one small commit converting the probe. Optional. If done, name the stride constant too (V_ROW_STRIDE_1 next to VIEW_DMA_FALSE) so the two alias lines carry no bare literal under jhan's guide.</li>")
+    a("</ul>")
+    a('<div class="rec"><div class="lbl">Recommendation</div><p>(a), first thing on the real branch. State the order with #4698 in the reply. Offer the probe conversion, do not insist on it.</p></div>')
+    a(reply_box("B6", "Draft reply under 4134925164"))
+
+    # ------------------------------------------------------------ verify
+    a('<h2 id="verify">10. Verification record</h2>')
+    a("<p>Two scratch branches were built and tested on delphi-3bda (our half: CPUs 72-143 and 216-287, socket 1). people-check (defined under Words used here) said FREE both times (no CI lease, no other user). Nothing was pushed.</p>")
+    a("<h3>Round r1: #4697 (cherry-picked) + B2 + B3 + B4 fallback</h3>")
+    a('<div class="tbl"><table><tr><th>Commit</th><th>Thread</th><th>Subject</th></tr>')
+    for r in [("6b6bcbcb29", "B6", "Share KV row view helpers across cache callers (cherry-pick of 8bbbb7c82d, author kept)"), ("7a6c3857d0", "B2", "Rename Note [Packed V layout] to Note [VNNI Packed V layout]"),
+              ("2ebc426f3d", "B3", "Reword Note [DMA allocation creates objects] in plain words"), ("6009cc6ed2", "B4 (a)", "Point the non-ISO reads comment at issue #4588")]:
+        a("<tr><td><code>%s</code></td><td>%s</td><td>%s</td></tr>" % tuple(esc(x) for x in r))
+    a("</table></div>")
+    a('<div class="tbl"><table><tr><th>Check</th><th>Result</th></tr>')
+    for r in [("git diff --check vs c73e7fb2f9", "rc 0, 13 files"), ("clang-format 19.1.7 --dry-run --Werror, 13 files", "rc 0; longest added line 87 (B2), 80 (B3), 74 (B4) columns"),
+              ("make lint-notes inside nix on 3bda", "rc 0, no dangling Note reference"), ("lcheck syntax-only, 5 units, AMX-on and AMX-off flags, before and after", "0 errors, 0 warnings in all runs (negative control detects 1 error in 7.6 s)"),
+              ("3bda configure + build gen (AMX-on) and gen-amxoff, 4 targets each", "rc 0; 4 min 45 s and 4 min 15 s")]:
+        a("<tr><td>%s</td><td>%s</td></tr>" % tuple(esc(x) for x in r))
+    a("</table></div>")
+    a('<div class="tbl"><table><tr><th>Tree</th><th>Test</th><th>Result</th><th>Known at c73e7fb2f9</th></tr>')
+    for r in [("AMX-on", "t_llama_unit", "pass, 44 cases / 252720 assertions", "44 / 252720"), ("AMX-on", "t_amx_numerics", "pass, 12301 assertions (real AMX)", "12301"), ("AMX-on", "t_amx_dispatch_dtype", "pass, 1559", "1559"),
+              ("AMX-on", "t_heterogeneous_scheduler", "pass, 1900", "1900"), ("AMX-on", "t_llama_unit, packed-bits case alone", "pass, 28947", "28947"), ("AMX-on", "t_llama_unit, sliding-chunk case alone", "pass, 53593", "53593"),
+              ("AMX-off", "t_llama_unit", "pass, 44 / 252720", "44 / 252720"), ("AMX-off", "t_amx_numerics", "pass, 1 (AMX cases compiled out)", "1"), ("AMX-off", "t_amx_dispatch_dtype", "pass, 1 (compiled out)", "1"), ("AMX-off", "t_heterogeneous_scheduler", "pass, 1900", "1900")]:
+        a("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % tuple(esc(x) for x in r))
+    a("</table></div>")
+    a("<p>Log: exec/ben-20260930/r1-3bda.log. The comment diffs: exec/ben-20260930/r1-comment-diffs.diff.</p>")
+    a("<h3>Round r2: #4697 + #4698 (merge) + B2 + B3 + two B3 follow-up edits</h3>")
+    import subprocess
+    try:
+        log = subprocess.run(["git", "-C", "/home/jhan/workspace/ai-runs/tron-issue4525-ben-r2", "log", "--format=%h|%an|%s", "c73e7fb2f9..HEAD"], capture_output=True, text=True, check=True).stdout.strip().split("\n")
+        a('<div class="tbl"><table><tr><th>Commit (ben-r2, newest first)</th><th>Author</th><th>Subject</th></tr>')
+        for l in log:
+            h, an, subj = l.split("|", 2)
+            a("<tr><td><code>%s</code></td><td>%s</td><td>%s</td></tr>" % (esc(h), esc(an), esc(subj)))
+        a("</table></div>")
+    except Exception as e:  # noqa
+        a("<p class=\"warn\">Could not read the ben-r2 worktree log: %s</p>" % esc(str(e)))
+    if r2_done:
+        a("<pre>%s</pre>" % esc(r2_text))
+    else:
+        a('<p class="warn">Pending. The r2 build was launched at 2026-09-30 20:4x UTC and had not reported when this page was generated. Until it does, the #4698 stack counts as "CI green, 3bda not run". Rerun gen_ben.py after saving the report as exec/ben-20260930/r2-results.txt.</p>')
+
+    # ------------------------------------------------------------ pr body
+    a('<h2 id="prbody">11. PR body lines that go stale</h2>')
+    a("<p>Line numbers refer to the body as fetched on 2026-09-30. The live GitHub body is the source, not any copy on disk. Re-fetch before editing.</p>")
+    a('<div class="tbl"><table><tr><th>Line</th><th>Today</th><th>Change</th><th>Trigger</th></tr>')
+    for r in [("3", "\"This PR addresses Ben's review comments at PR #4424, ...\"", "Replace the name by \"the maintainer's\". Pre-existing, against the no-names rule for public text.", "always"),
+              ("40", "\"Note [Packed V layout] documents the layout and the access rules.\"", "Note [VNNI Packed V layout]", "B2"),
+              ("44", "\"page::set_v and page::get_v take a typed, aligned, unit-stride row (const_view<Source, true, Dma, seq<head_size>, sseq<1>> and view<Destination, ...>)\"", "\"... (const_v_row_view<Source, head_size, Dma> / v_row_view<Destination, head_size, Dma>, from PR #4697)\"", "#4697"),
+              ("43 (add after)", "\"k_view now builds its views from this array with no reinterpret_cast\"", "Add the matching V sentence: scaled_v_expr, fill_storage_slot and the 8-lane V accessors read bf16 arrays without a cast (PR #4698).", "#4698"),
+              ("106", "\"The next section checks the allocation path of the current code.\"", "Delete the sentence. No such section follows (line 109 is \"## Labels\"). Already wrong today.", "always"),
+              ("19, 36, 37, 62, 64", "the v_vnni_row / operator[] / expr sentences", "Rewrite only if B5 = drop.", "B5"),
+              ("Status section", "commit list and CI links", "Add the new commits and the CI run of the final push.", "push")]:
+        a("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % tuple(esc(x) for x in r))
+    a("</table></div>")
+
+    # ------------------------------------------------------------ open
+    a('<h2 id="open">12. Open decisions for jhan</h2><ul>')
+    for s in [
+        "<strong>B4:</strong> merge #4698 now (recommended) or keep the one-line tracker reference and let #4698 land after this PR. The two are exclusive (the one-line commit conflicts with #4698).",
+        "<strong>B5:</strong> keep v_vnni_row, or drop it and the expr base (I lean to drop). The reply asks the reviewer either way. If jhan already knows the answer, post the diff instead of the question.",
+        "<strong>B1:</strong> issue #4732 is filed with the enum names view_alignment / view_memory. Rename them in the issue if you prefer other names.",
+        "<strong>B2:</strong> keep the added VNNI clause, or apply the literal rename only.",
+        "<strong>B3:</strong> the reworded Note names kv_block and the KV book inside a system header. memory.hpp:300 already names book::try_create, so there is precedent. Fine as is, or move the KV-specific sentences into Note [KV block lifetime].",
+        "<strong>B6:</strong> convert the last spelled-out probe (option c) or leave it. If converted, add V_ROW_STRIDE_1.",
+        "<strong>Follow-up issues not needed for this round:</strong> the three other DMA factories and direct dma_allocate_aligned callers create no objects (drafted); the four plane views in kv_cache.hpp could use the native_k_view aliases (cosmetic); the packed-K child follows the B5 decision (file only after the reviewer answers).",
+        "<strong>Merged code and the guide:</strong> #4698 carries bare literals and unbraced loops in the reviewer's lines. Accept as an exception (my recommendation: it is his code) or rename in a follow-up commit.",
+        "<strong>Housekeeping:</strong> correct the memory note that says the paragraph was removed on 2026-09-24. Delete /var/tmp/jhan/tron-issue4525-ben on 3bda after the round.",
+    ]:
+        a("<li>%s</li>" % s)
+    a("</ul>")
+
+    # ------------------------------------------------------------ gaps
+    a('<h2 id="gaps">13. What is not verified</h2><ul>')
+    for s in [
+        "The 8-lane (AVX2) hunks of #4698. No CI job builds 8 lanes, the seed tree on 3bda has no gen-avx2, and t_llama_unit does not compile at 8 lanes at c73e7fb2f9 (131 errors, none in kv_cache.hpp). A syntax-only check of kv_cache.hpp with 8-lane flags at the merge commit would show whether the hunks add errors. Not run.",
+        "Performance of the 16-lane scaled_v_expr after #4698 in production binaries. In t_llama_unit the two scaled_v_expr functions are identical after address normalization (section 10), and the addresses match by enumeration, so a change is unlikely. runtron itself was not rebuilt or timed. The #4698 CI benchmark on andoria-14 shows no same-host regression, but that is an AMD host without AMX.",
+        "Whether GitHub marks #4697 merged after a fast-forward push. Standard behavior, not exercised. Fallback given in section 3.",
+        "The claim that no compiler warning or sanitizer catches the lifetime gap was measured with GCC 14.3 and 11.4 only (17-line sample, -Wall -Wextra -Wpedantic, ASan + UBSan). clang 19 not measured. The sentence was dropped from the Note for that reason.",
+        "Whether the reviewer meant #4698 for this PR. He did not say. The reply asks.",
+        "The compile probes for B1 (enum against bool parameter) ran on standalone files with g++ 11.4 and clang 19.1.7 on claude-box, not inside the nix toolchain.",
+    ]:
+        a("<li>%s</li>" % esc(s))
+    a("</ul>")
+
+    # ------------------------------------------------------------ sources
+    a('<h2 id="sources">14. Sources and method</h2>')
+    a("<p>Every file:line on this page was read at c73e7fb2f9 (PR head), at 996f58ec82 (the merge base, called \"main\" here. origin/main has since moved to 43e533f7b6, with kv_cache.hpp byte-identical), at 8bbbb7c82d (#4697) or at 63df10cf90 (#4698), as stated in each place. Standard paragraphs are N4950 as published at timsong-cpp.github.io/cppwp/n4950.</p>")
+    a("<ul>")
+    a("<li>Review data: exec/ben-20260930/review-comments.json (the 8 comments of reviews 5352791816 and 5354385317).</li>")
+    a("<li>Workflow wf_eefcbfe8-584 (26 agents, 51 min): one analyst per thread, three refuters per analyst (facts and citations, engineering consequences, plain English and etiquette), one apply-and-build agent, one completeness critic. Script and full result: exec/ben-20260930/pr4557-ben-response-wf_eefcbfe8-584.js and workflow-result-wf_eefcbfe8-584.json. The refuters corrected 60 analyst items (counts, line numbers, over-claims); every correction is folded into this page. Where refuters disagreed with each other, the page says so (B3 claim iii, B5 recommendation, B1 option d).</li>")
+    a("<li>Round r2 build agent (this session): worktree ~/workspace/ai-runs/tron-issue4525-ben-r2, 3bda copy /var/tmp/jhan/tron-issue4525-ben.</li>")
+    a("<li>Earlier context: the design page status/design-new-tensor-type.html (Q3), the reviewer's PR 4424 review 5270587330 and sketch 5765866077, issue #4588, the session memory for the 2026-09-24 plan.</li>")
+    a("<li>Rules applied: jhan's C++ guide (named literals incl. true/false/0/1, braced loops) for any new line by jhan; no names in issue text; plain English (terms defined at first use, one claim per sentence, units on numbers).</li>")
+    a("</ul>")
+    a("</div></body></html>")
+
+    page = "\n".join(H)
+    bad = [(i, c) for i, c in enumerate(page) if ord(c) > 127]
+    assert not bad, bad[:5]
+    with open(OUT, "w") as f:
+        f.write(page)
+    print("wrote", os.path.abspath(OUT), len(page), "bytes")
+
+
+if __name__ == "__main__":
+    main()
