@@ -1,0 +1,227 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/fix-results.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/fix-results.html
+-->
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Issue 4500 fix results</title>
+<style>:root{color-scheme:light}body{background:#fff;color:#222;font-family:system-ui,sans-serif;max-width:1040px;margin:24px auto;padding:0 16px;line-height:1.45}
+table{border-collapse:collapse;font-size:14px}th,td{border:1px solid #ddd;padding:4px 8px;text-align:left}th{background:#f4f4f4}pre{background:#f6f6f6;padding:8px;overflow-x:auto;font-size:12px}h2{margin-top:32px}.short{background:#eef6ff;padding:10px 14px;border-left:4px solid #2a78d6}</style></head><body>
+<h1>Issue #4500 fix: row-major tail block for the VNNI K layout, measured</h1>
+<p class="short"><b>Short version.</b> The fix recovers little of the issue 4500 loss. qwen-3-4b with FPGA attention: PR 4424 loses 3.8 % TPS at tp2 (2 users per engine) and 11.8 % at tp4 (4 users) against the canonical AMX build; with the fix the losses are 2.3 % and 8.8 %, and the fix-vs-PR differences (+1.5 % and +3.4 %) are not resolved at 3 repetitions. llama-3.1-8b with CPU attention (tp2, 8 users per engine, prompt 4096) is unchanged by the fix (-0.4 %, not resolved; both builds +8.5 to +8.9 % over the canonical build). Token rows of the fix equal its own repeat run in every smoke; under FPGA attention they also equal the PR head's.</p>
+<p><b>What this says about the root cause.</b> The row-major tail block removes the three 64-line accesses of decode that the root-cause page named (the main-thread scatter store, the workers' tail read, the staging gather), and the smoke shows the new code path is active (the CPU-attention token rows of the fix differ from the PR head's from token 52 and 6 on, as the tail-block scores now take the row-major dotter's fp32 add order). Yet most of the loss stays. So the exposed cost of the VNNI layout in FPGA decode is not, or not mainly, the per-token access pattern of the incomplete block. Candidates that the fix does not touch: the AVX-512 reader k_vnni::qk_group on the engagement-prefix page (positions 64..126 are scored by the CPU on every step, in converted blocks), the per-step AMX path work that the kill switch removed at tp4 in the 09-19 campaign (+6.8 % TPS), and the forward-end conversions (est. 0.05 ms per step at 2 users, not measured). The m2 launch-phase result of 09-19 (+0.58 ms per step more loss with the late launch) still stands as the strongest lever: TRON_HWATTN_EARLY_LAUNCH_MIN_B=1 gave +6.2 % over the shipped package on the tp2 cell.</p>
+<p><b>Repetition 2 of the tp4 cell</b> is the known bimodal state of that cell (fix 127.0 and PR 118.4 TPS against 148 to 154 in the other repetitions; the canonical and nightly builds did not show it); the tp4 means and the paired t carry that spread.</p>
+<p><b>Nightly reference.</b> The installed nightly package (main of 2026-09-28, canonical AMX) is 12.9 % faster than the 09-18 canonical build at tp4 and equal at tp2 and on llama; the tp4 gain of main since 09-23 is a separate open item (memory: ci-amx-row-20260923). All four binaries were measured in the same session, interleaved.</p>
+<p><b>Unit tests.</b> The chain's builds ran 5 test binaries with the fake device: two failed in the VNNI build and one in the row-major build. Causes: the new EAGLE-view layout test built its book without the x storage an EAGLE slot needs (test setup); the apply-and-join test scores a page of a book with no active KV slot under a window that excludes every token, and the new software loop read the page's layout state before the token loop (a reader defect: the state is now fetched at the first relevant token, commit f34b0fe2ec, no effect on the measured decode paths). A third rerun exposed a data-dependent tolerance miss on one weighted-V element (scores matched the reference to 1e-5, one v_star element was 0.016 off on 0.25, the same with the AMX kernels off): the VNNI build's unconverted rows live at other plane bytes than the row-major build's rows, so the two builds scored different random K instances; the test now stores the row-major rows first, both builds score one instance, and every test passes in both builds at f34b0fe2ec (section 5, rerun). The miss on the other instance is consistent with the bf16 truncation of the softmax weights in scaled_v (issue #4600) on a large V value; not proven.</p>
+<p>Words used here: tron = the inference program under test; rinzler = the production server; runtron = tron's command-line tool; TPS = decode tokens per second per user, captured by the nightly's own client between generated tokens 896 and 1024 of 1536 (10 rounds); step ms = 1000 / TPS; paired t = the mean of the per-repetition differences divided by its standard error (thresholds 12.71 at n = 2, 4.30 at n = 3; "n.r." = not resolved); VNNI K = the K cache layout of PR 4424; the fix = commit 78582b7ba3 (row-major 16-token tail block, converted in place at the forward end); AMX-busy = cycles of the EXE.AMX_BUSY counter on the engine during 20 s of the benchmark (0 = no AMX kernel ran).</p>
+<h2>1. The chart</h2>
+<svg viewBox="0 0 1240 346" width="100%" style="max-width:1240px;font-family:system-ui,sans-serif;font-size:13px">
+<rect x="0" y="0" width="1240" height="346" fill="#ffffff"/>
+<line x1="522.9" y1="36" x2="522.9" y2="306" stroke="#e8e8e8"/>
+<text x="522.9" y="324" text-anchor="middle" fill="#666">30</text>
+<line x1="548.4" y1="36" x2="548.4" y2="306" stroke="#e8e8e8"/>
+<text x="548.4" y="324" text-anchor="middle" fill="#666">40</text>
+<line x1="574.0" y1="36" x2="574.0" y2="306" stroke="#e8e8e8"/>
+<text x="574.0" y="324" text-anchor="middle" fill="#666">50</text>
+<line x1="599.5" y1="36" x2="599.5" y2="306" stroke="#e8e8e8"/>
+<text x="599.5" y="324" text-anchor="middle" fill="#666">60</text>
+<line x1="625.0" y1="36" x2="625.0" y2="306" stroke="#e8e8e8"/>
+<text x="625.0" y="324" text-anchor="middle" fill="#666">70</text>
+<line x1="650.5" y1="36" x2="650.5" y2="306" stroke="#e8e8e8"/>
+<text x="650.5" y="324" text-anchor="middle" fill="#666">80</text>
+<line x1="676.0" y1="36" x2="676.0" y2="306" stroke="#e8e8e8"/>
+<text x="676.0" y="324" text-anchor="middle" fill="#666">90</text>
+<line x1="701.6" y1="36" x2="701.6" y2="306" stroke="#e8e8e8"/>
+<text x="701.6" y="324" text-anchor="middle" fill="#666">100</text>
+<line x1="727.1" y1="36" x2="727.1" y2="306" stroke="#e8e8e8"/>
+<text x="727.1" y="324" text-anchor="middle" fill="#666">110</text>
+<line x1="752.6" y1="36" x2="752.6" y2="306" stroke="#e8e8e8"/>
+<text x="752.6" y="324" text-anchor="middle" fill="#666">120</text>
+<line x1="778.1" y1="36" x2="778.1" y2="306" stroke="#e8e8e8"/>
+<text x="778.1" y="324" text-anchor="middle" fill="#666">130</text>
+<line x1="803.6" y1="36" x2="803.6" y2="306" stroke="#e8e8e8"/>
+<text x="803.6" y="324" text-anchor="middle" fill="#666">140</text>
+<line x1="829.2" y1="36" x2="829.2" y2="306" stroke="#e8e8e8"/>
+<text x="829.2" y="324" text-anchor="middle" fill="#666">150</text>
+<line x1="854.7" y1="36" x2="854.7" y2="306" stroke="#e8e8e8"/>
+<text x="854.7" y="324" text-anchor="middle" fill="#666">160</text>
+<line x1="880.2" y1="36" x2="880.2" y2="306" stroke="#e8e8e8"/>
+<text x="880.2" y="324" text-anchor="middle" fill="#666">170</text>
+<line x1="905.7" y1="36" x2="905.7" y2="306" stroke="#e8e8e8"/>
+<text x="905.7" y="324" text-anchor="middle" fill="#666">180</text>
+<line x1="931.2" y1="36" x2="931.2" y2="306" stroke="#e8e8e8"/>
+<text x="931.2" y="324" text-anchor="middle" fill="#666">190</text>
+<line x1="956.8" y1="36" x2="956.8" y2="306" stroke="#e8e8e8"/>
+<text x="956.8" y="324" text-anchor="middle" fill="#666">200</text>
+<line x1="982.3" y1="36" x2="982.3" y2="306" stroke="#e8e8e8"/>
+<text x="982.3" y="324" text-anchor="middle" fill="#666">210</text>
+<text x="745" y="340" text-anchor="middle" fill="#444">decode TPS per user (higher is better)</text>
+<text x="488" y="80.0" text-anchor="end" fill="#222">llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</text>
+<line x1="547.4" y1="86.0" x2="556.4" y2="86.0" stroke="#bbb" stroke-width="3"/>
+<circle cx="547.4" cy="86.0" r="7" fill="#2a78d6"/>
+<circle cx="556.4" cy="86.0" r="7" fill="#eb6834"/>
+<circle cx="556.0" cy="86.0" r="7" fill="#1f9d55"/>
+<circle cx="547.7" cy="86.0" r="7" fill="#8a8a8a"/>
+<text x="1006" y="59" fill="#2a78d6">base 39.6</text>
+<text x="1006" y="77" fill="#eb6834">vnni 43.1</text>
+<text x="1006" y="95" fill="#1f9d55">fix 43.0</text>
+<text x="1006" y="113" fill="#8a8a8a">nightly 39.7</text>
+<text x="488" y="100.0" text-anchor="end" fill="#1f9d55">fix vs PR 4424: -0.4 % TPS (+0.086 ms per step, paired t +3.4, n.r.)</text>
+<text x="488" y="164.0" text-anchor="end" fill="#222">qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</text>
+<line x1="921.5" y1="170.0" x2="942.6" y2="170.0" stroke="#bbb" stroke-width="3"/>
+<circle cx="940.1" cy="170.0" r="7" fill="#2a78d6"/>
+<circle cx="921.5" cy="170.0" r="7" fill="#eb6834"/>
+<circle cx="928.6" cy="170.0" r="7" fill="#1f9d55"/>
+<circle cx="942.6" cy="170.0" r="7" fill="#8a8a8a"/>
+<text x="1006" y="143" fill="#2a78d6">base 193.5</text>
+<text x="1006" y="161" fill="#eb6834">vnni 186.2</text>
+<text x="1006" y="179" fill="#1f9d55">fix 189.0</text>
+<text x="1006" y="197" fill="#8a8a8a">nightly 194.4</text>
+<text x="488" y="184.0" text-anchor="end" fill="#1f9d55">fix vs PR 4424: +1.5 % TPS (-0.080 ms per step, paired t -1.6, n.r.)</text>
+<text x="488" y="248.0" text-anchor="end" fill="#222">qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</text>
+<line x1="799.3" y1="254.0" x2="898.4" y2="254.0" stroke="#bbb" stroke-width="3"/>
+<circle cx="846.6" cy="254.0" r="7" fill="#2a78d6"/>
+<circle cx="799.3" cy="254.0" r="7" fill="#eb6834"/>
+<circle cx="811.3" cy="254.0" r="7" fill="#1f9d55"/>
+<circle cx="898.4" cy="254.0" r="7" fill="#8a8a8a"/>
+<text x="1006" y="227" fill="#2a78d6">base 156.8</text>
+<text x="1006" y="245" fill="#eb6834">vnni 138.3</text>
+<text x="1006" y="263" fill="#1f9d55">fix 143.0</text>
+<text x="1006" y="281" fill="#8a8a8a">nightly 177.1</text>
+<text x="488" y="268.0" text-anchor="end" fill="#1f9d55">fix vs PR 4424: +3.4 % TPS (-0.271 ms per step, paired t -1.8, n.r.)</text>
+<circle cx="46" cy="16" r="6" fill="#2a78d6"/><text x="56" y="20" fill="#333">base = canonical AMX (row-major K)</text>
+<circle cx="346" cy="16" r="6" fill="#eb6834"/><text x="356" y="20" fill="#333">vnni = PR 4424 (VNNI K, the loss)</text>
+<circle cx="646" cy="16" r="6" fill="#1f9d55"/><text x="656" y="20" fill="#333">fix = PR 4424 + fix</text>
+<circle cx="946" cy="16" r="6" fill="#8a8a8a"/><text x="956" y="20" fill="#333">nightly = installed nightly</text>
+</svg>
+<p>Every dot is the mean over the repetitions; the cell table gives min and max. Durations of the harness runs are in the cells' perf-e0.log files.</p>
+<h2>2. Cells</h2>
+<table><tr><th>cell</th><th>binary</th><th>n</th><th>TPS mean</th><th>min / max over reps</th><th>TTFT ms</th><th>AMX-busy cycles per rep (20 s)</th></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</td><td>base = canonical AMX (row-major K)</td><td>3</td><td>39.60</td><td>39.51 / 39.68</td><td>13421</td><td>63347390476/63493960436/63242149860</td></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</td><td>vnni = PR 4424 (VNNI K, the loss)</td><td>3</td><td>43.13</td><td>43.05 / 43.17</td><td>13444</td><td>69141980604/69402828600/69386780528</td></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</td><td>fix = PR 4424 + fix</td><td>3</td><td>42.97</td><td>42.91 / 43.05</td><td>13468</td><td>68970144124/68955850436/69194414060</td></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</td><td>nightly = installed nightly</td><td>3</td><td>39.69</td><td>39.66 / 39.73</td><td>13471</td><td>63597126068/63507561760/63484669760</td></tr>
+<tr><td>qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</td><td>base = canonical AMX (row-major K)</td><td>3</td><td>193.46</td><td>191.81 / 195.07</td><td>707</td><td>583519896/583521976/583514212</td></tr>
+<tr><td>qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</td><td>vnni = PR 4424 (VNNI K, the loss)</td><td>3</td><td>186.18</td><td>184.30 / 187.80</td><td>709</td><td>1239446048/1239435836/1239434112</td></tr>
+<tr><td>qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</td><td>fix = PR 4424 + fix</td><td>3</td><td>188.98</td><td>187.75 / 190.21</td><td>697</td><td>1107321132/1239449276/1239456448</td></tr>
+<tr><td>qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</td><td>nightly = installed nightly</td><td>3</td><td>194.44</td><td>194.07 / 194.66</td><td>705</td><td>583520788/583521932/583515032</td></tr>
+<tr><td>qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</td><td>base = canonical AMX (row-major K)</td><td>3</td><td>156.82</td><td>154.89 / 159.13</td><td>865</td><td>2006587572/2006574764/2006564648</td></tr>
+<tr><td>qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</td><td>vnni = PR 4424 (VNNI K, the loss)</td><td>3</td><td>138.30</td><td>118.44 / 150.05</td><td>817</td><td>968890212/919341636/1505271744</td></tr>
+<tr><td>qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</td><td>fix = PR 4424 + fix</td><td>3</td><td>142.99</td><td>126.98 / 153.60</td><td>821</td><td>968917400/892949324/2006606892</td></tr>
+<tr><td>qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</td><td>nightly = installed nightly</td><td>3</td><td>177.12</td><td>176.51 / 177.43</td><td>818</td><td>2204750720/2204756972/2204746464</td></tr>
+</table>
+<h2>3. Paired differences</h2>
+<table><tr><th>cell</th><th>a</th><th>b</th><th>n</th><th>a minus b, ms per step</th><th>TPS %</th><th>paired t</th></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</td><td>fix</td><td>base</td><td>3</td><td>-1.981 (sd 0.092)</td><td>+8.51</td><td>-37.47</td></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</td><td>nightly</td><td>base</td><td>3</td><td>-0.059 (sd 0.049)</td><td>+0.23</td><td>-2.08</td></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</td><td>vnni</td><td>base</td><td>3</td><td>-2.068 (sd 0.069)</td><td>+8.92</td><td>-51.58</td></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</td><td>fix</td><td>vnni</td><td>3</td><td>+0.086 (sd 0.045)</td><td>-0.37</td><td>+3.35</td></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096 (CPU attention)</td><td>nightly</td><td>vnni</td><td>3</td><td>+2.009 (sd 0.059)</td><td>-7.97</td><td>+58.49</td></tr>
+<tr><td>qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</td><td>fix</td><td>base</td><td>3</td><td>+0.123 (sd 0.067)</td><td>-2.32</td><td>+3.17</td></tr>
+<tr><td>qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</td><td>nightly</td><td>base</td><td>3</td><td>-0.026 (sd 0.051)</td><td>+0.51</td><td>-0.90</td></tr>
+<tr><td>qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</td><td>vnni</td><td>base</td><td>3</td><td>+0.202 (sd 0.054)</td><td>-3.77</td><td>+6.49</td></tr>
+<tr><td>qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</td><td>fix</td><td>vnni</td><td>3</td><td>-0.080 (sd 0.085)</td><td>+1.50</td><td>-1.62</td></tr>
+<tr><td>qwen-3-4b tp2, 2 users per engine, prompt 1024 (FPGA attention)</td><td>nightly</td><td>vnni</td><td>3</td><td>-0.229 (sd 0.059)</td><td>+4.44</td><td>-6.77</td></tr>
+<tr><td>qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</td><td>fix</td><td>base</td><td>3</td><td>+0.664 (sd 0.710)</td><td>-8.82</td><td>+1.62</td></tr>
+<tr><td>qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</td><td>nightly</td><td>base</td><td>3</td><td>-0.731 (sd 0.103)</td><td>+12.94</td><td>-12.32</td></tr>
+<tr><td>qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</td><td>vnni</td><td>base</td><td>3</td><td>+0.935 (sd 0.966)</td><td>-11.81</td><td>+1.68</td></tr>
+<tr><td>qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</td><td>fix</td><td>vnni</td><td>3</td><td>-0.271 (sd 0.259)</td><td>+3.39</td><td>-1.81</td></tr>
+<tr><td>qwen-3-4b tp4, 4 users per engine, prompt 1024 (FPGA attention)</td><td>nightly</td><td>vnni</td><td>3</td><td>-1.667 (sd 0.992)</td><td>+28.07</td><td>-2.91</td></tr>
+</table>
+<h2>4. Token smoke (runtron, one user, temperature 0)</h2>
+<p>fix vs fix2 must be identical (the A/A control). fix vs vnni may differ at a bf16 tie: the tail-block scores of the fix take the row-major dotter's fp32 add order, the PR head's take qk_group's.</p>
+<pre>### arm=vnni bin=/var/tmp/jhan/tron-tilec/gen/runtron attn=cpu prompt=1024 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:26:05Z load=80.48 126.33 139.68 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke cpu p1024 vnni rc=0 [13:26:06.144425875|thread 4082746|cpu 230] [info ] Version: 2026.09.17-30c4ac82 hash: 30c4ac82cbb6959f7e4f66b29efb36f5e0749b48 [13:26:32.540981801|thread 4082746|cpu 230] [info ] HW attention disabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: USE_HW_ATTN=0 [13:26:32.980100227|thread 4082814
+### arm=fix bin=/var/tmp/jhan/tron-i4500/gen/runtron attn=cpu prompt=1024 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:26:54Z load=36.99 107.43 132.55 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke cpu p1024 fix rc=0 [13:26:55.731154140|thread 4082913|cpu 222] [info ] Version: 2026.09.29-617cb833 hash: 617cb8333fe18ea02e0dcddeba1c52d7c3242d69 [13:27:22.130342028|thread 4082913|cpu 222] [info ] HW attention disabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: USE_HW_ATTN=0 [13:27:22.569913423|thread 4082986
+### arm=fix2 bin=/var/tmp/jhan/tron-i4500/gen/runtron attn=cpu prompt=1024 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:27:44Z load=18.11 91.44 125.79 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke cpu p1024 fix2 rc=0 [13:27:45.374991011|thread 4083148|cpu 170] [info ] Version: 2026.09.29-617cb833 hash: 617cb8333fe18ea02e0dcddeba1c52d7c3242d69 [13:28:10.449215009|thread 4083148|cpu 170] [info ] HW attention disabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: USE_HW_ATTN=0 [13:28:10.888672373|thread 4083219
+### arm=vnni bin=/var/tmp/jhan/tron-tilec/gen/runtron attn=cpu prompt=1000 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:28:32Z load=8.14 77.43 119.22 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke cpu p1000 vnni rc=0 [13:28:33.594893089|thread 4083316|cpu 169] [info ] Version: 2026.09.17-30c4ac82 hash: 30c4ac82cbb6959f7e4f66b29efb36f5e0749b48 [13:28:58.636067422|thread 4083316|cpu 169] [info ] HW attention disabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: USE_HW_ATTN=0 [13:28:59.062653482|thread 4083384
+### arm=fix bin=/var/tmp/jhan/tron-i4500/gen/runtron attn=cpu prompt=1000 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:29:21Z load=4.14 66.69 113.61 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke cpu p1000 fix rc=0 [13:29:21.789296116|thread 4083485|cpu 168] [info ] Version: 2026.09.29-617cb833 hash: 617cb8333fe18ea02e0dcddeba1c52d7c3242d69 [13:29:48.178136015|thread 4083485|cpu 168] [info ] HW attention disabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: USE_HW_ATTN=0 [13:29:48.605599086|thread 4083550
+### arm=fix2 bin=/var/tmp/jhan/tron-i4500/gen/runtron attn=cpu prompt=1000 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:30:10Z load=2.47 56.59 107.72 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke cpu p1000 fix2 rc=0 [13:30:11.326945155|thread 4083648|cpu 170] [info ] Version: 2026.09.29-617cb833 hash: 617cb8333fe18ea02e0dcddeba1c52d7c3242d69 [13:30:37.711092331|thread 4083648|cpu 170] [info ] HW attention disabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: USE_HW_ATTN=0 [13:30:38.140068101|thread 4083716
+### arm=vnni bin=/var/tmp/jhan/tron-tilec/gen/runtron attn=fpga prompt=1024 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:31:00Z load=3.13 48.44 102.26 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke fpga p1024 vnni rc=0 [13:31:00.878851514|thread 4083813|cpu 172] [info ] Version: 2026.09.17-30c4ac82 hash: 30c4ac82cbb6959f7e4f66b29efb36f5e0749b48 [13:31:25.912639287|thread 4083813|cpu 172] [info ] HW attention enabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: max_layers=36 engagement=127 kv_slot_extent=36 hw
+### arm=fix bin=/var/tmp/jhan/tron-i4500/gen/runtron attn=fpga prompt=1024 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:31:48Z load=3.42 41.54 97.09 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke fpga p1024 fix rc=0 [13:31:49.104697434|thread 4083978|cpu 176] [info ] Version: 2026.09.29-617cb833 hash: 617cb8333fe18ea02e0dcddeba1c52d7c3242d69 [13:32:15.535814806|thread 4083978|cpu 176] [info ] HW attention enabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: max_layers=36 engagement=127 kv_slot_extent=36 hw
+### arm=fix2 bin=/var/tmp/jhan/tron-i4500/gen/runtron attn=fpga prompt=1024 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:32:37Z load=1.82 35.24 92.03 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke fpga p1024 fix2 rc=0 [13:32:38.815661624|thread 4084148|cpu 174] [info ] Version: 2026.09.29-617cb833 hash: 617cb8333fe18ea02e0dcddeba1c52d7c3242d69 [13:33:03.851571376|thread 4084148|cpu 174] [info ] HW attention enabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: max_layers=36 engagement=127 kv_slot_extent=36 hw
+### arm=vnni bin=/var/tmp/jhan/tron-tilec/gen/runtron attn=fpga prompt=1000 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:33:26Z load=1.10 30.38 87.70 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke fpga p1000 vnni rc=0 [13:33:27.063285203|thread 4084314|cpu 176] [info ] Version: 2026.09.17-30c4ac82 hash: 30c4ac82cbb6959f7e4f66b29efb36f5e0749b48 [13:33:53.414374003|thread 4084314|cpu 176] [info ] HW attention enabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: max_layers=36 engagement=127 kv_slot_extent=36 hw
+### arm=fix bin=/var/tmp/jhan/tron-i4500/gen/runtron attn=fpga prompt=1000 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:34:15Z load=1.03 25.86 83.16 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke fpga p1000 fix rc=0 [13:34:16.637141205|thread 4084477|cpu 22] [info ] Version: 2026.09.29-617cb833 hash: 617cb8333fe18ea02e0dcddeba1c52d7c3242d69 [13:34:41.639915364|thread 4084477|cpu 22] [info ] HW attention enabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: max_layers=36 engagement=127 kv_slot_extent=36 hw_a
+### arm=fix2 bin=/var/tmp/jhan/tron-i4500/gen/runtron attn=fpga prompt=1000 len=128 users=1 temperature=0 pay-for-determinism seed=1 2026-09-29T13:35:04Z load=2.50 22.44 78.99 hugepages_free=512 units_active=0 others=caddy,platformd,rhys,
+smoke fpga p1000 fix2 rc=0 [13:35:04.772252668|thread 4084641|cpu 27] [info ] Version: 2026.09.29-617cb833 hash: 617cb8333fe18ea02e0dcddeba1c52d7c3242d69 [13:35:31.166798436|thread 4084641|cpu 27] [info ] HW attention enabled for model &#x27;ingested-qwen-3-4b-instruct-2507-tp2&#x27;: max_layers=36 engagement=127 kv_slot_extent=36 hw_a
+== cpu p1024: token rows {&#x27;vnni&#x27;: 128, &#x27;fix&#x27;: 128, &#x27;fix2&#x27;: 128}
+fix vs fix2: IDENTICAL
+fix vs vnni: first difference at token 52, 65 of 128 differ
+== cpu p1000: token rows {&#x27;vnni&#x27;: 128, &#x27;fix&#x27;: 128, &#x27;fix2&#x27;: 128}
+fix vs fix2: IDENTICAL
+fix vs vnni: first difference at token 6, 114 of 128 differ
+== fpga p1024: token rows {&#x27;vnni&#x27;: 128, &#x27;fix&#x27;: 128, &#x27;fix2&#x27;: 128}
+fix vs fix2: IDENTICAL
+fix vs vnni: IDENTICAL
+== fpga p1000: token rows {&#x27;vnni&#x27;: 128, &#x27;fix&#x27;: 128, &#x27;fix2&#x27;: 128}
+fix vs fix2: IDENTICAL
+fix vs vnni: IDENTICAL</pre>
+<h2>5. Unit tests (fake device, our half of delphi-3bda)</h2>
+<p>VNNI build (TRON_K_VNNI on), chain run:</p><pre>t_k_vnni_layout rc=134 tip=617cb8333f env=[] args=[] t/t_k_vnni_layout.cpp:713: FAILED: test cases:     8 |     7 passed | 1 failed assertions: 90712 | 90711 passed | 1 failed 
+t_amx_dispatch_dtype rc=0 tip=617cb8333f env=[] args=[] All tests passed (2076 assertions in 1 test case) 
+t_amx_numerics rc=0 tip=617cb8333f env=[] args=[] All tests passed (4621 assertions in 5 test cases) 
+t_llama_unit rc=134 tip=617cb8333f env=[] args=[] t/t_llama_unit.cpp:1873: FAILED: test cases:    38 |    37 passed | 1 failed assertions: 11942 | 11941 passed | 1 failed 
+t_phase1_integration rc=0 tip=617cb8333f env=[] args=[] All tests passed (2124 assertions in 64 test cases) </pre>
+<p>Row-major build (TRON_K_VNNI off), chain run:</p><pre>t_k_vnni_layout rc=134 tip=617cb8333f env=[] args=[] t/t_k_vnni_layout.cpp:713: FAILED: test cases:     8 |     7 passed | 1 failed assertions: 90707 | 90706 passed | 1 failed 
+t_amx_dispatch_dtype rc=0 tip=617cb8333f env=[] args=[] All tests passed (2076 assertions in 1 test case) 
+t_llama_unit rc=0 tip=617cb8333f env=[] args=[] All tests passed (130670 assertions in 42 test cases) </pre>
+<p>Rerun after the test fixes (VNNI build, then row-major):</p><pre>t_k_vnni_layout rc=0 tip=f34b0fe2ec env=[] args=[] All tests passed (90983 assertions in 10 test cases) 
+t_llama_unit rc=0 tip=f34b0fe2ec env=[] args=[] All tests passed (130625 assertions in 42 test cases) </pre><pre>t_k_vnni_layout rc=0 tip=f34b0fe2ec env=[] args=[] All tests passed (90978 assertions in 10 test cases) 
+t_llama_unit rc=0 tip=f34b0fe2ec env=[] args=[] All tests passed (130670 assertions in 42 test cases) </pre>
+<h2>6. Binaries</h2>
+<pre>{
+ &quot;built&quot;: &quot;2026-09-29T13:24:55Z&quot;,
+ &quot;commit&quot;: &quot;98a5accb8b&quot;,
+ &quot;head_sha&quot;: &quot;98a5accb8ba205e9dbb9166a4cbf0689702cb29e&quot;,
+ &quot;base&quot;: &quot;ci-mimic target 29a8a54740 = main 3faba6d0fd + PR 4424 30c4ac82cb + deb preset AMX+VNNI&quot;,
+ &quot;fix_commit_on_pr_head&quot;: &quot;78e2da7511&quot;,
+ &quot;deb&quot;: &quot;tron_2026.09.29-98a5accb_amd64.deb&quot;,
+ &quot;deb_sha256&quot;: &quot;2a0ed5b8cdf6963925b07e9ef874d1ae2d8fa24569c66c80b8f4aee787e4c5ef&quot;,
+ &quot;rinzler_sha256&quot;: &quot;ed3abd77386cbe19b5049fe29499399eac677f695106879a4869f617e110144b&quot;,
+ &quot;checks&quot;: {
+  &quot;TRON_AMX_DISABLE_literal&quot;: 1,
+  &quot;amx_tile_insns&quot;: 126,
+  &quot;vnni_strings&quot;: 4
+ },
+ &quot;options&quot;: {
+  &quot;TRON_AMX_DISPATCH&quot;: &quot;ON&quot;,
+  &quot;TRON_K_VNNI&quot;: &quot;ON&quot;
+ },
+ &quot;worktree&quot;: &quot;/var/tmp/jhan/tron-i4500deb&quot;
+}</pre>
+<p>base = /var/tmp/jhan/canon-ci-20260918 (main 3faba6d0fd + AMX in the deb preset); vnni = /var/tmp/jhan/ci-mimic-20260918 (main 3faba6d0fd + PR 4424 head 30c4ac82cb); fix = the same plus commits 78e2da7511, 78582b7ba3 and 617cb8333f (the measured package 98a5accb8b); the branch head after the test fixes is f34b0fe2ec; nightly = /opt/positron/bin/rinzler at campaign start (results/nightly.sha).</p>
+<h2>7. Chain log tail</h2>
+<pre>=== i4500fix chain started 2026-09-28T23:36:36Z pid 4009095 on delphi-3bda NOT_BEFORE=2026-09-29T13:00:00Z STEPS=[A B C D E] REPS=3 ARMS=[base vnni fix nightly] COMMIT_FIX=78582b7ba3 COMMIT_DEB=a6da845065 ===
+2026-09-28T23:36:36Z STATUS waiting: NOT_BEFORE 2026-09-29T13:00:00Z
+2026-09-29T00:04:00Z serving: no takeover of ours recorded, nothing to bring up
+=== i4500fix chain started 2026-09-29T00:04:57Z pid 1074377 on delphi-3bda NOT_BEFORE=2026-09-29T13:00:00Z STEPS=[A B C D E] REPS=3 ARMS=[base vnni fix nightly] COMMIT_FIX=617cb8333f COMMIT_DEB=98a5accb8b ===
+2026-09-29T00:04:57Z STATUS waiting: NOT_BEFORE 2026-09-29T13:00:00Z
+2026-09-29T13:00:10Z step A (build-fix) may start: load=126.01 126.80 127.72 hugepages_free=0 units_active=2 others=caddy,platformd,rhys,
+2026-09-29T13:00:10Z STATUS step A: build + tests of 617cb8333f (VNNI build)
+2026-09-29T13:11:10Z step A result: tests-failed-2
+2026-09-29T13:11:10Z STATUS step A: tests-failed-2 (see /home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/tests-fix.txt); chain continues
+2026-09-29T13:11:21Z step B (build-deb) may start: load=144.16 158.38 146.51 hugepages_free=0 units_active=2 others=caddy,platformd,rhys,
+2026-09-29T13:11:21Z STATUS step B: deb build of 98a5accb8b
+2026-09-29T13:25:21Z STATUS step C: smoke
+2026-09-29T13:35:33Z step C result: fix vs vnni: IDENTICAL == fpga p1000: token rows {&#x27;vnni&#x27;: 128, &#x27;fix&#x27;: 128, &#x27;fix2&#x27;: 128} fix vs fix2: IDENTICAL fix vs vnni: IDENTICAL 
+2026-09-29T13:35:33Z STATUS step D: campaign
+2026-09-29T16:44:12Z step D result: ok
+2026-09-29T16:44:22Z step E (build-fixrm) may start: load=99.28 50.67 37.27 hugepages_free=0 units_active=2 others=caddy,platformd,
+2026-09-29T16:44:22Z STATUS step E: build + tests of 617cb8333f (row-major build)
+2026-09-29T16:47:22Z step E result: tests-failed-1
+2026-09-29T16:47:22Z serving: no takeover of ours recorded, nothing to bring up
+2026-09-29T16:47:22Z STATUS chain finished
+=== i4500fix chain finished 2026-09-29T16:47:22Z: A=tests-failed-2 B=ok C=done D=ok E=tests-failed-1 ===
+2026-09-29T16:47:22Z serving: no takeover of ours recorded, nothing to bring up</pre>
+</body></html>
