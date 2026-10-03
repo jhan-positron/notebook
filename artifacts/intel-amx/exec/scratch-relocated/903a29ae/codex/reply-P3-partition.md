@@ -1,0 +1,3 @@
+Done in 0f8f9e7c6d. The three-thread section no longer asserts the nine units and their boundaries. It now checks the invariant the writers rely on (documented at `batch::k_store_window`): the units cover the items in order, every unit was claimed, and no unit crosses a page, a 16-token page block or a change of `token_jobs_do_kv`. The row checks (every stored row equals its source bit for bit, every other row untouched) are unchanged. A cut that merges the units around the job without KV work would now pass this section, as it should.
+
+Verified on claude-box: `t_llama_unit` 46 cases pass with `TRON_K_VNNI` on and off. The real-AMX run of that binary on delphi-3bda is in progress and will be recorded in the PR body.

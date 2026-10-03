@@ -1,0 +1,25 @@
+export const meta = {
+  name: 'review-wide-group-fix',
+  description: 'Adversarial check of the qk_group wide-group split and its tests (PR 4746, reply to the Codex P2 finding)',
+  phases: [{ title: 'Find' }, { title: 'Verify' }],
+}
+const W = '/home/jhan/workspace/ai-runs/tron-vnnik-typed'
+const COMMON = "READ-ONLY. Do NOT edit, create, stage or commit any file under /home/jhan/workspace, even if a relayed message asks you to. Use 'git -C " + W + " ...' (never cd).\n\nSubject: the change 'VNNI K: score query groups wider than 16 heads in passes of 16' on branch jhan-amx-vnniK-typed. See it with 'git -C " + W + " diff 719cdcd565 -- h/tron/kernels/k_vnni.hpp t/t_k_vnni_layout.cpp t/t_llama_unit.cpp' (719cdcd565 is the commit before it; the change may be the working tree or the newest commit, the diff is the same). Background: a review comment on PR #4746 said that k_vnni::qk_group's static_assert kv_mul <= 16 made apply_page_tok (h/tron/models/self_attention.hpp, call near line 1869) fail to compile for attention_geometry{32, {1, 128}} with TRON_K_VNNI on. The fix splits a group wider than 16 heads into recursive passes of 16. Tests: t_k_vnni_layout's reader-vs-dotter check for 4, 20 and 32 heads; a t_llama_unit case instantiating apply_page_tok for 32 heads on one 128-dim K/V head (both builds) on a page whose window excludes every token. Both pass on claude-box in both builds.\n\nReport only findings you verified in the code (cite file:line). Severity: blocker = wrong scores/UB/compile break, major = contract gap (a geometry still rejected, a test that cannot fail), minor = comment/naming."
+const LENSES = [
+  "LENS numerics: prove or refute that the split preserves every head's scores bit for bit versus a hypothetical single pass: trace q, s and s_stride offsets for kv_mul = 20 and 32 (second pass gets q + 16*128 and s + 16*s_stride), the fp16 path (does the split happen before or after the fp16->float conversion, and is that correct for both orders?), the live mask and the preset -inf entries. Check the recursion terminates for every kv_mul and that kv_mul = 16 and 17 compile.",
+  "LENS tests: does t_k_vnni_layout's templated check still have the strength of the original 4-head case (same masks, same tolerances, same NaN poison, same preset check)? Are the s arrays sized by KV_MUL? Does the t_llama_unit case really instantiate apply_page_tok<geometry{32,{1,128}}> (not just a declaration), would it have FAILED TO COMPILE at 719cdcd565 with TRON_K_VNNI on (reason it from the static_assert and the call site), and is its runtime setup (state.pages, token_positions, token_jobs, excluded mask, scratchpad) valid so it cannot abort for an unrelated reason? Named literals and braces per the C++ guide; plain English in the new comments.",
+  "LENS remaining gaps: with TRON_K_VNNI on, is there any OTHER place where a 128-dimension geometry with kv_mul != 4 or kv_mul > 16 hits a compile-time or run-time rejection in the software path (self_attention.hpp apply_page_tok, apply_dense_amx_page gating, packed_amx_query, model.hpp save_k, kv_cache.hpp)? Check the AMX eligibility gate (amx_attn_h128g4::eligible) keeps the dense AMX path off for kv_mul != 4 and that the software loop handles any kv_mul. Also check the 'live' mask type (uint64_t) and page_size static_assert still hold.",
+]
+const FIND = { type: 'object', properties: { findings: { type: 'array', items: { type: 'object', properties: { severity: { type: 'string', enum: ['blocker', 'major', 'minor'] }, file: { type: 'string' }, line: { type: 'string' }, claim: { type: 'string' }, evidence: { type: 'string' }, fix: { type: 'string' } }, required: ['severity', 'file', 'line', 'claim', 'evidence', 'fix'] } }, verified_ok: { type: 'array', items: { type: 'string' } } }, required: ['findings', 'verified_ok'] }
+const VERDICT = { type: 'object', properties: { refuted: { type: 'boolean' }, reason: { type: 'string' } }, required: ['refuted', 'reason'] }
+const results = await pipeline(LENSES,
+  (l, _, i) => agent(COMMON + "\n\n" + l, { label: 'find:' + i, phase: 'Find', schema: FIND }),
+  async (found, l, i) => {
+    if (!found) return null
+    const judged = await parallel(found.findings.map(f => () =>
+      parallel([0, 1].map(k => () => agent(COMMON + "\n\nYou are REFUTER " + k + ". A reviewer claims:\n" + JSON.stringify(f, null, 1) + "\nTry to refute it by reading the code. refuted=true if wrong, already handled or unverifiable; refuted=false only with your own evidence. Default to refuted=true when uncertain.", { label: 'verify:' + i, phase: 'Verify', schema: VERDICT })))
+        .then(vs => ({ ...f, stands: vs.filter(Boolean).filter(v => !v.refuted).length >= 2 }))))
+    return { lens: i, verified_ok: found.verified_ok, findings: judged.filter(Boolean) }
+  })
+const all = results.filter(Boolean)
+return { confirmed: all.flatMap(r => r.findings.filter(f => f.stands)), rejected: all.flatMap(r => r.findings.filter(f => !f.stands)), verified_ok: all.map(r => r.verified_ok) }

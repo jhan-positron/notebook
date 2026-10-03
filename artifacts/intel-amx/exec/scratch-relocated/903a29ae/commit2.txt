@@ -1,0 +1,61 @@
+VNNI K: typed owner and views for the packed K plane
+
+The K plane of a VNNI slot (Note [K VNNI storage]) is now reached the way
+PR #4557 reaches the packed V plane: through a typed owner and typed views,
+never through a raw bf16 pointer.
+
+- New h/tron/tensor/k_vnni.hpp: k_vnni_tensor (the owner: one 64-byte-aligned
+  array of 64 x 128 bf16, trivially copyable), k_vnni_view (the address
+  formula, bounds-checked at(token, dim), views only from an owner,
+  writable-to-read-only conversion only), detail::k_vnni_access (the one route
+  from a view to the plane address), the row-view aliases const_k_row_view /
+  k_row_view with the helpers k_source_row / k_destination_row, and the typed
+  operations store_row (was k_vnni::scatter_row), load_row (was gather_row),
+  store_block and copy_token. The index map, its constants and the vector
+  bodies moved verbatim: same scatters, gathers, transposes and masked stores,
+  so the stored bytes do not change.
+- h/tron/kernels/k_vnni.hpp keeps only qk_group, the AVX-512 reader. It takes
+  the packed view. It stays unguarded: self_attention.hpp names it in the
+  discarded branch of its layout if-constexpr.
+- kv_cache_fwd.hpp declares the two K types, so amx_attn_iface.hpp stays free
+  of intrinsics.
+- kv_cache.hpp: kv_block::k is std::conditional_t<k_vnni::layout_on<head_size>,
+  k_vnni_tensor<page_size, head_size>, bf16[page_size * head_size]>, with the
+  trivial-type checks the parent has for V. k_view() / k_at() exist for the
+  array branch only. page::k_packed (a read-only view) replaces the raw
+  page::k_vnni_plane. set_k_row / get_k_row take typed row views and call
+  store_row / load_row; set_k_block calls store_block on the owner's writable
+  view. copy_storage_slot copies a whole page as dst_block.k = src_block.k and
+  other ranges with copy_token. fill_random fills the packed plane through the
+  access helper, as it does for V. Note [K VNNI storage] and Note [KV block
+  lifetime] describe the typed plane.
+- amx_attn_iface.hpp, amx_attn.cpp: qk_vnni_128x4 takes
+  k_vnni_view<const bf16, 64, 128> by value and reads the plane once through
+  detail::k_vnni_access::plane, as weights_times_v_128x4 does for V. Its tile
+  registers use the file's naming scheme (Q_ROWS_TILE_4, K_EVEN_PANEL_TILE_5,
+  K_ODD_PANEL_TILE_6, ACCUMULATOR_TILE_0..3): identifiers only, the same
+  registers in the same order.
+- self_attention.hpp passes page::k_packed to both score kernels and includes
+  the kernel header itself. model.hpp passes typed source rows (the K buffer's
+  slice view keeps its alignment and DMA flags; the converted row is a
+  64-byte-aligned stack row). full.hpp passes a typed destination row for the
+  FPGA staging scratch.
+- Tests: t_k_vnni_layout runs on owners (poison through 64 typed row stores,
+  layout checks on the owner's bytes, index anchors unchanged, new at() and
+  copy_token sections). t_amx_numerics' bit-identity case fills a
+  k_vnni_tensor through store_row. t_amx_dispatch_dtype's fake takes the typed
+  view. t_llama_unit passes typed rows at every K row call and gains the K
+  typed-boundary contracts next to the V ones.
+
+Not changed: the issue #4525 design's worker-index request (fold save_k_helper
+into save_k(..., worker_ix, n_workers), a code-generator change). It is
+independent of the typed tensors and left for its own change.
+
+Verified on claude-box (clang 19, preset native, AMX dispatch on, fake
+device): t_k_vnni_layout (79810 assertions, 5 cases), t_amx_dispatch_dtype,
+t_amx_numerics, t_heterogeneous_scheduler and t_llama_unit (246842
+assertions, 45 cases) pass with TRON_K_VNNI on; the same five pass with it
+off (t_llama_unit 246898 assertions). make lint-notes and clang-format are
+clean. The AMX cases need delphi-3bda.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
