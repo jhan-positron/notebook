@@ -32,5 +32,5 @@ echo "cache after:  $(cache_line)"
 echo "$(ts) host suite done in $(( $(date +%s) - t0 )) s: $(grep -E 'rc=' "$RES/host-suite-$SUFFIX.txt" | tr '\n' ' ')"
 grep -E 'passed|failed|skipped|makespan' "$RES/host-suite-$SUFFIX.txt" | tail -5
 exec {LOCK_FD}>&-
-if grep -q 'build-test-host rc=0' "$RES/host-suite-$SUFFIX.txt" && grep -q 'test-host rc=0' "$RES/host-suite-$SUFFIX.txt"; then echo ok >"$RES/host-suite-$SUFFIX.done"; else echo failed >"$RES/host-suite-$SUFFIX.done"; fi
+if grep -q '^build-test-host rc=0' "$RES/host-suite-$SUFFIX.txt" && grep -q '^test-host rc=0' "$RES/host-suite-$SUFFIX.txt"; then echo ok >"$RES/host-suite-$SUFFIX.done"; else echo failed >"$RES/host-suite-$SUFFIX.done"; fi
 echo "=== host suite $SUFFIX finished $(ts): $(cat "$RES/host-suite-$SUFFIX.done") ==="
