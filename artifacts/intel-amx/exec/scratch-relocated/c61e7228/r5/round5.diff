@@ -1,0 +1,185 @@
+diff --git a/h/tron/models/attn_stats.hpp b/h/tron/models/attn_stats.hpp
+index 2740b4fe54..caf1072cd9 100644
+--- a/h/tron/models/attn_stats.hpp
++++ b/h/tron/models/attn_stats.hpp
+@@ -860,10 +860,9 @@ struct model_stats {
+ // writer. Off state: one bool copied at construction, tested twice there (start stamp,
+ // begin_forward) and once at destruction, no write. A caller of the hooks
+ // without this object gets a half record: token jobs without forwards, or a
+-// wall filed under the previous forward's class (PR 4596 review round 4,
+-// comment W2). The destructor also runs when forward() unwinds through an
+-// exception, so such a forward is still counted; tron's asserts abort rather
+-// than throw.
++// wall filed under the previous forward's class. The destructor also runs
++// when forward() unwinds through an exception, so such a forward is still
++// counted. tron's asserts abort rather than throw.
+ struct forward_scope : noncopyable<forward_scope> {
+   model_stats& stats;
+   const bool on;
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 190a8bf15d..d3cdb69d08 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -852,7 +852,8 @@ struct self_attention {
+       const uint64_t t_end = hardware::system::rdtsc();
+       attn_elapsed += t_end;
+       if (stats_enabled) {
+-        stats_ref.note_attn_job(pool_worker_ix, layer.i, attn_elapsed);
++        stats_ref.note_attn_job(
++            stats_ref.pool_worker(worker_ix, n_attn_workers), layer.i, attn_elapsed);
+         if (worker_ix == attn_stats::WORKER_0) {
+           stats_ref.note_attn_job_wall_w0(layer.i, t_end - t_entry);
+         }
+diff --git a/t/t_attn_stats.cpp b/t/t_attn_stats.cpp
+index 506085c5d1..9791d707d3 100644
+--- a/t/t_attn_stats.cpp
++++ b/t/t_attn_stats.cpp
+@@ -303,12 +303,12 @@ TEST_CASE(
+ 
+ TEST_CASE("attn-stats forward_scope: one object owns the per-forward record",
+     "[attn_stats]") {
+-  // PR 4596 review round 4, comment W2: the record behind <class>_forwards
+-  // had two writers, the scheduler (forwards and the wall) and the model
+-  // (class, token jobs, path sets). forward_scope is the one owner. The class
+-  // is stored at construction. The wall and the fold are recorded at
+-  // destruction. So every caller of model::state::forward gets a whole record
+-  // filed under the class of that forward.
++  // forward_scope is the one owner of the record behind <class>_forwards. The
++  // class is stored at construction. The wall and the fold are recorded at
++  // destruction. With the forwards count and the wall written at one site and
++  // the class and job counts at another, a wall could be filed under the class
++  // of the previous forward. So every caller of model::state::forward gets a
++  // whole record filed under the class of that forward.
+   auto stats = make_stats(STATS_ON_TRUE);
+   forward_counters const& decode = stats->forwards[CLASS_DECODE_0];
+   forward_counters const& prompt = stats->forwards[CLASS_PROMPT_1];
+@@ -369,13 +369,13 @@ TEST_CASE("attn-stats forward_scope: one object owns the per-forward record",
+ TEST_CASE("attn-stats forwards record: the three job counts move together at the end "
+           "of the forward",
+     "[attn_stats]") {
+-  // Seen in a live read of a CPU-attention run on 2026-09-29: listener_jobs
+-  // was one forward ahead of token_jobs. begin_forward added the listener
+-  // counts and end_forward added the token jobs. A reader of the leaves
+-  // during a forward must never see listener_jobs + kv_only_jobs above
+-  // token_jobs. All three are added in end_forward now. Under the old order
+-  // the mid-forward CHECKs on listener_jobs, kv_only_jobs and the rendered
+-  // leaf fail, for both classes below.
++  // A reader of the leaves during a forward must never see listener_jobs +
++  // kv_only_jobs above token_jobs. end_forward adds all three together. If
++  // begin_forward added the listener counts and end_forward the token jobs,
++  // listener_jobs would already include the current forward while token_jobs
++  // would not. The mid-forward CHECKs below would then fail: listener_jobs,
++  // kv_only_jobs and the rendered leaf for the prompt class, listener_jobs
++  // for the decode class.
+   auto stats = make_stats(STATS_ON_TRUE);
+   forward_counters const& prompt = stats->forwards[CLASS_PROMPT_1];
+   stats->begin_forward(forward_class::prompt_or_mixed, N_TOKEN_JOBS_5, LISTENERS_1);
+@@ -405,11 +405,11 @@ TEST_CASE("attn-stats forwards record: the three job counts move together at the
+ 
+ TEST_CASE(
+     "attn-stats: an out-of-range worker, layer or token job aborts", "[attn_stats]") {
+-  // PR 4596 review round 4, comment W4: in production every index is in range
+-  // by construction (the worker index is below the pool size that sizes the
+-  // rows, the layer id below n_layers, the token job below the count that
+-  // begin_forward sized). A wrong index must therefore fail, not go uncounted.
+-  // Each call runs in a forked child that must die with SIGABRT.
++  // In production every index is in range by construction (the worker index
++  // is below the pool size that sizes the rows, the layer id below n_layers,
++  // the token job below the count that begin_forward sized). A wrong index
++  // must therefore fail, not go uncounted. Each call runs in a forked child
++  // that must die with SIGABRT.
+   auto stats = make_stats(STATS_ON_TRUE);
+   stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
+   visit_tally tally;
+@@ -637,38 +637,19 @@ TEST_CASE("attn-stats FUSE leaves: with the switch off only the summary, the cla
+   CHECK_FALSE(tron::fuse::stats::get_file_handle("/model/a/b/attention/summary"));
+ }
+ 
+-TEST_CASE("attn-stats pool_worker: the last n_attn_workers pool workers run attention",
+-    "[attn_stats]") {
+-  // Note [Attention workers are the last pool workers] in model.hpp: attention
+-  // worker i of a forward with n attention workers is pool worker
+-  // num_workers - n + i. The rows are keyed by that pool worker.
+-  constexpr size_t SPLIT_1 = 1;
+-  constexpr size_t SPLIT_2 = 2;
+-  auto stats = make_stats(STATS_ON_TRUE);
+-  CHECK(stats->pool_worker(WORKER_0, N_WORKERS_3) == WORKER_0);
+-  CHECK(stats->pool_worker(WORKER_2, N_WORKERS_3) == WORKER_2);
+-  CHECK(stats->pool_worker(WORKER_0, SPLIT_2) == WORKER_1);
+-  CHECK(stats->pool_worker(WORKER_1, SPLIT_2) == WORKER_2);
+-  CHECK(stats->pool_worker(WORKER_0, SPLIT_1) == WORKER_2);
+-  // The off state answers the same: the mapping is arithmetic on the pool
+-  // size, and a caller may compute it before testing the switch.
+-  auto off = make_stats(STATS_OFF_FALSE);
+-  CHECK(off->pool_worker(WORKER_0, SPLIT_1) == WORKER_2);
+-}
+-
+ TEST_CASE("attn-stats rows keyed by pool worker: attention worker 0 lands in different "
+           "rows when the split moves",
+     "[attn_stats]") {
+-  // PR 4596 review round 4, comment W5. The rows are sized by the pool (3
+-  // here) and were indexed by the attention worker index. The plugin picks
+-  // the split per forward (recommend_n_main_helpers), so attention worker 0
+-  // of a 1-worker forward is pool worker 2 and attention worker 0 of a
+-  // 2-worker forward is pool worker 1: two threads, two cores. The old keying
+-  // put both under row 0, a row that no thread of either forward owned.
+-  // This case drives the hooks the way self_attention.hpp calls them after
+-  // the fix (row = pool_worker(attention index, split)) and checks that the
+-  // two forwards land in the two rows those threads own. Under the old
+-  // keying every CHECK on rows 1 and 2 below fails and row 0 carries it all.
++  // The rows are sized by the pool (3 here) and keyed by the pool worker, not
++  // by the attention worker index (Note [Attention workers are the last pool
++  // workers] in model.hpp). The plugin picks the split per forward
++  // (recommend_n_main_helpers). So attention worker 0 of a 1-worker forward is
++  // pool worker 2. Attention worker 0 of a 2-worker forward is pool worker 1.
++  // Those are two threads on two cores. Keyed by the attention index, both
++  // forwards would land in row 0, a row that no thread of either forward
++  // owns. This case drives the hooks the way self_attention.hpp calls them
++  // (row = pool_worker(attention index, split)) and checks that the two
++  // forwards land in the two rows those threads own.
+   constexpr size_t SPLIT_1 = 1;
+   constexpr size_t SPLIT_2 = 2;
+   auto stats = make_stats(STATS_ON_TRUE);
+@@ -693,6 +674,9 @@ TEST_CASE("attn-stats rows keyed by pool worker: attention worker 0 lands in dif
+   {
+     const size_t row = stats->pool_worker(WORKER_0, SPLIT_2);
+     REQUIRE(row == WORKER_1);
++    // Pins the "+ attn_ix" term of the row formula: the second attention
++    // worker of this split is the last pool worker.
++    CHECK(stats->pool_worker(WORKER_1, SPLIT_2) == WORKER_2);
+     stats->add_visits(row, LAYER_0, tally, PASS_READY_0);
+     stats->note_attn_job(row, LAYER_0, CYCLES_200);
+     stats->note_join_wait(row, LAYER_0, CYCLES_100);
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index e18f302a85..07b9a12ed4 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -2224,12 +2224,11 @@ TEST_CASE(
+     CHECK(sums.visits_all(static_cast<size_t>(visit_path::empty)) == 0);
+     CHECK(sums.visits[PASS_READY_0][static_cast<size_t>(visit_path::avx)] == 0);
+     CHECK(sums.avx_full_page_visits[PASS_PENDING_1] == 0);
+-    // PR 4596 review round 4, comment W5: the row is the pool worker's, not
+-    // the attention worker's. The call above ran attention worker 0 of a
+-    // 1-worker split, which is the last pool worker (Note [Attention workers
+-    // are the last pool workers] in model.hpp). Before the fix the visits
+-    // went to row 0, which is a main helper whenever the pool has more than
+-    // one worker.
++    // The row is the pool worker's, not the attention worker's. The call
++    // above ran attention worker 0 of a 1-worker split, which is the last
++    // pool worker (Note [Attention workers are the last pool workers] in
++    // model.hpp). Keyed by the attention index, the visits would go to row 0.
++    // Row 0 is a main helper whenever the pool has more than one worker.
+     const size_t n_pool = state.self_attn_state.attn.size();
+     const size_t last_row = n_pool - 1;
+     CHECK(state.self_attn_state.stats
+@@ -2254,8 +2253,8 @@ TEST_CASE(
+   if (state.self_attn_state.attn.size() >= 2) {
+     // Run after the numeric check above, which the first call feeds. The same
+     // attention worker 0 under a 2-worker split lands one row earlier: the
+-    // row follows the thread, not the attention index. The old keying put
+-    // this call in row 0 again, on top of the first call.
++    // row follows the thread, not the attention index. Keyed by the attention
++    // index, this call would land in row 0 again, added to the first call.
+     using namespace tron::attn_stats;
+     constexpr size_t N_ATTN_WORKERS_2 = 2;
+     {

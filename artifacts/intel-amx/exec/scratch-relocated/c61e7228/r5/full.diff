@@ -1,0 +1,3379 @@
+diff --git a/README.stats.md b/README.stats.md
+index 73e1c2bfe1..4ca48733b2 100644
+--- a/README.stats.md
++++ b/README.stats.md
+@@ -231,6 +231,64 @@ surface, so they carry no convention obligations.
+ auto h = fuse::stats::make_file("/rinzler/dev/scratch_counter", uint64_t{0}, true);
+ ```
+ 
++Example of a casual group: the attention path statistics under
++`/model/<model_id>/attention/` (`h/tron/models/attn_stats.hpp`). They
++say how much of a model's attention work ran on the AVX software loop,
++the AMX kernel and the FPGA, per layer and per pool worker, with
++the attention time per job and per forward. Collection is off unless
++the environment variable `TRON_ATTN_STATS` is exactly `1` (read once at
++start); with it unset the leaves `summary`, `<class>_totals` and
++`<class>_forwards` still exist: `summary` reports `"on":false`, the
++other two read `{}`. With it set, the
++per-layer leaves `<class>_layer_<L>` and per-worker leaves
++`<class>_worker_<W>` appear as well, and one `[attn-stats]` summary is
++printed to stderr when the model state is destroyed (a batch runtron run
++ends before the tree can be read). `<class>` is `decode_like` (every
++token job of the forward had a listener) or `prompt_or_mixed`. Under
++continuous batching (rinzler adds and removes users between forwards, so
++one forward can mix a new user's prompt tokens with other users'
++generated tokens) a forward that carries one prompt chunk (the slice of
++a prompt that one forward processes) of any user is `prompt_or_mixed`.
++So `decode_like` counts pure-decode forwards only. `listener_jobs` and
++`kv_only_jobs` in `<class>_forwards` say how many token jobs of the
++class had a listener (every generated token has one, and so does the
++last token of a prompt chunk) and how many did not (prompt tokens that
++only stored their K and V). The three job counts of a forward
++(`token_jobs`, all token jobs of the class, plus the two above) are
++added together at the end of the forward. So a read during a forward
++does not show the two listener counts ahead of `token_jobs`, and
++`listener_jobs` + `kv_only_jobs` = `token_jobs` at every read except in
++the few instructions of the three adds. The stderr
++lines label the classes `decode_like/all_jobs_with_listener` and
++`prompt_or_mixed/some_jobs_without_listener`, name plus rule. Values
++count from the construction of the model state and carry no reset: an
++interval is the difference of two reads. Cycle counters are TSC ticks; `summary`
++carries `tsc_hz`. Software `k_tokens` count one KV head per visit;
++`fpga_k_tokens` count one query per pass for all KV heads at once, so
++`fpga_k_tokens_x_kv_heads` is the value on the software scale. An EAGLE
++draft state, which shares the target's model id, publishes under
++`attention_eagle/`. A later state of the same model id (runtron makes
++one per prompt batch) takes the leaves over, with one info line in the
++log, and prints its own summary at its end. After the last state is
++destroyed the leaves read `{}`. `W` in `<class>_worker_<W>` is the pool
++worker index. The attention workers of a forward are the last
++`n_attn_workers` pool workers (`n_attn_workers` is the number of
++attention workers the plugin chose for that forward, the split). The
++first rows belong to the main helpers (the pool workers the plugin keeps
++for the non-attention work) and read zero. A row stays on one thread
++across forwards even when the plugin changes the split.
++`n_attn_workers_min` and `n_attn_workers_max` in `<class>_forwards` give
++the range of the split over the run. The T3 and
++T4 keys (`wall_cycles_w0`, `period_cycles_w0` and their companions) are
++per layer, observed by attention worker 0, and the worker leaves do not
++carry them. The timer `join_wait_cycles` (T5)
++counts the cycles a worker waits in the join with no join progress. It is
++measured in both join modes. In a hardware join it is the wait loop that
++ends when an FPGA pass or the other workers' software partials become
++ready. In a software-only join (CPU attention) it is the stretches of
++failed polls on the other workers' sections. T5 is inside T2
++(`busy_cycles`) in both modes. T2 minus T5 is compute plus fold.
++
+ **Exported stats** are leaves you want platformd to ingest as
+ Prometheus metrics. Pass `exported=true` on `make_file` to create a
+ symlink under `/exported<source_path>` and add a matching descriptor
+@@ -283,11 +341,14 @@ Pick the right FUSE path. Follow the existing tree:
+ | `/rinzler/stats/monitor/active/` | Instantaneous aggregates over current sessions |
+ | `/rinzler/stats/monitor/cumulative/` | Since-startup totals |
+ | `/model/loading/<model_id>/` | Per-model load progression |
++| `/model/<model_id>/attention/` | Attention path statistics (casual; described above) |
+ 
+ Call `fuse::stats::make_file()` at the relevant registration site
+ (rinzler's `main()` for rinzler-level stats, `h/tron/models/model.hpp`
+-for per-model stats, `src/rinzler/fuse-stats-monitor.cpp` for
+-TokenStreamMonitor-backed stats). Pass `exported=true` when the
++for per-model stats, the `self_attention::state` constructor for
++per-state stats such as `h/tron/models/attn_stats.hpp`,
++`src/rinzler/fuse-stats-monitor.cpp` for TokenStreamMonitor-backed
++stats). Pass `exported=true` when the
+ leaf is in a manifest.
+ 
+ ### 2. Declare the descriptor
+diff --git a/h/tron/models/attn_stats.hpp b/h/tron/models/attn_stats.hpp
+new file mode 100644
+index 0000000000..a62b2aeecb
+--- /dev/null
++++ b/h/tron/models/attn_stats.hpp
+@@ -0,0 +1,952 @@
++#pragma once
++// Attention path statistics: how much of the attention work of one model ran
++// on each path (AVX software loop, AMX kernel, FPGA), per layer and per
++// attention worker, plus the time attention took per layer and per forward.
++//
++// Note [Attention path stats]
++// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
++// Switch: the environment variable TRON_ATTN_STATS (an environment variable,
++// not a CMake option like TRON_PAGE_SHARE_COUNTERS or TRON_MWAIT_STATS).
++// Exactly "1" turns collection on (the same rule as TRON_AMX_DISABLE); unset
++// leaves it off, and any other value leaves it off with one warning in the
++// log. The variable is read once per process. Every hook is compiled into
++// every build. Off-state contract: a per-visit hook may test one bool that
++// was copied once per apply_page_range call and nothing else, no memory
++// write and no atomic. Per call the cost is one byte load and one stack tally.
++// Per job and per forward it is one branch. No row is allocated when the
++// switch is off.
++//
++// Unit of the path counters: one visit = one call of apply_page_tok, i.e. one
++// (query token, KV page, kv head) triple that passed the page-level checks of
++// apply_page_range. The AMX kernel serves a whole dense page (64 K tokens) per
++// visit. The AVX loop serves the relevant K tokens of the page. An empty visit
++// reached apply_page_tok and found no software work (the range belongs to the
++// FPGA, or every token of the page is outside the query's window). Pairs that
++// apply_page_range dismisses before the call (workless ranges, invisible pages,
++// whole-page window skips) are not visits. K tokens are counted per visit, once
++// per kv head, so the number of dot products is k_tokens times the number of
++// query heads per kv head (kv_mul).
++//
++// Timers, all in TSC cycles (summary carries tsc_hz): T1 = wall time of one
++// model forward, taken by forward_scope inside model::state::forward: from after
++// its perfetto slice to its return (the layers, logits and listener delivery,
++// and the latch arena release). T2 = busy time of one attention job on one
++// worker (run_attention_job's attn_elapsed: both passes and the join, without
++// the upstream K/V wait). T3 = wall time of one attention job as worker 0 sees
++// it (entry to return). T4 = layer period on worker 0: from its first job of one
++// attention operation to its first job of the next operation, so the last layer
++// of a forward has no period. T5 = time a worker spends waiting in the join with
++// no join progress. It is measured in both join modes. In a hardware join it is
++// the wait loop of stream_hw_joins, which ends when an FPGA pass or the peer
++// workers' software partials become ready. In a software-only join it is the
++// stretches of failed polls on the peer workers' sections in run_joins. T5 is
++// inside T2 in both modes. T2 minus T5 is compute plus fold.
++//
++// Rows: one row per (forward class, pool worker, layer). Only the owning
++// worker writes its rows, because apply_page_range runs on that worker. The
++// writes are plain load-add-store on relaxed atomics. The FUSE read callbacks
++// read the same atomics with relaxed loads. The FPGA counters and the
++// per-forward counters are written on the main thread with relaxed fetch_add.
++//
++// Forward class: decode_like when every token job of the forward has a listener
++// (one generated token per user, but also a one-token final prompt chunk or a
++// speculative verify step), prompt_or_mixed otherwise (prompt chunks, or a mix).
++// Under continuous batching (rinzler adds and removes users between forwards)
++// a forward that carries a prompt chunk of any user is prompt_or_mixed. So
++// decode_like counts pure-decode forwards only. listener_jobs and kv_only_jobs
++// in the forwards record say how many token jobs of a class had a listener and
++// how many did not.
++// One object, forward_scope, owns the per-forward record: its constructor stores
++// the class and sizes the per-forward scratch before the attention workers start
++// (begin_forward), and its destructor records T1, folds the path bits and adds
++// the three job counts after the workers, logits and listener delivery are done
++// (note_forward_wall, end_forward). The workers read the class once per
++// apply_page_range call. The per-forward scratch (path bits, FPGA bits, the T4 fields
++// of worker 0) is plain data because forwards of one model state are serialized: the
++// main thread writes before the workers start and reads after they have all finished,
++// and worker 0 is the only worker that touches the T4 fields.
++//
++// Output: casual FUSE leaves under /model/<model id>/attention/ (see
++// README.stats.md). The values count from the construction of the model state
++// and never reset, so an interval is the difference of two reads. One summary
++// goes to stderr when the model state is destroyed. runtron builds one state
++// per prompt batch: each prints its own summary, and the leaves follow the
++// newest state. W in <class>_worker_<W> is the pool worker index. The attention
++// workers of a forward are the last n_attn_workers pool workers, where
++// n_attn_workers is the number of attention workers the plugin chose for that
++// forward, the split (Note [Attention workers are the last pool workers] in
++// model.hpp). The first rows belong to the main helpers (the pool workers kept
++// for the non-attention work) and read zero. A row stays on one thread across
++// forwards even when the plugin changes the split. The forwards leaf carries
++// the smallest and largest n_attn_workers of the class. T3 and T4 are per (class,
++// layer), observed by attention worker 0, in a separate per-layer struct.
++// Memory when on: 2 classes x pool workers x layers x 192 bytes of rows, for
++// example 27 x 36 x 2 x 192 = 373 KB, plus 2 x layers x 64 bytes of timers.
++
++#include <algorithm>
++#include <atomic>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <iterator>
++#include <memory>
++#include <string>
++#include <string_view>
++#include <utility>
++#include <vector>
++
++#include <spdlog/fmt/fmt.h>
++#include <spdlog/spdlog.h>
++
++#include "common/assert.hpp"
++#include "common/util.hpp"
++#include "system/fuse_stats.hpp"
++#include "system/fuse_sysfs.hpp"
++#include "system/system.hpp"
++
++namespace tron::attn_stats {
++
++// The software path that served one visit: the AMX kernel, the AVX loop, or
++// none. An empty visit is one where apply_page_tok found no K token for the
++// software to score. The FPGA is not a visit path. Its share is counted per
++// hardware pass (note_fpga_pass) and per token job (note_fpga_query). The
++// values index the per-row arrays.
++enum class visit_path : uint8_t { empty = 0, avx = 1, amx = 2 };
++inline constexpr size_t N_PATHS_3 = 3;
++inline constexpr const char* PATH_NAMES[N_PATHS_3] = {"empty", "avx", "amx"};
++
++// The two software passes of one attention job. run_attention_job calls
++// run_sections twice: first over the ready pages, then, after the upstream
++// K/V wait, over the pending pages (Note [Ready versus pending attention
++// work] in model.hpp). Index 0 = the ready pass, 1 = the pending pass. These
++// are not the FPGA hardware passes (hw_workload.passes, note_fpga_pass).
++inline constexpr size_t N_PASSES_2 = 2;
++inline constexpr size_t PASS_READY_0 = 0;
++inline constexpr size_t PASS_PENDING_1 = 1;
++
++// Forward classes. CLASS_NAMES is the leaf name segment (<class>_totals and
++// friends), so it holds no slash. CLASS_LABELS names the class in the stderr
++// report together with the rule that defines it.
++enum class forward_class : uint8_t { decode_like = 0, prompt_or_mixed = 1 };
++inline constexpr size_t N_CLASSES_2 = 2;
++inline constexpr const char* CLASS_NAMES[N_CLASSES_2] = {
++    "decode_like", "prompt_or_mixed"};
++inline constexpr const char* CLASS_LABELS[N_CLASSES_2] = {
++    "decode_like/all_jobs_with_listener", "prompt_or_mixed/some_jobs_without_listener"};
++
++// Bits of the per-token path set: which paths served a token job in one
++// forward, over all layers, kv heads and pages. 8 possible sets.
++inline constexpr uint8_t PATH_BIT_NONE_0 = 0;
++inline constexpr uint8_t PATH_BIT_AVX_1 = 1;
++inline constexpr uint8_t PATH_BIT_AMX_2 = 2;
++inline constexpr uint8_t PATH_BIT_FPGA_4 = 4;
++inline constexpr size_t N_PATH_SETS_8 = 8;
++inline constexpr const char* PATH_SET_NAMES[N_PATH_SETS_8] = {
++    "none", "avx", "amx", "avx+amx", "fpga", "fpga+avx", "fpga+amx", "fpga+avx+amx"};
++
++inline constexpr uint8_t path_bit(visit_path p) noexcept {
++  return p == visit_path::avx   ? PATH_BIT_AVX_1
++         : p == visit_path::amx ? PATH_BIT_AMX_2
++                                : PATH_BIT_NONE_0;
++}
++
++inline constexpr uint64_t UNSET_CYCLES_0 = 0;  // a timestamp not taken (switch off)
++inline constexpr size_t WORKER_0 = 0;
++inline constexpr bool LEAF_READ_ONLY_TRUE = true;
++inline constexpr bool AMX_COMPILED_TRUE = true;
++
++// TRON_ATTN_STATS, read once per process: exactly "1" turns the stats on. Any
++// other set value is ignored with one warning.
++inline bool env_enabled() noexcept {
++  static const bool enabled = [] {
++    const char* value = std::getenv("TRON_ATTN_STATS");
++    if (value == nullptr) return false;
++    if (std::strcmp(value, "1") == 0) return true;
++    spdlog::warn(
++        "TRON_ATTN_STATS='{}' ignored: exactly \"1\" turns the attention path stats on",
++        value);
++    return false;
++  }();
++  return enabled;
++}
++
++// Adds value to a relaxed atomic. Single-writer: the owning thread is the only
++// writer, readers (FUSE callbacks, the exit report) load relaxed.
++inline void inc_relaxed(std::atomic<uint64_t>& counter, uint64_t value) noexcept {
++  counter.store(
++      counter.load(std::memory_order_relaxed) + value, std::memory_order_relaxed);
++}
++inline void max_relaxed(std::atomic<uint64_t>& counter, uint64_t value) noexcept {
++  if (value > counter.load(std::memory_order_relaxed)) {
++    counter.store(value, std::memory_order_relaxed);
++  }
++}
++inline void min_relaxed(std::atomic<uint64_t>& counter, uint64_t value) noexcept {
++  if (value < counter.load(std::memory_order_relaxed)) {
++    counter.store(value, std::memory_order_relaxed);
++  }
++}
++inline uint64_t load_relaxed(std::atomic<uint64_t> const& counter) noexcept {
++  return counter.load(std::memory_order_relaxed);
++}
++
++// Counts gathered by one apply_page_range call (one worker, one kv head, one
++// page range, one pass) as plain integers on the stack, then added to the
++// worker's row once per call.
++struct visit_tally {
++  uint64_t visits[N_PATHS_3] = {};
++  uint64_t k_tokens[N_PATHS_3] = {};
++  // AVX visits that scored a whole page: AMX-eligible volume that did not take
++  // the AMX path (the page failed is_dense_amx_page, for example a full page
++  // written in this forward, or AMX is off). For the same prompts and
++  // generated lengths, the kill-switch run's (TRON_AMX_DISABLE=1) value equals
++  // the AMX-on run's amx visits plus its own avx_full_page_visits.
++  uint64_t avx_full_page_visits = 0;
++  size_t n_visits = 0;
++
++  inline void record(visit_path p, int relevant_k_tokens, size_t page_size) noexcept {
++    const size_t ix = static_cast<size_t>(p);
++    visits[ix]++;
++    k_tokens[ix] += static_cast<uint64_t>(relevant_k_tokens);
++    // Branch-free: one when an AVX visit scored the whole page.
++    avx_full_page_visits += static_cast<uint64_t>(
++        (p == visit_path::avx) & (static_cast<size_t>(relevant_k_tokens) == page_size));
++    n_visits++;
++  }
++};
++
++// One row per (forward class, pool worker, layer). W is the pool worker index
++// (Note [Attention workers are the last pool workers] in model.hpp): attention
++// worker i of a forward with n attention workers writes row
++// num_workers - n + i, so a row stays on one thread and one core across
++// forwards even when the split moves. The main-helper rows read zero.
++// alignas(64) keeps rows of neighbouring workers on separate cache lines.
++struct alignas(64) worker_layer_row {
++  std::atomic<uint64_t> visits[N_PASSES_2][N_PATHS_3] = {};
++  std::atomic<uint64_t> k_tokens[N_PASSES_2][N_PATHS_3] = {};
++  std::atomic<uint64_t> avx_full_page_visits[N_PASSES_2] = {};
++  // T2: attention jobs of this worker in this layer and their busy cycles.
++  // The busy cycles are run_attention_job's attn_elapsed: both passes and the
++  // join, without the upstream K/V wait.
++  std::atomic<uint64_t> attn_jobs{0};
++  std::atomic<uint64_t> busy_cycles{0};
++  // T5: cycles this worker spent waiting in the join with no join progress.
++  // Hardware join: its wait loop (FPGA passes or the peer workers' software
++  // partials, whichever ends it). Software-only join: its failed polls.
++  std::atomic<uint64_t> join_wait_cycles{0};
++
++  inline void add(visit_tally const& tally, size_t pass) noexcept {
++    for (size_t p = 0; p < N_PATHS_3; ++p) {
++      inc_relaxed(visits[pass][p], tally.visits[p]);
++      inc_relaxed(k_tokens[pass][p], tally.k_tokens[p]);
++    }
++    inc_relaxed(avx_full_page_visits[pass], tally.avx_full_page_visits);
++  }
++};
++
++// T3 and T4 of one (forward class, layer), observed by attention worker 0 of
++// the forward. They describe the layer, not a worker, so they live apart from
++// the worker rows. Kept apart from layer_fpga_counters too, which a later
++// per-job split may re-key by job class.
++struct alignas(64) layer_timers {
++  // T3: entry-to-return cycles of the job as worker 0 sees it, every wait
++  // included (the job's wall time, in TSC cycles like every timer here).
++  std::atomic<uint64_t> wall_cycles{0};
++  std::atomic<uint64_t> wall_max_cycles{0};
++  // T4: entry-to-entry cycles between this layer's job and the next layer's
++  // job of the same minibatch on worker 0 (the whole layer as worker 0 sees
++  // it). The last layer has no successor.
++  std::atomic<uint64_t> period_cycles{0};
++  std::atomic<uint64_t> period_count{0};
++  std::atomic<uint64_t> period_max_cycles{0};
++};
++
++// FPGA work programmed for one layer of one forward class: K tokens the FPGA
++// card scores (the inclusive last token index + 1 per (pass, query)) and the
++// number of (pass, query) pairs. Written where the hardware job is prepared.
++// Unit note: one pass serves all n_kv_heads of a query at once, so these K
++// tokens compare with the software k_tokens (counted once per kv head) after
++// multiplying by n_kv_heads; the leaves carry that product too.
++struct layer_fpga_counters {
++  std::atomic<uint64_t> k_tokens{0};
++  std::atomic<uint64_t> query_passes{0};
++};
++
++// Per forward class: forwards, their wall cycles (T1), token jobs with FPGA
++// work, the per-token path sets, and the listener and KV-only job counts.
++struct forward_counters {
++  std::atomic<uint64_t> forwards{0};
++  std::atomic<uint64_t> wall_cycles{0};
++  std::atomic<uint64_t> wall_max_cycles{0};
++  std::atomic<uint64_t> fpga_queries{0};
++  std::atomic<uint64_t> token_jobs{0};
++  // How mixed the forwards of this class were, summed over its forwards.
++  // listener_jobs: token jobs with a listener. Every generated token has one.
++  // The last token of a prompt chunk has one too (with an empty logits buffer
++  // when the chunk is not the prompt's last). A chunk cut by the per-forward
++  // token limit gets its listener in the forward that finishes it.
++  // kv_only_jobs: token jobs without a listener, the prompt tokens that only
++  // stored their K and V. A prompt_or_mixed forward can hold other users'
++  // generated tokens. The record does not carry the number of users in
++  // prefill, so a reader who wants the generated tokens per forward takes
++  // that number from the run shape and subtracts it from the listener jobs
++  // per forward. Speculative verify steps carry one listener per draft token.
++  std::atomic<uint64_t> listener_jobs{0};
++  std::atomic<uint64_t> kv_only_jobs{0};
++  // Attention workers of this class's forwards, smallest and largest over the
++  // run. The plugin picks the split per forward (recommend_n_main_helpers),
++  // so a reader needs the range to know which pool rows were attention rows.
++  std::atomic<uint64_t> n_attn_workers_min{UINT64_MAX};
++  std::atomic<uint64_t> n_attn_workers_max{0};
++  std::atomic<uint64_t> token_jobs_by_path_set[N_PATH_SETS_8] = {};
++};
++
++// Facts about the model and the build that give the counters their meaning.
++struct header_facts {
++  bool amx_compiled = false;
++  bool amx_available = false;
++  size_t n_kv_heads = 0;
++  size_t kv_mul = 0;
++  size_t head_size = 0;
++  size_t n_layers = 0;
++  size_t page_size = 0;
++};
++
++// All statistics of one model state. Created with the state; the FUSE leaves
++// capture a weak_ptr so a read after the state is gone returns an empty value.
++struct model_stats {
++  // False when the state was built with the switch off (self_attention passes
++  // env_enabled(), tests pass a bool). The object exists in every state so that
++  // the hooks can test this one bool. No row, FPGA counter or path-bit vector
++  // is allocated when false. The summary, totals and forwards leaves still
++  // exist (README.stats.md).
++  const bool enabled;
++  const std::string model_id;
++  const bool is_eagle;  // an EAGLE draft state shares the target's model id
++  const header_facts facts;
++  const size_t n_workers;
++  const size_t n_layers;
++
++  std::vector<worker_layer_row> rows;     // [class][pool worker][layer], empty when off
++  std::vector<layer_fpga_counters> fpga;  // [class][layer], empty when off
++  std::vector<layer_timers> timers;       // [class][layer], empty when off
++  forward_counters forwards[N_CLASSES_2];
++  // Off-state placeholder for a worker index that is never read: the hooks
++  // run only behind `enabled`, and pool_worker asserts its inputs instead.
++  static constexpr size_t NO_WORKER = SIZE_MAX;
++
++  // Per-forward state. The main thread writes before the attention workers
++  // start and reads after they finish; the workers read the class and write
++  // their own path_bits vector.
++  std::atomic<uint8_t> current_class{0};
++  std::vector<std::vector<uint8_t>> path_bits;  // [pool worker][token job]
++  // The split of the current forward, set by note_attn_workers from the
++  // attention plan; UNKNOWN_SPLIT (a forward without attention work, or a
++  // unit test that never assembled a plan) makes end_forward fold every row.
++  static constexpr size_t UNKNOWN_SPLIT = SIZE_MAX;
++  size_t forward_n_attn_workers = UNKNOWN_SPLIT;
++  // The listener count of the current forward, kept from begin_forward to
++  // end_forward, where every job count of the forwards record is added.
++  size_t forward_n_listeners = 0;
++  std::vector<uint8_t> fpga_bits;  // [token job]: PATH_BIT_FPGA_4 or 0, main thread
++  // T4 state of worker 0. Worker 0 writes and reads it. The main thread resets
++  // t4_last_operation in begin_forward, before the workers start. The other two
++  // fields are read only after worker 0 has set them. A layer's period runs from
++  // worker 0's entry into the first job of one attention operation to its
++  // entry into the first job of the next operation. The other minibatches of
++  // the same operation do not start a new period.
++  static constexpr size_t NO_OPERATION = SIZE_MAX;
++  size_t t4_last_operation = NO_OPERATION;
++  size_t t4_last_layer = 0;
++  uint64_t t4_layer_start_cycles = 0;
++
++  model_stats(bool stats_enabled,
++      std::string id,
++      bool eagle,
++      header_facts f,
++      size_t workers,
++      size_t layers)
++  : enabled(stats_enabled)
++  , model_id(std::move(id))
++  , is_eagle(eagle)
++  , facts(f)
++  , n_workers(workers)
++  , n_layers(layers) {
++    if (enabled) {
++      rows = std::vector<worker_layer_row>(N_CLASSES_2 * n_workers * n_layers);
++      fpga = std::vector<layer_fpga_counters>(N_CLASSES_2 * n_layers);
++      timers = std::vector<layer_timers>(N_CLASSES_2 * n_layers);
++      path_bits.resize(n_workers);
++      spdlog::info(
++          "attention path stats on (TRON_ATTN_STATS=1) for model '{}'{}: rows for "
++          "{} app-pool workers x {} layers",
++          model_id, is_eagle ? " (EAGLE draft)" : "", n_workers, n_layers);
++    }
++  }
++
++  ~model_stats() {
++    if (enabled) print_report(stderr);
++  }
++
++  worker_layer_row& row(size_t cls, size_t worker, size_t layer) noexcept {
++    TRON_ASSERT_LT(cls, N_CLASSES_2);
++    TRON_ASSERT_LT(worker, n_workers);
++    TRON_ASSERT_LT(layer, n_layers);
++    return rows[(cls * n_workers + worker) * n_layers + layer];
++  }
++  worker_layer_row const& row(size_t cls, size_t worker, size_t layer) const noexcept {
++    TRON_ASSERT_LT(cls, N_CLASSES_2);
++    TRON_ASSERT_LT(worker, n_workers);
++    TRON_ASSERT_LT(layer, n_layers);
++    return rows[(cls * n_workers + worker) * n_layers + layer];
++  }
++  size_t current_class_ix() const noexcept {
++    return current_class.load(std::memory_order_relaxed);
++  }
++  layer_fpga_counters& fpga_at(size_t cls, size_t layer) noexcept {
++    TRON_ASSERT_LT(cls, N_CLASSES_2);
++    TRON_ASSERT_LT(layer, n_layers);
++    return fpga[cls * n_layers + layer];
++  }
++  layer_fpga_counters const& fpga_at(size_t cls, size_t layer) const noexcept {
++    TRON_ASSERT_LT(cls, N_CLASSES_2);
++    TRON_ASSERT_LT(layer, n_layers);
++    return fpga[cls * n_layers + layer];
++  }
++  layer_timers& timers_at(size_t cls, size_t layer) noexcept {
++    TRON_ASSERT_LT(cls, N_CLASSES_2);
++    TRON_ASSERT_LT(layer, n_layers);
++    return timers[cls * n_layers + layer];
++  }
++  layer_timers const& timers_at(size_t cls, size_t layer) const noexcept {
++    TRON_ASSERT_LT(cls, N_CLASSES_2);
++    TRON_ASSERT_LT(layer, n_layers);
++    return timers[cls * n_layers + layer];
++  }
++  // The pool worker that runs attention worker attn_ix of a forward with
++  // n_attn_workers attention workers (Note [Attention workers are the last
++  // pool workers] in model.hpp). Both inputs are asserted: the pair must fit
++  // the pool that sized the rows.
++  inline size_t pool_worker(size_t attn_ix, size_t n_attn_workers) const noexcept {
++    TRON_ASSERT_LE(n_attn_workers, n_workers);
++    TRON_ASSERT_LT(attn_ix, n_attn_workers);
++    return n_workers - n_attn_workers + attn_ix;
++  }
++  // The per-worker path bits of one forward, hoisted out of the visit loop.
++  // Called with the switch on only. begin_forward sized the vector for every
++  // token job of the forward, so the visit loop needs no bound of its own.
++  inline uint8_t* token_path_span(size_t worker, size_t n_token_jobs) noexcept {
++    TRON_ASSERT_LT(worker, path_bits.size());
++    TRON_ASSERT_LE(n_token_jobs, path_bits[worker].size());
++    return path_bits[worker].data();
++  }
++
++  // Main thread, before the attention workers of a forward start. The
++  // scheduler registers at most one listener per token job, so n_listeners
++  // never exceeds n_token_jobs. The job counts of the forwards record are
++  // added in end_forward, all three together: a live read during a forward
++  // then never shows listener_jobs and kv_only_jobs ahead of token_jobs.
++  void begin_forward(forward_class cls, size_t n_token_jobs, size_t n_listeners) {
++    if (!enabled) return;
++    TRON_ASSERT_LE(n_listeners, n_token_jobs);
++    current_class.store(static_cast<uint8_t>(cls), std::memory_order_relaxed);
++    forward_n_listeners = n_listeners;
++    fpga_bits.assign(n_token_jobs, 0);
++    for (auto& bits : path_bits) {
++      if (bits.size() < n_token_jobs) bits.resize(n_token_jobs, 0);
++    }
++    t4_last_operation = NO_OPERATION;
++    forward_n_attn_workers = UNKNOWN_SPLIT;
++  }
++
++  // Main thread, once per forward with attention work, from
++  // assemble_attention_plan_impl: the split the plugin chose. end_forward then
++  // folds the last n_attn_workers rows only, and the forwards record keeps
++  // the smallest and largest split of the class.
++  void note_attn_workers(size_t n_attn_workers) noexcept {
++    if (!enabled) return;
++    TRON_ASSERT_LE(n_attn_workers, n_workers);
++    forward_n_attn_workers = n_attn_workers;
++    forward_counters& fc = forwards[current_class_ix()];
++    min_relaxed(fc.n_attn_workers_min, n_attn_workers);
++    max_relaxed(fc.n_attn_workers_max, n_attn_workers);
++  }
++
++  // Worker-side, once per apply_page_range call: add the call's tally to the
++  // worker's row of the current class. Rows exist for the app pool's workers
++  // and the model's layers. Any other index is asserted, not ignored: in
++  // production every index is in range by construction, and a wrong one
++  // must fail instead of going uncounted.
++  inline void add_visits(
++      size_t worker, size_t layer, visit_tally const& tally, size_t pass) noexcept {
++    if (!enabled || tally.n_visits == 0) return;  // row() asserts the bounds
++    row(current_class_ix(), worker, layer).add(tally, pass);
++  }
++
++  // Worker 0, at the entry of every attention job: the T4 layer period.
++  inline void note_attn_job_entry_w0(
++      size_t operation, size_t layer, uint64_t t_entry) noexcept {
++    if (!enabled || operation == t4_last_operation) return;
++    if (t4_last_operation != NO_OPERATION) {
++      layer_timers& t = timers_at(current_class_ix(), t4_last_layer);
++      const uint64_t period = t_entry - t4_layer_start_cycles;
++      inc_relaxed(t.period_cycles, period);
++      inc_relaxed(t.period_count, 1);
++      max_relaxed(t.period_max_cycles, period);
++    }
++    t4_last_operation = operation;
++    t4_last_layer = layer;
++    t4_layer_start_cycles = t_entry;
++  }
++
++  // Every worker, at the end of every attention job: T2 (busy), under the
++  // pool worker that ran the job.
++  inline void note_attn_job(
++      size_t worker, size_t layer, uint64_t busy_cycles) noexcept {
++    if (!enabled) return;  // row() asserts the bounds
++    worker_layer_row& r = row(current_class_ix(), worker, layer);
++    inc_relaxed(r.attn_jobs, 1);
++    inc_relaxed(r.busy_cycles, busy_cycles);
++  }
++
++  // Attention worker 0, at the end of every attention job: T3, the job's wall
++  // time as that worker sees it, filed per layer.
++  inline void note_attn_job_wall_w0(size_t layer, uint64_t wall_cycles) noexcept {
++    if (!enabled) return;  // timers_at asserts the bounds
++    layer_timers& t = timers_at(current_class_ix(), layer);
++    inc_relaxed(t.wall_cycles, wall_cycles);
++    max_relaxed(t.wall_max_cycles, wall_cycles);
++  }
++
++  // Every worker, once per job: T5, cycles spent waiting in the join (both
++  // join modes; see run_joins in self_attention.hpp).
++  inline void note_join_wait(size_t worker, size_t layer, uint64_t cycles) noexcept {
++    if (!enabled || cycles == 0) return;  // row() asserts the bounds
++    inc_relaxed(row(current_class_ix(), worker, layer).join_wait_cycles, cycles);
++  }
++
++  // Main thread, once per hardware pass programmed for a layer: the K tokens
++  // the FPGA card scores for the pass's queries and the number of queries.
++  inline void note_fpga_pass(
++      size_t layer, uint64_t k_tokens, uint64_t n_queries) noexcept {
++    if (!enabled) return;  // fpga_at asserts the bounds
++    layer_fpga_counters& f = fpga_at(current_class_ix(), layer);
++    f.k_tokens.fetch_add(k_tokens, std::memory_order_relaxed);
++    f.query_passes.fetch_add(n_queries, std::memory_order_relaxed);
++  }
++
++  // Main thread, after a forward: T1.
++  inline void note_forward_wall(uint64_t cycles) noexcept {
++    if (!enabled) return;
++    forward_counters& fc = forwards[current_class_ix()];
++    fc.forwards.fetch_add(1, std::memory_order_relaxed);
++    fc.wall_cycles.fetch_add(cycles, std::memory_order_relaxed);
++    max_relaxed(fc.wall_max_cycles, cycles);
++  }
++
++  // Main thread, after every attention worker of the forward has finished:
++  // fold the per-worker path bits and the FPGA bits into the path-set
++  // histogram of the current class, then clear the bits for the next forward.
++  // It also adds the three job counts of the forward (token_jobs,
++  // listener_jobs, kv_only_jobs) to the forwards record.
++  void end_forward(size_t n_token_jobs) {
++    if (!enabled) return;
++    // begin_forward sized both scratch vectors for this count of token jobs.
++    TRON_ASSERT_EQ(fpga_bits.size(), n_token_jobs);
++    for (auto const& bits : path_bits) {
++      TRON_ASSERT_LE(n_token_jobs, bits.size());
++    }
++    // Only the attention workers of this forward wrote path bits: the last
++    // forward_n_attn_workers rows. Every row when the split is unknown.
++    const size_t first_row = forward_n_attn_workers == UNKNOWN_SPLIT
++                                 ? 0
++                                 : n_workers - forward_n_attn_workers;
++    forward_counters& fc = forwards[current_class_ix()];
++    for (size_t job = 0; job < n_token_jobs; ++job) {
++      uint8_t set = fpga_bits[job];
++      for (size_t w = first_row; w < n_workers; ++w) {
++        set |= path_bits[w][job];
++        path_bits[w][job] = 0;
++      }
++      // A wrong writer of fpga_bits or path_bits would index past the
++      // histogram. Fail here instead of counting the job under another set.
++      TRON_ASSERT_LT(static_cast<size_t>(set), N_PATH_SETS_8);
++      fc.token_jobs_by_path_set[set].fetch_add(1, std::memory_order_relaxed);
++    }
++    // The three job counts move together, in three relaxed adds. A read
++    // between them can differ from listener_jobs + kv_only_jobs == token_jobs
++    // by this one forward. A read at any other time sees the equality.
++    TRON_ASSERT_LE(forward_n_listeners, n_token_jobs);
++    fc.token_jobs.fetch_add(n_token_jobs, std::memory_order_relaxed);
++    fc.listener_jobs.fetch_add(forward_n_listeners, std::memory_order_relaxed);
++    fc.kv_only_jobs.fetch_add(
++        n_token_jobs - forward_n_listeners, std::memory_order_relaxed);
++  }
++
++  // Main thread: the hardware plan of a minibatch gave this token job at least
++  // one FPGA pass (read from hw_workload::by_job after set_passes).
++  inline void note_fpga_query(size_t token_job) noexcept {
++    if (!enabled) return;
++    TRON_ASSERT_LT(token_job, fpga_bits.size());
++    fpga_bits[token_job] = PATH_BIT_FPGA_4;
++    forwards[current_class_ix()].fpga_queries.fetch_add(1, std::memory_order_relaxed);
++  }
++
++  // Sums over workers for one (class, layer).
++  struct layer_sums {
++    uint64_t visits[N_PASSES_2][N_PATHS_3] = {};
++    uint64_t k_tokens[N_PASSES_2][N_PATHS_3] = {};
++    uint64_t avx_full_page_visits[N_PASSES_2] = {};
++    uint64_t attn_jobs = 0, busy_cycles = 0, wall_cycles = 0, wall_max_cycles = 0;
++    uint64_t period_cycles = 0, period_count = 0, period_max_cycles = 0;
++    uint64_t join_wait_cycles = 0;
++    void add(worker_layer_row const& r) noexcept {
++      for (size_t pass = 0; pass < N_PASSES_2; ++pass) {
++        for (size_t p = 0; p < N_PATHS_3; ++p) {
++          visits[pass][p] += load_relaxed(r.visits[pass][p]);
++          k_tokens[pass][p] += load_relaxed(r.k_tokens[pass][p]);
++        }
++        avx_full_page_visits[pass] += load_relaxed(r.avx_full_page_visits[pass]);
++      }
++      attn_jobs += load_relaxed(r.attn_jobs);
++      busy_cycles += load_relaxed(r.busy_cycles);
++      join_wait_cycles += load_relaxed(r.join_wait_cycles);
++    }
++    // T3 and T4 come from the per-layer struct, not from a worker row.
++    void add_timers(layer_timers const& t) noexcept {
++      wall_cycles += load_relaxed(t.wall_cycles);
++      wall_max_cycles = std::max(wall_max_cycles, load_relaxed(t.wall_max_cycles));
++      period_cycles += load_relaxed(t.period_cycles);
++      period_count += load_relaxed(t.period_count);
++      period_max_cycles =
++          std::max(period_max_cycles, load_relaxed(t.period_max_cycles));
++    }
++    void add_sums(layer_sums const& o) noexcept {
++      for (size_t pass = 0; pass < N_PASSES_2; ++pass) {
++        for (size_t p = 0; p < N_PATHS_3; ++p) {
++          visits[pass][p] += o.visits[pass][p];
++          k_tokens[pass][p] += o.k_tokens[pass][p];
++        }
++        avx_full_page_visits[pass] += o.avx_full_page_visits[pass];
++      }
++      attn_jobs += o.attn_jobs;
++      busy_cycles += o.busy_cycles;
++      wall_cycles += o.wall_cycles;
++      wall_max_cycles = std::max(wall_max_cycles, o.wall_max_cycles);
++      period_cycles += o.period_cycles;
++      period_count += o.period_count;
++      period_max_cycles = std::max(period_max_cycles, o.period_max_cycles);
++      join_wait_cycles += o.join_wait_cycles;
++    }
++    uint64_t visits_all(size_t p) const noexcept {
++      return visits[PASS_READY_0][p] + visits[PASS_PENDING_1][p];
++    }
++    uint64_t k_tokens_all(size_t p) const noexcept {
++      return k_tokens[PASS_READY_0][p] + k_tokens[PASS_PENDING_1][p];
++    }
++  };
++  // The layer view carries T3 and T4; the worker view (sum_worker) does not,
++  // because those timers describe the layer, not a worker.
++  layer_sums sum_layer(size_t cls, size_t layer) const noexcept {
++    layer_sums s;
++    for (size_t w = 0; w < n_workers; ++w) {
++      s.add(row(cls, w, layer));
++    }
++    s.add_timers(timers_at(cls, layer));
++    return s;
++  }
++  layer_sums sum_worker(size_t cls, size_t worker) const noexcept {
++    layer_sums s;
++    for (size_t l = 0; l < n_layers; ++l) {
++      s.add(row(cls, worker, l));
++    }
++    return s;
++  }
++
++  // ---- rendering (JSON, one object per leaf; every leaf stays well below
++  // fuse_sysfs::MAX_STRING_LENGTH) ----
++
++  // with_layer_timers: the T3/T4 keys, present in the layer and totals leaves
++  // and absent from the worker leaf.
++  static void put_counts(
++      std::string& out, layer_sums const& s, bool with_layer_timers) {
++    for (size_t pass = 0; pass < N_PASSES_2; ++pass) {
++      const char* pass_name = pass == PASS_READY_0 ? "ready" : "pending";
++      for (size_t p = 0; p < N_PATHS_3; ++p) {
++        fmt::format_to(std::back_inserter(out),
++            "\"{}_{}_visits\":{},\"{}_{}_k_tokens\":{},", pass_name, PATH_NAMES[p],
++            s.visits[pass][p], pass_name, PATH_NAMES[p], s.k_tokens[pass][p]);
++      }
++      fmt::format_to(std::back_inserter(out), "\"{}_avx_full_page_visits\":{},",
++          pass_name, s.avx_full_page_visits[pass]);
++    }
++    fmt::format_to(std::back_inserter(out), "\"attn_jobs\":{},\"busy_cycles\":{},",
++        s.attn_jobs, s.busy_cycles);
++    if (with_layer_timers) {
++      fmt::format_to(std::back_inserter(out),
++          "\"wall_cycles_w0\":{},\"wall_max_cycles_w0\":{},"
++          "\"period_cycles_w0\":{},\"period_count_w0\":{},\"period_max_cycles_w0\":{},",
++          s.wall_cycles, s.wall_max_cycles, s.period_cycles, s.period_count,
++          s.period_max_cycles);
++    }
++    fmt::format_to(
++        std::back_inserter(out), "\"join_wait_cycles\":{}", s.join_wait_cycles);
++  }
++
++  // FPGA K tokens as counted (per query, all kv heads at once) and on the
++  // software scale (per kv head), plus the (pass, query) pairs.
++  void put_fpga(std::string& out, uint64_t fpga_k, uint64_t fpga_qp) const {
++    fmt::format_to(std::back_inserter(out),
++        ",\"fpga_k_tokens\":{},\"fpga_k_tokens_x_kv_heads\":{},\"fpga_query_passes\":{"
++        "}",
++        fpga_k, fpga_k * facts.n_kv_heads, fpga_qp);
++  }
++
++  // Workers that ran at least one attention job (the app pool has more
++  // workers than the plugin uses for attention).
++  size_t active_workers() const noexcept {
++    size_t n = 0;
++    for (size_t w = 0; w < n_workers && enabled; ++w) {
++      bool active = false;
++      for (size_t cls = 0; cls < N_CLASSES_2 && !active; ++cls) {
++        for (size_t l = 0; l < n_layers && !active; ++l) {
++          active = load_relaxed(row(cls, w, l).attn_jobs) != 0;
++        }
++      }
++      n += active ? 1 : 0;
++    }
++    return n;
++  }
++
++  std::string render_summary() const {
++    std::string out;
++    // tsc_hz converts the cycle counters to seconds; 0 until the calibration
++    // thread has published a frequency.
++    fmt::format_to(std::back_inserter(out),
++        "{{\"on\":{},\"model_id\":\"{}\",\"eagle\":{},\"amx_compiled\":{},"
++        "\"amx_available\":{},\"n_kv_heads\":{},\"kv_mul\":{},\"head_size\":{},"
++        "\"n_layers\":{},\"page_size\":{},\"n_workers\":{},\"active_workers\":{},"
++        "\"tsc_hz\":{},\"switch\":\"TRON_ATTN_STATS=1\"}}",
++        enabled, model_id, is_eagle, facts.amx_compiled, facts.amx_available,
++        facts.n_kv_heads, facts.kv_mul, facts.head_size, facts.n_layers,
++        facts.page_size, n_workers, active_workers(), hardware::system::get_cpu_freq());
++    return out;
++  }
++
++  // Path totals per class, summed over workers and layers, plus the FPGA
++  // K tokens and query passes summed over layers.
++  std::string render_totals(size_t cls) const {
++    std::string out = "{";
++    if (enabled) {
++      layer_sums s;
++      for (size_t l = 0; l < n_layers; ++l) {
++        s.add_sums(sum_layer(cls, l));
++      }
++      put_counts(out, s, /*with_layer_timers=*/true);
++      uint64_t fpga_k = 0, fpga_qp = 0;
++      for (size_t l = 0; l < n_layers; ++l) {
++        fpga_k += load_relaxed(fpga_at(cls, l).k_tokens);
++        fpga_qp += load_relaxed(fpga_at(cls, l).query_passes);
++      }
++      put_fpga(out, fpga_k, fpga_qp);
++    }
++    out += "}";
++    return out;
++  }
++
++  // Forward counters per class: forwards, wall cycles, FPGA queries and token
++  // jobs by path set. Empty while the switch is off, like the totals.
++  std::string render_forwards(size_t cls) const {
++    std::string out = "{";
++    if (enabled) {
++      forward_counters const& fc = forwards[cls];
++      fmt::format_to(std::back_inserter(out),
++          "\"forwards\":{},\"wall_cycles\":{},\"wall_max_cycles\":{},\"fpga_queries\":{"
++          "},"
++          "\"token_jobs\":{},\"listener_jobs\":{},\"kv_only_jobs\":{},"
++          "\"n_attn_workers_min\":{},\"n_attn_workers_max\":{},"
++          "\"token_jobs_by_path_set\":{{",
++          load_relaxed(fc.forwards), load_relaxed(fc.wall_cycles),
++          load_relaxed(fc.wall_max_cycles), load_relaxed(fc.fpga_queries),
++          load_relaxed(fc.token_jobs), load_relaxed(fc.listener_jobs),
++          load_relaxed(fc.kv_only_jobs),
++          // UINT64_MAX is the "no forward yet" initial value of the minimum.
++          load_relaxed(fc.n_attn_workers_max) == 0
++              ? 0
++              : load_relaxed(fc.n_attn_workers_min),
++          load_relaxed(fc.n_attn_workers_max));
++      for (size_t set = 0; set < N_PATH_SETS_8; ++set) {
++        fmt::format_to(std::back_inserter(out), "{}\"{}\":{}", set == 0 ? "" : ",",
++            PATH_SET_NAMES[set], load_relaxed(fc.token_jobs_by_path_set[set]));
++      }
++      out += "}";
++    }
++    out += "}";
++    return out;
++  }
++
++  std::string render_layer(size_t cls, size_t layer) const {
++    std::string out;
++    fmt::format_to(std::back_inserter(out), "{{\"layer\":{}", layer);
++    if (enabled) {
++      out += ",";
++      put_counts(out, sum_layer(cls, layer), /*with_layer_timers=*/true);
++      put_fpga(out, load_relaxed(fpga_at(cls, layer).k_tokens),
++          load_relaxed(fpga_at(cls, layer).query_passes));
++    }
++    out += "}";
++    return out;
++  }
++
++  std::string render_worker(size_t cls, size_t worker) const {
++    std::string out;
++    fmt::format_to(std::back_inserter(out), "{{\"worker\":{}", worker);
++    if (enabled) {
++      out += ",";
++      put_counts(out, sum_worker(cls, worker), /*with_layer_timers=*/false);
++    }
++    out += "}";
++    return out;
++  }
++
++  // The stderr summary. Printed once, when the model state is destroyed, if
++  // the switch was on and anything was counted.
++  void print_report(std::FILE* f) const {
++    if (!enabled) return;
++    bool any = false;
++    for (size_t cls = 0; cls < N_CLASSES_2; ++cls) {
++      any = any || load_relaxed(forwards[cls].forwards) != 0;
++    }
++    for (auto const& r : rows) {
++      for (size_t pass = 0; pass < N_PASSES_2 && !any; ++pass) {
++        for (size_t p = 0; p < N_PATHS_3; ++p) {
++          any = any || load_relaxed(r.visits[pass][p]) != 0;
++        }
++      }
++    }
++    if (!any) return;
++    std::fprintf(
++        f, "\n[attn-stats] model %s: %s\n", model_id.c_str(), render_summary().c_str());
++    for (size_t cls = 0; cls < N_CLASSES_2; ++cls) {
++      std::fprintf(f, "[attn-stats] %s totals: %s\n", CLASS_LABELS[cls],
++          render_totals(cls).c_str());
++      std::fprintf(f, "[attn-stats] %s forwards: %s\n", CLASS_LABELS[cls],
++          render_forwards(cls).c_str());
++      // One line per class with the per-layer K tokens (ready + pending, summed
++      // over workers): layer=amx/avx/fpga.
++      std::string layers;
++      for (size_t l = 0; l < n_layers; ++l) {
++        const layer_sums s = sum_layer(cls, l);
++        fmt::format_to(std::back_inserter(layers), "{}{}={}/{}/{}", l == 0 ? "" : " ",
++            l, s.k_tokens_all(static_cast<size_t>(visit_path::amx)),
++            s.k_tokens_all(static_cast<size_t>(visit_path::avx)),
++            load_relaxed(fpga_at(cls, l).k_tokens));
++      }
++      std::fprintf(f, "[attn-stats] %s k_tokens per layer (amx/avx/fpga): %s\n",
++          CLASS_LABELS[cls], layers.c_str());
++    }
++  }
++};
++
++// One forward's record, owned by one object at one site (model::state::forward).
++// Construction: the T1 start stamp, then the class store and the scratch reset
++// (begin_forward), so T1 includes that reset. Destruction, after logits and
++// listener delivery and the latch arena release: the T1 stop stamp
++// (note_forward_wall), then the path-set fold and the job-count adds
++// (end_forward). The fold may run this late. The path bits are written only by the
++// attention workers inside the plugin's run, which waits for them. The FPGA bits are
++// written only by construct_hw_plan on the main thread, and fpga_queries keeps that
++// writer. Off state: one bool copied at construction, tested twice there (start stamp,
++// begin_forward) and once at destruction, no write. A caller of the hooks
++// without this object gets a half record: token jobs without forwards, or a
++// wall filed under the previous forward's class. The destructor also runs
++// when forward() unwinds through an exception, so such a forward is still
++// counted; tron's asserts abort rather than throw.
++struct forward_scope : noncopyable<forward_scope> {
++  model_stats& stats;
++  const bool on;
++  const size_t n_token_jobs;
++  const uint64_t t_start;
++  forward_scope(model_stats& s, forward_class cls, size_t n_jobs, size_t n_listeners)
++  : stats(s)
++  , on(s.enabled)
++  , n_token_jobs(n_jobs)
++  , t_start(on ? hardware::system::rdtsc() : UNSET_CYCLES_0) {
++    if (on) stats.begin_forward(cls, n_jobs, n_listeners);
++  }
++  ~forward_scope() noexcept {
++    if (!on) return;
++    stats.note_forward_wall(hardware::system::rdtsc() - t_start);
++    stats.end_forward(n_token_jobs);
++  }
++};
++
++// A model id is used as one FUSE path segment and inside a JSON string: the
++// expert-stats rule (non-empty, no leading dot, no slash) plus a character
++// whitelist so no quote, backslash or control character reaches the JSON.
++inline bool is_safe_model_id(std::string_view id) noexcept {
++  if (id.empty()) return false;
++  if (id.front() == '.') return false;
++  for (char c : id) {
++    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
++                    (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
++                    c == ':';
++    if (!ok) return false;
++  }
++  return true;
++}
++
++// Registers the casual leaves under /model/<model id>/attention/ (an EAGLE
++// draft state, which shares the target's id, uses attention_eagle/). Casual
++// leaves live outside /exported/ and carry no tronstats convention obligation
++// (README.stats.md), so there is no marker file. Flat layout:
++//   summary                       build and model facts, whether the switch is on
++//   <class>_totals                path counters summed over workers and layers
++//   <class>_forwards              forwards, wall cycles, token jobs by path set
++//   <class>_layer_<L>             per layer, summed over workers (only when on)
++//   <class>_worker_<W>            per worker, summed over layers (only when on)
++// Every callback captures a weak_ptr: a read after the model state is gone
++// returns "{}". A later state of the same model id (runtron builds one state
++// per prompt batch) takes the leaves over: make_file returns the existing
++// handle and the callbacks are replaced. No-op when stats are not initialized
++// or when the id cannot be a path segment.
++inline void register_fuse_files(std::shared_ptr<model_stats> const& stats) {
++  namespace fuse = tron::fuse;
++  if (!fuse::stats::is_initialized()) return;
++  if (!is_safe_model_id(stats->model_id)) return;
++  const std::string prefix = fmt::format(
++      "/model/{}/attention{}", stats->model_id, stats->is_eagle ? "_eagle" : "");
++  if (fuse::stats::get_file_handle(prefix + "/summary")) {
++    spdlog::info(
++        "attention path stats: a new model state takes over the leaves under {}",
++        prefix);
++  }
++  std::weak_ptr<model_stats> weak = stats;
++  auto leaf = [&weak](std::string const& path, auto render) {
++    auto handle = fuse::stats::make_file(path, std::string{"{}"}, LEAF_READ_ONLY_TRUE);
++    handle->set_read_callback(
++        [weak, render](std::string const&, fuse::fuse_sysfs::value_type const&) {
++          if (auto s = weak.lock()) return fuse::fuse_sysfs::value_type(render(*s));
++          return fuse::fuse_sysfs::value_type(std::string{"{}"});
++        });
++  };
++  leaf(prefix + "/summary", [](model_stats const& s) { return s.render_summary(); });
++  for (size_t cls = 0; cls < N_CLASSES_2; ++cls) {
++    leaf(fmt::format("{}/{}_totals", prefix, CLASS_NAMES[cls]),
++        [cls](model_stats const& s) { return s.render_totals(cls); });
++    leaf(fmt::format("{}/{}_forwards", prefix, CLASS_NAMES[cls]),
++        [cls](model_stats const& s) { return s.render_forwards(cls); });
++    if (!stats->enabled) continue;
++    for (size_t layer = 0; layer < stats->n_layers; ++layer) {
++      leaf(fmt::format("{}/{}_layer_{}", prefix, CLASS_NAMES[cls], layer),
++          [cls, layer](model_stats const& s) { return s.render_layer(cls, layer); });
++    }
++    for (size_t worker = 0; worker < stats->n_workers; ++worker) {
++      leaf(fmt::format("{}/{}_worker_{}", prefix, CLASS_NAMES[cls], worker),
++          [cls, worker](model_stats const& s) { return s.render_worker(cls, worker); });
++    }
++  }
++}
++
++}  // namespace tron::attn_stats
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index 2d33ce776e..6596f46fa6 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -1653,8 +1653,23 @@ public:
+         ranged_mask const& query_mask_in) noexcept {
+       MODEL_DEBUG("{}", __PRETTY_FUNCTION__);
+       TRACE_EVENT("scheduler", "forward", "n_token_jobs", in_token_jobs.size(),
+-          "n_tokens", in_tokens.size());
+-
++          "n_tokens", in_tokens.size(), "n_listeners", in_listener_index.size());
++
++      // Attention path stats (Note [Attention path stats] in attn_stats.hpp):
++      // one object owns this forward's record. decode_like = every token job
++      // has a listener (one generated token per user, but also a 1-token final
++      // prompt chunk or a speculative verify step). prompt_or_mixed = every
++      // other forward. Under continuous batching (rinzler adds users between
++      // forwards) a forward that carries one user's prompt chunk next to
++      // other users' generated tokens is prompt_or_mixed. The listener count
++      // records how mixed it was. The object is declared before the latch
++      // guard. So its destructor runs after the guard's, at the very end of
++      // the forward.
++      attn_stats::forward_scope attn_stats_scope(*self_attn_state.stats,
++          in_listener_index.size() == in_token_jobs.size()
++              ? attn_stats::forward_class::decode_like
++              : attn_stats::forward_class::prompt_or_mixed,
++          in_token_jobs.size(), in_listener_index.size());
+       with_latch_arena latches_guard(latches);
+ 
+       pages = in_pages;
+@@ -1687,6 +1702,11 @@ public:
+       return *token_pages[tok];
+     }
+ 
++    // Called by forward() only. forward() owns the attention path stats
++    // record of the forward (attn_stats::forward_scope). A second caller of
++    // run_forward would file the workers' rows and fpga_queries under the
++    // previous forward's class, and its path bits would be folded into the
++    // next forward.
+     void run_forward(
+         indexed_span<token_id, const token_batching_affinity_id> live_groups) {
+       // Writes: n_empty_listeners, n_logit_listeners, n_empty_chks, n_logit_chks
+@@ -2249,6 +2269,10 @@ public:
+     //   plan's load balance.
+     // - Per-worker attention scratchpads are keyed by attention worker
+     //   index, so two threads claiming the same index would race.
++    // - The attention path stats (attn_stats.hpp) key their per-worker rows
++    //   by pool worker through model_stats::pool_worker, which applies this
++    //   formula, and fold the last `n_attn_workers` rows at the end of the
++    //   forward.
+ 
+     // Assemble per-worker attention plans for `n_attn_workers` attention
+     // workers, from the work estimates left in `attn_work` by
+@@ -2273,6 +2297,10 @@ public:
+       TRACE_EVENT("model", "assemble attention plan");
+       TRON_ASSERT(n_attn_workers >= 1, "attention needs at least one worker");
+       TRON_ASSERT_LE(n_attn_workers, app_pool().num_workers());
++      // Attention path stats: the split of this forward. Rows are keyed by
++      // pool worker, and the fold at the end of the forward covers the last
++      // n_attn_workers rows only.
++      self_attn_state.stats->note_attn_workers(n_attn_workers);
+       const size_t n_plans = attention_plan_profiles.size();
+       const std::vector<float> worker_cumsum = estimate_worker_speeds(n_attn_workers);
+ 
+@@ -2716,6 +2744,15 @@ public:
+             self_attn_state.hw_attn_results_at(pass.scratchpad_ix)
+                 .prepare_raw_result(query.job_ix);
+           });
++      if (self_attn_state.stats->enabled) {
++        // Attention path stats: the token jobs of this minibatch with at least
++        // one FPGA pass, read from the same index the join uses.
++        for (size_t i = 0; i < q_batch->items.size(); ++i) {
++          if (!q_batch->hw_plan.by_job[i].devices.empty()) {
++            self_attn_state.stats->note_fpga_query(q_batch->items[i].i);
++          }
++        }
++      }
+     }
+ 
+     // Distribute work among workers according to their speed.
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 38c484c0ae..d3cdb69d08 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -11,6 +11,8 @@
+ #include <optional>
+ #include <span>
+ #include <string>
++#include <type_traits>
++#include <utility>
+ #include <vector>
+ 
+ #include "common/assert.hpp"
+@@ -22,6 +24,7 @@
+ #include "tron/kernels/dotter.hpp"
+ #include "tron/kernels/expr.hpp"
+ #include "tron/kernels/page_share_counters.hpp"  // TRON_PAGE_SHARE_COUNTERS only
++#include "tron/models/attn_stats.hpp"
+ #include "tron/models/common.hpp"
+ #include "tron/models/hw_attn_config.hpp"  // IWYU pragma: keep
+ #include "tron/models/kv_cache.hpp"
+@@ -464,6 +467,12 @@ struct self_attention {
+     std::deque<hw_attn_results> hw_attn;
+     // See Note [Host scale for hardware attention joins].
+     std::optional<float> hardware_attention_scale;
++    // Attention path statistics of this state (Note [Attention path stats] in
++    // attn_stats.hpp). Always present. `stats->enabled` says whether the hooks
++    // count. A shared_ptr because the FUSE leaves hold a weak_ptr to it, so
++    // the member must keep the object the constructor registered (unit tests
++    // that never initialize the FUSE tree may replace it).
++    std::shared_ptr<attn_stats::model_stats> stats;
+ 
+     state(enclosing_state_t& enclosing_state)
+     : enclosing_state(enclosing_state) {
+@@ -471,6 +480,24 @@ struct self_attention {
+       attn.resize(app_pool().num_workers());
+       hw_results_ready.fill(false);
+       hw_job_in_flight.fill(false);
++      {
++        attn_stats::header_facts facts;
++#ifdef TRON_AMX_DISPATCH
++        facts.amx_compiled = attn_stats::AMX_COMPILED_TRUE;
++        facts.amx_available = amx_attn_h128g4::available();
++#endif
++        facts.n_kv_heads = n_kv_heads;
++        facts.kv_mul = kv_mul;
++        facts.head_size = head_size;
++        facts.n_layers = n_layers;
++        facts.page_size = page::page_size;
++        // cfg is declared before self_attn_state in model::state, so its id is
++        // initialized here.
++        stats = std::make_shared<attn_stats::model_stats>(attn_stats::env_enabled(),
++            enclosing_state.cfg.id, enclosing_state.model_ref.plugin.is_eagle, facts,
++            attn.size(), n_layers);
++        attn_stats::register_fuse_files(stats);
++      }
+ 
+       constexpr std::optional<float> configured_hardware_scale =
+           model::hardware_attention_scale();
+@@ -599,6 +626,15 @@ struct self_attention {
+           }
+           tok_ix_arr[qi] = relative_hw_tok_ix(pass.queries[qi].last_hw_token_pos);
+         }
++        if (stats->enabled) {
++          // Attention path stats: K tokens the FPGA card scores in this pass (the
++          // inclusive last index + 1 per query) and the pass's query count.
++          uint64_t fpga_k_tokens = 0;
++          for (size_t qi = 0; qi < B; ++qi) {
++            fpga_k_tokens += tok_ix_arr[qi] + 1;
++          }
++          stats->note_fpga_pass(layer.i, fpga_k_tokens, B);
++        }
+ 
+         std::vector<hardware::shard_kv_slot_t> shard_slots;
+         for (auto* sh : pass.shards) {
+@@ -761,6 +797,16 @@ struct self_attention {
+       const size_t pool_worker_ix = tp.num_workers() - n_attn_workers + worker_ix;
+       const model_layer_id layer = binding.model_layer;
+       uint64_t attn_elapsed = 0;
++      // Attention path stats timers (Note [Attention path stats] in
++      // attn_stats.hpp). T3, the wall of this job on worker 0, and T4, the
++      // layer period, start here. T2 is attn_elapsed below.
++      attn_stats::model_stats& stats_ref = *stats;
++      const bool stats_enabled = stats_ref.enabled;
++      const uint64_t t_entry =
++          stats_enabled ? hardware::system::rdtsc() : attn_stats::UNSET_CYCLES_0;
++      if (stats_enabled && worker_ix == attn_stats::WORKER_0) {
++        stats_ref.note_attn_job_entry_w0(binding.operation.i, layer.i, t_entry);
++      }
+ 
+       query_channel.start_reading(worker_ix);
+       // One token is enough to wait on the fallback latch.
+@@ -793,8 +839,8 @@ struct self_attention {
+           compute_elapsed);
+       output_channel.start_writing(worker_ix);
+ 
+-      run_joins<geometry>(
+-          outer_batch, operation, output, worker_ix, n_attn_workers, uses_hw);
++      run_joins<geometry>(outer_batch, operation, output, worker_ix, n_attn_workers,
++          uses_hw, stats_enabled);
+       // Note [Attention query lifetime]
+       // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+       // Hardware launch queues pointers; it does not consume Q synchronously.
+@@ -803,7 +849,15 @@ struct self_attention {
+       query_channel.finish_reading(worker_ix);
+       output_channel.finish_writing(worker_ix);
+       outer_batch->free_scratchpads_barrier.done(worker_ix);
+-      attn_elapsed += hardware::system::rdtsc();
++      const uint64_t t_end = hardware::system::rdtsc();
++      attn_elapsed += t_end;
++      if (stats_enabled) {
++        stats_ref.note_attn_job(
++            stats_ref.pool_worker(worker_ix, n_attn_workers), layer.i, attn_elapsed);
++        if (worker_ix == attn_stats::WORKER_0) {
++          stats_ref.note_attn_job_wall_w0(layer.i, t_end - t_entry);
++        }
++      }
+       return attn_elapsed;
+     }
+ 
+@@ -974,7 +1028,8 @@ struct self_attention {
+         size_t rank,
+         size_t n_join_workers,
+         size_t n_attn_workers,
+-        finish_job_t& finish_job) {
++        finish_job_t& finish_job,
++        uint64_t* join_wait_cycles) {  // T5 accumulator, nullptr when stats are off
+       auto& workload = q_batch->hw_plan;
+       auto const& sections_left = plan_for(q_batch, operation).sections_left[kv_head];
+       const size_t n_batch_jobs = q_batch->items.size();
+@@ -1076,6 +1131,11 @@ struct self_attention {
+         // Watch both producers: SW can finish while HW is pending, and any
+         // device or job can become ready while software is still computing.
+         TRACE_EVENT("hwattention", "attention: join wait", "open jobs", n_open);
++        // T5: this loop is the only pure waiting in the hardware join. It ends
++        // when a hardware pass or the software partials become ready. The
++        // software-only join times its poll in run_joins instead.
++        const uint64_t t_wait =
++            join_wait_cycles ? hardware::system::rdtsc() : attn_stats::UNSET_CYCLES_0;
+         bool any_ready = false;
+         while (!any_ready) {
+           if (!software_ready && sections_left.load(std::memory_order_acquire) == 0)
+@@ -1090,6 +1150,7 @@ struct self_attention {
+                 any_ready = ready(groups[d].pass_ixs[cursor.next[d]], batch_job_ix);
+           }
+         }
++        if (join_wait_cycles) *join_wait_cycles += hardware::system::rdtsc() - t_wait;
+       }
+     }
+ 
+@@ -1126,9 +1187,12 @@ struct self_attention {
+         output_buffer_t& output,
+         size_t worker_ix,
+         size_t n_attn_workers,
+-        bool uses_hw) {
++        bool uses_hw,
++        bool stats_enabled) {
+       const attention_binding binding = operation.binding;
+       const model_layer_id layer = binding.model_layer;
++      uint64_t join_wait_cycles =
++          attn_stats::UNSET_CYCLES_0;  // T5 of this job, over its kv heads
+       // This is the join part; see Note [Computing self-attention].
+       //
+       // Note [Attention join parallelism scheme]
+@@ -1195,9 +1259,30 @@ struct self_attention {
+           "HW plan indexes {} jobs for a batch of {}", q_batch->hw_plan.by_job.size(),
+           n_batch_jobs);
+       mask_t<64> kv_heads_to_join = plan_state.kv_heads_to_join[worker_ix];
++      // T5 on a software-only join: one stretch of waiting = consecutive failed
++      // polls with no join progress in between, over all of this worker's kv
++      // heads. Folding head B while head A is still pending is work, not
++      // waiting, so stretches never overlap and their sum stays below the
++      // job's wall time. With join_hw the poll is skipped and stream_hw_joins
++      // times its own wait loop into the same accumulator, so nothing is
++      // counted twice. Off state: no rdtsc. One test of stats_enabled per
++      // failed poll, and one test of poll_waiting per kv head joined (also in
++      // the hardware join, where the poll is skipped).
++      bool poll_waiting = false;
++      uint64_t t_poll = attn_stats::UNSET_CYCLES_0;
+       while (!kv_heads_to_join.empty())
+         for (size_t kv_head : kv_heads_to_join) {
+-          if (!join_hw && plan_state.sections_left[kv_head]) continue;  // poll
++          if (!join_hw && plan_state.sections_left[kv_head]) {  // poll
++            if (stats_enabled && !poll_waiting) {
++              poll_waiting = true;
++              t_poll = hardware::system::rdtsc();
++            }
++            continue;
++          }
++          if (poll_waiting) {  // a successful poll closes the stretch
++            join_wait_cycles += hardware::system::rdtsc() - t_poll;
++            poll_waiting = false;
++          }
+           TRACE_EVENT("model", "attention: join", "worker_ix", worker_ix, "layer",
+               layer.i, "kv_head", kv_head);
+           const size_t n_join_workers = plan_state.join_workers[kv_head].count();
+@@ -1244,7 +1329,8 @@ struct self_attention {
+               auto finish_hw_job = [&](size_t batch_job_ix)
+                                        TRON(noinline) { finish_job(batch_job_ix); };
+               stream_hw_joins(q_batch, binding.operation, kv_head, rank, n_join_workers,
+-                  n_attn_workers, finish_hw_job);
++                  n_attn_workers, finish_hw_job,
++                  stats_enabled ? &join_wait_cycles : nullptr);
+             } else
+               finish_all_jobs();
+           } else {
+@@ -1253,6 +1339,10 @@ struct self_attention {
+           }
+           kv_heads_to_join.erase(kv_head);
+         }
++      if (stats_enabled) {
++        stats->note_join_wait(
++            stats->pool_worker(worker_ix, n_attn_workers), layer.i, join_wait_cycles);
++      }
+       /**
+        * Note [TODO: Improving parallelism in self-attention reduction]
+        * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+@@ -1385,12 +1475,25 @@ struct self_attention {
+         size_t q_begin = 0,
+         size_t q_end = SIZE_MAX) noexcept {
+       const attention_binding binding = operation.binding;
++      // Attention path stats (Note [Attention path stats] in attn_stats.hpp).
++      // This bool, copied once per call, gates every per-visit hook below. The
++      // row key (the pool worker of this attention worker) and the path-bit
++      // span of that row are hoisted here too; the off state computes neither.
++      attn_stats::model_stats& stats_ref = *stats;
++      const bool stats_enabled = stats_ref.enabled;
++      attn_stats::visit_tally stats_tally;
++      const size_t stats_worker =
++          stats_enabled ? stats_ref.pool_worker(scratchpad, n_attn_workers)
++                        : attn_stats::model_stats::NO_WORKER;
++      uint8_t* path_bits = stats_enabled ? stats_ref.token_path_span(stats_worker,
++                                               enclosing_state.token_jobs.size())
++                                         : nullptr;
+       // MODEL_DEBUG("{} layer {} kv_head {} scratchpad {} qbatch [{}]",
+       // __PRETTY_FUNCTION__, layer, kv_head, scratchpad,
+       // fmt::join(q_batch->items,","));
+       TRACE_EVENT("model",
+           perfetto::StaticString(pending ? "Attention Pending" : "Attention Ready"),
+-          "kv head", kv_head,
++          "layer", binding.model_layer.i, "kv head", kv_head,
+           // The scratchpad is the attention worker index; see
+           // Note [Attention workers are the last pool workers] in model.hpp.
+           "app thread id", app_pool().num_workers() - n_attn_workers + scratchpad,
+@@ -1540,10 +1643,15 @@ struct self_attention {
+             }
+           }
+ #endif
+-          auto [relevant_k_tokens, hint] = apply_page_tok<geometry>(was_valid, page,
++          const page_tok_result visit = apply_page_tok<geometry>(was_valid, page,
+               operation, operation_scale, kv_head, q, q_tok, sp, tok_ix,
+               page_begin_hint, sliding_window_size, run_visible_in_software, amx_qp);
+-          page_end_hint = hint;
++          const int relevant_k_tokens = visit.relevant_k_tokens;
++          page_end_hint = visit.hint;
++          if (stats_enabled) {
++            stats_tally.record(visit.served, relevant_k_tokens, page::page_size);
++            path_bits[tok_ix.i] |= attn_stats::path_bit(visit.served);
++          }
+ #ifdef TRON_PAGE_SHARE_COUNTERS
+           if (relevant_k_tokens > 0) n_relevant_query_tokens++;
+ #endif
+@@ -1570,6 +1678,12 @@ struct self_attention {
+ #ifdef TRON_PAGE_SHARE_COUNTERS
+       visit_counts.flush();
+ #endif
++      if (stats_enabled) {
++        // stats_worker is the pool worker of this attention worker (one to one
++        // inside a forward), so the row is written by its owner only.
++        stats_ref.add_visits(stats_worker, binding.model_layer.i, stats_tally,
++            pending ? attn_stats::PASS_PENDING_1 : attn_stats::PASS_READY_0);
++      }
+     }
+ 
+ #ifdef TRON_AMX_DISPATCH
+@@ -1704,13 +1818,26 @@ struct self_attention {
+     }
+ #endif
+ 
++    // What one apply_page_tok call did: how many K tokens were relevant, the
++    // range hint to continue from, and which path served the visit (the AMX
++    // kernel, the AVX dotter loop, or none: an empty visit).
++    struct page_tok_result {
++      const token_range* hint;
++      int relevant_k_tokens;
++      attn_stats::visit_path served;
++    };
++    static_assert(
++        sizeof(page_tok_result) == sizeof(std::pair<int, const token_range*>) &&
++            std::is_trivially_copyable_v<page_tok_result>,
++        "page_tok_result must stay as small as the pair it replaced");
++
+     // Minimum iota of work for paged attention: apply one KV head of one page to
+     // the attention-score accumulator of one token.  This incorporates
+     // the deferred-softmax trick, whose extra state is carried by the scratchpad.
+-    // Returns {number of relevant k tokens, final range hint}.
++    // Returns {number of relevant k tokens, final range hint, path}.
+     template <attention_geometry geometry>
+     TRON(inline)
+-    std::pair<int, const token_range*> apply_page_tok(bool was_valid,
++    page_tok_result apply_page_tok(bool was_valid,
+         const page& page,
+         attention_operation_descriptor const& operation,
+         float operation_scale,
+@@ -1769,7 +1896,7 @@ struct self_attention {
+           // page's last token is below range_hint->tok_hi, so the dotter's
+           // advance (kv_idx >= tok_hi below) could not have fired for this
+           // page either.
+-          return {int(page::page_size), range_hint};
++          return {range_hint, int(page::page_size), attn_stats::visit_path::amx};
+         }
+       }
+ #endif
+@@ -1821,7 +1948,7 @@ struct self_attention {
+       if (relevant_k_tokens == 0)
+         // Skip the V portion if there's nothing for it to do.  It
+         // would NaN anyway.
+-        return {0, range_hint};
++        return {range_hint, 0, attn_stats::visit_path::empty};
+       for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
+         size_t head = kv_head * operation_kv_mul + offset;
+         tensor<page::page_size>& s_page = s_pages[offset];
+@@ -1853,7 +1980,7 @@ struct self_attention {
+         }
+         head_sp.m_star = m_page;
+       }
+-      return {relevant_k_tokens, range_hint};
++      return {range_hint, relevant_k_tokens, attn_stats::visit_path::avx};
+     }
+ 
+     template <attention_geometry geometry>
+diff --git a/t/CMakeLists.txt b/t/CMakeLists.txt
+index 2b922e2182..ab534a3715 100644
+--- a/t/CMakeLists.txt
++++ b/t/CMakeLists.txt
+@@ -269,6 +269,7 @@ add_catch_test(NAME t_constraint_mask LIBRARIES tron pos_fake PROPERTIES LABELS
+ # itself so the test runs in every CI build, whatever the value of the
+ # TRON_PAGE_SHARE_COUNTERS option.
+ add_catch_test(NAME t_page_share_counters DEFINES TRON_PAGE_SHARE_COUNTERS LIBRARIES tron pos_fake PROPERTIES LABELS fake)
++
+ add_catch_test(NAME t_threading LIBRARIES tron pos_fake PROPERTIES LABELS fake)
+ add_catch_test(NAME t_minfifo LIBRARIES pos_fake PROPERTIES LABELS fake)
+ add_catch_test(NAME t_hwperf LIBRARIES pos_fake PROPERTIES LABELS fake)
+@@ -589,7 +590,11 @@ add_catch_test(NAME t_heap_v2 LIBRARIES tron pos_fake PROPERTIES LABELS fake)
+ add_catch_test(NAME t_alloc_contention LIBRARIES tron pos_fake PROPERTIES LABELS fake DISABLED TRUE)
+ # _GLIBCXX_ASSERTIONS: libstdc++ precondition checks in this translation unit
+ # only. The first test case needs them (see its comment in t_llama_unit.cpp).
++# t_attn_stats.cpp (attention path stats: tallies, rows, per-token path sets,
++# JSON leaves, FUSE registration; the stats tree is initialized but never
++# mounted) is part of this binary so it needs no cost-data row of its own.
+ add_catch_test(NAME t_llama_unit
++  FILES t_llama_unit.cpp t_attn_stats.cpp
+   LIBRARIES tron pos_fake
+   DEFINES _GLIBCXX_ASSERTIONS
+   MODEL_REFERENCES
+diff --git a/t/assertion_signal.hpp b/t/assertion_signal.hpp
+new file mode 100644
+index 0000000000..25ff33d52a
+--- /dev/null
++++ b/t/assertion_signal.hpp
+@@ -0,0 +1,29 @@
++// Runs a call in a forked child and reports how the child ended: the signal
++// number when a signal killed it (SIGABRT after a failed TRON_ASSERT), 0 when
++// it exited normally. Shared by the unit tests that check an assert fires.
++#pragma once
++
++#include <signal.h>
++#include <stdlib.h>
++#include <unistd.h>
++
++#include <catch2/catch_test_macros.hpp>
++#include <sys/wait.h>
++
++namespace tron {
++
++template <typename Fn>
++int assertion_signal(Fn&& fn) {
++  pid_t const pid = fork();
++  REQUIRE(pid >= 0);
++  if (pid == 0) {
++    signal(SIGABRT, SIG_DFL);
++    fn();
++    _exit(EXIT_SUCCESS);
++  }
++  int status = 0;
++  REQUIRE(waitpid(pid, &status, 0) == pid);
++  return WIFSIGNALED(status) ? WTERMSIG(status) : 0;
++}
++
++}  // namespace tron
+diff --git a/t/heterogeneous_scheduler_compile.cpp b/t/heterogeneous_scheduler_compile.cpp
+index b3acd83e6a..a8f658e56d 100644
+--- a/t/heterogeneous_scheduler_compile.cpp
++++ b/t/heterogeneous_scheduler_compile.cpp
+@@ -23,12 +23,14 @@
+ #include "pos/hwattention.hpp"
+ #include "system/memory.hpp"
+ #include "tron/hardware/attention_slots.hpp"
++#include "tron/models/attn_stats.hpp"
+ #include "tron/models/heterogeneous_kv_cache.hpp"
+ #include "tron/models/model.hpp"
+ #include "tron/models/moe_router_id.hpp"
+ #include "tron/scheduler/full.hpp"
+ #include "tron/scheduler/token_cache.hpp"
+ #include "tron/scheduler/token_cache_control.hpp"
++#include "tron/shard.hpp"
+ 
+ namespace tron {
+ 
+@@ -54,6 +56,8 @@ struct heterogeneous_scheduler_plugin
+   static constexpr size_t n_experts = 1;
+   static constexpr size_t n_shared_experts = 1;
+   static constexpr size_t n_routed_experts = 0;
++  // Attention workers the fixture's run assembles the plan for.
++  static constexpr size_t RUN_N_ATTN_WORKERS_1 = 1;
+   inline static const indexed_vector<moe_router_id, size_t>
+       expert_routing_top_k_by_router{};
+ 
+@@ -209,6 +213,12 @@ struct heterogeneous_scheduler_plugin
+ 
+     void run(std::vector<
+         std::unique_ptr<batch<::tron::model<heterogeneous_scheduler_plugin>>>>&) {
++      // As a generated plugin does (compile_generated_attention_calls above):
++      // the forward's attention plan for one attention worker. No attention
++      // job runs; the forward then goes straight to the logits.
++      outer_state
++          .template assemble_attention_plan<geometry_64, middle_geometry, geometry_256>(
++              RUN_N_ATTN_WORKERS_1);
+       outer_state.prepare_for_logits();
+     }
+   };
+@@ -289,6 +299,35 @@ struct observed_output_channel {
+   }
+ };
+ 
++// An enabled attention path stats object (h/tron/models/attn_stats.hpp) in
++// place of the state's own, which follows TRON_ATTN_STATS. Replacing the member
++// is safe here because this binary never mounts the FUSE tree, so no leaf
++// callback holds the old object. The caller opens the forward.
++static std::shared_ptr<attn_stats::model_stats> make_enabled_stats(
++    heterogeneous_outer_state& state) {
++  attn_stats::header_facts facts;
++  facts.n_kv_heads = 1;
++  facts.kv_mul = 1;
++  facts.head_size = heterogeneous_scheduler_tp1::geometry_128.kv.head_size;
++  facts.n_layers = heterogeneous_model::n_layers;
++  constexpr bool STATS_ON_TRUE = true;
++  constexpr bool NOT_EAGLE_FALSE = false;
++  auto stats = std::make_shared<attn_stats::model_stats>(STATS_ON_TRUE,
++      "heterogeneous-hw-config-test", NOT_EAGLE_FALSE, facts,
++      state.self_attn_state.attn.size(), heterogeneous_model::n_layers);
++  state.self_attn_state.stats = stats;
++  return stats;
++}
++
++// make_enabled_stats plus an open decode_like forward of n_token_jobs jobs.
++static std::shared_ptr<attn_stats::model_stats> install_enabled_stats(
++    heterogeneous_outer_state& state, size_t n_token_jobs) {
++  auto stats = make_enabled_stats(state);
++  stats->begin_forward(attn_stats::forward_class::decode_like, n_token_jobs,
++      /*n_listeners=*/n_token_jobs);
++  return stats;
++}
++
+ TEST_CASE("hardware attention configuration uses KV-slot identity", "[attention]") {
+   REQUIRE(devices.empty());
+   PosDevice device(hardware::process_device_id{0}, uint8_t{0}, uint8_t{0}, uint8_t{0},
+@@ -394,10 +433,23 @@ TEST_CASE("hardware attention configuration uses KV-slot identity", "[attention]
+       produce_hardware();
+     else
+       produce_software();
++    // T5 of the hardware join: the worker below blocks in stream_hw_joins'
++    // wait loop until the second producer runs, so its row must show a wait
++    // that is bounded by the wall time of the whole join.
++    auto stats = install_enabled_stats(*state, q_batch.items.size());
++    constexpr bool STATS_ENABLED_TRUE = true;
++    const uint64_t t_join_start = hardware::system::rdtsc();
++    // The latch starts the 20 ms window at worker entry, not at std::async,
++    // so a slow thread start cannot let the second producer run before the
++    // worker's first pass. It narrows the window to a preemption between
++    // lambda entry and that pass; it does not close it.
++    std::latch joining(1);
+     auto worker = std::async(std::launch::async, [&] {
++      joining.count_down();
+       state->self_attn_state.run_joins<geometry>(
+-          &q_batch, operation, output, 0, 2, true);
++          &q_batch, operation, output, 0, 2, true, STATS_ENABLED_TRUE);
+     });
++    joining.wait();
+     bool hardware_progressed = false;
+     if (hardware_first) {
+       // Decoding must progress before SW readiness. Bound the wait and
+@@ -415,8 +467,16 @@ TEST_CASE("hardware attention configuration uses KV-slot identity", "[attention]
+     else
+       produce_hardware();
+     worker.get();
++    const uint64_t join_wall = hardware::system::rdtsc() - t_join_start;
+     if (hardware_first) CHECK(hardware_progressed);
+     CHECK(waiting_for_other == std::future_status::timeout);
++    {
++      const auto sums =
++          stats->sum_layer(static_cast<size_t>(attn_stats::forward_class::decode_like),
++              operation.binding.model_layer.i);
++      CHECK(sums.join_wait_cycles > 0);
++      CHECK(sums.join_wait_cycles <= join_wall);
++    }
+     for (size_t b = 0; b < q_batch.items.size(); ++b) {
+       const float expected = (worker_zero_valid ? 4.5f : 6.0f) + b;
+       for (size_t i = 0; i < geometry.query_width(); ++i)
+@@ -424,6 +484,179 @@ TEST_CASE("hardware attention configuration uses KV-slot identity", "[attention]
+     }
+   }
+ 
++  SECTION("software-only join times its wait for the peer sections (T5)") {
++    // With no hardware plan, run_joins polls sections_left of its kv heads
++    // until the peer workers' sections are done. T5 (join_wait_cycles) must
++    // cover that poll: positive and bounded by the join's wall time when the
++    // producer is late, zero when the sections are already done, and zero
++    // when the stats flag of the call is off.
++    constexpr auto geometry = heterogeneous_scheduler_tp1::geometry_128;
++    constexpr auto operation = heterogeneous_scheduler_tp1::attention_operations[1];
++    heterogeneous_scheduler_state::intermediate_t<128> output;
++    output.resize(2);
++    state->resize(2);
++    latch_arena latches;
++    with_latch_arena latch_guard(latches);
++    heterogeneous_model::batch q_batch(
++        *state, {token_job_id(1), token_job_id(0)}, latches, 0);
++    q_batch.reset_channels(0, 0);
++    q_batch.plans.resize(state->attention_plan_profiles.size());
++    REQUIRE(q_batch.hw_plan.empty());  // no hardware plan: join_hw is false
++    auto& plan = state->self_attn_state.plan_for(&q_batch, operation.binding.operation);
++    plan.n_sections = {0};
++    plan.sections_left = std::vector<std::atomic_size_t>(1);
++    plan.kv_heads_to_join.resize(1);
++    plan.kv_heads_to_join[0].insert(0);
++    plan.join_workers.resize(1);
++    plan.join_workers[0].insert(0);
++    // Two software partials with equal maxima: the join is their mean.
++    constexpr std::array<float, 2> values{0, 2};
++    auto produce_software = [&] {
++      for (size_t b = 0; b < q_batch.items.size(); ++b)
++        for (size_t worker = 0; worker < 2; ++worker) {
++          auto partial =
++              state->self_attn_state.token_scratchpad_ref_at<geometry>(worker, b);
++          partial.mark_valid_for(0);
++          partial[0].m_star = 0;
++          partial[0].s_star = 1;
++          partial[0].v_star.set(constant<128>(values[worker] + b));
++        }
++      plan.sections_left[0].store(0, std::memory_order_release);
++    };
++    enum class arm {
++      late_producer_stats_on,
++      sections_done_stats_on,
++      late_producer_stats_off
++    };
++    const arm which = GENERATE(arm::late_producer_stats_on, arm::sections_done_stats_on,
++        arm::late_producer_stats_off);
++    CAPTURE(static_cast<int>(which));
++    const bool late = which != arm::sections_done_stats_on;
++    const bool stats_enabled = which != arm::late_producer_stats_off;
++    state->self_attn_state.free_scratchpads<geometry>(&q_batch, operation);
++    auto stats = install_enabled_stats(*state, q_batch.items.size());
++    plan.sections_left[0] = 1;
++    if (!late) produce_software();
++    const uint64_t t_join_start = hardware::system::rdtsc();
++    // The latch starts the 20 ms window at worker entry (see the mixed
++    // section above).
++    std::latch joining(1);
++    auto worker = std::async(std::launch::async, [&] {
++      joining.count_down();
++      state->self_attn_state.run_joins<geometry>(
++          &q_batch, operation, output, 0, 2, /*uses_hw=*/false, stats_enabled);
++    });
++    joining.wait();
++    if (late) {
++      // The worker must still be polling after 20 ms; then release it.
++      CHECK(worker.wait_for(std::chrono::milliseconds(20)) ==
++            std::future_status::timeout);
++      produce_software();
++    }
++    worker.get();
++    const uint64_t join_wall = hardware::system::rdtsc() - t_join_start;
++    const auto sums =
++        stats->sum_layer(static_cast<size_t>(attn_stats::forward_class::decode_like),
++            operation.binding.model_layer.i);
++    if (late && stats_enabled) {
++      CHECK(sums.join_wait_cycles > 0);
++      CHECK(sums.join_wait_cycles <= join_wall);
++    } else {
++      CHECK(sums.join_wait_cycles == 0);
++    }
++    for (size_t b = 0; b < q_batch.items.size(); ++b) {
++      const float expected = 1.0f + b;
++      for (size_t i = 0; i < geometry.query_width(); ++i)
++        CHECK(float(output[q_batch.items[b]].as_view()[i]) == expected);
++    }
++  }
++
++  SECTION("prepare_hw_attention files the FPGA K tokens of a pass (note_fpga_pass)") {
++    // Attention path stats: for every hardware pass, prepare_uniform_hw_attention
++    // (self_attention.hpp) files under the operation's layer the K tokens the
++    // FPGA card scores, summed over the pass's queries as the query's last
++    // hardware token relative to the pass's shards, inclusive, plus one; and
++    // the pass's query count. The three queries below take the three return
++    // paths of that relative index: inside the first shard, inside the second
++    // shard (not adjacent to the first, as round-robin device allocation
++    // produces), and beyond every shard of the pass.
++    constexpr auto geometry = heterogeneous_scheduler_tp1::geometry_128;
++    constexpr auto operation = heterogeneous_scheduler_tp1::attention_operations[1];
++    constexpr size_t DECODE_CLASS_0 =
++        static_cast<size_t>(attn_stats::forward_class::decode_like);
++    constexpr size_t N_JOBS_3 = 3;
++    heterogeneous_scheduler_state::intermediate_t<128> queries;
++    queries.resize(N_JOBS_3);
++    state->resize(N_JOBS_3);
++    state->self_attn_state.hw_attn.resize(1);
++    latch_arena latches;
++    with_latch_arena latch_guard(latches);
++    heterogeneous_model::batch q_batch(
++        *state, {token_job_id(0), token_job_id(1), token_job_id(2)}, latches, 0);
++    q_batch.plans.resize(state->attention_plan_profiles.size());
++    // Two fake shards of shard_tokens (1024) tokens each, at token 0 and at
++    // token 2048. No HBM is allocated (no hardware KV slots); the slot entry
++    // the pass reads for the operation's KV slot is marked present by hand.
++    static_assert(hardware::shard_tokens == 1024);
++    constexpr uint32_t SHARD_A_BASE_0 = 0;
++    constexpr uint32_t SHARD_B_BASE_2048 = 2048;
++    constexpr uint32_t NO_HW_SLOTS_0 = 0;
++    constexpr size_t SLOT_PRESENT_BYTES_1 = 1;
++    hardware::shard shard_a(&device, SHARD_A_BASE_0, NO_HW_SLOTS_0);
++    hardware::shard shard_b(&device, SHARD_B_BASE_2048, NO_HW_SLOTS_0);
++    for (hardware::shard* sh : {&shard_a, &shard_b}) {
++      sh->kv_shard_slots.resize(state->self_attn_state.hw_attn_kv_slot_extent);
++      sh->kv_shard_slots[operation.binding.kv_slot.i].allocation_bytes =
++          SLOT_PRESENT_BYTES_1;
++    }
++    // Last hardware token of each query and the K tokens it yields: token 5
++    // lies in shard A (index 5, so 6 tokens); token 2050 lies in shard B
++    // (1024 of A plus index 2, so 1027 tokens); token 5000 lies beyond both
++    // (all 2048 local tokens). The sum is 3081.
++    constexpr size_t LAST_POS_IN_A_5 = 5;
++    constexpr size_t LAST_POS_IN_B_2050 = 2050;
++    constexpr size_t LAST_POS_BEYOND_5000 = 5000;
++    constexpr uint64_t K_TOKENS_SUM_3081 = 6 + 1027 + 2048;
++    std::vector<hw_pass> passes(1);
++    passes[0].dev = &device;
++    passes[0].shards = {&shard_a, &shard_b};
++    passes[0].scratchpad_ix = hw_scratchpad_id(0);
++    passes[0].queries = {{token_job_id(0), LAST_POS_IN_A_5, 0},
++        {token_job_id(1), LAST_POS_IN_B_2050, 1},
++        {token_job_id(2), LAST_POS_BEYOND_5000, 2}};
++    passes[0].last_hw_token_pos = LAST_POS_BEYOND_5000;
++    q_batch.hw_plan.set_passes(std::move(passes), q_batch.items,
++        [&](hw_pass const& pass, hw_query const& query) {
++          state->self_attn_state.hw_attn_results_at(pass.scratchpad_ix)
++              .prepare_raw_result(query.job_ix);
++        });
++    auto stats = install_enabled_stats(*state, N_JOBS_3);
++    const auto& fpga = stats->fpga_at(DECODE_CLASS_0, operation.binding.model_layer.i);
++    // An operation that does not use the hardware files nothing, plan or not.
++    constexpr bool USES_HW_FALSE = false;
++    state->self_attn_state.prepare_hw_attention<geometry>(
++        &q_batch, operation, queries, USES_HW_FALSE);
++    CHECK(attn_stats::load_relaxed(fpga.k_tokens) == 0);
++    CHECK(attn_stats::load_relaxed(fpga.query_passes) == 0);
++    // The pass, prepared twice: the counters add up per pass, under the
++    // operation's layer only.
++    constexpr bool USES_HW_TRUE = true;
++    constexpr uint64_t PASSES_PREPARED_2 = 2;
++    for (uint64_t prepared = 1; prepared <= PASSES_PREPARED_2; ++prepared) {
++      state->self_attn_state.prepare_hw_attention<geometry>(
++          &q_batch, operation, queries, USES_HW_TRUE);
++      CHECK(attn_stats::load_relaxed(fpga.k_tokens) == prepared * K_TOKENS_SUM_3081);
++      CHECK(attn_stats::load_relaxed(fpga.query_passes) == prepared * N_JOBS_3);
++    }
++    for (size_t layer = 0; layer < heterogeneous_model::n_layers; ++layer) {
++      if (layer == operation.binding.model_layer.i) continue;
++      CHECK(attn_stats::load_relaxed(stats->fpga_at(DECODE_CLASS_0, layer).k_tokens) ==
++            0);
++      CHECK(attn_stats::load_relaxed(
++                stats->fpga_at(DECODE_CLASS_0, layer).query_passes) == 0);
++    }
++  }
++
+   SECTION("Q reuse waits for software work and hardware completion per minibatch") {
+     constexpr auto geometry = heterogeneous_scheduler_tp1::geometry_128;
+     constexpr auto operation = heterogeneous_scheduler_tp1::attention_operations[1];
+@@ -456,6 +689,24 @@ TEST_CASE("hardware attention configuration uses KV-slot identity", "[attention]
+     tokens.push_back(token_id(0));
+     tokens.push_back(token_id(0));
+     state->token_jobs = tokens;
++    // Attention path stats on, with the forward open for the whole section as
++    // in production: the T2/T3/T4 hooks of run_attention_job run under an
++    // enabled object and are read back below.
++    auto stats = make_enabled_stats(*state);
++    attn_stats::forward_scope stats_scope(
++        *stats, attn_stats::forward_class::decode_like, tokens.size(), tokens.size());
++    constexpr size_t DECODE_CLASS_0 =
++        static_cast<size_t>(attn_stats::forward_class::decode_like);
++    // Every batch runs two attention jobs on the one attention worker: the
++    // hardware-assisted operation, then the software one.
++    constexpr uint64_t JOBS_PER_BATCH_2 = 2;
++    // The job of this batch, on top of the earlier batches.
++    constexpr uint64_t ONE_JOB_1 = 1;
++    // The last pool row is n_pool - 1.
++    constexpr size_t LAST_ROW_BACK_1 = 1;
++    // Row 0 and the last row must differ for the keying check.
++    constexpr size_t MIN_ROWS_TO_DISCRIMINATE_2 = 2;
++    const size_t n_pool = state->self_attn_state.attn.size();
+     std::array<uint32_t, 1> positions{0};
+     state->token_positions.items = positions;
+     ranged_mask mask;
+@@ -476,6 +727,7 @@ TEST_CASE("hardware attention configuration uses KV-slot identity", "[attention]
+ 
+     for (size_t batch_ix = 0; batch_ix < 2; ++batch_ix) {
+       CAPTURE(batch_ix);
++      const uint64_t hw_jobs_so_far = batch_ix + ONE_JOB_1;
+       const token_job_id job(batch_ix);
+       heterogeneous_model::batch q_batch(*state, {job}, latches, batch_ix);
+       q_batch.reset_channels(1, 0);
+@@ -545,6 +797,31 @@ TEST_CASE("hardware attention configuration uses KV-slot identity", "[attention]
+       output_channel.finish_reading(0);
+       CHECK(software_pending == std::future_status::timeout);
+       CHECK(hardware_pending == std::future_status::timeout);
++      // T2 and T3 through run_attention_job (self_attention.hpp), cumulative
++      // over the batches: the job is filed once under the pool worker that
++      // ran it (attention worker 0 of a 1-worker split is the last pool
++      // worker, Note [Attention workers are the last pool workers] in
++      // model.hpp), never under row 0. T2 (busy) leaves out the upstream
++      // K/V wait, which the 20 ms probe above makes real, while T3 (the
++      // job's wall on worker 0) includes it, so T3 exceeds T2.
++      {
++        const auto layer =
++            stats->sum_layer(DECODE_CLASS_0, operation.binding.model_layer.i);
++        CHECK(layer.attn_jobs == hw_jobs_so_far);
++        CHECK(layer.busy_cycles > 0);
++        CHECK(layer.wall_cycles > layer.busy_cycles);
++        CHECK(layer.wall_max_cycles <= layer.wall_cycles);
++        // The max of two positive walls is below their sum.
++        if (batch_ix > 0) CHECK(layer.wall_max_cycles < layer.wall_cycles);
++        const uint64_t row_jobs_so_far = JOBS_PER_BATCH_2 * batch_ix + ONE_JOB_1;
++        CHECK(stats->sum_worker(DECODE_CLASS_0, n_pool - LAST_ROW_BACK_1).attn_jobs ==
++              row_jobs_so_far);
++        if (n_pool >= MIN_ROWS_TO_DISCRIMINATE_2) {
++          CHECK(stats->sum_worker(DECODE_CLASS_0, 0).attn_jobs == 0);
++        } else {
++          WARN("pool has one worker: the pool-row keying check cannot discriminate");
++        }
++      }
+ 
+       // Dense operation order does not require ascending model-layer order.
+       auto& software_plan = state->self_attn_state.plan_for(
+@@ -576,10 +853,164 @@ TEST_CASE("hardware attention configuration uses KV-slot identity", "[attention]
+       for (size_t i = 0; i < 256; ++i)
+         CHECK(float(software_output[job].as_view()[i]) == 3.0f);
+       software_o_channel.finish_reading(0);
++      // T4 through run_attention_job: a layer's period closes at worker 0's
++      // entry into the next operation's job. The hardware-assisted
++      // operation's layer closes at the software operation's entry, once per
++      // batch. The software operation's layer closes at the next batch's
++      // entry into the hardware-assisted operation, so it is one behind.
++      {
++        const auto hw_layer =
++            stats->sum_layer(DECODE_CLASS_0, operation.binding.model_layer.i);
++        const auto sw_layer =
++            stats->sum_layer(DECODE_CLASS_0, software_operation.binding.model_layer.i);
++        CHECK(hw_layer.period_count == hw_jobs_so_far);
++        CHECK(hw_layer.period_cycles > 0);
++        CHECK(sw_layer.period_count == batch_ix);
++        CHECK(sw_layer.attn_jobs == hw_jobs_so_far);
++        CHECK(sw_layer.wall_cycles >= sw_layer.busy_cycles);
++      }
+     }
+   }
+ }
+ 
++TEST_CASE("model::state::forward files one whole attention path stats record per "
++          "forward",
++    "[attention]") {
++  // The forward of model::state (model.hpp) owns the record of one forward
++  // (attn_stats::forward_scope): the class, decided by whether every token
++  // job has a listener; the token job, listener job and KV-only job counts;
++  // the wall (T1); and the split noted by assemble_attention_plan. Every
++  // stats-on test elsewhere opens the scope by hand, so this is the one
++  // test that reads a record the production forward wrote. Same fixture as
++  // the KV-slot case above: a fake device, no weights, the plugin's run
++  // assembles the plan and prepares the logits. The live token count is
++  // kept different from the token job count in both forwards, so a forward
++  // that counted tokens instead of token jobs would file the wrong number.
++  REQUIRE(devices.empty());
++  PosDevice device(hardware::process_device_id{0}, uint8_t{0}, uint8_t{0}, uint8_t{0},
++      0, uint16_t{0x0100});
++  device.num_fetchers = 32;
++  device.id_dat_raw = 0;
++  devices.push_back(&device);
++  tron::finally pop_device([] { devices.pop_back(); });
++
++  auto model = std::make_unique<heterogeneous_model>(
++      std::filesystem::path{}, json(json::value_t::object));
++  model_config cfg;
++  cfg.max_layers = heterogeneous_model::n_layers;
++  cfg.id = "heterogeneous-forward-stats-test";
++  auto state = std::make_unique<heterogeneous_outer_state>(*model, cfg);
++  auto stats = make_enabled_stats(*state);
++  constexpr size_t DECODE_CLASS_0 =
++      static_cast<size_t>(attn_stats::forward_class::decode_like);
++  constexpr size_t PROMPT_CLASS_1 =
++      static_cast<size_t>(attn_stats::forward_class::prompt_or_mixed);
++  attn_stats::forward_counters const& decode = stats->forwards[DECODE_CLASS_0];
++  attn_stats::forward_counters const& prompt = stats->forwards[PROMPT_CLASS_1];
++
++  // Four live tokens on one page. Every token job stores its K and V.
++  constexpr size_t N_TOKENS_4 = 4;
++  constexpr uint8_t DO_KV_1 = 1;
++  constexpr uint8_t LIVE_GROUP_0 = 0;
++  constexpr size_t ONE_NOTIFICATION_1 = 1;
++  heterogeneous_model::book book(1);
++  book.increment_tokens_used(N_TOKENS_4);
++  auto* page = book.page_of(0);
++  page->set_lo(0, 0);
++  page->set_offset_bound(N_TOKENS_4);
++  indexed_vector<page_id, heterogeneous_model::page*> pages;
++  pages.push_back(page);
++  indexed_vector<token_id, token_t> tokens;
++  indexed_vector<token_id, uint32_t> positions;
++  indexed_vector<token_id, heterogeneous_model::page*> token_pages;
++  indexed_vector<token_id, token_batching_affinity_id> live_groups;
++  for (size_t i = 0; i < N_TOKENS_4; ++i) {
++    tokens.push_back(static_cast<token_t>(i));
++    positions.push_back(static_cast<uint32_t>(i));
++    token_pages.push_back(page);
++    live_groups.push_back(token_batching_affinity_id(LIVE_GROUP_0));
++  }
++  indexed_vector<token_id, heterogeneous_model::activation_scalar const*> no_eagle_in;
++  indexed_vector<token_id, heterogeneous_model::activation_scalar*> no_eagle_out;
++  // The decode forward notifies its two listeners from two pool workers at
++  // once (run_listener_notifications, one task per pool worker index).
++  std::atomic<size_t> notified{0};
++  // One forward: the given token jobs, with a listener (no logits buffer)
++  // on each token of `listener_tokens`. Returns the forward's wall in TSC
++  // cycles as the caller sees it.
++  auto run_forward = [&](std::vector<token_id> const& job_tokens,
++                         std::vector<token_id> const& listener_tokens) {
++    indexed_vector<token_job_id, token_id> token_jobs;
++    indexed_vector<token_job_id, uint8_t> token_jobs_do_kv;
++    mask_t<ranged_mask_capacity> every_job;
++    for (token_id tok : job_tokens) {
++      every_job.insert(token_jobs.size());
++      token_jobs.push_back(tok);
++      token_jobs_do_kv.push_back(DO_KV_1);
++    }
++    ranged_mask mask;
++    mask.add_range(token_id(0), token_id(N_TOKENS_4), every_job, {});
++    indexed_vector<listener_id, token_id> listener_index;
++    indexed_vector<listener_id, std::vector<logits_buffer_t>> listener_buffers;
++    indexed_vector<listener_id, std::function<void()>> listener_notifications;
++    for (token_id tok : listener_tokens) {
++      listener_index.push_back(tok);
++      listener_buffers.push_back({});
++      listener_notifications.push_back([&notified] {
++        notified.fetch_add(ONE_NOTIFICATION_1, std::memory_order_relaxed);
++      });
++    }
++    const uint64_t t_start = hardware::system::rdtsc();
++    state->forward(pages, tokens, positions, token_pages, live_groups, no_eagle_in,
++        no_eagle_out, token_jobs, token_jobs_do_kv, listener_index, listener_buffers,
++        listener_notifications, mask);
++    return hardware::system::rdtsc() - t_start;
++  };
++
++  // decode_like: two token jobs, both with a listener. Two of the four live
++  // tokens (0 and 3) are not jobs of this forward.
++  constexpr uint64_t DECODE_JOBS_2 = 2;
++  constexpr uint64_t N_ATTN_WORKERS_1 =
++      heterogeneous_scheduler_tp1::RUN_N_ATTN_WORKERS_1;
++  const uint64_t decode_wall =
++      run_forward({token_id(1), token_id(2)}, {token_id(1), token_id(2)});
++  CHECK(notified.load() == DECODE_JOBS_2);
++  CHECK(attn_stats::load_relaxed(decode.forwards) == 1);
++  CHECK(attn_stats::load_relaxed(decode.token_jobs) == DECODE_JOBS_2);
++  CHECK(attn_stats::load_relaxed(decode.listener_jobs) == DECODE_JOBS_2);
++  CHECK(attn_stats::load_relaxed(decode.kv_only_jobs) == 0);
++  CHECK(attn_stats::load_relaxed(decode.wall_cycles) > 0);
++  CHECK(attn_stats::load_relaxed(decode.wall_cycles) <= decode_wall);
++  CHECK(attn_stats::load_relaxed(decode.n_attn_workers_min) == N_ATTN_WORKERS_1);
++  CHECK(attn_stats::load_relaxed(decode.n_attn_workers_max) == N_ATTN_WORKERS_1);
++  CHECK(
++      attn_stats::load_relaxed(
++          decode.token_jobs_by_path_set[attn_stats::PATH_BIT_NONE_0]) == DECODE_JOBS_2);
++  CHECK(attn_stats::load_relaxed(prompt.forwards) == 0);
++  CHECK(attn_stats::load_relaxed(prompt.token_jobs) == 0);
++
++  // prompt_or_mixed: three token jobs, a listener on the last one only.
++  constexpr uint64_t PROMPT_JOBS_3 = 3;
++  constexpr uint64_t PROMPT_LISTENERS_1 = 1;
++  const uint64_t prompt_wall =
++      run_forward({token_id(1), token_id(2), token_id(3)}, {token_id(3)});
++  CHECK(notified.load() == DECODE_JOBS_2 + PROMPT_LISTENERS_1);
++  CHECK(attn_stats::load_relaxed(prompt.forwards) == 1);
++  CHECK(attn_stats::load_relaxed(prompt.token_jobs) == PROMPT_JOBS_3);
++  CHECK(attn_stats::load_relaxed(prompt.listener_jobs) == PROMPT_LISTENERS_1);
++  CHECK(attn_stats::load_relaxed(prompt.kv_only_jobs) ==
++        PROMPT_JOBS_3 - PROMPT_LISTENERS_1);
++  CHECK(attn_stats::load_relaxed(prompt.wall_cycles) > 0);
++  CHECK(attn_stats::load_relaxed(prompt.wall_cycles) <= prompt_wall);
++  CHECK(attn_stats::load_relaxed(prompt.n_attn_workers_min) == N_ATTN_WORKERS_1);
++  CHECK(attn_stats::load_relaxed(prompt.n_attn_workers_max) == N_ATTN_WORKERS_1);
++  CHECK(
++      attn_stats::load_relaxed(
++          prompt.token_jobs_by_path_set[attn_stats::PATH_BIT_NONE_0]) == PROMPT_JOBS_3);
++  CHECK(attn_stats::load_relaxed(decode.forwards) == 1);
++  CHECK(attn_stats::load_relaxed(decode.token_jobs) == DECODE_JOBS_2);
++}
++
+ TEST_CASE("Growing sliding storage preserves token-cache accounting",
+     "[kv_data][fault_seam]") {
+   // A wide sliding slot crosses the production chunk boundary in a short
+diff --git a/t/t_amx_dispatch_dtype.cpp b/t/t_amx_dispatch_dtype.cpp
+index 67b1923f43..9630a814e1 100644
+--- a/t/t_amx_dispatch_dtype.cpp
++++ b/t/t_amx_dispatch_dtype.cpp
+@@ -55,12 +55,16 @@ struct amx_probe {
+ };
+ 
+ amx_probe probe;
++// What the fake amx_attn_h128g4::available() below answers: false stands for
++// the kill switch (TRON_AMX_DISABLE=1) or a CPU without AMX.
++bool fake_amx_available = true;
+ 
+ // Runs apply_page_range over one page holding `n_tokens` tokens, with the
+ // query at the last token, and records the fakes' calls in `probe`. With
+ // `repeat` the call is made a second time with different query values.
++// `amx_available` is what the fake available() answers during the call.
+ template <typename executor_t>
+-void exercise_page(size_t n_tokens, bool repeat = false) {
++void exercise_page(size_t n_tokens, bool repeat = false, bool amx_available = true) {
+   constexpr size_t head_size = 128;
+   constexpr size_t n_heads = 4;
+   constexpr size_t n_kv_heads = 1;
+@@ -126,16 +130,32 @@ void exercise_page(size_t n_tokens, bool repeat = false) {
+     q[i] = static_cast<query_scalar>(expected[i]);
+   }
+   state.self_attn_state.attn[0].clear_validity(1);
++  // Attention path stats forced on for this state: the tallies must agree with
++  // the fakes' call counts (h/tron/models/attn_stats.hpp).
++  {
++    tron::attn_stats::header_facts facts;
++    facts.n_kv_heads = n_kv_heads;
++    facts.kv_mul = n_heads / n_kv_heads;
++    facts.head_size = head_size;
++    facts.n_layers = n_layers;
++    facts.page_size = book_t::page_size;
++    constexpr bool STATS_ON_TRUE = true;
++    constexpr bool NOT_EAGLE_FALSE = false;
++    state.self_attn_state.stats =
++        std::make_shared<tron::attn_stats::model_stats>(STATS_ON_TRUE, "",
++            NOT_EAGLE_FALSE, facts, state.self_attn_state.attn.size(), n_layers);
++  }
+ 
+   std::vector<token_job_id> jobs{token_job_id(0)};
+   std::array<page_id, 1> page_ids{page_id(0)};
+   const auto& operation = model_t::plugin_t::attention_operations[0];
+   // The expectation is stated independently of the production gate: only a
+   // bf16 query buffer may reach the packer, which copies bf16 values and
+-  // converts nothing.
+-  constexpr bool packs = std::is_same_v<query_scalar, bf16>;
++  // converts nothing. With available() false nothing is packed either.
++  const bool packs = std::is_same_v<query_scalar, bf16> && amx_available;
+   // The dense predicate: the kernels run only for a full page.
+   const bool dense = packs && n_tokens == book_t::page_size;
++  fake_amx_available = amx_available;
+   for (int round = 0; round < (repeat ? 2 : 1); ++round) {
+     if (round == 1) {
+       // Different query values: the second call must pack again and see them.
+@@ -146,13 +166,48 @@ void exercise_page(size_t n_tokens, bool repeat = false) {
+       state.self_attn_state.attn[0].clear_validity(1);
+     }
+     probe = {};
+-    state.self_attn_state.template apply_page_range<geometry>(jobs, operation,
+-        state.plugin_state.qs_roped, 0, 0, 1, std::span<const page_id>(page_ids), {});
++    {
++      // The production sequence: the forward is open while the page is visited.
++      attn_stats::forward_scope stats_scope(*state.self_attn_state.stats,
++          attn_stats::forward_class::decode_like, token_jobs.size(), token_jobs.size());
++      state.self_attn_state.template apply_page_range<geometry>(jobs, operation,
++          state.plugin_state.qs_roped, 0, 0, 1, std::span<const page_id>(page_ids), {},
++          visible);
++    }
+     CAPTURE(round);
+     REQUIRE(probe.pack_calls == (packs ? 1 : 0));
+     REQUIRE(probe.qk_calls == (dense ? 1 : 0));
+     REQUIRE(probe.pv_calls == (dense ? 1 : 0));
+-    if constexpr (packs) {
++    // The path tallies are cumulative over the rounds: one visit per call, on
++    // the AMX path exactly when the kernels ran, else on the AVX path with
++    // every token of the page relevant.
++    {
++      using namespace tron::attn_stats;
++      const size_t decode_class = static_cast<size_t>(forward_class::decode_like);
++      const auto sums = state.self_attn_state.stats->sum_layer(decode_class, 0);
++      const uint64_t calls = static_cast<uint64_t>(round) + 1;
++      REQUIRE(
++          sums.visits_all(static_cast<size_t>(visit_path::amx)) == (dense ? calls : 0));
++      REQUIRE(
++          sums.visits_all(static_cast<size_t>(visit_path::avx)) == (dense ? 0 : calls));
++      REQUIRE(sums.visits_all(static_cast<size_t>(visit_path::empty)) == 0);
++      REQUIRE(sums.k_tokens_all(static_cast<size_t>(
++                  dense ? visit_path::amx : visit_path::avx)) == calls * n_tokens);
++      REQUIRE(sums.avx_full_page_visits[PASS_READY_0] ==
++              (!dense && n_tokens == book_t::page_size ? calls : 0));
++      REQUIRE(sums.visits[PASS_PENDING_1][static_cast<size_t>(visit_path::avx)] == 0);
++      // The per-token path set of the one job, written by apply_page_range and
++      // folded at the end of the scope, cumulative over the rounds: the AMX
++      // set exactly when the kernels ran, else the AVX set, never both.
++      forward_counters const& fc = state.self_attn_state.stats->forwards[decode_class];
++      REQUIRE(load_relaxed(
++                  fc.token_jobs_by_path_set[dense ? PATH_BIT_AMX_2 : PATH_BIT_AVX_1]) ==
++              calls);
++      REQUIRE(
++          load_relaxed(
++              fc.token_jobs_by_path_set[dense ? PATH_BIT_AVX_1 : PATH_BIT_AMX_2]) == 0);
++    }
++    if (packs) {
+       for (size_t i = 0; i < expected.size(); ++i) {
+         CAPTURE(i, expected[i], probe.q[i]);
+         REQUIRE(probe.q[i] == expected[i]);
+@@ -166,7 +221,7 @@ void exercise_page(size_t n_tokens, bool repeat = false) {
+ namespace tron::amx_attn_h128g4 {
+ 
+ bool available() noexcept {
+-  return true;
++  return fake_amx_available;
+ }
+ void begin_region() noexcept {}
+ void end_region() noexcept {}
+@@ -200,6 +255,13 @@ TEST_CASE("AMX dispatch rejects non-bf16 queries and partial pages",
+   SECTION("host_bf16, partial page: one pack, no kernel call") {
+     exercise_page<host_bf16>(page_size - 1);
+   }
++  SECTION("host_bf16, full page, available() false: no pack, no kernel call, one "
++          "AVX visit that scored the whole page") {
++    // The kill-switch arm of the attention path stats: the visit lands on the
++    // AVX path with the page's every token, and avx_full_page_visits counts it
++    // as AMX-eligible volume that did not take AMX.
++    exercise_page<host_bf16>(page_size, /*repeat=*/false, /*amx_available=*/false);
++  }
+   SECTION("host (float): no pack, no kernel call") {
+     exercise_page<host>(page_size);
+   }
+diff --git a/t/t_attn_stats.cpp b/t/t_attn_stats.cpp
+new file mode 100644
+index 0000000000..a8dd9fbf0e
+--- /dev/null
++++ b/t/t_attn_stats.cpp
+@@ -0,0 +1,886 @@
++// Host-only test of the attention path statistics (h/tron/models/attn_stats.hpp):
++// the per-call tally, the per-(class, pool worker, layer) rows, the per-layer
++// timers, the per-token path
++// sets folded per forward, the JSON leaves and their size, and the FUSE leaf
++// registration with its weak_ptr rule.
++//
++// What this protects: the exit report and the FUSE leaves are read from these
++// sums, so a wrong slot here misattributes attention work to the wrong path,
++// pass, class or layer. The hooks in self_attention.hpp are covered by
++// t_llama_unit, which drives apply_page_range on a real model state.
++
++#include <cstddef>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <filesystem>
++#include <memory>
++#include <string>
++#include <system_error>
++#include <utility>
++#include <variant>
++#include <vector>
++
++#include <catch2/catch_test_macros.hpp>
++#include <spdlog/spdlog.h>
++
++#include "assertion_signal.hpp"
++#include "system/fuse_stats.hpp"
++#include "system/fuse_sysfs.hpp"
++#include "tron/models/attn_stats.hpp"
++
++using namespace tron::attn_stats;
++
++namespace {
++
++constexpr size_t PAGE_SIZE_64 = 64;
++constexpr size_t N_WORKERS_3 = 3;
++constexpr size_t N_LAYERS_4 = 4;
++constexpr size_t N_TOKEN_JOBS_5 = 5;
++constexpr size_t LISTENERS_ALL_5 = 5;  // a decode-like forward: every job has one
++constexpr size_t LISTENERS_1 = 1;      // a prompt chunk: its last job only
++constexpr size_t LISTENERS_0 = 0;      // a chunk cut by the per-forward token limit
++constexpr size_t WORKER_1 = 1;
++constexpr size_t WORKER_2 = 2;
++constexpr size_t LAYER_0 = 0;
++constexpr size_t LAYER_2 = 2;
++constexpr size_t CLASS_DECODE_0 = static_cast<size_t>(forward_class::decode_like);
++constexpr size_t CLASS_PROMPT_1 = static_cast<size_t>(forward_class::prompt_or_mixed);
++constexpr size_t IX_EMPTY_0 = static_cast<size_t>(visit_path::empty);
++constexpr size_t IX_AVX_1 = static_cast<size_t>(visit_path::avx);
++constexpr size_t IX_AMX_2 = static_cast<size_t>(visit_path::amx);
++constexpr int K_TOKENS_FULL_PAGE_64 = 64;
++constexpr int K_TOKENS_TAIL_17 = 17;
++constexpr int K_TOKENS_NONE_0 = 0;
++constexpr bool STATS_ON_TRUE = true;
++constexpr bool STATS_OFF_FALSE = false;
++constexpr bool NOT_EAGLE_FALSE = false;
++constexpr bool EAGLE_TRUE = true;
++constexpr uint64_t CYCLES_50 = 50;
++constexpr uint64_t CYCLES_100 = 100;
++constexpr uint64_t CYCLES_200 = 200;
++constexpr uint64_t CYCLES_300 = 300;
++constexpr size_t REPORT_BUF_BYTES_4096 = 4096;
++constexpr size_t BYTE_1 = 1;
++
++header_facts test_facts() {
++  header_facts f;
++  f.amx_compiled = false;
++  f.amx_available = false;
++  f.n_kv_heads = 8;
++  f.kv_mul = 4;
++  f.head_size = 128;
++  f.n_layers = N_LAYERS_4;
++  f.page_size = PAGE_SIZE_64;
++  return f;
++}
++
++std::shared_ptr<model_stats> make_stats(bool enabled, std::string id = "test-model") {
++  return std::make_shared<model_stats>(
++      enabled, std::move(id), NOT_EAGLE_FALSE, test_facts(), N_WORKERS_3, N_LAYERS_4);
++}
++
++std::string leaf_string(std::string const& path) {
++  auto handle = tron::fuse::stats::get_file_handle(path);
++  REQUIRE(handle);
++  auto value = handle->get_value();
++  REQUIRE(std::holds_alternative<std::string>(value));
++  return std::get<std::string>(value);
++}
++
++// Own the stats singleton for one test case; the tree is initialized but never
++// mounted (no /dev/fuse needed): get_value() runs the read callback directly.
++struct stats_environment {
++  std::string dir;
++  stats_environment() {
++    tron::fuse::stats::unmount();
++    std::string templ =
++        (std::filesystem::temp_directory_path() / "attn_stats_XXXXXX").string();
++    std::vector<char> buf(templ.begin(), templ.end());
++    buf.push_back('\0');
++    char* created = ::mkdtemp(buf.data());
++    REQUIRE(created != nullptr);
++    dir = created;
++    tron::fuse::stats::initialize(dir);
++  }
++  ~stats_environment() {
++    tron::fuse::stats::unmount();
++    std::error_code ec;
++    std::filesystem::remove_all(dir, ec);
++  }
++  stats_environment(stats_environment const&) = delete;
++  stats_environment& operator=(stats_environment const&) = delete;
++};
++
++}  // namespace
++
++TEST_CASE("attn-stats tally: one visit per path, K tokens per visit, full AVX pages",
++    "[attn_stats]") {
++  visit_tally tally;
++  tally.record(visit_path::amx, K_TOKENS_FULL_PAGE_64, PAGE_SIZE_64);
++  tally.record(visit_path::avx, K_TOKENS_FULL_PAGE_64, PAGE_SIZE_64);
++  tally.record(visit_path::avx, K_TOKENS_TAIL_17, PAGE_SIZE_64);
++  tally.record(visit_path::empty, K_TOKENS_NONE_0, PAGE_SIZE_64);
++  CHECK(tally.visits[IX_AMX_2] == 1);
++  CHECK(tally.k_tokens[IX_AMX_2] == 64);
++  CHECK(tally.visits[IX_AVX_1] == 2);
++  CHECK(tally.k_tokens[IX_AVX_1] == 64 + 17);
++  CHECK(tally.visits[IX_EMPTY_0] == 1);
++  CHECK(tally.k_tokens[IX_EMPTY_0] == 0);
++  // Only the AVX visit that scored the whole page counts as a missed AMX page.
++  CHECK(tally.avx_full_page_visits == 1);
++  CHECK(tally.n_visits == 4);
++}
++
++TEST_CASE("attn-stats rows: a tally goes to its pass, and layer and worker sums agree",
++    "[attn_stats]") {
++  auto stats = make_stats(STATS_ON_TRUE);
++  REQUIRE(stats->enabled);
++  visit_tally ready;
++  ready.record(visit_path::amx, K_TOKENS_FULL_PAGE_64, PAGE_SIZE_64);
++  visit_tally pending;
++  pending.record(visit_path::avx, K_TOKENS_TAIL_17, PAGE_SIZE_64);
++  stats->row(CLASS_DECODE_0, WORKER_1, LAYER_2).add(ready, PASS_READY_0);
++  stats->row(CLASS_DECODE_0, WORKER_2, LAYER_2).add(pending, PASS_PENDING_1);
++  stats->row(CLASS_PROMPT_1, WORKER_1, LAYER_2).add(ready, PASS_READY_0);
++
++  auto layer = stats->sum_layer(CLASS_DECODE_0, LAYER_2);
++  CHECK(layer.visits[PASS_READY_0][IX_AMX_2] == 1);
++  CHECK(layer.k_tokens[PASS_READY_0][IX_AMX_2] == 64);
++  CHECK(layer.visits[PASS_PENDING_1][IX_AVX_1] == 1);
++  CHECK(layer.k_tokens[PASS_PENDING_1][IX_AVX_1] == 17);
++  CHECK(layer.visits[PASS_PENDING_1][IX_AMX_2] == 0);
++  CHECK(layer.visits_all(IX_AVX_1) == 1);
++  CHECK(layer.k_tokens_all(IX_AVX_1) == 17);
++  // Another layer of the same class saw nothing.
++  CHECK(stats->sum_layer(CLASS_DECODE_0, LAYER_0).visits_all(IX_AMX_2) == 0);
++  // The worker view of the same rows.
++  CHECK(stats->sum_worker(CLASS_DECODE_0, WORKER_1).visits_all(IX_AMX_2) == 1);
++  CHECK(stats->sum_worker(CLASS_DECODE_0, WORKER_2).visits_all(IX_AVX_1) == 1);
++  CHECK(stats->sum_worker(CLASS_DECODE_0, WORKER_0).visits_all(IX_AVX_1) == 0);
++  // The other class is separate.
++  CHECK(stats->sum_layer(CLASS_PROMPT_1, LAYER_2).visits_all(IX_AMX_2) == 1);
++  CHECK(stats->sum_layer(CLASS_PROMPT_1, LAYER_2).visits_all(IX_AVX_1) == 0);
++}
++
++TEST_CASE(
++    "attn-stats path sets: bits from every worker and the FPGA plan fold per forward",
++    "[attn_stats]") {
++  auto stats = make_stats(STATS_ON_TRUE);
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  // The workers write their path bits through the span the visit loop hoists.
++  // job 0: AMX on worker 0 and AVX on worker 2; job 1: FPGA + AVX; job 2: FPGA
++  // only; job 3: nothing; job 4: AVX + AMX on one worker.
++  uint8_t* bits_w0 = stats->token_path_span(WORKER_0, N_TOKEN_JOBS_5);
++  uint8_t* bits_w1 = stats->token_path_span(WORKER_1, N_TOKEN_JOBS_5);
++  uint8_t* bits_w2 = stats->token_path_span(WORKER_2, N_TOKEN_JOBS_5);
++  bits_w0[0] |= path_bit(visit_path::amx);
++  bits_w2[0] |= path_bit(visit_path::avx);
++  bits_w1[1] |= path_bit(visit_path::avx);
++  stats->note_fpga_query(1);
++  stats->note_fpga_query(2);
++  bits_w1[4] |= path_bit(visit_path::avx);
++  bits_w1[4] |= path_bit(visit_path::amx);
++  bits_w0[4] |= path_bit(visit_path::empty);  // an empty visit adds no bit
++  stats->end_forward(N_TOKEN_JOBS_5);
++
++  forward_counters const& fc = stats->forwards[CLASS_DECODE_0];
++  CHECK(load_relaxed(fc.token_jobs) == N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(fc.fpga_queries) == 2);
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[PATH_BIT_AVX_1 | PATH_BIT_AMX_2]) == 2);
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[PATH_BIT_FPGA_4 | PATH_BIT_AVX_1]) == 1);
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[PATH_BIT_FPGA_4]) == 1);
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[0]) == 1);
++  CHECK(
++      stats->render_forwards(CLASS_DECODE_0)
++          .find("\"fpga_queries\":2,\"token_jobs\":5,\"listener_jobs\":5,"
++                "\"kv_only_jobs\":0,\"n_attn_workers_min\":0,\"n_attn_workers_max\":0,"
++                "\"token_jobs_by_path_set\":{"
++                "\"none\":1,\"avx\":0,"
++                "\"amx\":0,\"avx+amx\":2,\"fpga\":1,\"fpga+avx\":1,\"fpga+amx\":0,"
++                "\"fpga+avx+amx\":0}}") != std::string::npos);
++  // The prompt class saw nothing.
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].token_jobs) == 0);
++
++  // The next forward begins with cleared bits: the same jobs with no visits count as
++  // "none".
++  stats->begin_forward(forward_class::prompt_or_mixed, N_TOKEN_JOBS_5, LISTENERS_1);
++  stats->end_forward(N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].token_jobs_by_path_set[0]) ==
++        N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].fpga_queries) == 0);
++  // The mix of the class: a prompt chunk of 5 jobs has one listener (its last
++  // job) and 4 KV-only jobs; the decode forward above had 5 and 0.
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].listener_jobs) == LISTENERS_1);
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].kv_only_jobs) ==
++        N_TOKEN_JOBS_5 - LISTENERS_1);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].listener_jobs) == LISTENERS_ALL_5);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].kv_only_jobs) == 0);
++  // A prompt edge cut by the per-forward token limit registers no listener in
++  // this forward: every job is KV-only, and the class stays prompt_or_mixed.
++  stats->begin_forward(forward_class::prompt_or_mixed, N_TOKEN_JOBS_5, LISTENERS_0);
++  stats->end_forward(N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].listener_jobs) == LISTENERS_1);
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].kv_only_jobs) ==
++        2 * N_TOKEN_JOBS_5 - LISTENERS_1);
++}
++
++TEST_CASE(
++    "attn-stats timers: T2 per worker, T3 on worker 0, T4 by operation change, T5 wait",
++    "[attn_stats]") {
++  constexpr size_t OPERATION_0 = 0;
++  constexpr size_t OPERATION_1 = 1;
++  constexpr uint64_t CYCLES_250 = 250;
++  constexpr uint64_t CYCLES_1000 = 1000;
++  constexpr uint64_t CYCLES_1300 = 1300;
++  constexpr uint64_t CYCLES_2000 = 2000;
++  constexpr uint64_t CYCLES_2700 = 2700;
++  auto stats = make_stats(STATS_ON_TRUE);
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  // Worker 0 runs operation 0 (layer 0) for two minibatches, then operation 1
++  // (layer 1): the layer-0 period is the distance between the two operation
++  // entries; the second minibatch of operation 0 starts no period.
++  stats->note_attn_job_entry_w0(OPERATION_0, LAYER_0, CYCLES_1000);
++  stats->note_attn_job_entry_w0(OPERATION_0, LAYER_0, CYCLES_1300);
++  stats->note_attn_job_entry_w0(OPERATION_1, 1, CYCLES_2700);
++  auto l0 = stats->sum_layer(CLASS_DECODE_0, LAYER_0);
++  CHECK(l0.period_count == 1);
++  CHECK(l0.period_cycles == CYCLES_2700 - CYCLES_1000);
++  CHECK(l0.period_max_cycles == CYCLES_2700 - CYCLES_1000);
++  CHECK(stats->sum_layer(CLASS_DECODE_0, 1).period_count == 0);
++  // A new forward resets the rule: the first operation of the next forward
++  // does not close the previous forward's last layer.
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  stats->note_attn_job_entry_w0(OPERATION_0, LAYER_0, CYCLES_2000);
++  CHECK(stats->sum_layer(CLASS_DECODE_0, 1).period_count == 0);
++
++  // T2 on every worker (rows), T3 from attention worker 0 only (per layer).
++  stats->note_attn_job(WORKER_0, LAYER_2, CYCLES_100);
++  stats->note_attn_job(WORKER_1, LAYER_2, CYCLES_100);
++  stats->note_attn_job_wall_w0(LAYER_2, CYCLES_250);
++  auto l2 = stats->sum_layer(CLASS_DECODE_0, LAYER_2);
++  CHECK(l2.attn_jobs == 2);
++  CHECK(l2.busy_cycles == 2 * CYCLES_100);
++  CHECK(l2.wall_cycles == CYCLES_250);
++  CHECK(l2.wall_max_cycles == CYCLES_250);
++  // T3 and T4 describe the layer, so no worker view carries them.
++  for (size_t w = 0; w < N_WORKERS_3; ++w) {
++    CHECK(stats->sum_worker(CLASS_DECODE_0, w).wall_cycles == 0);
++    CHECK(stats->sum_worker(CLASS_DECODE_0, w).period_count == 0);
++  }
++  // T5.
++  stats->note_join_wait(WORKER_1, LAYER_2, CYCLES_100);
++  stats->note_join_wait(WORKER_1, LAYER_2, 0);
++  CHECK(stats->sum_layer(CLASS_DECODE_0, LAYER_2).join_wait_cycles == CYCLES_100);
++  // T1 and the FPGA pass counters.
++  stats->note_forward_wall(CYCLES_2000);
++  stats->note_forward_wall(CYCLES_1000);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].forwards) == 2);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].wall_cycles) ==
++        CYCLES_2000 + CYCLES_1000);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].wall_max_cycles) == CYCLES_2000);
++  stats->note_fpga_pass(LAYER_2, 1024, 8);
++  stats->note_fpga_pass(LAYER_2, 1024, 8);
++  CHECK(load_relaxed(stats->fpga_at(CLASS_DECODE_0, LAYER_2).k_tokens) == 2048);
++  CHECK(load_relaxed(stats->fpga_at(CLASS_DECODE_0, LAYER_2).query_passes) == 16);
++  // The layer leaf carries the FPGA counters by value; the x_kv_heads product
++  // (n_kv_heads 8 in test_facts) puts the K tokens on the software scale.
++  CHECK(stats->render_layer(CLASS_DECODE_0, LAYER_2)
++            .find("\"fpga_k_tokens\":2048,\"fpga_k_tokens_x_kv_heads\":16384,"
++                  "\"fpga_query_passes\":16") != std::string::npos);
++  // The FPGA counters follow the forward class of the moment.
++  stats->begin_forward(forward_class::prompt_or_mixed, N_TOKEN_JOBS_5, LISTENERS_1);
++  stats->note_fpga_pass(LAYER_2, 512, 4);
++  CHECK(load_relaxed(stats->fpga_at(CLASS_PROMPT_1, LAYER_2).k_tokens) == 512);
++  CHECK(load_relaxed(stats->fpga_at(CLASS_DECODE_0, LAYER_2).k_tokens) == 2048);
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  // Out-of-range workers, layers and token jobs abort: see the negative case
++  // "an out-of-range worker, layer or token job aborts" below.
++  // An empty tally adds nothing (and touches no row).
++  stats->add_visits(WORKER_0, LAYER_0, visit_tally{}, PASS_READY_0);
++  CHECK(stats->sum_layer(CLASS_DECODE_0, LAYER_0).visits_all(IX_EMPTY_0) == 0);
++}
++
++TEST_CASE("attn-stats forward_scope: one object owns the per-forward record",
++    "[attn_stats]") {
++  // forward_scope is the one owner of the record behind <class>_forwards. The
++  // class is stored at construction. The wall and the fold are recorded at
++  // destruction. So every caller of model::state::forward gets a whole record
++  // filed under the class of that forward.
++  auto stats = make_stats(STATS_ON_TRUE);
++  forward_counters const& decode = stats->forwards[CLASS_DECODE_0];
++  forward_counters const& prompt = stats->forwards[CLASS_PROMPT_1];
++  const uint64_t t_before = tron::hardware::system::rdtsc();
++  {
++    forward_scope scope(
++        *stats, forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++    // Inside the forward: worker 0 serves job 0 on the AVX path, and the
++    // hardware plan gives job 1 an FPGA pass.
++    uint8_t* bits = stats->token_path_span(WORKER_0, N_TOKEN_JOBS_5);
++    bits[0] |= PATH_BIT_AVX_1;
++    stats->note_fpga_query(1);
++    // Forwards, token jobs and the wall are not filed before the scope ends.
++    // fpga_queries is filed at once by its own writer.
++    CHECK(load_relaxed(decode.fpga_queries) == 1);
++    CHECK(load_relaxed(decode.forwards) == 0);
++    CHECK(load_relaxed(decode.token_jobs) == 0);
++    CHECK(load_relaxed(decode.wall_cycles) == 0);
++  }
++  const uint64_t elapsed = tron::hardware::system::rdtsc() - t_before;
++  CHECK(load_relaxed(decode.forwards) == 1);
++  CHECK(load_relaxed(decode.token_jobs) == N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(decode.listener_jobs) == LISTENERS_ALL_5);
++  CHECK(load_relaxed(decode.kv_only_jobs) == 0);
++  CHECK(load_relaxed(decode.fpga_queries) == 1);
++  CHECK(load_relaxed(decode.wall_cycles) > 0);
++  CHECK(load_relaxed(decode.wall_cycles) <= elapsed);
++  CHECK(load_relaxed(decode.wall_max_cycles) == load_relaxed(decode.wall_cycles));
++  CHECK(load_relaxed(decode.token_jobs_by_path_set[PATH_BIT_AVX_1]) == 1);
++  CHECK(load_relaxed(decode.token_jobs_by_path_set[PATH_BIT_FPGA_4]) == 1);
++  CHECK(load_relaxed(decode.token_jobs_by_path_set[0]) == 3);
++  CHECK(load_relaxed(prompt.forwards) == 0);
++  CHECK(load_relaxed(prompt.token_jobs) == 0);
++  // The wall is filed under the class the scope stored, never under the class
++  // of an earlier forward: a prompt forward after a decode forward.
++  {
++    forward_scope scope(
++        *stats, forward_class::prompt_or_mixed, N_TOKEN_JOBS_5, LISTENERS_1);
++  }
++  CHECK(load_relaxed(prompt.forwards) == 1);
++  CHECK(load_relaxed(prompt.token_jobs) == N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(prompt.listener_jobs) == LISTENERS_1);
++  CHECK(load_relaxed(prompt.kv_only_jobs) == N_TOKEN_JOBS_5 - LISTENERS_1);
++  CHECK(load_relaxed(decode.forwards) == 1);
++  // Switch off: the scope writes nothing and the leaf reads {}.
++  auto off = make_stats(STATS_OFF_FALSE);
++  {
++    forward_scope scope(
++        *off, forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  }
++  CHECK(load_relaxed(off->forwards[CLASS_DECODE_0].forwards) == 0);
++  CHECK(load_relaxed(off->forwards[CLASS_DECODE_0].token_jobs) == 0);
++  CHECK(load_relaxed(off->forwards[CLASS_DECODE_0].listener_jobs) == 0);
++  CHECK(load_relaxed(off->forwards[CLASS_DECODE_0].kv_only_jobs) == 0);
++  CHECK(off->render_forwards(CLASS_DECODE_0) == "{}");
++}
++
++TEST_CASE("attn-stats forwards record: the three job counts move together at the end "
++          "of the forward",
++    "[attn_stats]") {
++  // A reader of the leaves during a forward must never see listener_jobs +
++  // kv_only_jobs above token_jobs. end_forward adds all three together. If
++  // begin_forward added the listener counts and end_forward the token jobs,
++  // listener_jobs would run one forward ahead of token_jobs. The mid-forward
++  // CHECKs on listener_jobs, kv_only_jobs and the rendered leaf below would
++  // then fail for both classes.
++  auto stats = make_stats(STATS_ON_TRUE);
++  forward_counters const& prompt = stats->forwards[CLASS_PROMPT_1];
++  stats->begin_forward(forward_class::prompt_or_mixed, N_TOKEN_JOBS_5, LISTENERS_1);
++  // Mid-forward: nothing filed yet.
++  CHECK(load_relaxed(prompt.listener_jobs) == 0);
++  CHECK(load_relaxed(prompt.kv_only_jobs) == 0);
++  CHECK(load_relaxed(prompt.token_jobs) == 0);
++  CHECK(stats->render_forwards(CLASS_PROMPT_1)
++            .find("\"token_jobs\":0,\"listener_jobs\":0,\"kv_only_jobs\":0,") !=
++        std::string::npos);
++  stats->end_forward(N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(prompt.listener_jobs) == LISTENERS_1);
++  CHECK(load_relaxed(prompt.kv_only_jobs) == N_TOKEN_JOBS_5 - LISTENERS_1);
++  CHECK(load_relaxed(prompt.token_jobs) == N_TOKEN_JOBS_5);
++  // The listener count belongs to the forward that began, also when another
++  // class's forward follows: a decode forward adds 5 listener jobs and 0
++  // KV-only jobs to its own class.
++  forward_counters const& decode = stats->forwards[CLASS_DECODE_0];
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  CHECK(load_relaxed(decode.listener_jobs) == 0);
++  stats->end_forward(N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(decode.listener_jobs) == LISTENERS_ALL_5);
++  CHECK(load_relaxed(decode.kv_only_jobs) == 0);
++  CHECK(load_relaxed(decode.token_jobs) == N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(prompt.listener_jobs) == LISTENERS_1);
++}
++
++TEST_CASE(
++    "attn-stats: an out-of-range worker, layer or token job aborts", "[attn_stats]") {
++  // In production every index is in range by construction (the worker index
++  // is below the pool size that sizes the rows, the layer id below n_layers,
++  // the token job below the count that begin_forward sized). A wrong index
++  // must therefore fail, not go uncounted. Each call runs in a forked child
++  // that must die with SIGABRT.
++  auto stats = make_stats(STATS_ON_TRUE);
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  visit_tally tally;
++  tally.record(visit_path::avx, K_TOKENS_TAIL_17, PAGE_SIZE_64);
++  REQUIRE(tron::assertion_signal([&] {
++    stats->add_visits(N_WORKERS_3, LAYER_0, tally, PASS_READY_0);
++  }) == SIGABRT);
++  REQUIRE(tron::assertion_signal([&] {
++    stats->add_visits(WORKER_0, N_LAYERS_4, tally, PASS_READY_0);
++  }) == SIGABRT);
++  REQUIRE(tron::assertion_signal([&] {
++    stats->note_attn_job(N_WORKERS_3, LAYER_0, CYCLES_100);
++  }) == SIGABRT);
++  REQUIRE(tron::assertion_signal([&] {
++    stats->note_attn_job_wall_w0(N_LAYERS_4, CYCLES_100);
++  }) == SIGABRT);
++  REQUIRE(tron::assertion_signal([&] { stats->note_attn_workers(N_WORKERS_3 + 1); }) ==
++          SIGABRT);
++  // pool_worker: a split larger than the pool, or an attention worker index
++  // at or past the split, is a caller bug.
++  REQUIRE(tron::assertion_signal(
++              [&] { stats->pool_worker(WORKER_0, N_WORKERS_3 + 1); }) == SIGABRT);
++  REQUIRE(tron::assertion_signal(
++              [&] { stats->pool_worker(WORKER_2, N_WORKERS_3 - 1); }) == SIGABRT);
++  REQUIRE(tron::assertion_signal([&] {
++    stats->note_join_wait(WORKER_0, N_LAYERS_4, CYCLES_100);
++  }) == SIGABRT);
++  REQUIRE(tron::assertion_signal([&] { stats->note_fpga_pass(N_LAYERS_4, 1, 1); }) ==
++          SIGABRT);
++  REQUIRE(tron::assertion_signal([&] { stats->note_fpga_query(N_TOKEN_JOBS_5); }) ==
++          SIGABRT);
++  REQUIRE(tron::assertion_signal(
++              [&] { stats->token_path_span(N_WORKERS_3, N_TOKEN_JOBS_5); }) == SIGABRT);
++  REQUIRE(tron::assertion_signal([&] {
++    stats->token_path_span(WORKER_0, N_TOKEN_JOBS_5 + 1);
++  }) == SIGABRT);
++  REQUIRE(tron::assertion_signal([&] { stats->end_forward(N_TOKEN_JOBS_5 + 1); }) ==
++          SIGABRT);
++  // The harness itself does not abort: an in-range call exits normally.
++  REQUIRE(tron::assertion_signal(
++              [&] { stats->add_visits(WORKER_0, LAYER_0, tally, PASS_READY_0); }) == 0);
++}
++
++TEST_CASE("attn-stats: with the switch off, nothing is allocated and the forward hooks "
++          "return",
++    "[attn_stats]") {
++  auto stats = make_stats(STATS_OFF_FALSE);
++  CHECK_FALSE(stats->enabled);
++  CHECK(stats->rows.empty());
++  CHECK(stats->fpga.empty());
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  stats->end_forward(N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].token_jobs) == 0);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].listener_jobs) == 0);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].kv_only_jobs) == 0);
++  // begin_forward allocated no per-forward scratch either.
++  CHECK(stats->fpga_bits.empty());
++  CHECK(stats->path_bits.empty());
++  // The per-forward timer hook returns before it counts.
++  stats->note_forward_wall(CYCLES_100);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].forwards) == 0);
++  CHECK(stats->render_summary().find("\"on\":false") != std::string::npos);
++  // README.stats.md contract: with the switch off the totals and the forwards
++  // read {}. A reader then cannot mistake unmeasured zeros for measured ones.
++  CHECK(stats->render_totals(CLASS_DECODE_0) == "{}");
++  CHECK(stats->render_forwards(CLASS_DECODE_0) == "{}");
++  CHECK(stats->render_totals(CLASS_PROMPT_1) == "{}");
++  CHECK(stats->render_forwards(CLASS_PROMPT_1) == "{}");
++}
++
++TEST_CASE("attn-stats leaves: JSON with the expected keys, below the FUSE string limit",
++    "[attn_stats]") {
++  // A large model shape: many workers and layers must keep every leaf below
++  // fuse_sysfs::MAX_STRING_LENGTH, because every leaf is one layer or one
++  // worker, never the whole table.
++  constexpr size_t N_WORKERS_LARGE_96 = 96;
++  constexpr size_t N_LAYERS_LARGE_128 = 128;
++  // Digit-wide fill values: every counter of the leaf is this wide, so the
++  // rendered leaf is as long as it can get for the size check below.
++  constexpr uint64_t FILL_COUNT_123456789 = 123456789;
++  constexpr uint64_t FILL_CYCLES_123456789012345 = 123456789012345ULL;
++  auto stats = std::make_shared<model_stats>(STATS_ON_TRUE, "big-model",
++      NOT_EAGLE_FALSE, test_facts(), N_WORKERS_LARGE_96, N_LAYERS_LARGE_128);
++  visit_tally tally;
++  for (int i = 0; i < 1000; ++i)
++    tally.record(visit_path::amx, K_TOKENS_FULL_PAGE_64, PAGE_SIZE_64);
++  for (size_t w = 0; w < N_WORKERS_LARGE_96; ++w) {
++    for (size_t l = 0; l < N_LAYERS_LARGE_128; ++l) {
++      auto& r = stats->row(CLASS_DECODE_0, w, l);
++      r.add(tally, PASS_READY_0);
++      r.add(tally, PASS_PENDING_1);
++      inc_relaxed(r.attn_jobs, FILL_COUNT_123456789);
++      inc_relaxed(r.busy_cycles, FILL_CYCLES_123456789012345);
++      inc_relaxed(r.join_wait_cycles, FILL_CYCLES_123456789012345);
++    }
++  }
++  for (size_t l = 0; l < N_LAYERS_LARGE_128; ++l) {
++    auto& t = stats->timers_at(CLASS_DECODE_0, l);
++    for (auto* c : {&t.wall_cycles, &t.wall_max_cycles, &t.period_cycles,
++             &t.period_count, &t.period_max_cycles}) {
++      inc_relaxed(*c, FILL_CYCLES_123456789012345);
++    }
++  }
++  // The forwards record too, so its leaf is rendered at full width.
++  forward_counters& fc = stats->forwards[CLASS_DECODE_0];
++  for (auto* c : {&fc.forwards, &fc.wall_cycles, &fc.wall_max_cycles, &fc.fpga_queries,
++           &fc.token_jobs, &fc.listener_jobs, &fc.kv_only_jobs, &fc.n_attn_workers_max})
++    inc_relaxed(*c, FILL_CYCLES_123456789012345);
++  for (auto& c : fc.token_jobs_by_path_set)
++    inc_relaxed(c, FILL_CYCLES_123456789012345);
++  const std::string totals = stats->render_totals(CLASS_DECODE_0);
++  const std::string layer = stats->render_layer(CLASS_DECODE_0, LAYER_0);
++  const std::string worker = stats->render_worker(CLASS_DECODE_0, WORKER_0);
++  const std::string forwards = stats->render_forwards(CLASS_DECODE_0);
++  const std::string summary = stats->render_summary();
++  for (auto const* s : {&totals, &layer, &worker, &forwards, &summary}) {
++    CHECK(s->size() < tron::fuse::fuse_sysfs::MAX_STRING_LENGTH);
++    CHECK(s->front() == '{');
++    CHECK(s->back() == '}');
++  }
++  CHECK(totals.find("\"ready_amx_visits\":") != std::string::npos);
++  CHECK(totals.find("\"pending_avx_k_tokens\":") != std::string::npos);
++  CHECK(totals.find("\"fpga_k_tokens\":") != std::string::npos);
++  CHECK(totals.find("\"fpga_k_tokens_x_kv_heads\":") != std::string::npos);
++  CHECK(summary.find("\"active_workers\":96,") != std::string::npos);
++  CHECK(layer.find("\"layer\":0,") != std::string::npos);
++  CHECK(worker.find("\"worker\":0,") != std::string::npos);
++  // The T3/T4 keys are per layer: in the layer and totals leaves, not in the
++  // worker leaf.
++  CHECK(layer.find("\"wall_cycles_w0\":") != std::string::npos);
++  CHECK(layer.find("\"period_count_w0\":") != std::string::npos);
++  CHECK(totals.find("\"wall_cycles_w0\":") != std::string::npos);
++  CHECK(worker.find("\"wall_cycles_w0\":") == std::string::npos);
++  CHECK(worker.find("\"period_count_w0\":") == std::string::npos);
++  CHECK(worker.find("\"join_wait_cycles\":") != std::string::npos);
++  CHECK(forwards.find("\"listener_jobs\":") != std::string::npos);
++  CHECK(forwards.find("\"kv_only_jobs\":") != std::string::npos);
++  CHECK(forwards.find("\"n_attn_workers_min\":") != std::string::npos);
++  CHECK(forwards.find("\"n_attn_workers_max\":") != std::string::npos);
++  CHECK(forwards.find("\"token_jobs_by_path_set\":{\"none\":") != std::string::npos);
++  CHECK(summary.find("\"switch\":\"TRON_ATTN_STATS=1\"") != std::string::npos);
++  // The layer leaf carries the sum over the 96 workers.
++  const std::string expected =
++      fmt::format("\"ready_amx_visits\":{},", 1000 * N_WORKERS_LARGE_96);
++  CHECK(layer.find(expected) != std::string::npos);
++}
++
++TEST_CASE("attn-stats FUSE leaves: registered once per model id, read live, empty "
++          "after the state is gone",
++    "[attn_stats]") {
++  stats_environment env;
++  const std::string prefix = "/model/test-model/attention";
++  {
++    auto stats = make_stats(STATS_ON_TRUE);
++    register_fuse_files(stats);
++    CHECK(leaf_string(prefix + "/summary").find("\"on\":true") != std::string::npos);
++    // No marker files: casual leaves carry no tronstats convention obligation.
++    CHECK_FALSE(tron::fuse::stats::get_file_handle(prefix + "/.skip"));
++    // The next read carries the new counts: no reset.
++    visit_tally tally;
++    tally.record(visit_path::avx, K_TOKENS_TAIL_17, PAGE_SIZE_64);
++    stats->row(CLASS_DECODE_0, WORKER_0, LAYER_0).add(tally, PASS_READY_0);
++    CHECK(leaf_string(prefix + "/decode_like_totals").find("\"ready_avx_visits\":1,") !=
++          std::string::npos);
++    CHECK(leaf_string(prefix + "/decode_like_layer_0")
++              .find("\"ready_avx_k_tokens\":17,") != std::string::npos);
++    CHECK(
++        leaf_string(prefix + "/decode_like_worker_0").find("\"ready_avx_visits\":1,") !=
++        std::string::npos);
++    CHECK(leaf_string(prefix + "/prompt_or_mixed_totals")
++              .find("\"ready_avx_visits\":0,") != std::string::npos);
++    // The layer leaf exists for every layer of the model, and not beyond.
++    CHECK(tron::fuse::stats::get_file_handle(prefix + "/decode_like_layer_3"));
++    CHECK_FALSE(tron::fuse::stats::get_file_handle(prefix + "/decode_like_layer_4"));
++    {
++      // A later state of the same model id takes the leaves over (runtron
++      // builds one state per prompt batch); when it dies the leaves read as
++      // empty although the first state is still alive.
++      auto twin = make_stats(STATS_ON_TRUE);
++      register_fuse_files(twin);
++      CHECK(
++          leaf_string(prefix + "/decode_like_totals").find("\"ready_avx_visits\":0,") !=
++          std::string::npos);
++      twin->row(CLASS_DECODE_0, WORKER_1, LAYER_0).add(tally, PASS_PENDING_1);
++      CHECK(leaf_string(prefix + "/decode_like_totals")
++                .find("\"pending_avx_visits\":1,") != std::string::npos);
++    }
++    CHECK(leaf_string(prefix + "/decode_like_totals") == "{}");
++    // Re-registering the surviving state brings its numbers back.
++    register_fuse_files(stats);
++    CHECK(leaf_string(prefix + "/decode_like_totals").find("\"ready_avx_visits\":1,") !=
++          std::string::npos);
++  }
++  // The state is gone: the leaves stay but read as an empty object.
++  CHECK(leaf_string(prefix + "/summary") == "{}");
++  CHECK(leaf_string(prefix + "/decode_like_totals") == "{}");
++}
++
++TEST_CASE("attn-stats FUSE leaves: with the switch off only the summary, the class "
++          "totals and the class forwards exist, and the last two read {}",
++    "[attn_stats]") {
++  stats_environment env;
++  auto stats = make_stats(STATS_OFF_FALSE, "off-model");
++  register_fuse_files(stats);
++  const std::string prefix = "/model/off-model/attention";
++  CHECK(leaf_string(prefix + "/summary").find("\"on\":false") != std::string::npos);
++  CHECK(leaf_string(prefix + "/decode_like_totals") == "{}");
++  CHECK(leaf_string(prefix + "/decode_like_forwards") == "{}");
++  CHECK(leaf_string(prefix + "/prompt_or_mixed_totals") == "{}");
++  CHECK(leaf_string(prefix + "/prompt_or_mixed_forwards") == "{}");
++  CHECK_FALSE(tron::fuse::stats::get_file_handle(prefix + "/decode_like_layer_0"));
++  CHECK_FALSE(tron::fuse::stats::get_file_handle(prefix + "/decode_like_worker_0"));
++  // Ids that cannot be one path segment are skipped without registering anything.
++  // The validator itself: empty, leading dot and a slash fail; the character
++  // classes of an ingested id (letters, digits, dash, dot, underscore, colon)
++  // pass. Made-up ids: a real model slug in a test source trips the CMake
++  // model-requirement audit.
++  CHECK_FALSE(is_safe_model_id(""));
++  CHECK_FALSE(is_safe_model_id(".hidden"));
++  CHECK_FALSE(is_safe_model_id("a/b"));
++  CHECK(is_safe_model_id("ingested-sample-3-4b-instruct-2507-tp2"));
++  CHECK(is_safe_model_id("sample-3.1:8b_v2"));
++  auto bad = make_stats(STATS_ON_TRUE, "a/b");
++  register_fuse_files(bad);
++  CHECK_FALSE(tron::fuse::stats::get_file_handle("/model/a/b/attention/summary"));
++}
++
++TEST_CASE("attn-stats rows keyed by pool worker: attention worker 0 lands in different "
++          "rows when the split moves",
++    "[attn_stats]") {
++  // The rows are sized by the pool (3 here) and keyed by the pool worker, not
++  // by the attention worker index (Note [Attention workers are the last pool
++  // workers] in model.hpp). The plugin picks the split per forward
++  // (recommend_n_main_helpers), so attention worker 0 of a 1-worker forward
++  // is pool worker 2 and attention worker 0 of a 2-worker forward is pool
++  // worker 1: two threads, two cores. Keyed by the attention index, both
++  // forwards would land in row 0, a row that no thread of either forward
++  // owns. This case drives the hooks the way self_attention.hpp calls them
++  // (row = pool_worker(attention index, split)) and checks that the two
++  // forwards land in the two rows those threads own.
++  constexpr size_t SPLIT_1 = 1;
++  constexpr size_t SPLIT_2 = 2;
++  auto stats = make_stats(STATS_ON_TRUE);
++  visit_tally tally;
++  tally.record(visit_path::amx, K_TOKENS_FULL_PAGE_64, PAGE_SIZE_64);
++
++  // Forward A: one attention worker, so attention worker 0 = pool worker 2.
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  stats->note_attn_workers(SPLIT_1);
++  {
++    const size_t row = stats->pool_worker(WORKER_0, SPLIT_1);
++    REQUIRE(row == WORKER_2);
++    stats->add_visits(row, LAYER_0, tally, PASS_READY_0);
++    stats->note_attn_job(row, LAYER_0, CYCLES_100);
++    stats->note_join_wait(row, LAYER_0, CYCLES_50);
++  }
++  stats->end_forward(N_TOKEN_JOBS_5);
++
++  // Forward B: two attention workers, so attention worker 0 = pool worker 1.
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  stats->note_attn_workers(SPLIT_2);
++  {
++    const size_t row = stats->pool_worker(WORKER_0, SPLIT_2);
++    REQUIRE(row == WORKER_1);
++    // The second attention worker of this split is the last pool worker.
++    CHECK(stats->pool_worker(WORKER_1, SPLIT_2) == WORKER_2);
++    stats->add_visits(row, LAYER_0, tally, PASS_READY_0);
++    stats->note_attn_job(row, LAYER_0, CYCLES_200);
++    stats->note_join_wait(row, LAYER_0, CYCLES_100);
++  }
++  stats->end_forward(N_TOKEN_JOBS_5);
++
++  // Pool worker 0 (a main helper in both forwards) counted nothing.
++  auto w0 = stats->sum_worker(CLASS_DECODE_0, WORKER_0);
++  CHECK(w0.visits_all(IX_AMX_2) == 0);
++  CHECK(w0.attn_jobs == 0);
++  CHECK(w0.busy_cycles == 0);
++  CHECK(w0.join_wait_cycles == 0);
++  // Pool worker 1 ran forward B's attention worker 0.
++  auto w1 = stats->sum_worker(CLASS_DECODE_0, WORKER_1);
++  CHECK(w1.visits_all(IX_AMX_2) == 1);
++  CHECK(w1.attn_jobs == 1);
++  CHECK(w1.busy_cycles == CYCLES_200);
++  CHECK(w1.join_wait_cycles == CYCLES_100);
++  // Pool worker 2 ran forward A's attention worker 0.
++  auto w2 = stats->sum_worker(CLASS_DECODE_0, WORKER_2);
++  CHECK(w2.visits_all(IX_AMX_2) == 1);
++  CHECK(w2.attn_jobs == 1);
++  CHECK(w2.busy_cycles == CYCLES_100);
++  CHECK(w2.join_wait_cycles == CYCLES_50);
++  // The layer view is the same either way: it sums the rows.
++  CHECK(stats->sum_layer(CLASS_DECODE_0, LAYER_0).attn_jobs == 2);
++  CHECK(
++      stats->sum_layer(CLASS_DECODE_0, LAYER_0).busy_cycles == CYCLES_100 + CYCLES_200);
++  // The worker leaves say the same as the sums.
++  CHECK(stats->render_worker(CLASS_DECODE_0, WORKER_0).find("\"attn_jobs\":0,") !=
++        std::string::npos);
++  CHECK(stats->render_worker(CLASS_DECODE_0, WORKER_2).find("\"attn_jobs\":1,") !=
++        std::string::npos);
++  // The forwards leaf records the range of the split.
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].n_attn_workers_min) == SPLIT_1);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].n_attn_workers_max) == SPLIT_2);
++  CHECK(stats->render_forwards(CLASS_DECODE_0)
++            .find("\"n_attn_workers_min\":1,\"n_attn_workers_max\":2,") !=
++        std::string::npos);
++  // A class with no forward yet renders 0 for both, not the UINT64_MAX seed.
++  CHECK(stats->render_forwards(CLASS_PROMPT_1)
++            .find("\"n_attn_workers_min\":0,\"n_attn_workers_max\":0,") !=
++        std::string::npos);
++}
++
++TEST_CASE("attn-stats end_forward folds the attention rows of the forward only",
++    "[attn_stats]") {
++  // With the split known, end_forward reads and clears the path bits of the
++  // last n_attn_workers rows. Bits left in a main-helper row (which no thread
++  // of the forward writes) are neither counted nor cleared. Without a split
++  // (a unit test that assembled no plan) every row is folded.
++  constexpr size_t SPLIT_2 = 2;
++  constexpr size_t JOB_0 = 0;
++  constexpr size_t JOB_1 = 1;
++  // The histogram index of a job is the OR of its path bits (path_bit()).
++  constexpr size_t SET_AVX_1 = PATH_BIT_AVX_1;
++  constexpr size_t SET_AMX_2 = PATH_BIT_AMX_2;
++  constexpr size_t SET_FPGA_4 = PATH_BIT_FPGA_4;
++  auto stats = make_stats(STATS_ON_TRUE);
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  stats->note_attn_workers(SPLIT_2);
++  // Attention rows: pool workers 1 and 2.
++  stats->token_path_span(WORKER_1, N_TOKEN_JOBS_5)[JOB_0] |= path_bit(visit_path::avx);
++  stats->token_path_span(WORKER_2, N_TOKEN_JOBS_5)[JOB_1] |= path_bit(visit_path::amx);
++  // A stray bit in the helper row.
++  stats->token_path_span(WORKER_0, N_TOKEN_JOBS_5)[JOB_0] |= path_bit(visit_path::amx);
++  stats->end_forward(N_TOKEN_JOBS_5);
++  forward_counters const& fc = stats->forwards[CLASS_DECODE_0];
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[SET_AVX_1]) == 1);
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[SET_AMX_2]) == 1);
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[SET_AVX_1 | SET_AMX_2]) == 0);
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[SET_FPGA_4]) == 0);
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[0]) == N_TOKEN_JOBS_5 - 2);
++  // The attention rows are clear, the helper row still holds its bit.
++  CHECK(stats->token_path_span(WORKER_1, N_TOKEN_JOBS_5)[JOB_0] == 0);
++  CHECK(stats->token_path_span(WORKER_2, N_TOKEN_JOBS_5)[JOB_1] == 0);
++  CHECK(stats->token_path_span(WORKER_0, N_TOKEN_JOBS_5)[JOB_0] ==
++        path_bit(visit_path::amx));
++  // The next forward has no split: every row is folded, so the stray bit is
++  // counted now and cleared.
++  stats->begin_forward(forward_class::decode_like, N_TOKEN_JOBS_5, LISTENERS_ALL_5);
++  stats->end_forward(N_TOKEN_JOBS_5);
++  CHECK(load_relaxed(fc.token_jobs_by_path_set[SET_AMX_2]) == 2);
++  CHECK(stats->token_path_span(WORKER_0, N_TOKEN_JOBS_5)[JOB_0] == 0);
++}
++
++TEST_CASE(
++    "attn-stats classes: rows and FPGA counters follow the forward class of the moment",
++    "[attn_stats]") {
++  auto stats = make_stats(STATS_ON_TRUE);
++  visit_tally tally;
++  tally.record(visit_path::amx, K_TOKENS_FULL_PAGE_64, PAGE_SIZE_64);
++  stats->begin_forward(forward_class::prompt_or_mixed, N_TOKEN_JOBS_5, LISTENERS_1);
++  stats->add_visits(WORKER_1, LAYER_2, tally, PASS_READY_0);
++  stats->note_attn_job(WORKER_1, LAYER_2, CYCLES_100);
++  stats->note_attn_job_wall_w0(LAYER_2, CYCLES_200);
++  stats->note_join_wait(WORKER_1, LAYER_2, CYCLES_50);
++  stats->note_forward_wall(CYCLES_300);
++  stats->end_forward(N_TOKEN_JOBS_5);
++  CHECK(stats->sum_layer(CLASS_PROMPT_1, LAYER_2).visits_all(IX_AMX_2) == 1);
++  CHECK(stats->sum_layer(CLASS_PROMPT_1, LAYER_2).attn_jobs == 1);
++  CHECK(stats->sum_layer(CLASS_PROMPT_1, LAYER_2).wall_cycles == CYCLES_200);
++  CHECK(stats->sum_layer(CLASS_PROMPT_1, LAYER_2).join_wait_cycles == CYCLES_50);
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].forwards) == 1);
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].listener_jobs) == LISTENERS_1);
++  CHECK(load_relaxed(stats->forwards[CLASS_PROMPT_1].kv_only_jobs) ==
++        N_TOKEN_JOBS_5 - LISTENERS_1);
++  CHECK(stats->sum_layer(CLASS_DECODE_0, LAYER_2).visits_all(IX_AMX_2) == 0);
++  CHECK(stats->sum_layer(CLASS_DECODE_0, LAYER_2).attn_jobs == 0);
++  CHECK(stats->sum_layer(CLASS_DECODE_0, LAYER_2).wall_cycles == 0);
++  CHECK(load_relaxed(stats->forwards[CLASS_DECODE_0].forwards) == 0);
++  // The totals leaf of a class sums its layers.
++  stats->add_visits(WORKER_0, LAYER_0, tally, PASS_READY_0);
++  const std::string totals = stats->render_totals(CLASS_PROMPT_1);
++  CHECK(totals.find("\"ready_amx_visits\":2,") != std::string::npos);
++  CHECK(totals.find("\"ready_amx_k_tokens\":128,") != std::string::npos);
++  CHECK(stats->render_totals(CLASS_DECODE_0).find("\"ready_amx_visits\":0,") !=
++        std::string::npos);
++}
++
++TEST_CASE(
++    "attn-stats exit report: prints only with the switch on and something counted",
++    "[attn_stats]") {
++  auto read_report = [](model_stats const& s) {
++    std::FILE* f = std::tmpfile();
++    REQUIRE(f != nullptr);
++    s.print_report(f);
++    std::rewind(f);
++    std::string out;
++    char buf[REPORT_BUF_BYTES_4096];
++    size_t n;
++    while ((n = std::fread(buf, BYTE_1, sizeof buf, f)) > 0) {
++      out.append(buf, n);
++    }
++    std::fclose(f);
++    return out;
++  };
++  auto off = make_stats(STATS_OFF_FALSE);
++  CHECK(read_report(*off).empty());
++  auto idle = make_stats(STATS_ON_TRUE);
++  CHECK(read_report(*idle).empty());
++  // The rule is "at least one forward or one visit": a forward without visits
++  // prints, FPGA passes alone do not.
++  auto forwards_only = make_stats(STATS_ON_TRUE);
++  forwards_only->note_forward_wall(CYCLES_100);
++  CHECK_FALSE(read_report(*forwards_only).empty());
++  auto fpga_only = make_stats(STATS_ON_TRUE);
++  fpga_only->note_fpga_pass(LAYER_0, 1, 1);
++  CHECK(read_report(*fpga_only).empty());
++  auto busy = make_stats(STATS_ON_TRUE);
++  visit_tally tally;
++  tally.record(visit_path::avx, K_TOKENS_TAIL_17, PAGE_SIZE_64);
++  busy->add_visits(WORKER_0, LAYER_2, tally, PASS_PENDING_1);
++  // The per-layer line shows all three columns: an AMX visit of a full page on
++  // another worker and one FPGA pass of 5 K tokens on the same layer.
++  visit_tally amx_tally;
++  amx_tally.record(visit_path::amx, K_TOKENS_FULL_PAGE_64, PAGE_SIZE_64);
++  busy->add_visits(WORKER_1, LAYER_2, amx_tally, PASS_READY_0);
++  constexpr uint64_t FPGA_K_TOKENS_5 = 5;
++  constexpr uint64_t FPGA_QUERIES_1 = 1;
++  busy->note_fpga_pass(LAYER_2, FPGA_K_TOKENS_5, FPGA_QUERIES_1);
++  const std::string report = read_report(*busy);
++  CHECK(report.find("[attn-stats] model test-model:") != std::string::npos);
++  CHECK(report.find("[attn-stats] decode_like/all_jobs_with_listener totals: {") !=
++        std::string::npos);
++  CHECK(report.find("\"pending_avx_k_tokens\":17,") != std::string::npos);
++  CHECK(report.find(
++            "[attn-stats] decode_like/all_jobs_with_listener k_tokens per layer "
++            "(amx/avx/fpga): 0=0/0/0 1=0/0/0 2=64/17/5 3=0/0/0") != std::string::npos);
++  CHECK(report.find(
++            "[attn-stats] prompt_or_mixed/some_jobs_without_listener forwards: {") !=
++        std::string::npos);
++}
++
++TEST_CASE("attn-stats leaves when off: layer and worker leaves are valid JSON objects",
++    "[attn_stats]") {
++  auto stats = make_stats(STATS_OFF_FALSE);
++  CHECK(stats->render_layer(CLASS_DECODE_0, LAYER_2) == "{\"layer\":2}");
++  CHECK(stats->render_worker(CLASS_DECODE_0, WORKER_1) == "{\"worker\":1}");
++}
++
++TEST_CASE(
++    "attn-stats FUSE leaves: an EAGLE draft state publishes under attention_eagle",
++    "[attn_stats]") {
++  stats_environment env;
++  auto draft = std::make_shared<model_stats>(
++      STATS_ON_TRUE, "shared-id", EAGLE_TRUE, test_facts(), N_WORKERS_3, N_LAYERS_4);
++  auto target = std::make_shared<model_stats>(STATS_ON_TRUE, "shared-id",
++      NOT_EAGLE_FALSE, test_facts(), N_WORKERS_3, N_LAYERS_4);
++  register_fuse_files(draft);
++  register_fuse_files(target);
++  CHECK(
++      leaf_string("/model/shared-id/attention_eagle/summary").find("\"eagle\":true") !=
++      std::string::npos);
++  CHECK(leaf_string("/model/shared-id/attention/summary").find("\"eagle\":false") !=
++        std::string::npos);
++  // A draft with the switch off publishes the same shape as any off state:
++  // the summary says off and the class leaves read {}.
++  auto off_draft = std::make_shared<model_stats>(
++      STATS_OFF_FALSE, "off-draft", EAGLE_TRUE, test_facts(), N_WORKERS_3, N_LAYERS_4);
++  register_fuse_files(off_draft);
++  CHECK(leaf_string("/model/off-draft/attention_eagle/summary").find("\"on\":false") !=
++        std::string::npos);
++  CHECK(leaf_string("/model/off-draft/attention_eagle/decode_like_totals") == "{}");
++  CHECK_FALSE(tron::fuse::stats::get_file_handle("/model/off-draft/attention/summary"));
++  // Ids with characters that cannot go into a path or a JSON string are skipped.
++  auto quoted = std::make_shared<model_stats>(
++      STATS_ON_TRUE, "bad\"id", NOT_EAGLE_FALSE, test_facts(), N_WORKERS_3, N_LAYERS_4);
++  register_fuse_files(quoted);
++  CHECK_FALSE(tron::fuse::stats::get_file_handle("/model/bad\"id/attention/summary"));
++}
+diff --git a/t/t_compute_attention_unit.cpp b/t/t_compute_attention_unit.cpp
+index 625890e522..57ab931e05 100644
+--- a/t/t_compute_attention_unit.cpp
++++ b/t/t_compute_attention_unit.cpp
+@@ -2,15 +2,13 @@
+ #include <limits>
+ #include <signal.h>
+ #include <stddef.h>
+-#include <stdlib.h>
+-#include <unistd.h>
+ #include <vector>
+ 
+ #include <catch2/catch_test_macros.hpp>
+ #include <catch2/matchers/catch_matchers.hpp>
+ #include <catch2/matchers/catch_matchers_floating_point.hpp>
+-#include <sys/wait.h>
+ 
++#include "assertion_signal.hpp"
+ #include "testutil.hpp"
+ #include "tron/emulation/attention.hpp"
+ 
+@@ -18,22 +16,6 @@ using namespace tron;
+ using namespace tron::emulation;
+ using Catch::Matchers::WithinAbs;
+ 
+-namespace {
+-template <typename Fn>
+-int assertion_signal(Fn&& fn) {
+-  pid_t const pid = fork();
+-  REQUIRE(pid >= 0);
+-  if (pid == 0) {
+-    signal(SIGABRT, SIG_DFL);
+-    fn();
+-    _exit(EXIT_SUCCESS);
+-  }
+-  int status = 0;
+-  REQUIRE(waitpid(pid, &status, 0) == pid);
+-  return WIFSIGNALED(status) ? WTERMSIG(status) : 0;
+-}
+-}  // namespace
+-
+ TEST_CASE("compute_attention rejects invalid scales", "[attention]") {
+   std::vector<std::vector<float>> const q{{1.0f}};
+   std::vector<std::vector<float>> const k{{1.0f}};
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index 6e8e9a01f7..f90de224fb 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -24,12 +24,10 @@
+ #include <span>
+ #include <sstream>
+ #include <stdexcept>
+-#include <stdlib.h>
+ #include <string>
+ #include <thread>
+ #include <tuple>
+ #include <type_traits>
+-#include <unistd.h>
+ #include <unordered_map>
+ #include <utility>
+ #include <vector>
+@@ -42,8 +40,8 @@
+ #include <catch2/matchers/catch_matchers.hpp>
+ #include <catch2/matchers/catch_matchers_floating_point.hpp>
+ #include <spdlog/spdlog.h>
+-#include <sys/wait.h>
+ 
++#include "assertion_signal.hpp"
+ #include "common/attributes.hpp"
+ #include "common/indexed.hpp"
+ #include "common/json.hpp"
+@@ -268,19 +266,6 @@ struct remapping_plugin_like {
+ 
+ struct passthrough_plugin_like {};
+ 
+-template <typename Fn>
+-int assertion_signal(Fn&& fn) {
+-  pid_t const pid = fork();
+-  REQUIRE(pid >= 0);
+-  if (pid == 0) {
+-    signal(SIGABRT, SIG_DFL);
+-    fn();
+-    _exit(EXIT_SUCCESS);
+-  }
+-  int status = 0;
+-  REQUIRE(waitpid(pid, &status, 0) == pid);
+-  return WIFSIGNALED(status) ? WTERMSIG(status) : 0;
+-}
+ }  // namespace
+ 
+ // Regression test for the memory order of the atomic load in
+@@ -2181,9 +2166,82 @@ TEST_CASE(
+   std::array<std::vector<page_id>, 2> relevant_pages;
+   state.select_relevant_pages(consumer->items, relevant_pages, {}, {page_id(0)},
+       state.attention_runtime_configs[operation.binding.operation].sliding_window_size);
+-  state.self_attn_state.apply_page_range<geometry>(consumer->items, operation,
+-      state.plugin_state.qs_roped, 0, 0, 1, relevant_pages[1], {}, consumer->items_mask,
+-      /*uses_hw=*/false, /*pending=*/true);
++  // Attention path stats forced on (h/tron/models/attn_stats.hpp): with one
++  // query head per KV head the AMX path is not eligible, so every consumer
++  // query visits the page once on the AVX path and scores the `half` K tokens
++  // its range makes visible. Replacing the member is safe here: this binary
++  // initializes the FUSE tree only inside the t_attn_stats.cpp cases, each of
++  // which unmounts it again, so no leaf points at the old object.
++  {
++    tron::attn_stats::header_facts facts;
++    facts.n_kv_heads = 1;
++    facts.kv_mul = 1;
++    facts.head_size = head_size;
++    facts.n_layers = 1;
++    facts.page_size = n_tokens;
++    constexpr bool STATS_ON_TRUE = true;
++    constexpr bool NOT_EAGLE_FALSE = false;
++    constexpr size_t N_LAYERS_1 = 1;
++    state.self_attn_state.stats =
++        std::make_shared<tron::attn_stats::model_stats>(STATS_ON_TRUE, "",
++            NOT_EAGLE_FALSE, facts, state.self_attn_state.attn.size(), N_LAYERS_1);
++  }
++  {
++    // The production sequence: the forward is open (begin_forward sized the
++    // per-token vectors) while the pages are visited, and folded at its end.
++    constexpr size_t N_ATTN_WORKERS_1 = 1;
++    tron::attn_stats::forward_scope stats_scope(*state.self_attn_state.stats,
++        tron::attn_stats::forward_class::decode_like, state.token_jobs.size(),
++        state.token_jobs.size());
++    // assemble_attention_plan_impl records the split in production.
++    state.self_attn_state.stats->note_attn_workers(N_ATTN_WORKERS_1);
++    state.self_attn_state.apply_page_range<geometry>(consumer->items, operation,
++        state.plugin_state.qs_roped, 0, 0, N_ATTN_WORKERS_1, relevant_pages[1], {},
++        consumer->items_mask,
++        /*uses_hw=*/false, /*pending=*/true);
++  }
++  {
++    using namespace tron::attn_stats;
++    const auto sums = state.self_attn_state.stats->sum_layer(
++        static_cast<size_t>(forward_class::decode_like), 0);
++    CHECK(load_relaxed(state.self_attn_state.stats->forwards[0].token_jobs) ==
++          state.token_jobs.size());
++    // The per-token path sets of the forward, written by apply_page_range (one
++    // bit per visit under the visiting job's index) and folded at the end of
++    // the scope: each of the consumer's `half` jobs visited the page once on
++    // the AVX path, the producer's jobs had no visit, and no job saw AMX.
++    forward_counters const& decode_fc =
++        state.self_attn_state.stats
++            ->forwards[static_cast<size_t>(forward_class::decode_like)];
++    CHECK(load_relaxed(decode_fc.token_jobs_by_path_set[PATH_BIT_AVX_1]) == half);
++    CHECK(load_relaxed(decode_fc.token_jobs_by_path_set[PATH_BIT_NONE_0]) ==
++          n_tokens - half);
++    CHECK(load_relaxed(decode_fc.token_jobs_by_path_set[PATH_BIT_AMX_2]) == 0);
++    CHECK(sums.visits[PASS_PENDING_1][static_cast<size_t>(visit_path::avx)] == half);
++    CHECK(sums.k_tokens[PASS_PENDING_1][static_cast<size_t>(visit_path::avx)] ==
++          half * half);
++    CHECK(sums.visits_all(static_cast<size_t>(visit_path::amx)) == 0);
++    CHECK(sums.visits_all(static_cast<size_t>(visit_path::empty)) == 0);
++    CHECK(sums.visits[PASS_READY_0][static_cast<size_t>(visit_path::avx)] == 0);
++    CHECK(sums.avx_full_page_visits[PASS_PENDING_1] == 0);
++    // The row is the pool worker's, not the attention worker's. The call
++    // above ran attention worker 0 of a 1-worker split, which is the last
++    // pool worker (Note [Attention workers are the last pool workers] in
++    // model.hpp). Keyed by the attention index, the visits would go to row 0,
++    // which is a main helper whenever the pool has more than one worker.
++    const size_t n_pool = state.self_attn_state.attn.size();
++    const size_t last_row = n_pool - 1;
++    CHECK(state.self_attn_state.stats
++              ->sum_worker(static_cast<size_t>(forward_class::decode_like), last_row)
++              .visits[PASS_PENDING_1][static_cast<size_t>(visit_path::avx)] == half);
++    if (n_pool > 1) {
++      CHECK(state.self_attn_state.stats
++                ->sum_worker(static_cast<size_t>(forward_class::decode_like), 0)
++                .visits_all(static_cast<size_t>(visit_path::avx)) == 0);
++    } else {
++      WARN("pool has one worker: the pool-row keying check cannot discriminate");
++    }
++  }
+   for (size_t i = 0; i < half; ++i) {
+     float const sum = state.self_attn_state.attn[0].s_stars[i][0];
+     REQUIRE(sum > 0.f);
+@@ -2192,6 +2250,38 @@ TEST_CASE(
+           Catch::Matchers::WithinAbs(2.f, 1e-6f));
+     }
+   }
++  if (state.self_attn_state.attn.size() >= 2) {
++    // Run after the numeric check above, which the first call feeds. The same
++    // attention worker 0 under a 2-worker split lands one row earlier: the
++    // row follows the thread, not the attention index. Keyed by the attention
++    // index, this call would land in row 0 again, on top of the first call.
++    using namespace tron::attn_stats;
++    constexpr size_t N_ATTN_WORKERS_2 = 2;
++    {
++      forward_scope stats_scope(*state.self_attn_state.stats,
++          forward_class::decode_like, state.token_jobs.size(), state.token_jobs.size());
++      state.self_attn_state.stats->note_attn_workers(N_ATTN_WORKERS_2);
++      state.self_attn_state.apply_page_range<geometry>(consumer->items, operation,
++          state.plugin_state.qs_roped, 0, 0, N_ATTN_WORKERS_2, relevant_pages[1], {},
++          consumer->items_mask,
++          /*uses_hw=*/false, /*pending=*/true);
++    }
++    const size_t n_pool = state.self_attn_state.attn.size();
++    const size_t cls = static_cast<size_t>(forward_class::decode_like);
++    CHECK(state.self_attn_state.stats->sum_worker(cls, n_pool - 2)
++              .visits[PASS_PENDING_1][static_cast<size_t>(visit_path::avx)] == half);
++    CHECK(state.self_attn_state.stats->sum_worker(cls, n_pool - 1)
++              .visits[PASS_PENDING_1][static_cast<size_t>(visit_path::avx)] == half);
++    CHECK(
++        state.self_attn_state.stats->sum_layer(cls, 0)
++            .visits[PASS_PENDING_1][static_cast<size_t>(visit_path::avx)] == 2 * half);
++    CHECK(load_relaxed(state.self_attn_state.stats->forwards[cls].n_attn_workers_min) ==
++          1);
++    CHECK(load_relaxed(state.self_attn_state.stats->forwards[cls].n_attn_workers_max) ==
++          N_ATTN_WORKERS_2);
++  } else {
++    WARN("pool has one worker: the split-moves check is skipped");
++  }
+ }
+ 
+ template <size_t n_q_tokens, bool split_queries, bool uses_hw = false>
+@@ -2296,6 +2386,13 @@ static void check_page_range_reductions(int sliding_window) {
+   for (size_t i = 0; i < n_q_tokens; ++i)
+     test_token_jobs.push_back(token_id(first_q_token + i));
+   state.token_jobs = test_token_jobs;
++  // Attention path stats: open the forward before the first apply_page_range,
++  // as production does (begin_forward sizes the per-token vectors). With the
++  // switch off the object does nothing.
++  std::optional<attn_stats::forward_scope> stats_scope;
++  stats_scope.emplace(*state.self_attn_state.stats,
++      attn_stats::forward_class::decode_like, state.token_jobs.size(),
++      state.token_jobs.size());
+   // Initialize token_positions for sliding window attention
+   std::vector<uint32_t> positions(num_kv_tokens);
+   for (size_t i = 0; i < num_kv_tokens; ++i)
+@@ -2394,7 +2491,8 @@ static void check_page_range_reductions(int sliding_window) {
+           *empty_page, operation, operation_scale, 0, q, excluded_token, scratch,
+           excluded_job, &excluded.find_range(token_id(0)),
+           window_excludes_all ? 1 : 1024, window_excludes_all, nullptr);
+-      REQUIRE(result.first == 0);
++      REQUIRE(result.relevant_k_tokens == 0);
++      REQUIRE(result.served == tron::attn_stats::visit_path::empty);
+     }
+     state.query_mask = &mask;
+   }
+@@ -2403,6 +2501,12 @@ static void check_page_range_reductions(int sliding_window) {
+   state.self_attn_state.apply_page_range<geometry>(q_batch.items, operation,
+       state.plugin_state.qs_roped, 0, 0, 1, std::span(page_ixs.begin(), page_ixs.end()),
+       {}, q_batch.items_mask, uses_hw);
++  // The state's own attention path stats object follows TRON_ATTN_STATS (unset
++  // in CTest, set in the switch-on run): rows exist exactly when it is on, and
++  // the production call above ran with that setting.
++  CHECK(state.self_attn_state.stats->enabled == tron::attn_stats::env_enabled());
++  CHECK(state.self_attn_state.stats->rows.empty() == !tron::attn_stats::env_enabled());
++  CHECK(state.self_attn_state.stats->n_layers == n_layers);
+ 
+   // 8. Save the results. Heap-allocated because attn_accum's parallel arrays
+   // are sized by max_minibatch_size; stack-copying them overflows the stack.
+@@ -2508,6 +2612,23 @@ static void check_page_range_reductions(int sliding_window) {
+     constexpr size_t n_workers = 4;
+     state.self_attn_state.attn.resize(
+         std::max(state.self_attn_state.attn.size(), n_workers));
++    if (state.self_attn_state.attn.size() > state.self_attn_state.stats->n_workers) {
++      // The grown scratchpad vector needs rows for its new workers: close the
++      // forward, rebuild the stats object for the new size, reopen the forward.
++      auto const& old_stats = *state.self_attn_state.stats;
++      const bool was_enabled = old_stats.enabled;
++      const std::string model_id = old_stats.model_id;
++      const bool is_eagle = old_stats.is_eagle;
++      const attn_stats::header_facts facts = old_stats.facts;
++      const size_t n_layers_kept = old_stats.n_layers;
++      stats_scope.reset();
++      state.self_attn_state.stats =
++          std::make_shared<attn_stats::model_stats>(was_enabled, model_id, is_eagle,
++              facts, state.self_attn_state.attn.size(), n_layers_kept);
++      stats_scope.emplace(*state.self_attn_state.stats,
++          attn_stats::forward_class::decode_like, state.token_jobs.size(),
++          state.token_jobs.size());
++    }
+     for (bool pending : {false, true}) {
+       std::array<std::vector<page_id>, 2> batch_pages;
+       batch_pages[pending] = page_ixs;
+@@ -2788,10 +2909,16 @@ static void check_page_range_reductions(int sliding_window) {
+     }
+     std::vector<size_t> finish_count(n_q_tokens);
+     auto finish_job = [&](size_t batch_job_ix) { ++finish_count[batch_job_ix]; };
++    // Inside stream_hw_joins, T5 (join_wait_cycles) counts only its wait
++    // loop, which a sweep that made progress never enters: every pass is
++    // complete here, so no wait.
++    uint64_t join_wait_cycles = 0;
+     for (size_t rank = 0; rank < n_join_workers; ++rank)
+       state.self_attn_state.stream_hw_joins(&q_batch, operation.binding.operation,
+-          /*kv_head=*/0, rank, n_join_workers, /*n_attn_workers=*/1, finish_job);
++          /*kv_head=*/0, rank, n_join_workers, /*n_attn_workers=*/1, finish_job,
++          &join_wait_cycles);
+     CHECK(finish_count == std::vector<size_t>(n_q_tokens, 1));
++    CHECK(join_wait_cycles == 0);
+     check_streamed_result();
+   }
+ 
+@@ -2837,11 +2964,15 @@ static void check_page_range_reductions(int sliding_window) {
+       }
+       release_cv.notify_one();
+     };
++    // The ready job finishes in the first sweep and releases the rest, so the
++    // join makes progress on every sweep and T5 stays 0: no blocking wait.
++    uint64_t join_wait_cycles = 0;
+     state.self_attn_state.stream_hw_joins(&q_batch, operation.binding.operation,
+         /*kv_head=*/0, /*rank=*/0, /*n_join_workers=*/1, /*n_attn_workers=*/1,
+-        finish_job);
++        finish_job, &join_wait_cycles);
+     watchdog.join();
+     CHECK_FALSE(timed_out);
++    CHECK(join_wait_cycles == 0);
+     REQUIRE(finished.size() == n_q_tokens);
+     CHECK(finished.front() != 0);
+     if (!pending_decode) CHECK(finished.front() == n_q_tokens - 1);
