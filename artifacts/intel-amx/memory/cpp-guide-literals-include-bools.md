@@ -35,3 +35,15 @@ values include true, false, 0 and 1. List any exception instead of applying it s
   Rule 7, never resolved silently toward the repo.
 
 Related: [[issue4525-implementation]].
+
+UPDATE 2026-10-02 (jhan, PR #4737): "Remove BIT_1, directly use literal 1". A literal `1` inside a bit helper
+(`uint8_t(1u << c)`, `uint64_t{1} << offset`) and in "mask minus one" arithmetic stays a literal; naming it adds no
+meaning. Keep one helper per mask kind (k_vnni::block_bit / offset_bit) so the spelling exists once. This is an
+EXPLICIT exception jhan granted, not a working interpretation: still list it in the chat summary when applied.
+Also: jhan prefers a constant name that says what the value IS over one that names a set
+(BLOCKS_PER_PAGE_MASK_0XF, not ALL_BLOCKS_0XF; FULL_BLOCK_0XFFFF-style "full page" was offered and not chosen).
+UPDATE 2026-10-02 (jhan, PR #4737, second exception): `return true;` in the row-major branch of the layout gate
+(`if constexpr` else-branch that always passes) stays a literal; a named ROW_MAJOR_DENSE_TRUE was asked to be reverted.
+Reading of both exceptions: a literal whose only meaning is "the trivial value of this expression" (a shift's 1, a
+subtraction's 1, a gate that is always open) is not named; a literal that encodes a choice or a flag (view aligned/dma,
+support_eagle, repeat, record_rows, converted) is named. Confirm with jhan before extending this reading to new cases.
