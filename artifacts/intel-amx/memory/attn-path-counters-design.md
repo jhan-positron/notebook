@@ -80,3 +80,18 @@ switch column visible per counter: keep section 9 in sync when counters change.
 line numbers shift with PR 4424 (VNNI K), re-verify before writing a PR. Related:
 [[wade-fuse-question-pr4267]], [[single-attention-measurement]], [[prefill-amx-vs-fpga-qwen3-4b]],
 [[amx-busy-perf-counter]], [[pr3879-split-progress]].
+
+UPDATE 2026-09-25 (05:xx UTC): counter.html now lives at PR3879/new-PRs/new-counters/counter.html (moved from
+PR1/ on 2026-09-24 by another session, which also added sections 2.2/2.3 + figure 3 and OUT in gen_counter.py;
+workflow wf_12412298-770). jhan asked for the per-layer K-token arithmetic of the exit report on the page:
+added section 13.1 (function section13_layer_line in gen_counter.py; pre-edit copy
+gen_counter.py.v6-20260925-before-13.1). Every number is computed in the function and asserted against
+exec/results/attnstats-20260924b/exit-reports.txt (all 3 headon2 lines + totals) before the page is written.
+jhan's wording, keep verbatim: "including the first 16 pages out of prefill (1024/64), Count = 16 + floor(i/64)".
+Derivation: per (user, KV head, layer) ready pages 4,461 (= 16 x 255 + 381) -> 285,504 keys AMX; pending keys
+8,256 of which 192 AMX (steps 63/127/191 full) and 8,064 AVX; x 64 pairs = 18,284,544 / 516,096 per layer;
+x 36 = the totals line. Trap: the stderr per-layer fpga value is raw (per query, all KV heads), x n_kv_heads to
+compare. Artifact BDw6g8QYbCUKdZkGAmbdMQ NOT republished after the move or after 13.1 (unknown whether the
+other session did).
+
+UPDATE 2026-09-25 ~06:00 UTC (AoF-question session): artifact BDw6g8QYbCUKdZkGAmbdMQ REPUBLISHED as Version 5 with sections 2.2/2.3 + 13.1 + the relabelled Table 1 (STEPS = 255); details in [[aof-amx-question-20260925]].
