@@ -1,0 +1,321 @@
+# Attention path stats: AMX kernel enabled vs disabled (attnstats-20261002)
+
+## Short version
+
+With software attention on the CPU, the AMX kernel scores 96 to 99 % of the decode K tokens of llama-3.1-8b and qwen3-4b, and disabling it costs 3 to 14 % of decode TPS and makes prefill up to 2.3x slower. With attention on the FPGA, the kernel scores 0 % of the decode K tokens of gpt-oss-120b and qwen3-4b, and disabling it changes no decode work counter. gpt-oss-120b can never use the kernel, because its head size 64 and 8 query heads per KV head fail the kernel's shape rule, so its software remainder (10 % of the decode K tokens, almost all in the 18 sliding-window layers) runs on the AVX loop in both arms.
+
+Detail behind the short version:
+
+- Prefill under software attention: TTFT 34.6 -> 78.8 s (+128 %, 2.3x) for llama at prompt 8192 with the kill switch; 3.42 -> 3.58 s (+4.6 %) at prompt 1024; qwen 3.19 -> 3.99 s (+25 %).
+- Under FPGA attention the visits, K tokens, token jobs, forwards, path sets and per-layer K tokens of decode are identical between the arms in the 3 AoF cells. Only the cycle timers differ, by up to 4.8 % of decode busy cycles (gpt-oss). Decode TPS differs by less than 1 % and TTFT by less than 2 % between the arms (one repetition per arm).
+- Measured 2026-10-02 13:59 to 14:12 UTC (first run start 13:59:41, last run end 14:12:45, 13 min) on our half of delphi-3bda, tron main dd0f942c75, 6 cells x 2 arms = 12 runtron runs, all finished, 0 HBM warnings [exec/results/attnstats-20261002/rt-results.txt]. The campaign process ran 13:37 to 14:15 UTC. The rest was an 8 min wait for production to go idle before the takeover, a 14 min wait on another session's campaign lock, and a 2 min hand-back [exec/logs/attnstats-20261002.log].
+
+## Words used here
+
+- tron = the inference program under test. runtron = its command-line tool. One runtron process per run prints the attention path stats to stderr at exit (the "exit report", 7 lines per model).
+- AMX, AVX = two CPU instruction sets. A KV page is a 64-token block of the KV cache. A page is dense for one query when all 64 entries of the page are live (page.count() == 64), the query sees all of them through one range (under FPGA attention: one range the CPU must score), and the page's first token is inside the query's sliding window, so the whole page is (is_dense_amx_page, h/tron/models/self_attention.hpp:1710-1721 at main). With the kernel enabled on a fitting shape, the AMX kernel scores the dense (query, page) pairs and the AVX software loop ("dotter") scores every other pair the CPU must score. Keys the FPGA card holds (up to the last complete GOF) are scored by the card, by neither CPU path. The split is per key, not per page: the 1 to 4 newest keys of the same page go to the AVX loop (next bullets).
+- GOF = group of four tokens, the unit in which K/V are copied to the FPGA card. DMA = that copy from host memory into the card's memory. HBM = the card's high-bandwidth memory, where it keeps the K/V it scores. A shard = one 1024-token range of K/V placed on one card. An HBM warning ('lose HW attention' or 'HBM bypass space exhausted' in the log) means one shard did not fit in the K/V region of that card's HBM, so its tokens are scored on the CPU.
+- FPGA attention (AoF, attention on the FPGA) = the FPGA card scores the keys already copied to its memory, up to the last complete GOF. The CPU scores the rest. In a decode step that is the 1 to 4 newest keys past that GOF, inside the pending page (measured 2.49 keys per visit in decode on qwen, both prompt lengths, both arms). In a prefill chunk it is each query's own chunk, 1 to 128 keys written in the same forward. In every case it also includes queries below the engagement point (positions 0 to 126), every layer the card does not serve (the 18 sliding-window layers of gpt-oss), and any 1024-token shard the card could not hold (the 'lose HW attention' warning, 0 in this campaign).
+- amxon = TRON_AMX_DISABLE unset. The AMX kernel is available.
+- amxoff = TRON_AMX_DISABLE=1, the kill switch. Same binary. Every page the CPU scores goes to the AVX loop. Pages the FPGA card scores stay on the card in both arms.
+- attn=cpu = USE_HW_ATTN=0, software attention on the CPU for every model.
+- attn=fpga = USE_HW_ATTN unset, the model default: FPGA attention for generated plugins (gpt-oss, qwen3), CPU attention for llama.
+- tp = tensor parallel degree, the number of FPGA cards one engine uses (tp2 = 2 cards, tp4 = 4 cards).
+- visit = one (token job, KV head, page) scoring step of the software loop. K tokens = the keys that step scored.
+- software scale = K tokens counted once per KV head, the unit of the AVX and AMX counters. The FPGA counts K tokens once per query (all KV heads at once). The report multiplies the FPGA count by n_kv_heads (8 for all three models) to put it on the software scale.
+- ready / pending = the two software passes of one attention job: the ready pass over pages whose K/V were written before this forward, and the pending pass, after the K/V wait, over the pages written in this forward.
+- join = the last step of an attention job. Each worker combines the partial results of all workers for its share of the batch's tokens and KV heads and normalizes them. Under FPGA attention, in the layers the card serves, it also folds in the card's per-pass partial results and waits when those or the peer workers' partials are not ready.
+- avx_full_page visits = AVX visits that scored a whole page (64 K tokens). For a fitting shape (llama, qwen) with the kernel enabled these are full pages that failed the dense-page test, for example a page written in this forward during prefill. For a non-fitting shape (gpt-oss) the dense-page test is never reached, so every whole-page AVX visit counts in both arms (299,520 in decode). With the kill switch they also include every page the kernel would have taken. The identity in section 4 uses that.
+- decode_like = forwards where every token job has a listener. Here that is the 255 generation steps after the first token, plus, for llama and gpt-oss, one forward holding the last prompt token of every user (a one-token final prompt chunk, which the rule also classes as decode_like): 255 forwards for qwen3-4b, 256 for llama-8b and gpt-oss. prompt_or_mixed = forwards with at least one job without a listener (prompt chunks: 8 forwards at prompt 1024, 64 at prompt 8192). A prompt chunk = up to 128 consecutive prompt tokens of one user (the TRON_PER_USER_PROMPT_CHUNK_LIMIT default, not set in this campaign; the last chunk of a prompt holds the remainder, here 1 token for llama and gpt-oss). One prompt forward processes one chunk of each of the 8 users: 1,024 token jobs per prompt forward (1,017 in the first forward of llama and gpt-oss, where 7 BOS tokens come from the prefix cache).
+- prefix cache = tron's reuse of K/V entries already computed for an identical leading token sequence (matched token by token, so part of a 64-token page can be reused). BOS = the beginning-of-sequence token some tokenizers add.
+- token_jobs_by_path_set = how many token jobs of a class touched which combination of paths in a forward.
+- T1 = forward wall time. busy = T2, the time one worker spent inside one attention job: both software passes and the join, without the upstream K/V wait. join wait = T5, the time inside busy spent waiting for peer workers or the card with no join progress. T4 per forward = the layer-to-layer periods on attention worker 0, summed per forward. tsc_hz = the frequency of the CPU timestamp counter, used to convert cycles to seconds.
+- TPS = generated tokens per second per user (runtron 'average tok/s', mean over the 8 users). TTFT = prompt parsing time in seconds, mean over users.
+- kv_mul = query heads per KV head (GQA). head_size = elements per head.
+- fitting shape = head size 128 and kv_mul 4, the only geometry the AMX kernel is compiled for (shape_ok in h/tron/kernels/amx_attn_iface.hpp:148-150 at main). llama-3.1-8b and qwen3-4b fit. gpt-oss-120b (head size 64, kv_mul 8) does not.
+- amx_available = the process-level probe (CPU support and the kill switch). It is not the shape verdict: it reads yes for gpt-oss in the amxon arm although the kernel never runs for it.
+- card layers = hw_slots of the 'HW attention enabled' line, the layers the FPGA serves. gpt-oss has 18 card layers (the odd layers 1, 3, ..., 35) and 18 sliding-window layers (the even layers, window 128 tokens) that always run in software. qwen3-4b has 36 card layers.
+- FUSE = the user-space file system through which tron publishes its live counters as files. platformd = the host service that starts and stops production serving.
+- our half = socket 1 of delphi-3bda with FPGA cards 90/93/b9/bc.
+
+## 1. What ran
+
+One binary: tron main dd0f942c75 (fetched 13:33 UTC) built with `cmake --preset native -DBUILD_INGEST_MODELS=ON -DTRON_AMX_DISPATCH=ON` [exec/results/attnstats-20261002/build-main1002.txt]. The disassembly has 98 AMX tile instructions (40 tileloadd, 32 tdpbf16ps, 12 tilestored, 12 tilezero, 1 ldtilecfg, 1 tilerelease; the chain log's count of 86 uses a list of instruction names (mnemonics) that omits tilezero) and the binary carries the TRON_ATTN_STATS switch [exec/logs/attnstats-20261002-chain.log]. Every run: `env -u SYSTEM_CONFIG -u TRON_AMX_DISABLE`, then the attention mode, then the arm, 8 users, 256 generated tokens per user, `--dont-stop` (so both arms generate the same number of tokens). The two arms of a cell ran one after the other, amxon first.
+
+| No. | cell | model | tp | prompt | attention | role |
+|---|---|---|---|---|---|---|
+| 1 | l8b-8u-p1024-cpu | llama-3.1-8b-instruct-good-tp2 | 2 | 1024 | cpu (USE_HW_ATTN=0) | pure software attention |
+| 2 | gptoss-8u-p1024-fpga | ingested-gpt-oss-120b-tp4 | 4 | 1024 | fpga (unset) | AoF, non-fitting shape |
+| 3 | q3-4b-8u-p1024-fpga | ingested-qwen-3-4b-instruct-2507-tp2 | 2 | 1024 | fpga (unset) | AoF, fitting shape |
+| 4 | q3-4b-8u-p1024-cpu | ingested-qwen-3-4b-instruct-2507-tp2 | 2 | 1024 | cpu (USE_HW_ATTN=0) | control: fitting shape under software attention |
+| 6 | l8b-8u-p8192-cpu | llama-3.1-8b-instruct-good-tp2 | 2 | 8192 | cpu (USE_HW_ATTN=0) | pure software attention, long prompt |
+| 7 | q3-4b-8u-p8192-fpga | ingested-qwen-3-4b-instruct-2507-tp2 | 2 | 8192 | fpga (unset) | AoF, fitting shape, long prompt |
+
+The first plan had 12 cells (3 models x 2 attention modes x 2 prompt lengths). jhan dropped 6 of them on 2026-10-02 in two rounds (02:40 and 02:50 UTC): gpt-oss under CPU attention at prompt 1024 ("we always use AoF for gptoss, no need to test AoF off") and at prompt 8192 ("yes, drop #8", after the same rule was pointed out), gpt-oss under FPGA attention at prompt 8192 ("not needed"), llama with USE_HW_ATTN=1 at both prompt lengths ("essentially same as #1 because llama is not AoF"), and qwen under CPU attention at prompt 8192 ("not needed"). The numbers in the table are the cell numbers of the 10-cell table of the second round, in which cells 5, 8, 9 and 10 were the last four dropped. "Always AoF" and "not AoF" are deployment defaults: gpt-oss's generated (ingested) plugin defaults to FPGA attention when USE_HW_ATTN is unset, and llama's hand-written plugin defaults to CPU attention. USE_HW_ATTN=0 or =1 overrides either default [h/tron/models/hw_attn_config.hpp:12-15].
+
+Geometry, attention mode and throughput per cell (from the exit-report header lines and the runtron logs):
+
+| cell | model | kv heads / kv_mul / head size / layers | kernel shape | attention asked | card (log) | card layers | prompt | users | AMX compiled / available (amxon) | available (amxoff) | TPS amxon | TPS amxoff | TTFT amxon s | TTFT amxoff s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| gptoss-8u-p1024-fpga | gpt-oss-120b tp4 | 8 / 8 / 64 / 36 | non-fitting | FPGA attention | on | 18 of 36 | 1024 | 8 | yes / yes | no | 96.07 | 96.22 | 2.73 | 2.73 |
+| l8b-8u-p1024-cpu | llama-3.1-8b tp2 | 8 / 4 / 128 / 32 | fitting | CPU attention | off | 0 | 1024 | 8 | yes / yes | no | 113.87 | 110.66 | 3.42 | 3.58 |
+| q3-4b-8u-p1024-cpu | qwen3-4b tp2 | 8 / 4 / 128 / 36 | fitting | CPU attention | off | 0 | 1024 | 8 | yes / yes | no | 79.48 | 71.20 | 3.19 | 3.99 |
+| q3-4b-8u-p1024-fpga | qwen3-4b tp2 | 8 / 4 / 128 / 36 | fitting | FPGA attention | on | 36 of 36 | 1024 | 8 | yes / yes | no | 126.59 | 127.69 | 3.11 | 3.06 |
+| l8b-8u-p8192-cpu | llama-3.1-8b tp2 | 8 / 4 / 128 / 32 | fitting | CPU attention | off | 0 | 8192 | 8 | yes / yes | no | 24.84 | 21.42 | 34.62 | 78.78 |
+| q3-4b-8u-p8192-fpga | qwen3-4b tp2 | 8 / 4 / 128 / 36 | fitting | FPGA attention | on | 36 of 36 | 8192 | 8 | yes / yes | no | 60.53 | 60.86 | 26.73 | 26.79 |
+
+HW attention line and HBM warnings per cell (the line is the first 'HW attention' line of the run's log):
+
+- gptoss-8u-p1024-fpga: HW attention enabled for model 'ingested-gpt-oss-120b-tp4': max_layers=36 engagement=127 kv_slot_extent=36 hw_attn_params { kv_head_size: 64 n_kv_heads: 8 n_heads: 64 gqa: 8 pre_attn_scalar: 0.125 hw_slots: 18 } (model default). HBM warnings amxon lose=0 exhausted=0; amxoff lose=0 exhausted=0.
+- l8b-8u-p1024-cpu: HW attention disabled for model 'llama-3.1-8b-instruct-good-tp2': USE_HW_ATTN=0. HBM warnings amxon lose=0 exhausted=0; amxoff lose=0 exhausted=0.
+- q3-4b-8u-p1024-cpu: HW attention disabled for model 'ingested-qwen-3-4b-instruct-2507-tp2': USE_HW_ATTN=0. HBM warnings amxon lose=0 exhausted=0; amxoff lose=0 exhausted=0.
+- q3-4b-8u-p1024-fpga: HW attention enabled for model 'ingested-qwen-3-4b-instruct-2507-tp2': max_layers=36 engagement=127 kv_slot_extent=36 hw_attn_params { kv_head_size: 128 n_kv_heads: 8 n_heads: 32 gqa: 4 pre_attn_scalar: 0.088388346 hw_slots: 36 } (model default). HBM warnings amxon lose=0 exhausted=0; amxoff lose=0 exhausted=0.
+- l8b-8u-p8192-cpu: HW attention disabled for model 'llama-3.1-8b-instruct-good-tp2': USE_HW_ATTN=0. HBM warnings amxon lose=0 exhausted=0; amxoff lose=0 exhausted=0.
+- q3-4b-8u-p8192-fpga: HW attention enabled for model 'ingested-qwen-3-4b-instruct-2507-tp2': max_layers=36 engagement=127 kv_slot_extent=36 hw_attn_params { kv_head_size: 128 n_kv_heads: 8 n_heads: 32 gqa: 4 pre_attn_scalar: 0.088388346 hw_slots: 36 } (model default). HBM warnings amxon lose=0 exhausted=0; amxoff lose=0 exhausted=0.
+
+## 2. Findings per situation
+
+### 2.1 Attention on the FPGA: gpt-oss-120b and qwen3-4b
+
+The AMX kernel does not take part in decode under FPGA attention. In every AoF decode row the AMX visit count is 0 in both arms, and the K-token shares are identical between amxon and amxoff [section 3, rows gptoss-8u-p1024-fpga, q3-4b-8u-p1024-fpga, q3-4b-8u-p8192-fpga]. The kill switch changes decode TPS by +0.2 % (gpt-oss), +0.9 % (qwen at prompt 1024) and +0.5 % (qwen at prompt 8192), and TTFT by -0.1 %, -1.6 % and +0.2 % [section 1 table]. With one repetition per arm these differences are inside the single-repetition variation (section 4). In decode the work counters are identical in both arms of every AoF cell. The attention busy time per job is not: it differs by -4.8 % (gpt-oss), +0.1 % and +0.4 % (qwen) although the kernel scored nothing in either arm. This report therefore treats the decode TPS and TTFT differences as single-repetition variation, not as kernel effects (section 4 gives the bound). In prefill the counters differ in two places: 144 more empty visits for gpt-oss in amxoff, and 7,077,888 whole-page visits that move from the kernel to the AVX loop for qwen at prompt 8192 (see below).
+
+gpt-oss-120b, prompt 1024 (cell 2):
+
+- The card scores 89.8 % of the decode K tokens (339,148,800 of 377,634,816 on the software scale). The AVX loop scores the other 10.2 % (38,486,016). AMX scores 0 [section 3].
+- The AVX share splits by layer kind [section 6]. The 18 sliding-window layers carry 37,748,736 K tokens, that is 2,097,152 per layer = 2,048 token jobs x 8 KV heads x 128 keys: every decode step scores its whole 128-token window on the CPU. The 18 card layers carry 737,280 K tokens, that is 40,960 per layer = 2,048 x 8 x 2.5 keys: the CPU tail past the last complete GOF is 2.5 keys per step on average (the 1 to 4 keys past that GOF), the same (p mod 4) + 1 tail per step as measured for qwen on 2026-09-25 (qwen's mean is 2.49 because it has 255 decode positions, 1024 to 1278, instead of 256).
+- The sliding-window layers contain 294,912 ready full-page AVX visits in decode (16,384 per layer = one full page per token job and KV head per step) and 4,608 pending ones [rt/gptoss-8u-p1024-fpga__fpga__amxon__rep1.log]. These are the visits a kernel of the right shape could take. The gpt-oss shape is wrong for the kernel (head size 64, kv_mul 8), so they stay on the AVX loop in both arms, and the counts are identical in both arms.
+- Prefill: the card scores 70.8 % of the K tokens, the AVX loop 29.2 % (217,716,768 K tokens: 141,630,480 in the sliding-window layers, 76,086,288 in the card layers) [section 6; section 3]. In a card layer the AVX part is 4,227,016 K tokens = 8 users x 8 KV heads x 8 chunks x 8,256 - 56: each prompt query scores its own 128-token chunk on the CPU (8,256 = 128 x 129 / 2 key-query pairs per chunk and KV head), and the card scores the earlier chunks (3,670,016 per layer as the per-layer line counts them, once per query = 8 users x 128 queries x 128 keys x 28 earlier-chunk pairs; on the software scale that is 29,360,128 = 8 users x 8 KV heads x 128 x 128 x 28, against the 4,227,016 AVX K tokens of the same layer). The 56 missing pairs are 7 users x 8 KV heads x 1 pair: for users 2 to 8 the BOS token is served from the prefix cache and is never a prompt query, so its own query-key pair is not scored (see section 8).
+- Every one of the 2,048 decode token jobs used the path set fpga+avx; no job touched amx [section 5]. In prefill, 1,017 jobs used avx only: the first 128-token chunk of each user (8 x 128 - 7 reused BOS tokens). Positions 0 to 126 sit below the engagement point (127), and position 127 has no earlier page of its user on the card yet, so all 128 queries of that chunk run on the CPU only.
+- The only cross-arm difference among the gpt-oss counters (visits, K tokens, jobs, forwards, path sets, per-layer lines) is 16,218 vs 16,362 empty visits in prefill (144 more in amxoff). The timer fields, tsc_hz and the amx_available flag differ, as expected for two runs and the kill switch.
+  - An empty visit scores no key and moves no K token.
+  - All 16,218 empty visits of the amxon run are in the 18 sliding-window layers (901 per even layer) and none in the 18 card layers [leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/prompt_or_mixed_layer_*]. So the card's copy progress does not set this count.
+  - 896 of the 901 per layer are consistent with an off-by-one between the page-level window gate (skip when q - (k0 + 64) >= 128, self_attention.hpp:1612) and the per-key test (skip when q - (k0 + i) >= 128, line 1927): a page whose last key is exactly 128 positions before the query is visited and found empty, 14 pages per user x 8 users x 8 KV heads.
+  - The remaining 5 per layer (amxon, measured in the per-layer snapshot) and est. 13 per layer (amxoff: 16,362 / 18 = 909 minus 896, assuming the same spread over the 18 sliding-window layers, because the amxoff prompt per-layer leaves are 0-byte files) differ between the runs by 144 = 8 x 18 in total. Their cause is not measured.
+- Time: attention busy per job 0.032 ms (amxon) vs 0.031 ms (amxoff) in decode; the join wait is 17 to 18 % of busy. The forward takes 10.26 ms (amxon) and 10.24 ms (amxoff), equal within 0.2 % [section 7].
+
+qwen3-4b, prompt 1024 and 8192 (cells 3 and 7):
+
+- Decode: the card scores 99.8 % (prompt 1024) and 100.0 % (prompt 8192, rounded) of the K tokens. The CPU tail is 1,465,344 K tokens in both cells over 587,520 visits = 2,040 token jobs x 8 KV heads x 36 layers x 2.49 keys, exactly the sum over the positions p = 1024 to 1278 of ((p mod 4) + 1) [sections 3 and 4]. There are 0 AMX visits and 0 full-page AVX visits. The tail never fills a page, so the kernel has nothing to take. The two arms are identical.
+- The card replaces the kernel's part, and in decode a little more. The qwen CPU control (cell 4, amxon arm) and the qwen AoF cell (cell 3, both arms) have the same prefill totals: AVX 152,174,592 K tokens in each, and the card's 1,056,964,608 K tokens (software scale) equal the control's AMX K tokens [section 3]. (In the control's amxoff arm the kernel's part moves to the AVX loop: AVX 1,209,139,200.) In decode the totals also agree (676,823,040 in both cells), but the card scores more than the kernel did: 675,357,696 against the control's AMX 658,243,584. The extra 17,114,112 K tokens (2.5 % of the decode K tokens) are the partial pending page down to the last complete GOF. The control's AVX loop scored them (18,579,456 K tokens, 32 keys per visit), and under FPGA attention only the 1 to 4 key tail stays on the CPU (1,465,344). So in prefill the card scores exactly the kernel's pages and nothing else moves. In decode the AVX-to-card move is a second change.
+- Prefill at prompt 1024: 87.4 % card, 12.6 % AVX (the chunks' own pages, 1,216,512 full-page AVX visits in both arms), 0 AMX. The 1,024 jobs with path set avx only are the first 128-token chunk of each user (8 x 128): positions 0 to 126 sit below the engagement point (127), and position 127 has no earlier page on the card to score.
+- Prefill at prompt 8192: 7,077,888 AMX visits in amxon = 0.6 % of the prefill K tokens, and the same visits appear as extra full-page AVX visits in amxoff (16,809,984 = 9,732,096 + 7,077,888). That is 3,072 visits per user, layer and KV head, each one whole page (64 K tokens per visit, 452,984,832 K tokens in all): 3,072 token jobs used the kernel (24 chunk-units of 128 prompt tokens). Averaged over them that is 384 per user (3 chunks, if the lag hit every user equally) and 8 whole pages (512 tokens) per job, layer and KV head above the prefix the card had copied. The counters record totals only, so the per-user split and the per-job page count are means. If the affected jobs fill whole forwards, that is 3 of the 64 prompt forwards. The count is identical in both arms, in both 2026-09-25 runs of the same cell (binary cbf1bb6c0c; the 'state 6' row of counter.html Table 2, prefill copy lag) and in every one of the 36 layers. So the lag is deterministic, not timing noise that varies between runs. The code sets the card boundary from the GOFs landed at the moment the plan is built [h/tron/scheduler/full.hpp:2850, 2882; h/tron/shard.hpp:355-365], so the cause is a fixed ordering between the copy submission and that poll. Which ordering is open. The 3,072 jobs used fpga+avx+amx in amxon and fpga+avx in amxoff [section 5]. With the kill switch, prefill attention busy time per job rises 3.6 % (2.391 -> 2.477 ms, one repetition) and TTFT by 0.2 % (26.73 -> 26.79 s).
+- Time: decode busy per job 0.043 ms (both arms) at prompt 1024 and 0.242 / 0.243 ms (amxon / amxoff) at prompt 8192. The join wait is 58 % and 88 % of busy: the CPU workers mostly wait for the card. T1 per decode forward is 7.75 / 7.68 ms and 15.96 / 15.87 ms (amxon / amxoff), the arms within 1 % [section 7].
+
+### 2.2 Pure software attention: llama-3.1-8b
+
+llama runs CPU attention when USE_HW_ATTN is unset: its hand-written plugin h/tron/plugins/llama.hpp does not define the `force_hw_attn` member that the generated plugins set to true [h/tron/models/model.hpp:742-748; ingest/src/TronCpp.hs:243]. (The llama cells here set USE_HW_ATTN=0 explicitly.) This is the situation where the kernel does the most work.
+
+- Decode, prompt 1024 (cell 1): AMX scores 96.5 % of the K tokens (583,073,792 of 604,241,920) in 9,110,528 visits (9,102,336 ready + 8,192 pending). The AVX loop scores the remaining 3.5 %: 21,168,128 K tokens, mostly the pending page of each step (16,515,072 of them in the pending pass) [rt/l8b-8u-p1024-cpu__cpu__amxon__rep1.log]. With the kill switch, the same work appears as 9,176,064 full-page AVX visits (identity holds, section 4).
+- Decode, prompt 8192 (cell 6): AMX scores 98.9 % (4,312,268,800 of 4,362,338,304) in 67,379,200 visits. The AVX share drops to 1.1 %. The pending-pass AVX work is a fixed 16,515,072 K tokens per cell, and the dense pages grow 7.4x with the context.
+- Prefill: AMX scores 86.0 % (prompt 1024) and 97.1 % (prompt 8192) of the K tokens. Most of the AVX remainder is the chunk's own pages: the pending pass holds 89 % of the AVX K tokens at prompt 1024 (133,658,880 of 149,944,576) and 55 % at prompt 8192, A page written in this forward has one visible range per token. It usually fails the dense-page test (1,052,672 of the 1,282,048 full-page AVX visits at prompt 1024 are pending-pass visits). The rest is in the ready pass, on pages written in earlier forwards: 16,285,696 K tokens (11 %) at prompt 1024 and 898,007,040 (45 %) at prompt 8192; what those pages are is not identified here (section 8). Not every fresh page fails the test: 1,605,632 pending-pass visits (102,760,448 K tokens) took the AMX path at prompt 1024. In prefill, qwen's CPU cell shows the clean case: 0 ready-pass AVX visits and 0 pending-pass AMX visits. (Its decode class keeps 0 ready-pass AVX visits but has 6,912 pending-pass AMX visits = 24 token jobs x 36 layers x 8 KV heads, the full pending pages of section 2.3.)
+- Cost of the kill switch, decode: TPS 113.87 -> 110.66 (-2.8 %) at prompt 1024 and 24.84 -> 21.42 (-13.8 %) at prompt 8192 [section 1 table]. Attention busy time per job 0.091 -> 0.103 ms (+13 %) and 0.574 -> 0.679 ms (+18 %); T1 per decode forward 8.66 -> 8.92 ms and 39.64 -> 46.05 ms [section 7].
+- Why the prompt 1024 decode TPS moves only 3 %: the attention workers are busy 5.8 ms of the 8.7 ms decode forward in amxon (busy 34.34 s / 5,901 worker-forwards = 67 %). The amxon run used 23 attention workers in 243 of the 256 decode forwards and 24 in the other 13, read from attn_jobs = 64 jobs per worker per forward; dividing by the maximum of 24 would give 5.6 ms (65 %). Worker 0's attention wall T3 is 5.7 ms. The kill switch (24 workers in 255 of 256 forwards) raises busy time to 6.59 ms per worker per forward, +0.77 ms, but adds only 0.26 ms to the forward (+3 %). About two thirds of the extra attention time is therefore absorbed by the time the workers spend outside attention jobs: 2.85 ms per forward on the busy basis (8.66 - 5.82), or 2.95 ms as worker 0's time outside its attention wall (8.66 - 5.72). Worker 0's timers show where it goes: under the kill switch its attention wall per forward grows 0.68 ms but its layer periods (T4) grow only 0.24 ms, close to the 0.26 ms of T1. Hypothesis for the mechanism (code-supported, not measured directly): llama runs two attention jobs per worker per layer per forward (377,664 / 5,901 / 32 = 2.0), consistent with the two-minibatch split its plugin allows (max_minibatches = -1, h/tron/plugins/llama.hpp:183; chunk_evenly splits a lone chunk in two "to enable FPGA-vs-CPU latency hiding", h/tron/models/model.hpp:246-250), and tron's own comment says a single minibatch cannot hide attention behind main work [model.hpp:2082-2090]. qwen's generated plugin runs one minibatch (max_minibatches = 1, ingest/src/TronCpp.hs:273; 1.0 jobs per worker per layer) and lets the extra time reach the forward almost 1:1: T1 +1.45 ms per decode forward for +1.29 ms busy per worker per forward (ratio 1.12). At prompt 8192 the attention time grows 6.6x (busy per worker per forward 5.8 -> 36.7 ms) while the rest of the forward stays near 3 ms, and 6.4 of the 6.7 ms the kill switch adds per worker (95 %) reaches the forward (T1 39.6 -> 46.1 ms) and the time per token (TPS -13.8 %).
+- Cost of the kill switch, prefill: TTFT 3.42 -> 3.58 s (+4.6 %) at prompt 1024 and 34.62 -> 78.78 s (+128 %, 2.3x) at prompt 8192; attention busy per job 1.92 -> 4.77 ms (2.5x) at prompt 8192 [sections 1, 7]. The prefill forward at prompt 8192 goes from 539 ms to 1,228 ms.
+- Path sets: in amxon every decode token job used avx+amx (2,048 of 2,048); in amxoff every job used avx only [section 5].
+
+### 2.3 Fitting shape (llama-3.1-8b, qwen3-4b) vs non-fitting shape (gpt-oss-120b)
+
+The kernel's shape rule at main is head size 128 and kv_mul 4, nothing else [h/tron/kernels/amx_attn_iface.hpp:148-150]. The exit-report header lines confirm the geometries: llama 8 KV heads / kv_mul 4 / head size 128 / 32 layers, qwen 8 / 4 / 128 / 36, gpt-oss 8 / 8 / 64 / 36 [section 1 table].
+
+- Fitting, under software attention (cells 1, 4, 6): AMX scores 96.5 % (llama) and 97.3 % (qwen) of the decode K tokens at prompt 1024, 98.9 % (llama) at prompt 8192. For qwen the 10,285,056 AMX decode visits are 4,461 ready + 3 pending per user, KV head and layer: 4,461 = the number of full ready pages summed over the 255 decode steps of a 1024-token prompt, and 3 = the pending page at the steps where it becomes full (decode steps 64, 128 and 192 of 255). The 24 qwen decode jobs with path set amx only are 8 users x those 3 steps, where the job has no AVX visit at all. The kill switch costs qwen 10.4 % of decode TPS (79.48 -> 71.20) and 25 % of TTFT (3.19 -> 3.99 s); attention busy per job 0.193 -> 0.229 ms in decode and 3.36 -> 6.32 ms in prefill [sections 1, 7].
+- Fitting, under FPGA attention (cells 3, 7): the kernel has no work in decode (0 AMX visits in both arms). The card scores every key up to the last complete GOF, and the CPU scores the 1 to 4 keys after it (2.49 on average). That tail never spans a whole page (0 full-page AVX visits), and the kernel takes whole pages only. The card scores exactly the pages the kernel scored under software attention (2.1). In these two cells the kernel got work only in the prompt 8192 prefill (7,077,888 whole pages the CPU scored instead of the card, 0.6 % of that cell's prefill K tokens; see 2.1). Short prompts (queries below position 127) and warm prefix-cache branches also give the kernel work under FPGA attention. They were measured on 2026-09-25, not here.
+- Non-fitting (cell 2, gpt-oss under its usual FPGA attention): 0 AMX visits in both arms, by construction of the binary (the AMX branch is compiled out for this shape). The CPU still scores 10.2 % of the decode K tokens and 29.2 % of the prefill K tokens for gpt-oss, all on the AVX loop. Inside that remainder, 299,520 decode visits (294,912 ready + 4,608 pending) scored a full page. A kernel that accepted head size 64 and kv_mul 8 could take at most those, which is 25 % of gpt-oss's 1,187,136 decode AVX visits, or about 50 % of its AVX K tokens (299,520 full-page visits x 64 K tokens per page = 19,169,280 of 38,486,016, 49.8 %; the mean AVX visit scores 32.4 K tokens, so the K-token share is twice the visit share). On the software scale that is 5.1 % of gpt-oss's decode K tokens (19,169,280 of 377,634,816). In prefill the bound is 1,714,464 full-page AVX visits x 64 = 109,725,696 of 746,199,072 K tokens (14.7 %). Whether a kernel for that shape would save time is not measured here.
+- Comparison:
+  - Under software attention a fitting model puts 96 to 99 % of its decode keys through the kernel and loses 3 to 14 % TPS without it.
+  - Under FPGA attention, in the cells measured here (prompt 1024 and 8192, cold prefix cache), no model puts decode keys through the kernel, fitting or not. A fitting model with a short prompt does (qwen3-4b at prompt 64: 8.5 % of its decode K tokens, measured 2026-09-25).
+  - The non-fitting model keeps 10 % of its decode keys on the AVX loop in both arms.
+
+## 3. K tokens by path, AMX enabled vs disabled
+
+Per cell and class: the K tokens each path scored (software scale), the shares, and the visit counts. Shares are of the row's total K tokens (AMX + AVX + FPGA).
+
+| cell | class | arm | K tokens AMX | share | K tokens AVX | share | K tokens FPGA (x kv heads) | share | visits AMX (ready+pending) | visits AVX | avx_full_page visits | empty visits | FPGA query passes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| gptoss-8u-p1024-fpga | decode_like | amxon | 0 | 0.0 % | 38,486,016 | 10.2 % | 339,148,800 | 89.8 % | 0 (0+0) | 1,187,136 | 299,520 | 0 | 36,864 |
+| gptoss-8u-p1024-fpga | decode_like | amxoff | 0 | 0.0 % | 38,486,016 | 10.2 % | 339,148,800 | 89.8 % | 0 (0+0) | 1,187,136 | 299,520 | 0 | 36,864 |
+| gptoss-8u-p1024-fpga | prompt_or_mixed | amxon | 0 | 0.0 % | 217,716,768 | 29.2 % | 528,482,304 | 70.8 % | 0 (0+0) | 6,212,160 | 1,714,464 | 16,218 | 129,024 |
+| gptoss-8u-p1024-fpga | prompt_or_mixed | amxoff | 0 | 0.0 % | 217,716,768 | 29.2 % | 528,482,304 | 70.8 % | 0 (0+0) | 6,212,160 | 1,714,464 | 16,362 | 129,024 |
+| l8b-8u-p1024-cpu | decode_like | amxon | 583,073,792 | 96.5 % | 21,168,128 | 3.5 % | 0 | 0.0 % | 9,110,528 (9,102,336+8,192) | 1,040,384 | 65,536 | 0 | 0 |
+| l8b-8u-p1024-cpu | decode_like | amxoff | 0 | 0.0 % | 604,241,920 | 100.0 % | 0 | 0.0 % | 0 (0+0) | 10,150,912 | 9,176,064 | 0 | 0 |
+| l8b-8u-p1024-cpu | prompt_or_mixed | amxon | 924,844,032 | 86.0 % | 149,944,576 | 14.0 % | 0 | 0.0 % | 14,450,688 (12,845,056+1,605,632) | 5,179,648 | 1,282,048 | 0 | 0 |
+| l8b-8u-p1024-cpu | prompt_or_mixed | amxoff | 0 | 0.0 % | 1,074,788,608 | 100.0 % | 0 | 0.0 % | 0 (0+0) | 19,630,336 | 15,732,736 | 0 | 0 |
+| q3-4b-8u-p1024-cpu | decode_like | amxon | 658,243,584 | 97.3 % | 18,579,456 | 2.7 % | 0 | 0.0 % | 10,285,056 (10,278,144+6,912) | 580,608 | 0 | 0 | 0 |
+| q3-4b-8u-p1024-cpu | decode_like | amxoff | 0 | 0.0 % | 676,823,040 | 100.0 % | 0 | 0.0 % | 0 (0+0) | 10,865,664 | 10,285,056 | 0 | 0 |
+| q3-4b-8u-p1024-cpu | prompt_or_mixed | amxon | 1,056,964,608 | 87.4 % | 152,174,592 | 12.6 % | 0 | 0.0 % | 16,515,072 (16,515,072+0) | 3,538,944 | 1,216,512 | 0 | 0 |
+| q3-4b-8u-p1024-cpu | prompt_or_mixed | amxoff | 0 | 0.0 % | 1,209,139,200 | 100.0 % | 0 | 0.0 % | 0 (0+0) | 20,054,016 | 17,731,584 | 0 | 0 |
+| q3-4b-8u-p1024-fpga | decode_like | amxon | 0 | 0.0 % | 1,465,344 | 0.2 % | 675,357,696 | 99.8 % | 0 (0+0) | 587,520 | 0 | 0 | 73,440 |
+| q3-4b-8u-p1024-fpga | decode_like | amxoff | 0 | 0.0 % | 1,465,344 | 0.2 % | 675,357,696 | 99.8 % | 0 (0+0) | 587,520 | 0 | 0 | 73,440 |
+| q3-4b-8u-p1024-fpga | prompt_or_mixed | amxon | 0 | 0.0 % | 152,174,592 | 12.6 % | 1,056,964,608 | 87.4 % | 0 (0+0) | 3,538,944 | 1,216,512 | 0 | 258,048 |
+| q3-4b-8u-p1024-fpga | prompt_or_mixed | amxoff | 0 | 0.0 % | 152,174,592 | 12.6 % | 1,056,964,608 | 87.4 % | 0 (0+0) | 3,538,944 | 1,216,512 | 0 | 258,048 |
+| l8b-8u-p8192-cpu | decode_like | amxon | 4,312,268,800 | 98.9 % | 50,069,504 | 1.1 % | 0 | 0.0 % | 67,379,200 (67,371,008+8,192) | 1,499,136 | 65,536 | 0 | 0 |
+| l8b-8u-p8192-cpu | decode_like | amxoff | 0 | 0.0 % | 4,362,338,304 | 100.0 % | 0 | 0.0 % | 0 (0+0) | 68,878,336 | 67,444,736 | 0 | 0 |
+| l8b-8u-p8192-cpu | prompt_or_mixed | amxon | 66,750,251,008 | 97.1 % | 1,977,612,544 | 2.9 % | 0 | 0.0 % | 1,042,972,672 (1,040,449,536+2,523,136) | 53,793,024 | 10,672,128 | 0 | 0 |
+| l8b-8u-p8192-cpu | prompt_or_mixed | amxoff | 0 | 0.0 % | 68,727,863,552 | 100.0 % | 0 | 0.0 % | 0 (0+0) | 1,096,765,696 | 1,053,644,800 | 0 | 0 |
+| q3-4b-8u-p8192-fpga | decode_like | amxon | 0 | 0.0 % | 1,465,344 | 0.0 % | 4,886,701,056 | 100.0 % | 0 (0+0) | 587,520 | 0 | 0 | 219,168 |
+| q3-4b-8u-p8192-fpga | decode_like | amxoff | 0 | 0.0 % | 1,465,344 | 0.0 % | 4,886,701,056 | 100.0 % | 0 (0+0) | 587,520 | 0 | 0 | 219,168 |
+| q3-4b-8u-p8192-fpga | prompt_or_mixed | amxon | 452,984,832 | 0.6 % | 1,217,396,736 | 1.6 % | 75,648,466,944 | 97.8 % | 7,077,888 (7,077,888+0) | 28,311,552 | 9,732,096 | 0 | 3,428,352 |
+| q3-4b-8u-p8192-fpga | prompt_or_mixed | amxoff | 0 | 0.0 % | 1,670,381,568 | 2.2 % | 75,648,466,944 | 97.8 % | 0 (0+0) | 35,389,440 | 16,809,984 | 0 | 3,428,352 |
+
+## 4. Kill-switch identity
+
+When both arms scored the same prompts, generated the same number of tokens (--dont-stop) and had the same HBM warning counts, every dense page the kernel took in amxon is an AVX full-page visit in amxoff. So avx_full_page(amxoff) must equal amx_visits(amxon) + avx_full_page(amxon). The AVX K tokens of amxoff must equal the AMX + AVX K tokens of amxon. A mismatch means the two runs did not score the same positions, or a counter defect. For a non-fitting shape both arms have 0 AMX visits and the identity degenerates to equal counts.
+
+| cell | class | amx visits (on) | avx_full_page (on) | avx_full_page (off) | visits identity | K tokens AMX+AVX (on) | K tokens AVX (off) | K identity | FPGA K tokens on / off |
+|---|---|---|---|---|---|---|---|---|---|
+| gptoss-8u-p1024-fpga | decode_like | 0 | 299,520 | 299,520 | holds | 38,486,016 | 38,486,016 | holds | 339,148,800 / 339,148,800 |
+| gptoss-8u-p1024-fpga | prompt_or_mixed | 0 | 1,714,464 | 1,714,464 | holds | 217,716,768 | 217,716,768 | holds | 528,482,304 / 528,482,304 |
+| l8b-8u-p1024-cpu | decode_like | 9,110,528 | 65,536 | 9,176,064 | holds | 604,241,920 | 604,241,920 | holds | 0 / 0 |
+| l8b-8u-p1024-cpu | prompt_or_mixed | 14,450,688 | 1,282,048 | 15,732,736 | holds | 1,074,788,608 | 1,074,788,608 | holds | 0 / 0 |
+| q3-4b-8u-p1024-cpu | decode_like | 10,285,056 | 0 | 10,285,056 | holds | 676,823,040 | 676,823,040 | holds | 0 / 0 |
+| q3-4b-8u-p1024-cpu | prompt_or_mixed | 16,515,072 | 1,216,512 | 17,731,584 | holds | 1,209,139,200 | 1,209,139,200 | holds | 0 / 0 |
+| q3-4b-8u-p1024-fpga | decode_like | 0 | 0 | 0 | holds | 1,465,344 | 1,465,344 | holds | 675,357,696 / 675,357,696 |
+| q3-4b-8u-p1024-fpga | prompt_or_mixed | 0 | 1,216,512 | 1,216,512 | holds | 152,174,592 | 152,174,592 | holds | 1,056,964,608 / 1,056,964,608 |
+| l8b-8u-p8192-cpu | decode_like | 67,379,200 | 65,536 | 67,444,736 | holds | 4,362,338,304 | 4,362,338,304 | holds | 0 / 0 |
+| l8b-8u-p8192-cpu | prompt_or_mixed | 1,042,972,672 | 10,672,128 | 1,053,644,800 | holds | 68,727,863,552 | 68,727,863,552 | holds | 0 / 0 |
+| q3-4b-8u-p8192-fpga | decode_like | 0 | 0 | 0 | holds | 1,465,344 | 1,465,344 | holds | 4,886,701,056 / 4,886,701,056 |
+| q3-4b-8u-p8192-fpga | prompt_or_mixed | 7,077,888 | 9,732,096 | 16,809,984 | holds | 1,670,381,568 | 1,670,381,568 | holds | 75,648,466,944 / 75,648,466,944 |
+
+The identity holds in all 12 class rows. So the two arms of every cell scored the same positions, and the kernel dispatch is the only controlled difference between the arms (the kill switch flips only available(); same layout, same AVX dotter). A cross-arm time or TPS difference is therefore the kernel effect plus single-repetition variation. The rows where the kernel ran in neither arm (gpt-oss, and qwen under FPGA attention except the prompt-8192 prefill row) bound that variation at up to 1.6 % of T1 and TTFT, under 1 % of TPS, up to 5 % of busy per job in decode (gpt-oss, 0.0322 vs 0.0307 ms) and up to 8 % of busy per job in prefill (qwen prompt 1024, 1.493 vs 1.371 ms). Only differences above that are attributed to the kernel.
+
+## 5. Token jobs by path set
+
+How many token jobs of a class touched which paths within a forward (a job may use several paths across its pages and layers).
+
+| cell | class | arm | token jobs | forwards | FPGA queries | none | avx | amx | avx+amx | fpga | fpga+avx | fpga+amx | fpga+avx+amx |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| gptoss-8u-p1024-fpga | decode_like | amxon | 2,048 | 256 | 2,048 | 0 | 0 | 0 | 0 | 0 | 2,048 | 0 | 0 |
+| gptoss-8u-p1024-fpga | decode_like | amxoff | 2,048 | 256 | 2,048 | 0 | 0 | 0 | 0 | 0 | 2,048 | 0 | 0 |
+| gptoss-8u-p1024-fpga | prompt_or_mixed | amxon | 8,185 | 8 | 7,168 | 0 | 1,017 | 0 | 0 | 0 | 7,168 | 0 | 0 |
+| gptoss-8u-p1024-fpga | prompt_or_mixed | amxoff | 8,185 | 8 | 7,168 | 0 | 1,017 | 0 | 0 | 0 | 7,168 | 0 | 0 |
+| l8b-8u-p1024-cpu | decode_like | amxon | 2,048 | 256 | 0 | 0 | 0 | 0 | 2,048 | 0 | 0 | 0 | 0 |
+| l8b-8u-p1024-cpu | decode_like | amxoff | 2,048 | 256 | 0 | 0 | 2,048 | 0 | 0 | 0 | 0 | 0 | 0 |
+| l8b-8u-p1024-cpu | prompt_or_mixed | amxon | 8,185 | 8 | 0 | 0 | 1,017 | 0 | 7,168 | 0 | 0 | 0 | 0 |
+| l8b-8u-p1024-cpu | prompt_or_mixed | amxoff | 8,185 | 8 | 0 | 0 | 8,185 | 0 | 0 | 0 | 0 | 0 | 0 |
+| q3-4b-8u-p1024-cpu | decode_like | amxon | 2,040 | 255 | 0 | 0 | 0 | 24 | 2,016 | 0 | 0 | 0 | 0 |
+| q3-4b-8u-p1024-cpu | decode_like | amxoff | 2,040 | 255 | 0 | 0 | 2,040 | 0 | 0 | 0 | 0 | 0 | 0 |
+| q3-4b-8u-p1024-cpu | prompt_or_mixed | amxon | 8,192 | 8 | 0 | 0 | 1,024 | 0 | 7,168 | 0 | 0 | 0 | 0 |
+| q3-4b-8u-p1024-cpu | prompt_or_mixed | amxoff | 8,192 | 8 | 0 | 0 | 8,192 | 0 | 0 | 0 | 0 | 0 | 0 |
+| q3-4b-8u-p1024-fpga | decode_like | amxon | 2,040 | 255 | 2,040 | 0 | 0 | 0 | 0 | 0 | 2,040 | 0 | 0 |
+| q3-4b-8u-p1024-fpga | decode_like | amxoff | 2,040 | 255 | 2,040 | 0 | 0 | 0 | 0 | 0 | 2,040 | 0 | 0 |
+| q3-4b-8u-p1024-fpga | prompt_or_mixed | amxon | 8,192 | 8 | 7,168 | 0 | 1,024 | 0 | 0 | 0 | 7,168 | 0 | 0 |
+| q3-4b-8u-p1024-fpga | prompt_or_mixed | amxoff | 8,192 | 8 | 7,168 | 0 | 1,024 | 0 | 0 | 0 | 7,168 | 0 | 0 |
+| l8b-8u-p8192-cpu | decode_like | amxon | 2,048 | 256 | 0 | 0 | 0 | 0 | 2,048 | 0 | 0 | 0 | 0 |
+| l8b-8u-p8192-cpu | decode_like | amxoff | 2,048 | 256 | 0 | 0 | 2,048 | 0 | 0 | 0 | 0 | 0 | 0 |
+| l8b-8u-p8192-cpu | prompt_or_mixed | amxon | 65,529 | 64 | 0 | 0 | 1,017 | 0 | 64,512 | 0 | 0 | 0 | 0 |
+| l8b-8u-p8192-cpu | prompt_or_mixed | amxoff | 65,529 | 64 | 0 | 0 | 65,529 | 0 | 0 | 0 | 0 | 0 | 0 |
+| q3-4b-8u-p8192-fpga | decode_like | amxon | 2,040 | 255 | 2,040 | 0 | 0 | 0 | 0 | 0 | 2,040 | 0 | 0 |
+| q3-4b-8u-p8192-fpga | decode_like | amxoff | 2,040 | 255 | 2,040 | 0 | 0 | 0 | 0 | 0 | 2,040 | 0 | 0 |
+| q3-4b-8u-p8192-fpga | prompt_or_mixed | amxon | 65,536 | 64 | 64,512 | 0 | 1,024 | 0 | 0 | 0 | 61,440 | 0 | 3,072 |
+| q3-4b-8u-p8192-fpga | prompt_or_mixed | amxoff | 65,536 | 64 | 64,512 | 0 | 1,024 | 0 | 0 | 0 | 64,512 | 0 | 0 |
+
+## 6. Per-layer pattern
+
+From the 'k_tokens per layer' line of the exit report (ready + pending, summed over workers). Layers with FPGA > 0 are the layers the card served. Layers with AMX > 0 are the layers where the kernel ran. AMX and AVX are K tokens per KV head. The FPGA value is per query (all KV heads at once); multiply it by n_kv_heads (8 for all three models) to compare it with the other two.
+
+- gptoss-8u-p1024-fpga amxon decode_like: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 18 (layers 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/40,960/2,355,200 in layers 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35; 0/2,097,152/0 in layers 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34
+- gptoss-8u-p1024-fpga amxon prompt_or_mixed: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 18 (layers 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/4,227,016/3,670,016 in layers 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35; 0/7,868,360/0 in layers 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34
+- gptoss-8u-p1024-fpga amxoff decode_like: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 18 (layers 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/40,960/2,355,200 in layers 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35; 0/2,097,152/0 in layers 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34
+- gptoss-8u-p1024-fpga amxoff prompt_or_mixed: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 18 (layers 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/4,227,016/3,670,016 in layers 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35; 0/7,868,360/0 in layers 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34
+- l8b-8u-p1024-cpu amxon decode_like: 32 layers; AMX K tokens > 0 in 32 (layers 0-31); FPGA > 0 in 0 (layers none); AVX > 0 in 32
+  - distinct per-layer (amx/avx/fpga) triples: 18,221,056/661,504/0 in layers 0-31
+- l8b-8u-p1024-cpu amxon prompt_or_mixed: 32 layers; AMX K tokens > 0 in 32 (layers 0-31); FPGA > 0 in 0 (layers none); AVX > 0 in 32
+  - distinct per-layer (amx/avx/fpga) triples: 28,901,376/4,685,768/0 in layers 0-31
+- l8b-8u-p1024-cpu amxoff decode_like: 32 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 0 (layers none); AVX > 0 in 32
+  - distinct per-layer (amx/avx/fpga) triples: 0/18,882,560/0 in layers 0-31
+- l8b-8u-p1024-cpu amxoff prompt_or_mixed: 32 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 0 (layers none); AVX > 0 in 32
+  - distinct per-layer (amx/avx/fpga) triples: 0/33,587,144/0 in layers 0-31
+- q3-4b-8u-p1024-cpu amxon decode_like: 36 layers; AMX K tokens > 0 in 36 (layers 0-35); FPGA > 0 in 0 (layers none); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 18,284,544/516,096/0 in layers 0-35
+- q3-4b-8u-p1024-cpu amxon prompt_or_mixed: 36 layers; AMX K tokens > 0 in 36 (layers 0-35); FPGA > 0 in 0 (layers none); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 29,360,128/4,227,072/0 in layers 0-35
+- q3-4b-8u-p1024-cpu amxoff decode_like: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 0 (layers none); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/18,800,640/0 in layers 0-35
+- q3-4b-8u-p1024-cpu amxoff prompt_or_mixed: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 0 (layers none); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/33,587,200/0 in layers 0-35
+- q3-4b-8u-p1024-fpga amxon decode_like: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 36 (layers 0-35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/40,704/2,344,992 in layers 0-35
+- q3-4b-8u-p1024-fpga amxon prompt_or_mixed: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 36 (layers 0-35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/4,227,072/3,670,016 in layers 0-35
+- q3-4b-8u-p1024-fpga amxoff decode_like: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 36 (layers 0-35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/40,704/2,344,992 in layers 0-35
+- q3-4b-8u-p1024-fpga amxoff prompt_or_mixed: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 36 (layers 0-35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/4,227,072/3,670,016 in layers 0-35
+- l8b-8u-p8192-cpu amxon decode_like: 32 layers; AMX K tokens > 0 in 32 (layers 0-31); FPGA > 0 in 0 (layers none); AVX > 0 in 32
+  - distinct per-layer (amx/avx/fpga) triples: 134,758,400/1,564,672/0 in layers 0-31
+- l8b-8u-p8192-cpu amxon prompt_or_mixed: 32 layers; AMX K tokens > 0 in 32 (layers 0-31); FPGA > 0 in 0 (layers none); AVX > 0 in 32
+  - distinct per-layer (amx/avx/fpga) triples: 2,085,945,344/61,800,392/0 in layers 0-31
+- l8b-8u-p8192-cpu amxoff decode_like: 32 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 0 (layers none); AVX > 0 in 32
+  - distinct per-layer (amx/avx/fpga) triples: 0/136,323,072/0 in layers 0-31
+- l8b-8u-p8192-cpu amxoff prompt_or_mixed: 32 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 0 (layers none); AVX > 0 in 32
+  - distinct per-layer (amx/avx/fpga) triples: 0/2,147,745,736/0 in layers 0-31
+- q3-4b-8u-p8192-fpga amxon decode_like: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 36 (layers 0-35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/40,704/16,967,712 in layers 0-35
+- q3-4b-8u-p8192-fpga amxon prompt_or_mixed: 36 layers; AMX K tokens > 0 in 36 (layers 0-35); FPGA > 0 in 36 (layers 0-35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 12,582,912/33,816,576/262,668,288 in layers 0-35
+- q3-4b-8u-p8192-fpga amxoff decode_like: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 36 (layers 0-35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/40,704/16,967,712 in layers 0-35
+- q3-4b-8u-p8192-fpga amxoff prompt_or_mixed: 36 layers; AMX K tokens > 0 in 0 (layers none); FPGA > 0 in 36 (layers 0-35); AVX > 0 in 36
+  - distinct per-layer (amx/avx/fpga) triples: 0/46,399,488/262,668,288 in layers 0-35
+
+## 7. Time
+
+Cycles are converted with tsc_hz of the run.
+
+- T1 ms per forward = forward wall time per forward.
+- busy s = T2 summed over all workers and jobs of the class. busy ms per job = T2 per attention job (both software passes and the join, without the upstream K/V wait).
+- join wait share = T5 / T2.
+- T4 ms per forward = the layer-to-layer periods on attention worker 0, summed per forward (n_layers - 1 periods).
+
+| cell | class | arm | forwards | T1 ms per forward | busy s (all workers) | busy ms per job | join wait share | T4 ms per forward |
+|---|---|---|---|---|---|---|---|---|
+| gptoss-8u-p1024-fpga | decode_like | amxon | 256 | 10.26 | 11.88 | 0.032 | 16.8 % | 9.40 |
+| gptoss-8u-p1024-fpga | decode_like | amxoff | 256 | 10.24 | 11.31 | 0.031 | 18.4 % | 9.38 |
+| gptoss-8u-p1024-fpga | prompt_or_mixed | amxon | 8 | 335.06 | 16.66 | 1.446 | 14.5 % | 278.64 |
+| gptoss-8u-p1024-fpga | prompt_or_mixed | amxoff | 8 | 334.60 | 16.55 | 1.436 | 14.2 % | 278.17 |
+| l8b-8u-p1024-cpu | decode_like | amxon | 256 | 8.66 | 34.34 | 0.091 | 3.3 % | 7.65 |
+| l8b-8u-p1024-cpu | decode_like | amxoff | 256 | 8.92 | 40.48 | 0.103 | 4.2 % | 7.89 |
+| l8b-8u-p1024-cpu | prompt_or_mixed | amxon | 8 | 425.79 | 19.70 | 0.639 | 10.5 % | 398.05 |
+| l8b-8u-p1024-cpu | prompt_or_mixed | amxoff | 8 | 445.19 | 37.27 | 1.116 | 8.8 % | 420.07 |
+| q3-4b-8u-p1024-cpu | decode_like | amxon | 255 | 12.48 | 35.36 | 0.193 | 2.0 % | 11.64 |
+| q3-4b-8u-p1024-cpu | decode_like | amxoff | 255 | 13.93 | 41.96 | 0.229 | 2.3 % | 13.05 |
+| q3-4b-8u-p1024-cpu | prompt_or_mixed | amxon | 8 | 397.92 | 19.38 | 3.364 | 9.9 % | 381.22 |
+| q3-4b-8u-p1024-cpu | prompt_or_mixed | amxoff | 8 | 497.65 | 36.42 | 6.322 | 1.8 % | 478.20 |
+| q3-4b-8u-p1024-fpga | decode_like | amxon | 255 | 7.75 | 7.81 | 0.043 | 57.5 % | 7.02 |
+| q3-4b-8u-p1024-fpga | decode_like | amxoff | 255 | 7.68 | 7.82 | 0.043 | 58.5 % | 6.95 |
+| q3-4b-8u-p1024-fpga | prompt_or_mixed | amxon | 8 | 381.90 | 8.60 | 1.493 | 1.8 % | 332.47 |
+| q3-4b-8u-p1024-fpga | prompt_or_mixed | amxoff | 8 | 375.64 | 7.90 | 1.371 | 0.9 % | 326.83 |
+| l8b-8u-p8192-cpu | decode_like | amxon | 256 | 39.64 | 244.59 | 0.574 | 1.8 % | 37.42 |
+| l8b-8u-p8192-cpu | decode_like | amxoff | 256 | 46.05 | 289.35 | 0.679 | 0.9 % | 43.61 |
+| l8b-8u-p8192-cpu | prompt_or_mixed | amxon | 64 | 538.63 | 695.33 | 1.919 | 4.5 % | 514.79 |
+| l8b-8u-p8192-cpu | prompt_or_mixed | amxoff | 64 | 1,228.36 | 1,923.42 | 4.769 | 2.0 % | 1,184.29 |
+| q3-4b-8u-p8192-fpga | decode_like | amxon | 255 | 15.96 | 44.45 | 0.242 | 88.4 % | 14.84 |
+| q3-4b-8u-p8192-fpga | decode_like | amxoff | 255 | 15.87 | 44.63 | 0.243 | 88.5 % | 14.75 |
+| q3-4b-8u-p8192-fpga | prompt_or_mixed | amxon | 64 | 409.36 | 110.16 | 2.391 | 23.4 % | 364.96 |
+| q3-4b-8u-p8192-fpga | prompt_or_mixed | amxoff | 64 | 410.48 | 114.13 | 2.477 | 22.6 % | 366.32 |
+
+Reading the time table:
+
+- Under FPGA attention in decode the join wait dominates busy for qwen (58 % at prompt 1024, 88 % at prompt 8192) but not for gpt-oss (17 % amxon, 18 % amxoff). The sliding-window layers are not the reason for the gpt-oss figure: in the per-layer snapshot they have the higher join share (18.2 % vs 13.7 % in the card layers), and gpt-oss's card layers wait only 3.8 microseconds (us) per job against qwen's 24.4 us at the same prompt length [leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_*, leaves/q3-4b-8u-p1024-fpga__fpga__amxon__rep1/]. Why gpt-oss's card layers wait less (tp4, 4 cards, head size 64) is not measured here. In prefill under FPGA attention the join wait is 1 to 23 % of busy.
+- Under CPU attention the join wait is 0.9 to 4.2 % of busy in decode.
+- The kill switch raises decode attention busy time per job by 13 to 19 % on the fitting models under CPU attention (llama +13 % at prompt 1024 and +18 % at prompt 8192, qwen +19 %) and prefill busy time per job by 1.7x to 2.5x. Summed over all workers the rise is 18 to 19 % in decode and 1.9x to 2.8x in prefill. The llama kill-switch runs recorded 4 to 11 % more attention jobs for the same forwards (393,152 vs 377,664 in decode at prompt 1024; 33,408 vs 30,848 and 403,328 vs 362,368 in prefill). The extra jobs come from the per-forward attention-worker split, not from more attention work: attn_jobs counts one job per attention worker per operation [h/tron/models/attn_stats.hpp:503-511], and the kill-switch runs ran more attention workers per forward. In decode at prompt 1024 the amxoff run used 24 workers in 255 of 256 forwards and the amxon run in 13 (377,664 = 64 x (13 x 24 + 243 x 23); 393,152 = 64 x (255 x 24 + 23)). In prefill the 14 always-attention workers record identical job counts in both arms and the whole difference sits on the optional workers 8 to 12 [leaves/l8b-8u-p1024-cpu__cpu__amx*__rep1/prompt_or_mixed_worker_*]. At prompt 8192 decode both arms used 26 workers in every forward and the counts are equal. The split follows recommend_n_main_helpers(), which balances predicted main and attention thread time [h/tron/models/model.hpp:2068-2103]; the estimator inputs behind each decision are not recorded.
+- Under FPGA attention the two arms' decode busy times agree within 1 % for qwen (0.043 vs 0.043 ms, +0.1 %; 0.242 vs 0.243 ms, +0.4 %) and within 5 % for gpt-oss (0.0322 vs 0.0307 ms per job, amxoff 4.8 % lower; 11.88 vs 11.31 s summed).
+- T4 (worker 0's layer-to-layer periods) is 88 to 95 % of T1 in the 12 decode rows, 93 to 96 % in the CPU-attention prefill rows and 83 to 89 % in the FPGA-attention prefill rows (lowest gpt-oss prefill, 278.6 of 335.1 ms). In the CPU-attention cells the kill switch moves T4 by nearly the same amount as T1: within 0.2 ms in decode (llama prompt 8192: T1 +6.4 ms, T4 +6.2 ms), and within 3 % of the move in prefill except llama prompt 1024 (T4 +22.0 ms against T1 +19.4 ms).
+
+## 8. Caveats and open items
+
+- One repetition per cell. TPS and TTFT differences below about 2 % (the AoF cells) are not findings. The position-determined totals reproduce exactly between arms: AMX+AVX visits (per class), AMX+AVX K tokens (per class and per layer), FPGA K tokens, token jobs and forwards agree in all 12 class rows, as the identity table shows; the split across paths (AMX vs AVX, path sets) differs by construction. Two counters outside the identity differ: ready_empty_visits in the gpt-oss prefill row (16,218 vs 16,362), and attn_jobs in three llama rows (4 to 11 % more jobs in amxoff, see section 7), which is the denominator of busy ms per job.
+- At prompt 1024, llama and gpt-oss ran 256 decode forwards with 2,048 decode token jobs and 8,185 prompt token jobs; qwen ran 255 with 2,040 and 8,192. At prompt 8192 the prompt classes hold 65,529 (llama) and 65,536 (qwen) token jobs over 64 forwards, with the same decode counts. The difference comes from the BOS token that the llama and gpt-oss tokenizers add (prompts of 1,025 tokens, 'with 1026 context' in the runtron lines; qwen: 1,024 tokens, 1025 context), not from the arms. The extra token makes a one-token ninth prompt forward whose jobs all have listeners, so it counts as decode_like (256 instead of 255 forwards, 2,048 instead of 2,040 jobs). The 7 missing prompt jobs (8,185 instead of 8,192) are the BOS token of users 2 to 8, served from the prefix cache ('Processed 10233 new and 7 reused tokens'; qwen '0 reused'). Both arms of a cell have identical forward and token-job counts.
+- llama's ready-pass AVX component is unexplained. Decode at prompt 1024: 524,288 ready AVX visits = exactly 1 per (token job, KV head, layer), 8.9 keys each; at prompt 8192: 983,040 visits, 34 keys each; prefill ready-pass AVX 16,285,696 and 898,007,040 K tokens. qwen's CPU cell has none. The counters already give the per-visit key counts. In decode at prompt 1024, 7 of every 8 ready AVX visits score exactly 1 key (458,752 visits, 458,752 K tokens) and 1 of 8 scores a full page (65,536 visits x 64 keys). Reading (consistent with every counter, not confirmed per user): users 2 to 8 score the shared BOS page, which holds 1 visible key for them, and user 1 scores its own first page, which holds the BOS, is full, but fails the dense-page test because the BOS is its own token range (self_attention.hpp:1718). The branch pages of users 2 to 8 start at position 1, off the 64-token grid, but are dense and go to the kernel: that layout predicts the ready AMX visits exactly (9,102,336 = 256 x (4,224 + 7 x 4,476)). At prompt 8192 one more non-full visit per (step, KV head, layer) appears for each of users 2 to 8 (983,040 visits, 14 non-full at 32 keys mean = 1 + 63), and the ready AMX count 67,371,008 = 2,048 x 32,896 equals eight on-grid users, so the branch pages return to the grid somewhere in the prompt. Where and why is open; a per-user breakdown would confirm the attribution.
+- The FUSE leaf snapshots in leaves/<run>/ are in-flight samples (the first file copied shows decode forward 64 to 254; later files up to 25 forwards after it). In four runs the copy overlapped the run's exit, so every file after one point in the copy order is empty: gpt-oss amxoff (146 of 187 files, all prompt layer and worker leaves, 52 of 55 decode worker leaves), llama prompt 8192 amxon (89 of 123, all worker leaves and all prompt layer leaves), qwen prompt 8192 FPGA amxoff (103 of 131, all worker leaves, all prompt layer leaves, decode layers 27 to 35) and qwen prompt 8192 FPGA amxon (28 of 131: the 27 prompt worker leaves and the summary). The other 8 snapshots have no empty files. Every attention counter and timer in the tables of sections 3 to 7 comes from the exit reports. TPS, TTFT, the HBM counts, the 'HW attention' line and the 'context' and 'reused tokens' figures come from the other runtron log lines. Two hand-written passages use the amxon snapshots: the per-layer split of the gpt-oss prefill empty visits in section 2.1 (901 per sliding-window layer, 0 per card layer, from a snapshot copied after the prompt forwards had finished, so its sum equals the exit-report total) and the four per-layer join-wait figures in section 7 (18.2 % and 13.7 % join share, 3.8 us and 24.4 us per job).
+- Dropped by jhan: gpt-oss under CPU attention and at prompt 8192, llama with USE_HW_ATTN=1, qwen CPU at prompt 8192.
+
+## 9. Files
+
+- results: exec/results/attnstats-20261002/ (rt-results.txt = run headers + TPS lines; rt/<run>.log = full runtron log with the [attn-stats] exit report; exit-reports.txt = the 12 exit reports; leaves/<run>/ = FUSE snapshots; build-main1002.txt; main.sha)
+- scripts: exec/attnstats-20261002/ (chain.sh, campaign.sh, gen_compare.py, assemble.py, launch.sh, README.md, final_prose.md = the hand-written prose with six table placeholders). This file is final_prose.md with gen_compare.py's output inserted at the placeholders by assemble.py. Hand-written: Short version, most of Words used here (6 of the 25 entries are the generator's wording), the text and cells table of section 1, sections 2, 8 and 9, the closing paragraph of section 4 and the reading notes of section 7. Generated: the tables, the lead-in sentence and HW-attention bullets of section 1, the intro sentences of sections 3 to 7, the four timer-definition bullets of section 7 and the per-layer bullets of section 6.
+- logs: exec/logs/attnstats-20261002-chain.log, exec/logs/attnstats-20261002.log (campaign; production serving was taken down at 13:45 UTC through platformd (POST /api/inference/down), the first run started at 13:59 UTC after a 14 min wait on another session's campaign lock, and serving was brought back at 14:12 UTC (POST /api/inference/up; both engines idle again at 14:15 UTC))
+- binary: /var/tmp/jhan/tron-main1002/gen/runtron.main1002 on delphi-3bda, main dd0f942c75
