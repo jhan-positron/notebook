@@ -9,13 +9,15 @@ Apply these rules to code you write or modify. When reviewing code, flag violati
 
 ## Named values
 
-- Define fixed values as named `constexpr` variables.
-- Keep literal values in these declarations; refer to the variables by name elsewhere.
+- Define fixed values as named `constexpr` variables, except for the explicit literal exceptions below.
+- Prefer literal `0` for zero initialization, resets, zero comparisons, and empty or disabled values when the surrounding code makes its meaning clear.
+- Numeric literals are allowed in `alignas(...)`: the syntax already explains that the value specifies alignment in bytes. Prefer `alignas(64)` over introducing a constant that merely restates the alignment. Use a named constant when it expresses a shared requirement whose uses must change together.
+- Use a named constant when the value encodes a domain-specific rule or the name explains meaning that is not apparent at the use site.
 - Name `constexpr` variables using uppercase letters and underscores between words.
 - Append the variable's value to its name, separated by an underscore.
 - For values containing punctuation or spaces, use an uppercase representation valid in a C++ identifier.
 - When editing a value in source code, rename the variable and update its uses so the suffix matches the new value.
-- Literal values include true, false, 0 and 1. List any exception instead of applying it silently.
+- Keep other literals, including `1`, `true`, and `false`, in named declarations and refer to them by name. List any further exceptions explicitly.
 
 ```cpp
 constexpr int DAYS_PER_WEEK_7 = 7;
