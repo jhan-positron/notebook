@@ -1,0 +1,130 @@
+# Memory index
+
+- [English banned words](english-banned-words.md) — never use: convoy, refund, "in disguise", swept (unless quoting code/spec)
+
+- [AMX × tron software attention project](amx-tron-softattn-project.md) — goal, consensus-v2 design, gate status, key tron facts
+- [MoE router × AMX project](amx-router-project.md) — verified router facts (mixtral CPU / gpt-oss FPGA paths), options analysis, doc in router/
+- [Router option (c) — CLOSED](amx-router-p0-results.md) — closed 2026-08-24; tracing inflates stalls 2.5x; determinism recipe inside
+- [PAL bridge usage](pal-bridge.md) — how to call gpt-6-astra / gpt-5.6-sol; no continuation across calls
+- [delphi-3bda hardware](delphi-3bda-hardware.md) — measured 6962P/AMX facts; amx_fp16 hidden from cpuinfo; check load before perf runs
+- [Keep working after answers](keep-working-after-answers.md) — answer questions AND resume queued work in the same turn
+- [Deleted comments stay deleted](deleted-comments-stay-deleted.md) — never reinstate comment text jhan deleted; reviewers get answers on demand
+- [Mirror naming convention](mirror-naming-convention.md) — "mirror" = Bill's-PR formulation, OUR implementation; add lineage note in every HTML
+- [claude-box pid exhaustion](claude-box-pid-exhaustion.md) - sleep-infinity PID 1 never reaps; pids.max 2048; host fix (NO sudo, rootless podman) = podman update --pids-limit 8192 claude-box
+- [Review body format](review-body-format.md) — verdict body in paragraphs + bullet list naming comment ids (R1-10 ...), never one prose blob; jhan feedback 2026-08-26
+- [Reviewer personas](reviewer-personas.md) — ~/workspace/reviewers/<name>.md = persona specs for mock reviews of jhan PRs; verify->find->refute recipe; ALWAYS read PR3879/triage.json before a mock-re
+- [SVG render check](svg-render-check.md) — render inline SVGs with cairosvg and inspect before delivering; gutter >=140px, no labels in arrow corridors
+- [Slack chart data lineage](slack-chart-data-lineage.md) — 2026-08-21 qwen charts: decode mirror = p2-inc3-arena, prefill mirror = inc2 mirror-amx (not arena); raw package tmp/amx-raw-data/
+- [AMX options Notion page](amx-options-notion-page.md) — 2026-09-16 sub-page 3ddd132d3cfd81ec8b97f46aec9ebbe9 under Daily notes: all AMX/VNNI build+runtime options of PR 3879/4424, fact-checked (60 f
+- [PR item register](pr-item-register.md) — jhan 2026-09-16: write PR items at the mechanism level (job -> command/flags -> what is measured, what is NOT affected, precedent, who decides)
+- [Plain-words comment register](plain-words-comment-register.md) — jhan wants dense comments explained via a "comment says | in plain words" table and rewritten in that register (R1-10, 2026-08-27)
+- [Notion memory-placement page](notion-memory-placement-page.md) — 2026-08-26 sub-page: TLB/caches/page tables/pages/hugepage pool in core/SRAM/RAM + tron hugepage lanes; generator in ...
+- [amx_attn_iface comment flags](amx-iface-comment-flags.md) — 2026-08-27 verified inaccuracies in the numerics-contract paragraph and Note [Mirror orientation] (bit-parity over-claim, arena-RAM sente
+- [claude-box tron build env](claude-box-tron-build-env.md) — nix at ~/.nix-profile/bin/nix; never cmake --build gen outside nix develop (wipes cache); run tests with env -u SYSTEM_CONFIG; ingest expo
+- [codex review loop](codex-review-loop.md) — codex appends findings to PR3879-codex/review.md; its tests live in tron-pr3879-codex/; verify→fix→test→commit→log to claude-report.md per finding
+- [amx_mirror_aware_cache unpack](amx-mirror-aware-cache-unpack.md) — 2026-08-28 verified facts for the kv_cache.hpp:1433-1461 comment (only book is a production cache; concept checks call shape only
+- [mirror_write_ok unpack](mirror-write-ok-unpack.md) — 2026-08-28 verified facts for the save_k write gate comment + Note bullet; replacement options offered (question-form recommended, code-change o
+- [runtron determinism recipe](runtron-determinism-recipe.md) — 2026-08-29 verified: pay-for-determinism + temp 0 + USE_HW_ATTN=0 + one prompt (NEVER -u with token files: -u N appends Moby Dick prompt
+- [Debug code on a new branch](debug-code-new-branch.md) — jhan 2026-08-30: debug-only changes go on jhan-dd-debug (~/workspace/ai-runs/tron-dd), never on jhan-amx-p0
+- [Token-30 campaign](token30-campaign.md) — DONE 2026-08-30: verdict = exact bf16 tie flipped by admissible numerics (no AMX bug); add-order control reproduces it without AMX (details in the file)
+- [Plain-English default register](plain-english-default.md) — jhan 2026-08-30: plain English always (no switch word); rules codified in ~/.claude/CLAUDE.md # English (define terms at first use, one c
+- [Perf round 2026-08-30](perf-round-20260830.md) — DONE: head 1d158249e = Aug-25 refs within noise, gpt-oss-120b parity + 0 GB arena verified live; PR3879 comment posted; next-round protocol traps in
+- [f9b678e unpack](f9b678e-unpack.md) — PR3879/f9b678e.html + facts/verdicts archive; nothing obsolete at head; iface:182 comment "read by the log line" is wrong (log keeps own totals)
+- [Jeremy comments replies](jeremy-comments-replies.md) — CLOSED 2026-08-31: 60d66d9c04 pushed (new PR3879 head), replies posted (r3896108314 data-close / r3896108631 fix+penalty), triage GH-* entries
+- [AMX vs AVX sense-making](amx-vs-avx-sense.md) — 2026-08-31 boost-vs-ctx numbers + denominator trap (kill-switch 2-5pp slow = retired August layout only; canonical code: kill switch = no-kernel spee
+- [NFS attr-cache build trap](nfs-attr-cache-build-trap.md) — cross-host edit + immediate build on 3bda compiles stale content while ninja rebuilds; verify content on the build host first (2026-08-31)
+- [worktree prune NFS trap](worktree-prune-nfs-trap.md) — never `git worktree prune` the shared tron repo from claude-box; 3bda /var/tmp/jhan worktrees look prunable; recovery recipe in the file
+- [workspace ai-runs layout](workspace-ai-runs-layout.md) — 2026-09-01 move of Claude-created folders to ~/workspace/ai-runs/; never create directly at ~/workspace
+- [Move AMX worktrees to ai-runs](pending-move-amx-worktrees.md) — 2026-09-01: tron-dd + tron-fence-amx MOVED to ~/workspace/ai-runs/ (exec scripts repointed; moved gen/ caches need a fresh cmake conf
+- [Single-attention measurement](single-attention-measurement.md) — DONE 2026-09-01: per-unit AVX 3.64 / canon 2.89 / mirror 2.66 us at 8K (1.37x/1.26x), common work 4-12%, QK+PV memory-limited
+- [prompt not ctx](prompt-not-ctx.md) — jhan 2026-09-01: label cells "prompt 8192", never "ctx 8192"; ctx is our script variable, not a tron term; total context = prompt + generated
+- [Attention worker lane facts](attn-worker-lane-facts.md) — 2026-09-02 verified 12-step per-layer sequence of one CPU attention worker (3 barriers, serial join fold, pending page = AVX) (details in t
+- [Notion QUESTIONs kept verbatim](notion-questions-keep-verbatim.md) — jhan 2026-09-02: never remove a QUESTION marker; open answers with "Answer to the QUESTION above (...)"; re-fetch before/after e
+- [Intel-doc AMX estimate](intel-doc-amx-estimate.md) — 2026-09-02/03 verified kernel tile counts, Table 20-2 rates, floors and brackets vs measured; VDPBF16PS = 2 cycles on EMR (uops.info)
+- [Perf-model project](perf-model-project.md) — 2026-09-03: data-wait model of the AMX boost without running Tron; plan perf-model/action-plan.html; tools exec/perf-model-20260903/; pre-registered acc
+- [Perf-model report artifact](perf-model-artifact.md) — 2026-09-03 published perf-model/index.html at claude.ai/code/artifact/a851731a-...; jhan comments there; read with Artifact action "comments",
+- [One-page primer](primer-one-page.md) — 2026-09-04 Notion sub page "Predicting the AMX Decode Boost" (3d1d132d3cfd8124bba6d3940f68913b); source perf-model/primer/ (details in the file)
+- [More-testing round 1 (CI tests vs PR3879)](more-testing-round1.md) — DONE 2026-09-05: nightly systems_test CI tests (functional/perf/MMLU Pro/soak) vs PR3879 in 3 arms x 4 models; results (llama +1
+- [Ben split request PR3879](ben-split-request-pr3879.md) — 2026-09-04 Ben DM order: counters -> AMX kernel w/o mirror -> K mirror, plus topical commits; CHANGES_REQUESTED w/ 10 comments (details in t
+- [Breakup PR3879 plan](breakup-pr3879-plan.md) — 2026-09-04/05: A+C with gate 2026-09-16 (PR0 counters, PR1 canonical #3879, PR2 mirror = reference draft after round-1 TTFT +17-24%/45 GB findings, si
+- [3bda shared with Bill](3bda-shared-with-bill.md) — marker /bill-has-instance-0,2 = Bill may use the first half (cards 10/13/38/3b, socket 0); ours = cards 90/93/b9/bc, socket 1 (--instance 1,2 or 2
+- [PR3879 split progress](pr3879-split-progress.md) — MERGED 2026-09-15 22:54Z via merge queue (main 3fd5edaa66, head 85fc8ff4de); follow-ups: #4424 retarget/rebase, AMX flag missing from the gcp-nix
+- [libstdc++ assertions guard for PR 0b UB](libstdcxx-assertions-memorder-guard.md) — 2026-09-08: only -D_GLIBCXX_ASSERTIONS catches the release-load UB (identical asm; warnings/clang-tidy/TSan/UBSan
+- [G1 store-cost campaign](g1-store-cost-campaign.md) — 2026-09-08: whole-machine G1 gate campaign queued (exec/g1-20260908/, probe fceeddc529 on jhan-dd-g1-store, TRON_DD_G1=sonly|inplace); waits CI
+- [Wade move-test question PR4265](wade-move-test-question-pr4265.md) — 2026-09-09/10: Wade asks to move t_kv_footprint_memorder into t_llama_unit ("move", never "fold"); wade-exp measured; MOVE COMMI
+- [Wade FUSE question PR4267](wade-fuse-question-pr4267.md) — 2026-09-09 Wade APPROVED PR0 #4267 (ef13273ba9) + asked for FUSE/env-var live counters; assessment page PR3879/new-PRs/PR0/respond-2-Wade-
+- [No names in GitHub issues](no-names-in-github-issues.md) — jhan 2026-09-09: never @-mention or name people in issues Claude drafts; roles + review links only
+- [qpack -> attn_accum investigation](qpack-attn-accum-investigation.md) — 2026-09-10: Ben is right; jhan chose B; commit 752e9f571a on jhan-amx-p0 LOCAL (not pushed), reply reviews/amx_qpack-reply.po
+- [range_hint audit](range-hint-audit.md) — 2026-09-10: Ben's r3973407196; AMX path returns the hint unchanged = dotter's value (dense page has no boundary inside); page PR1/reviews/range_hint.html
+- [PR3879 open-comments page](pr3879-open-comments-page.md) — 2026-09-10/11 PR3879/PR-open-comments.html; PR1 head 4290402491 (pushed 09-11 02:3x UTC: s_pages static_assert + tron::finally region guar
+- [Bill Claude review response](bill-claude-review-response.md) — 2026-09-10 page PR3879/Bill-claude-review-response.html answering the 14 findings (old head 60d66d9c04); Bill APPROVED #3879 at 524c51
+- [p0perf-20260911 campaign (Friday CI perf check)](p0perf-20260911-campaign.md) — DONE 2026-09-11: AMX-off/on qwen tp2/tp4 8u prompt-1024 on our half, head 47f6f2dceb: TPS +11.9/+6.8% (runtron), +13.
+- [AMX CI coverage facts](amx-ci-coverage-facts.md) — 2026-09-11 verified: PR1 compiles AMX in the CMake lane only; execution needs Intel runner AND tests not skipped by the platform-blind .passed cac
+- [AMD AMX fallback test](amd-amx-fallback-test.md) — DONE 2026-09-11: andoria-06 AMX build takes the AVX path (no arch_prctl(0x1023); Intel control shows it); amxprobe LD_PRELOAD shim (strace breaks
+- [Nightly vs ours TPS context](nightly-vs-ours-tps-context.md) — 2026-09-11/13: same 8 users, 4/2 engines behind Caddy (2/4 users per engine) + FPGA attention; two-level Done lines = even spread evid
+- [p0perf-20260913 campaign (nightly-layout CI cells)](p0perf-20260913-campaign.md) — DONE 2026-09-13: fpga arm reproduces nightly (+3.6/+4.6%); CPU attention + AMX = -20% TPS vs FPGA attention; AMX g
+- [Baseline vs Mirror sketch reading](baseline-vs-mirror-sketch.md) — 2026-09-13/14 jhan sketch vs code 60d66d9c04, page PR3879/baseline-vs-mirror-sketch.html; traps: 0.37 us = QK phase only, arena si
+- [Artifact UTF-8 mojibake trap](artifact-utf8-mojibake-trap.md) — 2026-09-13: published artifact showed Latin-1 mojibake for a valid UTF-8 file; always publish pure-ASCII HTML (numeric entities, <sup
+- [Notebook preservation convention](notebook-preservation-convention.md) — how pages go into github.com/jhan-positron/notebook artifacts/intel-amx/pr3879: canonical edit first, "Rendered page" ...
+- [VNNIed K in place project](vnnied-k-in-place-project.md) — PR #4424 (branch jhan-amx-vnniK, worktree VNNIed-K-in-place/tron-VNNIed-K), rebased onto main 2026-09-15/16, PR head 30c4ac82cb pushed 09-
+- [VNNI-K terminology](vnni-k-terminology.md) — jhan 2026-09-15: 'shared block save' not 'striped block store'; 'binary' not 'arm' in results tables; save = operation, store = instruction (details in
+- [PR 4424 description lives on GitHub](pr4424-description-on-github.md) — VNNI-K PR = positron-ai/tron #4424 (jhan-amx-vnniK -> MAIN since 2026-09-16 00:0x UTC; was jhan-amx-p0); jhan edits the body
+- [platformd 0.11 restarts stopped units](platformd-011-restarts-stopped-units.md) — 2026-09-22: systemctl stop rinzler@N is undone by platformd within ~1 min; takeovers go through POST /api/inference
+- [3bda nightly rinzler cleanup](3bda-nightly-rinzler-cleanup.md) — 2026-09-15: CI never stops rinzler@N (Rhys); OUR whole-machine campaign stops them after lease clear, our-half chain only waits (gap
+- [rinzler unit --num-expert-replicas 750 (Rhys manual edit)](rinzler-unit-expert-replicas-750.md) — 2026-09-17 hand edit of rinzler@.service on 3bda, NOT persistent (nightly apt reinstall reverts); b
+- [git rebase traps](git-rebase-traps.md) — rebase strips #-leading message lines; clean rebase can still fail to compile (main's new callers / sibling overloads); approved PR: MERGE main, don't rebas
+- [vnnik6 kv_mul-8 campaign (PR 4424 open item)](vnnik6-kvmul8-campaign.md) — 2026-09-16: arms base(main c7844ca2ce)/headoff(PR head, TRON_K_VNNI off)/vnni(vnnik5); scripts exec/vnnik6-20260916/; chai
+- [wedperf-20260916 campaign (CI models, pre-PR3879 vs PR4424)](wedperf-20260916-campaign.md) — DONE 2026-09-17: 12 nightly perf configs, base eb2de0265a vs target ff680c8020; report ...
+- [FPGA path under VNNI K](fpga-path-under-vnni-k.md) — 2026-09-16 verified: FPGA reads K only via gof::populate (made layout-aware); one FPGA run identical tokens (vnnik4-models, n=1) (details in the
+- [AMX/VNNI pseudocode check page](amx-vnni-pseudocode-check-page.md) — 2026-09-16 Notion sub-page 3ddd132d3cfd8121ae4aff7138318a8d under the AMX options page; jhan pseudocode 15/16 right; "VNNI code
+- [Nightly AMX check 2026-09-16](nightly-amx-check-20260916.md) — nightly deb (preset deb) never sets TRON_AMX_DISPATCH -> tron 2026.09.16-f46e48ba has 0 AMX instructions (stripped binary: use objdump
+- [Block store animation page](block-store-animation-page.md) — status/block-store-animation.html = artifact Mr7Vu2qJcA1uVdxP6kFiUh; generator + compiled ground truth in ...
+- [Shared save animation page](shared-save-animation-page.md) — status/shared-save-animation.html = artifact 9F8pqRrgZJjTbzQpFJg7eR; rev 5 (2026-09-18) adds sections 2-3 (stage, data, functions, block
+- [EXE.AMX_BUSY perf counter](amx-busy-perf-counter.md) — 2026-09-17 validated raw event cpu/event=0xb7,umask=0x02 (per-process on the engine pid + kill-switch arm) = direct proof AMX ran (details in
+- [CI-enable campaign 2026-09-17](ci-enable-20260917-campaign.md) — PR #4505 (AMX in the deb preset) opened 2026-09-21; Rhys AMD test table has swapped columns (trap); details in the file
+- [ci-mimic 2026-09-18 campaign](ci-mimic-20260918-campaign.md) — DONE: nightly perf phase by hand on whole 3bda, base (nightly deb) vs AMX+VNNI-K deb; report status/Friday-morning-CI-run-report.html
+- [Issue #4500 FPGA-attention TPS loss under VNNI K](issue-4500-fpga-attention-vnni-tps.md) — filed 2026-09-18, assigned jhan; qwen-3-4b -5/-11 % tp2/tp4 with PR 4424 + FPGA attention, tp4 flips CI th
+- [l8bload 2026-09-18 campaign](l8bload-20260918-campaign.md) — DONE: AMX gain on llama-8b vs users per engine (rinzler + CI harness, our half, same binary, kill switch vs on): +0.2/+3.9/+12.9 % at 2/
+- [Issue #4500 root-cause campaign](issue-4500-root-cause-campaign.md) — DONE 2026-09-19: cause = VNNI per-token column layout (64 lines/row paid 3x: main scatter store, workers tail read, staging gat
+- [canon-ci 2026-09-18 campaign (canonical AMX at the CI harness)](canon-ci-20260918-campaign.md) — DONE 2026-09-19: main 3faba6d0fd + deb preset AMX ON, whole 3bda vs the 09-18 ci-mimic arms; canon c
+- [CI AMX test-shapes recommendation](ci-amx-test-shapes-recommendation.md) — v2 2026-09-19 page PR1/CI-AMX-test-shapes.html: 32-user llama-8b shape stays, longer prompts DEFERRED to T0 (not rejected)
+- [l8b-levers 2026-09-19 campaign (T0 users x prompt grid, CI harness, whole 3bda)](l8b-levers-20260919-campaign.md) — DONE 2026-09-19 17:50 UTC: 7 cells x 3 pairs, gains +0.2 (2u x 1024) to +10.8 % (
+- [q4b-swattn campaign execution 2026-09-19/20](q4b-swattn-20260919-campaign.md) — two launches (Sat-night check cell, Sunday passes with NOT_BEFORE); scripts exec/q4b-swattn-20260919/, RUNBOOK.md in
+- [qwen3-4b software-attention plan 2026-09-19](q4b-swattn-20260919-plan.md) — CI-test/status/qwen3-4b-Saturday-plan.md: nightly deb vs canon deb with USE_HW_ATTN=0 via /opt/positron/user/config.env,
+- [mirror-vs-VNNI-K page data provenance](mirror-vs-vnnik-page-data-provenance.md) — 2026-09-19: write-up VNNIed-K-in-place/status/mirror-vs-VNNI-K-data-preservation.md; page = gen_compare.py + ...
+- [l8b-8u4k 2026-09-20 campaign](l8b-8u4k-20260920-campaign.md) — DONE: llama-8b 8 users/engine x prompt 4096 = +14.0 % TPS, inside band; report + combined page; overhead 33.8 not 29.0 trap
+- [Shared save distilled page](shared-save-distilled-page.md) — 2026-09-21 status/shared-save-animation-distilled.html = artifact NgSY2o6p7LkLQjpERc5o6v; gen_distilled.py asserts <= 3000 visible words
+- [Prefill AMX vs FPGA on qwen3-4b](prefill-amx-vs-fpga-qwen3-4b.md) — v9 2026-09-22: FPGA 1.8-1.9x vs CPU AMX at 8192, AMX 2.3x vs AVX; "0 new warnings != no CPU attention" trap; artifact ...
+- [q4b-fpga 2026-09-21 campaign (FPGA vs CPU attention x prompt length, platformd 0.11)](q4b-fpga-20260921-campaign.md) — harness updated for platformd 0.11 named engines (systems_test e4727d5 + our w
+- [PR 221 Rhys AMX benchmark review](pr221-rhys-amx-benchmark-review.md) — 2026-09-22 verdict ACCEPTABLE (32u x 4096 "AMX benchmark" row, informational); 3 optional nits not posted
+- [Issue #4525 design review](issue4525-design-review.md) — 4 rounds 2026-09-22, verdict accept with minor edits; traps: keep every id anchor, archive -rN first, never copy a lead note as a fact
+- [First CI AMX-benchmark row 2026-09-22](first-ci-amx-row-20260922.md) — 28.3 TPS = our no-AMX base (package had 0 AMX code); "AMX-off" = kill switch, wrong term here; page in CI-test/status/
+- [tron TSC timing infra](tron-tsc-timing-infra.md) — 2026-09-25 verified: rdtsc() inline fn + cycles_to_ns (Q3.61, 50 ms calibration); macros = perfetto TRACE_EVENT family + tron-owned TRON_CHECKPOIN
+- [attn_stats why not FUSE](attn-stats-why-not-fuse.md) — 2026-09-24 verified: attn_stats.hpp publishes THROUGH the FUSE layer (4 calls); the layer stores one value per file, no add op (set_value repl
+- [Attention path stats PR (TRON_ATTN_STATS)](attn-stats-pr-implementation.md) — PR #4596 implementation log (worktree ai-runs/tron-attn-stats); head 8c95514924
+- [Attention path counters design](attn-path-counters-design.md) — counter.html NOW at PR3879/new-PRs/new-counters/ (moved 2026-09-24); 2026-09-22 design of AVX/AMX/FPGA path counters + timers; 13.1 .
+- [Issue #4525 implementation](issue4525-implementation.md) — PR #4557 head 633cb88896 (Note [KV block lifetime] rewrite 2026-09-24); 0/1 literals open; clang-format 19 on claude-box via uvx; traps: C
+- [NFS running-script stale handle trap](nfs-running-script-stale-handle-trap.md) — 2026-09-22: never replace (sed -i, mv, save) a script that a 3bda process is running from NFS: bash dies with 'Stale
+- [Issue #4525 first 3bda test campaign](i4525-first-3bda-test-campaign.md) — DONE 2026-09-22: Step D identical tokens, Step E 12/12 inside band, Step C 88/0/1 same as main; 8 traps in the file
+- [First nightly with AMX kernels 2026-09-23](ci-amx-row-20260923.md) — AMX row 32.494 TPS (+15.0 % vs 09-22); tp4 rows rose Intel-only (cause open); artifact FY4Jk8v8Ag1FmZCvu8pkzW
+- [C++ guide: literals include true/false](cpp-guide-literals-include-bools.md) — named-value rule covers bool and 0/1 literals; pass the guide verbatim, no invented exemptions, list every class left
+- [PR 4587 construct_kv_blocks redesign](pr4587-alloc-creates-blocks.md) — 2026-09-24: #4587 (tagged DMA operator new[] creates kv_blocks, launder, k as bf16[]) FOLDED into #4557 (head c73e7fb2f9); ru
+- [Issue #4588 non-ISO kv_block reads](issue-4588-non-iso-kv-reads.md) — filed 2026-09-24 for the PR 4587 Note comment: scaled_v_expr / fill_storage_slot / 8-lane V accessors; verified TBAA + detectio
+- [CI Test host OOM (#4593)](ci-test-host-oom-4593.md) — GCP Nix "Test host"+"Test" red with t_generate_host_2-fast after "runner shutdown signal" on andoria-02/14 = issue #4593 NUMA-node-0 OOM, not t
+- [AoF AMX question 2026-09-25](aof-amx-question-20260925.md) — counter.html 2.2-2.4: steady state MEASURED 0 AMX; states 1/2 exact, state 5 ~3 %, state 8 zero refuted
+- [Re-fetch the PR body before gh pr edit](pr-body-refetch-before-edit.md) — 2026-09-25 overwrote jhan's GitHub edit of the PR 4596 body; patch onto the live body; recovery via GraphQL userContentEdit
+- [Store-remedies report 9/28 catch-up](store-remedies-catchup-0928.md) — 2026-09-28 section 0 = one-page VNNI-K status; verified GitHub facts + traps in the file
+- [Wade PR 4596 review response](wade-pr4596-review-response.md) — 2026-09-28 W1-W5 analysis page respond-Wade-comments.html; all five hold, fixed in round 4
+- [Issue #4500 fix implemented + measured](issue-4500-fix-implementation.md) — 2026-09-29 chain DONE at 617cb8333f (recovers ~1/3 of the qwen loss, llama gain kept); report issue4500/fix-4500.html; br
+- [Workflow journal reconstruction trap](workflow-journal-reconstruction-trap.md) — ids follow the script parallel() order, not journal order; big re-emitting agents loop on the 64k output limit; stal
+- [Attention stats why/what page](attention-stats-claude-page.md) — 2026-09-29 new-counters/attention-stats-claude.html + check script (72 closed-form checks); samples A/B/C/D lineage; T2 excludes K/V
+- [PR 4596 Claude review 2026-09-29](pr4596-claude-review-20260929.md) — approve with nits (0 must-fix, 7 should-fix); claude-review.html + exec/review-20260929/; open: R1-M13 stale PR-body perf claim
+- [Issue #4500 round 2: no-convert policy under FPGA attention](i4500b-policy-campaign.md) — DONE 2026-09-30 commit 452b2052c9, n=4: qwen TPS not worse, tp4 TTFT -6.4 %, llama +8.4 % TPS; issue4500/po
+- [Wade PR 4596 round 5 (W6-W9)](wade-pr4596-round5-response.md) — DONE 2026-09-30: 441e81178b pushed, Wade APPROVED, main merged (8c95514924 = PR head); open: W6-W9 replies
+- [PR 4557 Ben review response](pr4557-ben-review-response.md) — 2026-09-30 threads B1-B6 analysed (page issue4525/status/PR4557-respond-2-Ben.html); Ben's PRs 4697 (FF first!) + 4698; nothing pushed;
+- [PR 4596 body refresh 2026-09-30](pr4596-body-refresh-20260930.md) — new-counters/pr-body-20260930.md + .patch; objdump at 8670da7f0b
+- [PR description: no history](pr-description-no-history.md) — jhan 2026-09-30: describe the head in present tense; measurements keep commit id + date only; no round/change narration
+- [PR 4737 review response](pr4737-review-response.md) — DONE 2026-10-01: Codex review of the i4500 PR answered; head bb32a80774 pushed (k_storage_ref param, comment passages, named literals), 8/8 tes
+- [attnstats-20261002 campaign (AMX on/off attention stats, 3 models)](attnstats-20261002-campaign.md) — queued for 2026-10-02 after the nightly (NOT_BEFORE 13:00Z): main + TRON_AMX_DISPATCH, arms amx
+- [PR 4737 kv_cache.hpp diagram page](pr4737-kvcache-diagram-page.md) — 2026-10-01 issue4500/diagramming-code-changes.html + generator exec/pr4737-diagrams-20261001/ (units C0-C8/T1, base diagrams B1-
+- [Sync PR 4557 into PR 4424](sync-4557-into-4424.md) — 2026-10-02 port of VNNI K onto typed KV tensors: branch jhan-amx-vnniK-typed (ai-runs/tron-vnnik-typed), chain exec/sync4424-20261002/
