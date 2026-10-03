@@ -1,0 +1,132 @@
+{
+ "date": "2026-09-30",
+ "head": "04da001cb5",
+ "base": "66c7bb8db1",
+ "branch": "jhan-attn-path-stats",
+ "scope_text": "This page reviews pull request 4596 of positron-ai/tron at its head commit 04da001cb5 (pushed 2026-09-29 23:57 UTC). The diff base is 66c7bb8db1, the main commit the branch started from. The diff touches 11 files and adds 2,501 lines: the new header h/tron/models/attn_stats.hpp (953 lines), hooks in h/tron/models/self_attention.hpp and h/tron/models/model.hpp, README.stats.md, and six test files including the new t/t_attn_stats.cpp (932 lines). The main branch has moved 161 commits past the base and touches model.hpp and self_attention.hpp. The main-drift lens below checked whether the PR still applies (a lens is one reading pass over the diff with one question in mind).\n\nThe review followed the tron-code-review skill (the review checklist this reviewer uses for tron pull requests). The steps applied were:\n- trace every execution path the change crosses (forward bookkeeping, visit tallies, timers, the FPGA path, asynchronous ownership, worker and layer indexing)\n- check each counter's semantics and owner\n- check the relevant conditions\n- review whether the tests can fail Nineteen reading lenses produced 128 raw findings. Duplicates were merged. Three independent refuters (checks that try to disprove a finding, here on reachability, on evidence at the head and on intent) checked each merged finding, and a finding was dropped when two of the three refuted it. A completeness critic (a separate pass that looks for review questions the first round missed) chose the seven second-round lenses. The author's 2026-09-30 test-data comments were checked separately (section 'Posted test data').",
+ "inspection_text": "Every finding below cites line numbers of the head commit 04da001cb5. They shift after the next push. Line numbers of the earlier heads (1430736b2a, the one Wade reviewed) are not used. Each finding states its evidence strength. 'Confirmed by code' means the reviewer quoted the lines that show it. 'Plausible' means one step of the reading was not traced. 'Hypothesis' means the condition's reachability was not shown.",
+ "wade_intro": "Wade's review of 2026-09-28 (five inline comments at head 1430736b2a) caused the round-4 commits. The table lists each comment, its fix commit, what this review found about the fix, and the findings that concern the same code. This review did not reopen the five decisions. It checked the fixes in their current form at the head.",
+ "wade": [
+  {
+   "id": "W1",
+   "comment": "T5 (join_wait_cycles) was timed only in the hardware join. The software-only poll in run_joins was never timed. So CPU-attention runs read 0.",
+   "fix": "6e23101744: run_joins times each period of failed polls with no join progress into join_wait_cycles. Two new test sections.",
+   "status": "The fix is at the head and both join modes are timed. The author's 2026-09-29 CPU-attention run reads T5 = 4.1 us per decode job (2.1 % of T2). Remaining items are about the wording of what T5 excludes and about the tests. See the related findings.",
+   "keys": [
+    "join_wait",
+    "T5",
+    "run_joins",
+    "stream_hw_joins"
+   ]
+  },
+  {
+   "id": "W2",
+   "comment": "Two layers wrote the per-forward record (full.hpp for T1 and forwards, model.hpp for the job counts). So another caller of state.forward would give forwards == 0 next to nonzero token_jobs.",
+   "fix": "b6fd226982: a forward_scope object is constructed first in model::state::forward. It owns T1, the class and the fold. The fold is the destructor step end_forward, which folds the per-token path bits into the record. full.hpp is no longer changed by the PR.",
+   "status": "The fix is at the head: one owner, constructed at model.hpp:1668. The T1 span moved inside model::state::forward. The related findings concern the PR body sentence that still names the scheduler, and the missing test through model::state::forward.",
+   "keys": [
+    "forward_scope",
+    "state::forward",
+    "run_forward",
+    "T1"
+   ]
+  },
+  {
+   "id": "W3",
+   "comment": "Per-forward classification puts every serving forward that carries a prompt chunk into prompt_or_mixed. So decode_like shows pure-decode forwards only.",
+   "fix": "ae8a6d38d9: README sentence plus listener_jobs and kv_only_jobs per class in the forwards leaf. 04da001cb5 adds the three job counts together at the end of the forward.",
+   "status": "The fix is at the head, and the 2026-09-29 run shows listener_jobs 64 / kv_only_jobs 8,128 for the 8 prefill (prompt-processing) forwards. Per-job tagging stays a follow-up. Related findings are wording items about kv_only.",
+   "keys": [
+    "listener_jobs",
+    "kv_only",
+    "prompt_or_mixed",
+    "decode_like"
+   ]
+  },
+  {
+   "id": "W4",
+   "comment": "Range guards in the hooks silently dropped counts. Prefer asserting, and fix the tests to build correctly sized states.",
+   "fix": "15f355acb2: every guard is a TRON_ASSERT. note_token_path is deleted. The per-visit bound is one assert per call in token_path_span.",
+   "status": "The fix is at the head. The abort tests use a fork helper (t/assertion_signal.hpp: it runs the failing call in a forked child process and reports the signal that ended the child, SIGABRT after a failed TRON_ASSERT). Related findings concern which asserts still have no test and the cost of the per-call assert.",
+   "keys": [
+    "TRON_ASSERT",
+    "assert",
+    "token_path_span",
+    "assertion_signal"
+   ]
+  },
+  {
+   "id": "W5",
+   "comment": "Rows were sized by the whole pool but indexed by attention worker. So a per-worker row could mix cores across forwards.",
+   "fix": "bff317e0d3: rows and path bits are keyed by pool worker. T3/T4 are kept in a per-(class, layer) struct. n_attn_workers min/max are recorded per forward and class.",
+   "status": "The fix is at the head. The 2026-09-29 run shows pool workers 0 to 6 at zero and 7 to 26 carrying attention rows. Related findings concern the header comment that still says 'per attention worker', the missing sample count for T3, and the observer-worker semantics (the observer is attention worker 0, the one attention worker that records T3 and T4).",
+   "keys": [
+    "pool worker",
+    "pool_worker",
+    "n_attn_workers",
+    "wall_cycles_w0",
+    "period_cycles_w0",
+    "observer",
+    "active_workers"
+   ]
+  }
+ ],
+ "testdata_intro": "On 2026-09-30 the author posted three comments on the PR: a run of the head on delphi-3bda, the Intel test machine (the qwen-3-4b model, tp2 = tensor parallel over 2 accelerator cards, 8 users, prompt 1024, 256 generated tokens, CPU attention with USE_HW_ATTN=0, the setting that turns the FPGA attention off, and TRON_ATTN_STATS=1), the leaf samples of that run, and the definitions that changed in the last five commits. This section checks the posted numbers against each other and against the code at the head. The arithmetic was recomputed with a script (every derived number in the comments recomputes from the raw counts). In the tables below, 'orchestrator' names the agent that coordinated this review and ran that script, and 'pass (orchestrator)' marks its checks. Four reading passes (called lenses below, each reads the code from one angle) then checked the code-side claims. Two refuters (passes that try to disprove each finding) checked each resulting finding. Verdict words in the claims table: supported_by_both = the posted data and the code at the head both support the claim. supported_by_data or supported_by_code = only the posted data, or only the code, was checked. contradicted = the evidence shows the opposite. not_verifiable = the posted comments do not hold the needed numbers. In the findings, confirmed_by_data = the reviewer quoted the run files that show it.",
+ "rejected_intro": "These findings were raised by a lens (one review pass that looks for one kind of defect) and dropped by the verifiers (the reviewers who re-check each finding against the code). The reason column below calls the verifiers refuters. They are listed so the reader can see what was considered. The reason column quotes the refuters.",
+ "method_text": "Tools: four runs of the Workflow tool (the script runner that starts and sequences Claude subagents). / Main review, first round: 2 mapping agents (test table, change map), 12 lenses (a lens is one review agent that reads the change from one fixed viewpoint), 1 merge planner (an agent that groups duplicate findings into merged findings), 3 refuters (agents that try to disprove a finding) per merged finding (87 first-round findings).\nMain review, second round: 1 completeness critic (an agent that looks for areas the first round did not cover), 7 lenses, 1 merge planner, 3 refuters per finding (19 second-round findings). That run used 344 agents in all. The final synthesis agent (the agent that writes the report from the surviving findings) of that run could not emit the full report within its output limit. The report data was therefore assembled in code from the journal (the run's saved record of each step's output). The merge plan was applied. The refuter corrections were applied by majority. Six smaller agents wrote the triage, overview, counter audit, conditions table, proposed tests and verified-correct list. Two refuters checked the two tables that make new claims. / Test-data check: 4 lenses, 17 findings, 2 refuters each, 1 synthesis (39 agents). / Build and test: the head was built and its four test binaries were run on claude-box (the reviewer's build and test container, an AMD host without AMX) by the orchestrator (the workflow script that started the agents) (details under 'Tests actually run'). / Every line number was read at the head by the agent that cites it. The orchestrator did not re-verify every citation. The 'verifier notes' fields carry the refuters' warnings about the findings.\n\nRules applied to the prose: the plain-English rules of the reviewer's configuration (define terms at first use, one claim per sentence, units on numbers, citations after the sentence, a short version first, no idioms). A separate check pass over this page ran after generation. Its corrections are already applied.",
+ "followup_rows": [
+  {
+   "id": "R1-M15",
+   "commit": "7f86648d10",
+   "test": "Deleted TEST_CASE \"attn-stats: the hooks alone reproduce the half record forward_scope prevents\" (old t/t_attn_stats.cpp:406-431, 26 lines). No case added: the durable statement (a forward_scope files the whole record under the class given at construction) stays in \"attn-stats forward_scope: one object owns the per-forward record\" (t/t_attn_stats.cpp:304-367).",
+   "entry": "none (deletion of a hook-level case); forward_scope remains covered by the existing case",
+   "run": "./gen/t_llama_unit \"[attn_stats]\": 18 test cases, 337 assertions, all passed (19 cases / 343 assertions before). Wall not timed separately. The whole t_llama_unit run took 5.1 s.",
+   "mutation": "Discriminating refactor from the spec (the written task given to the implementer agent): moved `fc.forwards.fetch_add(1)` from note_forward_wall into end_forward in h/tron/models/attn_stats.hpp. With the HEAD test file: 3 cases / 4 assertions failed, including the deleted case at old L418 \"CHECK( load_relaxed(half->forwards[CLASS_PROMPT_1].forwards) == 0 ) with expansion: 1 == 0\" and L428 \"0 == 1\". With the case deleted: 2 cases / 2 assertions still failed, both outside this gap: t_attn_stats.cpp:278 \"CHECK( load_relaxed(stats->forwards[CLASS_DECODE_0].forwards) == 2 ) with expansion: 0 == 2\" (timers case) and :841 \"CHECK_FALSE( read_report(*forwards_only).empty() ) with expansion: !true\" (report-rule case). Reverted with git checkout -- h/tron/models/attn_stats.hpp. Before the commit, `git diff h/ | wc -l` = 0.",
+   "review": "accept",
+   "not_caught": "Two other cases still call note_forward_wall alone (timers case line 278, report-rule case line 841) and assert the same 'forwards is counted in note_forward_wall' detail. They were not in the spec and were left untouched. This is recorded in the commit body."
+  },
+  {
+   "id": "R1-M2",
+   "commit": "5eb8fa0419",
+   "test": "t/t_llama_unit.cpp:2209-2219 inside case \"pending attention waits for invisible writers on the same page\": after the first forward_scope closes, CHECK token_jobs_by_path_set[PATH_BIT_AVX_1] == half (32), [PATH_BIT_NONE_0] == n_tokens - half (32), [PATH_BIT_AMX_2] == 0. t/t_amx_dispatch_dtype.cpp:199-208 inside exercise_page (case \"AMX dispatch rejects non-bf16 queries and partial pages\", all 5 sections): per round REQUIRE token_jobs_by_path_set[dense ? AMX : AVX] == calls and the other set == 0.",
+   "entry": "self_attention::apply_page_range under attn_stats::forward_scope (path bits written at self_attention.hpp:1652, folded by end_forward)",
+   "run": "t_llama_unit, that case: 8296 assertions in 1 test case passed (8288 before). t_amx_dispatch_dtype full: 1612 assertions in 1 test case passed (1600 before), wall 0.21 s.",
+   "mutation": "Deleted `path_bits[tok_ix.i] |= attn_stats::path_bit(visit.served);` (self_attention.hpp:1652). Failures: t_llama_unit.cpp:2216 \"CHECK( load_relaxed(decode_fc.token_jobs_by_path_set[PATH_BIT_AVX_1]) == half ) with expansion: 0 == 32\" and :2218 \"64 == 32\" in both GENERATE arms (the two values that the GENERATE test macro repeats the case under), 4 failed / 8296; t_amx_dispatch_dtype.cpp:205 \"REQUIRE( load_relaxed( fc.token_jobs_by_path_set[dense ? PATH_BIT_AMX_2 : PATH_BIT_AVX_1]) == calls ) with expansion: 0 == 1\" in all 5 sections (5 failed / 60). Reverted with git checkout -- h/tron/models/self_attention.hpp. Before the commit, `git diff h/ | wc -l` = 0.",
+   "review": "accept",
+   "not_caught": "Not discriminated: indexing by tok_ix.i versus batch position. The consumer batch's jobs are 0..31, equal to their batch positions. The spec's suggestion to run the producer batch once more would not close it either. The histogram fold counts one entry per job regardless of which job index carries the bit. So both indexings give the same histogram."
+  },
+  {
+   "id": "R1-M8",
+   "commit": "492345f04c (literals named in 0f784c44ff)",
+   "test": "Helper split: make_enabled_stats (t/heterogeneous_scheduler_compile.cpp:305-321, installs without begin_forward) + install_enabled_stats (calls it then begin_forward). In SECTION \"Q reuse waits for software work and hardware completion per minibatch\": enabled object installed before the forward_scope (~:757-767); T2/T3 block after each hardware-assisted job (:792-813: layer.attn_jobs == batch_ix+1, busy_cycles > 0, wall_cycles > busy_cycles, wall_max <= wall, sum_worker(last pool row).attn_jobs == 2*batch_ix+1, row 0 == 0); T4 block after each software job (:847-860: hw layer period_count == batch_ix+1, period_cycles > 0, sw layer period_count == batch_ix, sw layer attn_jobs == batch_ix+1, wall >= busy).",
+   "entry": "self_attention::run_attention_job (T2 note_attn_job under pool_worker_ix, T3 note_attn_job_wall_w0, T4 note_attn_job_entry_w0) with an enabled model_stats and an open forward_scope",
+   "run": "t_heterogeneous_scheduler, section alone: 804 assertions passed. Full binary after the commit: 2 test cases, 2737 assertions passed (2715 before), wall 0.46 s.",
+   "mutation": "Two mutations, each reverted. (A) `stats_ref.note_attn_job(worker_ix, ...)` instead of pool_worker_ix: heterogeneous_scheduler_compile.cpp:715 \"CHECK( stats->sum_worker(DECODE_CLASS_0, n_pool - 1).attn_jobs == row_jobs_so_far ) with expansion: 0 == 1\" then \"0 == 3\"; :717 \"CHECK( stats->sum_worker(DECODE_CLASS_0, 0).attn_jobs == 0 ) with expansion: 1 == 0\" then \"3 == 0\" (4 failed / 804). (B) attn_elapsed and t_end - t_entry swapped between note_attn_job and note_attn_job_wall_w0: :711 \"CHECK( layer.wall_cycles > layer.busy_cycles )\" failed, :767 \"CHECK( sw_layer.wall_cycles >= sw_layer.busy_cycles ) with expansion: 50913 (0xc6e1) >= 53535 (0xd11f)\" (4 failed / 804). After each: git checkout -- h/tron/models/self_attention.hpp, `git diff h/ | wc -l` = 0.",
+   "review": "needs_change. The required changes were applied in the follow-up commits.",
+   "not_caught": "Not discriminated: filing T3 for every worker instead of worker 0. The reason: the section's split has one attention worker. Line numbers quoted from the mutation runs were taken before the formatter ran. In the committed file the blocks start at :792 and :847."
+  },
+  {
+   "id": "R1-M9",
+   "commit": "5b6a5deb51",
+   "test": "New SECTION \"prepare_hw_attention files the FPGA K tokens of a pass (note_fpga_pass)\" in TEST_CASE \"hardware attention configuration uses KV-slot identity\" (t/heterogeneous_scheduler_compile.cpp:573-651) plus `#include \"tron/shard.hpp\"`. One hw_pass over two fake hardware::shard objects (base 0 and base 2048, kv_slot_extent 0, kv_shard_slots[slot 1].allocation_bytes set to 1 by hand) with 3 queries (last_hw_token_pos 5, 2050, 5000 = the three return paths of relative_hw_tok_ix). Checks: uses_hw false files nothing; each prepared pass adds 3081 K tokens and 3 query passes under fpga_at(decode, layer 2); layers 0 and 1 stay 0.",
+   "entry": "self_attention::prepare_hw_attention<geometry_128> -> prepare_uniform_hw_attention (note_fpga_pass call site at self_attention.hpp:629-637) with the fake PosDevice (PosDevice is tron's handle for one FPGA device. In the fake library pos_fake, fill_attn_job_template and prepare_hardware_attn_job do nothing)",
+   "run": "Section alone: 20 assertions in 1 test case passed. Full binary after the commit: 2 test cases, 2757 assertions passed (2737 before), wall about 0.5 s.",
+   "mutation": "Two mutations, each reverted. (A) `fpga_k_tokens += tok_ix_arr[qi];` (the + 1 dropped): heterogeneous_scheduler_compile.cpp:641 \"CHECK( attn_stats::load_relaxed(fpga.k_tokens) == prepared * K_TOKENS_SUM_3081 ) with expansion: 3078 (0xc06) == 3081 (0xc09)\" then \"6156 == 6162\" (2 failed / 20). (B) `stats->note_fpga_pass(0, fpga_k_tokens, B)` (layer 0 instead of layer.i): :641 \"0 == 3081\", :642 \"CHECK( attn_stats::load_relaxed(fpga.query_passes) == prepared * N_JOBS_3 ) with expansion: 0 == 3\", :646 \"6162 == 0\", :647 \"6 == 0\" (6 failed / 20). After each: git checkout -- h/tron/models/self_attention.hpp, `git diff h/ | wc -l` = 0.",
+   "review": "accept",
+   "not_caught": "The fake shards allocate no HBM (high-bandwidth memory on the FPGA card): their kv_slot_extent is 0. So the shard destructor frees nothing. The slot entry is marked present with allocation_bytes 1. The call site only asserts that value to be > 0. static_assert(hardware::shard_tokens == 1024) ties the expected numbers to that shard size."
+  },
+  {
+   "id": "R1-M1",
+   "commit": "4094b51dde (listener counter made atomic in 4c70f04604)",
+   "test": "New TEST_CASE \"model::state::forward files one whole attention path stats record per forward\" (t/heterogeneous_scheduler_compile.cpp:867-997). Fixture change: the plugin's state::run (:210-221) now calls outer_state.assemble_attention_plan<geometry_64, middle_geometry, geometry_256>(N_ATTN_WORKERS_1) before prepare_for_logits. The case calls state->forward twice (4 live tokens on one page, listeners with empty logits buffers, notification counter): decode_like (jobs {1,2}, listeners {1,2}) then prompt_or_mixed (jobs {1,2,3}, listener {3}). Checks per class: forwards, token_jobs, listener_jobs, kv_only_jobs, wall_cycles > 0 and <= caller's rdtsc span (rdtsc = the CPU instruction that reads the TSC), n_attn_workers_min == n_attn_workers_max == 1, token_jobs_by_path_set[PATH_BIT_NONE_0] == token jobs, notified count, and the other class untouched.",
+   "entry": "model::state::forward (forward_scope construction at model.hpp:1668-1672, note_attn_workers at model.hpp:2303 via assemble_attention_plan_impl) on the heterogeneous fake-device fixture; t_trace_passes_host and t_generate_mock_plugin were not used (t_trace_passes_host needs the llama-3-8b-host export, a converted model that the test loads. The mock plugin of t_generate_mock_plugin has 0 layers. With 0 layers note_attn_workers never runs)",
+   "run": "Case alone: 25 assertions in 1 test case passed. Full binary after the commit: 3 test cases, 2782 assertions passed (2757 before), wall 0.55 s.",
+   "mutation": "Three mutations of h/tron/models/model.hpp, each reverted. (A) class rule inverted (`!=` for `==` at :1669): 15 of 25 assertions failed, e.g. :964 \"CHECK( attn_stats::load_relaxed(decode.forwards) == 1 ) with expansion: 0 == 1\", :974 \"CHECK( attn_stats::load_relaxed(prompt.forwards) == 0 ) with expansion: 1 == 0\". (B) `in_tokens.size()` instead of `in_token_jobs.size()` at :1672: 7 failed, e.g. :965 \"CHECK( attn_stats::load_relaxed(decode.token_jobs) == DECODE_JOBS_2 ) with expansion: 4 == 2\", :984 \"4 == 3\". (C) `self_attn_state.stats->note_attn_workers(n_attn_workers);` deleted at :2303: 4 failed, :970 \"CHECK( attn_stats::load_relaxed(decode.n_attn_workers_min) == N_ATTN_WORKERS_1 ) with expansion: 18446744073709551615 (0xffffffffffffffff)\", :971 \"0 == 1\", same for prompt at :990/:991. After each: git checkout -- h/tron/models/model.hpp, `git diff h/ | wc -l` = 0.",
+   "review": "needs_change. The required changes were applied in the follow-up commits.",
+   "not_caught": "The page is passed in `pages`. So estimate_attention_work and finish_sw_plan run for real on the one page. The fixture's run launches no workers. So no attention job executes. The listener buffers are empty (std::monostate). So run_logits skips the wcls matmul (the matrix multiply with the output-word weight matrix, n_logit_chks 0). Only the empty-listener notifications run on the app pool."
+  }
+ ],
+ "followup_short": "After the review, five of the seven should-fix items were closed by seven test commits pushed on 2026-09-30 (PR head now 0f784c44ff). The two open items are the stale PR-body performance claims (finding R1-M13 in the Findings section) and the missing T3 sample count (finding R1-M27).",
+ "followup_intro": "The five should-fix test gaps were closed in this session, after the review above was written. One implementer agent wrote each test against the production boundary named in the finding, ran a deliberate break of the production code to confirm the new assertion fails (a mutation check), reverted the break, and committed. Five reviewer agents then checked each commit with the test questions of the tron-code-review skill (the review checklist used for tron pull requests). Two asked for changes: R1-M8 had bare literals where the C++ guide (the repository's C++ coding guide) asks for named values, and R1-M1 counted listener notifications in a plain integer that two pool workers increment at once (a data race in the test). Both were fixed in follow-up commits. The implementer pushed 4094b51dde before the review step, against its instructions. The two follow-up changes were therefore pushed as new commits (4c70f04604, 0f784c44ff) on top of it. No history was rewritten. Every commit touches test files only: git diff 04da001cb5..0f784c44ff -- h/ is empty.",
+ "followup_runs": "At 0f784c44ff the four test binaries were rebuilt and run three times each (TRON_ATTN_STATS unset, 1, yes) and t_heterogeneous_scheduler also with USE_HW_ATTN=1 (the setting that enables the fake hardware attention device), all from the worktree root on claude-box (the container this session runs in). All runs passed.\n- t_page_share_counters: 61 assertions in 4 cases.\n- t_amx_dispatch_dtype: 1,612 assertions in 1 case (was 1,600).\n- t_heterogeneous_scheduler: 2,783 assertions in 3 cases (was 2,715 in 2).\n- t_llama_unit: 220,158 assertions in 61 cases (was 62 cases: one hook-level case deleted, its assertions replaced by the new path-set checks). Wall times 0.2 to 2.8 s per run."
+}

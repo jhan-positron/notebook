@@ -1,0 +1,315 @@
+{
+ "build_lanes": "Binaries and files (t/CMakeLists.txt at HEAD 04da001cb5). FILES, LIBRARIES, DEFINES, MODEL_REFERENCES, LABELS and ENVIRONMENT are the arguments of add_catch_test, the CMake helper that registers one test binary (LABELS and ENVIRONMENT are passed under PROPERTIES). / t_llama_unit = FILES t_llama_unit.cpp t_attn_stats.cpp, LIBRARIES tron pos_fake, DEFINES _GLIBCXX_ASSERTIONS (the libstdc++ macro that turns on bounds and precondition checks, applied to BOTH translation units, that is, to both compiled .cpp files), MODEL_REFERENCES llama-3.1-8b-instruct-good-tp2 + eagle-llama-3.1-8b-instruct-tp2 (tp2 = tensor-parallel over 2 devices), LABELS fake [t/CMakeLists.txt:596-603]. / t_heterogeneous_scheduler = FILES heterogeneous_scheduler_compile.cpp, LIBRARIES tron fake_scheduler pos_fake, LABELS fake, ENVIRONMENT USE_HW_ATTN=1 (the environment variable that selects hardware attention, 1 = on) [t/CMakeLists.txt:580-583]. / t_amx_dispatch_dtype = default FILES t_amx_dispatch_dtype.cpp, LIBRARIES tron pos_fake, LABELS fake [t/CMakeLists.txt:605-607]. It is its own TU (translation unit, one separately compiled .cpp file). The reason is that it defines the amx_attn_h128g4 fakes. / t_compute_attention_unit = LIBRARIES pos_fake, LABELS fake [t/CMakeLists.txt:279]. / t/assertion_signal.hpp is a header shared by t_llama_unit, t_attn_stats and t_compute_attention_unit (a fork-and-waitpid helper that expects SIGABRT, the abort signal) [t/assertion_signal.hpp:15-27]. / Test selection: 'fake'-labelled binaries run in the host lane (the CI job that runs tests without an FPGA). The reason is that the host filter of bin/slice (the CI test-selection script) excludes only the 'fpga' label [bin/slice:1398]. / AMX compile option: TRON_AMX_DISPATCH (the CMake option that compiles the AMX kernel) defaults to OFF [CMakeLists.txt:48]. Only the legacy 'CMake and CTest' lane (CTest = the CMake test runner) passes -DTRON_AMX_DISPATCH=ON [.github/workflows/cmake-single-platform.yml:353-355]. That workflow has no automatic trigger. It runs only through workflow_call (a call from another workflow) or by hand [README.ci.md:9, README.ci.md:99]. / The default GCP Nix lane (the CI job on Google Cloud, built with the Nix package manager) configures without the flag. Its configure line has -DAVX512=ON -DENABLE_TESTS=ON and no TRON_AMX_DISPATCH [flake.nix:1200-1219]. So in default PR CI, t_amx_dispatch_dtype compiles only the SUCCEED stub (a test body that only records a pass) 'AMX dispatch dtype test skipped (dispatch not compiled)' [t/t_amx_dispatch_dtype.cpp:262-266]. In that build, apply_page_tok never returns visit_path::amx. The AMX branch is under #ifdef TRON_AMX_DISPATCH [h/tron/models/self_attention.hpp:1895-1899]. / The deb preset (the CMake preset that builds the Debian package) sets TRON_AMX_DISPATCH ON but ENABLE_TESTS OFF [CMakePresets.json:74-81]. / TRON_ATTN_STATS is unset under CTest. So every test that reads the state's own stats object (t_llama_unit check_page_range_reductions, heterogeneous 'Q reuse' section) runs with the switch off. Coverage of the hooks comes only from the tests that replace self_attn_state.stats with an enabled object (t_llama_unit:2176-2188, t_amx_dispatch_dtype:133-148, heterogeneous_scheduler_compile.cpp:297-313). / The rendered-leaf tests never mount FUSE. stats_environment initializes the tree in a mkdtemp dir, and get_value() runs the read callback directly [t/t_attn_stats.cpp:91-113].",
+ "tests": [
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats tally: one visit per path, K tokens per visit, full AVX pages",
+   "lines": "117-133",
+   "production_boundary_called": "hook only: visit_tally::record [h/tron/models/attn_stats.hpp:208-216]",
+   "fake_retains_information": "No fake. Plain struct on the stack. Inputs are literal (path, K tokens, page size 64 tokens).",
+   "semantic_break_that_fails_it": "record() indexing the wrong path slot, adding K tokens to the wrong path, counting an AMX full page or a 17-token AVX visit as avx_full_page_visits, or not counting n_visits.",
+   "breaks_not_caught": "Nothing about how apply_page_range fills the tally (visit.served, page::page_size) is exercised. A caller passing page_size=0 or a wrong served path passes here.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats rows: a tally goes to its pass, and layer and worker sums agree",
+   "lines": "135-164",
+   "production_boundary_called": "model_stats::row, worker_layer_row::add, sum_layer, sum_worker [attn_stats.hpp:392-397, 239-245, 651-665]",
+   "fake_retains_information": "No fake. Explicit (class, worker, layer, pass) keys. The class is passed directly, not through current_class.",
+   "semantic_break_that_fails_it": "A wrong row index formula (worker and layer swapped, class stride wrong), a pass mix-up in add(), or sum_worker/sum_layer reading the wrong rows.",
+   "breaks_not_caught": "Rows written through current_class (add_visits) are covered by the 'classes' case, not here.\nNothing checks the T2/T5 fields of a row.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats path sets: bits from every worker and the FPGA plan fold per forward",
+   "lines": "166-226",
+   "production_boundary_called": "begin_forward, token_path_span, note_fpga_query, end_forward, render_forwards [attn_stats.hpp:450-461, 439-443, 589-594, 553-585, 760-787]",
+   "fake_retains_information": "No fake. The test writes path bits directly into the spans, the way apply_page_range does [self_attention.hpp:1652]. The split is UNKNOWN_SPLIT (no known attention-worker range). Under that split every row is folded.",
+   "semantic_break_that_fails_it": "end_forward not OR-ing the FPGA bit with the software bits, skipping a worker, not clearing bits between forwards (second forward would not count 5 'none'), listener_jobs/kv_only_jobs added to the wrong class or with the wrong difference, or a changed JSON key order/name in the forwards leaf.",
+   "breaks_not_caught": "The exact-string CHECK (an assertion macro of Catch2, the C++ test framework) at 194-201 also asserts the exact key order and the n_attn_workers 0/0 rendering. A harmless key reorder therefore fails it. The check is over-strict, not wrong.\nThe known-split fold (last n rows only) is covered by the 'end_forward folds' case, not here.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats timers: T2 per worker, T3 on worker 0, T4 by operation change, T5 wait",
+   "lines": "228-302",
+   "production_boundary_called": "note_attn_job_entry_w0, note_attn_job, note_attn_job_wall_w0, note_join_wait, note_forward_wall, note_fpga_pass, fpga_at, render_layer, add_visits with an empty tally [attn_stats.hpp:488-546, 481-485, 789-800]",
+   "fake_retains_information": "No fake. Cycle values are literal TSC cycle counts (1000/1300/2700...). The expected values of the arithmetic therefore do not depend on rdtsc (the CPU instruction that reads the TSC).",
+   "semantic_break_that_fails_it": "T4 closing a period on the second minibatch (one scheduled slice of the forward's token jobs) of the same operation (period_count would be 2), T4 carrying a period across begin_forward, T3 or T4 filed in a worker row (the sum_worker loop at 267-270), note_join_wait(0) creating a count, wall_max not tracked, FPGA counters filed under the wrong class, fpga_k_tokens_x_kv_heads not multiplied by n_kv_heads=8.",
+   "breaks_not_caught": "The production timing points (which rdtsc is taken where in run_attention_job, self_attention.hpp:800-858) are not exercised. A swapped t_entry/t_end there passes.\nT2 minus T5 being 'compute plus fold' (README.stats.md:289-290) is not checked anywhere.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats forward_scope: one object owns the per-forward record",
+   "lines": "304-367",
+   "production_boundary_called": "forward_scope ctor/dtor [attn_stats.hpp:867-884], and through them begin_forward, note_forward_wall, end_forward; token_path_span, note_fpga_query, render_forwards",
+   "fake_retains_information": "No fake. Real rdtsc. The CHECKs on wall_cycles are relational (> 0 and <= the elapsed cycles measured on the same thread around the scope), not exact.",
+   "semantic_break_that_fails_it": "The W2 defects: forwards/token_jobs/wall filed before the scope ends (326-329), the wall filed under an earlier forward's class (347-355), a scope that writes while enabled is false (357-366), or fpga_queries no longer filed immediately.",
+   "breaks_not_caught": "Nothing checks that model::state::forward actually constructs the scope first (model.hpp:1668) or that no second caller of run_forward exists. That is a source-reading fact only.\nThe `wall_cycles > 0` CHECK at 337 relies on two rdtsc reads not being equal. On x86 with begin_forward between them this is safe. Low flaky risk if a thread migrates between unsynchronized TSCs (not expected on invariant-TSC hosts: hosts whose TSC ticks at one constant rate, independent of core frequency and power state).",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats forwards record: the three job counts move together at the end of the forward",
+   "lines": "369-404",
+   "production_boundary_called": "begin_forward, end_forward, render_forwards [attn_stats.hpp:450-461, 553-585, 760-787]",
+   "fake_retains_information": "No fake. Reads the counters mid-forward and after end_forward for both classes.",
+   "semantic_break_that_fails_it": "begin_forward adding listener_jobs/kv_only_jobs (the pre-04da001cb5 order): the mid-forward CHECKs at 383-388 and 398 fail.",
+   "breaks_not_caught": "The three adds are still three separate relaxed stores (atomic writes with no ordering against each other) [attn_stats.hpp:577-584]. A reader between them still sees a transient inequality. No test can observe that deterministically.\nPolicy note (AGENTS.md test policy, regression tests): the comment cites a live read on 2026-09-29. The fault was introduced by ae8a6d38d9 and fixed by 04da001cb5 inside this unmerged PR. The durable contract the test protects is README.stats.md:256-261. The comment should name that contract rather than the transient defect.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats: the hooks alone reproduce the half record forward_scope prevents",
+   "lines": "406-430",
+   "production_boundary_called": "begin_forward, end_forward, note_forward_wall [attn_stats.hpp:450-461, 553-585, 540-546]",
+   "fake_retains_information": "No fake. Calls the raw hooks in a deliberately incomplete sequence.",
+   "semantic_break_that_fails_it": "Only an improvement would fail it. One such improvement: note_forward_wall starts asserting that a class was stored for the current forward. Another: end_forward begins counting a forward. Under either one, CHECKs 418, 423-424, 428 fail. No production defect fails it.",
+   "breaks_not_caught": "It asserts the exact defect-like behavior of the raw hooks (a wall filed under class 0 or the previous class) instead of a contract. AGENTS.md test policy: 'Do not use tests merely to document the current implementation'. Production never calls these hooks without forward_scope [model.hpp:1668, 1705-1709]. So this case protects nothing a user sees. It would also block a later, stricter version of note_forward_wall.",
+   "verdict": "weak"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats: an out-of-range worker, layer or token job aborts",
+   "lines": "432-480",
+   "production_boundary_called": "add_visits, note_attn_job, note_attn_job_wall_w0, note_attn_workers, pool_worker, note_join_wait, note_fpga_pass, note_fpga_query, token_path_span, end_forward, each in a forked child via tron::assertion_signal [t/assertion_signal.hpp:15-27]. Asserts at attn_stats.hpp:393-395, 408-409, 418-419, 432-433, 440-441, 452, 469, 556-558, 591",
+   "fake_retains_information": "No fake. The child inherits the enabled stats object. One in-range control call (478-479) proves the harness itself exits 0.",
+   "semantic_break_that_fails_it": "Any guard reverting to a silent early return or nullptr (the pre-W4 behavior, 15f355acb2): the child exits 0 instead of dying with SIGABRT (the abort signal).",
+   "breaks_not_caught": "An assert that fires on a different, wrong condition (for example an off-by-one that lets worker == n_workers through while rejecting n_workers+1) is not distinguished. Each call uses exactly one out-of-range value.\nLow risk of a flaky result: fork() runs in a binary whose app pool threads already exist (t_llama_unit cases run first in this binary). The child logs through spdlog (the logging library) before it aborts [h/common/assert.hpp:59-62]. A log-sink mutex held by another thread at fork time would therefore hang the child and the parent's waitpid. The same pattern already existed in t_llama_unit [t/t_llama_unit.cpp:289, 565, 1458]. So this is not a new risk.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats: with the switch off, nothing is allocated and the forward hooks return",
+   "lines": "482-507",
+   "production_boundary_called": "model_stats ctor (enabled=false), begin_forward, end_forward, note_forward_wall, render_summary, render_totals, render_forwards [attn_stats.hpp:364-386, 739-787]",
+   "fake_retains_information": "No fake.",
+   "semantic_break_that_fails_it": "The Cursor bot finding fails 504/506. (Cursor is an automated code-review bot that comments on GitHub pull requests. It found render_forwards returning a zero-filled object while off, fixed in 1430736b2a.) Rows, fpga or path_bits allocated while off fail 487-496. A forward hook writing while off fails 491-499.",
+   "breaks_not_caught": "The off-state cost contract (Note [Attention path stats]: 'no memory write and no atomic' per visit) is not measurable here. Only allocation and counter values are.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats leaves: JSON with the expected keys, below the FUSE string limit",
+   "lines": "509-584",
+   "production_boundary_called": "render_totals, render_layer, render_worker, render_forwards, render_summary, timers_at, row [attn_stats.hpp:722-811]; the limit tron::fuse::fuse_sysfs::MAX_STRING_LENGTH",
+   "fake_retains_information": "No fake. Every counter is filled to 9 or 15 digits. Each leaf is then at its widest for the size check (518-548).",
+   "semantic_break_that_fails_it": "A leaf that renders the whole table (size CHECK 555), a leaf that is not one JSON object (556-557), T3/T4 keys appearing in the worker leaf or missing from layer/totals (568-572), listener/kv_only/n_attn_workers keys missing from forwards (574-577), the layer leaf not summing the 96 workers (581-583), active_workers not derived from attn_jobs (563).",
+   "breaks_not_caught": "Key-presence CHECKs are name assertions. Their consumer is README.stats.md:236-292 and the exit report. / The forwards leaf's n_attn_workers_min is filled to 15 digits at 545-548. The min field is not in the key list (only max). So the 'min rendered as UINT64_MAX' path (UINT64_MAX is the largest 64-bit unsigned value, the initial value of the min) is covered elsewhere (763). / MAX_STRING_LENGTH is compared to the widest layer leaf of a 96 workers x 128 layers shape. A larger pool (for example 192 workers) is not sized. The worker leaf sums layers, and the layer leaf sums workers. So the leaf size does not grow with the pool.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats FUSE leaves: registered once per model id, read live, empty after the state is gone",
+   "lines": "586-635",
+   "production_boundary_called": "register_fuse_files [attn_stats.hpp:915-951], tron::fuse::stats::initialize/unmount/get_file_handle/make_file and the read callback via handle->get_value() [t_attn_stats.cpp:83-89]",
+   "fake_retains_information": "No fake. The real fuse::stats singleton is initialized in a fresh temporary directory (mkdtemp) and never mounted (stats_environment, 93-113). get_value() runs the registered callback.",
+   "semantic_break_that_fails_it": "Leaves capturing a shared_ptr instead of a weak_ptr (626 and 633-634 would not read {}), a second state of the same id not replacing the callbacks (620-624), layer leaves registered beyond n_layers (611-612), a leaf that resets on read (601-607), a marker file appearing (596).",
+   "breaks_not_caught": "Behavior with a real mounted FUSE (path permissions, read() through the kernel) is not exercised. / The singleton is process-global. This case depends on no other TEST_CASE in the t_llama_unit binary leaving the tree initialized. Today each stats_environment unmounts in its destructor (107), and Catch2 (the C++ test framework) runs cases sequentially. So there is no conflict today. A future test that calls initialize() without unmount would make the model states in t_llama_unit register leaves for real.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats FUSE leaves: with the switch off only the summary, the class totals and the class forwards exist, and the last two read {}",
+   "lines": "637-664",
+   "production_boundary_called": "register_fuse_files (enabled=false branch, attn_stats.hpp:941), is_safe_model_id [attn_stats.hpp:889-899]",
+   "fake_retains_information": "No fake (same stats_environment).",
+   "semantic_break_that_fails_it": "Layer or worker leaves registered while off (649-650), forwards leaf not reading {} while off (646/648), an id with a slash or leading dot or empty passing the validator (656-658, 661-663), a legal ingested id being rejected (659-660).",
+   "breaks_not_caught": "A rejected id is skipped silently: register_fuse_files returns without a log line [attn_stats.hpp:918]. The test does not check for any diagnostic. So a production model whose cfg.id fails the whitelist would lose its leaves with no log line to show it.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats pool_worker: the last n_attn_workers pool workers run attention",
+   "lines": "666-683",
+   "production_boundary_called": "hook only: model_stats::pool_worker [attn_stats.hpp:431-435]",
+   "fake_retains_information": "No fake. Expected values are literals for a 3-worker pool.",
+   "semantic_break_that_fails_it": "A changed formula in pool_worker (for example attn_ix alone, or n_workers - attn_ix).",
+   "breaks_not_caught": "The W5 regression itself (self_attention.hpp not calling pool_worker for the row key, or model.hpp choosing a different mapping than Note [Attention workers are the last pool workers]) passes this case; only t_llama_unit:2219-2273 catches it.\nThe 'off state answers the same' claim (679-682) has no production caller: apply_page_range computes pool_worker only when stats_enabled (self_attention.hpp:1484-1486).\nThe formula is one line. It is exercised by the next case and by t_llama_unit. So this case adds no distinct protection.",
+   "verdict": "weak"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats rows keyed by pool worker: attention worker 0 lands in different rows when the split moves",
+   "lines": "685-765",
+   "production_boundary_called": "begin_forward, note_attn_workers, pool_worker, add_visits, note_attn_job, note_join_wait, end_forward, sum_worker, sum_layer, render_worker, render_forwards [attn_stats.hpp:450-474, 481-527, 553-585, 651-665, 760-811]",
+   "fake_retains_information": "No fake, but the test itself computes row = pool_worker(...) (708, 720) and passes it to the hooks. The hooks receive whatever the test hands them.",
+   "semantic_break_that_fails_it": "note_attn_workers not tracking min/max (756-757), render_forwards printing the UINT64_MAX initial value for a class with no forward (762-764), sum_layer not summing rows (747-749), a hook writing a different row than the index it was given.",
+   "breaks_not_caught": "The W5 defect (production keying rows by attention index) does not fail this case. The test computes the pool row itself. The case is the fix's contract restated with the fix's own helper. The comment at 696-697 ('Under the old keying every CHECK on rows 1 and 2 below fails') is true only if the old code is imagined at the test's call sites, not at self_attention.hpp:1484/1683/1342. Real W5 coverage is t_llama_unit:2219-2273.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats end_forward folds the attention rows of the forward only",
+   "lines": "767-806",
+   "production_boundary_called": "begin_forward, note_attn_workers, token_path_span, end_forward [attn_stats.hpp:450-474, 439-443, 553-585]",
+   "fake_retains_information": "No fake. A stray bit (a bit set in a row that no attention worker owns) is written into helper row 0 to prove the fold's lower bound (786-787).",
+   "semantic_break_that_fails_it": "end_forward folding or clearing rows below n_workers - split (790-799), not folding every row under UNKNOWN_SPLIT (802-805), or leaving attention rows uncleared (796-797).",
+   "breaks_not_caught": "Design note that lines 800-805 assert: a stray bit left in a helper row survives to a later forward and is counted there under UNKNOWN_SPLIT. In production helper rows are never written (only attention workers call apply_page_range). So the leak is unreachable. The test documents the leak rather than asserting it cannot happen.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats classes: rows and FPGA counters follow the forward class of the moment",
+   "lines": "808-840",
+   "production_boundary_called": "begin_forward, add_visits, note_attn_job, note_attn_job_wall_w0, note_join_wait, note_forward_wall, end_forward, sum_layer, render_totals [attn_stats.hpp:450-585, 651-658, 739-756]",
+   "fake_retains_information": "No fake. Class is set once by begin_forward(prompt_or_mixed) and every hook must follow it.",
+   "semantic_break_that_fails_it": "Any hook ignoring current_class (writing class 0), listener/kv_only counts filed under the wrong class (826-828), render_totals not summing layers (836-837).",
+   "breaks_not_caught": "A class change between the workers' read of current_class and their writes (the serialization assumption in Note [Attention path stats], attn_stats.hpp:64-67) cannot be exercised single-threaded.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats exit report: prints only with the switch on and something counted",
+   "lines": "842-894",
+   "production_boundary_called": "print_report [attn_stats.hpp:815-849] into a tmpfile",
+   "fake_retains_information": "No fake. Reads the whole stderr text back.",
+   "semantic_break_that_fails_it": "A report printed while off or idle (860-862), FPGA passes alone triggering a report (868-870), a forward alone not triggering it (865-867), the per-layer amx/avx/fpga line format or the class labels changing (884-893), pending_avx_k_tokens miscounted (887).",
+   "breaks_not_caught": "Exact-string CHECKs assert the report text verbatim. A wording change fails them without any counting defect. That strictness is by design: the report is the user-visible artifact.\nThe destructor path (~model_stats calls print_report(stderr), attn_stats.hpp:388-390) is not what is tested. print_report is called directly.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats leaves when off: layer and worker leaves are valid JSON objects",
+   "lines": "896-901",
+   "production_boundary_called": "render_layer, render_worker with enabled=false [attn_stats.hpp:789-811]",
+   "fake_retains_information": "No fake.",
+   "semantic_break_that_fails_it": "render_layer/render_worker emitting something other than {\"layer\":N} / {\"worker\":N} while off.",
+   "breaks_not_caught": "No consumer exists. register_fuse_files skips the layer and worker leaves while off [attn_stats.hpp:941], and the FUSE off case checks that they do not exist (649-650). print_report returns before rendering while off (816). The exact strings assert an output that is never reached. AGENTS.md test policy asks for an identifiable consumer for value assertions.",
+   "verdict": "weak"
+  },
+  {
+   "file": "t/t_attn_stats.cpp",
+   "case_or_section": "attn-stats FUSE leaves: an EAGLE draft state publishes under attention_eagle",
+   "lines": "903-932",
+   "production_boundary_called": "register_fuse_files with is_eagle true/false and a quote in the id [attn_stats.hpp:915-951, 889-899]",
+   "fake_retains_information": "No fake (stats_environment).",
+   "semantic_break_that_fails_it": "A draft and its target sharing one prefix (913-917), an off draft registering class leaves under the wrong prefix (923-926), a quote reaching a JSON string (928-931).",
+   "breaks_not_caught": "Whether the production draft state really carries is_eagle (model_ref.plugin.is_eagle at self_attention.hpp:496) is not exercised; the flag is passed by the test.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/heterogeneous_scheduler_compile.cpp",
+   "case_or_section": "hardware attention configuration uses KV-slot identity / SECTION mixed attention retains both contributions regardless of readiness order (T5 checks added)",
+   "lines": "297-313 (install_enabled_stats), 419-465",
+   "production_boundary_called": "self_attention::state::run_joins<geometry>(..., uses_hw=true, stats_enabled=true) [self_attention.hpp:1183-1346] and inside it stream_hw_joins with the T5 accumulator [self_attention.hpp:1027-1152], note_join_wait, pool_worker, sum_layer",
+   "fake_retains_information": "Fake device (a PosDevice, the FPGA device handle type, at 317-322) and hand-written partials and raw results. The stats object is a real enabled model_stats sized from attn.size() and n_layers (297-313). The forward is opened with begin_forward directly (309-310), not with forward_scope. So T1 and the fold are not part of this section.",
+   "semantic_break_that_fails_it": "stream_hw_joins not timing its wait loop (join_wait_cycles stays 0 while the worker provably waited >= 20 ms: 448-449 asserts the timeout), run_joins passing nullptr with stats on (1330-1332), note_join_wait filing under the wrong layer or a helper row (sum_layer at 458-460 sums all rows of the layer. A wrong row of the same layer therefore still passes), or T5 exceeding the join's wall (462).",
+   "breaks_not_caught": "Double counting of a poll stretch (one continuous run of failed polls) plus the hardware wait would still be <= join_wall. So the loose upper bound does not catch it. / Row keying is not checked, only the layer sum is. Here run_joins is called with worker_ix 0 of n_attn_workers 2. The row is therefore pool worker 2 - 2 + 0 = worker 0. / end_forward is never called in this section. So the begin_forward at 309 leaves the object mid-forward. That is harmless here. It does mean the T5 value is read before any fold.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/heterogeneous_scheduler_compile.cpp",
+   "case_or_section": "hardware attention configuration uses KV-slot identity / SECTION software-only join times its wait for the peer sections (T5)",
+   "lines": "471-556",
+   "production_boundary_called": "run_joins<geometry>(..., uses_hw=false, stats_enabled) [self_attention.hpp:1183-1346], the software poll timing at 1270-1283, note_join_wait at 1342, sum_layer",
+   "fake_retains_information": "A fake device is present, but hw_plan (the query batch's plan of FPGA attention passes) is empty (491). So join_hw is false. Peer partials are hand-written (503-514). Three GENERATE arms (GENERATE is a macro of the Catch2 C++ test framework that runs the section once per listed value) (late+on, sections done+on, late+off) at 515-524.",
+   "semantic_break_that_fails_it": "The W1 defect (untimed software poll, pre-6e23101744): late_producer_stats_on reads 0 at 546. Timing while stats_enabled is false: 549 fails in the off arm. Timing a stretch that had no failed poll: 549 fails in the sections_done arm. T5 above the join wall: 547 fails.",
+   "breaks_not_caught": "Only one KV head is joined (plan.kv_heads_to_join[0] = {0}). So the rule 'a stretch spans several heads, and a fold in between counts as work' [self_attention.hpp:1258-1268] is not exercised. A change that restarts the clock per head or per poll passes. / Row keying is not checked (only the layer sum is). / The stats object is installed by replacing self_attn_state.stats (312). That is safe: this binary never initializes the FUSE tree, as the helper comment says (293-296).",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/heterogeneous_scheduler_compile.cpp",
+   "case_or_section": "hardware attention configuration uses KV-slot identity / SECTION Q reuse waits for software work and hardware completion per minibatch (forward_scope added)",
+   "lines": "590-593",
+   "production_boundary_called": "attn_stats::forward_scope on the state's own stats object (follows TRON_ATTN_STATS, which is unset under CTest, the CMake test runner used by CI, the automated continuous-integration build-and-test service) [attn_stats.hpp:867-884]",
+   "fake_retains_information": "With the switch off the scope tests one bool and does nothing. With TRON_ATTN_STATS=1 it sizes the path bits. The later apply_page_range asserts in token_path_span [attn_stats.hpp:440-441] then hold.",
+   "semantic_break_that_fails_it": "None in the default CI run: no CHECK reads the stats. With TRON_ATTN_STATS=1 the section would abort on the token_path_span assert if the scope were removed. That is setup code, not an assertion of the section.",
+   "breaks_not_caught": "Everything about stats. The change only keeps the section runnable under the switch. Not a test row in substance.",
+   "verdict": "cannot_fail"
+  },
+  {
+   "file": "t/t_amx_dispatch_dtype.cpp",
+   "case_or_section": "AMX dispatch rejects non-bf16 queries and partial pages (exercise_page stats block used by all five sections: host_bf16 full page repeat; host_bf16 partial page; host (float); host_fp16)",
+   "lines": "133-148 (enabled stats installed), 153-158, 169-176 (forward_scope around apply_page_range), 181-198 (tally checks); sections 241-247, 255-260",
+   "production_boundary_called": "apply_page_range<geometry> -> apply_page_tok -> page_tok_result.served [self_attention.hpp:1474-1686, 1820-1982], visit_tally::record and add_visits at 1651-1652 and 1683, forward_scope, sum_layer. The amx_attn_h128g4 entry points are fakes in this translation unit (213-235)",
+   "fake_retains_information": "The AMX kernel is a fake that records pack/qk/pv call counts and copies the packed queries (probe, 55-58, 213-235). fake_amx_available (60, 213-215) stands for the kill switch. The stats tally must agree with the fake's call counts: an AMX visit exactly when qk/pv were called (dense page), otherwise one AVX visit with n_tokens K tokens.",
+   "semantic_break_that_fails_it": "apply_page_tok returning visit_path::avx after the AMX branch ran (or amx when it fell through), k_tokens for the AMX visit not being page_size (191-193), a non-empty visit reported as empty (192), a partial page counted as avx_full_page_visits (196-197), the visit filed under the pending pass (198), or the tally not being cumulative over the two rounds (calls = round + 1).",
+   "breaks_not_caught": "Only compiled with TRON_AMX_DISPATCH (the build flag that compiles the AMX kernels in) (237). In the default GCP Nix lane (the required CI build: Google Cloud runners, Nix build environment) the whole TEST_CASE is the SUCCEED stub (262-266). So the AMX-visit half of the path classification is verified only in the manual CMake lane [cmake-single-platform.yml:355; README.ci.md:99]. / AGENTS.md test policy requires a required CI suite to execute every committed test. The AMX arm of this case does not run in the required lane. / One token job and one page are used. So path bits per token job are not distinguished from the tally (the forwards leaf is not checked here).",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_amx_dispatch_dtype.cpp",
+   "case_or_section": "AMX dispatch rejects non-bf16 queries and partial pages / SECTION host_bf16, full page, available() false: no pack, no kernel call, one AVX visit that scored the whole page",
+   "lines": "248-254 (drives exercise_page 60-206 with amx_available=false)",
+   "production_boundary_called": "apply_page_range with the AMX gate answering false (the fake available() at 213-215 read by the production dispatch under #ifdef TRON_AMX_DISPATCH, self_attention.hpp:1895-1899), tally checks at 181-198",
+   "fake_retains_information": "fake_amx_available=false makes the fake available() answer as the kill switch (TRON_AMX_DISABLE=1) or a non-AMX CPU would. The fake keeps pack/qk/pv counts to prove nothing was packed (177-179).",
+   "semantic_break_that_fails_it": "The dispatch packing or running kernels with available() false (177-179), the visit not being filed as AVX with all 64 K tokens (191-194), avx_full_page_visits not counting this AMX-eligible page (196-197).",
+   "breaks_not_caught": "Same lane limit as the parent case: never runs in the default GCP Nix lane.\nThe relation stated in attn_stats.hpp:200-204 (kill-switch avx_full_page_visits equals AMX-on amx visits plus its own avx_full_page_visits) is checked only for one page.\nThe 'dense page written in this forward' reason for a full-page AVX visit (is_dense_amx_page false with AMX on) is not exercised.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_llama_unit.cpp",
+   "case_or_section": "pending attention waits for invisible writers on the same page (stats block, first apply_page_range)",
+   "lines": "2166-2233",
+   "production_boundary_called": "apply_page_range<geometry>(..., n_attn_workers=1, pending=true) on a real llm (the tron language-model plugin class) model state [self_attention.hpp:1474-1686], forward_scope, note_attn_workers, sum_layer, sum_worker, forwards[0].token_jobs",
+   "fake_retains_information": "No kernel fake: the real AVX dotter (the AVX dot-product loop that scores one query against a page) runs on a real page. kv_mul=1. So AMX is not eligible (comment 2169-2171). The stats object replaces the state's member with an enabled one (2176-2188). That is safe: the FUSE tree is initialized only inside t_attn_stats cases (2172-2174). GENERATE(visible_prefix) at 2062 runs the block twice.",
+   "semantic_break_that_fails_it": "The W5 defect (row keyed by attention index): the row-0 CHECK at 2227-2229 fails, and the last-row CHECK at 2223-2226 fails whenever the pool has more than one worker. A pending-pass visit filed as ready (2210/2216). k_tokens not equal to the visible half per query (2211-2212). An AMX or empty visit reported (2213-2214). A full-page count for a half-visible page (2216). end_forward not filing token_jobs (2207-2208).",
+   "breaks_not_caught": "The discriminating CHECK is machine dependent. n_pool = app_get_num_cpus() - 1 [h/tron/threading.hpp:861, src/system/system.cpp:526]. On a host where the app cpu set has 2 cores the pool has one worker. The case then only WARNs (WARN is the Catch2 macro that reports without failing) (2231-2232). So it passes without the W5 protection (a silent scope cut).\nT2/T3/T5 are not produced. The test calls apply_page_range directly, not run_attention_job.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_llama_unit.cpp",
+   "case_or_section": "pending attention waits for invisible writers on the same page (split-moves block, second apply_page_range with n_attn_workers=2)",
+   "lines": "2243-2273",
+   "production_boundary_called": "apply_page_range<geometry>(..., scratchpad 0, n_attn_workers=2, pending=true) [self_attention.hpp:1474-1686, row key at 1484-1486], forward_scope, note_attn_workers, sum_worker, sum_layer, forwards[cls].n_attn_workers_min/max",
+   "fake_retains_information": "Same real state and page. Runs after the numeric check that the first call feeds (2244-2245). Executed only when attn.size() >= 2 (2243), else WARN (2273).",
+   "semantic_break_that_fails_it": "The W5 defect: attention worker 0 of a 2-worker split filed in row 0 or in the same row as the 1-worker call (2263-2266: rows n_pool-2 and n_pool-1 must each hold `half` pending AVX visits). A second break: note_attn_workers not recording the split range through the production hook order (2268-2271).",
+   "breaks_not_caught": "Only n_attn_workers 1 and 2 are exercised. With a 2-worker pool both calls write rows 0 and 1. Those rows coincide with attention indices 0 and 1 of the second call. So a regression that keys by attention index would pass the second-call CHECKs on a 2-worker host. It would fail only through the first block.\nSame machine dependence and silent WARN scope cut as the block above.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_llama_unit.cpp",
+   "case_or_section": "apply and join page ranges / check_page_range_reductions: apply_page_tok result for an excluded query (page_tok_result)",
+   "lines": "2480-2485",
+   "production_boundary_called": "apply_page_tok<geometry> directly [self_attention.hpp:1842-1982], returning page_tok_result [1823-1832]",
+   "fake_retains_information": "No fake. Real empty page and a window that excludes the query (window_excludes_all arms).",
+   "semantic_break_that_fails_it": "A visit with no relevant K tokens reported as visit_path::avx or amx (2485), or relevant_k_tokens not 0 (2484).",
+   "breaks_not_caught": "The AVX-served and AMX-served return values of apply_page_tok are not checked at this call site; they are covered through apply_page_range by t_amx_dispatch_dtype (AMX lane only) and the pending-attention case (AVX).",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_llama_unit.cpp",
+   "case_or_section": "apply and join page ranges / check_page_range_reductions: the state's own stats object follows TRON_ATTN_STATS",
+   "lines": "2494-2499",
+   "production_boundary_called": "self_attention::state ctor building model_stats from env_enabled() [self_attention.hpp:483-500], and env_enabled() itself [attn_stats.hpp:161-172]",
+   "fake_retains_information": "No fake. The expected value is env_enabled(), the same function production reads.",
+   "semantic_break_that_fails_it": "The state constructor hard-coding enabled, allocating rows while off, or passing a wrong layer count (2499).",
+   "breaks_not_caught": "The expectation is derived from the function under test. So a wrong env_enabled() (for example one accepting any set value) passes.\nUnder CTest the variable is unset. So 2497-2498 reduce to false == false and true == true on every CI run. The switch-on branch is reached only in a manual run with TRON_ATTN_STATS=1 (comment 2494-2496). AGENTS.md test policy: do not derive expected results from the logic under test.",
+   "verdict": "weak"
+  },
+  {
+   "file": "t/t_llama_unit.cpp",
+   "case_or_section": "apply and join page ranges / check_page_range_reductions: forward_scope opened before the first apply_page_range, and the stats object rebuilt when the scratchpad vector grows (split_queries arm)",
+   "lines": "2379-2385, 2605-2621",
+   "production_boundary_called": "attn_stats::forward_scope and model_stats ctor on the state's own (env-following) object [attn_stats.hpp:867-884, 364-386]",
+   "fake_retains_information": "No CHECK. With the switch off (CTest) the scope and the rebuilt object do nothing. With TRON_ATTN_STATS=1 they keep the apply_page_range asserts (token_path_span 440-441, row 394) from firing after attn.resize to 4 workers (2602-2604).",
+   "semantic_break_that_fails_it": "None in CI. This is setup that lets the existing reductions test run under the switch. Removing it changes nothing while the switch is off.",
+   "breaks_not_caught": "Everything about stats.\nNote the rebuild copies facts/model_id/is_eagle from the old object and discards its counters. So nothing checks that the counters of the pre-grow forward were consistent. That is acceptable for setup code.",
+   "verdict": "cannot_fail"
+  },
+  {
+   "file": "t/t_llama_unit.cpp",
+   "case_or_section": "apply and join page ranges / check_page_range_reductions (uses_hw arm): stream_hw_joins T5 accumulator stays 0 when every sweep progresses",
+   "lines": "2902-2911 (rank loop over n_join_workers) and 2955-2965 (ready-job-first section with watchdog)",
+   "production_boundary_called": "stream_hw_joins(..., finish_job, &join_wait_cycles) called directly with a non-null accumulator [self_attention.hpp:1027-1152; wait-loop timing at 1133-1152]",
+   "fake_retains_information": "Fake devices (byte arrays cast to PosDevice at 2896-2900, 2921-2923) and hand-set completion generations. In the first block every pass is complete before the call. In the second block the ready job's finish_job releases the rest synchronously inside the sweep (2938-2953).",
+   "semantic_break_that_fails_it": "stream_hw_joins adding cycles outside the wait loop (for example timing the whole call or a sweep that progressed): 2911/2965 read a nonzero value.",
+   "breaks_not_caught": "The positive case (the wait loop entered and timed) is not covered here. That is the heterogeneous mixed section.\nA nullptr accumulator path (stats off) is not exercised in this file.\nDeterministic: the watchdog release at 2 s only fires on a hang that already fails CHECK_FALSE(timed_out) at 2964.",
+   "verdict": "meaningful"
+  },
+  {
+   "file": "t/t_compute_attention_unit.cpp",
+   "case_or_section": "compute_attention rejects invalid scales (now uses the shared t/assertion_signal.hpp instead of a local copy)",
+   "lines": "11, 19-31 (header swap at 11; the case body is unchanged)",
+   "production_boundary_called": "emulation::compute_attention under tron::assertion_signal [t/assertion_signal.hpp:15-27]",
+   "fake_retains_information": "No fake. The forked child must die with SIGABRT.",
+   "semantic_break_that_fails_it": "Unchanged by the PR: compute_attention accepting an invalid scale. The PR only moved the helper; the diff removes the local template (old 21-36) and the <stdlib.h>/<unistd.h>/<sys/wait.h> includes.",
+   "breaks_not_caught": "None new. The same mechanical move applies to t_llama_unit.cpp (local helper removed at old 271-283, include at 44). Its three existing assertion_signal users (t_llama_unit.cpp:289, 565, 1458-1461) are unchanged.",
+   "verdict": "meaningful"
+  }
+ ]
+}
