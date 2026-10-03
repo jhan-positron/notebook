@@ -1,0 +1,1818 @@
+diff --git a/h/tron/kernels/amx_attn_iface.hpp b/h/tron/kernels/amx_attn_iface.hpp
+index f167ed8a83..86140b18dd 100644
+--- a/h/tron/kernels/amx_attn_iface.hpp
++++ b/h/tron/kernels/amx_attn_iface.hpp
+@@ -216,11 +216,14 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+ // IS the VNNI B-operand layout. The orientation therefore flips. qk_vnni_128x4
+ // takes the 4 query rows, padded to 16 rows, as the A operand. The 16 K panels
+ // of the page are the B operand. The tiles come out as S[query][token]. No
+-// transpose is needed. The cost moves to two places. The K store scatters 64
+-// dimension pairs per token when the token's run has one token (save_k,
+-// page::set_k_row). A run of two or more consecutive tokens of one block uses
+-// the block save (page::set_k_block). The software reader for partial pages
+-// runs k_vnni::qk_group instead of the row-major dotter.
++// transpose is needed. The cost moves to the K save. A run of 16 consecutive
++// tokens that fills one 16-token block uses the block save (page::set_k_block,
++// a register transpose and whole-line stores). A shorter run (decode: one
++// token per user per step) is stored row-major into the block's own bytes,
++// and the block is transposed in place at the end of the forward pass that
++// saved its 16th row (Note [Row-major tail block] in k_vnni.hpp). The software reader
++// for the VNNI blocks of partial pages runs k_vnni::qk_group; the row-major tail block
++// keeps the row-major dotter.
+ 
+ // Dense QK for one page: computes S^T = K_page . Q^T in tiles and transposes
+ // on the way out (see Note [QK orientation]); writes s[4][s_stride_floats]
+diff --git a/h/tron/kernels/k_vnni.hpp b/h/tron/kernels/k_vnni.hpp
+index dba0a49f97..773b1a42b7 100644
+--- a/h/tron/kernels/k_vnni.hpp
++++ b/h/tron/kernels/k_vnni.hpp
+@@ -1,9 +1,11 @@
+ #pragma once
+ // K stored in the VNNI pair-interleaved layout, in place of the row-major K
+ // plane: the index map, the per-token store (scatter) and load (gather), the
+-// 16-token block save (transpose in registers, full-line stores), and the
+-// AVX-512 QK reader that serves partial pages, hosts without AMX and the AMX
+-// kill switch (TRON_AMX_DISABLE=1).
++// 16-token block save (transpose in registers, full-line stores), the in-place
++// conversion of one 16-token block between the row-major and the VNNI layout
++// (Note [Row-major tail block] below), and the AVX-512 QK reader that serves
++// the VNNI blocks of partial pages, hosts without AMX and the AMX kill switch
++// (TRON_AMX_DISABLE=1).
+ // Everything here is AVX-512 (no AMX instruction). So any translation unit may
+ // include it. The layout itself, who writes it and who reads it are described
+ // in Note [K VNNI storage] (in kv_cache.hpp).
+@@ -63,8 +65,13 @@ inline constexpr size_t PANEL_ELEMS_512 = STEP_PAIRS_16 * BLOCK_TOKENS_16 * PAIR
+ inline constexpr size_t PANEL_BYTES_1024 = PANEL_ELEMS_512 * sizeof(bf16);
+ inline constexpr size_t PANEL_DWORDS_256 = PANEL_BYTES_1024 / DWORD_BYTES_4;
+ inline constexpr size_t N_PANELS_16 = DIM_STEPS_4 * TOKEN_BLOCKS_4;
++// A row-major block (Note [Row-major tail block]) keeps 4 token rows of 256
++// bytes in each of its 4 panels.
++inline constexpr size_t PANEL_ROWS_4 = PANEL_ELEMS_512 / HEAD_SIZE_128;
+ // The 16 lanes of one token block, all present.
+ inline constexpr __mmask16 FULL_BLOCK_0XFFFF = 0xffffu;
++// The 4 token blocks of a page, one bit each (page::k_vnni_blocks).
++inline constexpr uint8_t ALL_BLOCKS_0XF = 0xfu;
+ // 32-bit lanes of one 512-bit register (the transpose below is LANES x LANES).
+ inline constexpr size_t LANES_16 = LINE_BYTES_64 / DWORD_BYTES_4;
+ // Width of a bf16: a bf16 shifted up by this many bits is the exact fp32.
+@@ -76,10 +83,12 @@ inline constexpr size_t MAX_KV_MUL_16 = 16;
+ static_assert(BLOCK_TOKENS_16 == 16 && TOKEN_BLOCKS_4 == 4 && STEP_PAIRS_16 == 16 &&
+                   DIM_STEPS_4 == 4 && ROW_ELEMS_32 == 32 && ROW_DWORDS_16 == 16 &&
+                   PANEL_ELEMS_512 == 512 && PANEL_BYTES_1024 == 1024 &&
+-                  PANEL_DWORDS_256 == 256 && N_PANELS_16 == 16 && LANES_16 == 16,
++                  PANEL_DWORDS_256 == 256 && N_PANELS_16 == 16 && LANES_16 == 16 &&
++                  PANEL_ROWS_4 == 4,
+     "every constant's name states its value");
+ static_assert(N_PANELS_16 * PANEL_ELEMS_512 == PAGE_TOKENS_64 * HEAD_SIZE_128,
+     "the VNNI plane is a permutation of the row-major plane: same element count");
++static_assert(ALL_BLOCKS_0XF == (1u << TOKEN_BLOCKS_4) - 1, "one bit per token block");
+ static_assert(BLOCK_TOKENS_16 == LANES_16 && STEP_PAIRS_16 == LANES_16,
+     "the block save transposes 16 token rows onto the 16 pair rows of a panel");
+ 
+@@ -103,7 +112,8 @@ constexpr size_t index(size_t token, size_t dim) noexcept {
+                dp = (dim % STEP_DIMS_32) / PAIR_2, t = token % BLOCK_TOKENS_16,
+                j = dim % PAIR_2;
+   return (((s * TOKEN_BLOCKS_4 + c) * STEP_PAIRS_16 + dp) * BLOCK_TOKENS_16 + t) *
+-             PAIR_2 + j;
++             PAIR_2 +
++         j;
+ }
+ 
+ namespace detail {
+@@ -227,15 +237,77 @@ void gather_row(const bf16* plane, size_t token, bf16* row) noexcept {
+   }
+ }
+ 
++// Note [Row-major tail block]
++// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
++// A 16-token block of the plane holds the VNNI layout above only once all 16
++// of its K rows are saved. Until then the block holds its rows row-major:
++// token t of block c owns 256 contiguous bytes (its 128 bf16 values in
++// dimension order) at row_ptr(). Those bytes are the block's own 4 panels:
++// panel (t / 4, c) holds the rows of tokens 4 (t / 4) .. 4 (t / 4) + 3, 256
++// bytes each. So a row-major block and a VNNI block occupy the same 4 KiB, and
++// no other block is touched by either layout.
++// Why: in decode every step saves one token per user. The VNNI scatter of one
++// row writes 4 bytes into each of 64 lines; the row-major store writes 4 whole
++// lines. The readers of an incomplete block (the AVX-512 tail scoring through
++// the row-major dotter, and the FPGA staging gather) read 4 lines per token
++// instead of 64 as well. At the forward end of the pass that saved the 16th
++// row (or at once, when a whole-block save wrote the block), block_to_vnni()
++// transposes the block in place (4 KiB read, 4 KiB written), and the AMX
++// kernel reads the page as its B operand once every block of the page is
++// VNNI. Which layout a block holds is recorded per (page, slot) by the page
++// (its converted-block bit, Note [K VNNI storage] in kv_cache.hpp). The
++// kernels here take the layout from the caller.
++TRON(nodiscard, inline, pure)
++bf16* row_ptr(bf16* plane, size_t token) noexcept {
++  const size_t c = token / BLOCK_TOKENS_16, t = token % BLOCK_TOKENS_16;
++  return plane + ((t / PANEL_ROWS_4) * TOKEN_BLOCKS_4 + c) * PANEL_ELEMS_512 +
++         (t % PANEL_ROWS_4) * HEAD_SIZE_128;
++}
++TRON(nodiscard, inline, pure)
++const bf16* row_ptr(const bf16* plane, size_t token) noexcept {
++  const size_t c = token / BLOCK_TOKENS_16, t = token % BLOCK_TOKENS_16;
++  return plane + ((t / PANEL_ROWS_4) * TOKEN_BLOCKS_4 + c) * PANEL_ELEMS_512 +
++         (t % PANEL_ROWS_4) * HEAD_SIZE_128;
++}
++
++// Convert block c from row-major (Note [Row-major tail block]) to the VNNI
++// layout, in place. The 16 rows are copied to the stack first: store_block
++// writes panel (s, c) while the rows of tokens 4 s .. 4 s + 3 still live there.
++TRON(inline)
++void block_to_vnni(bf16* plane, size_t c) noexcept {
++  alignas(64) bf16 rows[BLOCK_TOKENS_16][HEAD_SIZE_128];
++  const bf16* row_ptrs[BLOCK_TOKENS_16];
++  for (size_t t = 0; t < BLOCK_TOKENS_16; ++t) {
++    std::memcpy(rows[t], row_ptr(plane, c * BLOCK_TOKENS_16 + t), sizeof(rows[t]));
++    row_ptrs[t] = rows[t];
++  }
++  store_block(plane, c, FULL_BLOCK_0XFFFF, row_ptrs);
++}
++
++// The inverse: block c from the VNNI layout back to row-major, in place.
++TRON(inline)
++void block_to_rows(bf16* plane, size_t c) noexcept {
++  alignas(64) bf16 rows[BLOCK_TOKENS_16][HEAD_SIZE_128];
++  for (size_t t = 0; t < BLOCK_TOKENS_16; ++t) {
++    gather_row(plane, c * BLOCK_TOKENS_16 + t, rows[t]);
++  }
++  for (size_t t = 0; t < BLOCK_TOKENS_16; ++t) {
++    std::memcpy(row_ptr(plane, c * BLOCK_TOKENS_16 + t), rows[t], sizeof(rows[t]));
++  }
++}
++
+ // Scores of one query group against the live tokens of one page, read from
+ // the VNNI plane with AVX-512. s[h * s_stride + t] = q_h . K_t (UNSCALED) for
+ // every token t whose bit is set in `live`. The other entries of s are left
+ // untouched (the caller keeps them at -inf). The K storage of a token whose
+ // bit is clear is never read (masked loads). So unwritten tokens cannot
+-// change the result. Token lanes: one 64-byte load supplies one dimension pair
+-// of 16 tokens. The query's dimension pair is broadcast. VDPBF16PS accumulates 16
+-// scores at once. So there is no horizontal reduction and no per-token gather.
+-// q points at kv_mul rows of 128 values (the group's heads, row stride 128).
++// change the result. Every token block with a live bit must hold the VNNI
++// layout (Note [Row-major tail block]): the caller scores the tokens of a
++// row-major block with the row-major dotter and keeps their bits clear here. Token
++// lanes: one 64-byte load supplies one dimension pair of 16 tokens. The query's
++// dimension pair is broadcast. VDPBF16PS accumulates 16 scores at once. So there is no
++// horizontal reduction and no per-token gather. q points at kv_mul rows of 128 values
++// (the group's heads, row stride 128).
+ //   bf16 q: exact bf16 x bf16 products added in fp32 by VDPBF16PS. This is the
+ //     same instruction the row-major dotter<bf16, 128> uses. Only the order of
+ //     the fp32 adds differs (see Note [AMX attention dispatch]).
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index d64b78e53b..3ce7ff7278 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -669,40 +669,126 @@ struct kv_slot_offsets final {
+ // no second copy of K to keep coherent. The K mirror design this replaces kept
+ // a row-major K and a VNNI copy of it in a parallel arena.
+ //
++// A block holds the VNNI layout only once it is complete and converted. A
++// 16-token block of the plane (page offsets 16 c .. 16 c + 15) holds its rows
++// row-major inside the same 4 KiB (Note [Row-major tail block] in k_vnni.hpp)
++// until all 16 of its K rows are saved and the block has been converted in
++// place. The page records two things per storage slot: the saved rows
++// (k_rows_saved_, one bit per offset) and the converted blocks
++// (k_vnni_blocks_, one bit per block). A converted block always has its 16
++// rows saved; a complete block may wait for its conversion. Every reader and
++// writer of a row takes the layout from the converted-block bit.
++//   - save_k (model.hpp) sets a row's bit after the row is stored, on the main
++//     thread. A block completed that way is queued (state::pending_k_blocks_)
++//     and converted at the forward end (convert_pending_k_blocks, after the
++//     plugin joined its workers and the cooperative GOF staging drained),
++//     unless the hardware attention scores the operation's K (Note [Row-major
++//     blocks under hardware attention] below: no bit, no conversion). Why
++//     not in save_k: a block may be split across two minibatches of one pass
++//     (grains of 8 tokens), and the cooperative GOF staging gather of the
++//     earlier minibatch's tokens (help_drain_gof on the attention workers,
++//     wait_for_coop_gof on main) reads the block's rows row-major while the
++//     later minibatch saves the block's last rows. The attention workers
++//     themselves are not that reader: a pending page is read only after every
++//     minibatch that writes it counted its latch down. The forward end, after
++//     wait_for_coop_gof, is the first point where no reader of this pass is
++//     left. The in-place transposes of clear_kv_complete_at and copy_from rely
++//     on the same rule as the rest of the tree work: no forward pass reads the
++//     book meanwhile (the tree lock is held; the OOM rescue's append shares
++//     this reliance with the book relocation it already does).
++//   - a full-block save (page::set_k_block) writes the VNNI layout directly and
++//     sets the 16 row bits and the block bit itself (any thread of a shared
++//     window): every row of that block belongs to that one run.
++//   - clear_kv_complete_at (a new token takes a page offset) drops the row bits
++//     of that offset and of every offset above it (KV entries are appended, so
++//     the offsets above a newly assigned one are free) and the block bits of
++//     those blocks. A converted block that keeps live rows below the offset is
++//     converted back to row-major first, so those rows stay readable. When the
++//     book's storage is not readable (a KV restore not yet published, or
++//     reclaimed storage) only the bits change: the bytes are not valid anyway.
++//   - page copies (copy_from) carry both bit sets with the rows.
++// Why the transition is at 16 saved rows: in decode every step saves one token
++// per user, and the tail block of every user is read again on every step. The
++// row-major tail block costs 4 whole lines per token to store, to score and to
++// stage for the FPGA, where the VNNI column cost 64 lines each (issue #4500).
++// The VNNI blocks are what the AMX kernel needs. A page is dense for that
++// kernel only when all its 64 rows are saved; it is VNNI from the forward end
++// of the pass that completed its last block (at once when that block was a
++// whole-block save), and takes the software loop until then.
++//
++// Note [Row-major blocks under hardware attention]
++// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++// When the hardware attention scores an operation's K (the operation's
++// cached_operation_uses_hw in model.hpp, decided once per model), save_k
++// records no row bits for the rows a short run stores and queues no block
++// for the forward-end conversion. Such a block stays row-major: no bit is
++// ever set for it, so a page copy (copy_from) does not convert it either.
++// Why: once the sequence has passed the engagement point
++// (hw_attn_engagement_point in model.hpp, 127 by default) the FPGA holds
++// the K/V of every DMA-complete GOF (a group of four consecutive tokens
++// whose rows the staging, gof::populate, copies into a buffer that DMA,
++// direct memory access, moves to the card), and the CPU scores only the
++// tail above them: a page the hardware covers takes the software loop with
++// no K bytes read, and a tail token is scored row by row when it lies in a
++// row-major block (by the VNNI reader qk_group when it lies in a
++// whole-block-saved or converted block). So the AMX kernel never reads a
++// block that decode completes there. What the conversion would cost is a
++// serial main-thread copy of every completed block of every layer and KV
++// head at the forward end (8 KiB of plane traffic plus an 8 KiB stack round
++// trip per block and KV head, every 16th step for every user) and a 64-line
++// gather per row whenever the staging copies a converted block.
++// Whole-block saves (prefill) still store the VNNI layout at once: a page
++// the hardware does not cover yet (before the engagement point, in the
++// first forwards of a prompt, or when the DMA is behind by a page) is
++// dense for the AMX kernel only through them.
++// The cost accepted: a range that the software scores although the
++// operation is a hardware one (before the engagement point, a prompt
++// shorter than 128 tokens, a shard without HBM, USE_HW_ATTN=N raising the
++// engagement point) scores the blocks decode completed with the row-major
++// dotter, where the conversion would have let the AMX kernel score a page
++// of them. Every reader takes its layout from the block bit, so the tokens
++// are the same either way.
++//
+ // Consumers of a VNNI slot, and how each one changes:
+ //   1. save_k (model.hpp) stores K with page::set_k_block when a run of the
+-//      pass's tokens fills (part of) one 16-token block of a page. The 16
+-//      rows are transposed in registers. Every 64-byte pair row of the four
+-//      panels (a panel: the 16 pair rows of one 32-dimension step for one 16-token
+-//      block, 1 KiB) is written whole (k_vnni::store_block). A run of one
+-//      token (decode: one token per user per step) is stored with
+-//      page::set_k_row. That store scatters the 64 dimension pairs into the
+-//      token's column (k_vnni::scatter_row). It issues 4 AVX-512 scatters
+-//      that together write 4 bytes into each of 64 64-byte pair rows. The
+-//      row-major store was 4 64-byte stores per token. When a pass holds
+-//      more than 16 tokens the store may be shared with the idle main helpers
+-//      (Note [Shared block save] in model.hpp). TRON_AMX_DISABLE leaves both
+-//      store paths untouched.
++//      pass's tokens fills one whole 16-token block of a page. The 16 rows are
++//      transposed in registers. Every 64-byte pair row of the four panels (a
++//      panel: the 16 pair rows of one 32-dimension step for one 16-token
++//      block, 1 KiB) is written whole (k_vnni::store_block). Any shorter run
++//      (decode: one token per user per step; the last block of a prompt) is
++//      stored row by row with page::set_k_row: 4 whole 64-byte lines per
++//      token into the row-major tail block, the same store the row-major
++//      layout makes. When a pass holds more than 16 tokens the store may be
++//      shared with the idle main helpers (Note [Shared block save] in
++//      model.hpp). TRON_AMX_DISABLE leaves both store paths untouched.
+ //   2. the dense AMX page path (self_attention.hpp) passes page::k_vnni_plane
+-//      to qk_vnni_128x4.
++//      to qk_vnni_128x4 when page::k_vnni_blocks says every block of the page
++//      is converted. A page whose last block waits for the forward end, a
++//      page with a block that stays row-major under hardware attention, or a
++//      page filled by another writer than save_k, takes the software loop.
+ //   3. the software path for partial pages, the kill switch
+-//      (TRON_AMX_DISABLE=1) and hosts without AMX use k_vnni::qk_group. That
+-//      reader is AVX-512 code with one token per vector lane. It needs no
+-//      per-token gather and no horizontal reduction. The row-major dotter
+-//      loop (the per-token dot-product loop of self_attention.hpp) is
+-//      compiled only for row-major slots.
++//      (TRON_AMX_DISABLE=1) and hosts without AMX read the VNNI blocks with
++//      k_vnni::qk_group. That reader is AVX-512 code with one token per vector
++//      lane. It needs no per-token gather and no horizontal reduction. The
++//      tokens of the row-major tail block are scored with the row-major dotter
++//      (the per-token dot-product loop of self_attention.hpp) through
++//      k_vnni::row_ptr, 4 lines per token.
+ //   4. the FPGA (field-programmable gate array) staging path (gof::populate ->
+ //      shuffle_k_entry) needs one row per token. So page_info::k_head_fn
+-//      materializes it with page::get_k_row into caller-owned scratch.
++//      materializes it with page::get_k_row into caller-owned scratch: a
++//      gather from a VNNI block, a 256-byte copy from a row-major block.
+ //      v_head_fn already does the same for V. The staging bytes and the HBM
+ //      (High Bandwidth Memory, the FPGA device memory) layout are unchanged.
+ //   5. page copies (copy_storage_slot: append and defrag) copy a whole page
+-//      as one memcpy when the range covers the page. A token's position
+-//      inside the page decides its column. So every other range moves token
+-//      by token (k_vnni::gather_row + k_vnni::scatter_row).
++//      as one memcpy when the range covers the page, bits included. A token's
++//      position inside the page decides its column. So every other range
++//      moves token by token: the converted destination blocks the range
++//      touches are made row-major first, the rows are copied row-major, and a
++//      block whose 16 rows are saved after the copy is converted to VNNI.
+ //   6. the row view page::k() does not exist for VNNI slots. A token's values
+ //      are not contiguous there. The layout-agnostic set_k_row / get_k_row
+-//      accessors exist for every slot.
++//      accessors exist for every slot. They follow the block's recorded
++//      layout.
+ // The kill switch keeps the layout. With TRON_AMX_DISABLE=1 a TRON_K_VNNI
+ // binary runs the AVX-512 VNNI reader, not the row-major dotter. So it is an
+ // AMX-off run of the same layout, not a rollback to the row-major binary's
+@@ -969,6 +1055,13 @@ public:
+     refresh_kv_blocks_alias();
+   }
+ 
++  // Whether the EAGLE storage view is selected (set_storage_view). Logical
++  // slot zero then addresses the extra physical slot.
++  TRON(nodiscard, inline, pure)
++  bool eagle_view_active() const noexcept {
++    return storage_view_offset_.i != 0;
++  }
++
+   TRON(nodiscard, inline, pure)
+   kv_storage_offset eagle_storage_offset() const noexcept {
+     TRON_ASSERT(has_eagle_storage(), "EAGLE storage view requires EAGLE support");
+@@ -1545,6 +1638,12 @@ struct alignas(64) page final {
+       for (size_t l = 0; l < layout_t::n_slots; ++l)
+         kv_saves_[o][l].store(other.kv_saves_[o][l].load(std::memory_order_relaxed),
+             std::memory_order_relaxed);
++    for (size_t l = 0; l < k_rows_saved_.size(); ++l) {
++      k_rows_saved_[l].store(other.k_rows_saved_[l].load(std::memory_order_relaxed),
++          std::memory_order_relaxed);
++      k_vnni_blocks_[l].store(other.k_vnni_blocks_[l].load(std::memory_order_relaxed),
++          std::memory_order_relaxed);
++    }
+   }
+ 
+   // How many kv entries are live (see Note [KV Token Lifetimes]) on
+@@ -1682,6 +1781,8 @@ struct alignas(64) page final {
+   // K storage of one KV head of one slot in this page as the VNNI plane of
+   // Note [K VNNI storage]. The plane is 16 KiB. The AMX QK kernel (its B
+   // operand) and the AVX-512 reader k_vnni::qk_group consume it in place.
++  // Only the blocks named by k_vnni_blocks hold the VNNI layout; the others
++  // hold row-major rows at k_vnni::row_ptr.
+   template <kv_geometry geometry>
+     requires(book_t::template declares_geometry<geometry>() &&
+              k_vnni::layout_on<geometry.head_size>)
+@@ -1692,9 +1793,118 @@ struct alignas(64) page final {
+     return reinterpret_cast<const bf16*>(kv_block<geometry>(slot, kv_head).k);
+   }
+ 
++  // The 16-token blocks of this page that hold the VNNI layout for `slot`, one
++  // bit per block (bit c = page offsets 16 c .. 16 c + 15): the converted
++  // blocks of Note [K VNNI storage].
++  template <kv_geometry geometry>
++    requires(book_t::template declares_geometry<geometry>() &&
++             k_vnni::layout_on<geometry.head_size>)
++  TRON(nodiscard, inline)
++  uint8_t k_vnni_blocks(kv_slot_id slot) const noexcept {
++    return k_vnni_blocks_[k_state_ix(slot)].load(std::memory_order_acquire);
++  }
++
++  // The physical storage a logical slot maps to under the current view, and
++  // the index of its K layout state (Note [K VNNI storage]). The deferred
++  // conversion list of save_k keeps this pair, so that a view change between
++  // the save and the forward end cannot redirect the conversion.
++  struct k_storage_ref {
++    kv_storage_offset offset;
++    size_t state_ix;
++  };
++  TRON(nodiscard, inline)
++  k_storage_ref k_storage_of(kv_slot_id slot) const noexcept {
++    const size_t ix = k_state_ix(slot);
++    return {ix == layout_t::n_slots ? book.eagle_storage_offset()
++                                    : kv_storage_offset(slot.i),
++        ix};
++  }
++
++  // Record that the K row of page offset `offset` is saved for `slot` (VNNI
++  // slots; a row-major slot keeps no bits and returns false). Returns true when
++  // the row's 16-token block now has all 16 rows saved and is not converted
++  // yet: the main thread of save_k then queues the block for k_block_to_vnni
++  // at the forward end. A row saved again into a block that waits for its
++  // conversion returns true again (the conversion is idempotent); a row of a
++  // converted block returns false (set_k_row wrote it into the VNNI column).
++  template <kv_geometry geometry>
++    requires(book_t::template declares_geometry<geometry>())
++  TRON(nodiscard, inline)
++  bool note_k_row_saved(kv_slot_id slot, size_t offset) noexcept {
++    TRON_ASSERT_LT(offset, page_size);
++    if constexpr (!k_vnni::layout_on<geometry.head_size>) {
++      (void)slot;
++      return false;
++    }
++    const size_t ix = k_state_ix(slot);
++    const size_t c = offset / k_vnni::BLOCK_TOKENS_16;
++    const uint64_t bit = uint64_t{1} << offset;
++    auto& saved = k_rows_saved_[ix];
++    uint64_t before = saved.load(std::memory_order_relaxed);
++    if ((before & bit) == 0) before = saved.fetch_or(bit, std::memory_order_acq_rel);
++    const uint64_t after = before | bit;
++    return (after & k_block_bits(c)) == k_block_bits(c) &&
++           ((k_vnni_blocks_[ix].load(std::memory_order_acquire) >> c) & 1u) == 0;
++  }
++
++  TRON(nodiscard, inline)
++  bool note_k_row_saved(kv_slot_id slot, size_t offset) noexcept
++    requires(layout_t::uniform_geometry)
++  {
++    return note_k_row_saved<layout_t::primary_geometry>(slot, offset);
++  }
++
++  // Record that block c was stored whole in the VNNI layout (set_k_block): its
++  // 16 rows are saved and the block is converted.
++  TRON(inline)
++  void note_k_block_saved(kv_slot_id slot, size_t c) noexcept {
++    TRON_ASSERT_LT(c, page_size / k_vnni::BLOCK_TOKENS_16);
++    const size_t ix = k_state_ix(slot);
++    k_rows_saved_[ix].fetch_or(k_block_bits(c), std::memory_order_acq_rel);
++    k_vnni_blocks_[ix].fetch_or(uint8_t(1u << c), std::memory_order_release);
++  }
++
++  // Convert block c of every KV head of `slot` from row-major to the VNNI
++  // layout in place (Note [Row-major tail block] in k_vnni.hpp) when its 16
++  // rows are saved and it is not converted yet. Returns whether it converted.
++  // Main thread only, at a point where no reader of the block runs (the
++  // forward end). A row-major slot never converts.
++  TRON(inline)
++  bool k_block_to_vnni(kv_slot_id slot, size_t c) noexcept {
++    const k_storage_ref ref = k_storage_of(slot);
++    return k_block_to_vnni_at(ref.offset, ref.state_ix, c);
++  }
++
++  TRON(inline)
++  bool k_block_to_vnni_at(
++      kv_storage_offset storage_offset, size_t state_ix, size_t c) noexcept {
++    TRON_ASSERT_LT(c, page_size / k_vnni::BLOCK_TOKENS_16);
++    const uint8_t cbit = uint8_t(1u << c);
++    if ((k_rows_saved_[state_ix].load(std::memory_order_acquire) & k_block_bits(c)) !=
++            k_block_bits(c) ||
++        (k_vnni_blocks_[state_ix].load(std::memory_order_acquire) & cbit) != 0) {
++      return false;
++    }
++    bool converted = false;
++    k_with_storage_geometry(storage_offset, [&]<kv_geometry geometry>() {
++      if constexpr (k_vnni::layout_on<geometry.head_size>) {
++        for (size_t kv_head = 0; kv_head < geometry.n_kv_heads; ++kv_head) {
++          k_vnni::block_to_vnni(
++              reinterpret_cast<bf16*>(
++                  kv_block_at_storage<geometry>(storage_offset, kv_head).k),
++              c);
++        }
++        converted = true;
++      }
++    });
++    if (converted) k_vnni_blocks_[state_ix].fetch_or(cbit, std::memory_order_release);
++    return converted;
++  }
++
+   // Layout-agnostic K row store: writes the token's head_size bf16 values
+-  // (contiguous in `row`) into whichever layout the slot uses
+-  // (Note [K VNNI storage]).
++  // (contiguous in `row`) into whichever layout the slot, and for a VNNI slot
++  // the token's block, uses (Note [K VNNI storage]). The row's saved bit is
++  // the caller's (note_k_row_saved).
+   template <kv_geometry geometry>
+     requires(book_t::template declares_geometry<geometry>())
+   TRON(inline)
+@@ -1702,20 +1912,26 @@ struct alignas(64) page final {
+       kv_slot_id slot, size_t kv_head, size_t i_page, const bf16* row) noexcept {
+     TRON_ASSERT_LT(i_page, page_size);
+     if constexpr (k_vnni::layout_on<geometry.head_size>) {
+-      k_vnni::scatter_row(
+-          reinterpret_cast<bf16*>(kv_block<geometry>(slot, kv_head).k), i_page, row);
++      bf16* plane = reinterpret_cast<bf16*>(kv_block<geometry>(slot, kv_head).k);
++      if (k_block_is_vnni(k_state_ix(slot), i_page)) {
++        k_vnni::scatter_row(plane, i_page, row);
++      } else {
++        std::memcpy(
++            k_vnni::row_ptr(plane, i_page), row, geometry.head_size * sizeof(bf16));
++      }
+     } else {
+       std::memcpy(kv_block<geometry>(slot, kv_head).k_at(i_page).data, row,
+           geometry.head_size * sizeof(bf16));
+     }
+   }
+ 
+-  // K rows of up to 16 tokens of one 16-token block of this page, stored at
+-  // once (VNNI slots only, Note [K VNNI storage] item 1). Block c holds the
+-  // page offsets c * 16 .. c * 16 + 15. Bit t of `present` says that rows[t]
+-  // (128 bf16) is the row of offset c * 16 + t. The other offsets are left
+-  // untouched. The result is bit-identical to set_k_row per present token
+-  // (k_vnni::store_block). The difference is the write pattern.
++  // K rows of the 16 tokens of one 16-token block of this page, stored at
++  // once in the VNNI layout (VNNI slots only, Note [K VNNI storage] item 1).
++  // Block c holds the page offsets c * 16 .. c * 16 + 15; rows[t] (128 bf16)
++  // is the row of offset c * 16 + t. The result is bit-identical to set_k_row
++  // per token of a complete block (k_vnni::store_block). The difference is
++  // the write pattern. The caller records the block with note_k_block_saved
++  // after the last KV head.
+   template <kv_geometry geometry>
+     requires(book_t::template declares_geometry<geometry>() &&
+              k_vnni::layout_on<geometry.head_size>)
+@@ -1723,11 +1939,10 @@ struct alignas(64) page final {
+   void set_k_block(kv_slot_id slot,
+       size_t kv_head,
+       size_t c,
+-      __mmask16 present,
+       const bf16* const rows[k_vnni::BLOCK_TOKENS_16]) noexcept {
+     TRON_ASSERT_LT(c, page_size / k_vnni::BLOCK_TOKENS_16);
+-    k_vnni::store_block(
+-        reinterpret_cast<bf16*>(kv_block<geometry>(slot, kv_head).k), c, present, rows);
++    k_vnni::store_block(reinterpret_cast<bf16*>(kv_block<geometry>(slot, kv_head).k), c,
++        k_vnni::FULL_BLOCK_0XFFFF, rows);
+   }
+ 
+   // Layout-agnostic K row load: the inverse of set_k_row.
+@@ -1738,9 +1953,14 @@ struct alignas(64) page final {
+       kv_slot_id slot, size_t kv_head, size_t i_page, bf16* row) const noexcept {
+     TRON_ASSERT_LT(i_page, page_size);
+     if constexpr (k_vnni::layout_on<geometry.head_size>) {
+-      k_vnni::gather_row(
+-          reinterpret_cast<const bf16*>(kv_block<geometry>(slot, kv_head).k), i_page,
+-          row);
++      const bf16* plane =
++          reinterpret_cast<const bf16*>(kv_block<geometry>(slot, kv_head).k);
++      if (k_block_is_vnni(k_state_ix(slot), i_page)) {
++        k_vnni::gather_row(plane, i_page, row);
++      } else {
++        std::memcpy(
++            row, k_vnni::row_ptr(plane, i_page), geometry.head_size * sizeof(bf16));
++      }
+     } else {
+       std::memcpy(row, kv_block<geometry>(slot, kv_head).k_at(i_page).data,
+           geometry.head_size * sizeof(bf16));
+@@ -1764,6 +1984,22 @@ struct alignas(64) page final {
+     get_k_row<layout_t::primary_geometry>(slot, kv_head, i_page, row);
+   }
+ 
++  // The token's K row in place when its block is row-major (Note [Row-major
++  // blocks under hardware attention]): head_size contiguous bf16 inside the
++  // block's own panels, valid as long as no writer touches the block (the
++  // same rule as get_k_row's read). nullptr for a converted block: the caller
++  // gathers that one with get_k_row.
++  template <kv_geometry geometry>
++    requires(book_t::template declares_geometry<geometry>() &&
++             k_vnni::layout_on<geometry.head_size>)
++  TRON(nodiscard, inline)
++  bf16* k_row_if_row_major(kv_slot_id slot, size_t kv_head, size_t i_page) noexcept {
++    TRON_ASSERT_LT(i_page, page_size);
++    if (k_block_is_vnni(k_state_ix(slot), i_page)) return nullptr;
++    return k_vnni::row_ptr(
++        reinterpret_cast<bf16*>(kv_block<geometry>(slot, kv_head).k), i_page);
++  }
++
+   // Pointer to this page's V values for one KV head of one layer (slot), in
+   // the layout they are stored in: token pairs interleaved, so for each dim
+   // the values of tokens 2p and 2p+1 sit next to each other. That is the
+@@ -1958,12 +2194,110 @@ struct alignas(64) page final {
+     TRON_ASSERT_LT(offset, page_size);
+     for (size_t l = 0; l < book.logical_slot_count(); ++l)
+       kv_saves_[offset][l].store(0, std::memory_order_relaxed);
++    k_forget_row(offset);
+   }
+ 
+ private:
+   using kv_block_t = detail::kv_block<page_size, head_size>;
+   friend struct book<n_layers, n_kv_heads, head_size, x_bytes, layout_t>;
+ 
++  // ---------------------------------------------------------------------------
++  // The K layout state of Note [K VNNI storage]: k_rows_saved_ holds one bit
++  // per page offset and storage slot, k_vnni_blocks_ one bit per 16-token
++  // block and storage slot. Entry layout_t::n_slots is the EAGLE storage. The
++  // bits are kept for every slot; only a VNNI slot's readers and writers take
++  // their layout from them.
++  // ---------------------------------------------------------------------------
++
++  // The state entry of a logical slot: the EAGLE entry while the EAGLE view
++  // maps slot zero onto the EAGLE storage.
++  TRON(nodiscard, inline)
++  size_t k_state_ix(kv_slot_id slot) const noexcept {
++    TRON_ASSERT_LT(slot.i, book.logical_slot_count());
++    return (book.eagle_view_active() && slot.i == 0) ? layout_t::n_slots : slot.i;
++  }
++
++  // The 16 bits of block c.
++  static constexpr uint64_t k_block_bits(size_t c) noexcept {
++    static_assert(page_size == k_vnni::PAGE_TOKENS_64, "one bit per page offset");
++    return uint64_t{k_vnni::FULL_BLOCK_0XFFFF} << (c * k_vnni::BLOCK_TOKENS_16);
++  }
++
++  TRON(nodiscard, inline)
++  bool k_block_is_vnni(size_t state_ix, size_t offset) const noexcept {
++    const size_t c = offset / k_vnni::BLOCK_TOKENS_16;
++    return ((k_vnni_blocks_[state_ix].load(std::memory_order_acquire) >> c) & 1u) != 0;
++  }
++
++  // Call f.template operator()<geometry>() with the geometry of the storage
++  // slot at `storage_offset`: the logical slot's declared geometry, or the
++  // primary geometry for the EAGLE storage.
++  template <typename F>
++  void k_with_storage_geometry(kv_storage_offset storage_offset, F&& f) const {
++    if (storage_offset.i < book.logical_slot_count()) {
++      book.for_each_active_slot([&]<size_t slot, kv_geometry geometry>() {
++        if (slot == storage_offset.i) f.template operator()<geometry>();
++      });
++    } else {
++      f.template operator()<layout_t::primary_geometry>();
++    }
++  }
++
++  // Whether the bytes of the storage slot may be read and written now: the
++  // book's storage is published (no private KV restore in flight) and the
++  // slot's arena is allocated. clear_kv_complete_at runs on both sides of a
++  // KV restore commit (full.hpp invalidate_restored_book).
++  TRON(nodiscard, inline)
++  bool k_storage_readable(kv_storage_offset storage_offset) const noexcept {
++    return book.reclaimable_kv_restore_attempt_ == 0 &&
++           book.slot_base(storage_offset) != nullptr;
++  }
++
++  // A new token takes page offset `offset` (clear_kv_complete_at): drop the
++  // saved-row bits of that offset and of every offset above it, and the
++  // converted-block bits of those blocks, in every storage slot. The offset's
++  // own block keeps rows below the offset; when it was converted, its bytes go
++  // back to row-major first (when the storage is readable), so those rows stay
++  // readable. Blocks above hold no live row: their bits are dropped and their
++  // bytes are left alone. Called with the token tree locked, between forward
++  // passes: no reader runs meanwhile. Note [K VNNI storage].
++  void k_forget_row(size_t offset) noexcept {
++    const size_t c = offset / k_vnni::BLOCK_TOKENS_16;
++    const uint64_t rows_below = (uint64_t{1} << offset) - 1;
++    const uint8_t blocks_below = uint8_t((1u << c) - 1);
++    const bool block_keeps_rows = offset % k_vnni::BLOCK_TOKENS_16 != 0;
++    for (size_t ix = 0; ix < k_rows_saved_.size(); ++ix) {
++      const bool eagle = ix == layout_t::n_slots;
++      if (eagle && !book.has_eagle_storage()) break;
++      if (!eagle && ix >= book.logical_slot_count()) continue;
++      const kv_storage_offset storage_offset =
++          eagle ? book.eagle_storage_offset() : kv_storage_offset(ix);
++      auto& blocks = k_vnni_blocks_[ix];
++      const uint8_t converted = blocks.load(std::memory_order_acquire);
++      // Nothing at or above the offset: no bit to drop (the common case of a
++      // decode append; two loads instead of two locked read-modify-writes).
++      if ((converted & ~blocks_below) == 0 &&
++          (k_rows_saved_[ix].load(std::memory_order_acquire) & ~rows_below) == 0) {
++        continue;
++      }
++      if (block_keeps_rows && ((converted >> c) & 1u) != 0 &&
++          k_storage_readable(storage_offset)) {
++        k_with_storage_geometry(storage_offset, [&]<kv_geometry geometry>() {
++          if constexpr (k_vnni::layout_on<geometry.head_size>) {
++            for (size_t kv_head = 0; kv_head < geometry.n_kv_heads; ++kv_head) {
++              k_vnni::block_to_rows(
++                  reinterpret_cast<bf16*>(
++                      kv_block_at_storage<geometry>(storage_offset, kv_head).k),
++                  c);
++            }
++          }
++        });
++      }
++      blocks.fetch_and(blocks_below, std::memory_order_release);
++      k_rows_saved_[ix].fetch_and(rows_below, std::memory_order_release);
++    }
++  }
++
+   // Which book am I in?
+   book_t& book;
+ 
+@@ -1984,6 +2318,20 @@ private:
+   std::array<std::array<std::atomic<uint8_t>, layout_t::n_slots>, page_size>
+       kv_saves_{};
+ 
++  // K rows saved, one bit per page offset, per storage slot (entry
++  // layout_t::n_slots = the EAGLE storage), VNNI slots only (Note [K VNNI
++  // storage]). A block whose 16 bits are set is complete and is queued for its
++  // conversion; the layout itself is recorded in k_vnni_blocks_ below. Bits
++  // are set by save_k (main thread; not for the rows of a hardware-scored
++  // operation, Note [Row-major blocks under hardware attention]) and by the
++  // full-block save (any thread of a shared window, fetch_or), dropped by
++  // clear_kv_complete_at, carried by page copies.
++  std::array<std::atomic<uint64_t>, layout_t::n_slots + 1> k_rows_saved_{};
++  // Converted 16-token blocks, one bit per block, per storage slot (the same
++  // entries). Set by the forward-end conversion and the full-block save,
++  // dropped by clear_kv_complete_at; a set bit implies the block's 16 row bits.
++  std::array<std::atomic<uint8_t>, layout_t::n_slots + 1> k_vnni_blocks_{};
++
+   // Which page am I in the book?
+   TRON(nodiscard, inline, pure)
+   size_t pageno() const noexcept {
+@@ -2089,29 +2437,74 @@ private:
+   }
+ #endif
+ 
++  // state_ix = the k_rows_saved_ entry of the storage slot (Note [K VNNI
++  // storage]); the K bits of the copied offsets follow the rows.
+   template <kv_geometry geometry>
+   void copy_storage_slot(kv_storage_offset storage_offset,
++      size_t state_ix,
+       const page* src_page,
+       size_t src_begin,
+       size_t dst_begin,
+       size_t count) noexcept {
++    // The K bits: the saved-row bits of the destination range are replaced by
++    // the source range's; the converted-block bits follow the conversions
++    // below. Computed once per slot, applied after the last KV head.
++    [[maybe_unused]] uint64_t src_saved = 0, dst_saved = 0, new_saved = 0;
++    [[maybe_unused]] uint8_t src_blocks = 0, dst_blocks = 0, new_blocks = 0;
++    [[maybe_unused]] const bool whole_page =
++        src_begin == 0 && dst_begin == 0 && count == page_size;
++    if constexpr (k_vnni::layout_on<geometry.head_size>) {
++      static_assert(page_size == k_vnni::PAGE_TOKENS_64, "one bit per page offset");
++      TRON_ASSERT(count >= 1, "copy_storage_slot: empty range");
++      src_saved = src_page->k_rows_saved_[state_ix].load(std::memory_order_acquire);
++      src_blocks = src_page->k_vnni_blocks_[state_ix].load(std::memory_order_acquire);
++      dst_saved = k_rows_saved_[state_ix].load(std::memory_order_acquire);
++      dst_blocks = k_vnni_blocks_[state_ix].load(std::memory_order_acquire);
++      const uint64_t range =
++          count == page_size ? ~uint64_t{0} : ((uint64_t{1} << count) - 1) << dst_begin;
++      new_saved =
++          (dst_saved & ~range) | (((src_saved >> src_begin) << dst_begin) & range);
++      new_blocks = dst_blocks;
++    }
+     for (size_t kv_head = 0; kv_head < geometry.n_kv_heads; ++kv_head) {
+       if constexpr (k_vnni::layout_on<geometry.head_size>) {
+-        // VNNI plane (Note [K VNNI storage]): a token's column depends on its
+-        // offset in the page. So a whole-page copy is one memcpy. Every other
+-        // range moves token by token.
++        // VNNI plane (Note [K VNNI storage] item 5): a token's column depends
++        // on its offset in the page. So a whole-page copy is one memcpy. Every
++        // other range moves token by token, through row-major rows: the
++        // destination blocks the range touches are made row-major first, and
++        // those complete after the copy are converted to VNNI at the end.
+         auto const& src_block =
+             src_page->template kv_block_at_storage<geometry>(storage_offset, kv_head);
+         auto& dst_block = kv_block_at_storage<geometry>(storage_offset, kv_head);
+-        if (src_begin == 0 && dst_begin == 0 && count == page_size) {
++        const bf16* src_plane = reinterpret_cast<const bf16*>(src_block.k);
++        bf16* dst_plane = reinterpret_cast<bf16*>(dst_block.k);
++        if (whole_page) {
+           memcpy(dst_block.k, src_block.k, sizeof(dst_block.k));
++          new_blocks = src_blocks;
+         } else {
+-          alignas(64) bf16 row[geometry.head_size];
++          const size_t c_begin = dst_begin / k_vnni::BLOCK_TOKENS_16;
++          const size_t c_end = (dst_begin + count - 1) / k_vnni::BLOCK_TOKENS_16;
++          for (size_t c = c_begin; c <= c_end; ++c) {
++            if (((dst_blocks >> c) & 1u) != 0) {
++              k_vnni::block_to_rows(dst_plane, c);
++              new_blocks &= uint8_t(~(1u << c));
++            }
++          }
+           for (size_t i = 0; i < count; ++i) {
+-            k_vnni::gather_row(
+-                reinterpret_cast<const bf16*>(src_block.k), src_begin + i, row);
+-            k_vnni::scatter_row(
+-                reinterpret_cast<bf16*>(dst_block.k), dst_begin + i, row);
++            const size_t src_c = (src_begin + i) / k_vnni::BLOCK_TOKENS_16;
++            bf16* dst_row = k_vnni::row_ptr(dst_plane, dst_begin + i);
++            if (((src_blocks >> src_c) & 1u) != 0) {
++              k_vnni::gather_row(src_plane, src_begin + i, dst_row);
++            } else {
++              memcpy(dst_row, k_vnni::row_ptr(src_plane, src_begin + i),
++                  geometry.head_size * sizeof(bf16));
++            }
++          }
++          for (size_t c = c_begin; c <= c_end; ++c) {
++            if ((new_saved & k_block_bits(c)) == k_block_bits(c)) {
++              k_vnni::block_to_vnni(dst_plane, c);
++              new_blocks |= uint8_t(1u << c);
++            }
+           }
+         }
+       } else {
+@@ -2141,6 +2534,10 @@ private:
+       memcpy(dst_v, src_v, count * v_size);
+ #endif  // TRON_CHUNK_SIZE == 16
+     }
++    if constexpr (k_vnni::layout_on<geometry.head_size>) {
++      k_rows_saved_[state_ix].store(new_saved, std::memory_order_release);
++      k_vnni_blocks_[state_ix].store(new_blocks, std::memory_order_release);
++    }
+   }
+ 
+   // Copies count-many tokens from src_page to this page, starting at the given offsets.
+@@ -2150,7 +2547,7 @@ private:
+     TRON_ASSERT_LE(dst_begin + count, page_size);
+     book.for_each_active_slot([&]<size_t slot, kv_geometry geometry>() {
+       copy_storage_slot<geometry>(
+-          kv_storage_offset(slot), src_page, src_begin, dst_begin, count);
++          kv_storage_offset(slot), slot, src_page, src_begin, dst_begin, count);
+       for (size_t i = 0; i < count; ++i) {
+         uint8_t const completion =
+             src_page->kv_saves_[src_begin + i][slot].load(std::memory_order_acquire);
+@@ -2158,8 +2555,8 @@ private:
+       }
+     });
+     if (book.has_eagle_storage())
+-      copy_storage_slot<layout_t::primary_geometry>(
+-          book.eagle_storage_offset(), src_page, src_begin, dst_begin, count);
++      copy_storage_slot<layout_t::primary_geometry>(book.eagle_storage_offset(),
++          layout_t::n_slots, src_page, src_begin, dst_begin, count);
+     if constexpr (x_bytes) {
+       if (book.has_eagle_storage() && src_page->book.has_eagle_storage()) {
+         const uint8_t* src = src_page->x<uint8_t>(src_begin);
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index 8f2ea75a3e..e90ce4f826 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -1710,6 +1710,13 @@ public:
+       // (gof_rodeo_impl dereferences gof_jobs_span). No-op when the queue is empty.
+       wait_for_coop_gof();
+ 
++      // The K blocks this pass completed go to the VNNI layout now: run()
++      // joined its workers and the staging drained, so no reader is left
++      // (Note [K VNNI storage] in kv_cache.hpp). Blocks of a hardware-scored
++      // operation were never queued (Note [Row-major blocks under hardware
++      // attention] there).
++      convert_pending_k_blocks();
++
+       // Launch logit delivery
+       thread_pool& tp = app_pool();
+       for (size_t i = 0; i < logits_chunk_size; ++i)
+@@ -2740,10 +2747,17 @@ public:
+     // per (token, KV head) row. The attention workers' pending sections wait
+     // behind it. Two things shorten it:
+     //   1. Block save (k_vnni::store_block, page::set_k_block): a run of the
+-    //      pass's tokens that fills (part of) one 16-token block of a page is
++    //      pass's tokens that fills one whole 16-token block of a page is
+     //      transposed in registers. It is then written as whole 64-byte
+     //      lines, instead of one 4-byte scatter per (token, dimension pair, line).
+-    //      Chosen per run in store_k_block.
++    //      Chosen per run in store_k_block. A shorter run is stored row by
++    //      row into the block's row-major form (Note [Row-major tail block]
++    //      in k_vnni.hpp), also whole lines. A block completed that way is
++    //      queued after the join below and converted to the VNNI layout at
++    //      the forward end (convert_pending_k_blocks, Note [K VNNI storage]
++    //      in kv_cache.hpp), unless the hardware attention scores the
++    //      operation's K (Note [Row-major blocks under hardware attention]
++    //      there: the block stays row-major).
+     //   2. Sharing with the main helpers: in generated plugins the helpers
+     //      are idle while main runs save_k. Their next kernel waits for the
+     //      attention output. So the generated run_main_help calls
+@@ -2790,8 +2804,33 @@ public:
+ 
+     static constexpr size_t K_STORE_BLOCK_16 = k_vnni::BLOCK_TOKENS_16;
+     static_assert(K_STORE_BLOCK_16 == 16, "the constant's name states its value");
+-    // A run of this length is stored row by row (set_k_row), not as a block.
+-    static constexpr size_t K_SCATTER_RUN_LEN_1 = 1;
++
++    // Note [K VNNI storage]: the 16-token blocks that this forward pass
++    // completed through runs shorter than a block, for the operations the
++    // hardware attention does not score (Note [Row-major blocks under
++    // hardware attention] in kv_cache.hpp). save_k queues them (main
++    // thread) and convert_pending_k_blocks converts them at the forward end,
++    // after wait_for_coop_gof: the cooperative GOF staging gather of an
++    // earlier minibatch is the reader that can still hold the block's rows
++    // row-major. The storage reference is taken at the save, so a storage
++    // view change cannot redirect the conversion.
++    struct pending_k_block {
++      page* pg;
++      typename page::k_storage_ref storage;
++      uint32_t block;
++    };
++    std::vector<pending_k_block> pending_k_blocks_;
++
++    // Convert the queued blocks (Note [K VNNI storage]). Main thread, after
++    // the plugin's run() returned and the cooperative GOF staging drained.
++    void convert_pending_k_blocks() noexcept {
++      if (pending_k_blocks_.empty()) return;
++      TRACE_EVENT("model", "convert_k_blocks", "blocks", pending_k_blocks_.size());
++      for (pending_k_block const& b : pending_k_blocks_) {
++        b.pg->k_block_to_vnni_at(b.storage.offset, b.storage.state_ix, b.block);
++      }
++      pending_k_blocks_.clear();
++    }
+     // The join watchdog of Note [Shared block save]: main reads the clock once
+     // every K_JOIN_CLOCK_SPINS_1048576 pause loops. It aborts
+     // K_JOIN_TIMEOUT_S_120 seconds after the first clock read.
+@@ -2846,11 +2885,11 @@ public:
+ 
+     // Store the K rows (every KV head) of the tokens items[task_begin,
+     // task_end) of q_batch into slot `slot`. VNNI slots: consecutive items
+-    // that fall into the same 16-token block of the same page are stored as
+-    // one block (set_k_block). A run of one token is stored with set_k_row
+-    // (scatter). Row-major slots: the per-token row store of
+-    // before. Marks and credits are not touched here. save_k_impl does them
+-    // after every store is done.
++    // that fill one whole 16-token block of one page are stored as one VNNI
++    // block (set_k_block). A shorter run is stored row by row (set_k_row)
++    // into the block's row-major form. Row-major slots: the per-token row
++    // store of before. Marks, saved-row bits of partial runs and credits are
++    // not touched here. save_k_impl does them after every store is done.
+     template <attention_geometry geometry, typename kv_buffer_t>
+     void store_k_block(batch* q_batch,
+         kv_slot_id slot,
+@@ -2911,7 +2950,10 @@ public:
+             present |= bit;
+             ++n;
+           }
+-          if (n == K_SCATTER_RUN_LEN_1) {
++          if (n < K_STORE_BLOCK_16) {
++            // An incomplete block: row-major rows (Note [Row-major tail block]
++            // in k_vnni.hpp), or the VNNI column when the block is complete
++            // already (a row saved again). set_k_row decides.
+             for (size_t i = 0; i < n; ++i) {
+               const size_t j = c * K_STORE_BLOCK_16 + run_t[i];
+               for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+@@ -2926,6 +2968,9 @@ public:
+               }
+             }
+           } else {
++            // The whole block: the VNNI block save, then its 16 saved-row bits.
++            TRON_ASSERT(present == k_vnni::FULL_BLOCK_0XFFFF,
++                "store_k_block: a run of 16 tokens must cover its block");
+             for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+               const bf16* rows[K_STORE_BLOCK_16] = {};
+               for (size_t i = 0; i < n; ++i) {
+@@ -2938,8 +2983,9 @@ public:
+                   rows[run_t[i]] = conv[i];
+                 }
+               }
+-              pg.template set_k_block<geometry.kv>(slot, kv_head, c, present, rows);
++              pg.template set_k_block<geometry.kv>(slot, kv_head, c, rows);
+             }
++            pg.note_k_block_saved(slot, c);
+           }
+         }
+       }
+@@ -3039,6 +3085,26 @@ public:
+       } else {
+         store_k_block<geometry>(q_batch, slot, ks, 0, n_items);
+       }
++      if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
++        // Note [K VNNI storage]: record this pass's rows. A block whose 16th
++        // row this pass saved is queued for the conversion at the forward end.
++        // Not when the hardware attention scores this operation's K: then no
++        // row is recorded and the block stays row-major (Note [Row-major
++        // blocks under hardware attention] in kv_cache.hpp).
++        if (!cached_operation_uses_hw(binding.operation)) {
++          for (token_job_id ix : q_batch->items) {
++            auto const& self = *this;
++            if (!self.token_jobs_do_kv[ix]) continue;
++            const token_id tok_ix = token_jobs[ix];
++            page& pg = page_of(tok_ix);
++            const size_t j = static_cast<size_t>(pg.offset_in_page(tok_ix));
++            if (pg.template note_k_row_saved<geometry.kv>(slot, j)) {
++              pending_k_blocks_.push_back({&pg, pg.k_storage_of(slot),
++                  static_cast<uint32_t>(j / K_STORE_BLOCK_16)});
++            }
++          }
++        }
++      }
+       for (token_job_id ix : q_batch->items) {
+         auto const& self = *this;
+         if (!self.token_jobs_do_kv[ix]) continue;
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index e194355819..590d88ed16 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -1545,9 +1545,28 @@ struct self_attention {
+       // Note [AMX attention dispatch].
+       if constexpr (amx_attn_h128g4::eligible<typename model::activation_scalar>(
+                         operation_head_size, operation_kv_mul)) {
++        // A VNNI slot adds a third gate: every 16-token block of the page
++        // must hold the VNNI layout (Note [K VNNI storage] item 2). A page
++        // whose last block this forward pass completed through a run shorter
++        // than a block waits for the forward end; it takes the software loop
++        // until then. So does a page filled by another writer than save_k,
++        // and a page with a block that stays row-major because the hardware
++        // attention scores the operation (Note [Row-major blocks under
++        // hardware attention] in kv_cache.hpp).
++        // Read after the dense predicate: a page nothing is relevant for is
++        // never asked for its state (a book may have no active KV slot).
++        const auto k_layout_dense = [&] {
++          if constexpr (k_vnni::layout_on<operation_head_size>) {
++            return page.template k_vnni_blocks<geometry.kv>(slot) ==
++                   k_vnni::ALL_BLOCKS_0XF;
++          } else {
++            return true;
++          }
++        };
+         if (amx_q_packed != nullptr &&
+             is_dense_amx_page(page, begin, end, query_visible, *range_hint, q_position,
+-                k_position, sliding_window_size)) {
++                k_position, sliding_window_size) &&
++            k_layout_dense()) {
+           apply_dense_amx_page<geometry>(
+               was_valid, page, slot, operation_scale, kv_head, sp, amx_q_packed);
+           // The hint is returned unchanged: is_dense_amx_page proved that the
+@@ -1568,9 +1587,11 @@ struct self_attention {
+         // The slot's K layout (Note [K VNNI storage] in kv_cache.hpp) decides
+         // how the relevant tokens are scored. The row-major layout scores one
+         // token at a time with the dotters below. The VNNI layout records the
+-        // relevant tokens in `live`. It scores them in one AVX-512 (Advanced
+-        // Vector Extensions, 512-bit vectors) pass over the plane after the loop
+-        // (k_vnni::qk_group).
++        // relevant tokens of its VNNI blocks in `live` and scores them in one
++        // AVX-512 (Advanced Vector Extensions, 512-bit vectors) pass over the
++        // plane after the loop (k_vnni::qk_group). The tokens of a row-major
++        // tail block (Note [Row-major tail block] in k_vnni.hpp) are scored
++        // with the dotters, through k_vnni::row_ptr.
+         constexpr bool k_vnni_on = k_vnni::layout_on<operation_head_size>;
+         // `dotter` binds to a view at construction and has no default
+         // constructor, so we can't declare a std::array<dotter,...> and fill
+@@ -1578,22 +1599,23 @@ struct self_attention {
+         // array initializer instead. Worth the syntax because `kv_mul` is a
+         // compile-time constant and this is the per-page hot path, so we
+         // avoid the heap allocation a std::vector<dotter> would incur.
+-        [[maybe_unused]] auto dot_q = [&] {
+-          if constexpr (k_vnni_on) {
+-            // No dotters. The VNNI reader takes q directly.
+-            return 0;
+-          } else {
+-            return [&]<size_t... I>(std::index_sequence<I...>) {
++        std::array<dotter<scalar_t, operation_head_size>, operation_kv_mul> dot_q =
++            [&]<size_t... I>(std::index_sequence<I...>) {
+               return std::array{
+                   dotter<scalar_t, operation_head_size>(slice<operation_head_size>()(
+                       q, (kv_head * operation_kv_mul + I) * operation_head_size))...};
+             }(std::make_index_sequence<operation_kv_mul>{});
+-          }
+-        }();
+         [[maybe_unused]] uint64_t live = 0;
++        // The VNNI slot: the blocks of the page that hold the VNNI layout, and
++        // the plane whose row-major tail rows the dotters read. Both are
++        // fetched at the first relevant token, like the row view below: a
++        // page nothing is relevant for is never asked (a book may have no
++        // active KV slot).
++        [[maybe_unused]] uint8_t vnni_blocks = 0;
++        [[maybe_unused]] const bf16* plane = nullptr;
+         // The row-major loop reads K through one checked page view, fetched on
+-        // the first relevant token. A VNNI slot has no row view (its plane is
+-        // read after the loop), so `keys` is a placeholder there, like dot_q.
++        // the first relevant token. A VNNI slot has no row view, so `keys` is
++        // a placeholder there.
+         [[maybe_unused]] auto keys = [&] {
+           if constexpr (k_vnni_on) {
+             return 0;  // no row view: the VNNI plane has no contiguous rows
+@@ -1620,7 +1642,21 @@ struct self_attention {
+           }
+           relevant_k_tokens++;
+           if constexpr (k_vnni_on) {
+-            live |= uint64_t{1} << i;
++            if (plane == nullptr) {
++              vnni_blocks = page.template k_vnni_blocks<geometry.kv>(slot);
++              plane = page.template k_vnni_plane<geometry.kv>(slot, kv_head);
++            }
++            if ((vnni_blocks >> (i / k_vnni::BLOCK_TOKENS_16)) & 1u) {
++              live |= uint64_t{1} << i;
++            } else {
++              // A row of the row-major tail block: 4 whole lines, the
++              // row-major dotter.
++              const const_view<bf16, true, false, seq<operation_head_size>, sseq<1>> k{
++                  k_vnni::row_ptr(plane, i)};
++              for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
++                s_pages[offset][i] = dot_q[offset](k);
++              }
++            }
+           } else {
+             if (!keys.valid()) keys = page.template k<geometry.kv>(slot, kv_head);
+             const auto k = keys[i];
+@@ -1632,9 +1668,8 @@ struct self_attention {
+         if constexpr (k_vnni_on) {
+           static_assert(page::page_size == k_vnni::PAGE_TOKENS_64,
+               "the live mask is one bit per token");
+-          if (relevant_k_tokens > 0) {
+-            k_vnni::qk_group<operation_kv_mul>(
+-                page.template k_vnni_plane<geometry.kv>(slot, kv_head),
++          if (live != 0) {
++            k_vnni::qk_group<operation_kv_mul>(plane,
+                 q.data + kv_head * operation_kv_mul * operation_head_size, live,
+                 &s_pages[0][0], page::page_size);
+           }
+diff --git a/h/tron/scheduler/full.hpp b/h/tron/scheduler/full.hpp
+index 415230b59b..2966535a0f 100644
+--- a/h/tron/scheduler/full.hpp
++++ b/h/tron/scheduler/full.hpp
+@@ -2649,9 +2649,16 @@ struct full_scheduler : scheduler {
+                         // K is stored as the VNNI plane (VNNI: Vector Neural Network
+                         // Instructions). VNNI dot-product operands use this
+                         // pair-interleaved layout. Note [K VNNI storage] in
+-                        // kv_cache.hpp describes the layout. Gather the token's row
++                        // kv_cache.hpp describes the layout. A row of a row-major
++                        // block (the usual case under hardware attention, Note
++                        // [Row-major blocks under hardware attention] there) is
++                        // read in place; a row of a converted block is gathered
+                         // into the caller's scratch buffer (dest). The V callback
+-                        // below does the same.
++                        // below always copies.
++                        if (bf16* row = pg_ptr->template k_row_if_row_major<hw_kv>(
++                                slot, kv_head, off)) {
++                          return row;
++                        }
+                         pg_ptr->template get_k_row<hw_kv>(slot, kv_head, off, dest);
+                         return dest;
+                       } else {
+diff --git a/t/t_amx_dispatch_dtype.cpp b/t/t_amx_dispatch_dtype.cpp
+index 873d867d70..a9d126a68c 100644
+--- a/t/t_amx_dispatch_dtype.cpp
++++ b/t/t_amx_dispatch_dtype.cpp
+@@ -41,6 +41,7 @@
+ #include "common/numerics.hpp"
+ #include "common/types.hpp"
+ #include "tron/kernels/amx_attn_iface.hpp"
++#include "tron/kernels/k_vnni.hpp"
+ #include "tron/models/common.hpp"
+ #include "tron/models/model.hpp"
+ #include "tron/models/ranged_mask.hpp"
+@@ -62,9 +63,12 @@ amx_probe probe;
+ 
+ // Runs apply_page_range over one page holding `n_tokens` tokens, with the
+ // query at the last token, and records the fakes' calls in `probe`. With
+-// `repeat` the call is made a second time with different query values.
++// `repeat` the call is made a second time with different query values. With
++// `record_rows` the stored rows are recorded like save_k records them, so the
++// page's blocks hold the VNNI layout under TRON_K_VNNI; without it a full page
++// keeps row-major blocks and the dense gate must refuse the AMX path.
+ template <typename executor_t>
+-void exercise_page(size_t n_tokens, bool repeat = false) {
++void exercise_page(size_t n_tokens, bool repeat = false, bool record_rows = true) {
+   constexpr size_t head_size = 128;
+   constexpr size_t n_heads = 4;
+   constexpr size_t n_kv_heads = 1;
+@@ -99,6 +103,13 @@ void exercise_page(size_t n_tokens, bool repeat = false) {
+   alignas(64) std::array<bf16, head_size> zero{};
+   for (size_t token = 0; token < n_tokens; ++token) {
+     page->set_k_row(slot, 0, token, zero.data());
++    // What save_k and the forward end do after a row store: record the row,
++    // and convert the block to the VNNI layout when it is complete (Note [K
++    // VNNI storage]). The dense AMX path runs only for a page whose 4 blocks
++    // are VNNI.
++    if (record_rows && page->note_k_row_saved(slot, token)) {
++      page->k_block_to_vnni(slot, token / k_vnni::BLOCK_TOKENS_16);
++    }
+     page->template set_v<geometry.kv>(slot, 0, token, zero.data());
+     cache.increment_tokens_used();
+   }
+@@ -138,8 +149,10 @@ void exercise_page(size_t n_tokens, bool repeat = false) {
+   // bf16 query buffer may reach the packer, which copies bf16 values and
+   // converts nothing.
+   constexpr bool packs = std::is_same_v<query_scalar, bf16>;
+-  // The dense predicate: the kernels run only for a full page.
+-  const bool dense = packs && n_tokens == book_t::page_size;
++  // The dense predicate: the kernels run only for a full page whose blocks
++  // hold the VNNI layout (a VNNI slot with unrecorded rows keeps them row-major).
++  const bool dense = packs && n_tokens == book_t::page_size &&
++                     (record_rows || !k_vnni::layout_on<head_size>);
+   for (int round = 0; round < (repeat ? 2 : 1); ++round) {
+     if (round == 1) {
+       // Different query values: the second call must pack again and see them.
+@@ -215,6 +228,10 @@ TEST_CASE("AMX dispatch rejects non-bf16 queries and partial pages",
+   SECTION("host_bf16, partial page: one pack, no kernel call") {
+     exercise_page<host_bf16>(page_size - 1);
+   }
++  SECTION("host_bf16, full page with unrecorded rows: one pack, and under "
++          "TRON_K_VNNI no kernel call (the blocks are row-major)") {
++    exercise_page<host_bf16>(page_size, /*repeat=*/false, /*record_rows=*/false);
++  }
+   SECTION("host (float): no pack, no kernel call") {
+     exercise_page<host>(page_size);
+   }
+diff --git a/t/t_k_vnni_layout.cpp b/t/t_k_vnni_layout.cpp
+index f0a88540bc..9ab1006134 100644
+--- a/t/t_k_vnni_layout.cpp
++++ b/t/t_k_vnni_layout.cpp
+@@ -1,9 +1,12 @@
+ // This file tests the VNNI (Vector Neural Network Instructions) K storage layout
+ // (Note [K VNNI storage] in kv_cache.hpp). The index map matches hand-computed
+-// anchors. The per-token store / load primitives are exact. The AVX-512 (the
++// anchors. The per-token store / load primitives are exact. The in-place
++// conversion of a 16-token block between its row-major and its VNNI form
++// (Note [Row-major tail block] in k_vnni.hpp) is exact. The AVX-512 (the
+ // 512-bit Advanced Vector Extensions) reader of that layout does not differ
+ // from the row-major dotter. The layout-agnostic page accessors and page copies
+-// move tokens correctly.
++// move tokens correctly, and the page's per-block layout state follows the
++// saved rows.
+ // No AMX (Advanced Matrix Extensions, the tile instruction set) instruction runs
+ // here. So every case runs on every host. The cases that need a VNNI slot (the
+ // book-level ones under TRON_K_VNNI) exercise the row-major layout in the other
+@@ -234,6 +237,78 @@ TEST_CASE("VNNI K block save equals the per-token scatter, bit for bit",
+     }
+   }
+ }
++TEST_CASE("row-major tail block converts to the VNNI layout and back, bit for bit",
++    "[kv_data][k_vnni]") {
++  // Note [Row-major tail block] in k_vnni.hpp: before its 16th row is saved a
++  // block holds contiguous 256-byte rows at row_ptr, inside its own 4 panels.
++  // block_to_vnni must produce the same bytes as scatter_row per token, touch no
++  // other block, and block_to_rows must invert it.
++  constexpr uint32_t SEED_23 = 23;
++  constexpr size_t ROW_BYTES_256 = HEAD_SIZE_128 * sizeof(tron::bf16);
++  constexpr size_t PANEL_BYTES_1024 = tron::k_vnni::PANEL_BYTES_1024;
++  static_assert(ROW_BYTES_256 == 256, "the constant's name states its value");
++  auto ref = std::make_unique<plane_and_rows>();
++  auto blk = std::make_unique<plane_and_rows>();
++  std::mt19937 gen(SEED_23);
++  std::uniform_int_distribution<uint16_t> bits(0, BITS_MAX_0XFFFF);
++  for (auto& x : ref->rows) {
++    x = tron::bf16::from_bits(bits(gen));
++  }
++  SECTION("row_ptr rows are distinct, 64-byte aligned, and inside the block's panels") {
++    for (size_t tok = 0; tok < PAGE_TOKENS_64; ++tok) {
++      const size_t c = tok / BLOCK_TOKENS_16;
++      const char* base = reinterpret_cast<const char*>(blk->plane);
++      const char* row = reinterpret_cast<const char*>(
++          tron::k_vnni::row_ptr(static_cast<const tron::bf16*>(blk->plane), tok));
++      const size_t off = static_cast<size_t>(row - base);
++      CAPTURE(tok, off);
++      REQUIRE(off % tron::k_vnni::LINE_BYTES_64 == 0);
++      // Inside panel (s, c) for some dimension step s: those are the block's bytes.
++      const size_t panel = off / PANEL_BYTES_1024;
++      REQUIRE(panel % TOKEN_BLOCKS_4 == c);
++      REQUIRE(off + ROW_BYTES_256 <= (panel + 1) * PANEL_BYTES_1024);
++      for (size_t other = 0; other < tok; ++other) {
++        const char* orow = reinterpret_cast<const char*>(
++            tron::k_vnni::row_ptr(static_cast<const tron::bf16*>(blk->plane), other));
++        REQUIRE(static_cast<size_t>(std::abs(orow - row)) >= ROW_BYTES_256);
++      }
++    }
++  }
++  SECTION("block_to_vnni equals scatter_row per token and touches no other block") {
++    for (size_t c = 0; c < TOKEN_BLOCKS_4; ++c) {
++      for (auto& x : ref->plane) {
++        x = tron::bf16::from_bits(POISON_0XA5A5);
++      }
++      std::memcpy(blk->plane, ref->plane, sizeof(ref->plane));
++      for (size_t t = 0; t < BLOCK_TOKENS_16; ++t) {
++        const size_t tok = c * BLOCK_TOKENS_16 + t;
++        tron::k_vnni::scatter_row(ref->plane, tok, ref->rows + tok * HEAD_SIZE_128);
++        std::memcpy(tron::k_vnni::row_ptr(blk->plane, tok),
++            ref->rows + tok * HEAD_SIZE_128, ROW_BYTES_256);
++      }
++      tron::k_vnni::block_to_vnni(blk->plane, c);
++      CAPTURE(c);
++      REQUIRE(std::memcmp(blk->plane, ref->plane, sizeof(ref->plane)) == 0);
++      tron::k_vnni::block_to_rows(blk->plane, c);
++      for (size_t t = 0; t < BLOCK_TOKENS_16; ++t) {
++        const size_t tok = c * BLOCK_TOKENS_16 + t;
++        CAPTURE(tok);
++        REQUIRE(std::memcmp(tron::k_vnni::row_ptr(blk->plane, tok),
++                    ref->rows + tok * HEAD_SIZE_128, ROW_BYTES_256) == 0);
++      }
++      // The other blocks' bytes are still poison after both conversions.
++      for (size_t tok = 0; tok < PAGE_TOKENS_64; ++tok) {
++        if (tok / BLOCK_TOKENS_16 == c) continue;
++        alignas(64) tron::bf16 row[HEAD_SIZE_128];
++        tron::k_vnni::gather_row(blk->plane, tok, row);
++        for (size_t d = 0; d < HEAD_SIZE_128; ++d) {
++          REQUIRE(row[d].to_bits() == POISON_0XA5A5);
++        }
++      }
++    }
++  }
++}
++
+ TEST_CASE(
+     "VNNI K reader does not digress from the row-major dotter", "[kv_data][k_vnni]") {
+   // Same numerics contract as the AMX kernels (Note [AMX attention dispatch]).
+@@ -463,6 +538,403 @@ TEST_CASE(
+   }
+ }
+ 
++namespace {
++
++[[maybe_unused]] constexpr tron::kv_geometry GEOMETRY_1X128{
++    N_KV_HEADS_1, HEAD_SIZE_128};
++// No block of the page holds the VNNI layout.
++constexpr uint8_t NO_BLOCK_0X0 = 0x0;
++// A second slot for the multi-slot case below.
++constexpr size_t N_SLOTS_2 = 2;
++using book2_t = tron::uniform_kv_cache<N_SLOTS_2, GEOMETRY_1X128, 0>;
++using page2_t = book2_t::page_t;
++constexpr tron::kv_slot_id SLOT_1(1);
++
++// What save_k plus the forward end do per row (Note [K VNNI storage]): record
++// the row; when it completes its 16-token block, convert the block to the VNNI
++// layout. Returns whether the block was completed by this row (always false in
++// the row-major build: a row-major slot keeps no bits).
++template <typename P>
++bool save_row_state(P* page, tron::kv_slot_id slot, size_t tok) {
++  const bool completed = page->note_k_row_saved(slot, tok);
++  if (completed) page->k_block_to_vnni(slot, tok / BLOCK_TOKENS_16);
++  return completed;
++}
++
++// The page's VNNI blocks; 0 in the row-major build (no block is ever VNNI).
++template <typename P>
++uint8_t vnni_blocks(const P* page, tron::kv_slot_id slot) {
++#ifdef TRON_K_VNNI
++  return page->template k_vnni_blocks<GEOMETRY_1X128>(slot);
++#else
++  (void)page;
++  (void)slot;
++  return NO_BLOCK_0X0;
++#endif
++}
++
++}  // namespace
++
++TEST_CASE("page K blocks turn VNNI at the 16th saved row and back when a row is "
++          "forgotten",
++    "[kv_data][k_vnni]") {
++  // Note [K VNNI storage]: a block holds the VNNI layout exactly when its 16
++  // rows are saved. Every row stays readable through get_k_row across the
++  // transitions, and the raw plane holds the documented bytes on both sides.
++  constexpr size_t SALT_5 = 5;
++  constexpr size_t SAVED_TOKENS_21 = 21;  // block 0 complete, block 1 with 5 rows
++  constexpr size_t LAST_OF_BLOCK_0_15 = 15;
++  constexpr size_t FORGOTTEN_TOKEN_3 = 3;
++  constexpr size_t FORGOTTEN_TOKEN_18 = 18;  // a row of the row-major block 1
++  constexpr size_t FORGOTTEN_TOKEN_16 = 16;  // the first row of block 1
++  constexpr size_t LAST_OF_BLOCK_1_31 = 31;
++  constexpr size_t SAVED_TOKENS_32 = 32;
++  constexpr uint8_t BLOCK_0_ONLY_0X1 = 0x1;
++  constexpr uint8_t BLOCKS_0_AND_1_0X3 = 0x3;
++  static_assert(SAVED_TOKENS_21 == 21 && LAST_OF_BLOCK_0_15 == 15,
++      "every constant's name states its value");
++  const bool vnni_build = tron::k_vnni::layout_on<HEAD_SIZE_128>;
++  alignas(64) std::array<tron::bf16, HEAD_SIZE_128> row{}, got{};
++  book_t cache(/*n_pages=*/N_PAGES_1);
++  cache.increment_tokens_used(PAGE_TOKENS_64);
++  page_t* page = cache.page_of(0);
++  auto check_rows = [&](size_t n, size_t skip) {
++    for (size_t tok = 0; tok < n; ++tok) {
++      if (tok == skip) continue;
++      fill_row(row, tok, SALT_5);
++      page->get_k_row(SLOT_0, 0, tok, got.data());
++      CAPTURE(tok);
++      REQUIRE(same_bits(got, row));
++    }
++  };
++  for (size_t tok = 0; tok < SAVED_TOKENS_21; ++tok) {
++    fill_row(row, tok, SALT_5);
++    page->set_k_row(SLOT_0, 0, tok, row.data());
++    CAPTURE(tok);
++    REQUIRE(
++        save_row_state(page, SLOT_0, tok) == (vnni_build && tok == LAST_OF_BLOCK_0_15));
++    REQUIRE(
++        vnni_blocks(page, SLOT_0) ==
++        (vnni_build && tok >= LAST_OF_BLOCK_0_15 ? BLOCK_0_ONLY_0X1 : NO_BLOCK_0X0));
++    check_rows(tok + 1, PAGE_TOKENS_64);
++  }
++#ifdef TRON_K_VNNI
++  {
++    // The raw plane: block 0 as scatter_row would write it, block 1's rows at row_ptr.
++    auto ref = std::make_unique<plane_and_rows>();
++    const tron::bf16* plane = page->template k_vnni_plane<GEOMETRY_1X128>(SLOT_0, 0);
++    std::memcpy(ref->plane, plane, sizeof(ref->plane));
++    for (size_t tok = 0; tok < SAVED_TOKENS_21; ++tok) {
++      fill_row(row, tok, SALT_5);
++      if (tok < BLOCK_TOKENS_16) {
++        tron::k_vnni::scatter_row(ref->plane, tok, row.data());
++      } else {
++        std::memcpy(tron::k_vnni::row_ptr(ref->plane, tok), row.data(), sizeof(row));
++      }
++    }
++    REQUIRE(std::memcmp(ref->plane, plane, sizeof(ref->plane)) == 0);
++  }
++#endif
++  // A new token takes offset 3: the rows at and above 3 are forgotten, the
++  // block goes back to row-major, and rows 0..2 stay readable.
++  page->clear_kv_complete_at(FORGOTTEN_TOKEN_3);
++  REQUIRE(vnni_blocks(page, SLOT_0) == NO_BLOCK_0X0);
++  check_rows(FORGOTTEN_TOKEN_3, PAGE_TOKENS_64);
++  // Saving rows 3..20 again completes block 0 at row 15 again.
++  for (size_t tok = FORGOTTEN_TOKEN_3; tok < SAVED_TOKENS_21; ++tok) {
++    fill_row(row, tok, SALT_5);
++    page->set_k_row(SLOT_0, 0, tok, row.data());
++    CAPTURE(tok);
++    REQUIRE(
++        save_row_state(page, SLOT_0, tok) == (vnni_build && tok == LAST_OF_BLOCK_0_15));
++  }
++  REQUIRE(vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCK_0_ONLY_0X1 : NO_BLOCK_0X0));
++  check_rows(SAVED_TOKENS_21, PAGE_TOKENS_64);
++  // A row saved again into a converted block keeps the block VNNI.
++  fill_row(row, LAST_OF_BLOCK_0_15, SALT_5);
++  page->set_k_row(SLOT_0, 0, LAST_OF_BLOCK_0_15, row.data());
++  REQUIRE_FALSE(save_row_state(page, SLOT_0, LAST_OF_BLOCK_0_15));
++  REQUIRE(vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCK_0_ONLY_0X1 : NO_BLOCK_0X0));
++  check_rows(SAVED_TOKENS_21, PAGE_TOKENS_64);
++  // A new token takes offset 18, a row of the row-major block 1: block 0 stays
++  // VNNI, rows 0..17 stay readable, and block 1 completes only once rows
++  // 18..31 are saved.
++  page->clear_kv_complete_at(FORGOTTEN_TOKEN_18);
++  REQUIRE(vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCK_0_ONLY_0X1 : NO_BLOCK_0X0));
++  check_rows(FORGOTTEN_TOKEN_18, PAGE_TOKENS_64);
++  for (size_t tok = FORGOTTEN_TOKEN_18; tok < SAVED_TOKENS_32; ++tok) {
++    fill_row(row, tok, SALT_5);
++    page->set_k_row(SLOT_0, 0, tok, row.data());
++    CAPTURE(tok);
++    REQUIRE(
++        save_row_state(page, SLOT_0, tok) == (vnni_build && tok == LAST_OF_BLOCK_1_31));
++  }
++  REQUIRE(
++      vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCKS_0_AND_1_0X3 : NO_BLOCK_0X0));
++  check_rows(SAVED_TOKENS_32, PAGE_TOKENS_64);
++  // A new token takes offset 16, the first row of the converted block 1: no
++  // row of that block survives, so only its bits drop; block 0 stays VNNI.
++  page->clear_kv_complete_at(FORGOTTEN_TOKEN_16);
++  REQUIRE(vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCK_0_ONLY_0X1 : NO_BLOCK_0X0));
++  check_rows(FORGOTTEN_TOKEN_16, PAGE_TOKENS_64);
++  // Rows 16..31 again (blocks 0 and 1 converted), then a new token at offset
++  // 3: block 0 goes back to row-major for rows 0..2, block 1 above it only
++  // drops its bits and its bytes stay as they are.
++  for (size_t tok = FORGOTTEN_TOKEN_16; tok < SAVED_TOKENS_32; ++tok) {
++    fill_row(row, tok, SALT_5);
++    page->set_k_row(SLOT_0, 0, tok, row.data());
++    save_row_state(page, SLOT_0, tok);
++  }
++  REQUIRE(
++      vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCKS_0_AND_1_0X3 : NO_BLOCK_0X0));
++#ifdef TRON_K_VNNI
++  auto snap = std::make_unique<plane_and_rows>();
++  std::memcpy(snap->plane, page->template k_vnni_plane<GEOMETRY_1X128>(SLOT_0, 0),
++      sizeof(snap->plane));
++#endif
++  page->clear_kv_complete_at(FORGOTTEN_TOKEN_3);
++  REQUIRE(vnni_blocks(page, SLOT_0) == NO_BLOCK_0X0);
++  check_rows(FORGOTTEN_TOKEN_3, PAGE_TOKENS_64);
++#ifdef TRON_K_VNNI
++  {
++    // Block 1's 4 panels (s, 1) are byte-identical to the snapshot.
++    const tron::bf16* plane = page->template k_vnni_plane<GEOMETRY_1X128>(SLOT_0, 0);
++    constexpr size_t BLOCK_1 = 1;
++    for (size_t s = 0; s < tron::k_vnni::DIM_STEPS_4; ++s) {
++      const size_t panel =
++          (s * TOKEN_BLOCKS_4 + BLOCK_1) * tron::k_vnni::PANEL_ELEMS_512;
++      REQUIRE(std::memcmp(plane + panel, snap->plane + panel,
++                  tron::k_vnni::PANEL_BYTES_1024) == 0);
++    }
++  }
++#endif
++}
++
++TEST_CASE("the EAGLE storage view keeps its own K layout state", "[kv_data][k_vnni]") {
++  // Note [K VNNI storage]: while the EAGLE view is active, logical slot 0
++  // addresses the extra storage slot and the extra state entry. Rows recorded
++  // and converted under the view must not show up in the primary slot's
++  // state, and each view reads its own rows.
++  constexpr size_t PRIMARY_SALT_9 = 9;
++  constexpr size_t EAGLE_SALT_10 = 10;
++  constexpr size_t FORGOTTEN_TOKEN_5 = 5;
++  constexpr uint8_t BLOCK_0_ONLY_0X1 = 0x1;
++  const bool vnni_build = tron::k_vnni::layout_on<HEAD_SIZE_128>;
++  alignas(64) std::array<tron::bf16, HEAD_SIZE_128> row{}, got{};
++  // An EAGLE-capable book carries x storage (the hidden state per token, 16
++  // bytes here); the layout book without it cannot allocate the EAGLE slot.
++  constexpr size_t X_BYTES_16 = 16;
++  using eagle_book_t = tron::uniform_kv_cache<N_SLOTS_1, GEOMETRY_1X128, X_BYTES_16>;
++  constexpr size_t STORAGE_SLOTS_2 =
++      eagle_book_t::storage_slot_count_for_layers(/*max_model_layers=*/N_SLOTS_1, true);
++  static_assert(STORAGE_SLOTS_2 == 2, "one logical slot plus the EAGLE storage");
++  eagle_book_t cache(/*n_pages=*/N_PAGES_1, STORAGE_SLOTS_2, /*support_eagle=*/true);
++  cache.increment_tokens_used(PAGE_TOKENS_64);
++  eagle_book_t::page_t* page = cache.page_of(0);
++  // Primary view: 16 rows saved and converted.
++  for (size_t tok = 0; tok < BLOCK_TOKENS_16; ++tok) {
++    fill_row(row, tok, PRIMARY_SALT_9);
++    page->set_k_row(SLOT_0, 0, tok, row.data());
++    save_row_state(page, SLOT_0, tok);
++  }
++  REQUIRE(vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCK_0_ONLY_0X1 : NO_BLOCK_0X0));
++  // EAGLE view: its own 16 rows, converted separately.
++  cache.set_storage_view(cache.eagle_storage_offset());
++  REQUIRE(vnni_blocks(page, SLOT_0) == NO_BLOCK_0X0);
++  for (size_t tok = 0; tok < BLOCK_TOKENS_16; ++tok) {
++    fill_row(row, tok, EAGLE_SALT_10);
++    page->set_k_row(SLOT_0, 0, tok, row.data());
++    CAPTURE(tok);
++    REQUIRE(save_row_state(page, SLOT_0, tok) ==
++            (vnni_build && tok == BLOCK_TOKENS_16 - 1));
++  }
++  REQUIRE(vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCK_0_ONLY_0X1 : NO_BLOCK_0X0));
++  for (size_t tok = 0; tok < BLOCK_TOKENS_16; ++tok) {
++    fill_row(row, tok, EAGLE_SALT_10);
++    page->get_k_row(SLOT_0, 0, tok, got.data());
++    CAPTURE(tok);
++    REQUIRE(same_bits(got, row));
++  }
++  // Back to the primary view: its state and rows are untouched.
++  cache.reset_storage_view();
++  REQUIRE(vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCK_0_ONLY_0X1 : NO_BLOCK_0X0));
++  for (size_t tok = 0; tok < BLOCK_TOKENS_16; ++tok) {
++    fill_row(row, tok, PRIMARY_SALT_9);
++    page->get_k_row(SLOT_0, 0, tok, got.data());
++    CAPTURE(tok);
++    REQUIRE(same_bits(got, row));
++  }
++  // A new token at offset 5 forgets rows 5.. in both storages; rows 0..4 of
++  // both stay readable (each storage converted back on its own).
++  page->clear_kv_complete_at(FORGOTTEN_TOKEN_5);
++  REQUIRE(vnni_blocks(page, SLOT_0) == NO_BLOCK_0X0);
++  for (size_t tok = 0; tok < FORGOTTEN_TOKEN_5; ++tok) {
++    fill_row(row, tok, PRIMARY_SALT_9);
++    page->get_k_row(SLOT_0, 0, tok, got.data());
++    CAPTURE(tok);
++    REQUIRE(same_bits(got, row));
++  }
++  cache.set_storage_view(cache.eagle_storage_offset());
++  REQUIRE(vnni_blocks(page, SLOT_0) == NO_BLOCK_0X0);
++  for (size_t tok = 0; tok < FORGOTTEN_TOKEN_5; ++tok) {
++    fill_row(row, tok, EAGLE_SALT_10);
++    page->get_k_row(SLOT_0, 0, tok, got.data());
++    CAPTURE(tok);
++    REQUIRE(same_bits(got, row));
++  }
++  cache.reset_storage_view();
++}
++
++TEST_CASE("forgetting a row acts on every slot's own block", "[kv_data][k_vnni]") {
++  // Note [K VNNI storage]: clear_kv_complete_at drops the bits of the offset
++  // in every storage slot and converts back only the slots whose block was
++  // converted. Two slots, converted in one of them only.
++  constexpr size_t SALT_8 = 8;
++  constexpr size_t FORGOTTEN_TOKEN_3 = 3;
++  constexpr uint8_t BLOCK_0_ONLY_0X1 = 0x1;
++  const bool vnni_build = tron::k_vnni::layout_on<HEAD_SIZE_128>;
++  alignas(64) std::array<tron::bf16, HEAD_SIZE_128> row{}, got{};
++  book2_t cache(/*n_pages=*/N_PAGES_1);
++  cache.increment_tokens_used(PAGE_TOKENS_64);
++  page2_t* page = cache.page_of(0);
++  for (size_t tok = 0; tok < BLOCK_TOKENS_16; ++tok) {
++    fill_row(row, tok, SALT_8);
++    page->set_k_row(SLOT_0, 0, tok, row.data());
++    page->set_k_row(SLOT_1, 0, tok, row.data());
++    // Slot 1 records its rows (and converts at row 15); slot 0 does not.
++    save_row_state(page, SLOT_1, tok);
++  }
++  REQUIRE(vnni_blocks(page, SLOT_0) == NO_BLOCK_0X0);
++  REQUIRE(vnni_blocks(page, SLOT_1) == (vnni_build ? BLOCK_0_ONLY_0X1 : NO_BLOCK_0X0));
++  page->clear_kv_complete_at(FORGOTTEN_TOKEN_3);
++  REQUIRE(vnni_blocks(page, SLOT_0) == NO_BLOCK_0X0);
++  REQUIRE(vnni_blocks(page, SLOT_1) == NO_BLOCK_0X0);
++  for (size_t tok = 0; tok < BLOCK_TOKENS_16; ++tok) {
++    if (tok == FORGOTTEN_TOKEN_3) continue;  // forgotten in every slot
++    fill_row(row, tok, SALT_8);
++    CAPTURE(tok);
++    page->get_k_row(SLOT_0, 0, tok, got.data());
++    REQUIRE(same_bits(got, row));
++    if (tok < FORGOTTEN_TOKEN_3) {  // the rows slot 1 keeps
++      page->get_k_row(SLOT_1, 0, tok, got.data());
++      REQUIRE(same_bits(got, row));
++    }
++  }
++}
++
++TEST_CASE("page append carries the K layout state with the rows", "[kv_data][k_vnni]") {
++  // Note [K VNNI storage] item 5: the token-by-token copy moves rows between
++  // blocks of both layouts. Afterwards the destination's blocks are VNNI
++  // exactly where its 16 rows are saved.
++  constexpr size_t OLD_TOKENS_5 = 5;
++  constexpr size_t NEW_TOKENS_40 =
++      40;  // source: blocks 0 and 1 VNNI, block 2 with 8 rows
++  constexpr size_t OLD_SALT_6 = 6;
++  constexpr size_t NEW_SALT_7 = 7;
++  constexpr uint8_t BLOCKS_0_AND_1_0X3 = 0x3;
++  constexpr uint8_t ALL_BLOCKS_0XF = tron::k_vnni::ALL_BLOCKS_0XF;
++  constexpr size_t TOTAL_TOKENS_45 = OLD_TOKENS_5 + NEW_TOKENS_40;
++  static_assert(TOTAL_TOKENS_45 == 45, "blocks 0 and 1 complete, block 2 with 13 rows");
++  const bool vnni_build = tron::k_vnni::layout_on<HEAD_SIZE_128>;
++  alignas(64) std::array<tron::bf16, HEAD_SIZE_128> row{}, got{};
++  SECTION("token-by-token append into a partly filled page") {
++    book_t destination(/*n_pages=*/N_PAGES_1);
++    book_t source(/*n_pages=*/N_PAGES_1);
++    destination.increment_tokens_used(OLD_TOKENS_5);
++    source.increment_tokens_used(NEW_TOKENS_40);
++    for (size_t tok = 0; tok < OLD_TOKENS_5; ++tok) {
++      fill_row(row, tok, OLD_SALT_6);
++      destination.page_of(tok)->set_k_row(SLOT_0, 0, tok, row.data());
++      REQUIRE_FALSE(save_row_state(destination.page_of(tok), SLOT_0, tok));
++    }
++    for (size_t tok = 0; tok < NEW_TOKENS_40; ++tok) {
++      fill_row(row, tok, NEW_SALT_7);
++      source.page_of(tok)->set_k_row(SLOT_0, 0, tok, row.data());
++      save_row_state(source.page_of(tok), SLOT_0, tok);
++    }
++    REQUIRE(vnni_blocks(source.page_of(0), SLOT_0) ==
++            (vnni_build ? BLOCKS_0_AND_1_0X3 : NO_BLOCK_0X0));
++    destination.append(source);
++    REQUIRE(destination.size() == TOTAL_TOKENS_45);
++    REQUIRE(vnni_blocks(destination.page_of(0), SLOT_0) ==
++            (vnni_build ? BLOCKS_0_AND_1_0X3 : NO_BLOCK_0X0));
++    for (size_t tok = 0; tok < OLD_TOKENS_5; ++tok) {
++      fill_row(row, tok, OLD_SALT_6);
++      destination.page_of(tok)->get_k_row(SLOT_0, 0, tok, got.data());
++      CAPTURE(tok);
++      REQUIRE(same_bits(got, row));
++    }
++    for (size_t tok = 0; tok < NEW_TOKENS_40; ++tok) {
++      fill_row(row, tok, NEW_SALT_7);
++      destination.page_of(OLD_TOKENS_5 + tok)
++          ->get_k_row(SLOT_0, 0, OLD_TOKENS_5 + tok, got.data());
++      CAPTURE(tok);
++      REQUIRE(same_bits(got, row));
++    }
++  }
++  SECTION("append into a converted destination block converts it back and forth") {
++    // The destination page has 64 recorded rows (every block converted) but a
++    // size of 20; the source's 10 rows land at offsets 20..29 inside block 1.
++    // Block 1 must go back to row-major for the copy, keep rows 16..19 and
++    // 30..31, and come back as VNNI (its 16 rows are saved after the copy).
++    constexpr size_t DST_SIZE_20 = 20;
++    constexpr size_t SRC_TOKENS_10 = 10;
++    constexpr size_t COPIED_END_30 = DST_SIZE_20 + SRC_TOKENS_10;
++    static_assert(COPIED_END_30 == 30, "the constant's name states its value");
++    book_t destination(/*n_pages=*/N_PAGES_1);
++    book_t source(/*n_pages=*/N_PAGES_1);
++    destination.increment_tokens_used(DST_SIZE_20);
++    source.increment_tokens_used(SRC_TOKENS_10);
++    page_t* dst = destination.page_of(0);
++    for (size_t tok = 0; tok < PAGE_TOKENS_64; ++tok) {
++      fill_row(row, tok, OLD_SALT_6);
++      dst->set_k_row(SLOT_0, 0, tok, row.data());
++      save_row_state(dst, SLOT_0, tok);
++    }
++    REQUIRE(vnni_blocks(dst, SLOT_0) == (vnni_build ? ALL_BLOCKS_0XF : NO_BLOCK_0X0));
++    for (size_t tok = 0; tok < SRC_TOKENS_10; ++tok) {
++      fill_row(row, tok, NEW_SALT_7);
++      source.page_of(tok)->set_k_row(SLOT_0, 0, tok, row.data());
++      save_row_state(source.page_of(tok), SLOT_0, tok);
++    }
++    destination.append(source);
++    REQUIRE(destination.size() == COPIED_END_30);
++    REQUIRE(vnni_blocks(dst, SLOT_0) == (vnni_build ? ALL_BLOCKS_0XF : NO_BLOCK_0X0));
++    for (size_t tok = 0; tok < PAGE_TOKENS_64; ++tok) {
++      const bool copied = tok >= DST_SIZE_20 && tok < COPIED_END_30;
++      if (copied) {
++        fill_row(row, tok - DST_SIZE_20, NEW_SALT_7);
++      } else {
++        fill_row(row, tok, OLD_SALT_6);
++      }
++      dst->get_k_row(SLOT_0, 0, tok, got.data());
++      CAPTURE(tok);
++      REQUIRE(same_bits(got, row));
++    }
++  }
++  SECTION("whole-page append copies the state of a fully VNNI page") {
++    book_t destination(/*n_pages=*/N_PAGES_1);
++    book_t source(/*n_pages=*/N_PAGES_1);
++    source.increment_tokens_used(PAGE_TOKENS_64);
++    for (size_t tok = 0; tok < PAGE_TOKENS_64; ++tok) {
++      fill_row(row, tok, NEW_SALT_7);
++      source.page_of(tok)->set_k_row(SLOT_0, 0, tok, row.data());
++      save_row_state(source.page_of(tok), SLOT_0, tok);
++    }
++    REQUIRE(vnni_blocks(source.page_of(0), SLOT_0) ==
++            (vnni_build ? ALL_BLOCKS_0XF : NO_BLOCK_0X0));
++    destination.append(source);
++    REQUIRE(vnni_blocks(destination.page_of(0), SLOT_0) ==
++            (vnni_build ? ALL_BLOCKS_0XF : NO_BLOCK_0X0));
++    for (size_t tok = 0; tok < PAGE_TOKENS_64; ++tok) {
++      fill_row(row, tok, NEW_SALT_7);
++      destination.page_of(tok)->get_k_row(SLOT_0, 0, tok, got.data());
++      CAPTURE(tok);
++      REQUIRE(same_bits(got, row));
++    }
++  }
++}
++
+ #else  // TRON_CHUNK_SIZE != 16
+ 
+ TEST_CASE("VNNI K layout tests skipped (chunk-8 build)", "[k_vnni]") {
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index 2dde152ccd..187eeadbc2 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -1940,6 +1940,45 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+     pages.back()->set_offset_bound(page_t::page_size);
+   }
+ 
++#ifdef TRON_K_VNNI
++  // Give the VNNI build the K instance of the row-major build: the raw bytes
++  // fill_random wrote, read as consecutive 128-value rows (row i at element
++  // i * 128 of the plane), stored through set_k_row. Then record the rows of
++  // layer 0 as save_k and the forward end would (Note [K VNNI storage]): page 0
++  // whole (4 VNNI blocks, the dense AMX shape), page 1 up to row 40 (blocks 0
++  // and 1 VNNI, block 2 a row-major tail of 9 rows, block 3 row-major and
++  // unrecorded). The reference below reads the rows through get_k_row, so the
++  // mixed page is scored against the same values, and against the same
++  // attention instance the row-major build scores.
++  {
++    constexpr size_t PAGE_1_RECORDED_ROWS_41 = 41;
++    static_assert(
++        PAGE_1_RECORDED_ROWS_41 == 41, "the constant's name states its value");
++    const kv_slot_id slot_0 = test_kv_slot<book_t>(0);
++    auto rows =
++        std::make_unique<std::array<std::array<bf16, head_size>, page_t::page_size>>();
++    for (size_t pg = 0; pg < num_pages; ++pg) {
++      page_t* page = bk.page_of(pg * page_t::page_size);
++      for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
++        const bf16* plane = page->template k_vnni_plane<geometry.kv>(slot_0, kv_head);
++        for (size_t tok = 0; tok < page_t::page_size; ++tok) {
++          std::memcpy(
++              (*rows)[tok].data(), plane + tok * head_size, head_size * sizeof(bf16));
++        }
++        for (size_t tok = 0; tok < page_t::page_size; ++tok) {
++          page->set_k_row(slot_0, kv_head, tok, (*rows)[tok].data());
++        }
++      }
++      const size_t recorded = pg == 0 ? page_t::page_size : PAGE_1_RECORDED_ROWS_41;
++      for (size_t tok = 0; tok < recorded; ++tok) {
++        if (page->note_k_row_saved(slot_0, tok)) {
++          page->k_block_to_vnni(slot_0, tok / k_vnni::BLOCK_TOKENS_16);
++        }
++      }
++    }
++  }
++#endif
++
+   // Copy out layer 0 for emulation::compute_attention
+   random_ks.resize(num_kv_tokens, std::vector<float>(n_kv_heads * head_size));
+   random_vs.resize(num_kv_tokens, std::vector<float>(n_kv_heads * head_size));
+@@ -2761,16 +2800,86 @@ TEST_CASE("save_k stores every token's K row once, grouped by page block, alone
+     REQUIRE(kept == (NUM_KV_TOKENS_192 - KV_JOBS_46) * N_KV_HEADS_8);
+   };
+ 
++  // Rows 0..4 and 8 of page 0 are saved before the pass, so the pass's run
++  // 5..15 (minus the job of token 8, which has no KV work) completes block 0
++  // of page 0 through save_k: the block is queued and converted at the forward
++  // end (convert_pending_k_blocks, Note [K VNNI storage]). Block 3 of page 0 is
++  // a whole run and is converted by the block save itself.
++  constexpr size_t PRE_SAVED_ROWS_5 = 5;
++  auto pre_save = [&] {
++    for (size_t tok = 0; tok <= NO_KV_TOKEN_8; ++tok) {
++      if (tok >= PRE_SAVED_ROWS_5 && tok != NO_KV_TOKEN_8) continue;
++      REQUIRE_FALSE(pages[0]->note_k_row_saved(slot, tok));
++    }
++  };
++  auto check_blocks = [&](bool converted) {
++#ifdef TRON_K_VNNI
++    constexpr uint8_t BLOCKS_0_AND_3_0X9 = 0x9;
++    constexpr uint8_t BLOCK_3_ONLY_0X8 = 0x8;
++    constexpr uint8_t NO_BLOCK_0X0 = 0x0;
++    const uint8_t page0 = converted ? BLOCKS_0_AND_3_0X9 : BLOCK_3_ONLY_0X8;
++    REQUIRE(pages[0]->template k_vnni_blocks<geometry.kv>(slot) == page0);
++    REQUIRE(pages[1]->template k_vnni_blocks<geometry.kv>(slot) == NO_BLOCK_0X0);
++    REQUIRE(pages[2]->template k_vnni_blocks<geometry.kv>(slot) == NO_BLOCK_0X0);
++#else
++    (void)converted;
++#endif
++  };
++
+   SECTION("one thread: the grouping stores every row and touches nothing else") {
+     bk.fill_random(gen);
++    pre_save();
+     const auto before = snapshot();
+     state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
+     check(before);
++    check_blocks(/*converted=*/false);
++    state.convert_pending_k_blocks();
++    check_blocks(/*converted=*/true);
++    check(before);
+     REQUIRE(q_batch.k_store_window.opened.load() == 0);
+   }
+ 
++  // Note [Row-major blocks under hardware attention] in kv_cache.hpp: the rows
++  // land the same way; only the row bits and the forward-end conversion of the
++  // hardware-scored operation are skipped. Catch2 builds a fresh state for
++  // every SECTION, so the flag needs no reset.
++  constexpr uint8_t OPERATION_USES_HW_1 = 1;
++  SECTION("hardware attention scores the operation: the completed block stays "
++          "row-major, the whole-block save is still VNNI") {
++    bk.fill_random(gen);
++    pre_save();
++    state.attention_operation_uses_hw[operation.binding.operation.i] =
++        OPERATION_USES_HW_1;
++    const auto before = snapshot();
++    state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
++    check(before);
++    check_blocks(/*converted=*/false);
++    state.convert_pending_k_blocks();
++    check_blocks(/*converted=*/false);
++    check(before);
++  }
++
++  SECTION("hardware attention scores another operation: this one still converts") {
++    // The flag is read for the saving operation, not for another id space
++    // (operation 0 is also layer 0 and KV slot 0; operation 1 is not).
++    bk.fill_random(gen);
++    pre_save();
++    const attention_op_id other =
++        state.active_attention_operations[1].binding.operation;
++    REQUIRE(other != operation.binding.operation);
++    state.attention_operation_uses_hw[other.i] = OPERATION_USES_HW_1;
++    const auto before = snapshot();
++    state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
++    check(before);
++    check_blocks(/*converted=*/false);
++    state.convert_pending_k_blocks();
++    check_blocks(/*converted=*/true);
++    check(before);
++  }
++
+   SECTION("three threads: the helpers share the window and every row lands once") {
+     bk.fill_random(gen);
++    pre_save();
+     const auto before = snapshot();
+     constexpr size_t N_WORKERS_3 = 3;
+     std::vector<std::thread> helpers;
+@@ -2786,6 +2895,10 @@ TEST_CASE("save_k stores every token's K row once, grouped by page block, alone
+       h.join();
+     }
+     check(before);
++    check_blocks(/*converted=*/false);
++    state.convert_pending_k_blocks();
++    check_blocks(/*converted=*/true);
++    check(before);
+     if constexpr (k_vnni::layout_on<HEAD_SIZE_128>) {
+       auto const& w = q_batch.k_store_window;
+       REQUIRE(w.opened.load() == 1);
