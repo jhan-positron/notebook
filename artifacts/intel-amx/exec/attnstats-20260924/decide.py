@@ -60,7 +60,7 @@ def attn_stats_lines(pattern):
 def totals_of(lines, cls):
     """The JSON object after '[attn-stats] <cls> totals: '."""
     for l in lines:
-        m = re.match(r"\[attn-stats\] " + re.escape(cls) + r" totals: (\{.*\})$", l)
+        m = re.match(r"\[attn-stats\] " + re.escape(cls) + r"(?:/\S+)? totals: (\{.*\})$", l)  # label may carry "/rule" (2026-09-25)
         if m:
             try:
                 return json.loads(m.group(1))
@@ -71,7 +71,7 @@ def totals_of(lines, cls):
 
 def forwards_of(lines, cls):
     for l in lines:
-        m = re.match(r"\[attn-stats\] " + re.escape(cls) + r" forwards: (\{.*\})$", l)
+        m = re.match(r"\[attn-stats\] " + re.escape(cls) + r"(?:/\S+)? forwards: (\{.*\})$", l)  # label may carry "/rule" (2026-09-25)
         if m:
             try:
                 return json.loads(m.group(1))
