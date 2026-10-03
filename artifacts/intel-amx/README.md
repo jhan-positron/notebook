@@ -2848,3 +2848,1303 @@ Root mapping: existing intel-AMX mappings apply. `exec/workflows/` maps to `clau
   - Related handoffs: handoffs/claude_20260924_counter-html-toggle-env-var-vs-build-option.md
 
 Left behind (size): the four trace inputs listed in the new page inventories exceed 5 MiB each. The parsed summaries are preserved. Historical comparison-source omissions remain itemized in the existing store-remedies inventory. Temporary browser screenshots and one-time text-edit scripts are not needed to resume the final documents.
+
+## Batch: 2026-10-02 SCOPE:auto run (Claude, agentsrv)
+
+Registered by the 2026-10-02 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. The machine now reports `hostname` = `agentsrv` (the host that earlier batches called `claude-agentsrv`, the podman container on it); both names point at the same home directory and the same files. `WS` = `agentsrv:/home/jhan/workspace/intel-AMX` (shared NFS home, not a git repository). Repo path -> canonical path. Layout: `pr3879/` mirrors `WS/PR3879/new-PRs/`, `vnnied-k-in-place/` mirrors `WS/VNNIed-K-in-place/`, `memory/` mirrors `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/`, `exec/workflows/` and the campaign folders hold Workflow scripts relocated from session directories under `~/.claude/projects/` (their `origin:` is recorded), `exec/scratch-relocated/<session id prefix>/` holds files relocated from session scratchpads under `/tmp/claude-644434775/`. New prefixes this batch: `3bda-var-tmp/` mirrors small records under `delphi-3bda:/var/tmp/jhan/`, and `pr3879/new-counters/recovered-pr-desc/` mirrors the PR 4596 description files that the 2026-09-25 session recovered into `agentsrv:/home/jhan/tmp/`.
+
+Covers the 19 handoffs of 2026-09-24 to 2026-10-02 (see "Related" on each entry). Preserved: 967 files, 25.57 MiB. Left behind, by rule 4 of the prompt, one reason per file (full per-file inventories in the `.lineage.md` companions named under each report page):
+
+- left behind (provenance: raw client stream): 6720 files
+- left behind (no value used): 1664 files
+- left behind (provenance): 848 files
+- left behind (scratch directory >60 files, decide at gate): 814 files
+- left behind (duplicate (held by tests-*.txt)): 245 files
+- left behind (size): 36 files
+- left behind (provenance: campaign log): 33 files
+- left behind (provenance: raw workflow output): 21 files
+- `provenance: raw client stream` = `work-e0/.perf/round_*/user_*/chunks.txt` and `prompt.json` of the CI harness cells (the streamed completions; the per-request samples are in the preserved perf*.json). `no value used` = `leaves/<run>/` FUSE leaf snapshots of attnstats-20261002, which gen_compare.py states it does not read. `scratch directory >60 files` = the agent batch trees under two session scratchpads (5bd3203f: 662 files, 12.35 MiB; 81e65d05: 152 files, 4.67 MiB), of which only the files the handoffs name individually were relocated. The 26 `rinzler-e0.log` files of 14.47 MB and the six `.perfetto-trace` files of 6.4 to 12.6 MB stay behind for size; the lane JSON files derived from the traces are preserved. Binaries and .deb packages on delphi-3bda stay there.
+
+`artifacts/intel-amx/rampup/operand-B.html` was NOT refreshed this run: its repo copy is newer than the canonical file (commit 71fc29c of 2026-10-02 added a table of contents in the repo only). The canonical file is unchanged since 2026-09-13; the mirror rule says edit the canonical first, so the user decides which copy wins.
+
+### Report pages and their lineage
+
+#### pr3879/new-counters/review-round3-response.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/review-round3-response.html` (37239 canonical bytes). Related: [claude_20260925_pr-4596-attn-stats-naming-review.md](../../handoffs/claude_20260925_pr-4596-attn-stats-naming-review.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/review-round3-response.html
+- generator: none (hand-written HTML, edited with inline Python string replacements)
+- input: workflow results wf_08b87b9e-b66, wf_e77e93ba-661, wf_625fd241-a04 (journals under /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/5826261d-b91c-4ae1-85bb-05f87951226b/subagents/workflows/); /home/jhan/workspace/intel-AMX/exec/logs/attnstats-20260925-review-<commit>.log; /home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-<commit>/tests-attnhead3.txt
+- input built by: /home/jhan/workspace/intel-AMX/exec/attnstats-20260925-review/build-test.sh on delphi-3bda, one run per commit (fac3d21d10, f7da0e64ab, 0274131d23, 7f8a4aa4d8, d85edc0e28)
+- sources: `tron worktree /home/jhan/workspace/ai-runs/tron-attn-stats at ebadce2adb, 0274131d23, 7f8a4aa4d8, d85edc0e28`: not a local file (code state, URL or text)
+- regenerate: unavailable (hand-written page)
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [review-round3-response.html.lineage.md](pr3879/new-counters/review-round3-response.html.lineage.md) (5 lines)
+
+#### vnnied-k-in-place/issue4500/fix-results.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4500/fix-results.html` (29576 canonical bytes). Related: [claude_20260928-20260929_issue-4500-fix-testing-qwen3-4b-llama-3-1-8b.md](../../handoffs/claude_20260928-20260929_issue-4500-fix-testing-qwen3-4b-llama-3-1-8b.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/fix-results.html
+- generator: /home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/gen_report.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/ (summary.json, smoke/smoke.txt, tests-fix.txt, tests-fixrm.txt, tests-retest*.txt, manifest.json)
+- input built by: /home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/chain.sh on delphi-3bda (campaign.sh -> cells/, summarize.py -> summary.json/summary.md, smoke.sh -> smoke/smoke.txt, retest.sh -> tests-retest*.txt)
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/*/perf.json (st_perf2.py, the nightly's client)`: preserved amx_busy.txt, meta.json, perf-e0.json, perf.json, proof.txt; left behind (provenance) STATUS, perf-e0.log, rinzler-e0.log; left behind (provenance: raw client stream) work-e0/.perf/**; left behind (size) rinzler-e0.log; `/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/smoke/smoke.txt`: preserved smoke.txt; `/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/tests-*.out`: no files found under it; `/var/tmp/jhan/i4500fix-20260928/manifest.json (delphi-3bda)`: no files found under it
+- regenerate: python3 /home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/gen_report.py /home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928 <OUT>
+- regenerate verified 2026-10-02 (from the preserved exec/i4500fix-20260928/ and exec/results/i4500fix-20260928/ copies; byte-identical)
+- inventory: [fix-results.html.lineage.md](vnnied-k-in-place/issue4500/fix-results.html.lineage.md) (3713 lines)
+
+#### pr3879/new-counters/respond-Wade-comments.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/respond-Wade-comments.html` (257497 canonical bytes). Related: [claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md](../../handoffs/claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/respond-Wade-comments.html
+- generator: /home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_wade.py
+- input: the 14 SVG files and combined.html in /home/jhan/workspace/intel-AMX/exec/counter-20260922/ read by the generator, plus measured numbers typed into the generator source
+- input built by: SVGs hand-drawn by Claude (checked with cairosvg renders); numbers copied from exec/results/attnstats-20260929-w1-*/tests-attnhead4.txt and exec/results/attnstats-20260929-cpu{,2}/ written by build-test.sh and cpu-cell.sh on delphi-3bda
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-*/tests-attnhead4.txt`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1/tests-attnhead4.txt`: preserved tests-attnhead4.txt; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/exit-reports.txt`: preserved exit-reports.txt; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/leaves-latest/`: nothing preserved; left behind (provenance) .taken, decode_like_forwards, decode_like_layer_0, decode_like_layer_1, decode_like_layer_10, decode_like_layer_11 ...; `/home/jhan/workspace/ai-runs/tron-attn-stats (37bb2a4055..04da001cb5)`: no files found under it; `workflow results wf_f55b1d12-561, wf_ffa9db0b-45b, wf_ac63ef8b-687, wf_11b2ce07-4c8, wf_183ab347-257, wf_c3fe3a20-00e, wf_bbac4876-428`: not a local file (code state, URL or text); `live PR body fetched 2026-09-29 21:0x UTC`: not a local file (code state, URL or text)
+- regenerate: python3 /home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_wade.py  (writes <OUT>, path hard-coded in the generator)
+- regenerate unverified (unavailable: gen_wade.py writes a fixed canonical output path, and the 2026-09-28 generator form was overwritten)
+- inventory: [respond-Wade-comments.html.lineage.md](pr3879/new-counters/respond-Wade-comments.html.lineage.md) (224 lines)
+
+#### pr3879/new-counters/pr-body-round4.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body-round4.md` (20215 canonical bytes). Related: [claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md](../../handoffs/claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md)
+- generator: none (hand-written by Claude)
+- input: proposed live PR body; not applied
+- input built by: build-test.sh and cpu-cell.sh on delphi-3bda
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-*/tests-attnhead4.txt`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1/tests-attnhead4.txt`: preserved tests-attnhead4.txt; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/exit-reports.txt`: preserved exit-reports.txt; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/leaves-latest/`: nothing preserved; left behind (provenance) .taken, decode_like_forwards, decode_like_layer_0, decode_like_layer_1, decode_like_layer_10, decode_like_layer_11 ...; `live PR body fetched 2026-09-29 21:0x UTC`: not a local file (code state, URL or text)
+- regenerate: none
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [pr-body-round4.md.lineage.md](pr3879/new-counters/pr-body-round4.md.lineage.md) (134 lines)
+
+#### pr3879/new-counters/pr-comment-round4-1.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-comment-round4-1.md` (1195 canonical bytes). Related: [claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md](../../handoffs/claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md)
+- generator: none (hand-written by Claude)
+- input: PR comment 1: runtron run table
+- input built by: build-test.sh and cpu-cell.sh on delphi-3bda
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/exit-reports.txt`: preserved exit-reports.txt; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/leaves-latest/`: nothing preserved; left behind (provenance) .taken, decode_like_forwards, decode_like_layer_0, decode_like_layer_1, decode_like_layer_10, decode_like_layer_11 ...
+- regenerate: none
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [pr-comment-round4-1.md.lineage.md](pr3879/new-counters/pr-comment-round4-1.md.lineage.md) (133 lines)
+
+#### pr3879/new-counters/pr-comment-round4-2.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-comment-round4-2.md` (3466 canonical bytes). Related: [claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md](../../handoffs/claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md)
+- generator: none (hand-written by Claude)
+- input: PR comment 2: leaf samples
+- input built by: build-test.sh and cpu-cell.sh on delphi-3bda
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/exit-reports.txt`: preserved exit-reports.txt; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/leaves-latest/`: nothing preserved; left behind (provenance) .taken, decode_like_forwards, decode_like_layer_0, decode_like_layer_1, decode_like_layer_10, decode_like_layer_11 ...
+- regenerate: none
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [pr-comment-round4-2.md.lineage.md](pr3879/new-counters/pr-comment-round4-2.md.lineage.md) (133 lines)
+
+#### pr3879/new-counters/pr-comment-round4-3.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-comment-round4-3.md` (1973 canonical bytes). Related: [claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md](../../handoffs/claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md)
+- generator: none (hand-written by Claude)
+- input: PR comment 3: changed definitions + unit-test line
+- input built by: build-test.sh and cpu-cell.sh on delphi-3bda
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-*/tests-attnhead4.txt`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1/tests-attnhead4.txt`: preserved tests-attnhead4.txt
+- regenerate: none
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [pr-comment-round4-3.md.lineage.md](pr3879/new-counters/pr-comment-round4-3.md.lineage.md) (1 lines)
+
+#### pr3879/new-counters/test-gap-register-20260929.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/test-gap-register-20260929.md` (28281 canonical bytes). Related: [claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md](../../handoffs/claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md)
+- generator: none (assembled from workflow wf_77ac48c5-d88 output)
+- input: /tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/b0414974-08b1-4a2b-bd67-8a3bb7964f33/tasks/wa8iqnfg6.output
+- input built by: /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/attn-stats-test-gap-audit-wf_77ac48c5-d88.js
+- sources: `/home/jhan/workspace/ai-runs/tron-attn-stats at bfb4cfc4be`: no files found under it
+- regenerate: unavailable (workflow output deleted with the scratchpad)
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [test-gap-register-20260929.md.lineage.md](pr3879/new-counters/test-gap-register-20260929.md.lineage.md) (5 lines)
+
+#### pr3879/new-counters/w1-diff-review-20260929.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/w1-diff-review-20260929.md` (32349 canonical bytes). Related: [claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md](../../handoffs/claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md)
+- generator: none (assembled from workflow wf_1f3fe567-f89 output)
+- input: /tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/b0414974-08b1-4a2b-bd67-8a3bb7964f33/tasks/wootjo9n2.output
+- input built by: /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/w1-diff-review-wf_1f3fe567-f89.js
+- sources: `/home/jhan/workspace/ai-runs/tron-attn-stats at bfb4cfc4be`: no files found under it
+- regenerate: unavailable (workflow output deleted with the scratchpad)
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [w1-diff-review-20260929.md.lineage.md](pr3879/new-counters/w1-diff-review-20260929.md.lineage.md) (5 lines)
+
+#### vnnied-k-in-place/issue4500/fix-4500.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4500/fix-4500.html` (63835 canonical bytes). Related: [claude_20260928-20260929_store-remedies-report-section-0-5.md](../../handoffs/claude_20260928-20260929_store-remedies-report-section-0-5.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/fix-4500.html
+- generator: unavailable (scratchpad fix4500/gen_final.py, cleaned up; the page was hand-edited by three editor rounds after generation)
+- input: unavailable (scratchpad fix4500/facts-understand.json and raw logs, cleaned up); underlying: /home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/ (summary.md, summary.json, smoke/smoke.txt, tests-fix*.txt, tests-fixrm*.txt, tests-retest*.txt)
+- input built by: /home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/chain.sh on delphi-3bda, run by the sibling session 'Issue 4500 fix testing with qwen3-4b and llama-3.1-8b' (transcript 4434dec4-1336-4a21-aa7d-620e0effca90)
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/summary.md`: preserved summary.md; `/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/summary.json`: preserved summary.json; `/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/smoke/smoke.txt`: preserved smoke.txt; `/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/tests-*.txt`: no files found under it; `git show 78e2da7511 78582b7ba3 617cb8333f 63740b0232 675df85c94 f34b0fe2ec in /home/jhan/workspace/tron`: not a local file (code state, URL or text); `/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4500/root-cause-debug.html`: preserved root-cause-debug.html; `gh issue view 4500 at 2026-09-29 18:26 UTC`: not a local file (code state, URL or text)
+- regenerate: unavailable (generator and facts bundle gone; the page is the record)
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [fix-4500.html.lineage.md](vnnied-k-in-place/issue4500/fix-4500.html.lineage.md) (3714 lines)
+
+#### pr3879/new-counters/claude-review.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/claude-review.html` (761411 canonical bytes). Related: [claude_20260929-20260930_pr-4596-review-doc.md](../../handoffs/claude_20260929-20260930_pr-4596-review-doc.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/claude-review.html
+- generator: /home/jhan/workspace/intel-AMX/exec/review-20260929/gen_review.py
+- input: /home/jhan/workspace/intel-AMX/exec/review-20260929/data/ (report-base.json, synth.json, testdata-result.json, buildtest.json, glossary.json, meta.json, overrides.json, test-table.json, pe1-edits.json, pe2-edits.json)
+- input built by: review workflow wf_9d1f4e76-619 + reconstruct.py; test-data workflow wf_53f1ec9c-827; synthesis workflow wf_4d58da8e-a90; plain-English workflows wf_bd52350c-38a, wf_a6563ae8-be1, wf_7cc51697-5d6 + apply_edits.py; buildtest/run-tests.sh
+- sources: `/home/jhan/workspace/ai-runs/tron-attn-stats (diff 66c7bb8db1..04da001cb5)`: no files found under it; `https://github.com/positron-ai/tron/pull/4596#issuecomment-5902483127`: no files found under it; `https://github.com/positron-ai/tron/pull/4596#issuecomment-5902523541`: no files found under it; `https://github.com/positron-ai/tron/pull/4596#issuecomment-5902534762`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/review-20260929/buildtest/summary-04da001cb5.tsv`: preserved summary-04da001cb5.tsv; `/home/jhan/workspace/intel-AMX/exec/review-20260929/buildtest/summary-0f784c44ff.tsv`: preserved summary-0f784c44ff.tsv
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/review-20260929 && python3 gen_review.py <OUT>
+- regenerate verified 2026-10-02 (byte-identical; the generator reads its JSON inputs beside itself, so run `cp data/*.json .` in the folder first; the label above includes that step)
+- inventory: [claude-review.html.lineage.md](pr3879/new-counters/claude-review.html.lineage.md) (16 lines)
+
+#### vnnied-k-in-place/issue4500/policy-4500.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4500/policy-4500.html` (36779 canonical bytes). Related: [claude_20260929-20261001_vnni-k-layout-perf-regression-on-qwen3-4b.md](../../handoffs/claude_20260929-20261001_vnni-k-layout-perf-regression-on-qwen3-4b.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/policy-4500.html
+- generator: /home/jhan/workspace/intel-AMX/exec/i4500b-20260930/gen_report.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/summary.json, cells/*/perf-e0.json, smoke/smoke.txt, tests-fixS1.txt, tests-fixS1rm.txt, traces/analysis.md; /home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/perf.done; delphi-3bda:/var/tmp/jhan/i4500b-20260930/manifest.json
+- input built by: /home/jhan/workspace/intel-AMX/exec/i4500b-20260930/summarize.py (summary.json); chain.sh steps A0 A B C T D E on delphi-3bda; trace_analyze.py (analysis.md)
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/*/perf-e0.json`: preserved amx_busy.txt, meta.json, perf-e0.json, perf.json, proof.txt; left behind (provenance) STATUS, perf-e0.log, rinzler-e0.log; left behind (provenance: raw client stream) work-e0/.perf/**; left behind (size) rinzler-e0.log; `/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/smoke/smoke.txt`: preserved smoke.txt; `/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/*.perfetto-trace`: preserved analysis.json, analysis.md, lanes-base__tp2__2u-burst.json, lanes-base__tp2__2u-quiet.json, lanes-base__tp4__4u-burst.json, lanes-base__tp4__4u-quiet.json, lanes-fixS1__tp2__2u-burst.json, lanes-fixS1__tp2__2u-quiet.json, lanes-fixS1__tp4__4u-burst.json, lanes-fixS1__tp4__4u-quiet.json, lanes-fix__tp2__2u-burst.json, lanes-fix__tp2__2u-quiet.json ...; left behind (size) base__tp2__2u.perfetto-trace, base__tp4__4u.perfetto-trace, fixS1__tp2__2u.perfetto-trace, fixS1__tp4__4u.perfetto-trace, fix__tp2__2u.perfetto-trace, fix__tp4__4u.perfetto-trace; left behind (provenance) traces.done; left behind (duplicate (held by tests-*.txt)) analyze.out; `/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/tests-fixS1.txt`: preserved tests-fixS1.txt; `/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/tests-fixS1rm.txt`: preserved tests-fixS1rm.txt
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec && python3 i4500b-20260930/summarize.py results/i4500b-20260930 && python3 i4500b-20260930/gen_report.py results/i4500b-20260930 <OUT>
+- regenerate verified 2026-10-02 (summary.json rebuilt identical and page byte-identical; summarize.py prints a FileNotFoundError for one cell STATUS marker that stays behind, then continues)
+- inventory: [policy-4500.html.lineage.md](vnnied-k-in-place/issue4500/policy-4500.html.lineage.md) (3711 lines)
+
+#### vnnied-k-in-place/issue4500/round2-4500.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4500/round2-4500.html` (117449 canonical bytes). Related: [claude_20260929-20261001_vnni-k-layout-perf-regression-on-qwen3-4b.md](../../handoffs/claude_20260929-20261001_vnni-k-layout-perf-regression-on-qwen3-4b.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/round2-4500.html
+- generator: /home/jhan/workspace/intel-AMX/exec/i4500b-20260930/gen_round2.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/summary.json, cells/*/perf-e0.json, traces/passes.json, traces/lanes14.json, traces/analysis.json, smoke/smoke.txt, tests-*.txt; /home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/*/perf-e0.json; /home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/{base,fixS1}/report-main.txt
+- input built by: summarize.py (summary.json); /home/jhan/workspace/intel-AMX/exec/i4500b-20260930/traces_passes.py (passes.json, lanes14.json); trace_analyze.py (analysis.json); chain c perf.sh plus perf report --tid <work_queue tid> -g none run by hand on delphi-3bda (report-main.txt)
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/*.perfetto-trace`: preserved analysis.json, analysis.md, lanes-base__tp2__2u-burst.json, lanes-base__tp2__2u-quiet.json, lanes-base__tp4__4u-burst.json, lanes-base__tp4__4u-quiet.json, lanes-fixS1__tp2__2u-burst.json, lanes-fixS1__tp2__2u-quiet.json, lanes-fixS1__tp4__4u-burst.json, lanes-fixS1__tp4__4u-quiet.json, lanes-fix__tp2__2u-burst.json, lanes-fix__tp2__2u-quiet.json ...; left behind (size) base__tp2__2u.perfetto-trace, base__tp4__4u.perfetto-trace, fixS1__tp2__2u.perfetto-trace, fixS1__tp4__4u.perfetto-trace, fix__tp2__2u.perfetto-trace, fix__tp4__4u.perfetto-trace; left behind (provenance) traces.done; left behind (duplicate (held by tests-*.txt)) analyze.out; `/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/*/perf-e0.json`: preserved amx_busy.txt, meta.json, perf-e0.json, perf.json, proof.txt; left behind (provenance) STATUS, perf-e0.log, rinzler-e0.log; left behind (provenance: raw client stream) work-e0/.perf/**; left behind (size) rinzler-e0.log; `/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/*/perf-e0.json`: preserved amx_busy.txt, meta.json, perf-e0.json, perf.json, proof.txt; left behind (provenance) STATUS, perf-e0.log, rinzler-e0.log; left behind (provenance: raw client stream) work-e0/.perf/**; left behind (size) rinzler-e0.log; `delphi-3bda:/var/tmp/jhan/traces/i4500c-20260930/base.perf.data`: no files found under it; `delphi-3bda:/var/tmp/jhan/traces/i4500c-20260930/fixS1.perf.data`: no files found under it
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/i4500b-20260930 && python3 traces_passes.py && python3 gen_round2.py <OUT>
+- regenerate verified 2026-10-02 for the gen_round2.py step (byte-identical); the traces_passes.py step needs the six .perfetto-trace files that stay behind for size, so passes.json and lanes14.json are preserved as built
+- inventory: [round2-4500.html.lineage.md](vnnied-k-in-place/issue4500/round2-4500.html.lineage.md) (7370 lines)
+
+#### pr3879/new-counters/attention-stats-claude.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attention-stats-claude.html` (115380 canonical bytes). Related: [claude_20260929_attention-stats-claude-html-for-pr-4596-counters.md](../../handoffs/claude_20260929_attention-stats-claude-html-for-pr-4596-counters.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/attention-stats-claude.html
+- generator: workflow wf_032a5012-c97 (attention-stats-page-wf_032a5012-c97.js) wrote the page; Claude then applied hand edits by python string replacement
+- input: facts.json from attention-stats-claude-check.py (scratchpad copy, no longer on disk) plus the gather agents' catalogues
+- input built by: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attention-stats-claude-check.py
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/rt/q3-4b-tp2-8u-p1024__cpu__headon4__rep1.log`: preserved q3-4b-tp2-8u-p1024__cpu__headon4__rep1.log; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p1024__fpga__headon2__rep1.log`: preserved q3-4b-tp2-8u-p1024__fpga__headon2__rep1.log; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headon__rep1.log`: preserved q3-4b-tp2-8u-p1024__cpu__headon__rep1.log; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headkill__rep1.log`: preserved q3-4b-tp2-8u-p1024__cpu__headkill__rep1.log; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/leaves-latest/`: nothing preserved; left behind (provenance) .taken, decode_like_forwards, decode_like_layer_0, decode_like_layer_1, decode_like_layer_10, decode_like_layer_11 ...; `/home/jhan/workspace/ai-runs/tron-attn-stats/h/tron/models/attn_stats.hpp`: nothing preserved; `/home/jhan/workspace/ai-runs/tron-attn-stats/h/tron/models/self_attention.hpp`: nothing preserved; `/home/jhan/workspace/ai-runs/tron-attn-stats/h/tron/models/model.hpp`: nothing preserved; `/home/jhan/workspace/ai-runs/tron-attn-stats/README.stats.md`: nothing preserved; `/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/respond-Wade-comments.html`: preserved respond-Wade-comments.html; `/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/counter.html`: preserved counter.html; `/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body.md`: preserved pr-body.md; `/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body-round4.md`: preserved pr-body-round4.md
+- regenerate: unavailable (page text written by workflow agents and hand-edited); re-verify numbers with: cd /home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters && python3 attention-stats-claude-check.py
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [attention-stats-claude.html.lineage.md](pr3879/new-counters/attention-stats-claude.html.lineage.md) (145 lines)
+
+#### vnnied-k-in-place/issue4525/status/PR4557-respond-2-Ben.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/PR4557-respond-2-Ben.html` (119740 canonical bytes). Related: [claude_20260930-20261001_pr-4557-review-comments-from-ben.md](../../handoffs/claude_20260930-20261001_pr-4557-review-comments-from-ben.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4525/status/PR4557-respond-2-Ben.html
+- generator: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/gen_ben.py
+- input: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/workflow-result-wf_eefcbfe8-584.json, /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/r1-comment-diffs.diff, /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/r2-results.txt
+- input built by: workflow pr4557-ben-response-wf_eefcbfe8-584 (2026-09-30 12:23 to 13:14 PT); r2-build teammate agent on delphi-3bda (2026-09-30 20:19 to 20:43 UTC)
+- sources: `/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/review-comments.json`: preserved review-comments.json; `/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/r1-3bda.log`: preserved r1-3bda.log; `/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/r2-3bda.log`: preserved r2-3bda.log; `/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-3bda.log`: preserved final-3bda.log; `git log of the deleted worktree /home/jhan/workspace/ai-runs/tron-issue4525-ben-r2 (generator now falls back to a 'could not read' line)`: not a local file (code state, URL or text)
+- regenerate: cd /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930 && python3 gen_ben.py   (writes <OUT> = /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/PR4557-respond-2-Ben.html; the section-10 commit table differs now that the ben-r2 worktree is gone)
+- regenerate unverified (10 lines differ in the section 10 commit table because the ben-r2 worktree is deleted; the rest is identical)
+- inventory: [PR4557-respond-2-Ben.html.lineage.md](vnnied-k-in-place/issue4525/status/PR4557-respond-2-Ben.html.lineage.md) (7 lines)
+
+#### pr3879/new-counters/pr-body-20260930.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body-20260930.md` (19475 canonical bytes). Related: [claude_20260930_pr-4596-description-patch.md](../../handoffs/claude_20260930_pr-4596-description-patch.md)
+- generator: /tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/build_body2.py (session scratchpad, may be cleaned up)
+- input: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body-live-20260930.md
+- input built by: gh pr view 4596 --repo positron-ai/tron --json body (2026-09-30 16:36 PDT)
+- sources: `git show 441e81178b:h/tron/models/attn_stats.hpp, model.hpp, self_attention.hpp, README.stats.md, t/t_attn_stats.cpp, t/t_llama_unit.cpp, t/heterogeneous_scheduler_compile.cpp, t/t_amx_dispatch_dtype.cpp`: not a local file (code state, URL or text); `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924*/rt-results.txt`: preserved q3-4b-tp2-8u-p1024__cpu__headkill__rep1.log, q3-4b-tp2-8u-p1024__cpu__headon__rep1.log; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260930-objdump/objdump-check.txt`: preserved objdump-check.txt; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu and -cpu2 (exit-reports.txt, leaves-latest/)`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/summary.tsv`: preserved summary.tsv; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1/tests-attnhead4.txt`: preserved tests-attnhead4.txt
+- regenerate: python3 <scratchpad>/build_body2.py /home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body-live-20260930.md > <OUT>   (unavailable once the scratchpad is cleaned; then apply pr-body-20260930.patch to the live body)
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [pr-body-20260930.md.lineage.md](pr3879/new-counters/pr-body-20260930.md.lineage.md) (13 lines)
+
+#### pr3879/new-counters/pr-body-20260930-patch.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body-20260930-patch.md` (36573 canonical bytes). Related: [claude_20260930_pr-4596-description-patch.md](../../handoffs/claude_20260930_pr-4596-description-patch.md)
+- generator: /tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/build_body2.py plus a heredoc for the register table (session scratchpad, may be cleaned up)
+- input: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body-live-20260930.md and pr-body-20260930.md (diff -u)
+- input built by: gh pr view 4596 --json body; build_body2.py
+- sources: `same as pr-body-20260930.md`: not a local file (code state, URL or text)
+- regenerate: diff -u pr-body-live-20260930.md pr-body-20260930.md, fenced under the register table; unavailable as one command once the scratchpad is cleaned
+- regenerate unverified (no generator or generator unavailable)
+- inventory: [pr-body-20260930-patch.md.lineage.md](pr3879/new-counters/pr-body-20260930-patch.md.lineage.md) (1 lines)
+
+#### pr3879/new-counters/wade-comment-response-2.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/wade-comment-response-2.html` (74644 canonical bytes). Related: [claude_20260930_pr-4596-wade-comments.md](../../handoffs/claude_20260930_pr-4596-wade-comments.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/wade-comment-response-2.html
+- generator: /home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_wade2.py
+- input: /home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/ (summary.tsv, round5.diff, wf1.json, wf2.json, review-applied.md, commit.txt, apply.py, apply2.py) and /home/jhan/workspace/intel-AMX/exec/counter-20260922/w9_fig.svg
+- input built by: r5/apply.py and r5/apply2.py (edits), r5/buildtest/run.sh (test runs -> summary.tsv), workflows wf_4e5d9ee3-57d / wf_48d45328-3c3 / wf_ce2336b3-aad (wf1/wf2/wf3.json), git diff HEAD~1 (round5.diff)
+- sources: `/home/jhan/workspace/ai-runs/tron-attn-stats at 441e81178b`: no files found under it; `PR 4596 review comments 4146947611, 4146959502, 4146998951, 4147010638`: not a local file (code state, URL or text)
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/counter-20260922 && python3 gen_wade2.py   (reads r5/ beside it; writes <OUT> = /home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/wade-comment-response-2.html, fixed inside the script)
+- regenerate unverified (unavailable: gen_wade2.py writes a fixed canonical output path)
+- inventory: [wade-comment-response-2.html.lineage.md](pr3879/new-counters/wade-comment-response-2.html.lineage.md) (65 lines)
+
+#### pr3879/new-counters/attn-stats-compare.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attn-stats-compare.md` (59879 canonical bytes). Related: [claude_20261001-20261002_amx-attention-stats-comparison-at-3bda.md](../../handoffs/claude_20261001-20261002_amx-attention-stats-comparison-at-3bda.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/attnstats-20261002/assemble.py
+- input: /home/jhan/workspace/intel-AMX/exec/attnstats-20261002/final_prose.md (hand-written prose with GEN_TABLE_n placeholders) + the gen_compare.py output (/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/attn-stats-compare.md)
+- input built by: gen_compare.py over exec/results/attnstats-20261002 (chain.sh step R, then by hand); final_prose.md hand-written and corrected after workflows wf_ae2765d2-062 and wf_b8d75c26-c80
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt-results.txt`: preserved rt-results.txt; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/*.log`: preserved gptoss-8u-p1024-fpga__fpga__amxoff__rep1.log, gptoss-8u-p1024-fpga__fpga__amxon__rep1.log, l8b-8u-p1024-cpu__cpu__amxoff__rep1.log, l8b-8u-p1024-cpu__cpu__amxon__rep1.log, l8b-8u-p8192-cpu__cpu__amxoff__rep1.log, l8b-8u-p8192-cpu__cpu__amxon__rep1.log, q3-4b-8u-p1024-cpu__cpu__amxoff__rep1.log, q3-4b-8u-p1024-cpu__cpu__amxon__rep1.log, q3-4b-8u-p1024-fpga__fpga__amxoff__rep1.log, q3-4b-8u-p1024-fpga__fpga__amxon__rep1.log, q3-4b-8u-p8192-fpga__fpga__amxoff__rep1.log, q3-4b-8u-p8192-fpga__fpga__amxon__rep1.log; left behind (provenance) gptoss-8u-p1024-fpga__fpga__amxoff__rep1.log.attempt1, gptoss-8u-p1024-fpga__fpga__amxon__rep1.log.attempt1, l8b-8u-p1024-cpu__cpu__amxoff__rep1.log.attempt1, l8b-8u-p1024-cpu__cpu__amxon__rep1.log.attempt1, l8b-8u-p8192-cpu__cpu__amxoff__rep1.log.attempt1, l8b-8u-p8192-cpu__cpu__amxon__rep1.log.attempt1 ...; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/exit-reports.txt`: preserved exit-reports.txt; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/`: nothing preserved; left behind (no value used) .taken, decode_like_forwards, decode_like_layer_0, decode_like_layer_1, decode_like_layer_10, decode_like_layer_11 ...; `/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/build-main1002.txt`: preserved build-main1002.txt; `/home/jhan/workspace/intel-AMX/exec/logs/attnstats-20261002-chain.log`: preserved attnstats-20261002-chain.log; `/home/jhan/workspace/intel-AMX/exec/logs/attnstats-20261002.log`: preserved attnstats-20261002.log; `tron main dd0f942c75 source files cited in the report`: not a local file (code state, URL or text)
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/attnstats-20261002 && python3 gen_compare.py /home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002 > /tmp/gen.md && python3 assemble.py /tmp/gen.md final_prose.md <OUT>
+- regenerate verified 2026-10-02 (byte-identical, both the gen_compare.py output and the assembled page)
+- inventory: [attn-stats-compare.md.lineage.md](pr3879/new-counters/attn-stats-compare.md.lineage.md) (1695 lines)
+
+#### pr3879/new-counters/attn-stats-compare.md.gen-v1.bak
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attn-stats-compare.md.gen-v1.bak` (34088 canonical bytes). Related: [claude_20261001-20261002_amx-attention-stats-comparison-at-3bda.md](../../handoffs/claude_20261001-20261002_amx-attention-stats-comparison-at-3bda.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/attnstats-20261002/gen_compare.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/ (rt-results.txt, rt/*.log)
+- input built by: chain.sh steps D (campaign.sh) and R on delphi-3bda, 2026-10-02 13:37 to 14:15 UTC
+- sources: `the 12 runtron logs under exec/results/attnstats-20261002/rt/`: not a local file (code state, URL or text)
+- regenerate: python3 /home/jhan/workspace/intel-AMX/exec/attnstats-20261002/gen_compare.py /home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002 > <OUT>
+- regenerate verified 2026-10-02 (byte-identical)
+- inventory: [attn-stats-compare.md.gen-v1.bak.lineage.md](pr3879/new-counters/attn-stats-compare.md.gen-v1.bak.lineage.md) (1700 lines)
+
+#### exec/results/attnstats-20261002/attn-stats-compare.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/attn-stats-compare.md` (34088 canonical bytes). Related: [claude_20261001-20261002_amx-attention-stats-comparison-at-3bda.md](../../handoffs/claude_20261001-20261002_amx-attention-stats-comparison-at-3bda.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/attnstats-20261002/gen_compare.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/ (rt-results.txt, rt/*.log)
+- input built by: chain.sh steps D (campaign.sh) and R on delphi-3bda, 2026-10-02 13:37 to 14:15 UTC
+- sources: `the 12 runtron logs under exec/results/attnstats-20261002/rt/`: not a local file (code state, URL or text)
+- regenerate: python3 /home/jhan/workspace/intel-AMX/exec/attnstats-20261002/gen_compare.py /home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002 > <OUT>
+- regenerate verified 2026-10-02 (byte-identical, both the gen_compare.py output and the assembled page)
+- inventory: [attn-stats-compare.md.lineage.md](exec/results/attnstats-20261002/attn-stats-compare.md.lineage.md) (1700 lines)
+
+#### vnnied-k-in-place/issue4500/diagramming-code-changes.html
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4500/diagramming-code-changes.html` (381015 canonical bytes). Related: [claude_20261001-20261002_pr4737-kv-cache-hpp-diagram-page.md](../../handoffs/claude_20261001-20261002_pr4737-kv-cache-hpp-diagram-page.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4500/diagramming-code-changes.html
+- generator: /home/jhan/workspace/intel-AMX/exec/pr4737-diagrams-20261001/gen_page.py (with difflib_units.py, svg_helpers.py, diagrams_base.py, diagrams_base_b5.py, diagrams_changes.py)
+- input: git diff -U3 30c4ac82cb bb32a80774 -- h/tron/models/kv_cache.hpp and git show bb32a80774:h/tron/models/kv_cache.hpp in /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/tron-i4500, plus git blame per added line
+- input built by: the commits of PR 4737 on branch jhan-amx-vnniK-i4500 (positron-ai/tron)
+- sources: `/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/tron-i4500 (worktree at bb32a80774)`: no files found under it; `https://github.com/positron-ai/tron/pull/4737 (PR comments for thread and ordering facts)`: no files found under it
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/pr4737-diagrams-20261001 && python3 gen_page.py <OUT> && python3 render_check.py <OUT> <pngdir>
+- regenerate unverified (unavailable: the generator reads the live tron worktree git diff, outside its preserved inputs)
+- inventory: [diagramming-code-changes.html.lineage.md](vnnied-k-in-place/issue4500/diagramming-code-changes.html.lineage.md) (0 lines)
+
+#### exec/results/sync4424-E-cpu/summary.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-E-cpu/summary.md` (1784 canonical bytes). Related: [claude_20261002_pr4557-to-pr4424-sync.md](../../handoffs/claude_20261002_pr4557-to-pr4424-sync.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/sync4424-E-cpu/rt-results.txt
+- input built by: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/campaign.sh run by chain.sh step E on delphi-3bda (2026-10-02 18:49 to 19:17 UTC)
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/sync4424-E-cpu/rt/ (18 runtron logs)`: no files found under it
+- regenerate: python3 /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py /home/jhan/workspace/intel-AMX/exec/results/sync4424-E-cpu > <OUT>  (current output lists base and head only; the new arm is missing, cause unverified)
+- regenerate verified 2026-10-02 (byte-identical)
+- inventory: [summary.md.lineage.md](exec/results/sync4424-E-cpu/summary.md.lineage.md) (2 lines)
+
+#### exec/results/sync4424-E-fpga/summary.md
+
+- mirror of `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-E-fpga/summary.md` (1393 canonical bytes). Related: [claude_20261002_pr4557-to-pr4424-sync.md](../../handoffs/claude_20261002_pr4557-to-pr4424-sync.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/sync4424-E-fpga/rt-results.txt
+- input built by: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/campaign.sh run by chain.sh step E on delphi-3bda (2026-10-02 18:49 to 19:17 UTC)
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/sync4424-E-fpga/rt/ (9 runtron logs)`: no files found under it
+- regenerate: python3 /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py /home/jhan/workspace/intel-AMX/exec/results/sync4424-E-fpga > <OUT>  (current output lists base and head only; the new arm is missing, cause unverified)
+- regenerate verified 2026-10-02 (byte-identical)
+- inventory: [summary.md.lineage.md](exec/results/sync4424-E-fpga/summary.md.lineage.md) (2 lines)
+
+### All files of this batch
+
+Repo path -> canonical path (bytes). `origin:` = the session-store or scratchpad path a relocated file was copied from (history only, never fetched again).
+
+Related: [claude_20260924-20260925_counter-html-amx-counters-in-fpga-attention.md](../../handoffs/claude_20260924-20260925_counter-html-amx-counters-in-fpga-attention.md)
+
+- `exec/attnstats-20260924/campaign-iter.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260924/campaign-iter.sh` (16689 bytes)
+- `exec/attnstats-20260924/fpga-cell.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260924/fpga-cell.sh` (3075 bytes)
+- `exec/attnstats-20260924/fpga-cell2.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260924/fpga-cell2.sh` (3497 bytes)
+- `exec/attnstats-20260924/fpga-cell3.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260924/fpga-cell3.sh` (4467 bytes)
+- `exec/counter-20260922/gen_counter.py.v5-20260924` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_counter.py.v5-20260924` (95177 bytes)
+- `exec/counter-20260922/gen_counter.py.v7-20260925` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_counter.py.v7-20260925` (145869 bytes)
+- `exec/counter-20260922/gen_counter.py.v8-20260925` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_counter.py.v8-20260925` (165169 bytes)
+- `exec/counter-20260922/workflow-wf_12412298-770-claims.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/workflow-wf_12412298-770-claims.txt` (57783 bytes)
+- `exec/counter-20260922/workflow-wf_12412298-770-result.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/workflow-wf_12412298-770-result.json` (660102 bytes)
+- `exec/counter-20260922/workflow-wf_aa9cf9e7-4bf-result.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/workflow-wf_aa9cf9e7-4bf-result.json` (422355 bytes)
+- `exec/results/attnstats-20260925-fpga/exit-reports.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/exit-reports.txt` (34227 bytes)
+- `exec/results/attnstats-20260925-fpga/rt-results.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt-results.txt` (27010 bytes)
+- `exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-1u-p1024__fpga__headkill2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-1u-p1024__fpga__headkill2__rep1.log` (27960 bytes)
+- `exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-1u-p1024__fpga__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-1u-p1024__fpga__headon2__rep1.log` (27936 bytes)
+- `exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p1024__fpga__headkill2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p1024__fpga__headkill2__rep1.log` (27185 bytes)
+- `exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p1024__fpga__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p1024__fpga__headon2__rep1.log` (27167 bytes)
+- `exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p64__fpga__headkill2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p64__fpga__headkill2__rep1.log` (25763 bytes)
+- `exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p64__fpga__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p64__fpga__headon2__rep1.log` (25936 bytes)
+- `exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p8192__fpga__headkill2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p8192__fpga__headkill2__rep1.log` (39192 bytes)
+- `exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p8192__fpga__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/rt/q3-4b-tp2-8u-p8192__fpga__headon2__rep1.log` (39430 bytes)
+- `exec/results/attnstats-20260925-fpga/summary.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/summary.json` (6531 bytes)
+- `exec/results/attnstats-20260925-fpga/summary.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-fpga/summary.md` (2312 bytes)
+- `exec/results/attnstats-20260925-warm/exit-reports.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/exit-reports.txt` (38371 bytes)
+- `exec/results/attnstats-20260925-warm/rt-results.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/rt-results.txt` (28306 bytes)
+- `exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it1__fpga__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it1__fpga__headon2__rep1.log` (28021 bytes)
+- `exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it3__cpu__headkill2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it3__cpu__headkill2__rep1.log` (43140 bytes)
+- `exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it3__cpu__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it3__cpu__headon2__rep1.log` (43590 bytes)
+- `exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it3__fpga__headkill2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it3__fpga__headkill2__rep1.log` (44791 bytes)
+- `exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it3__fpga__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1000-it3__fpga__headon2__rep1.log` (44721 bytes)
+- `exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1024-it3__fpga__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-1u-p1024-it3__fpga__headon2__rep1.log` (44511 bytes)
+- `exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-8u-p1000-it1__fpga__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-8u-p1000-it1__fpga__headon2__rep1.log` (27336 bytes)
+- `exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-8u-p1000-it3__fpga__headon2__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/rt/q3-4b-tp2-8u-p1000-it3__fpga__headon2__rep1.log` (42307 bytes)
+- `exec/results/attnstats-20260925-warm/summary.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/summary.json` (9170 bytes)
+- `exec/results/attnstats-20260925-warm/summary.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-warm/summary.md` (5004 bytes)
+- `exec/workflows/aof-amx-split-verify-wf_12412298-770.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/aof-amx-split-verify-wf_12412298-770.js` (22807 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/266ec0d5-0cad-41a6-b043-9787af43528d/workflows/scripts/aof-amx-split-verify-wf_12412298-770.js`
+- `exec/workflows/counter-page-sec2-verify-wf_aa9cf9e7-4bf.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/counter-page-sec2-verify-wf_aa9cf9e7-4bf.js` (12552 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/266ec0d5-0cad-41a6-b043-9787af43528d/workflows/scripts/counter-page-sec2-verify-wf_aa9cf9e7-4bf.js`
+- `memory/MEMORY.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md` (24435 bytes)
+- `memory/aof-amx-question-20260925.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/aof-amx-question-20260925.md` (8280 bytes)
+
+Related: [claude_20260925-20260926_tron-pr-4596-review-comment.md](../../handoffs/claude_20260925-20260926_tron-pr-4596-review-comment.md)
+
+- `exec/attnstats-20260925-review/queue-after-ci.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260925-review/queue-after-ci.sh` (1336 bytes)
+- `exec/attnstats-20260925-review/verify-forwards-fix-wf_0f84832e-18b.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260925-review/verify-forwards-fix-wf_0f84832e-18b.js` (9273 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/32de5040-829c-4e61-be93-890df4e86fcf/workflows/scripts/verify-forwards-fix-wf_0f84832e-18b.js`
+- `exec/results/attnstats-20260925-review-d85edc0e28/build-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-d85edc0e28/build-attnhead3.txt` (1380 bytes)
+- `exec/results/attnstats-20260925-review-d85edc0e28/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-d85edc0e28/exit-report-sample.txt` (2509 bytes)
+- `exec/results/attnstats-20260925-review-d85edc0e28/tests-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-d85edc0e28/tests-attnhead3.txt` (532 bytes)
+- `exec/results/attnstats-20260925-review/build-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review/build-attnhead3.txt` (1391 bytes)
+- `exec/results/attnstats-20260925-review/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review/exit-report-sample.txt` (2509 bytes)
+- `exec/results/attnstats-20260925-review/tests-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review/tests-attnhead3.txt` (532 bytes)
+
+Related: [claude_20260925_pr-4596-attn-stats-naming-review.md](../../handoffs/claude_20260925_pr-4596-attn-stats-naming-review.md)
+
+- `exec/attnstats-20260925-review/build-test.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260925-review/build-test.sh` (2465 bytes)
+- `exec/logs/attnstats-20260925-review-0274131d23.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/attnstats-20260925-review-0274131d23.log` (503 bytes)
+- `exec/logs/attnstats-20260925-review-7f8a4aa4d8.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/attnstats-20260925-review-7f8a4aa4d8.log` (503 bytes)
+- `exec/logs/attnstats-20260925-review-f7da0e64ab.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/attnstats-20260925-review-f7da0e64ab.log` (503 bytes)
+- `exec/logs/attnstats-20260925-review-fac3d21d10.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/attnstats-20260925-review-fac3d21d10.log` (503 bytes)
+- `exec/results/attnstats-20260925-review-0274131d23/build-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-0274131d23/build-attnhead3.txt` (1405 bytes)
+- `exec/results/attnstats-20260925-review-0274131d23/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-0274131d23/exit-report-sample.txt` (2359 bytes)
+- `exec/results/attnstats-20260925-review-0274131d23/tests-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-0274131d23/tests-attnhead3.txt` (532 bytes)
+- `exec/results/attnstats-20260925-review-7f8a4aa4d8/build-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-7f8a4aa4d8/build-attnhead3.txt` (1374 bytes)
+- `exec/results/attnstats-20260925-review-7f8a4aa4d8/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-7f8a4aa4d8/exit-report-sample.txt` (2509 bytes)
+- `exec/results/attnstats-20260925-review-7f8a4aa4d8/tests-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-7f8a4aa4d8/tests-attnhead3.txt` (532 bytes)
+- `exec/results/attnstats-20260925-review-f7da0e64ab/build-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-f7da0e64ab/build-attnhead3.txt` (1416 bytes)
+- `exec/results/attnstats-20260925-review-f7da0e64ab/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-f7da0e64ab/exit-report-sample.txt` (2359 bytes)
+- `exec/results/attnstats-20260925-review-f7da0e64ab/tests-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-f7da0e64ab/tests-attnhead3.txt` (532 bytes)
+- `exec/results/attnstats-20260925-review-fac3d21d10/build-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-fac3d21d10/build-attnhead3.txt` (1416 bytes)
+- `exec/results/attnstats-20260925-review-fac3d21d10/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-fac3d21d10/exit-report-sample.txt` (2359 bytes)
+- `exec/results/attnstats-20260925-review-fac3d21d10/tests-attnhead3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260925-review-fac3d21d10/tests-attnhead3.txt` (532 bytes)
+- `exec/workflows/pr4596-review-facts-and-names-wf_08b87b9e-b66.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr4596-review-facts-and-names-wf_08b87b9e-b66.js` (12961 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/5826261d-b91c-4ae1-85bb-05f87951226b/workflows/scripts/pr4596-review-facts-and-names-wf_08b87b9e-b66.js`
+- `exec/workflows/pr4596-round3-diff-review-wf_e77e93ba-661.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr4596-round3-diff-review-wf_e77e93ba-661.js` (5569 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/5826261d-b91c-4ae1-85bb-05f87951226b/workflows/scripts/pr4596-round3-diff-review-wf_e77e93ba-661.js`
+- `exec/workflows/prefill-decode-global-state-wf_625fd241-a04.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/prefill-decode-global-state-wf_625fd241-a04.js` (8935 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/5826261d-b91c-4ae1-85bb-05f87951226b/workflows/scripts/prefill-decode-global-state-wf_625fd241-a04.js`
+- `memory/pr-body-refetch-before-edit.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr-body-refetch-before-edit.md` (1876 bytes)
+- `pr3879/new-counters/recovered-pr-desc/pr-desc.md` -> `agentsrv:/home/jhan/tmp/pr-desc.md` (14669 bytes)
+- `pr3879/new-counters/recovered-pr-desc/pr4596-body-current.md` -> `agentsrv:/home/jhan/tmp/pr4596-body-current.md` (18725 bytes)
+- `pr3879/new-counters/recovered-pr-desc/pr4596-edits.json` -> `agentsrv:/home/jhan/tmp/pr4596-edits.json` (89259 bytes)
+- `pr3879/new-counters/recovered-pr-desc/update.md` -> `agentsrv:/home/jhan/tmp/update.md` (2796 bytes)
+
+Related: [claude_20260928-20260929_issue-4500-fix-testing-qwen3-4b-llama-3-1-8b.md](../../handoffs/claude_20260928-20260929_issue-4500-fix-testing-qwen3-4b-llama-3-1-8b.md)
+
+- `3bda-var-tmp/i4500fix-20260928/manifest.json` -> `delphi-3bda:/var/tmp/jhan/i4500fix-20260928/manifest.json` (682 bytes)
+- `exec/i4500fix-20260928/README.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/README.md` (3824 bytes)
+- `exec/i4500fix-20260928/build-deb.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/build-deb.sh` (4578 bytes)
+- `exec/i4500fix-20260928/campaign.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/campaign.sh` (12491 bytes)
+- `exec/i4500fix-20260928/chain.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/chain.sh` (7375 bytes)
+- `exec/i4500fix-20260928/gen_report.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/gen_report.py` (13451 bytes)
+- `exec/i4500fix-20260928/launch.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/launch.sh` (1658 bytes)
+- `exec/i4500fix-20260928/lib.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/lib.sh` (5294 bytes)
+- `exec/i4500fix-20260928/retest.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/retest.sh` (2094 bytes)
+- `exec/i4500fix-20260928/review-i4500-fix-v2-wf_f74c0069-5bb.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/review-i4500-fix-v2-wf_f74c0069-5bb.js` (11144 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/4434dec4-1336-4a21-aa7d-620e0effca90/workflows/scripts/review-i4500-fix-v2-wf_f74c0069-5bb.js`
+- `exec/i4500fix-20260928/review-i4500-fix-wf_3b4b5a79-160.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/review-i4500-fix-wf_3b4b5a79-160.js` (12573 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/4434dec4-1336-4a21-aa7d-620e0effca90/workflows/scripts/review-i4500-fix-wf_3b4b5a79-160.js`
+- `exec/i4500fix-20260928/review-i4500fix-scripts-wf_8c2bb5ff-aa0.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/review-i4500fix-scripts-wf_8c2bb5ff-aa0.js` (6715 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/4434dec4-1336-4a21-aa7d-620e0effca90/workflows/scripts/review-i4500fix-scripts-wf_8c2bb5ff-aa0.js`
+- `exec/i4500fix-20260928/smoke.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/smoke.sh` (6265 bytes)
+- `exec/i4500fix-20260928/st_perf2.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/st_perf2.py` (4332 bytes)
+- `exec/i4500fix-20260928/summarize.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500fix-20260928/summarize.py` (4336 bytes)
+- `exec/results/i4500fix-20260928/build-fix.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/build-fix.txt` (1551 bytes)
+- `exec/results/i4500fix-20260928/build-fixrm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/build-fixrm.txt` (959 bytes)
+- `exec/results/i4500fix-20260928/build-retest.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/build-retest.txt` (759 bytes)
+- `exec/results/i4500fix-20260928/build-retestrm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/build-retestrm.txt` (767 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/meta.json` (858 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/perf-e0.json` (3214 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/perf.json` (3520 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep1/proof.txt` (851 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/meta.json` (853 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/perf-e0.json` (3204 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/perf.json` (3510 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep2/proof.txt` (851 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/meta.json` (853 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/perf-e0.json` (3197 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/perf.json` (3503 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__base__rep3/proof.txt` (856 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/meta.json` (857 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/perf-e0.json` (3200 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/perf.json` (3505 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep1/proof.txt` (836 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/meta.json` (857 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/perf-e0.json` (3203 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/perf.json` (3506 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep2/proof.txt` (836 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/meta.json` (852 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/perf-e0.json` (3208 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/perf.json` (3512 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__fix__rep3/proof.txt` (836 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/meta.json` (825 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/perf-e0.json` (3209 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/perf.json` (3513 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep1/proof.txt` (809 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/meta.json` (825 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/perf-e0.json` (3210 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/perf.json` (3515 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep2/proof.txt` (804 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/meta.json` (820 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/perf-e0.json` (3207 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/perf.json` (3511 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__nightly__rep3/proof.txt` (804 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/meta.json` (858 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/perf-e0.json` (3202 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/perf.json` (3508 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep1/proof.txt` (863 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/meta.json` (858 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/perf-e0.json` (3206 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/perf.json` (3510 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep2/proof.txt` (858 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/meta.json` (853 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/perf-e0.json` (3210 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/perf.json` (3518 bytes)
+- `exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/llama-8b__tp2__8u__p4096__vnni__rep3/proof.txt` (863 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/amx_busy.txt` (81 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/meta.json` (863 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/perf-e0.json` (1242 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/perf.json` (1546 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep1/proof.txt` (940 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/amx_busy.txt` (81 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/meta.json` (864 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/perf-e0.json` (1243 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/perf.json` (1547 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep2/proof.txt` (940 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/amx_busy.txt` (81 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/meta.json` (859 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/perf-e0.json` (1246 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/perf.json` (1550 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__base__rep3/proof.txt` (940 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/meta.json` (863 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/perf-e0.json` (1244 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/perf.json` (1547 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/proof.txt` (926 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/meta.json` (863 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/perf-e0.json` (1243 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/perf.json` (1546 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/proof.txt` (930 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/meta.json` (858 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/perf-e0.json` (1240 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/perf.json` (1544 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/proof.txt` (926 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/amx_busy.txt` (81 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/meta.json` (831 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/perf-e0.json` (1241 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/perf.json` (1541 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep1/proof.txt` (897 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/amx_busy.txt` (81 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/meta.json` (831 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/perf-e0.json` (1243 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/perf.json` (1546 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep2/proof.txt` (897 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/amx_busy.txt` (81 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/meta.json` (826 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/perf-e0.json` (1250 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/perf.json` (1553 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__nightly__rep3/proof.txt` (893 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/meta.json` (864 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/perf-e0.json` (1239 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/perf.json` (1544 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep1/proof.txt` (952 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/meta.json` (864 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/perf-e0.json` (1244 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/perf.json` (1546 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep2/proof.txt` (948 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/meta.json` (859 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/perf-e0.json` (1239 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/perf.json` (1539 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp2__2u__p1024__vnni__rep3/proof.txt` (948 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/meta.json` (934 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/perf-e0.json` (1857 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/perf.json` (2161 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep1/proof.txt` (1038 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/meta.json` (934 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/perf-e0.json` (1860 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/perf.json` (2162 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep2/proof.txt` (1038 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/meta.json` (929 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/perf-e0.json` (1857 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/perf.json` (2160 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__base__rep3/proof.txt` (1038 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/meta.json` (933 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/perf-e0.json` (1861 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/perf.json` (2164 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/proof.txt` (1022 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/meta.json` (933 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/perf-e0.json` (1862 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/perf.json` (2162 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/proof.txt` (1026 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/meta.json` (928 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/perf-e0.json` (1862 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/perf.json` (2167 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/proof.txt` (1027 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/meta.json` (901 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/perf-e0.json` (1858 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/perf.json` (2160 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep1/proof.txt` (995 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/meta.json` (901 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/perf-e0.json` (1859 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/perf.json` (2163 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep2/proof.txt` (991 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/meta.json` (896 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/perf-e0.json` (1863 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/perf.json` (2167 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__nightly__rep3/proof.txt` (991 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/meta.json` (934 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/perf-e0.json` (1850 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/perf.json` (2152 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep1/proof.txt` (1044 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/amx_busy.txt` (82 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/meta.json` (934 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/perf-e0.json` (1865 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/perf.json` (2169 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep2/proof.txt` (1048 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/meta.json` (929 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/perf-e0.json` (1858 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/perf.json` (2162 bytes)
+- `exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/cells/qwen3-4b__tp4__4u__p1024__vnni__rep3/proof.txt` (1049 bytes)
+- `exec/results/i4500fix-20260928/manifest.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/manifest.json` (682 bytes)
+- `exec/results/i4500fix-20260928/nightly.sha` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/nightly.sha` (17 bytes)
+- `exec/results/i4500fix-20260928/smoke/smoke.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/smoke/smoke.txt` (7312 bytes)
+- `exec/results/i4500fix-20260928/status.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/status.txt` (42 bytes)
+- `exec/results/i4500fix-20260928/summary.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/summary.json` (12367 bytes)
+- `exec/results/i4500fix-20260928/summary.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/summary.md` (3172 bytes)
+- `exec/results/i4500fix-20260928/tests-fix.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/tests-fix.txt` (667 bytes)
+- `exec/results/i4500fix-20260928/tests-fixrm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/tests-fixrm.txt` (387 bytes)
+- `exec/results/i4500fix-20260928/tests-retest.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/tests-retest.txt` (208 bytes)
+- `exec/results/i4500fix-20260928/tests-retestrm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500fix-20260928/tests-retestrm.txt` (208 bytes)
+- `memory/issue-4500-fix-implementation.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue-4500-fix-implementation.md` (14171 bytes)
+
+Related: [claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md](../../handoffs/claude_20260928-20260929_respond-wade-comments-html-w1-t5-feedback.md)
+
+- `exec/attnstats-20260929-w1/build-test.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260929-w1/build-test.sh` (3312 bytes)
+- `exec/attnstats-20260929-w1/cpu-cell.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260929-w1/cpu-cell.sh` (2458 bytes)
+- `exec/attnstats-20260929-w1/queue.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260929-w1/queue.sh` (2364 bytes)
+- `exec/counter-20260922/gen_wade.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_wade.py` (162438 bytes)
+- `exec/counter-20260922/gen_wade.py.v10-20260929-before-replies` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_wade.py.v10-20260929-before-replies` (149180 bytes)
+- `exec/counter-20260922/w2_fig_fix.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w2_fig_fix.svg` (4098 bytes)
+- `exec/counter-20260922/w2_fig_today.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w2_fig_today.svg` (5235 bytes)
+- `exec/counter-20260922/w3_fig_counts.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w3_fig_counts.svg` (3467 bytes)
+- `exec/counter-20260922/w3_fig_layers.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w3_fig_layers.svg` (6673 bytes)
+- `exec/counter-20260922/w3_fig_serving.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w3_fig_serving.svg` (4722 bytes)
+- `exec/counter-20260922/w3_fig_tag.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w3_fig_tag.svg` (2961 bytes)
+- `exec/counter-20260922/w3_fig_timelines.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w3_fig_timelines.svg` (8807 bytes)
+- `exec/counter-20260922/w3_fig_units.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w3_fig_units.svg` (4436 bytes)
+- `exec/counter-20260922/w4_fig_fixtures.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w4_fig_fixtures.svg` (4364 bytes)
+- `exec/counter-20260922/w4_fig_indices.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w4_fig_indices.svg` (3573 bytes)
+- `exec/lib-guard.sh.bak-20260929` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/lib-guard.sh.bak-20260929` (20284 bytes)
+- `exec/results/attnstats-20260929-cpu/exit-reports.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/exit-reports.txt` (4238 bytes)
+- `exec/results/attnstats-20260929-cpu/rt-results.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/rt-results.txt` (6571 bytes)
+- `exec/results/attnstats-20260929-cpu/rt/q3-4b-tp2-8u-p1024__cpu__headon4__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/rt/q3-4b-tp2-8u-p1024__cpu__headon4__rep1.log` (25427 bytes)
+- `exec/results/attnstats-20260929-cpu/summary.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/summary.json` (184 bytes)
+- `exec/results/attnstats-20260929-cpu/summary.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu/summary.md` (1140 bytes)
+- `exec/results/attnstats-20260929-cpu2/exit-reports.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/exit-reports.txt` (4238 bytes)
+- `exec/results/attnstats-20260929-cpu2/rt-results.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/rt-results.txt` (5081 bytes)
+- `exec/results/attnstats-20260929-cpu2/rt/q3-4b-tp2-8u-p1024__cpu__headon4__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/rt/q3-4b-tp2-8u-p1024__cpu__headon4__rep1.log` (25408 bytes)
+- `exec/results/attnstats-20260929-cpu2/summary.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/summary.json` (184 bytes)
+- `exec/results/attnstats-20260929-cpu2/summary.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-cpu2/summary.md` (1140 bytes)
+- `exec/results/attnstats-20260929-w1-32b918b681/build-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-32b918b681/build-attnhead4.txt` (1529 bytes)
+- `exec/results/attnstats-20260929-w1-32b918b681/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-32b918b681/exit-report-sample.txt` (2591 bytes)
+- `exec/results/attnstats-20260929-w1-32b918b681/t5-evidence.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-32b918b681/t5-evidence.txt` (1324 bytes)
+- `exec/results/attnstats-20260929-w1-32b918b681/tests-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-32b918b681/tests-attnhead4.txt` (643 bytes)
+- `exec/results/attnstats-20260929-w1-37bb2a4055/build-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-37bb2a4055/build-attnhead4.txt` (1394 bytes)
+- `exec/results/attnstats-20260929-w1-37bb2a4055/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-37bb2a4055/exit-report-sample.txt` (2509 bytes)
+- `exec/results/attnstats-20260929-w1-37bb2a4055/t5-evidence.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-37bb2a4055/t5-evidence.txt` (1324 bytes)
+- `exec/results/attnstats-20260929-w1-37bb2a4055/tests-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-37bb2a4055/tests-attnhead4.txt` (532 bytes)
+- `exec/results/attnstats-20260929-w1-736952c66f/build-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-736952c66f/build-attnhead4.txt` (1401 bytes)
+- `exec/results/attnstats-20260929-w1-736952c66f/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-736952c66f/exit-report-sample.txt` (2579 bytes)
+- `exec/results/attnstats-20260929-w1-736952c66f/t5-evidence.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-736952c66f/t5-evidence.txt` (1324 bytes)
+- `exec/results/attnstats-20260929-w1-736952c66f/tests-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-736952c66f/tests-attnhead4.txt` (532 bytes)
+- `exec/results/attnstats-20260929-w1-ae8a6d38d9/build-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-ae8a6d38d9/build-attnhead4.txt` (1401 bytes)
+- `exec/results/attnstats-20260929-w1-ae8a6d38d9/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-ae8a6d38d9/exit-report-sample.txt` (2579 bytes)
+- `exec/results/attnstats-20260929-w1-ae8a6d38d9/t5-evidence.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-ae8a6d38d9/t5-evidence.txt` (1324 bytes)
+- `exec/results/attnstats-20260929-w1-ae8a6d38d9/tests-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-ae8a6d38d9/tests-attnhead4.txt` (532 bytes)
+- `exec/results/attnstats-20260929-w1-b6fd226982/build-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-b6fd226982/build-attnhead4.txt` (1396 bytes)
+- `exec/results/attnstats-20260929-w1-b6fd226982/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-b6fd226982/exit-report-sample.txt` (2509 bytes)
+- `exec/results/attnstats-20260929-w1-b6fd226982/t5-evidence.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-b6fd226982/t5-evidence.txt` (1324 bytes)
+- `exec/results/attnstats-20260929-w1-b6fd226982/tests-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-b6fd226982/tests-attnhead4.txt` (532 bytes)
+- `exec/results/attnstats-20260929-w1-bff317e0d3/build-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-bff317e0d3/build-attnhead4.txt` (1539 bytes)
+- `exec/results/attnstats-20260929-w1-bff317e0d3/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-bff317e0d3/exit-report-sample.txt` (2686 bytes)
+- `exec/results/attnstats-20260929-w1-bff317e0d3/t5-evidence.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-bff317e0d3/t5-evidence.txt` (1324 bytes)
+- `exec/results/attnstats-20260929-w1-bff317e0d3/tests-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-bff317e0d3/tests-attnhead4.txt` (643 bytes)
+- `exec/results/attnstats-20260929-w1-c612b82a84/build-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-c612b82a84/build-attnhead4.txt` (1396 bytes)
+- `exec/results/attnstats-20260929-w1-c612b82a84/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-c612b82a84/exit-report-sample.txt` (2509 bytes)
+- `exec/results/attnstats-20260929-w1-c612b82a84/t5-evidence.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-c612b82a84/t5-evidence.txt` (1324 bytes)
+- `exec/results/attnstats-20260929-w1-c612b82a84/tests-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-c612b82a84/tests-attnhead4.txt` (532 bytes)
+- `exec/results/attnstats-20260929-w1-ff37c2a64e-failed/build-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-ff37c2a64e-failed/build-attnhead4.txt` (1539 bytes)
+- `exec/results/attnstats-20260929-w1-ff37c2a64e-failed/tests-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1-ff37c2a64e-failed/tests-attnhead4.txt` (778 bytes)
+- `exec/results/attnstats-20260929-w1/build-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1/build-attnhead4.txt` (1507 bytes)
+- `exec/results/attnstats-20260929-w1/exit-report-sample.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1/exit-report-sample.txt` (2686 bytes)
+- `exec/results/attnstats-20260929-w1/t5-evidence.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1/t5-evidence.txt` (1324 bytes)
+- `exec/results/attnstats-20260929-w1/tests-attnhead4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260929-w1/tests-attnhead4.txt` (643 bytes)
+- `exec/workflows/attn-stats-test-gap-audit-wf_77ac48c5-d88.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/attn-stats-test-gap-audit-wf_77ac48c5-d88.js` (7391 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/attn-stats-test-gap-audit-wf_77ac48c5-d88.js`
+- `exec/workflows/jobcounts-commit-review-wf_bbac4876-428.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/jobcounts-commit-review-wf_bbac4876-428.js` (5830 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/jobcounts-commit-review-wf_bbac4876-428.js`
+- `exec/workflows/w1-diff-review-wf_1f3fe567-f89.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/w1-diff-review-wf_1f3fe567-f89.js` (8410 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/w1-diff-review-wf_1f3fe567-f89.js`
+- `exec/workflows/w2-commit-review-wf_ac63ef8b-687.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/w2-commit-review-wf_ac63ef8b-687.js` (9624 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/w2-commit-review-wf_ac63ef8b-687.js`
+- `exec/workflows/w2-section-check-wf_f55b1d12-561.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/w2-section-check-wf_f55b1d12-561.js` (7662 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/w2-section-check-wf_f55b1d12-561.js`
+- `exec/workflows/w3-commit-review-wf_11b2ce07-4c8.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/w3-commit-review-wf_11b2ce07-4c8.js` (8123 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/w3-commit-review-wf_11b2ce07-4c8.js`
+- `exec/workflows/w3-w4-section-check-wf_ffa9db0b-45b.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/w3-w4-section-check-wf_ffa9db0b-45b.js` (9270 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/w3-w4-section-check-wf_ffa9db0b-45b.js`
+- `exec/workflows/w4-commit-review-wf_183ab347-257.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/w4-commit-review-wf_183ab347-257.js` (9952 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/w4-commit-review-wf_183ab347-257.js`
+- `exec/workflows/w5-commit-review-wf_c3fe3a20-00e.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/w5-commit-review-wf_c3fe3a20-00e.js` (12272 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/250b087e-e392-4c2c-9dee-81cc77ecf2cc/workflows/scripts/w5-commit-review-wf_c3fe3a20-00e.js`
+- `memory/wade-pr4596-review-response.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-pr4596-review-response.md` (10222 bytes)
+- `pr3879/new-counters/test-gap-register-20260929-items.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/test-gap-register-20260929-items.json` (101099 bytes)
+
+Related: [claude_20260928-20260929_store-remedies-report-section-0-5.md](../../handoffs/claude_20260928-20260929_store-remedies-report-section-0-5.md)
+
+- `exec/workflows/fix4500-revise-wf_ee908df4-9c7.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/fix4500-revise-wf_ee908df4-9c7.js` (7079 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/6602673a-67f7-41a1-a988-b02f4f109ac7/workflows/scripts/fix4500-revise-wf_ee908df4-9c7.js`
+- `exec/workflows/fix4500-understand-wf_5e867f49-ded.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/fix4500-understand-wf_5e867f49-ded.js` (5965 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/6602673a-67f7-41a1-a988-b02f4f109ac7/workflows/scripts/fix4500-understand-wf_5e867f49-ded.js`
+- `exec/workflows/fix4500-write-wf_7db69edf-954.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/fix4500-write-wf_7db69edf-954.js` (12740 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/6602673a-67f7-41a1-a988-b02f4f109ac7/workflows/scripts/fix4500-write-wf_7db69edf-954.js`
+- `exec/workflows/rewrite-section-0-5-wf_531099a3-466.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/rewrite-section-0-5-wf_531099a3-466.js` (11369 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/6602673a-67f7-41a1-a988-b02f4f109ac7/workflows/scripts/rewrite-section-0-5-wf_531099a3-466.js`
+- `memory/store-remedies-catchup-0928.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/store-remedies-catchup-0928.md` (6127 bytes)
+
+Related: [claude_20260928_pr4596-wade-comment-response-doc.md](../../handoffs/claude_20260928_pr4596-wade-comment-response-doc.md)
+
+- `exec/counter-20260922/combined.html` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/combined.html` (11030 bytes)
+- `exec/counter-20260922/intro_fig.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/intro_fig.svg` (10770 bytes)
+- `exec/counter-20260922/w1_fig.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w1_fig.svg` (2091 bytes)
+- `exec/counter-20260922/w5_fig.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w5_fig.svg` (2997 bytes)
+- `exec/counter-20260922/wade-page-check-wf_e224ff90-fd4.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/wade-page-check-wf_e224ff90-fd4.js` (5617 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/b0414974-08b1-4a2b-bd67-8a3bb7964f33/workflows/scripts/wade-page-check-wf_e224ff90-fd4.js`
+- `exec/counter-20260922/wade-pr4596-comments-wf_0345146e-957.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/wade-pr4596-comments-wf_0345146e-957.js` (25699 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/b0414974-08b1-4a2b-bd67-8a3bb7964f33/workflows/scripts/wade-pr4596-comments-wf_0345146e-957.js`
+
+Related: [claude_20260928_store-remedies-report-html-9-28-catch-up.md](../../handoffs/claude_20260928_store-remedies-report-html-9-28-catch-up.md)
+
+- `exec/workflows/catchup-section-verify-r2-wf_7bfe9a6f-ac4.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/catchup-section-verify-r2-wf_7bfe9a6f-ac4.js` (11077 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/ea765415-6b15-42b8-857a-d38b306eaa6b/workflows/scripts/catchup-section-verify-r2-wf_7bfe9a6f-ac4.js`
+- `exec/workflows/catchup-section-verify-r3-wf_9404bcf4-4b3.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/catchup-section-verify-r3-wf_9404bcf4-4b3.js` (12949 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/ea765415-6b15-42b8-857a-d38b306eaa6b/workflows/scripts/catchup-section-verify-r3-wf_9404bcf4-4b3.js`
+- `exec/workflows/catchup-section-verify-wf_72ded3d7-747.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/catchup-section-verify-wf_72ded3d7-747.js` (18728 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/ea765415-6b15-42b8-857a-d38b306eaa6b/workflows/scripts/catchup-section-verify-wf_72ded3d7-747.js`
+
+Related: [claude_20260929-20260930_pr-4596-review-doc.md](../../handoffs/claude_20260929-20260930_pr-4596-review-doc.md)
+
+- `exec/review-20260929/README.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/README.md` (1000 bytes)
+- `exec/review-20260929/apply_edits.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/apply_edits.py` (1668 bytes)
+- `exec/review-20260929/buildtest/run-tests.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/buildtest/run-tests.sh` (1547 bytes)
+- `exec/review-20260929/buildtest/summary-04da001cb5.tsv` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/buildtest/summary-04da001cb5.tsv` (1164 bytes)
+- `exec/review-20260929/buildtest/summary-0f784c44ff.tsv` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/buildtest/summary-0f784c44ff.tsv` (1167 bytes)
+- `exec/review-20260929/data/buildtest.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/buildtest.json` (3668 bytes)
+- `exec/review-20260929/data/glossary.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/glossary.json` (5005 bytes)
+- `exec/review-20260929/data/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/meta.json` (23794 bytes)
+- `exec/review-20260929/data/overrides.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/overrides.json` (299 bytes)
+- `exec/review-20260929/data/pe1-edits.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/pe1-edits.json` (832548 bytes)
+- `exec/review-20260929/data/pe2-edits.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/pe2-edits.json` (461567 bytes)
+- `exec/review-20260929/data/report-base.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/report-base.json` (481228 bytes)
+- `exec/review-20260929/data/synth.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/synth.json` (194039 bytes)
+- `exec/review-20260929/data/test-table.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/test-table.json` (42775 bytes)
+- `exec/review-20260929/data/testdata-result.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/data/testdata-result.json` (139345 bytes)
+- `exec/review-20260929/gen_review.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/gen_review.py` (21936 bytes)
+- `exec/review-20260929/reconstruct.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/reconstruct.py` (3945 bytes)
+- `exec/review-20260929/workflows/pr4596-close-test-gaps-wf_64ee6903-30b.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/workflows/pr4596-close-test-gaps-wf_64ee6903-30b.js` (9381 bytes)
+- `exec/review-20260929/workflows/pr4596-review-plain-english-pass2-wf_a6563ae8-be1.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/workflows/pr4596-review-plain-english-pass2-wf_a6563ae8-be1.js` (5940 bytes)
+- `exec/review-20260929/workflows/pr4596-review-plain-english-wf_bd52350c-38a.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/workflows/pr4596-review-plain-english-wf_bd52350c-38a.js` (6618 bytes)
+- `exec/review-20260929/workflows/pr4596-synthesis-light-wf_4d58da8e-a90.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/workflows/pr4596-synthesis-light-wf_4d58da8e-a90.js` (12506 bytes)
+- `exec/review-20260929/workflows/pr4596-testdata-check-wf_53f1ec9c-827.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/workflows/pr4596-testdata-check-wf_53f1ec9c-827.js` (13062 bytes)
+- `exec/review-20260929/workflows/tron-review-pr4596-wf_9d1f4e76-619.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/review-20260929/workflows/tron-review-pr4596-wf_9d1f4e76-619.js` (39859 bytes)
+- `exec/workflows/pr4596-review-plain-english-reanchor-wf_7cc51697-5d6.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr4596-review-plain-english-reanchor-wf_7cc51697-5d6.js` (2140 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c1e2475d-c671-4e92-9fc3-579c9ced20ea/workflows/scripts/pr4596-review-plain-english-reanchor-wf_7cc51697-5d6.js`
+- `memory/pr4596-claude-review-20260929.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4596-claude-review-20260929.md` (3555 bytes)
+- `memory/workflow-journal-reconstruction-trap.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/workflow-journal-reconstruction-trap.md` (2088 bytes)
+
+Related: [claude_20260929-20261001_vnni-k-layout-perf-regression-on-qwen3-4b.md](../../handoffs/claude_20260929-20261001_vnni-k-layout-perf-regression-on-qwen3-4b.md)
+
+- `3bda-var-tmp/i4500b-20260930/manifest.json` -> `delphi-3bda:/var/tmp/jhan/i4500b-20260930/manifest.json` (750 bytes)
+- `exec/i4500b-20260930/README.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/README.md` (4577 bytes)
+- `exec/i4500b-20260930/build-deb.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/build-deb.sh` (4876 bytes)
+- `exec/i4500b-20260930/campaign.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/campaign.sh` (13007 bytes)
+- `exec/i4500b-20260930/chain.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/chain.sh` (8649 bytes)
+- `exec/i4500b-20260930/gen_report.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/gen_report.py` (22842 bytes)
+- `exec/i4500b-20260930/gen_round2.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/gen_round2.py` (51605 bytes)
+- `exec/i4500b-20260930/launch.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/launch.sh` (1601 bytes)
+- `exec/i4500b-20260930/lib.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/lib.sh` (5292 bytes)
+- `exec/i4500b-20260930/smoke.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/smoke.sh` (6297 bytes)
+- `exec/i4500b-20260930/st_perf2.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/st_perf2.py` (4332 bytes)
+- `exec/i4500b-20260930/summarize.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/summarize.py` (4452 bytes)
+- `exec/i4500b-20260930/trace_analyze.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/trace_analyze.py` (8837 bytes)
+- `exec/i4500b-20260930/traces.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/traces.sh` (5907 bytes)
+- `exec/i4500b-20260930/traces_passes.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500b-20260930/traces_passes.py` (3356 bytes)
+- `exec/i4500c-20260930/README.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500c-20260930/README.md` (746 bytes)
+- `exec/i4500c-20260930/chain.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500c-20260930/chain.sh` (4063 bytes)
+- `exec/i4500c-20260930/launch.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500c-20260930/launch.sh` (1253 bytes)
+- `exec/i4500c-20260930/lib.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500c-20260930/lib.sh` (5292 bytes)
+- `exec/i4500c-20260930/perf.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/i4500c-20260930/perf.sh` (6358 bytes)
+- `exec/results/i4500b-20260930/build-fix.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/build-fix.txt` (747 bytes)
+- `exec/results/i4500b-20260930/build-fixS1.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/build-fixS1.txt` (1528 bytes)
+- `exec/results/i4500b-20260930/build-fixS1rm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/build-fixS1rm.txt` (875 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/meta.json` (851 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/perf-e0.json` (3207 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/perf.json` (3511 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep1/proof.txt` (856 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/meta.json` (851 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/perf-e0.json` (3201 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/perf.json` (3508 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep2/proof.txt` (851 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/meta.json` (851 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/perf-e0.json` (3201 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/perf.json` (3505 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep3/proof.txt` (856 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/meta.json` (851 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/perf-e0.json` (3208 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/perf.json` (3512 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__base__rep4/proof.txt` (851 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/meta.json` (850 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/perf-e0.json` (3205 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/perf.json` (3507 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep1/proof.txt` (836 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/meta.json` (850 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/perf-e0.json` (3204 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/perf.json` (3510 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep2/proof.txt` (836 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/meta.json` (850 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/perf-e0.json` (3203 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/perf.json` (3508 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep3/proof.txt` (841 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/meta.json` (850 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/perf-e0.json` (3204 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/perf.json` (3508 bytes)
+- `exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/llama-8b__tp2__8u__p4096__fixS1__rep4/proof.txt` (841 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/amx_busy.txt` (81 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/meta.json` (855 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/perf-e0.json` (1243 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/perf.json` (1546 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep1/proof.txt` (940 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/amx_busy.txt` (81 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/meta.json` (857 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/perf-e0.json` (1248 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/perf.json` (1552 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep2/proof.txt` (940 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/amx_busy.txt` (81 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/meta.json` (857 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/perf-e0.json` (1243 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/perf.json` (1546 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep3/proof.txt` (940 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/amx_busy.txt` (81 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/meta.json` (857 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/perf-e0.json` (1246 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/perf.json` (1551 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__base__rep4/proof.txt` (944 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/amx_busy.txt` (81 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/meta.json` (856 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/perf-e0.json` (1241 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/perf.json` (1547 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep1/proof.txt` (929 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/amx_busy.txt` (81 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/meta.json` (856 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/perf-e0.json` (1243 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/perf.json` (1546 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep2/proof.txt` (925 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/amx_busy.txt` (81 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/meta.json` (856 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/perf-e0.json` (1246 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/perf.json` (1551 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep3/proof.txt` (925 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/amx_busy.txt` (81 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/meta.json` (856 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/perf-e0.json` (1238 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/perf.json` (1540 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fixS1__rep4/proof.txt` (925 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/amx_busy.txt` (82 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/meta.json` (856 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/perf-e0.json` (1247 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/perf.json` (1552 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep1/proof.txt` (930 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/amx_busy.txt` (82 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/meta.json` (856 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/perf-e0.json` (1246 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/perf.json` (1550 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep2/proof.txt` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/amx_busy.txt` (82 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/meta.json` (856 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/perf-e0.json` (1247 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/perf.json` (1550 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep3/proof.txt` (930 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/amx_busy.txt` (82 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/meta.json` (856 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/perf-e0.json` (1243 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/perf.json` (1548 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp2__2u__p1024__fix__rep4/proof.txt` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/meta.json` (927 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/perf-e0.json` (1852 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/perf.json` (2157 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep1/proof.txt` (1038 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/amx_busy.txt` (82 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/meta.json` (927 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/perf-e0.json` (1859 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/perf.json` (2162 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep2/proof.txt` (1041 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/meta.json` (927 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/perf-e0.json` (1864 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/perf.json` (2169 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep3/proof.txt` (1042 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/amx_busy.txt` (82 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/meta.json` (927 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/perf-e0.json` (1861 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/perf.json` (2165 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__base__rep4/proof.txt` (1041 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/amx_busy.txt` (74 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/meta.json` (927 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/perf-e0.json` (1860 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/perf.json` (2162 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep1/proof.txt` (1037 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/amx_busy.txt` (74 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/meta.json` (927 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/perf-e0.json` (1854 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/perf.json` (2157 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep2/proof.txt` (1037 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/amx_busy.txt` (74 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/meta.json` (927 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/perf-e0.json` (1863 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/perf.json` (2168 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep3/proof.txt` (1037 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/amx_busy.txt` (74 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/meta.json` (927 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/perf-e0.json` (1858 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/perf.json` (2160 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__basekill__rep4/proof.txt` (1033 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/perf-e0.json` (1860 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/perf.json` (2163 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep1/proof.txt` (1027 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/perf-e0.json` (1860 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/perf.json` (2163 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep2/proof.txt` (1023 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/perf-e0.json` (1858 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/perf.json` (2163 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep3/proof.txt` (1023 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/perf-e0.json` (1860 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/perf.json` (2165 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1__rep4/proof.txt` (1023 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/amx_busy.txt` (74 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/perf-e0.json` (1861 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/perf.json` (2165 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep1/proof.txt` (1018 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/amx_busy.txt` (74 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/perf-e0.json` (1854 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/perf.json` (2154 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep2/proof.txt` (1018 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/amx_busy.txt` (74 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/perf-e0.json` (1850 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/perf.json` (2152 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep3/proof.txt` (1022 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/amx_busy.txt` (74 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/perf-e0.json` (1854 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/perf.json` (2156 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fixS1kill__rep4/proof.txt` (1018 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/perf-e0.json` (1864 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/perf.json` (2167 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep1/proof.txt` (1023 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/perf-e0.json` (1862 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/perf.json` (2167 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep2/proof.txt` (1023 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/perf-e0.json` (1860 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/perf.json` (2164 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep3/proof.txt` (1027 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/amx_busy.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/amx_busy.txt` (83 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/meta.json` (926 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/perf-e0.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/perf-e0.json` (1858 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/perf.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/perf.json` (2164 bytes)
+- `exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/proof.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/cells/qwen3-4b__tp4__4u__p1024__fix__rep4/proof.txt` (1023 bytes)
+- `exec/results/i4500b-20260930/nightly.sha` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/nightly.sha` (17 bytes)
+- `exec/results/i4500b-20260930/rt/base__tp2__2u.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/rt/base__tp2__2u.log` (13527 bytes)
+- `exec/results/i4500b-20260930/rt/base__tp4__4u.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/rt/base__tp4__4u.log` (19987 bytes)
+- `exec/results/i4500b-20260930/rt/fixS1__tp2__2u.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/rt/fixS1__tp2__2u.log` (13513 bytes)
+- `exec/results/i4500b-20260930/rt/fixS1__tp4__4u.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/rt/fixS1__tp4__4u.log` (19966 bytes)
+- `exec/results/i4500b-20260930/rt/fix__tp2__2u.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/rt/fix__tp2__2u.log` (13326 bytes)
+- `exec/results/i4500b-20260930/rt/fix__tp4__4u.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/rt/fix__tp4__4u.log` (19957 bytes)
+- `exec/results/i4500b-20260930/smoke/smoke.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/smoke/smoke.txt` (7306 bytes)
+- `exec/results/i4500b-20260930/status.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/status.txt` (43 bytes)
+- `exec/results/i4500b-20260930/summary.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/summary.json` (11816 bytes)
+- `exec/results/i4500b-20260930/summary.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/summary.md` (2558 bytes)
+- `exec/results/i4500b-20260930/tests-fix.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/tests-fix.txt` (0 bytes)
+- `exec/results/i4500b-20260930/tests-fixS1.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/tests-fixS1.txt` (526 bytes)
+- `exec/results/i4500b-20260930/tests-fixS1rm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/tests-fixS1rm.txt` (315 bytes)
+- `exec/results/i4500b-20260930/traces/analysis.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/analysis.json` (697935 bytes)
+- `exec/results/i4500b-20260930/traces/analysis.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/analysis.md` (2842 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-base__tp2__2u-burst.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-base__tp2__2u-burst.json` (271718 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-base__tp2__2u-quiet.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-base__tp2__2u-quiet.json` (258215 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-base__tp4__4u-burst.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-base__tp4__4u-burst.json` (515433 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-base__tp4__4u-quiet.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-base__tp4__4u-quiet.json` (492434 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-fixS1__tp2__2u-burst.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-fixS1__tp2__2u-burst.json` (271407 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-fixS1__tp2__2u-quiet.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-fixS1__tp2__2u-quiet.json` (258324 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-fixS1__tp4__4u-burst.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-fixS1__tp4__4u-burst.json` (519007 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-fixS1__tp4__4u-quiet.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-fixS1__tp4__4u-quiet.json` (488860 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-fix__tp2__2u-burst.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-fix__tp2__2u-burst.json` (271408 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-fix__tp2__2u-quiet.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-fix__tp2__2u-quiet.json` (268378 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-fix__tp4__4u-burst.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-fix__tp4__4u-burst.json` (515547 bytes)
+- `exec/results/i4500b-20260930/traces/lanes-fix__tp4__4u-quiet.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes-fix__tp4__4u-quiet.json` (489079 bytes)
+- `exec/results/i4500b-20260930/traces/lanes14.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/lanes14.json` (2610581 bytes)
+- `exec/results/i4500b-20260930/traces/passes.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/passes.json` (20432 bytes)
+- `exec/results/i4500b-20260930/traces/rt-results.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500b-20260930/traces/rt-results.txt` (8865 bytes)
+- `exec/results/i4500c-20260930/perf/base/perf-record.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/base/perf-record.txt` (164 bytes)
+- `exec/results/i4500c-20260930/perf/base/perf-threads.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/base/perf-threads.txt` (16093 bytes)
+- `exec/results/i4500c-20260930/perf/base/pid.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/base/pid.txt` (12 bytes)
+- `exec/results/i4500c-20260930/perf/base/report-all.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/base/report-all.txt` (0 bytes)
+- `exec/results/i4500c-20260930/perf/base/report-main-children.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/base/report-main-children.txt` (0 bytes)
+- `exec/results/i4500c-20260930/perf/base/report-main.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/base/report-main.txt` (3931 bytes)
+- `exec/results/i4500c-20260930/perf/base/threads.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/base/threads.txt` (1517 bytes)
+- `exec/results/i4500c-20260930/perf/fixS1/perf-record.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/fixS1/perf-record.txt` (165 bytes)
+- `exec/results/i4500c-20260930/perf/fixS1/perf-threads.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/fixS1/perf-threads.txt` (16093 bytes)
+- `exec/results/i4500c-20260930/perf/fixS1/pid.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/fixS1/pid.txt` (12 bytes)
+- `exec/results/i4500c-20260930/perf/fixS1/report-all.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/fixS1/report-all.txt` (0 bytes)
+- `exec/results/i4500c-20260930/perf/fixS1/report-main-children.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/fixS1/report-main-children.txt` (0 bytes)
+- `exec/results/i4500c-20260930/perf/fixS1/report-main.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/fixS1/report-main.txt` (3931 bytes)
+- `exec/results/i4500c-20260930/perf/fixS1/threads.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/perf/fixS1/threads.txt` (1461 bytes)
+- `exec/results/i4500c-20260930/rt/base.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/rt/base.log` (11802 bytes)
+- `exec/results/i4500c-20260930/rt/fixS1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/rt/fixS1.log` (11703 bytes)
+- `exec/results/i4500c-20260930/status.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4500c-20260930/status.txt` (77 bytes)
+- `exec/scratch-relocated/b0cfc925/factsheet.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/b0cfc925/factsheet.md` (71250 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/b0cfc925-5b1e-4504-94b7-d6d1505d5718/scratchpad/factsheet.md`
+- `exec/scratch-relocated/b0cfc925/gen_round2.v1.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/b0cfc925/gen_round2.v1.py` (38958 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/b0cfc925-5b1e-4504-94b7-d6d1505d5718/scratchpad/gen_round2.v1.py`
+- `exec/scratch-relocated/b0cfc925/lcheck2.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/b0cfc925/lcheck2.sh` (1696 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/b0cfc925-5b1e-4504-94b7-d6d1505d5718/scratchpad/lcheck2.sh`
+- `exec/scratch-relocated/b0cfc925/policy-preview.html` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/b0cfc925/policy-preview.html` (26056 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/b0cfc925-5b1e-4504-94b7-d6d1505d5718/scratchpad/policy-preview.html`
+- `exec/scratch-relocated/b0cfc925/review2.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/b0cfc925/review2.txt` (84514 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/b0cfc925-5b1e-4504-94b7-d6d1505d5718/scratchpad/review2.txt`
+- `exec/workflows/i4500-policy-review-wf_f9b3a62f-255.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/i4500-policy-review-wf_f9b3a62f-255.js` (8599 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/b0cfc925-5b1e-4504-94b7-d6d1505d5718/workflows/scripts/i4500-policy-review-wf_f9b3a62f-255.js`
+- `exec/workflows/i4500-store-review-wf_d9d0ea63-7ca.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/i4500-store-review-wf_d9d0ea63-7ca.js` (4938 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/b0cfc925-5b1e-4504-94b7-d6d1505d5718/workflows/scripts/i4500-store-review-wf_d9d0ea63-7ca.js`
+- `exec/workflows/i4500-understand-wf_6861a5cc-c84.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/i4500-understand-wf_6861a5cc-c84.js` (15155 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/b0cfc925-5b1e-4504-94b7-d6d1505d5718/workflows/scripts/i4500-understand-wf_6861a5cc-c84.js`
+- `exec/workflows/round2-report-review-wf_c6c82f11-841.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/round2-report-review-wf_c6c82f11-841.js` (7234 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/b0cfc925-5b1e-4504-94b7-d6d1505d5718/workflows/scripts/round2-report-review-wf_c6c82f11-841.js`
+- `memory/i4500b-policy-campaign.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/i4500b-policy-campaign.md` (9901 bytes)
+
+Related: [claude_20260929_attention-stats-claude-html-for-pr-4596-counters.md](../../handoffs/claude_20260929_attention-stats-claude-html-for-pr-4596-counters.md)
+
+- `exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headkill__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headkill__rep1.log` (23189 bytes)
+- `exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headon__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260924/rt/q3-4b-tp2-8u-p1024__cpu__headon__rep1.log` (23361 bytes)
+- `exec/workflows/attention-stats-page-wf_032a5012-c97.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/attention-stats-page-wf_032a5012-c97.js` (33817 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/7684287b-c61d-49c7-bd35-07b469748b28/workflows/scripts/attention-stats-page-wf_032a5012-c97.js`
+- `memory/attention-stats-claude-page.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attention-stats-claude-page.md` (3269 bytes)
+- `pr3879/new-counters/attention-stats-claude-check.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attention-stats-claude-check.py` (19075 bytes)
+
+Related: [claude_20260930-20261001_pr-4557-review-comments-from-ben.md](../../handoffs/claude_20260930-20261001_pr-4557-review-comments-from-ben.md)
+
+- `exec/results/i4557final-20261001/binaries.sha256` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557final-20261001/binaries.sha256` (227 bytes)
+- `exec/results/i4557final-20261001/build-final.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557final-20261001/build-final.txt` (703 bytes)
+- `exec/results/i4557final-20261001/chain-final.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557final-20261001/chain-final.sh` (5563 bytes)
+- `exec/results/i4557final-20261001/chain-steps.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557final-20261001/chain-steps.txt` (319 bytes)
+- `exec/results/i4557final-20261001/smoke/cpu-p1024/smoke.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557final-20261001/smoke/cpu-p1024/smoke.txt` (3679 bytes)
+- `exec/results/i4557final-20261001/smoke/fpga-p1024/smoke.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557final-20261001/smoke/fpga-p1024/smoke.txt` (1406 bytes)
+- `exec/results/i4557final-20261001/tests-final.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557final-20261001/tests-final.txt` (0 bytes)
+- `exec/results/i4557final-20261001/worktree-before.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557final-20261001/worktree-before.txt` (137 bytes)
+- `exec/scratch-relocated/5bd3203f/ben/ben-comment-5765866077.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/ben-comment-5765866077.md` (7007 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/ben-comment-5765866077.md`
+- `exec/scratch-relocated/5bd3203f/ben/ben-review-5270587330.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/ben-review-5270587330.md` (929 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/ben-review-5270587330.md`
+- `exec/scratch-relocated/5bd3203f/ben/fig0.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/fig0.png` (140275 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/fig0.png`
+- `exec/scratch-relocated/5bd3203f/ben/fig1.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/fig1.png` (74544 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/fig1.png`
+- `exec/scratch-relocated/5bd3203f/ben/fig2.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/fig2.png` (69085 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/fig2.png`
+- `exec/scratch-relocated/5bd3203f/ben/issue-comments.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/issue-comments.json` (14671 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/issue-comments.json`
+- `exec/scratch-relocated/5bd3203f/ben/patch2.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/patch2.py` (29439 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/patch2.py`
+- `exec/scratch-relocated/5bd3203f/ben/pr4557-body.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/pr4557-body.md` (13659 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/pr4557-body.md`
+- `exec/scratch-relocated/5bd3203f/ben/pr4697.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/pr4697.diff` (11312 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/pr4697.diff`
+- `exec/scratch-relocated/5bd3203f/ben/pr4697.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/pr4697.json` (2125 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/pr4697.json`
+- `exec/scratch-relocated/5bd3203f/ben/review-comments.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/review-comments.json` (33187 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/review-comments.json`
+- `exec/scratch-relocated/5bd3203f/ben/reviews.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/reviews.json` (3326 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/reviews.json`
+- `exec/scratch-relocated/5bd3203f/ben/wf-result.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/ben/wf-result.json` (625782 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/ben/wf-result.json`
+- `exec/scratch-relocated/5bd3203f/final-checklist.before.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/final-checklist.before.md` (5510 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/final-checklist.before.md`
+- `exec/scratch-relocated/5bd3203f/final-issue-4588-comment.before.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/final-issue-4588-comment.before.md` (2606 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/final-issue-4588-comment.before.md`
+- `exec/scratch-relocated/5bd3203f/final-pr-body.before.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/final-pr-body.before.md` (17659 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/final-pr-body.before.md`
+- `exec/scratch-relocated/5bd3203f/final-replies.before.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/final-replies.before.md` (10399 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/final-replies.before.md`
+- `exec/scratch-relocated/5bd3203f/page.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/page.txt` (89728 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/page.txt`
+- `exec/scratch-relocated/5bd3203f/review-b5-prbody.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/5bd3203f/review-b5-prbody.md` (13659 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/scratchpad/review-b5-prbody.md`
+- `exec/workflows/pr4557-b5-drop-row-wf_34ade71d-741.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr4557-b5-drop-row-wf_34ade71d-741.js` (17549 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/5bd3203f-0cd9-4559-8bc6-0e0d2549cc9a/workflows/scripts/pr4557-b5-drop-row-wf_34ade71d-741.js`
+- `memory/pr4557-ben-review-response.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4557-ben-review-response.md` (9011 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/b1-issue-body.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/b1-issue-body.md` (5039 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/b1-issue-title.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/b1-issue-title.txt` (90 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/b5-option-b-drop-row.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/b5-option-b-drop-row.diff` (13827 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/fill-counts.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/fill-counts.py` (4445 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-3bda.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-3bda.log` (22816 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-checklist.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-checklist.md` (6689 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-issue-4588-comment.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-issue-4588-comment.md` (2964 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-pr-body-2.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-pr-body-2.md` (18733 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-pr-body.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-pr-body.diff` (14830 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-pr-body.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-pr-body.md` (18418 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-replies.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-replies.md` (10870 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-reply-b2.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-reply-b2.md` (924 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-reply-b3.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-reply-b3.md` (2083 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-reply-b4.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-reply-b4.md` (2669 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-reply-b5.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-reply-b5.md` (2812 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/final-reply-b6.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/final-reply-b6.md` (2027 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/gen-final-body.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/gen-final-body.py` (7433 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/gen_ben.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/gen_ben.py` (103548 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/pr-body-live-2.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/pr-body-live-2.md` (13659 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/pr-body-live-3.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/pr-body-live-3.md` (18419 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/pr-body-live.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/pr-body-live.md` (13659 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/pr4557-ben-response-wf_eefcbfe8-584.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/pr4557-ben-response-wf_eefcbfe8-584.js` (35827 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/r1-3bda.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/r1-3bda.log` (82034 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/r1-comment-diffs.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/r1-comment-diffs.diff` (13688 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/r2-3bda.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/r2-3bda.log` (14863 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/r2-results.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/r2-results.txt` (2567 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/review-comments.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/review-comments.json` (33187 bytes)
+- `vnnied-k-in-place/issue4525/exec/ben-20260930/workflow-result-wf_eefcbfe8-584.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/ben-20260930/workflow-result-wf_eefcbfe8-584.json` (625782 bytes)
+
+Related: [claude_20260930_pr-4596-description-patch.md](../../handoffs/claude_20260930_pr-4596-description-patch.md)
+
+- `exec/attnstats-20260930-objdump/objdump-check.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20260930-objdump/objdump-check.sh` (2834 bytes)
+- `exec/counter-20260922/r5/summary.tsv` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/summary.tsv` (1445 bytes)
+- `exec/results/attnstats-20260930-objdump/objdump-check.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20260930-objdump/objdump-check.txt` (4232 bytes)
+- `exec/scratch-relocated/ff442b62/apply-test4.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff442b62/apply-test4.md` (19475 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/apply-test4.md`
+- `exec/scratch-relocated/ff442b62/build_body.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff442b62/build_body.py` (18366 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/build_body.py`
+- `exec/scratch-relocated/ff442b62/build_body2.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff442b62/build_body2.py` (17160 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/build_body2.py`
+- `exec/scratch-relocated/ff442b62/comment-5902483127.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff442b62/comment-5902483127.md` (1185 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/comment-5902483127.md`
+- `exec/scratch-relocated/ff442b62/comment-5902523541.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff442b62/comment-5902523541.md` (3449 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/comment-5902523541.md`
+- `exec/scratch-relocated/ff442b62/comment-5902534762.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff442b62/comment-5902534762.md` (1487 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/comment-5902534762.md`
+- `exec/scratch-relocated/ff442b62/live-body.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff442b62/live-body.md` (13082 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/live-body.md`
+- `exec/scratch-relocated/ff442b62/pr-meta.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff442b62/pr-meta.json` (524 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ff442b62-9617-4995-a3e8-2a776fb27f4c/scratchpad/pr-meta.json`
+- `memory/pr-description-no-history.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr-description-no-history.md` (1493 bytes)
+- `memory/pr4596-body-refresh-20260930.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4596-body-refresh-20260930.md` (5200 bytes)
+- `pr3879/new-counters/pr-body-20260930.patch` -> `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body-20260930.patch` (32961 bytes)
+- `pr3879/new-counters/pr-body-live-20260930.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/pr-body-live-20260930.md` (13082 bytes)
+
+Related: [claude_20260930_pr-4596-merge-conflicts.md](../../handoffs/claude_20260930_pr-4596-merge-conflicts.md)
+
+- `exec/scratch-relocated/bed9db2b/ci-checks.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/ci-checks.txt` (83955 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/ci-checks.txt`
+- `exec/scratch-relocated/bed9db2b/merge-build/build.end` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/merge-build/build.end` (21 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/merge-build/build.end`
+- `exec/scratch-relocated/bed9db2b/merge-build/build.exit` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/merge-build/build.exit` (13 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/merge-build/build.exit`
+- `exec/scratch-relocated/bed9db2b/merge-build/build.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/merge-build/build.log` (12238 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/merge-build/build.log`
+- `exec/scratch-relocated/bed9db2b/merge-build/build.start` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/merge-build/build.start` (21 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/merge-build/build.start`
+- `exec/scratch-relocated/bed9db2b/merge-build/run.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/merge-build/run.log` (1458 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/merge-build/run.log`
+- `exec/scratch-relocated/bed9db2b/merge-build/run.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/merge-build/run.sh` (1910 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/merge-build/run.sh`
+- `exec/scratch-relocated/bed9db2b/merge-build/summary.tsv` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/merge-build/summary.tsv` (1445 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/merge-build/summary.tsv`
+- `exec/scratch-relocated/bed9db2b/merge-msg.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/merge-msg.txt` (512 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/merge-msg.txt`
+- `exec/scratch-relocated/bed9db2b/merge-tree.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/bed9db2b/merge-tree.txt` (1264085 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/bed9db2b-cd22-4507-966d-cc12da65429f/scratchpad/merge-tree.txt`
+- `memory/wade-pr4596-round5-response.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-pr4596-round5-response.md` (7339 bytes)
+
+Related: [claude_20260930_pr-4596-wade-comments.md](../../handoffs/claude_20260930_pr-4596-wade-comments.md)
+
+- `exec/counter-20260922/gen_wade2.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/gen_wade2.py` (47016 bytes)
+- `exec/counter-20260922/r5/added.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/added.txt` (142173 bytes)
+- `exec/counter-20260922/r5/apply.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/apply.py` (8644 bytes)
+- `exec/counter-20260922/r5/apply2.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/apply2.py` (3464 bytes)
+- `exec/counter-20260922/r5/buildtest-run1/run.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/buildtest-run1/run.sh` (1620 bytes)
+- `exec/counter-20260922/r5/buildtest-run1/summary.tsv` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/buildtest-run1/summary.tsv` (1445 bytes)
+- `exec/counter-20260922/r5/buildtest/summary.tsv` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/buildtest/summary.tsv` (1445 bytes)
+- `exec/counter-20260922/r5/commit.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/commit.txt` (41 bytes)
+- `exec/counter-20260922/r5/full.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/full.diff` (167527 bytes)
+- `exec/counter-20260922/r5/gen_wade2.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/gen_wade2.py` (47016 bytes)
+- `exec/counter-20260922/r5/gh-body-live.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/gh-body-live.md` (13082 bytes)
+- `exec/counter-20260922/r5/page-edits.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/page-edits.json` (24321 bytes)
+- `exec/counter-20260922/r5/review-applied.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/review-applied.md` (2935 bytes)
+- `exec/counter-20260922/r5/round5.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/round5.diff` (11015 bytes)
+- `exec/counter-20260922/r5/w9_fig.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/w9_fig.png` (89117 bytes)
+- `exec/counter-20260922/r5/wade-round5-diff-review-wf_48d45328-3c3.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/wade-round5-diff-review-wf_48d45328-3c3.js` (8368 bytes)
+- `exec/counter-20260922/r5/wade-round5-page-check-wf_ce2336b3-aad.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/wade-round5-page-check-wf_ce2336b3-aad.js` (6594 bytes)
+- `exec/counter-20260922/r5/wade-round5-verify-wf_4e5d9ee3-57d.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/wade-round5-verify-wf_4e5d9ee3-57d.js` (21882 bytes)
+- `exec/counter-20260922/r5/wf1.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/wf1.json` (172487 bytes)
+- `exec/counter-20260922/r5/wf2.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/wf2.json` (205756 bytes)
+- `exec/counter-20260922/r5/wf3.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/wf3.json` (181546 bytes)
+- `exec/counter-20260922/r5/wt.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/r5/wt.diff` (10436 bytes)
+- `exec/counter-20260922/w9_fig.svg` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/counter-20260922/w9_fig.svg` (4367 bytes)
+- `exec/scratch-relocated/c61e7228/r5/added.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/added.txt` (142173 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/added.txt`
+- `exec/scratch-relocated/c61e7228/r5/apply.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/apply.py` (8644 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/apply.py`
+- `exec/scratch-relocated/c61e7228/r5/apply2.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/apply2.py` (3464 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/apply2.py`
+- `exec/scratch-relocated/c61e7228/r5/buildtest-run1/run.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/buildtest-run1/run.sh` (1620 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/buildtest-run1/run.sh`
+- `exec/scratch-relocated/c61e7228/r5/buildtest-run1/summary.tsv` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/buildtest-run1/summary.tsv` (1445 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/buildtest-run1/summary.tsv`
+- `exec/scratch-relocated/c61e7228/r5/buildtest/summary.tsv` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/buildtest/summary.tsv` (1445 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/buildtest/summary.tsv`
+- `exec/scratch-relocated/c61e7228/r5/commit.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/commit.txt` (41 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/commit.txt`
+- `exec/scratch-relocated/c61e7228/r5/full.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/full.diff` (167527 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/full.diff`
+- `exec/scratch-relocated/c61e7228/r5/gh-body-live.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/gh-body-live.md` (13082 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/gh-body-live.md`
+- `exec/scratch-relocated/c61e7228/r5/review-applied.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/review-applied.md` (2873 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/review-applied.md`
+- `exec/scratch-relocated/c61e7228/r5/round5.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/round5.diff` (11006 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/round5.diff`
+- `exec/scratch-relocated/c61e7228/r5/summary.tsv` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/summary.tsv` (1445 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/summary.tsv`
+- `exec/scratch-relocated/c61e7228/r5/wf1.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/wf1.json` (172487 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/wf1.json`
+- `exec/scratch-relocated/c61e7228/r5/wf2.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/wf2.json` (205756 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/wf2.json`
+- `exec/scratch-relocated/c61e7228/r5/wt.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c61e7228/r5/wt.diff` (10436 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/c61e7228-4669-46da-a017-80905c3bf593/scratchpad/r5/wt.diff`
+
+Related: [claude_20261001-20261002_amx-attention-stats-comparison-at-3bda.md](../../handoffs/claude_20261001-20261002_amx-attention-stats-comparison-at-3bda.md)
+
+- `exec/attnstats-20261002/README.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/README.md` (5334 bytes)
+- `exec/attnstats-20261002/assemble.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/assemble.py` (1328 bytes)
+- `exec/attnstats-20261002/attnstats-20261002-script-review-wf_0fd83adc-336.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/attnstats-20261002-script-review-wf_0fd83adc-336.js` (8805 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/81e65d05-6ef1-4e3c-ada7-bca5950d03db/workflows/scripts/attnstats-20261002-script-review-wf_0fd83adc-336.js`
+- `exec/attnstats-20261002/attnstats-compare-facts-wf_0bb1d05b-48c.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/attnstats-compare-facts-wf_0bb1d05b-48c.js` (13291 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/81e65d05-6ef1-4e3c-ada7-bca5950d03db/workflows/scripts/attnstats-compare-facts-wf_0bb1d05b-48c.js`
+- `exec/attnstats-20261002/attnstats-compare-verify-2-wf_b8d75c26-c80.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/attnstats-compare-verify-2-wf_b8d75c26-c80.js` (4940 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/81e65d05-6ef1-4e3c-ada7-bca5950d03db/workflows/scripts/attnstats-compare-verify-2-wf_b8d75c26-c80.js`
+- `exec/attnstats-20261002/attnstats-compare-verify-wf_ae2765d2-062.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/attnstats-compare-verify-wf_ae2765d2-062.js` (7941 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/81e65d05-6ef1-4e3c-ada7-bca5950d03db/workflows/scripts/attnstats-compare-verify-wf_ae2765d2-062.js`
+- `exec/attnstats-20261002/campaign.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/campaign.sh` (19689 bytes)
+- `exec/attnstats-20261002/chain.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/chain.sh` (12440 bytes)
+- `exec/attnstats-20261002/final_prose.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/final_prose.md` (38372 bytes)
+- `exec/attnstats-20261002/final_prose.md.rev2` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/final_prose.md.rev2` (29108 bytes)
+- `exec/attnstats-20261002/gen_compare.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/gen_compare.py` (31141 bytes)
+- `exec/attnstats-20261002/launch.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/launch.sh` (1871 bytes)
+- `exec/logs/attnstats-20261002-chain.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/attnstats-20261002-chain.log` (3114 bytes)
+- `exec/logs/attnstats-20261002.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/attnstats-20261002.log` (8902 bytes)
+- `exec/results/attnstats-20261002/build-main1002.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/build-main1002.txt` (796 bytes)
+- `exec/results/attnstats-20261002/exit-reports.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/exit-reports.txt` (52593 bytes)
+- `exec/results/attnstats-20261002/main.sha` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/main.sha` (11 bytes)
+- `exec/results/attnstats-20261002/rt-results.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt-results.txt` (47397 bytes)
+- `exec/results/attnstats-20261002/rt/gptoss-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/gptoss-8u-p1024-fpga__fpga__amxoff__rep1.log` (36612 bytes)
+- `exec/results/attnstats-20261002/rt/gptoss-8u-p1024-fpga__fpga__amxon__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/gptoss-8u-p1024-fpga__fpga__amxon__rep1.log` (36527 bytes)
+- `exec/results/attnstats-20261002/rt/l8b-8u-p1024-cpu__cpu__amxoff__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/l8b-8u-p1024-cpu__cpu__amxoff__rep1.log` (25866 bytes)
+- `exec/results/attnstats-20261002/rt/l8b-8u-p1024-cpu__cpu__amxon__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/l8b-8u-p1024-cpu__cpu__amxon__rep1.log` (26373 bytes)
+- `exec/results/attnstats-20261002/rt/l8b-8u-p8192-cpu__cpu__amxoff__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/l8b-8u-p8192-cpu__cpu__amxoff__rep1.log` (30401 bytes)
+- `exec/results/attnstats-20261002/rt/l8b-8u-p8192-cpu__cpu__amxon__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/l8b-8u-p8192-cpu__cpu__amxon__rep1.log` (30853 bytes)
+- `exec/results/attnstats-20261002/rt/q3-4b-8u-p1024-cpu__cpu__amxoff__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/q3-4b-8u-p1024-cpu__cpu__amxoff__rep1.log` (25051 bytes)
+- `exec/results/attnstats-20261002/rt/q3-4b-8u-p1024-cpu__cpu__amxon__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/q3-4b-8u-p1024-cpu__cpu__amxon__rep1.log` (25434 bytes)
+- `exec/results/attnstats-20261002/rt/q3-4b-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/q3-4b-8u-p1024-fpga__fpga__amxoff__rep1.log` (27654 bytes)
+- `exec/results/attnstats-20261002/rt/q3-4b-8u-p1024-fpga__fpga__amxon__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/q3-4b-8u-p1024-fpga__fpga__amxon__rep1.log` (27639 bytes)
+- `exec/results/attnstats-20261002/rt/q3-4b-8u-p8192-fpga__fpga__amxoff__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/q3-4b-8u-p8192-fpga__fpga__amxoff__rep1.log` (40027 bytes)
+- `exec/results/attnstats-20261002/rt/q3-4b-8u-p8192-fpga__fpga__amxon__rep1.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/q3-4b-8u-p8192-fpga__fpga__amxon__rep1.log` (40280 bytes)
+- `exec/results/attnstats-20261002/tests-main1002.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/tests-main1002.txt` (0 bytes)
+- `exec/scratch-relocated/81e65d05/factsheet.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/81e65d05/factsheet.md` (62766 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/81e65d05-6ef1-4e3c-ada7-bca5950d03db/scratchpad/factsheet.md`
+- `exec/scratch-relocated/81e65d05/review-critic.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/81e65d05/review-critic.md` (17454 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/81e65d05-6ef1-4e3c-ada7-bca5950d03db/scratchpad/review-critic.md`
+- `exec/scratch-relocated/81e65d05/verify-critic.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/81e65d05/verify-critic.md` (32124 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/81e65d05-6ef1-4e3c-ada7-bca5950d03db/scratchpad/verify-critic.md`
+- `exec/scratch-relocated/81e65d05/verify2-critic.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/81e65d05/verify2-critic.md` (33031 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/81e65d05-6ef1-4e3c-ada7-bca5950d03db/scratchpad/verify2-critic.md`
+- `memory/attnstats-20261002-campaign.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attnstats-20261002-campaign.md` (10223 bytes)
+
+Related: [claude_20261001-20261002_codex-pr-review-comments.md](../../handoffs/claude_20261001-20261002_codex-pr-review-comments.md)
+
+- `exec/pr4737-ci-sim-20261002/README.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-ci-sim-20261002/README.md` (1086 bytes)
+- `exec/pr4737-ci-sim-20261002/run.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-ci-sim-20261002/run.sh` (2938 bytes)
+- `exec/pr4737-review-20261001/README.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-review-20261001/README.md` (871 bytes)
+- `exec/pr4737-review-20261001/run.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-review-20261001/run.sh` (2565 bytes)
+- `exec/results/pr4737-ci-sim-20261002/host-suite-break.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-ci-sim-20261002/host-suite-break.log` (912 bytes)
+- `exec/results/pr4737-ci-sim-20261002/host-suite-break.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-ci-sim-20261002/host-suite-break.txt` (12677 bytes)
+- `exec/results/pr4737-ci-sim-20261002/host-suite-head.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-ci-sim-20261002/host-suite-head.log` (941 bytes)
+- `exec/results/pr4737-ci-sim-20261002/host-suite-head.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-ci-sim-20261002/host-suite-head.txt` (12643 bytes)
+- `exec/results/pr4737-ci-sim-20261002/host-suite-restored.log` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-ci-sim-20261002/host-suite-restored.log` (885 bytes)
+- `exec/results/pr4737-ci-sim-20261002/host-suite-restored.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-ci-sim-20261002/host-suite-restored.txt` (9414 bytes)
+- `exec/results/pr4737-review-20261001/build-r1.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-review-20261001/build-r1.txt` (1447 bytes)
+- `exec/results/pr4737-review-20261001/build-r1rm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-review-20261001/build-r1rm.txt` (855 bytes)
+- `exec/results/pr4737-review-20261001/tests-r1.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-review-20261001/tests-r1.txt` (526 bytes)
+- `exec/results/pr4737-review-20261001/tests-r1rm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4737-review-20261001/tests-r1rm.txt` (315 bytes)
+- `exec/scratch-relocated/922a3361/comments.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/comments.json` (34934 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/comments.json`
+- `exec/scratch-relocated/922a3361/lcheck2.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/lcheck2.sh` (1696 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/lcheck2.sh`
+- `exec/scratch-relocated/922a3361/patch_body.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/patch_body.py` (1526 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/patch_body.py`
+- `exec/scratch-relocated/922a3361/pr4737.diff` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/pr4737.diff` (94715 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/pr4737.diff`
+- `exec/scratch-relocated/922a3361/replies/C1-run.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/replies/C1-run.md` (1567 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/replies/C1-run.md`
+- `exec/scratch-relocated/922a3361/replies/C1.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/replies/C1.md` (3807 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/replies/C1.md`
+- `exec/scratch-relocated/922a3361/replies/C2.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/replies/C2.md` (799 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/replies/C2.md`
+- `exec/scratch-relocated/922a3361/replies/C3.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/replies/C3.md` (855 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/replies/C3.md`
+- `exec/scratch-relocated/922a3361/replies/C4.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/replies/C4.md` (639 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/replies/C4.md`
+- `exec/scratch-relocated/922a3361/replies/C5.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/replies/C5.md` (1158 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/replies/C5.md`
+- `exec/scratch-relocated/922a3361/replies/G.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/replies/G.md` (2554 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/replies/G.md`
+- `exec/scratch-relocated/922a3361/reviews.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/reviews.json` (3561 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/reviews.json`
+- `exec/scratch-relocated/922a3361/threads.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/threads.json` (13370 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/threads.json`
+- `exec/scratch-relocated/922a3361/wf1.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/922a3361/wf1.json` (193372 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/scratchpad/wf1.json`
+- `exec/workflows/pr4737-reply-check-wf_26d88e9e-f68.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr4737-reply-check-wf_26d88e9e-f68.js` (3386 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/workflows/scripts/pr4737-reply-check-wf_26d88e9e-f68.js`
+- `exec/workflows/pr4737-review-response-wf_6cdbf29e-093.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr4737-review-response-wf_6cdbf29e-093.js` (14609 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/922a3361-aa01-4c82-918d-776e08c4d97d/workflows/scripts/pr4737-review-response-wf_6cdbf29e-093.js`
+- `memory/pr4737-review-response.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4737-review-response.md` (8327 bytes)
+- `pr3879/new-counters/recovered-pr-desc/PR-number.txt` -> `agentsrv:/home/jhan/tmp/PR-number.txt` (5 bytes)
+
+Related: [claude_20261001-20261002_pr4737-kv-cache-hpp-diagram-page.md](../../handoffs/claude_20261001-20261002_pr4737-kv-cache-hpp-diagram-page.md)
+
+- `exec/pr4737-diagrams-20261001/diagrams_base.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-diagrams-20261001/diagrams_base.py` (26849 bytes)
+- `exec/pr4737-diagrams-20261001/diagrams_base_b5.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-diagrams-20261001/diagrams_base_b5.py` (5237 bytes)
+- `exec/pr4737-diagrams-20261001/diagrams_changes.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-diagrams-20261001/diagrams_changes.py` (30147 bytes)
+- `exec/pr4737-diagrams-20261001/difflib_units.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-diagrams-20261001/difflib_units.py` (4954 bytes)
+- `exec/pr4737-diagrams-20261001/gen_page.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-diagrams-20261001/gen_page.py` (32270 bytes)
+- `exec/pr4737-diagrams-20261001/render_check.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-diagrams-20261001/render_check.py` (951 bytes)
+- `exec/pr4737-diagrams-20261001/svg_helpers.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4737-diagrams-20261001/svg_helpers.py` (6645 bytes)
+- `exec/scratch-relocated/adff9d22/png/b1.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/b1.png` (204706 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/b1.png`
+- `exec/scratch-relocated/adff9d22/png/b2.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/b2.png` (197378 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/b2.png`
+- `exec/scratch-relocated/adff9d22/png/b3.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/b3.png` (243393 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/b3.png`
+- `exec/scratch-relocated/adff9d22/png/b4.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/b4.png` (103337 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/b4.png`
+- `exec/scratch-relocated/adff9d22/png/b5.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/b5.png` (144450 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/b5.png`
+- `exec/scratch-relocated/adff9d22/png/d0.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/d0.png` (65541 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/d0.png`
+- `exec/scratch-relocated/adff9d22/png/d1.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/d1.png` (88100 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/d1.png`
+- `exec/scratch-relocated/adff9d22/png/d2.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/d2.png` (83519 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/d2.png`
+- `exec/scratch-relocated/adff9d22/png/d3.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/d3.png` (102130 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/d3.png`
+- `exec/scratch-relocated/adff9d22/png/d4.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/d4.png` (101409 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/d4.png`
+- `exec/scratch-relocated/adff9d22/png/d5.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/d5.png` (81584 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/d5.png`
+- `exec/scratch-relocated/adff9d22/png/d6.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/d6.png` (79992 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/d6.png`
+- `exec/scratch-relocated/adff9d22/png/d7.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/d7.png` (112312 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/d7.png`
+- `exec/scratch-relocated/adff9d22/png/d8.png` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/adff9d22/png/d8.png` (124005 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4500/adff9d22-41d8-4f8d-8cda-a9cdd5330731/scratchpad/png/d8.png`
+- `memory/pr4737-kvcache-diagram-page.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4737-kvcache-diagram-page.md` (3177 bytes)
+
+Related: [claude_20261002_pr4557-to-pr4424-sync.md](../../handoffs/claude_20261002_pr4557-to-pr4424-sync.md)
+
+- `exec/results/sync4424-20261002/build-sync.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/build-sync.txt` (1638 bytes)
+- `exec/results/sync4424-20261002/build-sync3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/build-sync3.txt` (1202 bytes)
+- `exec/results/sync4424-20261002/build-sync4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/build-sync4.txt` (1206 bytes)
+- `exec/results/sync4424-20261002/build-sync5.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/build-sync5.txt` (670 bytes)
+- `exec/results/sync4424-20261002/build-syncrm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/build-syncrm.txt` (1145 bytes)
+- `exec/results/sync4424-20261002/chain-steps.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/chain-steps.txt` (568 bytes)
+- `exec/results/sync4424-20261002/host-suite-sync.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/host-suite-sync.txt` (12668 bytes)
+- `exec/results/sync4424-20261002/host-suite-sync2.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/host-suite-sync2.txt` (6502 bytes)
+- `exec/results/sync4424-20261002/smoke/cpu-p1024/smoke.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/smoke/cpu-p1024/smoke.txt` (5563 bytes)
+- `exec/results/sync4424-20261002/smoke/cpu-p8192/smoke.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/smoke/cpu-p8192/smoke.txt` (1501 bytes)
+- `exec/results/sync4424-20261002/smoke/fpga-p1024/smoke.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/smoke/fpga-p1024/smoke.txt` (2358 bytes)
+- `exec/results/sync4424-20261002/tests-sync.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/tests-sync.txt` (1086 bytes)
+- `exec/results/sync4424-20261002/tests-sync3.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/tests-sync3.txt` (820 bytes)
+- `exec/results/sync4424-20261002/tests-sync4.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/tests-sync4.txt` (821 bytes)
+- `exec/results/sync4424-20261002/tests-sync5.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/tests-sync5.txt` (133 bytes)
+- `exec/results/sync4424-20261002/tests-syncrm.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-20261002/tests-syncrm.txt` (680 bytes)
+- `exec/results/sync4424-E-cpu/rt-results.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-E-cpu/rt-results.txt` (66037 bytes)
+- `exec/results/sync4424-E-cpu/summary.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-E-cpu/summary.json` (6631 bytes)
+- `exec/results/sync4424-E-fpga/rt-results.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-E-fpga/rt-results.txt` (34750 bytes)
+- `exec/results/sync4424-E-fpga/summary.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/results/sync4424-E-fpga/summary.json` (3465 bytes)
+- `exec/scratch-relocated/903a29ae/codex/comments.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/codex/comments.json` (6412 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/codex/comments.json`
+- `exec/scratch-relocated/903a29ae/codex/comments2.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/codex/comments2.json` (44855 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/codex/comments2.json`
+- `exec/scratch-relocated/903a29ae/codex/reply-P2.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/codex/reply-P2.md` (1800 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/codex/reply-P2.md`
+- `exec/scratch-relocated/903a29ae/codex/reply-P3-constants.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/codex/reply-P3-constants.md` (1142 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/codex/reply-P3-constants.md`
+- `exec/scratch-relocated/903a29ae/codex/reply-P3-partition.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/codex/reply-P3-partition.md` (726 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/codex/reply-P3-partition.md`
+- `exec/scratch-relocated/903a29ae/codex/reviews.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/codex/reviews.json` (2401 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/codex/reviews.json`
+- `exec/scratch-relocated/903a29ae/codex/reviews2.json` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/codex/reviews2.json` (10075 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/codex/reviews2.json`
+- `exec/scratch-relocated/903a29ae/commit2.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/commit2.txt` (3801 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/commit2.txt`
+- `exec/scratch-relocated/903a29ae/maps/01_h_tron_models_self_attention_hpp_h_tron.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/maps/01_h_tron_models_self_attention_hpp_h_tron.md` (28969 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/maps/01_h_tron_models_self_attention_hpp_h_tron.md`
+- `exec/scratch-relocated/903a29ae/maps/02_h_tron_models_kv_cache_hpp_with_h_tron_.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/maps/02_h_tron_models_kv_cache_hpp_with_h_tron_.md` (40036 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/maps/02_h_tron_models_kv_cache_hpp_with_h_tron_.md`
+- `exec/scratch-relocated/903a29ae/maps/03_tests_t_t_llama_unit_cpp_t_t_amx_dispa.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/maps/03_tests_t_t_llama_unit_cpp_t_t_amx_dispa.md` (45779 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/maps/03_tests_t_t_llama_unit_cpp_t_t_amx_dispa.md`
+- `exec/scratch-relocated/903a29ae/maps/04_h_tron_models_model_hpp_h_tron_schedule.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/maps/04_h_tron_models_model_hpp_h_tron_schedule.md` (21428 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/maps/04_h_tron_models_model_hpp_h_tron_schedule.md`
+- `exec/scratch-relocated/903a29ae/maps/05_h_tron_kernels_k_vnni_hpp_child_only_3.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/maps/05_h_tron_kernels_k_vnni_hpp_child_only_3.md` (49267 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/maps/05_h_tron_kernels_k_vnni_hpp_child_only_3.md`
+- `exec/scratch-relocated/903a29ae/maps/06_build_files_cmakelists_txt_src_tron_cm.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/maps/06_build_files_cmakelists_txt_src_tron_cm.md` (22168 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/maps/06_build_files_cmakelists_txt_src_tron_cm.md`
+- `exec/scratch-relocated/903a29ae/maps/07_design_specification_issue_4525_adapt_.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/maps/07_design_specification_issue_4525_adapt_.md` (59603 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/maps/07_design_specification_issue_4525_adapt_.md`
+- `exec/scratch-relocated/903a29ae/merge-msg.txt` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/merge-msg.txt` (2185 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/merge-msg.txt`
+- `exec/scratch-relocated/903a29ae/plan-checklist.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/plan-checklist.md` (17477 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/plan-checklist.md`
+- `exec/scratch-relocated/903a29ae/plan.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/plan.md` (58308 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/plan.md`
+- `exec/scratch-relocated/903a29ae/pr-body.final.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/pr-body.final.md` (11236 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/pr-body.final.md`
+- `exec/scratch-relocated/903a29ae/pr-body.live.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/pr-body.live.md` (9140 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/pr-body.live.md`
+- `exec/scratch-relocated/903a29ae/pr-body.live2.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/pr-body.live2.md` (11237 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/pr-body.live2.md`
+- `exec/scratch-relocated/903a29ae/pr-body.live3.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/pr-body.live3.md` (11237 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/pr-body.live3.md`
+- `exec/scratch-relocated/903a29ae/pr-body.live4.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/pr-body.live4.md` (12277 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/pr-body.live4.md`
+- `exec/scratch-relocated/903a29ae/pr-body.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/903a29ae/pr-body.md` (9139 bytes). origin: `agentsrv:/tmp/claude-644434775/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/scratchpad/pr-body.md`
+- `exec/sync4424-20261002/README.md` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/README.md` (800 bytes)
+- `exec/sync4424-20261002/campaign.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/campaign.sh` (16914 bytes)
+- `exec/sync4424-20261002/chain.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/chain.sh` (9061 bytes)
+- `exec/sync4424-20261002/launch.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/launch.sh` (444 bytes)
+- `exec/sync4424-20261002/review-typed-k-port-wf_30cbf192-a77.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/review-typed-k-port-wf_30cbf192-a77.js` (9729 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/workflows/scripts/review-typed-k-port-wf_30cbf192-a77.js`
+- `exec/sync4424-20261002/review-wide-group-fix-wf_fe4c6555-479.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/review-wide-group-fix-wf_fe4c6555-479.js` (4999 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/workflows/scripts/review-wide-group-fix-wf_fe4c6555-479.js`
+- `exec/sync4424-20261002/smoke.sh` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/smoke.sh` (6796 bytes)
+- `exec/sync4424-20261002/summarize.py` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py` (10545 bytes)
+- `exec/sync4424-20261002/sync-4557-into-4424-understand-wf_48b1bd5b-45a.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/sync-4557-into-4424-understand-wf_48b1bd5b-45a.js` (24407 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/workflows/scripts/sync-4557-into-4424-understand-wf_48b1bd5b-45a.js`
+- `memory/sync-4557-into-4424.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/sync-4557-into-4424.md` (9734 bytes)
+
