@@ -44,6 +44,7 @@
   th, td { border: 1px solid var(--line); padding: 6px 12px; text-align: left; }
   th { background: var(--chip); font-weight: 600; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  #decode-q td.mono { white-space: nowrap; }
   code, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 0.92em; }
   code { background: var(--chip); padding: 1px 5px; border-radius: 4px; }
   dl.gloss { margin: 10px 0; }
@@ -68,10 +69,21 @@
 <p class="lead">Why modern LLMs have more query heads than key/value heads, and why
 the KV-head count is the number that decides inference memory cost.</p>
 
+<div class="callout">
+<div class="t">Short version: during decode, is Q a vector?</div>
+<p><strong>Yes: for one sequence and one decode token, each query head has
+one row vector, q, of shape 1 &times; head_dim.</strong> The full query
+projection is also one row vector, with all heads placed side by side.
+A matrix drawn with several query heads as rows is a reshaping of that
+one token's queries. <a href="#decode-q">See the exact rows, columns,
+and products below.</a></p>
+</div>
+
 <div class="toc">
 <div class="t">Contents</div>
 <ul>
 <li><a href="#gloss">Glossary (plain words)</a></li>
+<li><a href="#decode-q">Decode first: is Q a vector or a matrix?</a></li>
 <li><a href="#s1">1&nbsp;&middot;&nbsp;The token axis: one head reading a 3-token cache</a></li>
 <li><a href="#s2">2&nbsp;&middot;&nbsp;The head axis: mapping query heads &rarr; KV heads</a></li>
 <li><a href="#s3">3&nbsp;&middot;&nbsp;Where q, k, v come from: the projection matrices</a></li>
@@ -122,6 +134,189 @@ query-head/KV-head counts existed). MQA (Shazeer 2019) then picked
 as: everything per-head / queries per-head + KV per-group / queries
 per-head + one shared KV.</dd>
 </dl>
+
+<section id="decode-q" aria-labelledby="decode-q-title">
+<h2 id="decode-q-title">Decode first: is Q a vector or a matrix?</h2>
+<p><strong>For a single query head, Q is a vector during ordinary
+one-token decode.</strong> We write that vector as a one-row matrix so
+the multiplication dimensions are explicit. The assumptions here are
+one sequence, one token being processed, and one attention layer.</p>
+
+<h3>1. Projection produces one long row</h3>
+<p>Let D be the hidden width, H<sub>q</sub> the query-head count, and d the
+number of elements per head. The input x is this layer's normalized
+hidden vector for the current token. All shapes below use
+<strong>rows &times; columns</strong>:</p>
+<pre class="mono" style="overflow-x:auto">x          W_Q                Q_flat
+[1 &times; D] &times; [D &times; (H_q &times; d)] = [1 &times; (H_q &times; d)]</pre>
+<ul>
+<li><b>x:</b> one token row, with D hidden coordinates as columns.</li>
+<li><b>W<sub>Q</sub>:</b> D input coordinates as rows, with
+H<sub>q</sub> &times; d query coordinates as columns.</li>
+<li><b>Q<sub>flat</sub>:</b> one token row, with H<sub>q</sub> blocks
+of d columns. Each block is one head's query vector.</li>
+</ul>
+<p><b>Your vector &times; matrix = vector reasoning is correct.</b>
+The projection matrix need not be square. It is square only when
+D = H<sub>q</sub> &times; d.</p>
+
+<div style="overflow-x:auto">
+<table id="decode-model-shapes">
+<caption>Exact dimensions for the two model examples</caption>
+<tr><th scope="col">Quantity</th><th scope="col">Llama-3.1-8B</th><th scope="col">Qwen3-4B</th></tr>
+<tr><th scope="row">Hidden width D</th><td>4096 elements</td><td>2560 elements</td></tr>
+<tr><th scope="row">Query / KV heads</th><td>32 / 8 heads</td><td>32 / 8 heads</td></tr>
+<tr><th scope="row">Head width d</th><td>128 elements</td><td>128 elements</td></tr>
+<tr><th scope="row">W<sub>Q</sub></th><td class="mono">4096 &times; 4096</td><td class="mono">2560 &times; 4096</td></tr>
+<tr><th scope="row">Q<sub>flat</sub> = x W<sub>Q</sub></th><td class="mono">1 &times; 4096</td><td class="mono">1 &times; 4096</td></tr>
+<tr><th scope="row">Each of W<sub>K</sub> and W<sub>V</sub></th><td class="mono">4096 &times; 1024</td><td class="mono">2560 &times; 1024</td></tr>
+<tr><th scope="row">Each new K or V row, all heads</th><td class="mono">1 &times; 1024</td><td class="mono">1 &times; 1024</td></tr>
+</table>
+</div>
+<p>These shapes follow from the published model dimensions.
+[<a href="https://github.com/meta-llama/llama-models/blob/main/models/sku_list.py#L220-L239">Meta's Llama-3.1-8B definition</a>;
+<a href="https://huggingface.co/Qwen/Qwen3-4B/blob/main/config.json">Qwen3-4B config</a>]
+Qwen3-4B explicitly sets <code>head_dim = 128</code>.
+Its head width is <em>not</em> hidden_size / num_attention_heads.</p>
+<p>Splitting the projection into heads only reshapes its values.
+The same 1 &times; 4096 row can be viewed as a 32 &times; 128 matrix:
+32 head rows, each with 128 columns, all for the same token.</p>
+<p>
+Rotary position embedding (RoPE, a position-dependent rotation of Q and K)
+then changes values within each head while preserving these shapes.
+Qwen3 also normalizes each query and key before that rotation.
+[<a href="https://github.com/huggingface/transformers/blob/v4.51.3/src/transformers/models/qwen3/modeling_qwen3.py#L158-L210">Qwen3 projection, reshape, and rotation</a>]</p>
+
+<h3>2. Attention uses one head's row against its assigned keys</h3>
+<p>For either model above, select query head h. Its query
+q<sub>h</sub> has shape <b>1 &times; 128</b>.
+Let g be its assigned KV head. Let T be the number of visible token
+positions, <strong>including the current token</strong>.
+This layer adds the current token's key and value before attention.
+With three earlier cached tokens, T = 4 token positions.
+[<a href="https://github.com/huggingface/transformers/blob/v4.51.3/src/transformers/models/qwen3/modeling_qwen3.py#L199-L228">Cache update before attention</a>]</p>
+
+<div style="overflow-x:auto">
+<table id="decode-attention-shapes">
+<tr><th scope="col">Object</th><th scope="col">Shape</th><th scope="col">Rows mean</th><th scope="col">Columns mean</th></tr>
+<tr><th scope="row">q<sub>h</sub></th><td class="mono">1 &times; 128</td><td>Current token</td><td>Query coordinates</td></tr>
+<tr><th scope="row">K<sub>g</sub> and V<sub>g</sub>, separately</th><td class="mono">T &times; 128</td><td>Visible token positions</td><td>Key or value coordinates</td></tr>
+<tr><th scope="row">K<sub>g</sub><sup>T</sup></th><td class="mono">128 &times; T</td><td>Key coordinates</td><td>Visible token positions</td></tr>
+<tr><th scope="row">Scores, then attention weights</th><td class="mono">1 &times; T</td><td>Current token's query in head h</td><td>Visible token positions</td></tr>
+<tr><th scope="row">Head output</th><td class="mono">1 &times; 128</td><td>Current token</td><td>Value coordinates</td></tr>
+</table>
+</div>
+<pre class="mono" style="overflow-x:auto">scores_h = q_h &times; K_g^T / sqrt(128)
+           [1 &times; 128] &times; [128 &times; T] = [1 &times; T]
+
+weights_h = softmax(scores_h)         [1 &times; T]
+
+output_h = weights_h &times; V_g
+           [1 &times; T] &times; [T &times; 128] = [1 &times; 128]</pre>
+<p>The superscript T on K means <b>transpose</b> (swap rows and columns).
+The dimension T counts token positions. Each score is the dot product
+of q<sub>h</sub> with one token's key from head g.
+Softmax turns those scores into weights that sum to one across the T
+positions. The head output is their weighted sum of the value rows.
+[<a href="https://docs.pytorch.org/docs/2.14/generated/torch.nn.functional.scaled_dot_product_attention.html">PyTorch attention definition</a>]</p>
+<p><b>So yes: the Q operand for a single head is a row vector.</b>
+The product is q<sub>h</sub> &times; K<sub>g</sub><sup>T</sup>, using
+that head's 128 columns from the full projection.</p>
+
+<h3>3. A grouped Q matrix has heads as rows</h3>
+<p>In these models, query heads 0&ndash;3 share KV head 0.
+Stack their four query vectors as the rows of Q<sub>group</sub>.
+Then one matrix product computes the same four score rows:</p>
+
+<div class="fig" id="decode-shape-figure">
+<svg width="760" height="378" viewBox="0 0 760 378" role="img"
+     aria-labelledby="decode-fig-title decode-fig-desc"
+     font-family="Segoe UI, Arial, sans-serif" font-size="13">
+  <title id="decode-fig-title">One token's query vector, viewed by head</title>
+  <desc id="decode-fig-desc">The full query row has 4096 columns split into
+  32 heads of 128 columns. One head times its transposed key cache gives
+  one score row. Stacking heads zero through three gives four head rows
+  times the same key cache and produces four score rows for one token.</desc>
+  <text x="12" y="22" fill="#1c5cab" font-weight="600">Q_flat: 1 token row &times; 4096 columns</text>
+  <g fill="#dce9f9" stroke="#2a78d6">
+    <rect x="12" y="36" width="106" height="44"/>
+    <rect x="118" y="36" width="106" height="44"/>
+    <rect x="224" y="36" width="106" height="44"/>
+    <rect x="330" y="36" width="106" height="44"/>
+    <rect x="642" y="36" width="106" height="44"/>
+  </g>
+  <rect x="436" y="36" width="206" height="44" fill="#f1f0ec" stroke="#8b8d93" stroke-dasharray="4 3"/>
+  <g fill="#1c5cab" text-anchor="middle">
+    <text x="65" y="54">q_0</text><text x="171" y="54">q_1</text>
+    <text x="277" y="54">q_2</text><text x="383" y="54">q_3</text>
+    <text x="695" y="54">q_31</text>
+    <text x="65" y="71" font-size="11">128 columns</text><text x="171" y="71" font-size="11">128 columns</text>
+    <text x="277" y="71" font-size="11">128 columns</text><text x="383" y="71" font-size="11">128 columns</text>
+    <text x="695" y="71" font-size="11">128 columns</text>
+  </g>
+  <text x="539" y="62" text-anchor="middle" fill="#54565c">heads 4&ndash;30 omitted</text>
+  <text x="12" y="108" fill="#54565c">Select one slice: one query vector reads one KV head's keys.</text>
+  <rect x="64" y="131" width="174" height="36" fill="#dce9f9" stroke="#2a78d6"/>
+  <text x="151" y="154" text-anchor="middle" fill="#1c5cab">q_0: 1 &times; 128</text>
+  <text x="277" y="154" text-anchor="middle" font-size="20" fill="#54565c">&times;</text>
+  <rect x="314" y="121" width="180" height="56" rx="4" fill="#fbe4d9" stroke="#eb6834"/>
+  <text x="404" y="144" text-anchor="middle" fill="#1a1b1e">K_0 transposed</text>
+  <text x="404" y="163" text-anchor="middle" fill="#54565c">128 &times; T</text>
+  <text x="532" y="154" text-anchor="middle" font-size="20" fill="#54565c">=</text>
+  <rect x="571" y="131" width="174" height="36" fill="#ffffff" stroke="#2a78d6"/>
+  <text x="658" y="154" text-anchor="middle" fill="#1c5cab">1 &times; T scores</text>
+  <text x="12" y="211" fill="#54565c">Stack four slices: four query heads read those same keys.</text>
+  <g fill="#dce9f9" stroke="#2a78d6">
+    <rect x="64" y="229" width="174" height="26"/><rect x="64" y="255" width="174" height="26"/>
+    <rect x="64" y="281" width="174" height="26"/><rect x="64" y="307" width="174" height="26"/>
+  </g>
+  <g fill="#1c5cab" text-anchor="middle">
+    <text x="151" y="247">q_0</text><text x="151" y="273">q_1</text>
+    <text x="151" y="299">q_2</text><text x="151" y="325">q_3</text>
+  </g>
+  <text x="277" y="286" text-anchor="middle" font-size="20" fill="#54565c">&times;</text>
+  <rect x="314" y="253" width="180" height="56" rx="4" fill="#fbe4d9" stroke="#eb6834"/>
+  <text x="404" y="276" text-anchor="middle" fill="#1a1b1e">same K_0 transposed</text>
+  <text x="404" y="295" text-anchor="middle" fill="#54565c">128 &times; T</text>
+  <text x="532" y="286" text-anchor="middle" font-size="20" fill="#54565c">=</text>
+  <g fill="#ffffff" stroke="#2a78d6">
+    <rect x="571" y="229" width="174" height="26"/><rect x="571" y="255" width="174" height="26"/>
+    <rect x="571" y="281" width="174" height="26"/><rect x="571" y="307" width="174" height="26"/>
+  </g>
+  <g fill="#1c5cab" text-anchor="middle">
+    <text x="658" y="247">head 0 scores</text><text x="658" y="273">head 1 scores</text>
+    <text x="658" y="299">head 2 scores</text><text x="658" y="325">head 3 scores</text>
+  </g>
+  <text x="151" y="355" text-anchor="middle" fill="#1c5cab" font-weight="600">4 head rows &times; 128 columns</text>
+  <text x="658" y="355" text-anchor="middle" fill="#1c5cab" font-weight="600">4 head rows &times; T columns</text>
+</svg>
+<p class="cap"><b>All four rows still describe one token.</b>
+The row axis now selects a query head. Shapes are exact, but box sizes
+are schematic. The score products omit the division by &radic;128.</p>
+</div>
+
+<p class="mono">Q<sub>group</sub> K<sub>0</sub><sup>T</sup>:
+(4 &times; 128)(128 &times; T) = 4 &times; T</p>
+<p>Apply softmax separately to each row. Multiplying those weights by
+V<sub>0</sub> gives a 4 &times; 128 output matrix, one row per query head.
+Repeat with the other seven groups and their assigned KV heads.
+Joining all 32 head outputs side by side restores a 1 &times; 4096 row.
+The output projection maps it back to the model's hidden width D.</p>
+
+<details>
+<summary>Why code can show a Q tensor with more than two axes</summary>
+<p>A tensor is a multidimensional array. A common attention layout
+is <code>[batch, query heads, query tokens, head_dim]</code>.
+For one sequence in decode, this is <code>[1, 32, 1, 128]</code>.
+Selecting one sequence and one head leaves the <code>[1, 128]</code>
+row used above. [<a href="https://docs.pytorch.org/docs/2.14/generated/torch.nn.functional.scaled_dot_product_attention.html">PyTorch query shape</a>]</p>
+<p>Processing B sequences together changes the batch dimension to B.
+Processing P prompt tokens in prefill changes the query-token dimension
+to P. These are separate axes from the 32 query heads.
+In the grouped matrix above, the four rows instead select heads for
+the same token.</p>
+</details>
+</section>
 
 <h2 id="s1">1&nbsp;&middot;&nbsp;The token axis: one head reading a 3-token cache (worked example)</h2>
 <p>One query head, one new token, three cached tokens &mdash; everything in this
@@ -1251,7 +1446,10 @@ gives X; the matmul X&middot;W<sub>Q</sub> then has one row per token and the
 <p class="cap">Rows of W are hidden dims; rows of X and of the output Q are
 tokens. One row of Q is the 1&times;4096 vector, read as 32 heads &times; 128.
 X&middot;W<sub>K</sub> and X&middot;W<sub>V</sub> work the same way with 8
-slices, giving the T&times;1024 K-cache and V-cache rows of section 6.</p>
+slices. Each decode step produces one 1&times;1024 row for each cache.
+Appending these rows builds the T&times;1024 caches in section 6.
+<a href="#decode-q">The decode explanation above follows one head into
+the q&middot;K<sup>T</sup> product.</a></p>
 </div>
 
 <div class="callout"><div class="t">Honesty caveat</div>
