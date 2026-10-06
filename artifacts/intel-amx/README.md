@@ -4148,3 +4148,18 @@ Related: [claude_20261002_pr4557-to-pr4424-sync.md](../../handoffs/claude_202610
 - `exec/sync4424-20261002/sync-4557-into-4424-understand-wf_48b1bd5b-45a.js` -> `agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/sync-4557-into-4424-understand-wf_48b1bd5b-45a.js` (24407 bytes). origin: `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/903a29ae-0b73-4583-8512-63f570133e8d/workflows/scripts/sync-4557-into-4424-understand-wf_48b1bd5b-45a.js`
 - `memory/sync-4557-into-4424.md` -> `agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/sync-4557-into-4424.md` (9734 bytes)
 
+
+## 2026-10-06 preservation batch: nightly Delphi versus Andoria history
+
+- `CI-test/status/ci-machine-history-20261006/` -> canonical
+  `/home/jhan/workspace/random/ci-machine-history-2026-10-06/` - historical
+  comparison through October 6, 2026, with the report, three charts, exact paired
+  data, 31 Talos session summaries, saved Slack reports, and reproduction scripts.
+  Llama 3.1 8B at 32 users is the only new sustained Delphi lead after AMX was
+  enabled. Mixtral and both Gemma leads predate the rollout.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/CI-test/status/ci-machine-history-20261006/report.html
+  Backup renderer: https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/CI-test/status/ci-machine-history-20261006/report.html
+  Summary note: [README](CI-test/status/ci-machine-history-20261006/README.md).
+  Edit-safe sources: `analyze.py`, `build_report.py`, and `README.md` in the canonical directory.
+  Regenerate: `python3 analyze.py` then `python3 build_report.py` from the report directory.
+  Lineage: [report.html.lineage.md](CI-test/status/ci-machine-history-20261006/report.html.lineage.md).
