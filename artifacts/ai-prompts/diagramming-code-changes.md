@@ -1,0 +1,19 @@
+generate diagramming-code-changes.html:
+- at the top, include this prompt literally
+- have Table of Content at top
+- use diagrams to explain code changes of PR4424
+- each code change has at least 1 diagrams
+- definition of "1 code change": a logical unit of code change. E.g.:
+--- 5 lines of code update one data model which is used by other code, these 5 lines are 1 unit and there should be a diagram illustrating the change
+--- 10 lines of code checks one data model based on another model
+- trivial code changes do not need diagrams, but need to be listed
+- code comments which explain the code need to keep with code
+- code change and its corresponding diagram are best side to side
+- use consistent font/color schemes for same concepts or data models across whole file; have a color and font scheme table before detailed sections
+--- At each section or its diagrams, repeat `Colour and font scheme` but only include the color/font used in the section/diagrams
+- at start, use some base diagrams to illustrate overall data models, function models, sequencing models, interaction models, etc.
+--- individual diagrams beside code changes, if use base diagrams as context, or better yet, update base diagrams, would be great.
+- no invented shorthand; take names from the code, and cite the comment or line that defines each box.
+- Every function cell carries a one-line description of what the function does
+- Label every arrow between data-model boxes with how many: for example, one page has n_slots entries, one entry covers n_kv_heads kv_blocks
+- target files: pick the most important 3 files from the PR, each file has its own diagramming-code-changes.html, e.g. diagramming-code-changes-<file1>.html
