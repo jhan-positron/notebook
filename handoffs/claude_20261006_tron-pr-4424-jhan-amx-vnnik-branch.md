@@ -155,29 +155,29 @@ Code:
 
 Chain scripts (claude-agentsrv, workspace NFS, written by this session):
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek-20261006/chain.sh (10,040 bytes). The chain: steps A, A2, B, C, D, E-cpu, E-fpga, then serving restore.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek-20261006/launch.sh (310 bytes). Starts chain.sh detached on delphi-3bda over ssh.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek-20261006/final.sh (2,591 bytes). Rebuilds t_llama_unit at the final commit in both K layouts and reruns the ingest tests.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek-20261006/e8k.sh (1,710 bytes). The prompt-8192 rerun, 5 repetitions, new first, then final.sh.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek-20261006/chain.sh (10,040 bytes). The chain: steps A, A2, B, C, D, E-cpu, E-fpga, then serving restore. (preserved: artifacts/intel-amx/exec/savek-20261006/chain.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek-20261006/launch.sh (310 bytes). Starts chain.sh detached on delphi-3bda over ssh. (preserved: artifacts/intel-amx/exec/savek-20261006/launch.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek-20261006/final.sh (2,591 bytes). Rebuilds t_llama_unit at the final commit in both K layouts and reruns the ingest tests. (preserved: artifacts/intel-amx/exec/savek-20261006/final.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek-20261006/e8k.sh (1,710 bytes). The prompt-8192 rerun, 5 repetitions, new first, then final.sh. (preserved: artifacts/intel-amx/exec/savek-20261006/e8k.sh)
 
 Results written on delphi-3bda (same NFS paths):
 
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek-20261006/ (454,146 bytes, 43 files plus rt/ and smoke/). Build logs, test outputs, host-suite.txt, ingest-test-*.txt, chain-steps.txt (2,210 bytes), chain.done, final.done, smoke/ with the three token-identity cells.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu/summary.md (1,779 bytes). CPU-attention perf cells, prompt 1024 and 8192, 3 repetitions. Directory 668,393 bytes with the rt/ logs.
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek-20261006/ (454,146 bytes, 43 files plus rt/ and smoke/). Build logs, test outputs, host-suite.txt, ingest-test-*.txt, chain-steps.txt (2,210 bytes), chain.done, final.done, smoke/ with the three token-identity cells. (preserved: artifacts/intel-amx/exec/results/savek-20261006/chain-steps.txt)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu/summary.md (1,779 bytes). CPU-attention perf cells, prompt 1024 and 8192, 3 repetitions. Directory 668,393 bytes with the rt/ logs. (preserved: artifacts/intel-amx/exec/results/savek-E-cpu/summary.md)
   - generator: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py
-  - input: /home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu/rt-results.txt and rt/*.log
+  - input: /home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu/rt-results.txt and rt/*.log (preserved: artifacts/intel-amx/exec/results/savek-E-cpu/rt-results.txt)
   - input built by: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/campaign.sh, called from chain.sh step E-cpu
   - sources: runtron binaries /var/tmp/jhan/tron-tilec/gen/runtron (30c4ac82cb) and /var/tmp/jhan/tron-savek/gen/runtron.savek (19ae84d95a) on delphi-3bda
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py /home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu > <OUT>`
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek-E-fpga/summary.md (1,389 bytes). FPGA-attention perf cell, prompt 1024. Directory 306,128 bytes.
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek-E-fpga/summary.md (1,389 bytes). FPGA-attention perf cell, prompt 1024. Directory 306,128 bytes. (preserved: artifacts/intel-amx/exec/results/savek-E-fpga/summary.md)
   - generator: same summarize.py
-  - input: /home/jhan/workspace/intel-AMX/exec/results/savek-E-fpga/rt-results.txt and rt/*.log
+  - input: /home/jhan/workspace/intel-AMX/exec/results/savek-E-fpga/rt-results.txt and rt/*.log (preserved: artifacts/intel-amx/exec/results/savek-E-fpga/rt-results.txt)
   - input built by: campaign.sh, called from chain.sh step E-fpga
   - sources: the same two runtron binaries
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py /home/jhan/workspace/intel-AMX/exec/results/savek-E-fpga > <OUT>`
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu8k/summary.md (1,392 bytes). The prompt-8192 rerun. Directory 554,143 bytes.
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu8k/summary.md (1,392 bytes). The prompt-8192 rerun. Directory 554,143 bytes. (preserved: artifacts/intel-amx/exec/results/savek-E-cpu8k/summary.md)
   - generator: same summarize.py
-  - input: /home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu8k/rt-results.txt and rt/*.log
+  - input: /home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu8k/rt-results.txt and rt/*.log (preserved: artifacts/intel-amx/exec/results/savek-E-cpu8k/rt-results.txt)
   - input built by: campaign.sh, called from e8k.sh
   - sources: the same two runtron binaries
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py /home/jhan/workspace/intel-AMX/exec/results/savek-E-cpu8k > <OUT>`
@@ -187,18 +187,31 @@ Memory and workflow:
 
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/savek-worker-fold.md (5,609 bytes). Project memory note: request, Ben's comment, the implementation, the chain, the PR, the detached-HEAD trap, open items. Hand-written, `generator: none`.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md (24,227 bytes today). One index line added, and over-long index lines shortened to 150 characters.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-PR4424/5277060b-be19-4dc9-9488-99c27d15f6bd/workflows/scripts/review-savek-fold-wf_b2263903-559.js (13,901 bytes). The review workflow script: five lenses (protocol, prose, callers, generator, reviewer), then refuters.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-PR4424/5277060b-be19-4dc9-9488-99c27d15f6bd/workflows/scripts/review-savek-fold-wf_b2263903-559.js (13,901 bytes). The review workflow script: five lenses (protocol, prose, callers, generator, reviewer), then refuters. (preserved: artifacts/intel-amx/exec/savek-20261006/review-savek-fold-wf_b2263903-559.js, relocated to /home/jhan/workspace/intel-AMX/exec/savek-20261006/review-savek-fold-wf_b2263903-559.js)
 
 Scratchpad (claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-PR4424/5277060b-be19-4dc9-9488-99c27d15f6bd/, may be cleaned up):
 
-- scratchpad/commit-msg.txt (1,057 bytes). The commit message.
-- scratchpad/pr-body.md (4,174 bytes). The first PR body draft.
-- scratchpad/test-section.md (3,081 bytes). The Test section with the placeholders filled.
-- scratchpad/pr-body.final.md (7,506 bytes). The PR body as read back from GitHub after the last patch.
-- scratchpad/patch.json (7,591 bytes). The last `gh api` PATCH payload.
-- scratchpad/plugin-counts.txt (146 bytes). save_k call counts per generated plugin.
+- scratchpad/commit-msg.txt (1,057 bytes). The commit message. (preserved: artifacts/intel-amx/exec/scratch-relocated/5277060b/commit-msg.txt, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/5277060b/commit-msg.txt)
+- scratchpad/pr-body.md (4,174 bytes). The first PR body draft. (preserved: artifacts/intel-amx/exec/scratch-relocated/5277060b/pr-body.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/5277060b/pr-body.md)
+- scratchpad/test-section.md (3,081 bytes). The Test section with the placeholders filled. (preserved: artifacts/intel-amx/exec/scratch-relocated/5277060b/test-section.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/5277060b/test-section.md)
+- scratchpad/pr-body.final.md (7,506 bytes). The PR body as read back from GitHub after the last patch. (preserved: artifacts/intel-amx/exec/scratch-relocated/5277060b/pr-body.final.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/5277060b/pr-body.final.md)
+- scratchpad/patch.json (7,591 bytes). The last `gh api` PATCH payload. (preserved: artifacts/intel-amx/exec/scratch-relocated/5277060b/patch.json, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/5277060b/patch.json)
+- scratchpad/plugin-counts.txt (146 bytes). save_k call counts per generated plugin. (preserved: artifacts/intel-amx/exec/scratch-relocated/5277060b/plugin-counts.txt, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/5277060b/plugin-counts.txt)
 - tasks/w6qm98878.output (134,433 bytes). The review workflow result (wrapper object, result under the `result` key).
 - tasks/bxt99d243.output (3,151 bytes), tasks/b7toji9bb.output (2,150 bytes), tasks/b5fdkh50j.output (1,040 bytes), tasks/bvr4flddb.output (898 bytes). Monitor outputs for the chain, the perf steps, the rerun and the final tests.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/results/savek-20261006/` (11 files)
+- `artifacts/intel-amx/exec/results/savek-20261006/smoke/cpu-p1024/` (1 files)
+- `artifacts/intel-amx/exec/results/savek-20261006/smoke/cpu-p8192/` (1 files)
+- `artifacts/intel-amx/exec/results/savek-20261006/smoke/fpga-p1024/` (1 files)
+- `artifacts/intel-amx/exec/results/savek-E-cpu/` (1 files)
+- `artifacts/intel-amx/exec/results/savek-E-cpu/rt/` (12 files)
+- `artifacts/intel-amx/exec/results/savek-E-cpu8k/` (1 files)
+- `artifacts/intel-amx/exec/results/savek-E-cpu8k/rt/` (10 files)
+- `artifacts/intel-amx/exec/results/savek-E-fpga/` (1 files)
+- `artifacts/intel-amx/exec/results/savek-E-fpga/rt/` (6 files)
 
 ## Current state
 
