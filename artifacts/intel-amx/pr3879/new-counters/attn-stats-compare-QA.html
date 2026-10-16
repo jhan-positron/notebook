@@ -1,0 +1,346 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/attn-stats-compare-QA.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/pr3879/new-counters/attn-stats-compare-QA.html
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attention stats Q&amp;A</title>
+<style>
+  :root { --bg:#ffffff; --fg:#1b1f23; --muted:#5c6570; --line:#d8dde3; --box:#f5f7f9; --amx:#1f77b4; --avx:#e07b00; --fpga:#2a9d5c; --red:#c0392b; }
+  body { background:var(--bg); color:var(--fg); font:16px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; margin:0; padding:0 16px 48px; }
+  main { max-width: 980px; margin: 0 auto; }
+  h1 { font-size:26px; margin:28px 0 8px; } h2 { font-size:21px; margin:32px 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; } h3 { font-size:17px; margin:20px 0 6px; }
+  .short { background:var(--box); border-left:4px solid var(--amx); padding:10px 14px; margin:12px 0 20px; }
+  .q { background:#fff8ec; border-left:4px solid var(--avx); padding:8px 14px; margin:14px 0 8px; color:#4a3b1c; }
+  table { border-collapse:collapse; margin:10px 0 16px; font-size:14px; } th, td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; } th { background:var(--box); } td.n { text-align:right; font-variant-numeric: tabular-nums; }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size:13.5px; } pre { background:var(--box); padding:10px 12px; overflow-x:auto; }
+  .cite { color:var(--muted); font-size:14px; }
+  figure { margin:16px 0; } figcaption { color:var(--muted); font-size:14px; margin-top:6px; }
+  svg { width:100%; height:auto; display:block; }
+  ul { padding-left:22px; } li { margin:3px 0; }
+  .take { font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+<h1>Attention stats Q&amp;A: why AMX is zero under FPGA attention, and how to read the path-set table</h1>
+<p class="cite">Answers to jhan's questions of 2026-10-04 on attn-stats-compare.md (campaign attnstats-20261002, tron main dd0f942c75). Every number below is recomputed from the exit reports in exec/results/attnstats-20261002/rt/ and matches them exactly.</p>
+
+<div class="short">
+<p><span class="take">Short version.</span> The AMX kernel scores only whole 64-token pages, so x is 64, not 4 or 16. Under FPGA attention the card scores every key up to the last complete group of four tokens (GOF), and the CPU is left with 1 to 4 keys per step, never a whole page, so the kernel has nothing to take. The 4 and the 16 in your memory are real units, but of other things: 4 tokens is the GOF, the unit the card's K/V copy advances in, and 16 token rows is one AMX tile, four of which make one page.</p>
+</div>
+
+<h2>Words used here</h2>
+<ul>
+<li><b>page</b> = a 64-token block of the KV cache. <b>pending page</b> = the page that the current forward is still writing (it holds the newest 1 to 64 tokens). <b>ready page</b> = a page written before this forward.</li>
+<li><b>dense page</b> = a page with all 64 entries live that the query sees through one range and that lies inside the sliding window. Only dense pages take the AMX kernel [h/tron/models/self_attention.hpp:1710-1721 at main].</li>
+<li><b>visit</b> = one (token job, KV head, page) scoring step of the software loop. <b>K tokens</b> (keys) = the keys that step scored. The exit report counts both per path: amx, avx, empty.</li>
+<li><b>GOF</b> = group of four tokens, the unit in which K/V are copied to the FPGA card [h/tron/gof.hpp:3-5]. <b>DMA</b> = that copy. The card scores keys only up to the end of the unbroken run of complete GOFs (count_complete_prefix_gofs, h/tron/shard.hpp:355-365).</li>
+<li><b>AoF</b> = attention on the FPGA (USE_HW_ATTN unset for qwen). <b>software attention</b> = USE_HW_ATTN=0, the CPU scores every key, with the AMX kernel for dense pages and the AVX loop ("dotter") for the rest.</li>
+<li><b>decode step s</b> = the s-th forward after the prompt forwards; it scores the query at position p = P + s - 1 (0-based) against positions 0..p, where P is the prompt length. qwen at prompt 1024 has s = 1..255 (255 decode forwards: the first generated token comes out of the last prompt forward).</li>
+<li><b>per (user, KV head, layer)</b> = the unit of the closed forms below. The campaign totals are that number times 8 users x 8 KV heads x 36 layers = 2,304 for qwen3-4b.</li>
+</ul>
+
+<h2>1. AMX counters under AoF</h2>
+
+<div class="q">Q: at decode, under software attention, AMX functions every x tokens (4 or 16?) until the new tokens fill a page, so AVX should never be zero. Under AoF, AoF functions every 64 tokens and x is less than 64, so both AMX and AVX should have functioned. The report says zero AMX. Please confirm x.</div>
+
+<p><span class="take">x is 64.</span> The kernel's decision unit is the (query, page) pair, and it takes a page only when the whole 64-token page is dense [h/tron/kernels/amx_attn_iface.hpp:19-30; self_attention.hpp:1710-1721]. The K operand of the kernel fills its tiles completely: "64 tokens = 4 tiles of 16 rows" [amx_attn_iface.hpp:27]. A partial page, whatever its fill, goes to the AVX loop.</p>
+
+<p>Where the 4 and the 16 come from:</p>
+<ul>
+<li>4 tokens = one GOF, the copy unit of the FPGA path. It sets how far the card's coverage reaches at each step, not when the kernel runs.</li>
+<li>16 token rows = one AMX tile (16 rows x 64 bytes). The kernel loads four such tiles per page and never runs on fewer than four.</li>
+</ul>
+
+<h3>1.1 Software attention on the CPU: what each decode step does</h3>
+<p>At step s the query at position p = P + s - 1 scores positions 0..p. The pages below the pending page are full and ready, so each is one AMX visit of 64 keys. The pending page holds (p mod 64) + 1 keys. Two cases:</p>
+<ul>
+<li>(p mod 64) &lt; 63: the pending page is partial. One AVX visit with (p mod 64) + 1 keys. This is the case in 252 of the 255 steps.</li>
+<li>(p mod 64) = 63: the step completes the page inside the pending pass. The page is then dense and the pending pass takes it with the kernel: one AMX visit of 64 keys, zero AVX visits for this step. At P = 1024 this happens at s = 64, 128 and 192 (p = 1087, 1151, 1215).</li>
+</ul>
+<p>So you are right that AVX is almost never zero under software attention. It is zero only in the three page-completing steps, and the counters show that: the qwen CPU cell has 24 token jobs with path set "amx" only, 8 users x 3 steps.</p>
+
+<h3>1.2 FPGA attention: what each decode step does</h3>
+<p>The card does not wait for a page to fill. Its coverage ends at the last complete GOF, so at step s it scores positions 0 .. 4 x floor(p / 4) - 1, and the CPU scores the (p mod 4) + 1 newest keys (1 to 4 keys) with the AVX loop. The DMA of a GOF lands within the step, so in every one of the 255 steps the measured tail was exactly (p mod 4) + 1 keys: no copy lag was seen [sum over p = 1024..1278 of ((p mod 4) + 1) = 636 keys per (user, KV head, layer); measured pending_avx_k_tokens 1,465,344 / 2,304 = 636.0].</p>
+<p>The CPU tail is at most 4 keys, so the pending page is never dense on the CPU side, and the kernel takes nothing: ready_amx_visits = 0 and pending_amx_visits = 0 in both arms. The full pages are on the card, which has its own scoring and never calls the kernel.</p>
+
+<figure>
+<svg viewBox="0 0 960 330" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+  <!-- title -->
+  <text x="16" y="22" font-size="15" font-weight="600">One decode step of qwen3-4b at prompt 1024, step s = 79 (query position p = 1102, keys 0..1102)</text>
+  <!-- axis -->
+  <text x="16" y="48" fill="#5c6570">key positions:</text>
+  <text x="206" y="48" fill="#5c6570">... pages 0 to 14 (960 keys) ...</text>
+  <text x="430" y="48" fill="#5c6570">page 15: 960..1023</text>
+  <text x="590" y="48" fill="#5c6570">page 16: 1024..1087</text>
+  <text x="742" y="48" fill="#5c6570">pending page 17: 1088..1102</text>
+
+  <!-- lane 1: CPU -->
+  <text x="16" y="92" font-weight="600">Software attention (CPU)</text>
+  <!-- break marker for early pages -->
+  <rect x="200" y="100" width="210" height="34" fill="#1f77b4" opacity="0.85"/>
+  <text x="305" y="122" fill="#fff" text-anchor="middle">15 AMX visits (dense pages)</text>
+  <rect x="420" y="100" width="150" height="34" fill="#1f77b4" opacity="0.85"/>
+  <text x="495" y="122" fill="#fff" text-anchor="middle">AMX, 64 keys</text>
+  <rect x="580" y="100" width="150" height="34" fill="#1f77b4" opacity="0.85"/>
+  <text x="655" y="122" fill="#fff" text-anchor="middle">AMX, 64 keys</text>
+  <rect x="740" y="100" width="35" height="34" fill="#e07b00"/>
+  <rect x="775" y="100" width="115" height="34" fill="none" stroke="#e07b00" stroke-dasharray="4 3"/>
+  <text x="834" y="122" fill="#4a3b1c" text-anchor="middle" font-size="12">AVX, 15 keys</text>
+  <text x="16" y="156" fill="#5c6570">per (KV head, layer): 17 AMX visits x 64 keys + 1 AVX visit x 15 keys</text>
+
+  <!-- lane 2: AoF -->
+  <text x="16" y="204" font-weight="600">Attention on the FPGA</text>
+  <rect x="200" y="212" width="210" height="34" fill="#2a9d5c" opacity="0.85"/>
+  <text x="305" y="234" fill="#fff" text-anchor="middle">card</text>
+  <rect x="420" y="212" width="150" height="34" fill="#2a9d5c" opacity="0.85"/>
+  <text x="495" y="234" fill="#fff" text-anchor="middle">card</text>
+  <rect x="580" y="212" width="150" height="34" fill="#2a9d5c" opacity="0.85"/>
+  <text x="655" y="234" fill="#fff" text-anchor="middle">card</text>
+  <!-- pending page: GOFs 1088..1099 on card, tail 1100..1102 on CPU -->
+  <rect x="740" y="212" width="28" height="34" fill="#2a9d5c" opacity="0.85"/>
+  <rect x="768" y="212" width="7" height="34" fill="#e07b00"/>
+  <rect x="775" y="212" width="115" height="34" fill="none" stroke="#d8dde3" stroke-dasharray="4 3"/>
+  <line x1="768" y1="208" x2="768" y2="250" stroke="#c0392b" stroke-width="2"/>
+  <text x="890" y="266" fill="#c0392b" font-size="12" text-anchor="end">last complete GOF ends at 1099: 1,100 keys on the card, 3 on the CPU (orange sliver)</text>
+  <text x="16" y="294" fill="#5c6570">per (KV head, layer): 0 AMX visits, 1 AVX visit x 3 keys (positions 1100..1102), 1,100 keys on the card</text>
+  <!-- legend -->
+  <rect x="16" y="310" width="14" height="12" fill="#1f77b4"/><text x="36" y="321">AMX kernel</text>
+  <rect x="130" y="310" width="14" height="12" fill="#e07b00"/><text x="150" y="321">AVX loop</text>
+  <rect x="230" y="310" width="14" height="12" fill="#2a9d5c"/><text x="250" y="321">FPGA card</text>
+  <rect x="340" y="310" width="14" height="12" fill="none" stroke="#5c6570" stroke-dasharray="4 3"/><text x="360" y="321">not yet written (future tokens of the page)</text>
+</svg>
+<figcaption>Figure 1. The same decode step under the two attention modes. Block widths are schematic (pages 0 to 14 are compressed into one block). Under software attention the kernel takes the 17 full pages and the AVX loop the 15-key pending page. Under FPGA attention the card takes everything up to the last complete GOF, and the CPU keeps a 3-key tail; no page is left whole on the CPU, so the kernel never runs.</figcaption>
+</figure>
+
+<div class="q">Q: how can the FPGA score 100 %?</div>
+<p>It does not score exactly 100 %. The table rounds. At prompt 8192 the card scored 4,886,701,056 K tokens (software scale) and the CPU tail 1,465,344, so the card's share is 99.97 %, printed as "100.0 %". At prompt 1024 it is 99.78 %, printed as "99.8 %". The CPU tail is the same 1,465,344 K tokens in both cells, because the tail depends only on p mod 4 and the step count, not on the prompt length. The AVX counter is never zero under AoF: every step has one AVX visit of 1 to 4 keys per (KV head, layer).</p>
+
+<div class="q">Q: what does "2.49 keys" mean? How can it not be a whole number?</div>
+<p>It is a mean. Each visit scores a whole number of keys: 1, 2, 3 or 4, following (p mod 4) + 1 as p advances. Over the 255 steps the tail lengths are 1, 2, 3, 4, 1, 2, 3, 4, ... starting at p = 1024 (1 key), and their sum is 636 keys. 636 / 255 = 2.494 keys per visit. With 256 steps the mean would be exactly 2.5. The report should have said "2.49 keys per visit on average (1 to 4 keys per step)"; the sentence you quoted compressed that.</p>
+
+<div class="q">Q: "The tail never fills a page, so the kernel has nothing to take": does AMX only function on whole pages? Then x = 64.</div>
+<p>Yes. Confirmed in the code at main: the predicate requires begin == 0 and end == page_size (64), the whole page visible through one range, and the whole page inside the sliding window [self_attention.hpp:1710-1721]. The kernel comment says the same: "a full 64-token page, all of it visible to the query" [amx_attn_iface.hpp:19-22]. Under AoF the CPU side holds at most 4 keys of the pending page, so the predicate fails at every step.</p>
+
+<div class="q">Q: what is the equation for AMX and AVX scores under software attention after prefill, for decode length L (qwen3-4b)? And under AoF?</div>
+
+<h3>1.3 Equations, per (user, KV head, layer)</h3>
+<p>P = prompt length in tokens. S = number of decode forwards = L - 1 for L generated tokens (the first generated token comes out of the last prompt forward). Step s = 1..S scores the query at position p = P + s - 1 against keys 0..p. Floor division is written floor(). The totals of a run are these sums times (users x KV heads x layers) = 8 x 8 x 36 = 2,304 for qwen3-4b.</p>
+
+<p><b>Software attention on the CPU (kernel enabled):</b></p>
+<pre>
+ready AMX visits      = sum over s = 1..S of floor(p / 64)                  (full pages below the pending page)
+pending AMX visits    = number of s in 1..S with (p mod 64) = 63            (steps that complete a page)
+AMX K tokens          = 64 x (ready AMX visits + pending AMX visits)
+pending AVX visits    = number of s in 1..S with (p mod 64) &lt; 63            (steps with a partial pending page)
+AVX K tokens          = sum over those s of ((p mod 64) + 1)
+ready AVX visits      = 0                                                   (every ready page is dense for qwen; llama differs, see the report's section 8)
+</pre>
+<p><b>Software attention with the kill switch (TRON_AMX_DISABLE=1):</b> the same visits with the same key counts, all on the AVX loop. Every former AMX visit becomes one avx_full_page visit of 64 keys. That is the identity the report checks in section 4.</p>
+
+<p><b>Attention on the FPGA (steady state, no copy lag):</b></p>
+<pre>
+AMX visits            = 0                                                   (the CPU never holds a whole page)
+AVX visits            = S                                                   (one pending-pass visit per step)
+AVX K tokens          = sum over s = 1..S of ((p mod 4) + 1)                (the tail past the last complete GOF)
+card K tokens         = sum over s = 1..S of 4 x floor(p / 4)               (per query; multiply by KV heads for the software scale)
+</pre>
+<p>These hold when every GOF copy lands within the step, which the data show for both prompt lengths. When a copy lags by whole pages the CPU scores those pages, and if the kernel is enabled the dense ones go to it; the only such case in this campaign is the qwen prompt-8192 prefill (7,077,888 AMX visits, 0.6 % of the prefill K tokens; report section 2.1).</p>
+
+<h3>1.4 The equations against the measured qwen3-4b totals (prompt 1024, L = 256, S = 255)</h3>
+<table>
+<tr><th>quantity</th><th>closed form</th><th>per (user, KV head, layer)</th><th>x 2,304</th><th>measured (exit report)</th></tr>
+<tr><td>CPU: ready AMX visits</td><td>sum floor((1023 + s) / 64), s = 1..255</td><td class="n">4,461</td><td class="n">10,278,144</td><td class="n">10,278,144</td></tr>
+<tr><td>CPU: pending AMX visits</td><td>s with (1023 + s) mod 64 = 63: s = 64, 128, 192</td><td class="n">3</td><td class="n">6,912</td><td class="n">6,912</td></tr>
+<tr><td>CPU: AMX K tokens</td><td>64 x (4,461 + 3)</td><td class="n">285,696</td><td class="n">658,243,584</td><td class="n">658,243,584</td></tr>
+<tr><td>CPU: pending AVX visits</td><td>255 - 3</td><td class="n">252</td><td class="n">580,608</td><td class="n">580,608</td></tr>
+<tr><td>CPU: AVX K tokens</td><td>sum ((1023 + s) mod 64) + 1 over the 252 steps</td><td class="n">8,064</td><td class="n">18,579,456</td><td class="n">18,579,456</td></tr>
+<tr><td>CPU: ready AVX visits</td><td>0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td></tr>
+<tr><td>AoF: AMX visits</td><td>0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td></tr>
+<tr><td>AoF: AVX visits</td><td>S</td><td class="n">255</td><td class="n">587,520</td><td class="n">587,520</td></tr>
+<tr><td>AoF: AVX K tokens</td><td>sum ((1023 + s) mod 4) + 1, s = 1..255</td><td class="n">636</td><td class="n">1,465,344</td><td class="n">1,465,344</td></tr>
+<tr><td>AoF: card K tokens (per query)</td><td>sum 4 x floor((1023 + s) / 4)</td><td class="n">293,124 per (user, layer)</td><td class="n">x 288 = 84,419,712</td><td class="n">84,419,712 (fpga_k_tokens)</td></tr>
+</table>
+<p class="cite">Sources: rt/q3-4b-8u-p1024-cpu__cpu__amxon__rep1.log and rt/q3-4b-8u-p1024-fpga__fpga__amxon__rep1.log, decode_like totals lines. Every row matches exactly. The same AoF tail (636 per unit) appears at prompt 8192.</p>
+
+<h3>1.5 A worked step for the kill-switch arm</h3>
+<p>The kill-switch arm scores the same visits with the same key counts. At the step of Figure 1 the CPU arm scores 17 full pages plus 15 keys; with the kernel disabled that is 17 avx_full_page visits of 64 keys plus one AVX visit of 15 keys. The AoF arm is unchanged by the kill switch: the card still scores 1,100 keys and the CPU 3.</p>
+
+<h2>2. Section "5. Token jobs by path set"</h2>
+
+<div class="q">Q: rephrase "How many token jobs of a class touched which paths within a forward (a job may use several paths across its pages and layers)" in plain English.</div>
+<p>Replacement text for the section intro:</p>
+<blockquote>
+<p>A token job is one token of one user inside one forward. During that forward the token's keys are scored layer by layer, KV head by KV head, page by page, and each (KV head, page) step takes one path: the AMX kernel, the AVX loop or the FPGA card. One token job therefore usually touches more than one path in a forward, for example the kernel for its full pages and the AVX loop for its pending page.</p>
+<p>The table counts token jobs by the combination of paths that touched them. Each token job goes into exactly one column: the set of all paths it used in its forward, over all layers, KV heads and pages. The counts add up over every forward of the class.</p>
+</blockquote>
+
+<div class="q">Q: the sentence says "within a forward", but the forwards column shows 256, 64, etc. How do they correlate?</div>
+<p>"Within a forward" describes how one token job is classified: its path set is collected over the one forward it belongs to, then it is counted once. The counts in the row are then summed over all forwards of the class. So:</p>
+<ul>
+<li>token jobs = sum over the forwards of the class of the token jobs in each forward. Decode for qwen: 255 forwards x 8 users = 2,040 token jobs. Prompt 1024 prefill: 8 forwards x 1,024 jobs (8 users x a 128-token chunk) = 8,192. Prompt 8192 prefill: 64 forwards x 1,024 = 65,536.</li>
+<li>the eight path-set columns of a row add up to the token jobs column. qwen CPU decode amxon: 24 (amx only) + 2,016 (avx+amx) = 2,040.</li>
+<li>a per-forward view is the row divided by the forwards: qwen CPU decode amxon has 8 token jobs per forward; in 3 of the 255 forwards all 8 jobs are "amx" only (the page-completing steps), in the other 252 all 8 are "avx+amx".</li>
+</ul>
+<p>Reading examples from the campaign:</p>
+<table>
+<tr><th>row</th><th>forwards</th><th>token jobs</th><th>jobs per forward</th><th>path sets</th><th>meaning</th></tr>
+<tr><td>qwen CPU decode, amxon</td><td class="n">255</td><td class="n">2,040</td><td class="n">8</td><td>amx 24, avx+amx 2,016</td><td>every step uses the kernel; 252 steps also use the AVX loop for the pending page; 3 steps complete a page and use the kernel only</td></tr>
+<tr><td>qwen CPU decode, amxoff</td><td class="n">255</td><td class="n">2,040</td><td class="n">8</td><td>avx 2,040</td><td>kill switch: every job on the AVX loop only</td></tr>
+<tr><td>qwen AoF decode, both arms</td><td class="n">255</td><td class="n">2,040</td><td class="n">8</td><td>fpga+avx 2,040</td><td>every step: card for the complete GOFs, AVX loop for the 1 to 4 key tail, no kernel</td></tr>
+<tr><td>qwen AoF prefill, prompt 1024</td><td class="n">8</td><td class="n">8,192</td><td class="n">1,024</td><td>avx 1,024, fpga+avx 7,168</td><td>the first 128-token chunk of each user (positions 0..127) runs on the CPU only; later chunks use the card for earlier chunks and the AVX loop for their own chunk</td></tr>
+<tr><td>qwen AoF prefill, prompt 8192, amxon</td><td class="n">64</td><td class="n">65,536</td><td class="n">1,024</td><td>avx 1,024, fpga+avx 61,440, fpga+avx+amx 3,072</td><td>3,072 jobs also used the kernel: pages the card had not yet taken (copy lag)</td></tr>
+</table>
+
+<h2>3. Under FPGA attention, can the kernel do anything, and would a smaller kernel unit help?</h2>
+
+<div class="q">Q: when FPGA attention is enabled, neither prefill nor decode can use AMX, right? My understanding of the reason: the unit of AoF is 4 tokens and the unit of AMX is 64 tokens, so under AoF the pending (tail) page can never accumulate 64 tokens before the first attention. In other words, lowering the AMX unit from 64 is a fruitless thought, because lowering it to 4 is not realistic. Correct?</div>
+
+<p>Words used only in this section (the page's own list above still applies):</p>
+<ul>
+<li><b>card</b> = the FPGA board that runs AoF attention. <b>K/V</b> = the key and value tensors of the KV cache.</li>
+<li><b>shard</b> = the 1,024-token unit (8 hardware pages of 128 positions) in which one card stores K/V [h/tron/gof.hpp:35-36; h/tron/shard.hpp:5-6]. <b>shard base</b> = the first token position of the shard.</li>
+<li><b>engagement point</b> = position 127 (0-based), the first query position the card may serve. Every query below it is software work. 127 is the default. USE_HW_ATTN=N can raise it, rounded up to a page boundary (k x 128 - 1). In the FPGA-attention runs of this section the variable was unset, and the run header says "engagement=127 (model default)" [h/libpos.hpp:83-90; h/tron/models/hw_attn_config.hpp:18-22; h/tron/scheduler/full.hpp:2037-2046].</li>
+<li><b>prompt chunk</b> = up to 128 consecutive prompt tokens of one user, processed in one prefill forward (one forward pass of the model) together with one chunk of every other user (TRON_PER_USER_PROMPT_CHUNK_LIMIT, default 128, not set in this campaign) [h/libtron.hpp:193-205; src/tron/generation/context.cpp:41-42]. The last chunk of a prompt holds the remainder. In the 2026-10-02 qwen cells every prefill forward held 1,024 token jobs (one 128-token chunk of each of the 8 users): 8 forwards at prompt 1024, 64 at prompt 8192.</li>
+<li><b>plan</b> = the per-step attention schedule the scheduler builds before each forward. It decides which key ranges the card serves and which the CPU serves. The <b>range builder</b> is the code that splits the keys of one tree edge into ranges, each a run of consecutive keys with one flag per query: CPU, card, or not visible [src/tron/models/ranged_mask.cpp:13-91].</li>
+<li><b>exit report</b> = the counter dump tron prints at process exit (the data of the campaign). <b>counter.html</b> = the 2026-09-25 page in this folder on the same question, with Tables 2 and 4 of the FPGA-attention cases.</li>
+<li><b>arm</b> = one of the two runs of a cell: AMX on, or the <b>kill switch</b> (TRON_AMX_DISABLE=1, the run-time flag that turns the kernel off). <b>cell</b> = one measured configuration (model, users, prompt length, attention mode).</li>
+<li><b>warm</b> = part or all of the prompt is already in the <b>prefix cache</b> (K/V kept from an earlier request with the same prefix; tron calls it the token tree). In the 2026-09-25 warm cells runtron ran the same prompt three times in one engine (--iterations 3). Iteration 1 was cold. In iterations 2 and 3 the whole prompt was cached. <b>cold</b> = no part of the prompt was cached. A <b>tree node</b> stands for one prefix. Its <b>edge</b> is the run of tokens that joins it to its parent, together with that run's K/V and shards.</li>
+<li><b>TPS</b> = generated tokens per second. <b>TTFT</b> = time to first token (the prefill time, lower is better). <b>kv_mul</b> = query heads per KV head. <b>shape gate</b> = the kernel's check of the model dimensions (head size 128 and kv_mul 4). <b>rinzler</b> = the production server.</li>
+<li><b>join wait</b> = the time a worker spends in the join step with nothing ready to fold (the <b>join fold</b> combines the workers' partial results). Under FPGA attention it waits for the card's results or for the other workers, whichever comes first.</li>
+<li><b>tile</b> = the AMX register the kernel multiplies, 16 rows x 64 bytes. <b>Q panel</b> = one 32-dimension slice of the 4-head query group, packed for the tile multiply: 16 dimension-pair rows x 16 columns (the 4 query heads plus 12 zero columns), 1 KiB. The kernel loads four Q panels per page, one per dimension step [h/tron/kernels/amx_attn_iface.hpp:181-185].</li>
+<li><b>unit</b> (in "per unit") = per (user, KV head, layer), as in section 1.3. The qwen3-4b software totals are the per-unit value x 2,304 (8 users x 8 KV heads x 36 layers). The card counter fpga_k_tokens counts per query, so its total is the per-unit value x 288 (8 users x 36 layers).</li>
+</ul>
+
+<p><span class="take">Short answer.</span></p>
+<ul>
+<li><b>Decode: correct in the steady state.</b> The measured AMX visit count is an exact zero at prompt 1024 and 8192, cold prefix cache. With a warm prefix cache or a short prompt the kernel does run (3.2).</li>
+<li><b>Prefill: correct for whole pages, with two exceptions.</b> The card scores exactly the pages the kernel scored under software attention. One exception is counted by the attention counters: the kernel ran where the K/V copy to the card lagged by whole pages, 0.6 % of the prefill keys at prompt 8192, 0 % at prompt 1024. One has no kernel-share counter: a full card K/V store. It is recorded by the engines' "lose HW attention" warnings, and its whole-request effect shows in TTFT (3.2).</li>
+<li><b>The 4-versus-64 reason explains the exact zero.</b> It does not explain the size of what the kernel loses. The card takes the full pages whatever the size of its copy unit, as long as that size divides 64 (1, 2, 4, 8, 16, 32 or 64 tokens).</li>
+<li><b>Lowering the kernel unit gains nothing under FPGA attention in the steady state.</b> The arithmetic alone shows it. No judgment of what is realistic is needed. A 16-token kernel would recover 0 decode keys. A 4-token kernel would recover 0.09 % of the decode keys at prompt 1024 (252 of the 636 tail keys per unit) and 0.01 % at prompt 8192. In five of the six exception cases of 3.2 the CPU scores partial pages itself. There a smaller unit would gain its software-attention share (3.1 % of that cell's decode keys at prompt 64 with a 16-token unit). The copy-lag case gains nothing from a smaller unit (3.2).</li>
+</ul>
+<p>Scope of "use AMX": at tron main dd0f942c75 the only AMX code is the attention kernel, the QK (query times key) and PV (probability times value) products of one 64-token page [all 36 AMX tile intrinsic calls are in src/tron/kernels/amx_attn.cpp; the interface header is intrinsics-free (src/tron/CMakeLists.txt:212-215); report section 1 counts 98 tile instructions in the campaign binary, built with -DTRON_AMX_DISPATCH=ON]. The projection and FFN (feed-forward network) matrix multiplications run on the FPGA or on AVX in every attention mode. So "use AMX" below means kernel page visits.</p>
+
+<h3>3.1 Decode: the reasons, in order</h3>
+<ol>
+<li>The card's coverage advances in GOFs of 4 tokens [h/tron/gof.hpp:34]. For the shard whose copy is still in progress, the plan sets the card's last key to (shard base + 4 x complete GOFs - 1). "Complete GOFs" means the unbroken run of GOFs from the shard start whose copy has finished [full.hpp:2850-2854 (first shard) and 2882-2889 (last shard); h/tron/shard.hpp:355-365]. The plan uses that key only when at least one GOF is complete and the copied range reaches the current edge. For the first shard the threshold is 32 complete GOFs (128 tokens), and the key must be at or above the engagement point [full.hpp:2851, 2856; h/pos/config.hpp:98]. A shard other than the first whose copy is complete is pushed at its full extent [full.hpp:2875-2879].</li>
+<li>Every key above that boundary is software work. The range builder closes the key range above the card's last key as a CPU range for the query. It moves the query to the card only for the range at and below that key [src/tron/models/ranged_mask.cpp:42-49 and 68-80]. (The extra split at full.hpp:2051-2062, under Note [Prompt HW-attention entries] at 2010-2022, runs only for a plan entry with more than one query [full.hpp:2051]. In these runs each decode query was alone in its entry, because the 8 users shared no prompt prefix. So the decode steps skipped it.)</li>
+<li>Consider the GOFs whose four tokens were saved before the step's plan is built. When every one of them has finished its copy, the CPU is left with (p mod 4) + 1 keys, that is 1 to 4 keys of the pending page (p = the query position, whose own key is saved during the step and so is always on the CPU). The data show exactly that at both prompt lengths: 636 tail keys per unit over 255 steps, the closed-form sum [exit report counter pending_avx_k_tokens (keys the AVX loop scored in pending pages) 1,465,344 keys / 2,304 units, same value at prompt 1024 and 8192].</li>
+<li>The kernel takes a page only when four conditions hold: begin = 0, end = 64 (all 64 entries active), the whole page lies in one range that this query must run in software, and the whole page is inside the query's sliding window (the key limit of a sliding-window layer, see 3.5) [h/tron/models/self_attention.hpp:1710-1721]. Under FPGA attention the range flag tested is "software required", not mask visibility [self_attention.hpp:1868-1869]. In 252 of the 255 steps the pending page has fewer than 64 active entries, so "end = 64" fails. In the 3 page-completing steps the page is full. Its leading range belongs to the card. So the "software required" clause fails. The result is AMX visits = 0 [exit report, AMX-on arm: ready_amx_visits = pending_amx_visits = 0 at both prompt lengths. In the kill-switch arm those two counters are 0 by construction. There the matching evidence is ready_avx_full_page_visits = pending_avx_full_page_visits = 0].</li>
+</ol>
+<p>The tail does not grow past 4 keys in the measured cells. Each decode step scores its tail at once. The tail is 1, 2, 3, then 4 keys over four steps. When the fourth token completes the GOF, its copy is submitted. The next step polls the copies once, before it builds the plan [full.hpp:1974-1975]. Nothing waits for a copy. When the copy has finished by then, the plan moves the card boundary up by 4 keys, and the tail drops back to 1 key. Had a copy still been unfinished, the tail at that step would be 5 keys. The data show that never happened: 636 tail keys per unit is the exact closed-form sum, at both prompt lengths.</p>
+
+<p><span class="take">What the unit mismatch explains, and what it does not.</span></p>
+<ul>
+<li>Under software attention at prompt 1024 (qwen3-4b, section 1.4) the kernel's decode work per unit over the 255 steps is 4,461 ready-page visits plus 3 pending-page visits. One visit is one kernel call on one full page in one step.</li>
+<li>Once every GOF copy has finished, the card takes all 4,461 ready pages [exit report, q3-4b prompt-1024 FPGA cells, both arms: ready_avx_visits = ready_amx_visits = ready_empty_visits = 0, so the CPU scores no ready page].</li>
+<li>That stays true for any card unit that divides the 64-token page (1, 2, 4, 8, 16, 32 or 64 tokens). The number of ready keys, 64 times the number of full pages, is then a multiple of the card unit and is at most the query position. The card's keys end at the largest multiple of the card unit that is at most the query position. So the last ready key is never above the card's last key. (In 16 of the 255 steps at prompt 1024 the two coincide.)</li>
+<li>The 4-versus-64 mismatch removes only the last 3 visits, 0.07 % of the kernel's 4,464 visits (0.009 % at prompt 8192, where the closed form gives 33,021 ready visits). So the mismatch is the reason for the exact zero.</li>
+<li>The reason for the size of the loss is that the card scores the full pages. All but 12 of the kernel's 285,696 keys per unit, 97.3 % of all decode keys, lie inside the card's 293,124 keys. The 12 are the last GOF of each of the 3 pending pages the kernel completes, which the card has not copied in that step.</li>
+</ul>
+
+<p><span class="take">The opposite change gains nothing either.</span> Suppose the card unit were raised to 64 tokens. The CPU would then keep the whole pending page. The kernel would take the pending page only in the step that completes it: 3 of 255 steps at prompt 1024 (p = 1087, 1151, 1215), exactly as under software attention. In the other 252 steps the AVX loop would score up to 63 keys instead of at most 4. That takes 7,620 keys per unit off the card. The AVX loop would score 8,064 keys instead of 636 (as measured under software attention in the AMX-on arm, qwen3-4b prompt 1024: pending_avx_k_tokens 18,579,456 / 2,304 units; the kill-switch arm reads 19,021,824 = 8,256 per unit, because the 3 full pending pages also go to the AVX loop there). The kernel would take 192 keys (3 visits x 64): 180 from the card and the 12 tail keys of the 3 page-completing steps.</p>
+
+<h3>3.2 When the kernel does run under FPGA attention</h3>
+<p>The kernel runs under FPGA attention only when whole dense pages are left on the CPU. Six cases exist. Four were measured with the attention counters. The "bucket" column names the forward class that got the kernel's work. For the first four cases it is the exit-report class that recorded the AMX visits (decode_like, written "decode", or prompt_or_mixed, written "prefill"). The card-store-full case has no counter record, and its bucket follows from the mechanism. The production-like case has only a per-process AMX busy-cycle count, and its bucket follows from the cell shape (the whole prompt was cached).</p>
+<table>
+<tr><th>case</th><th>bucket</th><th>why whole pages stay on the CPU</th><th>measured kernel share</th><th>source</th></tr>
+<tr><td>short prompt</td><td>decode</td><td>queries below position 127, and the first shard not yet engaged (it needs 32 complete GOFs = 128 tokens) [h/pos/config.hpp:98; full.hpp:2849-2858]</td><td class="n">8.5 % of that cell's decode keys at prompt 64 (9,584,640 AMX keys of 112,803,840 keys on all paths, card keys counted x 8 KV heads). Per unit: 64 queries x one dense page + the full pending page at p = 127 = 4,160 of 48,960 keys.</td><td>2026-09-25, cell 8 users x prompt 64, AMX on, exit report exec/results/attnstats-20260925-fpga. counter.html Table 4 lists the same cell as 147,456 ready + 2,304 pending AMX visits, all in the decode bucket. The kill-switch arm has 0 AMX visits.</td></tr>
+<tr><td>copy lag of whole pages</td><td>prefill</td><td>GOF copies not yet finished when the plan was built</td><td class="n">0.6 % of the prefill keys at prompt 8192 (qwen3-4b), 0 % at prompt 1024, 0 in decode</td><td>exit report of this campaign; report section 2.1</td></tr>
+<tr><td>prefix-cache branch inside a shard</td><td>decode</td><td>the shard that spans the branch point stays with the old path. The new branch builds its own shard and copies the earlier K/V into it [full.hpp:1139-1148, 2614-2615; src/tron/gof.cpp:227-286]. Until that copy reaches the branch point, the branch's queries score the whole cached prefix on the CPU.</td><td class="n">3.0 to 3.6 % of the kernel visits a cold request of the same shape makes under software attention (38,304 and 44,856 AMX visits per warm request against the closed-form 1,258,272 for a 255-forward request at prompt 1000). Against the measured 1-user software-attention control (1,239,648 visits per request) it is 3.1 to 3.6 %.</td><td>2026-09-25 warm cells (exec/results/attnstats-20260925-warm), counter.html section 2.4 and Table 4</td></tr>
+<tr><td>prefix-cache hit at a shard end, then a branch</td><td>decode</td><td>the request followed the cached answer for 12 to 20 tokens and then branched. The whole 1,024-token prefix was scored on the CPU for est. 4 forwards. The shard-reuse reading of the code does not hold during the branch's first forwards (mechanism open).</td><td class="n">1.4 % of the kernel visits a cold request of the same shape makes under software attention (18,432 AMX visits per warm request against 1,285,632 at prompt 1024, closed form and measured)</td><td>2026-09-25 warm cells, counter.html Table 4 and section 2.4 ("state 8 is refuted as a zero")</td></tr>
+<tr><td>card K/V store full</td><td>prefill and decode</td><td>a shard that could not be placed holds no card memory. Its whole 1,024-token range is scored on the CPU. tron retries the placement only when the shard's edge is marked changed (it gains tokens, is split or merged, or has its K/V invalidated) and a card reports both room for a whole shard and one free contiguous 64 KiB block, the smallest region a shard allocates [full.hpp:2489, 2503-2617, Note [Retrying a degraded shard]]. A shard inherited through the prefix cache sits on a stable edge, so it keeps the CPU state until one of those changes touches its edge or its tree node is evicted.</td><td class="n">no kernel-share counter in that campaign (the attention counters were first committed on a tron branch on 2026-09-24 and merged into main on 2026-10-01 UTC, both after these passes). In the warm cells at prompt 4096 and 5120, est. 81 to 114 % of the new shard placements failed (the warnings count new failures, not the total CPU share). Whole-request effect: AMX build TTFT -42.5 % at prompt 4096 and -37.1 % at prompt 5120 vs the AVX build, both under FPGA attention (mean of the per-pass deltas, 3 paired passes). Decode TPS in the same cells +6.9 % / +1.5 %, not resolved. The source calls this a co-occurrence, not a measured cause.</td><td>campaign q4b-fpga-20260921, warm passes 2026-09-21/22, qwen3-4b-prefill-amx-vs-fpga.html sections 5 and 6</td></tr>
+<tr><td>production-like repeat (temperature 0, repeated prompt, prefix cache)</td><td>decode (busy cycles, not visits)</td><td>cause open. Candidates: the request follows the cached answer step by step (state 5c in Table 2 of counter.html section 2.3), or one GOF of the cached prefix skipped by the copy into the new shard (state 5b, "hole in the copied prefix"). The copy skips a GOF whose 4 tokens are not all saved [src/tron/gof.cpp:253-259]. The complete run then stops below the branch's first position, and the whole request stays on the CPU [h/tron/shard.hpp:355-365].</td><td class="n">AMX busy cycles 501,350,140 under FPGA attention = 57 % of the software-attention run's AMX busy cycles, 1 user, 910 cached tokens, 3 requests</td><td>2026-09-17 rinzler measurement, counter.html sections 2.3 and 2.4. Not reproduced with the counters yet.</td></tr>
+</table>
+<p>counter.html Table 2 has one more state: a layer or model that never uses the card. In this campaign that is the gpt-oss case of 3.5, where the shape gate blocks the kernel.</p>
+<p>What these cases mean for a smaller kernel unit:</p>
+<ul>
+<li>In all six cases the kernel gets whole dense pages, and the 64-token kernel takes them already. So the unit size is not what blocks the kernel there.</li>
+<li>In the short-prompt case the query has no card range in those steps. In the two prefix-cache cases most AMX steps have no card range either, and a few keep one up to the card's copied boundary (path set fpga+avx+amx: 2 of 26, 18 of 234 and 8 of 22 AMX jobs in the three 2026-09-25 warm cells). In the card-store-full case the query keeps the card range of the shards placed before the degraded one. In every one of these cases the AVX work in the same step is partial-page work (the pending page, or the page at the boundary), exactly as under software attention. So a smaller unit would gain its software-attention share there.</li>
+<li>The copy-lag case is the exception. There the query keeps its card range. Its partial AVX work is the own chunk of the prefill forward. A smaller unit cannot take that work (3.3).</li>
+<li>Measured at prompt 64: 64 steps run before the card engages (query positions 64 to 127). In 63 of them the pending page is partial, and they leave 2,016 partial-page keys per unit on the AVX loop, 4.1 % of that cell's decode keys. The 64th step (p = 127) hands a full pending page to the kernel. A 16-token unit would take 1,536 of the 2,016 keys, 3.1 % [attnstats-20260925-fpga, prompt-64 cell: pending_avx_k_tokens 5,741,568 = 2,304 x (2,016 + 476 tail keys)]. That is the software-attention gain of section 3.4, not an FPGA-attention gain.</li>
+</ul>
+
+<h3>3.3 Prefill: where the kernel's work goes under FPGA attention</h3>
+<p>One prefill forward scores one chunk per user. Each query scores two kinds of keys: the keys of the earlier chunks, and the keys of its own chunk (the causal triangle, 1 to 128 keys written in the same forward).</p>
+<ul>
+<li><b>Earlier chunks.</b> Under software attention they are whole dense pages and go to the kernel: 16,515,072 ready AMX visits at prompt 1024, 458,752 keys per unit, 87.4 % of the prefill keys [q3-4b-8u-p1024-cpu amxon, prompt totals]. Under FPGA attention the card scores exactly those keys: the fpga_k_tokens counter (keys the card scored per query) 132,120,576 x 8 KV heads = 1,056,964,608 keys = 16,515,072 visits x 64 keys [q3-4b-8u-p1024-fpga, both arms]. The swap is exact.</li>
+<li><b>First chunk.</b> Positions 0 to 126 are below the engagement point [full.hpp:2037-2041]. Position 127 has no earlier chunk on the card. All 128 queries run on the CPU in both attention modes, on the AVX loop (their keys are own-chunk keys). The path-set tables show them as the 1,024 jobs with path set "avx" only: under FPGA attention in section 2 of this page, under software attention with the kernel on in the report's section 5 (q3-4b-8u-p1024-cpu amxon: avx 1,024, avx+amx 7,168).</li>
+<li><b>Own chunk.</b> It goes to the AVX loop in every build and in both attention modes. A page written in the same forward has one visibility range per token [ranged_mask.cpp:42-48 closes a range at every query token]. The one-range clause of the kernel's page test (3.1, item 4) then fails. It fails even for a page the query sees whole. Measured: 1,216,512 full-page AVX visits (counter pending_avx_full_page_visits, AVX visits in the pending pass that scored a whole page [h/tron/models/attn_stats.hpp:208-215]) in the prompt totals of all four qwen prompt-1024 runs: software attention with and without the kernel, FPGA attention with and without it. Per unit that is 528 full-page visits = 8 chunks x 66. The 66 per chunk are chunk positions 63 to 127 scoring all 64 keys of the chunk's first page (65 visits) plus position 127 scoring all 64 keys of its second page (1 visit). The own chunk as a whole takes 1,536 AVX visits per unit scoring 66,048 keys (8 x 128 x 129 / 2), that is 12.6 % of the 524,800 prefill keys per unit (1,024 x 1,025 / 2). At prompt 8192 it is 4,224 full-page visits per unit = 64 chunks x 66 (9,732,096 visits per run, the same in both prompt-8192 runs) and 528,384 own-chunk keys = 1.6 % of the 33,558,528 prefill keys per unit.</li>
+<li><b>Copy lag.</b> Some pages of earlier chunks still had unfinished GOF copies when the plan was built. Those pages stay on the CPU. They are dense, so the kernel takes them. Prompt 8192: 7,077,888 AMX visits = 452,984,832 keys = 0.6 % of the prefill keys. The kill-switch arm records the same 7,077,888 whole-page visits as full-page AVX visits. Both runs of the same cell on 2026-09-25, with a different binary (cbf1bb6c0c), record the same count. So the lag is deterministic. Prompt 1024: 0.</li>
+</ul>
+<p>So in prefill, FPGA attention removes exactly the kernel's work (the earlier chunks) and leaves the AVX work the CPU had anyway (the own chunk).</p>
+<p>About half of the own-chunk keys are in pages the query sees whole: the 66 full-page AVX visits per chunk, 528 x 64 = 33,792 keys per unit at prompt 1024, 51 % of the own-chunk keys and 6.4 % of the prefill keys (270,336 keys per unit at prompt 8192, 0.8 %).</p>
+<p>A kernel could take them under one condition: the page test accepts a page that is fully visible through several ranges [self_attention.hpp:1718-1719 requires one range to cover the page]. That is a visibility change, not a unit change. Its value is the same with or without FPGA attention: the prefill counter reads 1,216,512 in all four runs.</p>
+
+<h3>3.4 The arithmetic of a smaller kernel unit, decode</h3>
+<p>Suppose a kernel variant took any run of U tokens instead of a whole page (U = 16 is one tile of token rows, U = 4 is one GOF). The table gives the AVX keys it could take per unit over the 255 decode steps, computed from the closed forms of section 1.3 (script exec/attnstats-20261002/subunit.py). Under software attention with the kernel on, the AVX keys are the partial pending page: (p mod 64) + 1 keys per step in the 252 steps with (p mod 64) &lt; 63, and 0 keys in the 3 steps that complete a page. Under FPGA attention they are the tail, (p mod 4) + 1 keys in every one of the 255 steps.</p>
+<p>What is measured and what is not:</p>
+<ul>
+<li>The script holds three constants copied from the exit report decode totals and asserts the prompt-1024 closed forms x 2,304 against them. From the software-attention cell with the kernel on (q3-4b-8u-p1024-cpu amxon): AMX keys 658,243,584 (ready_amx_k_tokens 657,801,216 + pending_amx_k_tokens 442,368) and pending AVX keys 18,579,456. From the FPGA-attention cell (q3-4b-8u-p1024-fpga, both arms): the tail, pending_avx_k_tokens 1,465,344.</li>
+<li>The FPGA-attention tail at prompt 8192 is the same 1,465,344 in the exit report (q3-4b-8u-p8192-fpga, both arms).</li>
+<li>The campaign ran no qwen3-4b prompt-8192 software-attention cell. So the "software attention, prompt 8192" column has no qwen measurement.</li>
+<li>The llama-8b prompt-8192 software-attention cell measures the base of that column: 16,515,072 partial pending-page AVX keys = 2,048 units x 8,064 keys, the same per-unit value, over 256 steps [l8b-8u-p8192-cpu amxon, decode totals, pending_avx_k_tokens]. The per-unit partial-page keys depend only on the page size and the step range, not on the model. That cell also records 33,554,432 ready-page AVX keys (16,384 per unit), which qwen does not have. The report discusses that component in its section 8.</li>
+<li>The rows for U = 16, 8 and 4 describe hypothetical kernels and are arithmetic only. No such kernel exists to measure.</li>
+</ul>
+<table>
+<tr><th>kernel unit U</th><th>software attention, prompt 1024</th><th>software attention, prompt 8192 (closed form for qwen3-4b; the 8,064 base is measured in llama-8b)</th><th>FPGA attention, prompt 1024</th><th>FPGA attention, prompt 8192</th></tr>
+<tr><td>partial pending-page AVX keys per unit (the upper bound)</td><td class="n">8,064 keys (2.75 % of the decode keys)</td><td class="n">8,064 (0.38 %)</td><td class="n">636 (0.22 %)</td><td class="n">636 (0.03 %)</td></tr>
+<tr><td>64 (today)</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td></tr>
+<tr><td>16</td><td class="n">6,144 (2.09 %)</td><td class="n">6,144 (0.29 %)</td><td class="n">0 (the tail is never 16 keys)</td><td class="n">0</td></tr>
+<tr><td>8</td><td class="n">7,168 (2.44 %)</td><td class="n">7,168 (0.34 %)</td><td class="n">0 (the tail is never 8 keys)</td><td class="n">0</td></tr>
+<tr><td>4</td><td class="n">7,680 (2.61 %)</td><td class="n">7,680 (0.36 %)</td><td class="n">252 (0.09 %): the 63 steps with a 4-key tail</td><td class="n">252 (0.01 %)</td></tr>
+</table>
+<p>Reading the table:</p>
+<ul>
+<li>Under FPGA attention the upper bound itself is 0.22 % of the decode keys at prompt 1024 and 0.03 % at prompt 8192. A kernel that scored the tail in zero time would save at most the AVX time of those keys. A 16-token unit takes none of them. A 4-token unit takes 252 of 636.</li>
+<li>Under software attention a 16-token unit would move 2.1 % of the decode keys at prompt 1024 and 0.29 % at prompt 8192 from the AVX loop to the kernel (2.6 % and 0.36 % with a 4-token unit). That is the whole value of the change, counted in keys, and it has nothing to do with FPGA attention.</li>
+<li>The cost side, for a tail of 1 to 4 keys:
+  <ul>
+  <li>Tile fill: the kernel's K operand is a tile of 16 token rows. A 1 to 4 key tail fills at most 4 of the 16 rows (25 %).</li>
+  <li>Fixed work per page: the four tile zeroes, the four Q panel loads, the four tile stores and the AVX-512 transpose (sections 2 and 3 of the tile page Q-K-page-AMX_tile-claude.html; src/tron/kernels/amx_attn.cpp:128-185). The transpose belongs to the canonical kernel, the kernel of this build. A tail kernel would pay that fixed work for at most 4 keys x 4 heads x 128 dimensions = 2,048 multiply-adds in the QK step per (user, KV head, layer, step), 1,277 on average (636 tail keys over 255 steps, 2.49 keys per step). The PV step does the same number of multiply-adds with its own fixed work [amx_attn.cpp:197-236]. The tile configuration is not part of the per-page cost: one worker loads it once before its page loop [amx_attn_iface.hpp:87-89; self_attention.hpp:1555-1560].</li>
+  <li>Bytes read: both paths touch the same 1 to 4 K rows of 256 bytes each (256 B to 1 KiB per step). That equality holds only if the tile were configured to the tail length. With the kernel's fixed 16-row tile [amx_attn.cpp:92], one K tile load reads 16 rows x 64 bytes = 1 KiB [amx_attn.cpp:135-136]. The four dimension steps of one 16-row block read 16 rows x 256 bytes = 4 KiB per decode step. That is 4 to 16 times the AVX path's bytes: 4x for a 4-key tail, 6.4x at the mean tail of 2.49 keys.</li>
+  <li>Time: the counters record K tokens per path and busy time per attention job, but no time per path [attn_stats.hpp:19-27, 30-43]. So the tail's own time cannot be separated. A measured upper bound exists: under FPGA attention at prompt 1024 the attention busy time per job is 0.043 ms, of which 58 % is join wait [report section 7]. The CPU's own scoring work is therefore at most est. 0.018 ms per attention job, and that includes the join fold, not only the 1 to 4 key tail. One job is one worker's share of one layer in one decode step (183,600 jobs = 255 steps x 36 layers x 20 workers). Per worker and decode step that is 36 jobs, at most est. 0.65 ms.</li>
+  <li>The kill switch under FPGA attention moves no decode work:
+    <ul>
+    <li>Both arms have 0 AMX visits and identical AVX and card counters in all three AoF cells.</li>
+    <li>Decode TPS is +0.2 to +0.9 % in the kill-switch arm (one repetition per arm) [report section 1].</li>
+    <li>For qwen the attention busy time per job is 0.0425 vs 0.0426 ms at prompt 1024 and 0.242 vs 0.243 ms at prompt 8192 (AMX on vs kill switch, recomputed from the exit report fields busy_cycles / attn_jobs / tsc_hz; report section 7 prints the rounded values).</li>
+    <li>For gpt-oss it is 0.0322 vs 0.0307 ms, 4.8 % lower in the kill-switch arm. Neither arm scored anything on the kernel. Any tail saving would have to exceed that single-repetition variation to be visible.</li>
+    <li>At prompt 8192 the kill switch does move prefill work. The 7,077,888 copy-lag visits go from the kernel to the AVX loop. TTFT is 26.73 vs 26.79 s (+0.2 %, one repetition per arm). That difference is inside the single-repetition variation the report bounds in section 4 [report section 2.1].</li>
+    </ul>
+  </li>
+  </ul>
+</li>
+</ul>
+
+<h3>3.5 Side note: gpt-oss has page-sized CPU work under FPGA attention, blocked by shape, not by the unit</h3>
+<p>Under FPGA attention at prompt 1024 (the campaign's only gpt-oss cell) gpt-oss scores 10.2 % of its decode keys on the CPU: 38,486,016 of 377,634,816 keys, with the card's keys counted once per KV head [gptoss-8u-p1024-fpga, decode totals, same in both arms]. Its 18 sliding-window layers (layers whose attention sees only the last 128 keys) do not run on the card [h/tron/models/model.hpp:1554-1556 keeps sliding-window operations off the hardware slots]. In those layers each query scores a 128-key window, the same number of keys as two pages [per-layer line: 2,097,152 AVX keys in each even layer, 0 on the card]. The share falls as the prompt grows. The window stays at 128 keys, and the card's keys grow with the prompt.</p>
+<p>The window is not page-aligned. In 252 of the 256 steps it covers one whole page plus parts of two others. In the 4 steps where the newest token ends a page it covers two whole pages. The counters show it: 294,912 ready full-page AVX visits (8 users x 8 KV heads x 18 sliding layers x 256 steps, one per query, KV head, layer and step) plus 4,608 pending ones (8 users x 8 KV heads x 18 layers x 4 steps) = 299,520 full-page AVX visits per decode run, identical in both arms.</p>
+<p>The kernel cannot take them. Its shape gate requires head size 128 and kv_mul 4 [h/tron/kernels/amx_attn_iface.hpp:148-150]. gpt-oss has head size 64 and kv_mul 8.</p>
+<p>This is the only decode case in the 2026-10-02 cells where FPGA attention leaves page-sized work on the CPU. The other decode cases are the ones of section 3.2: the short-prompt and prefix-cache cases, measured with the counters on 2026-09-25, and the card-store-full and production-like cases, measured without the counters on 2026-09-21/22 and 2026-09-17. Here the obstacle is the shape gate, not the unit. In prefill the qwen cells also leave page-sized CPU work: the copy-lag pages at prompt 8192 (which the kernel took) and the own-chunk pages at both prompt lengths (section 3.3).</p>
+
+<h3>3.6 Verdict on the four statements</h3>
+<ul>
+<li>"Neither prefill nor decode can use AMX under FPGA attention": decode, correct in the steady state (exact zero at prompt 1024 and 8192, cold cache). The decode exceptions are the cases of 3.2, each with its own base: short prompt 8.5 % of that cell's decode keys (prompt 64), prefix-cache branch 3.0 to 3.6 % and shard-end hit 1.4 % of the closed-form kernel visit count of a cold request of the same shape under software attention (counter.html Table 4; the measured prompt-1000 control gives 3.1 to 3.6 % for the branch case), card store full (no counter), and one unexplained production-like measurement at 57 % of the software-attention run's AMX busy cycles. Prefill, correct except for copy lag (0.6 % of the prefill keys at prompt 8192, 0 % at prompt 1024) and the card-store-full case. The short-prompt and branch cases give the kernel decode work only: their prompt-bucket AMX visits were 0 [exec/results/attnstats-20260925-fpga and -warm exit reports].</li>
+<li>"The reason is the 4-token unit of AoF against the 64-token unit of AMX": correct for the exact zero, with one added condition. Every GOF whose copy started during a decode step must have finished, and been polled, before the next step's plan is built. The data show that at both prompt lengths: the tail sums to exactly 636 keys per unit. The ready-page AVX key counter (ready_avx_k_tokens) is 0. So no step was left with a lagging GOF. Incomplete for the size of the loss: the card takes the full pages regardless of the GOF size.</li>
+<li>"The tail can never accumulate to 64 tokens": correct in the steady state (card engaged, every GOF copy finished before the next plan), and more than that. There the keys the card does not yet hold never exceed 4. Every step scores them on the AVX loop. Once their GOF is copied, every fourth step, the card boundary moves past them. The pending page itself does fill to 64 tokens, in 3 of 255 steps at prompt 1024, but the card already holds its first 60 keys. Before the card engages the statement fails: at prompt 64 the CPU-side keys grow to a full page at position 127, and the kernel scores it [attnstats-20260925-fpga, prompt-64 AMX-on cell: pending_amx_visits 2,304 = one per unit].</li>
+<li>"Lowering the AMX unit from 64 is fruitless": correct under FPGA attention, by arithmetic (0 % at unit 16, 0.09 % at unit 4 at prompt 1024, 0.01 % at prompt 8192). Under software attention the same change is worth 2.1 % of the decode keys at prompt 1024 with a 16-token unit (2.6 % with a 4-token unit), and less at longer prompts (0.29 % and 0.36 % at prompt 8192, closed form. The llama-8b prompt-8192 cell measures the base of that arithmetic, 8,064 partial-page AVX keys per unit. It cannot measure the gains, because no 16-token or 4-token kernel exists.)</li>
+</ul>
+
+<h2>4. Corrections this Q&amp;A implies for attn-stats-compare.md</h2>
+<ul>
+<li>Section 2.1, qwen bullet: write "2.49 keys per visit on average (1 to 4 keys per step, (p mod 4) + 1)" and "99.97 %" next to the rounded "100.0 %".</li>
+<li>Section 5 intro: replace the one-line definition with the two paragraphs of section 2 above.</li>
+<li>Words used here: add "page-completing step" and the sentence that the kernel's unit is the whole 64-token page.</li>
+</ul>
+<p class="cite">Files: this page = PR3879/new-PRs/new-counters/attn-stats-compare-QA.html. Code cited at tron origin/main dd0f942c75 (self_attention.hpp, amx_attn_iface.hpp, gof.hpp, shard.hpp, scheduler/full.hpp, pos/config.hpp, libtron.hpp). Data: exec/results/attnstats-20261002/.</p>
+</main>
+</body>
+</html>

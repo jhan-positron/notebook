@@ -100,23 +100,27 @@ All 96 refuted claims were precision items. None changed the verdict.
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attn-stats-compare-QA.html (57,736 bytes). The QA page with the new section 3 (about 5,900 words, six subsections) inserted at 20:40. Not rendered in a browser during the session.
-  - generator: /tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/31edeaf3-fed2-4688-a6fa-1f5ec7f340d4/scratchpad/insert.py (scratchpad, may be cleaned up)
-  - input: the scratchpad fragment section3.html (35,985 bytes), hand-written
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attn-stats-compare-QA.html (57,736 bytes). The QA page with the new section 3 (about 5,900 words, six subsections) inserted at 20:40. Not rendered in a browser during the session. (preserved: artifacts/intel-amx/pr3879/new-counters/attn-stats-compare-QA.html)
+  - generator: /tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/31edeaf3-fed2-4688-a6fa-1f5ec7f340d4/scratchpad/insert.py (scratchpad, may be cleaned up) (preserved: artifacts/intel-amx/exec/scratch-relocated/31edeaf3/insert.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/31edeaf3/insert.py)
+  - input: the scratchpad fragment section3.html (35,985 bytes), hand-written (preserved: artifacts/intel-amx/exec/scratch-relocated/31edeaf3/section3.html, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/31edeaf3/section3.html)
   - input built by: hand, with numbers from subunit.py and the exit reports
   - sources: /home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/exit-reports.txt, tron main dd0f942c75
   - regenerate: `python3 insert.py <page.bak> section3.html <OUT>`
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attn-stats-compare-QA.html.bak-20261004-before-section3 (21,701 bytes). The page before the insertion.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/subunit.py (2,413 bytes). The kernel-unit arithmetic script. It asserts its closed forms against the exit report.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/qk-tile-animation-pages.md (5,830 bytes). Memory note, two UPDATE blocks appended (section 3 facts, round-3 facts).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attn-stats-compare-QA.html.bak-20261004-before-section3 (21,701 bytes). The page before the insertion. (preserved: artifacts/intel-amx/pr3879/new-counters/attn-stats-compare-QA.html.bak-20261004-before-section3)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/subunit.py (2,413 bytes). The kernel-unit arithmetic script. It asserts its closed forms against the exit report. (preserved: artifacts/intel-amx/exec/attnstats-20261002/subunit.py)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/qk-tile-animation-pages.md (5,830 bytes). Memory note, two UPDATE blocks appended (section 3 facts, round-3 facts). (preserved: artifacts/intel-amx/memory/qk-tile-animation-pages.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md (24,491 bytes today). The index line for that note was extended.
 - Workflow scripts (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/31edeaf3-fed2-4688-a6fa-1f5ec7f340d4/workflows/scripts/):
-  - verify-qa-section3-wf_f9324547-16c.js (8,661 bytes), round 1.
-  - verify-qa-section3-round2-wf_efac67ae-904.js (6,280 bytes), round 2.
-  - verify-qa-section3-round3-wf_34b97b85-58e.js (4,459 bytes), round 3.
+  - verify-qa-section3-wf_f9324547-16c.js (8,661 bytes), round 1. (preserved: artifacts/intel-amx/exec/attnstats-20261002/verify-qa-section3-wf_f9324547-16c.js, relocated to /home/jhan/workspace/intel-AMX/exec/attnstats-20261002/verify-qa-section3-wf_f9324547-16c.js)
+  - verify-qa-section3-round2-wf_efac67ae-904.js (6,280 bytes), round 2. (preserved: artifacts/intel-amx/exec/attnstats-20261002/verify-qa-section3-round2-wf_efac67ae-904.js, relocated to /home/jhan/workspace/intel-AMX/exec/attnstats-20261002/verify-qa-section3-round2-wf_efac67ae-904.js)
+  - verify-qa-section3-round3-wf_34b97b85-58e.js (4,459 bytes), round 3. (preserved: artifacts/intel-amx/exec/attnstats-20261002/verify-qa-section3-round3-wf_34b97b85-58e.js, relocated to /home/jhan/workspace/intel-AMX/exec/attnstats-20261002/verify-qa-section3-round3-wf_34b97b85-58e.js)
 - Raw workflow outputs (claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/31edeaf3-fed2-4688-a6fa-1f5ec7f340d4/tasks/, scratch): w40oxp5pd.output (479,273 bytes), wnz2bhyir.output (647,591 bytes), wpjl11754.output (243,894 bytes). The result is under the `result` key.
-- Scratchpad (claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/31edeaf3-fed2-4688-a6fa-1f5ec7f340d4/scratchpad/): section3.v1.html, .v2.html, .v3.html, section3.html (the four fragment versions), insert.py, findings.txt, findings2.txt, dryrun.html, and copied source files. May be cleaned up.
+- Scratchpad (claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/31edeaf3-fed2-4688-a6fa-1f5ec7f340d4/scratchpad/): section3.v1.html, .v2.html, .v3.html, section3.html (the four fragment versions), insert.py, findings.txt, findings2.txt, dryrun.html, and copied source files. May be cleaned up. (preserved: artifacts/intel-amx/exec/scratch-relocated/31edeaf3/section3.v1.html, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/31edeaf3/section3.v1.html)
 - Code: no commits. Read-only checkout /home/jhan/workspace/ai-runs/tron-main-ro at dd0f942c75.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/scratch-relocated/31edeaf3/` (2 files)
 
 ## Current state
 

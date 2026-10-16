@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attention stats Q&amp;A</title>
+<style>
+  :root { --bg:#ffffff; --fg:#1b1f23; --muted:#5c6570; --line:#d8dde3; --box:#f5f7f9; --amx:#1f77b4; --avx:#e07b00; --fpga:#2a9d5c; --red:#c0392b; }
+  body { background:var(--bg); color:var(--fg); font:16px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; margin:0; padding:0 16px 48px; }
+  main { max-width: 980px; margin: 0 auto; }
+  h1 { font-size:26px; margin:28px 0 8px; } h2 { font-size:21px; margin:32px 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; } h3 { font-size:17px; margin:20px 0 6px; }
+  .short { background:var(--box); border-left:4px solid var(--amx); padding:10px 14px; margin:12px 0 20px; }
+  .q { background:#fff8ec; border-left:4px solid var(--avx); padding:8px 14px; margin:14px 0 8px; color:#4a3b1c; }
+  table { border-collapse:collapse; margin:10px 0 16px; font-size:14px; } th, td { border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; } th { background:var(--box); } td.n { text-align:right; font-variant-numeric: tabular-nums; }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size:13.5px; } pre { background:var(--box); padding:10px 12px; overflow-x:auto; }
+  .cite { color:var(--muted); font-size:14px; }
+  figure { margin:16px 0; } figcaption { color:var(--muted); font-size:14px; margin-top:6px; }
+  svg { width:100%; height:auto; display:block; }
+  ul { padding-left:22px; } li { margin:3px 0; }
+  .take { font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+<h1>Attention stats Q&amp;A: why AMX is zero under FPGA attention, and how to read the path-set table</h1>
+<p class="cite">Answers to jhan's questions of 2026-10-04 on attn-stats-compare.md (campaign attnstats-20261002, tron main dd0f942c75). Every number below is recomputed from the exit reports in exec/results/attnstats-20261002/rt/ and matches them exactly.</p>
+
+<div class="short">
+<p><span class="take">Short version.</span> The AMX kernel scores only whole 64-token pages, so x is 64, not 4 or 16. Under FPGA attention the card scores every key up to the last complete group of four tokens (GOF), and the CPU is left with 1 to 4 keys per step, never a whole page, so the kernel has nothing to take. The 4 and the 16 in your memory are real units, but of other things: 4 tokens is the GOF, the unit the card's K/V copy advances in, and 16 token rows is one AMX tile, four of which make one page.</p>
+</div>
+
+<h2>Words used here</h2>
+<ul>
+<li><b>page</b> = a 64-token block of the KV cache. <b>pending page</b> = the page that the current forward is still writing (it holds the newest 1 to 64 tokens). <b>ready page</b> = a page written before this forward.</li>
+<li><b>dense page</b> = a page with all 64 entries live that the query sees through one range and that lies inside the sliding window. Only dense pages take the AMX kernel [h/tron/models/self_attention.hpp:1710-1721 at main].</li>
+<li><b>visit</b> = one (token job, KV head, page) scoring step of the software loop. <b>K tokens</b> (keys) = the keys that step scored. The exit report counts both per path: amx, avx, empty.</li>
+<li><b>GOF</b> = group of four tokens, the unit in which K/V are copied to the FPGA card [h/tron/gof.hpp:3-5]. <b>DMA</b> = that copy. The card scores keys only up to the end of the unbroken run of complete GOFs (count_complete_prefix_gofs, h/tron/shard.hpp:355-365).</li>
+<li><b>AoF</b> = attention on the FPGA (USE_HW_ATTN unset for qwen). <b>software attention</b> = USE_HW_ATTN=0, the CPU scores every key, with the AMX kernel for dense pages and the AVX loop ("dotter") for the rest.</li>
+<li><b>decode step s</b> = the s-th forward after the prompt forwards; it scores the query at position p = P + s - 1 (0-based) against positions 0..p, where P is the prompt length. qwen at prompt 1024 has s = 1..255 (255 decode forwards: the first generated token comes out of the last prompt forward).</li>
+<li><b>per (user, KV head, layer)</b> = the unit of the closed forms below. The campaign totals are that number times 8 users x 8 KV heads x 36 layers = 2,304 for qwen3-4b.</li>
+</ul>
+
+<h2>1. AMX counters under AoF</h2>
+
+<div class="q">Q: at decode, under software attention, AMX functions every x tokens (4 or 16?) until the new tokens fill a page, so AVX should never be zero. Under AoF, AoF functions every 64 tokens and x is less than 64, so both AMX and AVX should have functioned. The report says zero AMX. Please confirm x.</div>
+
+<p><span class="take">x is 64.</span> The kernel's decision unit is the (query, page) pair, and it takes a page only when the whole 64-token page is dense [h/tron/kernels/amx_attn_iface.hpp:19-30; self_attention.hpp:1710-1721]. The K operand of the kernel fills its tiles completely: "64 tokens = 4 tiles of 16 rows" [amx_attn_iface.hpp:27]. A partial page, whatever its fill, goes to the AVX loop.</p>
+
+<p>Where the 4 and the 16 come from:</p>
+<ul>
+<li>4 tokens = one GOF, the copy unit of the FPGA path. It sets how far the card's coverage reaches at each step, not when the kernel runs.</li>
+<li>16 token rows = one AMX tile (16 rows x 64 bytes). The kernel loads four such tiles per page and never runs on fewer than four.</li>
+</ul>
+
+<h3>1.1 Software attention on the CPU: what each decode step does</h3>
+<p>At step s the query at position p = P + s - 1 scores positions 0..p. The pages below the pending page are full and ready, so each is one AMX visit of 64 keys. The pending page holds (p mod 64) + 1 keys. Two cases:</p>
+<ul>
+<li>(p mod 64) &lt; 63: the pending page is partial. One AVX visit with (p mod 64) + 1 keys. This is the case in 252 of the 255 steps.</li>
+<li>(p mod 64) = 63: the step completes the page inside the pending pass. The page is then dense and the pending pass takes it with the kernel: one AMX visit of 64 keys, zero AVX visits for this step. At P = 1024 this happens at s = 64, 128 and 192 (p = 1087, 1151, 1215).</li>
+</ul>
+<p>So you are right that AVX is almost never zero under software attention. It is zero only in the three page-completing steps, and the counters show that: the qwen CPU cell has 24 token jobs with path set "amx" only, 8 users x 3 steps.</p>
+
+<h3>1.2 FPGA attention: what each decode step does</h3>
+<p>The card does not wait for a page to fill. Its coverage ends at the last complete GOF, so at step s it scores positions 0 .. 4 x floor(p / 4) - 1, and the CPU scores the (p mod 4) + 1 newest keys (1 to 4 keys) with the AVX loop. The DMA of a GOF lands within the step, so in every one of the 255 steps the measured tail was exactly (p mod 4) + 1 keys: no copy lag was seen [sum over p = 1024..1278 of ((p mod 4) + 1) = 636 keys per (user, KV head, layer); measured pending_avx_k_tokens 1,465,344 / 2,304 = 636.0].</p>
+<p>The CPU tail is at most 4 keys, so the pending page is never dense on the CPU side, and the kernel takes nothing: ready_amx_visits = 0 and pending_amx_visits = 0 in both arms. The full pages are on the card, which has its own scoring and never calls the kernel.</p>
+
+<figure>
+<svg viewBox="0 0 960 330" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+  <!-- title -->
+  <text x="16" y="22" font-size="15" font-weight="600">One decode step of qwen3-4b at prompt 1024, step s = 79 (query position p = 1102, keys 0..1102)</text>
+  <!-- axis -->
+  <text x="16" y="48" fill="#5c6570">key positions:</text>
+  <text x="206" y="48" fill="#5c6570">... pages 0 to 14 (960 keys) ...</text>
+  <text x="430" y="48" fill="#5c6570">page 15: 960..1023</text>
+  <text x="590" y="48" fill="#5c6570">page 16: 1024..1087</text>
+  <text x="742" y="48" fill="#5c6570">pending page 17: 1088..1102</text>
+
+  <!-- lane 1: CPU -->
+  <text x="16" y="92" font-weight="600">Software attention (CPU)</text>
+  <!-- break marker for early pages -->
+  <rect x="200" y="100" width="210" height="34" fill="#1f77b4" opacity="0.85"/>
+  <text x="305" y="122" fill="#fff" text-anchor="middle">15 AMX visits (dense pages)</text>
+  <rect x="420" y="100" width="150" height="34" fill="#1f77b4" opacity="0.85"/>
+  <text x="495" y="122" fill="#fff" text-anchor="middle">AMX, 64 keys</text>
+  <rect x="580" y="100" width="150" height="34" fill="#1f77b4" opacity="0.85"/>
+  <text x="655" y="122" fill="#fff" text-anchor="middle">AMX, 64 keys</text>
+  <rect x="740" y="100" width="35" height="34" fill="#e07b00"/>
+  <rect x="775" y="100" width="115" height="34" fill="none" stroke="#e07b00" stroke-dasharray="4 3"/>
+  <text x="834" y="122" fill="#4a3b1c" text-anchor="middle" font-size="12">AVX, 15 keys</text>
+  <text x="16" y="156" fill="#5c6570">per (KV head, layer): 17 AMX visits x 64 keys + 1 AVX visit x 15 keys</text>
+
+  <!-- lane 2: AoF -->
+  <text x="16" y="204" font-weight="600">Attention on the FPGA</text>
+  <rect x="200" y="212" width="210" height="34" fill="#2a9d5c" opacity="0.85"/>
+  <text x="305" y="234" fill="#fff" text-anchor="middle">card</text>
+  <rect x="420" y="212" width="150" height="34" fill="#2a9d5c" opacity="0.85"/>
+  <text x="495" y="234" fill="#fff" text-anchor="middle">card</text>
+  <rect x="580" y="212" width="150" height="34" fill="#2a9d5c" opacity="0.85"/>
+  <text x="655" y="234" fill="#fff" text-anchor="middle">card</text>
+  <!-- pending page: GOFs 1088..1099 on card, tail 1100..1102 on CPU -->
+  <rect x="740" y="212" width="28" height="34" fill="#2a9d5c" opacity="0.85"/>
+  <rect x="768" y="212" width="7" height="34" fill="#e07b00"/>
+  <rect x="775" y="212" width="115" height="34" fill="none" stroke="#d8dde3" stroke-dasharray="4 3"/>
+  <line x1="768" y1="208" x2="768" y2="250" stroke="#c0392b" stroke-width="2"/>
+  <text x="890" y="266" fill="#c0392b" font-size="12" text-anchor="end">last complete GOF ends at 1099: 1,100 keys on the card, 3 on the CPU (orange sliver)</text>
+  <text x="16" y="294" fill="#5c6570">per (KV head, layer): 0 AMX visits, 1 AVX visit x 3 keys (positions 1100..1102), 1,100 keys on the card</text>
+  <!-- legend -->
+  <rect x="16" y="310" width="14" height="12" fill="#1f77b4"/><text x="36" y="321">AMX kernel</text>
+  <rect x="130" y="310" width="14" height="12" fill="#e07b00"/><text x="150" y="321">AVX loop</text>
+  <rect x="230" y="310" width="14" height="12" fill="#2a9d5c"/><text x="250" y="321">FPGA card</text>
+  <rect x="340" y="310" width="14" height="12" fill="none" stroke="#5c6570" stroke-dasharray="4 3"/><text x="360" y="321">not yet written (future tokens of the page)</text>
+</svg>
+<figcaption>Figure 1. The same decode step under the two attention modes. Block widths are schematic (pages 0 to 14 are compressed into one block). Under software attention the kernel takes the 17 full pages and the AVX loop the 15-key pending page. Under FPGA attention the card takes everything up to the last complete GOF, and the CPU keeps a 3-key tail; no page is left whole on the CPU, so the kernel never runs.</figcaption>
+</figure>
+
+<div class="q">Q: how can the FPGA score 100 %?</div>
+<p>It does not score exactly 100 %. The table rounds. At prompt 8192 the card scored 4,886,701,056 K tokens (software scale) and the CPU tail 1,465,344, so the card's share is 99.97 %, printed as "100.0 %". At prompt 1024 it is 99.78 %, printed as "99.8 %". The CPU tail is the same 1,465,344 K tokens in both cells, because the tail depends only on p mod 4 and the step count, not on the prompt length. The AVX counter is never zero under AoF: every step has one AVX visit of 1 to 4 keys per (KV head, layer).</p>
+
+<div class="q">Q: what does "2.49 keys" mean? How can it not be a whole number?</div>
+<p>It is a mean. Each visit scores a whole number of keys: 1, 2, 3 or 4, following (p mod 4) + 1 as p advances. Over the 255 steps the tail lengths are 1, 2, 3, 4, 1, 2, 3, 4, ... starting at p = 1024 (1 key), and their sum is 636 keys. 636 / 255 = 2.494 keys per visit. With 256 steps the mean would be exactly 2.5. The report should have said "2.49 keys per visit on average (1 to 4 keys per step)"; the sentence you quoted compressed that.</p>
+
+<div class="q">Q: "The tail never fills a page, so the kernel has nothing to take": does AMX only function on whole pages? Then x = 64.</div>
+<p>Yes. Confirmed in the code at main: the predicate requires begin == 0 and end == page_size (64), the whole page visible through one range, and the whole page inside the sliding window [self_attention.hpp:1710-1721]. The kernel comment says the same: "a full 64-token page, all of it visible to the query" [amx_attn_iface.hpp:19-22]. Under AoF the CPU side holds at most 4 keys of the pending page, so the predicate fails at every step.</p>
+
+<div class="q">Q: what is the equation for AMX and AVX scores under software attention after prefill, for decode length L (qwen3-4b)? And under AoF?</div>
+
+<h3>1.3 Equations, per (user, KV head, layer)</h3>
+<p>P = prompt length in tokens. S = number of decode forwards = L - 1 for L generated tokens (the first generated token comes out of the last prompt forward). Step s = 1..S scores the query at position p = P + s - 1 against keys 0..p. Floor division is written floor(). The totals of a run are these sums times (users x KV heads x layers) = 8 x 8 x 36 = 2,304 for qwen3-4b.</p>
+
+<p><b>Software attention on the CPU (kernel enabled):</b></p>
+<pre>
+ready AMX visits      = sum over s = 1..S of floor(p / 64)                  (full pages below the pending page)
+pending AMX visits    = number of s in 1..S with (p mod 64) = 63            (steps that complete a page)
+AMX K tokens          = 64 x (ready AMX visits + pending AMX visits)
+pending AVX visits    = number of s in 1..S with (p mod 64) &lt; 63            (steps with a partial pending page)
+AVX K tokens          = sum over those s of ((p mod 64) + 1)
+ready AVX visits      = 0                                                   (every ready page is dense for qwen; llama differs, see the report's section 8)
+</pre>
+<p><b>Software attention with the kill switch (TRON_AMX_DISABLE=1):</b> the same visits with the same key counts, all on the AVX loop. Every former AMX visit becomes one avx_full_page visit of 64 keys. That is the identity the report checks in section 4.</p>
+
+<p><b>Attention on the FPGA (steady state, no copy lag):</b></p>
+<pre>
+AMX visits            = 0                                                   (the CPU never holds a whole page)
+AVX visits            = S                                                   (one pending-pass visit per step)
+AVX K tokens          = sum over s = 1..S of ((p mod 4) + 1)                (the tail past the last complete GOF)
+card K tokens         = sum over s = 1..S of 4 x floor(p / 4)               (per query; multiply by KV heads for the software scale)
+</pre>
+<p>These hold when every GOF copy lands within the step, which the data show for both prompt lengths. When a copy lags by whole pages the CPU scores those pages, and if the kernel is enabled the dense ones go to it; the only such case in this campaign is the qwen prompt-8192 prefill (7,077,888 AMX visits, 0.6 % of the prefill K tokens; report section 2.1).</p>
+
+<h3>1.4 The equations against the measured qwen3-4b totals (prompt 1024, L = 256, S = 255)</h3>
+<table>
+<tr><th>quantity</th><th>closed form</th><th>per (user, KV head, layer)</th><th>x 2,304</th><th>measured (exit report)</th></tr>
+<tr><td>CPU: ready AMX visits</td><td>sum floor((1023 + s) / 64), s = 1..255</td><td class="n">4,461</td><td class="n">10,278,144</td><td class="n">10,278,144</td></tr>
+<tr><td>CPU: pending AMX visits</td><td>s with (1023 + s) mod 64 = 63: s = 64, 128, 192</td><td class="n">3</td><td class="n">6,912</td><td class="n">6,912</td></tr>
+<tr><td>CPU: AMX K tokens</td><td>64 x (4,461 + 3)</td><td class="n">285,696</td><td class="n">658,243,584</td><td class="n">658,243,584</td></tr>
+<tr><td>CPU: pending AVX visits</td><td>255 - 3</td><td class="n">252</td><td class="n">580,608</td><td class="n">580,608</td></tr>
+<tr><td>CPU: AVX K tokens</td><td>sum ((1023 + s) mod 64) + 1 over the 252 steps</td><td class="n">8,064</td><td class="n">18,579,456</td><td class="n">18,579,456</td></tr>
+<tr><td>CPU: ready AVX visits</td><td>0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td></tr>
+<tr><td>AoF: AMX visits</td><td>0</td><td class="n">0</td><td class="n">0</td><td class="n">0</td></tr>
+<tr><td>AoF: AVX visits</td><td>S</td><td class="n">255</td><td class="n">587,520</td><td class="n">587,520</td></tr>
+<tr><td>AoF: AVX K tokens</td><td>sum ((1023 + s) mod 4) + 1, s = 1..255</td><td class="n">636</td><td class="n">1,465,344</td><td class="n">1,465,344</td></tr>
+<tr><td>AoF: card K tokens (per query)</td><td>sum 4 x floor((1023 + s) / 4)</td><td class="n">293,124 per (user, layer)</td><td class="n">x 288 = 84,419,712</td><td class="n">84,419,712 (fpga_k_tokens)</td></tr>
+</table>
+<p class="cite">Sources: rt/q3-4b-8u-p1024-cpu__cpu__amxon__rep1.log and rt/q3-4b-8u-p1024-fpga__fpga__amxon__rep1.log, decode_like totals lines. Every row matches exactly. The same AoF tail (636 per unit) appears at prompt 8192.</p>
+
+<h3>1.5 A worked step for the kill-switch arm</h3>
+<p>The kill-switch arm scores the same visits with the same key counts. At the step of Figure 1 the CPU arm scores 17 full pages plus 15 keys; with the kernel disabled that is 17 avx_full_page visits of 64 keys plus one AVX visit of 15 keys. The AoF arm is unchanged by the kill switch: the card still scores 1,100 keys and the CPU 3.</p>
+
+<h2>2. Section "5. Token jobs by path set"</h2>
+
+<div class="q">Q: rephrase "How many token jobs of a class touched which paths within a forward (a job may use several paths across its pages and layers)" in plain English.</div>
+<p>Replacement text for the section intro:</p>
+<blockquote>
+<p>A token job is one token of one user inside one forward. During that forward the token's keys are scored layer by layer, KV head by KV head, page by page, and each (KV head, page) step takes one path: the AMX kernel, the AVX loop or the FPGA card. One token job therefore usually touches more than one path in a forward, for example the kernel for its full pages and the AVX loop for its pending page.</p>
+<p>The table counts token jobs by the combination of paths that touched them. Each token job goes into exactly one column: the set of all paths it used in its forward, over all layers, KV heads and pages. The counts add up over every forward of the class.</p>
+</blockquote>
+
+<div class="q">Q: the sentence says "within a forward", but the forwards column shows 256, 64, etc. How do they correlate?</div>
+<p>"Within a forward" describes how one token job is classified: its path set is collected over the one forward it belongs to, then it is counted once. The counts in the row are then summed over all forwards of the class. So:</p>
+<ul>
+<li>token jobs = sum over the forwards of the class of the token jobs in each forward. Decode for qwen: 255 forwards x 8 users = 2,040 token jobs. Prompt 1024 prefill: 8 forwards x 1,024 jobs (8 users x a 128-token chunk) = 8,192. Prompt 8192 prefill: 64 forwards x 1,024 = 65,536.</li>
+<li>the eight path-set columns of a row add up to the token jobs column. qwen CPU decode amxon: 24 (amx only) + 2,016 (avx+amx) = 2,040.</li>
+<li>a per-forward view is the row divided by the forwards: qwen CPU decode amxon has 8 token jobs per forward; in 3 of the 255 forwards all 8 jobs are "amx" only (the page-completing steps), in the other 252 all 8 are "avx+amx".</li>
+</ul>
+<p>Reading examples from the campaign:</p>
+<table>
+<tr><th>row</th><th>forwards</th><th>token jobs</th><th>jobs per forward</th><th>path sets</th><th>meaning</th></tr>
+<tr><td>qwen CPU decode, amxon</td><td class="n">255</td><td class="n">2,040</td><td class="n">8</td><td>amx 24, avx+amx 2,016</td><td>every step uses the kernel; 252 steps also use the AVX loop for the pending page; 3 steps complete a page and use the kernel only</td></tr>
+<tr><td>qwen CPU decode, amxoff</td><td class="n">255</td><td class="n">2,040</td><td class="n">8</td><td>avx 2,040</td><td>kill switch: every job on the AVX loop only</td></tr>
+<tr><td>qwen AoF decode, both arms</td><td class="n">255</td><td class="n">2,040</td><td class="n">8</td><td>fpga+avx 2,040</td><td>every step: card for the complete GOFs, AVX loop for the 1 to 4 key tail, no kernel</td></tr>
+<tr><td>qwen AoF prefill, prompt 1024</td><td class="n">8</td><td class="n">8,192</td><td class="n">1,024</td><td>avx 1,024, fpga+avx 7,168</td><td>the first 128-token chunk of each user (positions 0..127) runs on the CPU only; later chunks use the card for earlier chunks and the AVX loop for their own chunk</td></tr>
+<tr><td>qwen AoF prefill, prompt 8192, amxon</td><td class="n">64</td><td class="n">65,536</td><td class="n">1,024</td><td>avx 1,024, fpga+avx 61,440, fpga+avx+amx 3,072</td><td>3,072 jobs also used the kernel: pages the card had not yet taken (copy lag)</td></tr>
+</table>
+
+<h2>3. Corrections this Q&amp;A implies for attn-stats-compare.md</h2>
+<ul>
+<li>Section 2.1, qwen bullet: write "2.49 keys per visit on average (1 to 4 keys per step, (p mod 4) + 1)" and "99.97 %" next to the rounded "100.0 %".</li>
+<li>Section 5 intro: replace the one-line definition with the two paragraphs of section 2 above.</li>
+<li>Words used here: add "page-completing step" and the sentence that the kernel's unit is the whole 64-token page.</li>
+</ul>
+<p class="cite">Files: this page = PR3879/new-PRs/new-counters/attn-stats-compare-QA.html. Code cited at tron origin/main dd0f942c75 (self_attention.hpp, amx_attn_iface.hpp, gof.hpp, shard.hpp). Data: exec/results/attnstats-20261002/.</p>
+</main>
+</body>
+</html>
