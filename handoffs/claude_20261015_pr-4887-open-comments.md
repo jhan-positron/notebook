@@ -33,7 +33,7 @@ Then at 11:32: push the commit if not yet, and update the PR body with a short i
 
 ## Environment
 
-- Host: claude-agentsrv for all reads, edits, checks, pushes and GitHub calls. ssh to delphi-3bda for the commit only (commit-on-3bda.sh), so the lefthook pre-commit hook could run.
+- Host: claude-agentsrv for all reads, edits, checks, pushes and GitHub calls. ssh to delphi-3bda for the commit only (commit-on-3bda.sh), so the lefthook pre-commit hook could run. (preserved: artifacts/intel-amx/exec/pr2-20261011/review-20261015/commit-on-3bda.sh)
 - Working directory (cwd): /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424.
 - Code edited in the git worktree /home/jhan/workspace/ai-runs/tron-split-pr2, branch `jhan-vnnik-2-amx`.
 - Record folder: /home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/ (new), beside the existing exec/pr2-20261011/ record.
@@ -45,17 +45,17 @@ Then at 11:32: push the commit if not yet, and update the PR body with a short i
 - 10:44 The user pasted the instruction. Claude read five memory notes (checks-20261015.md, tron-commit-hook.md, pr2-split-execution.md, named-bool-rule.md, no-minor-refactors.md) and the PR state (head 0ee8671d35, draft).
 - 10:45 All review threads fetched by GraphQL into threads.json (26 threads with resolution state and replies). The folder was first created under split-4424/exec/ by mistake and moved to intel-AMX/exec/pr2-20261011/review-20261015/ at 10:45 to 10:46.
 - 10:46 Claude read the 24 comment sites in the worktree, the .clang-format limits, the PR 2 step-4 commands, and how the PR 4 review commits were made over ssh.
-- 10:48 apply.py written and run: 24 edits by exact line-range replacement with first-line and last-line guards at head 0ee8671d35. Log in apply.log, diff in comments.patch (9 files, +54/-113).
+- 10:48 apply.py written and run: 24 edits by exact line-range replacement with first-line and last-line guards at head 0ee8671d35. Log in apply.log, diff in comments.patch (9 files, +54/-113). (preserved: artifacts/intel-amx/exec/pr2-20261011/review-20261015/apply.log)
 - 10:49 clang-format 19.1.7 passed on the changed files. The step-4 matrix launched in the background (step4.sh r1, output step4-r1.out). The commit message msg.txt written and reflowed to 72 columns.
 - 10:50 ssh to delphi-3bda confirmed the worktree is visible there with the hook's nix shell. commit-on-3bda.sh written (stages exactly the 9 files, commits with msg.txt).
 - 10:50 The 22-cell matrix passed and matched the step-5 reference. The 38-cell run was still going.
 - 10:52 The 38-cell run finished: 0 errors, 0 warnings, summary identical to the reference. Format checks clean.
 - 10:52 Committed over ssh on delphi-3bda as 65a9d655ec (author jhan, 17:52:46 UTC). The hook printed "Can't find lefthook in PATH" and let the commit through, as it had for dbcb28387f. Working tree clean.
 - 10:52 to 10:53 Pushed to origin jhan-vnnik-2-amx. The PR view showed the old head for a moment (GitHub lag).
-- 10:53 to 10:55 post_replies.py posted "Applied in 65a9d655ec." on 23 threads and "Applied your wording in 65a9d655ec." on 1, and resolved the 24 threads (48 calls, all rc 0, log post_replies.log). GraphQL afterwards: 26 threads, 26 resolved.
+- 10:53 to 10:55 post_replies.py posted "Applied in 65a9d655ec." on 23 threads and "Applied your wording in 65a9d655ec." on 1, and resolved the 24 threads (48 calls, all rc 0, log post_replies.log). GraphQL afterwards: 26 threads, 26 resolved. (preserved: artifacts/intel-amx/exec/pr2-20261011/review-20261015/post_replies.log)
 - 10:56 split-status.md section appended, pr2-split-execution.md and MEMORY.md updated. Draft CI at the new head: no check runs yet.
 - 10:57 Summary in chat.
-- 11:32 The user asked to push if not yet and to update the body with a short intro. The commit was already on origin. The live body was re-fetched (pr-live2.json, unchanged since 10:48). One line changed, the Verification opening, posted as pr-body-v10.md and verified equal to the live text. Records updated.
+- 11:32 The user asked to push if not yet and to update the body with a short intro. The commit was already on origin. The live body was re-fetched (pr-live2.json, unchanged since 10:48). One line changed, the Verification opening, posted as pr-body-v10.md and verified equal to the live text. Records updated. (preserved: artifacts/intel-amx/exec/pr2-20261011/review-20261015/pr-live2.json)
 - 11:39 to 11:40 The user asked whether "kept ... off the dense AMX page path" means the same as "kept ... from". Answer: yes, with "off" the more natural pairing with "path", and "away from" the plainest form. No edit made.
 
 ## Results
@@ -86,21 +86,27 @@ The two STATIC_REQUIREs in t_llama_unit.cpp lost their trailing comments and wer
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/threads.json (33,780 bytes). All 26 review threads of PR 4887 with path, lines, resolution state and replies, fetched by GraphQL at 10:45.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/apply.py (9,410 bytes). The 24 exact line-range replacements with guards. apply.log (15,015 bytes) is its log. comments.patch (21,365 bytes) is the resulting `git diff`.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/msg.txt (1,126 bytes). The commit message. commit-on-3bda.sh (995 bytes) stages the 9 files and commits over ssh on delphi-3bda.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/post_replies.py (1,648 bytes) and post_replies.log (5,814 bytes). The reply-and-resolve script and its 48-call log.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/pr-live.json (31,908 bytes), pr-body-live.md (14,060 bytes), pr-live2.json (31,870 bytes), pr-body-live2.md (14,060 bytes), patch-v10.json (14,160 bytes). The live PR body before and at 11:32, and the body patch.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/step4.sh (3,131 bytes). The step-4 matrix runner, a fork of the PR 4 script for the PR 2 base. Its outputs: step4-r1.out (1,097 bytes), matrix-r1.log (1,241), control-a-r1.log (388), control-b-r1.log (3,488), pr2check-38-r1.log (2,383), format-r1.log (0), pr2check-out-r1/ (2,486 bytes).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/pr-body-v9-jhan-live-20261015.md (14,060 bytes). The live body as the user had edited it, saved at 10:49. pr-body-v10.md (14,021 bytes), the body posted at 11:32.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/threads.json (33,780 bytes). All 26 review threads of PR 4887 with path, lines, resolution state and replies, fetched by GraphQL at 10:45. (preserved: artifacts/intel-amx/exec/pr2-20261011/review-20261015/threads.json)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/apply.py (9,410 bytes). The 24 exact line-range replacements with guards. apply.log (15,015 bytes) is its log. comments.patch (21,365 bytes) is the resulting `git diff`. (preserved: artifacts/intel-amx/exec/pr2-20261011/review-20261015/apply.py)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/msg.txt (1,126 bytes). The commit message. commit-on-3bda.sh (995 bytes) stages the 9 files and commits over ssh on delphi-3bda. (preserved: artifacts/intel-amx/exec/pr2-20261011/review-20261015/msg.txt)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/post_replies.py (1,648 bytes) and post_replies.log (5,814 bytes). The reply-and-resolve script and its 48-call log. (preserved: artifacts/intel-amx/exec/pr2-20261011/review-20261015/post_replies.py)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/review-20261015/pr-live.json (31,908 bytes), pr-body-live.md (14,060 bytes), pr-live2.json (31,870 bytes), pr-body-live2.md (14,060 bytes), patch-v10.json (14,160 bytes). The live PR body before and at 11:32, and the body patch. (preserved: artifacts/intel-amx/exec/pr2-20261011/review-20261015/pr-live.json)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/step4.sh (3,131 bytes). The step-4 matrix runner, a fork of the PR 4 script for the PR 2 base. Its outputs: step4-r1.out (1,097 bytes), matrix-r1.log (1,241), control-a-r1.log (388), control-b-r1.log (3,488), pr2check-38-r1.log (2,383), format-r1.log (0), pr2check-out-r1/ (2,486 bytes). (preserved: artifacts/intel-amx/exec/pr2-20261011/step4.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/pr-body-v9-jhan-live-20261015.md (14,060 bytes). The live body as the user had edited it, saved at 10:49. pr-body-v10.md (14,021 bytes), the body posted at 11:32. (preserved: artifacts/intel-amx/exec/pr2-20261011/pr-body-v9-jhan-live-20261015.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md (270,899 bytes now). Section "PR-2 (#4887): the 2026-10-15 comment-check threads applied as 65a9d655ec" appended at 10:56, update line at 11:32.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr2-split-execution.md (6,663 bytes). Two UPDATE paragraphs appended. MEMORY.md (10,006 bytes): the PR-2 index line rewritten.
 - Code: worktree claude-agentsrv:/home/jhan/workspace/ai-runs/tron-split-pr2, branch `jhan-vnnik-2-amx`, commit 65a9d655ec (9 files, comments only), pushed to origin. PR: https://github.com/positron-ai/tron/pull/4887.
 
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr2-20261011/` (5 files)
+- `artifacts/intel-amx/exec/pr2-20261011/pr2check-out-r1/` (2 files)
+- `artifacts/intel-amx/exec/pr2-20261011/review-20261015/` (5 files)
+
 ## Current state
 
 - PR 4887 head is 65a9d655ec, pushed, all 26 review threads resolved (verified by GraphQL at 10:55 and by `gh pr view` at 11:32).
-- The PR body's Verification section opens with "Head `65a9d655ec`. Its last commit shortens comments only. Measurements: `0ee8671d35`, based on PR #4868 at `82d05e94be`, Granite Rapids test machine, 2026-10-11." (verified live equal to pr-body-v10.md at 11:32). Counted words without the "Words used here" section: 1,564.
+- The PR body's Verification section opens with "Head `65a9d655ec`. Its last commit shortens comments only. Measurements: `0ee8671d35`, based on PR #4868 at `82d05e94be`, Granite Rapids test machine, 2026-10-11." (verified live equal to pr-body-v10.md at 11:32). Counted words without the "Words used here" section: 1,564. (preserved: artifacts/intel-amx/exec/pr2-20261011/pr-body-v10.md)
 - Draft CI had no check runs at the new head when last looked (10:57 and 11:32). Unverified since.
 - PR 4887 is not rebased onto PR 4868's new head dbcb28387f, which edits 6 of the same files. GitHub's PR diff uses the merge base, so the shown diff is unchanged. A later rebase may conflict inside comment blocks.
 - Later sessions moved on: the stack was re-opened as PRs 4956 to 4959 on the same day (memory note stack-reopened-20261015.md), so PR 4887 may be superseded. Unverified in this transcript.

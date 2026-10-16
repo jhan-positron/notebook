@@ -1,0 +1,355 @@
+diff --git a/h/tron/kernels/amx_attn_iface.hpp b/h/tron/kernels/amx_attn_iface.hpp
+index ece635a836..4e5c18f6cf 100644
+--- a/h/tron/kernels/amx_attn_iface.hpp
++++ b/h/tron/kernels/amx_attn_iface.hpp
+@@ -142,9 +142,7 @@ inline constexpr size_t PAGE_TOKENS_64 = 64;
+ inline constexpr size_t HEAD_SIZE_128 = 128;
+ inline constexpr size_t GROUP_HEADS_4 = 4;
+ 
+-// One packed Q group, the output buffer of either packer, padding included:
+-// pack_q_group_128x4 fills 4 panels x 16 dim-pair rows x 16 columns x 2, and
+-// pack_q_rows_128x4 fills 16 rows x 128 dims. Both are 2048 bf16 = 4096 bytes.
++// Element count of either query packer's output buffer (4096 bytes), padding included.
+ inline constexpr size_t Q_PACK_ELEMS_2048 = TILE_ROWS_16 * HEAD_SIZE_128;
+ static_assert(Q_PACK_ELEMS_2048 == 2048, "the constant's name states its value");
+ 
+@@ -239,29 +237,18 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+     float* s,
+     size_t s_stride_floats) noexcept;
+ 
+-// Pack one query group as the A operand of qk_vnni_128x4. Rows 0..3 are the
+-// 4 heads' 128-dimension bf16 rows copied as stored (256 bytes each). Rows 4..15
+-// are zero padding the caller keeps zero. This call writes rows 0..3 only. A
+-// buffer zeroed once at allocation therefore stays valid for every pack.
+-// `padded` holds Q_PACK_ELEMS_2048 bf16 (4096 bytes), aligned to 64 bytes.
+-// That is the same buffer size as pack_q_group_128x4's output. One query-pack
+-// slot (amx_qpack_slot in self_attention.hpp) therefore serves either layout.
+-// The build's K layout picks one packer and one kernel (k_vnni::layout_on).
++// Pack one query group as the A operand of qk_vnni_128x4: the 4 heads' 128-dim
++// bf16 rows copied as stored into rows 0..3 of `padded`. Rows 4..15 are zero
++// padding the caller keeps zero: this call writes rows 0..3 only. `padded`
++// holds Q_PACK_ELEMS_2048 bf16 (4096 bytes), aligned to 64 bytes.
+ void pack_q_rows_128x4(const bf16* q_group, bf16* padded) noexcept;
+ 
+-// Dense QK for one page whose K is stored in the VNNI layout (Note [K VNNI
+-// storage] in kv_cache.hpp). Computes S = Q . K^T. The padded Q rows are the
+-// A operand. The page's 16 K panels are the B operand. There is no
+-// transpose. Writes s[4][s_stride_floats] fp32, all 64 token columns,
+-// UNSCALED. The 16-row tile stores write to a buffer inside the kernel. Only
+-// the 4 query rows are copied out. `s` therefore needs 4 rows (Note [Tile
+-// stores write 16 rows]). k_page = the page's packed K plane (64 tokens x 128
+-// dims, 16 KiB, layout in h/tron/tensor/k_vnni.hpp) as its typed view, so that
+-// a native K view, a packed V plane or a bare pointer cannot be handed in by
+-// mistake. q_rows = the pack_q_rows_128x4 output. For the same K and Q the
+-// scores are bit-identical to qk_rowmajor_128x4's: both kernels add the same
+-// four 32-dimension partial dot products in the same order inside TDPBF16PS
+-// (t_amx_numerics checks the identity).
++// Dense QK for one page whose K is stored in the VNNI layout: computes
++// S = Q . K^T with no transpose (Note [QK orientation]); writes
++// s[4][s_stride_floats] fp32, all 64 token columns, UNSCALED. k_page = the
++// page's packed K plane (layout in h/tron/tensor/k_vnni.hpp); q_rows = the
++// pack_q_rows_128x4 output. The scores are bit-identical to qk_rowmajor_128x4's
++// (the same four 32-dim partial sums in the same order; t_amx_numerics checks).
+ void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+     const bf16* q_rows,
+     float* s,
+diff --git a/h/tron/kernels/k_vnni.hpp b/h/tron/kernels/k_vnni.hpp
+index 7074c1a7bf..bf859d9bd5 100644
+--- a/h/tron/kernels/k_vnni.hpp
++++ b/h/tron/kernels/k_vnni.hpp
+@@ -1,13 +1,10 @@
+ #pragma once
+-// The AVX-512 (the CPU's 512-bit vector instruction set) QK score reader of the
+-// K VNNI layout (h/tron/tensor/k_vnni.hpp). It serves every page the AMX
+-// (Advanced Matrix Extensions, the tile instruction set) kernel qk_vnni_128x4
+-// does not take: partial or partly visible pages, hosts without AMX, the AMX
+-// kill switch (TRON_AMX_DISABLE=1), builds without TRON_AMX_DISPATCH, and the
+-// shapes and query types outside the AMX gate (Note [AMX attention dispatch]
+-// in amx_attn_iface.hpp). No AMX instruction runs here. So any
+-// translation unit may include it. The layout itself, who writes it and who
+-// reads it are described in Note [K VNNI storage] (in kv_cache.hpp).
++// The AVX-512 QK score reader of the K VNNI layout (h/tron/tensor/k_vnni.hpp).
++// It serves every page the AMX kernel qk_vnni_128x4
++// does not take (Note [AMX attention dispatch] in amx_attn_iface.hpp). No AMX
++// instruction runs here. So any translation unit may include it. The layout
++// itself, who writes it and who reads it are described in Note [K VNNI storage]
++// (in kv_cache.hpp).
+ //
+ // Words used here: bf16 is the 16-bit brain floating-point format. fp16 is the
+ // 16-bit IEEE half format. fp32 is the 32-bit IEEE single format. VDPBF16PS is
+@@ -44,9 +41,8 @@ inline constexpr size_t MAX_KV_MUL_16 = 16;
+ // of 16 tokens. The query's dimension pair is broadcast. VDPBF16PS accumulates 16
+ // scores at once. So there is no horizontal reduction and no per-token gather.
+ // k_page is the page's packed K plane as its typed view (page::k_packed). This
+-// reader is one of the two layout-specific score kernels allowed to take the
+-// plane address (the other is amx_attn_h128g4::qk_vnni_128x4). q points at
+-// kv_mul rows of 128 values (the group's heads, row stride 128). kv_mul is
++// reader is allowed to take the plane address (detail::k_vnni_access). q points
++// at kv_mul rows of 128 values (the group's heads, row stride 128). kv_mul is
+ // any group size: a group of more than 16 heads is
+ // scored 16 heads at a time. Every head's scores are its own accumulation.
+ // So the split changes no head's add order.
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index 2395bbbde9..31c7e86eaa 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -1984,12 +1984,9 @@ struct alignas(64) page final {
+     return k<geometry>(slot, kv_head)[i_page];
+   }
+ 
+-  // This page's packed K plane for one KV head of one slot, read-only: the
+-  // argument type of the layout-specific score kernels (the AMX QK kernel
+-  // qk_vnni_128x4 reads it in place as its B operand, and the AVX-512 reader
+-  // k_vnni::qk_group reads it one token per lane). VNNI slots only (Note [K VNNI
+-  // storage]). Internal cache writes take writable views from the block owner
+-  // instead.
++  // This page's packed K plane for one KV head of one slot, read-only. VNNI
++  // slots only (Note [K VNNI storage]). Internal cache writes take writable views
++  // from the block owner instead.
+   template <kv_geometry geometry>
+     requires(book_t::template declares_geometry<geometry>() &&
+              k_vnni::layout_on<geometry.head_size>)
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index dbe5ebb205..c82a2e0d3f 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -254,10 +254,9 @@ struct self_attention {
+ 
+ #ifdef TRON_AMX_DISPATCH
+     // One packed query group for the AMX attention path (the output of
+-    // pack_q_group_128x4 for row-major K, or of pack_q_rows_128x4 for VNNI K,
+-    // Note [K VNNI storage] in kv_cache.hpp): 4096 bytes. alignas(64) meets
+-    // both packers' 64-byte alignment contract; std::vector routes
+-    // over-aligned elements through the aligned operator new.
++    // pack_q_group_128x4 or of pack_q_rows_128x4): 4096 bytes. alignas(64) meets
++    // both packers' 64-byte alignment contract; std::vector routes over-aligned
++    // elements through the aligned operator new.
+     struct alignas(64) amx_qpack_slot {
+       bf16 v[amx_attn_h128g4::Q_PACK_ELEMS_2048];
+     };
+@@ -1550,10 +1549,8 @@ struct self_attention {
+       std::bitset<max_minibatch_size> amx_packed;
+       if (amx_on) {
+         TRON_ASSERT_LE(items.size(), max_minibatch_size);
+-        // resize() zero-fills new slots. The packer writes only the 4 live
+-        // columns (pack_q_group_128x4, row-major K) or the 4 live rows
+-        // (pack_q_rows_128x4, VNNI K) of each slot. So the padding both
+-        // packers rely on stays zero (the pack contracts in amx_attn_iface.hpp).
++        // resize() zero-fills new slots. Both packers rely on the padding they
++        // do not write staying zero (the pack contracts in amx_attn_iface.hpp).
+         amx_qpack.resize(items.size());
+         amx_attn_h128g4::begin_region();
+       }
+@@ -1697,13 +1694,8 @@ struct self_attention {
+       if (!packed.test(batch_job_ix)) {
+         const bf16* group =
+             q.data + kv_head * geometry.kv_mul() * geometry.kv.head_size;
+-        // The pack matches the slot's K layout (Note [K VNNI storage] in
+-        // kv_cache.hpp). A and B are the left and right matrices of the AMX
+-        // (Advanced Matrix Extensions) tile multiply. The VNNI plane (K in the
+-        // Vector Neural Network Instructions layout, pair-interleaved) is the B
+-        // operand of qk_vnni_128x4. So Q is packed as its A operand (rows). The
+-        // row-major K page is the A operand of qk_rowmajor_128x4. So Q is
+-        // packed as its B operand (pair-interleaved columns).
++        // The K layout picks the packer. Each QK kernel takes Q as a different
++        // tile operand (Note [QK orientation] in amx_attn_iface.hpp).
+         if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
+           amx_attn_h128g4::pack_q_rows_128x4(group, slot);
+         } else {
+@@ -1764,13 +1756,11 @@ struct self_attention {
+       // scores, not yet multiplied by the attention scale, into
+       // s_pages[head][token]. That is the same array and layout the software
+       // loop fills. It reads K directly from storage, in the slot's layout
+-      // (Note [K VNNI storage] in kv_cache.hpp). In the VNNI layout the
+-      // argument is the page's packed K plane, a k_vnni_view from page::k_packed,
+-      // the B operand of qk_vnni_128x4. In the row-major layout the argument is
+-      // this (slot, kv_head)'s whole K plane, a const_native_k_view of 64
+-      // consecutive 128-dim rows, the A operand of qk_rowmajor_128x4. That call
+-      // is the only place where the AMX path depends on K being stored as
+-      // consecutive rows. The view types state the layout at the call.
++      // (Note [K VNNI storage] in kv_cache.hpp). In the row-major layout the
++      // argument is this (slot, kv_head)'s whole K plane, a const_native_k_view
++      // of 64 consecutive 128-dim rows. That call is the only place where the
++      // AMX path depends on K being stored as consecutive rows. The view types
++      // state the layout at the call.
+       tensor<operation_kv_mul, page::page_size> s_pages;
+       // Both kernels take &s_pages[0][0] with row stride page_size, so the 4
+       // rows of 64 floats must be consecutive with no padding. The size check
+diff --git a/h/tron/tensor/k_vnni.hpp b/h/tron/tensor/k_vnni.hpp
+index cd930525d9..a6a195ef0c 100644
+--- a/h/tron/tensor/k_vnni.hpp
++++ b/h/tron/tensor/k_vnni.hpp
+@@ -116,10 +116,8 @@ constexpr size_t index(size_t token, size_t dim) noexcept {
+ }  // namespace k_vnni
+ 
+ namespace detail {
+-// The one route from a packed K view to its plane address, for the typed
+-// operations below, the two layout-specific score kernels (k_vnni::qk_group,
+-// amx_attn_h128g4::qk_vnni_128x4) and the test-only book::fill_random, the
+-// documented exception (Note [K VNNI storage] in kv_cache.hpp).
++// The one route from a packed K view to its plane address. Who may use it is
++// listed at the top of this file (Who may compute a packed address).
+ struct k_vnni_access;
+ }  // namespace detail
+ 
+@@ -177,8 +175,7 @@ private:
+ // Trivial to construct, copy and destroy; copying an owner copies the plane
+ // (page::copy_storage_slot copies a whole page as `dst_block.k = src_block.k`).
+ // as_view() on a temporary is deleted: a view must not outlive its owner.
+-// 64-byte alignment: every pair row is one 64-byte line, and the AMX QK kernel
+-// reads the plane in 64-byte tile rows.
++// 64-byte alignment: every pair row is one 64-byte line.
+ template <size_t Rows, size_t Cols>
+ struct alignas(64) k_vnni_tensor final {
+   static_assert(Rows == k_vnni::PAGE_TOKENS_64 && Cols == k_vnni::HEAD_SIZE_128,
+diff --git a/src/tron/kernels/amx_attn.cpp b/src/tron/kernels/amx_attn.cpp
+index 900d0ddb09..ec605fca0c 100644
+--- a/src/tron/kernels/amx_attn.cpp
++++ b/src/tron/kernels/amx_attn.cpp
+@@ -55,8 +55,7 @@ constexpr int Q_TILE_6 = 6;
+ constexpr int P_TILE_4 = 4;
+ constexpr int V_EVEN_SLICE_TILE_5 = 5;
+ constexpr int V_ODD_SLICE_TILE_6 = 6;
+-// qk_vnni_128x4: the padded Q rows load into tile 4. In each dimension step,
+-// the K panels of token blocks 0 and 2 load into tile 5 and those of token
++// qk_vnni_128x4: the K panels of token blocks 0 and 2 load into tile 5, those of
+ // blocks 1 and 3 into tile 6.
+ constexpr int Q_ROWS_TILE_4 = 4;
+ constexpr int K_EVEN_PANEL_TILE_5 = 5;
+@@ -228,29 +227,21 @@ void pack_q_rows_128x4(const bf16* q_group, bf16* padded) noexcept {
+   std::memcpy(padded, q_group, GROUP_HEADS_4 * HEAD_SIZE_128 * sizeof(bf16));
+ }
+ 
+-// S[16 q][64 tok] = Q . K^T. K is read from the VNNI (Vector Neural Network
+-// Instructions) plane as the B operand (see the declaration and
+-// Note [K VNNI storage] in kv_cache.hpp). A = the padded Q rows (16 rows x 32
+-// dimensions per step, row stride 256 bytes). B = one K panel per (step, token
+-// block): 16 dimension-pair rows x 16 tokens, 64-byte rows. C (destination) tiles
+-// 0..3 = the four 16-token blocks.
++// S[16 q][64 tok] = Q . K^T in tiles (A = the padded Q rows, B = the K panels as
++// stored), then rows 0..3 copied into the caller's s buffer (UNSCALED). See the
++// declaration and Note [K VNNI storage] in kv_cache.hpp.
+ void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+     const bf16* q_rows,
+     float* s,
+     size_t s_stride_floats) noexcept {
+-  // The plane's first element: panel (step 0, block 0), pair row 0. This kernel
+-  // is one of the two layout-specific readers allowed to take the plane address
+-  // (the other is k_vnni::qk_group).
++  // This kernel is one of the two layout-specific readers allowed to take the
++  // plane address.
+   const bf16* const k_vnni_plane = detail::k_vnni_access::plane(k_page);
+   // The tile stores write 16 rows (Note [Tile stores write 16 rows]). Rows
+   // 4..15 are the products of the zero padding rows. They are dropped below.
+   alignas(64) float s16[TILE_ROWS_16 * PAGE_TOKENS_64];
+   constexpr size_t S16_ROW_BYTES_256 = PAGE_TOKENS_64 * sizeof(float);
+   static_assert(S16_ROW_BYTES_256 == 256, "the constant's name states its value");
+-  // One K panel = 16 dimension-pair rows x 16 tokens x 2 paired values (1 KiB).
+-  // Panel (step, block) is at (step * 4 + block) panels from the plane base
+-  // (the k_vnni.hpp layout). One token block = the 16 token columns of one
+-  // tile row.
+   using k_vnni::BLOCK_TOKENS_16;
+   using k_vnni::PANEL_ELEMS_512;
+   using k_vnni::TOKEN_BLOCKS_4;
+@@ -266,10 +257,6 @@ void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+       "one pair row of the plane is one B tile row: the panel load stride");
+   static_assert(k_vnni::PANEL_BYTES_1024 == TILE_ROWS_16 * TILE_ROW_BYTES_64,
+       "one K panel is exactly one B tile");
+-  // Tile registers: the padded Q rows are the A operand in Q_ROWS_TILE_4. The
+-  // K panels are the B operand in K_EVEN_PANEL_TILE_5 and K_ODD_PANEL_TILE_6,
+-  // used in turn. Token block b (0..3) accumulates its scores in accumulator
+-  // tile b (ACCUMULATOR_TILE_0 .. ACCUMULATOR_TILE_3).
+   _tile_zero(ACCUMULATOR_TILE_0);
+   _tile_zero(ACCUMULATOR_TILE_1);
+   _tile_zero(ACCUMULATOR_TILE_2);
+diff --git a/t/t_amx_dispatch_dtype.cpp b/t/t_amx_dispatch_dtype.cpp
+index 6c46e838a7..35358c34bf 100644
+--- a/t/t_amx_dispatch_dtype.cpp
++++ b/t/t_amx_dispatch_dtype.cpp
+@@ -5,14 +5,11 @@
+ // defines every amx_attn_h128g4 entry point as a CPU fake, so the linker never
+ // pulls libtron's amx_attn.cpp object and no AMX instruction is linked or
+ // executed; available() is the fake too, so the dispatch believes AMX is
+-// present. The K layout of the build selects which packer and which QK kernel
+-// the dispatch calls. The layout is row-major, or under TRON_K_VNNI the VNNI
+-// (Vector Neural Network Instructions) layout (Note [K VNNI storage] in
+-// kv_cache.hpp). The fakes of both packers and both QK kernels count into the
+-// same probe, and the fake of the VNNI packer counts a second time. So the
+-// expectations below hold for either layout, and the VNNI packer count checks
+-// that the dispatch picks the packer of the build's layout (the two packers
+-// share one signature; the kernel is pinned by its view type).
++// present. Under TRON_K_VNNI the K plane holds the VNNI (Vector Neural Network
++// Instructions) layout (Note [K VNNI storage] in kv_cache.hpp) and the dispatch
++// calls the VNNI packer and QK kernel. The expectations below hold for either
++// layout. The QK kernels differ in their K view type and the packers do not, so
++// only the packer choice needs its own count (rows_pack_calls).
+ //   host_bf16, full page: the Q pack runs exactly once and sees the query
+ //   values. The dense QK and PV kernels run once each.
+ //   host_bf16, partial page (63 tokens): the Q pack still runs (it happens
+@@ -167,7 +164,6 @@ void exercise_page(size_t n_tokens, bool repeat = false, bool amx_available = tr
+   // bf16 query buffer may reach the packer, which copies bf16 values and
+   // converts nothing. With available() false nothing is packed either.
+   const bool packs = std::is_same_v<query_scalar, bf16> && amx_available;
+-  // The dense predicate: the kernels run only for a full page.
+   const bool dense = packs && n_tokens == book_t::page_size;
+   fake_amx_available = amx_available;
+   for (int round = 0; round < (repeat ? 2 : 1); ++round) {
+diff --git a/t/t_amx_numerics.cpp b/t/t_amx_numerics.cpp
+index a6d923a3d1..d1a88387ae 100644
+--- a/t/t_amx_numerics.cpp
++++ b/t/t_amx_numerics.cpp
+@@ -119,11 +119,9 @@ TEST_CASE("AMX dispatch is limited to executors that store activations as bf16",
+ 
+ TEST_CASE("AMX Q packer moves bf16 values to the documented positions",
+     "[amx_numerics][q_pack]") {
+-  // Layout contracts of pack_q_group_128x4 and pack_q_rows_128x4
+-  // (amx_attn_iface.hpp): scalar copies, no AMX instruction runs, so this runs
+-  // on every host. Distinct bit
+-  // patterns per element, so a wrong index cannot pass by coincidence; the
+-  // comparison is on the bit patterns, not on float equality.
++  // Both packers are scalar copies, no AMX instruction runs, so this runs on
++  // every host. Distinct bit patterns per element, so a wrong index cannot pass
++  // by coincidence; the comparison is on the bit patterns, not on float equality.
+   alignas(64) tron::bf16 q[GROUP_HEADS_4 * HEAD_SIZE_128];
+   for (size_t i = 0; i < GROUP_HEADS_4 * HEAD_SIZE_128; ++i) {
+     q[i] = tron::bf16::from_bits(static_cast<uint16_t>(0x3f80u + i));
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index fd07e178eb..c77523a150 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -98,8 +98,6 @@ template <typename V>
+ constexpr bool amx_pv_accepts = requires(V v, const float* weights, float* out) {
+   amx_attn_h128g4::weights_times_v_128x4(v, weights, size_t{0}, out);
+ };
+-
+-// The VNNI K kernel takes the packed K plane (page::k_packed) the same way.
+ template <typename K>
+ constexpr bool amx_qk_vnni_accepts = requires(K k, const bf16* q, float* s) {
+   amx_attn_h128g4::qk_vnni_128x4(k, q, s, size_t{0});
+@@ -413,11 +411,7 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+   // plane, also for an owner that lives outside a kv_block.
+   STATIC_REQUIRE(alignof(v_owner_t) == 64);
+ 
+-  // The packed K plane (Note [K VNNI storage]) follows the same rules. The VNNI
+-  // QK kernel accepts the view, and no other type, as its K argument. The other
+-  // two kernels reject it.
+-  // Views come only from an owner. A writable view converts to a read-only one
+-  // only.
++  // The packed K plane (Note [K VNNI storage]) follows the same rules.
+   constexpr kv_geometry one_head{1, amx_attn_h128g4::HEAD_SIZE_128};
+   using k_packed_t = k_vnni_view<const bf16, amx_attn_h128g4::PAGE_TOKENS_64,
+       amx_attn_h128g4::HEAD_SIZE_128>;
+@@ -426,11 +420,10 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+   using k_owner_t =
+       k_vnni_tensor<amx_attn_h128g4::PAGE_TOKENS_64, amx_attn_h128g4::HEAD_SIZE_128>;
+   STATIC_REQUIRE(amx_qk_vnni_accepts<k_packed_t>);
+-  STATIC_REQUIRE(
+-      amx_qk_vnni_accepts<k_packed_mut_t>);  // writable converts to read-only
++  STATIC_REQUIRE(amx_qk_vnni_accepts<k_packed_mut_t>);
+   STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<const bf16*>);
+   STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<bf16*>);
+-  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<k_plane_t>);  // the native K view
++  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<k_plane_t>);
+   STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<v_plane_t>);
+   STATIC_REQUIRE_FALSE(amx_qk_accepts<k_packed_t>);
+   STATIC_REQUIRE_FALSE(amx_pv_accepts<k_packed_t>);
