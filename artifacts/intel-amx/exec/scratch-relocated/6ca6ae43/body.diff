@@ -1,0 +1,137 @@
+--- live-body.md	2026-10-08 09:48:04.702274821 -0700
++++ new-body.md	2026-10-08 09:56:18.942548601 -0700
+@@ -43,7 +43,7 @@
+ | shared block save | The K store of this branch. The pass's tokens are cut into work units (runs of consecutive tokens inside one 16-token block of a page). The main thread and the idle main helpers claim the units from one counter. A unit of two or more tokens is written with 16 rows transposed in registers, one 64-byte line at a time, masked (only the lanes of the unit's tokens are written) when the unit does not fill the block. A unit of one token is written with a scatter (many small stores, each to a separate address). |
+ | dotter | The per-token AVX-512 (the 512-bit vector instruction set used by the software path, not AMX) dot-product loop of the software attention path (`tron/kernels/dotter.hpp`). |
+ | kill switch | `TRON_AMX_DISABLE=1`: the binary does not use the AMX kernels and runs the software path. |
+-| base | A `main` binary built without `TRON_K_VNNI` (row-major K). The Measurements table also cites the older base of the first campaign, the PR #3879 binary (commit 544ca05c7a). |
++| base | A `main` binary built without `TRON_K_VNNI` (row-major K). The Measurements section also cites the PR #3879 binary (commit 544ca05c7a) as a base. |
+ | greedy run, A/A repeat | A run with temperature 0 (always pick the top-scoring token) and deterministic reductions (sums performed in a fixed order, so the result does not depend on thread timing). The same binary then produces the same tokens twice. An A/A repeat is the same configuration run twice as a control. |
+ | slot | One persistent K/V storage region of the cache (one per layer, or shared between layers), described by a `kv_slot_spec`. A row-major slot keeps K in the row-major layout. |
+ | dense page | A full 64-token page, all of it visible to the query: the case the AMX QK kernel (the kernel that multiplies the query by the K rows to produce the attention scores) handles. |
+@@ -81,13 +81,15 @@
+   - Fakes (stand-in implementations used only by the test) in `t_amx_dispatch_dtype` that take the typed view.
+   - In `t_llama_unit`: a model-level shared-save case, a software-attention case for 32 query heads on one 128-dimension K/V head, layout-independent accessors, and the K typed-boundary contracts. The contracts are: the VNNI QK kernel accepts the packed view only, the other kernels reject it, no pointer construction, writable-to-read-only only, no view of a temporary owner, no element write, 64-byte owner alignment.
+   - Call-text checks in `LoopyTronSpec.hs`.
+-- Constant spelling: the AMX kernel files and this branch's own K headers and tests name every value-carrying constant `NAME_<value>`. Code added to shared files (`t_llama_unit.cpp`, `model.hpp`, `common.hpp`) keeps those files' own spelling (literals and lower_snake names). PR #4557 (the parent PR) agreed on this rule with its reviewer.
++- Constant spelling: the AMX kernel files and this branch's own K headers and tests name every value-carrying constant `NAME_<value>`. Code added to shared files (`t_llama_unit.cpp`, `model.hpp`, `common.hpp`) keeps those files' own spelling (literals and lower_snake names), as PR #4557 does.
+ 
+ ## Measurements (qwen3-4b, 8 users, one of the two CPU sockets of delphi-3bda, software attention with AMX)
+ 
+ delphi-3bda is the Intel Xeon 6962P test machine. One of its two CPU sockets is ours. The other is reserved for another user.
+ 
+-The table below is the first campaign against the PR #3879 binary 544ca05c7a. Its prompt 1024 rows were measured at branch commit 10fc7c724c (campaign vnnik2-confirm, 2026-09-15). Its prompt 2048 and prompt 8192 rows were measured at branch commit 9928cb2849 (campaign vnnik2, 2026-09-14/15). The Verification section carries the 2026-10-08 cells against a `main` binary.
++Against a `main` binary (be0d5565b3, 2026-10-08, tp2, 3 repetitions): decode +5.3 % at prompt 1024 and +10.4 % at prompt 8192. TTFT is -57 ms at prompt 1024 (inside the 0.15 s noise band) and -0.80 s at prompt 8192. The full rows, and an FPGA-attention cell, are in the Verification section.
++
++Against the PR #3879 binary (544ca05c7a), tp2 and tp4. This branch at 10fc7c724c for the prompt 1024 rows (2026-09-15) and at 9928cb2849 for the prompt 2048 and prompt 8192 rows (2026-09-14/15):
+ 
+ | prompt | binary | tp2 TTFT | tp4 TTFT | tp2 TPS/user | tp4 TPS/user |
+ |---|---|---|---|---|---|
+@@ -99,16 +101,14 @@
+ The tp4 decode numbers have a run-to-run spread of 1 to 3 TPS (1 to 3 % of 104 TPS). So the +0.2 % and -0.7 % at prompt 1024 and prompt 2048 are inside that spread, not a real change.
+ 
+ - Decode gain: the gain grows with the prompt length.
+-- TTFT gain: the cause is the shared block save. Save K per prefill layer went from 274 us (base) to 60 to 80 us (this branch), measured with in-process Perfetto (an open-source tracing tool into which tron records its own timing events) traces.
+-
+-Against a `main` binary (be0d5565b3, 2026-10-08, tp2 only, 3 repetitions): decode +5.3 % at prompt 1024 and +10.4 % at prompt 8192, TTFT -57 ms and -0.80 s. The full rows are in the Verification section.
++- TTFT gain: the cause is the shared block save. Save K per prefill layer takes 274 us with the row-major store (base) and 60 to 80 us with the shared block save (this branch), measured with in-process Perfetto (an open-source tracing tool into which tron records its own timing events) traces.
+ 
+ 
+ ## Verification
+ 
+-Head 6b939d25d2. The delphi-3bda runs below were taken at 37064d72b2. The two commits after it change no compiled code: 4bbf97ef78 changes comments and writes one `static_assert` as a zero comparison, 6b939d25d2 carries the cost rows measured below. 4bbf97ef78 was built and tested on delphi-3bda as well (VNNI build, our half of the machine): the same six unit tests pass with the same assertion counts, and the code-generator suite passes.
++The delphi-3bda runs below were taken at 37064d72b2 on 2026-10-08. The head 6b939d25d2 compiles to the same code: the two commits after 37064d72b2 change comments, one `static_assert` condition and the cost-data file.
+ 
+-The runs below used this setup on delphi-3bda on 2026-10-08. The chain is `exec/sync4424b-20261007/chain.sh` in jhan's intel-AMX workspace, and the results are under `exec/results/sync4424b-20261007/`. Setup: `nix develop` (the project's pinned build shell), clang 19, preset `native` (explicit AVX-512 flags), `TRON_AMX_DISPATCH=ON`, `BUILD_INGEST_MODELS=ON` (the CMake option that builds the generated model plugins).
++Setup: `nix develop` (the project's pinned build shell), clang 19, preset `native` (explicit AVX-512 flags), `TRON_AMX_DISPATCH=ON`, `BUILD_INGEST_MODELS=ON` (the CMake option that builds the generated model plugins). The campaign script is `exec/sync4424b-20261007/chain.sh` in jhan's intel-AMX workspace, with results under `exec/results/sync4424b-20261007/`.
+ 
+ Unit tests, VNNI build (`TRON_K_VNNI=ON`), real AMX, our half of the machine:
+ 
+@@ -130,7 +130,7 @@
+ - `t_llama_unit` 251478 / 64
+ - `t_heterogeneous_scheduler` 2783 / 3
+ 
+-One test of `main` needed a wider tolerance (commit 37064d72b2): `t_llama_unit` "apply and join page ranges / query splits match unsplit page reductions" compares a page reduction done in one run with the same reduction done as two ranges and joined. The two runs reach a page with a different running maximum. So each softmax weight (the normalized attention score) is converted to bf16 for the PV product (the product of the softmax weights and V) at a different scale. The AVX path truncates in that conversion. The row-major build passes the old bounds by a small margin (0.018 of 0.020 on one element of the weighted V sum, 1.9e-6 of 2.0e-6 on the weight sum). With VNNI K the scores differ in their last bits. The bf16 conversion then rounds at a different point. One element reaches 0.022. The bounds are now 0.05 and a relative 1e-6. Measured with the option on and off.
++One `main` test, `t_llama_unit` "apply and join page ranges / query splits match unsplit page reductions", runs with a wider tolerance in this branch. The Open items section gives the mechanism.
+ 
+ Whole host test suite (`make build-test-host`, `make test-host`, VNNI build, fake device (a software stand-in for the FPGA), our half):
+ - All host test targets compile.
+@@ -139,56 +139,39 @@
+ - 1 test failed: `t_proxy_llama31`, new on `main`. It fails with "t/proxy/.venv missing", the same absent venv. The cause is the machine, not the code.
+ - Total wall-clock time of the suite: 128 s.
+ 
+-Token identity, measured with runtron (tron's command-line tool): qwen3-4b tp2, 1 user, temperature 0, pay-for-determinism (the runtron flag that selects the deterministic reductions of a greedy run), seed 1, 256 generated tokens. `new` = this branch, `head` = the previous PR head 30c4ac82cb (VNNI K already, before the typed-tensor port and the merge of `main`), `base` = `main` at be0d5565b3 (row-major K, AMX dispatch on):
++Cost data (`config/test-benchmarks.json`, granite_rapids_6962p block), measured with `bin/slice bench --update t_llama_unit t_k_vnni_layout t_amx_numerics` on the whole delphi-3bda host (both sockets, serving stopped, 2026-10-08 13:50 UTC): `t_llama_unit` 28.1 / 28.3 / 28.3 s, `t_k_vnni_layout` 0.90 / 0.91 / 0.91 s, `t_amx_numerics` 0.81 / 0.83 / 0.74 s.
+ 
+-| cell | new vs head | new vs its A/A repeat | kill-switch pairs | new vs base |
+-|---|---|---|---|---|
+-| CPU attention, prompt 1024 | identical, 256 of 256 | identical | `newoff` = `headoff` = `head` = `new` (`newoff` and `headoff` are the `new` and `head` binaries run with the kill switch) | first difference at generated token 52 |
+-| FPGA attention, prompt 1024 | identical, 256 of 256 | - | - | first difference at generated token 52 (`head` vs `base` the same) |
+-| CPU attention, prompt 8192 | identical, 256 of 256 | - | - | identical, 256 of 256 |
++Token identity, measured with runtron (tron's command-line tool): qwen3-4b tp2, 1 user, temperature 0, pay-for-determinism (the runtron flag that selects the deterministic reductions of a greedy run), seed 1, 256 generated tokens. This branch against `base` = `main` at be0d5565b3 (row-major K, AMX dispatch on):
+ 
+-So the typed port and the merge of `main` change no token against the previous head. The divergence against `base` is the known PR #4424 divergence (issue #4444). It appears under FPGA attention too. There the software path still scores, with the VNNI reader, the pages the FPGA does not process.
++| cell | this branch vs its A/A repeat | this branch, AMX on vs kill switch | this branch vs base |
++|---|---|---|---|
++| CPU attention, prompt 1024 | identical, 256 of 256 | identical, 256 of 256 | first difference at generated token 52 |
++| FPGA attention, prompt 1024 | - | - | first difference at generated token 52 |
++| CPU attention, prompt 8192 | - | - | identical, 256 of 256 |
++
++The divergence against `base` is tracked in issue #4444 (see Open items). It appears under FPGA attention too. There the software path still scores, with the VNNI reader, the pages the FPGA does not process.
+ 
+ Performance. Setup:
+-- 8 users, 256 generated tokens, 3 repetitions interleaved. The chain (the script that runs the campaign steps in order) stopped at its 01:30 UTC cutoff and finished the remaining runs after the nightly CI window.
+-- band (the size of a difference that counts as noise) = the larger of 2 x the largest standard deviation (sd) across the three binaries, and a floor of 0.4 TPS for TPS or 0.15 s for TTFT.
++- 8 users, 256 generated tokens, 3 repetitions, the binaries interleaved.
++- band (the size of a difference that counts as noise) = the larger of 2 x the largest standard deviation (sd) of the two binaries, and a floor of 0.4 TPS for TPS or 0.15 s for TTFT.
+ - TPS = decode tokens per second per user.
+ - TTFT = the maximum over the 8 users.
+ 
+-| cell | attention | base (`main` be0d5565b3) TPS / TTFT | head (30c4ac82cb) TPS / TTFT | new (this branch) TPS / TTFT | new vs head | new vs base |
+-|---|---|---|---|---|---|---|
+-| prompt 1024, n = 3 | CPU | 79.37 / 3.178 s | 83.32 / 3.147 s | 83.60 / 3.121 s | TPS +0.3 % (inside band), TTFT -26 ms (inside band) | TPS +5.3 %, TTFT -57 ms |
+-| prompt 8192, n = 3 | CPU | 17.13 / 52.542 s | 18.93 / 52.849 s | 18.90 / 51.745 s | TPS -0.1 % (inside band), TTFT -1.10 s (beyond the band) | TPS +10.4 %, TTFT -0.80 s |
+-| prompt 1024, n = 3 | FPGA | 128.72 / 3.184 s | 125.47 / 3.193 s | 125.97 / 3.142 s | TPS +0.4 % (inside band), TTFT -51 ms (inside band) | TPS -2.1 % (issue #4500), TTFT -42 ms |
+-
+-`new` vs `base` reproduces the first campaign's result against a `main` binary (CPU decode +5.3 % at prompt 1024 and +10.4 % at prompt 8192, TTFT lower in both cells). `new` vs `head`: decode is inside the band in both cells. TTFT is lower by 26 ms at prompt 1024 (inside the band, which is 0.15 s there) and by 1.10 s at prompt 8192 (beyond the band, which is 0.32 s there). The subsection below attributes that TTFT difference. Production serving was restored after the run.
+-
+-### TTFT difference between `new` and `head`: which change causes it
+-
+-`head` is the 2026-09-17 binary. `new` differs from it in two ways: the typed K owner and views (this port), and 916 `main` commits that came in with the merge. Several of those commits touch the attention and scheduler hot path (query splitting, attention path stats, the chunk-size removal, K and V projections on separate device halves). The typed port changes no stored byte and no kernel. So the hypothesis is that the TTFT difference comes from `main`.
+-
+-The measurement that separates the two: a third binary, `headm` = commit c6ec38813d of this branch. It has the merge of `main` and the raw-pointer K plane of the previous head, but not the typed port. It runs against `new` on the same cells (CPU attention prompt 1024 and 8192, FPGA attention prompt 1024, 8 users, 3 repetitions), after a token-identity smoke (`headm` must equal `new` for 256 tokens).
+-
+-Verdict rule: if `headm` sits inside `new`'s band in every cell, the TTFT difference is `main`'s and the port costs nothing. If `headm` is slower than `new` beyond the band, the port itself changed prefill time, and the cause is looked for in the port.
+-
+-Result (2026-10-08, after the nightly CI window; results under `exec/results/sync6-E-headm-cpu/` and `sync6-E-headm-fpga/`): `headm` produced the same 256 tokens as `new` in the identity smoke (CPU attention, prompt 1024). In every cell `headm` sits inside `new`'s band. So the TTFT difference against the 2026-09-17 head comes from `main`, and the typed port costs nothing.
++| cell | attention | base (`main` be0d5565b3) TPS / TTFT | this branch TPS / TTFT | band TPS / TTFT | this branch vs base |
++|---|---|---|---|---|---|
++| prompt 1024, n = 3 | CPU | 79.37 / 3.178 s | 83.60 / 3.121 s | 0.54 / 0.15 s | TPS +5.3 % (beyond the band), TTFT -57 ms (inside the band) |
++| prompt 8192, n = 3 | CPU | 17.13 / 52.542 s | 18.90 / 51.745 s | 0.40 / 0.29 s | TPS +10.4 % (beyond the band), TTFT -0.80 s (beyond the band) |
++| prompt 1024, n = 3 | FPGA | 128.72 / 3.184 s | 125.97 / 3.142 s | 0.88 / 0.15 s | TPS -2.1 % (beyond the band, issue #4500), TTFT -42 ms (inside the band) |
+ 
+-| cell | attention | headm (c6ec38813d) TPS / TTFT | new (this branch) TPS / TTFT | new vs headm |
+-|---|---|---|---|---|
+-| prompt 1024, n = 3 | CPU | 83.38 / 3.121 s | 83.67 / 3.121 s | TPS +0.4 %, TTFT 0 ms (inside band) |
+-| prompt 8192, n = 3 | CPU | 18.89 / 51.618 s | 18.91 / 51.787 s | TPS +0.1 %, TTFT +169 ms (inside band, which is 0.21 s there) |
+-| prompt 1024, n = 3 | FPGA | 124.83 / 3.156 s | 125.89 / 3.142 s | TPS +0.9 %, TTFT -13 ms (inside band) |
++Under CPU attention decode is faster than `base` in both cells, and TTFT is lower at prompt 8192. The TTFT differences at prompt 1024 are inside the band. Under FPGA attention decode is slower than `base` (issue #4500).
+ 
+ ## Open items
+ 
+-- **Cost rows (done).** `bin/slice bench --update t_llama_unit t_k_vnni_layout t_amx_numerics` ran on the whole delphi-3bda host (serving stopped, both sockets, 2026-10-08 13:50 UTC) at 37064d72b2. Commit 6b939d25d2 carries the granite_rapids_6962p rows: `t_llama_unit` 28.1 / 28.3 / 28.3 s (was 27.7 / 27.6 / 28.0 s), `t_k_vnni_layout` 0.90 / 0.91 / 0.91 s, `t_amx_numerics` 0.81 / 0.83 / 0.74 s. The genoa96 block (the AMD benchmark runner) has no row for `t_k_vnni_layout`. Its rows for `t_amx_numerics` and `t_amx_dispatch_dtype` came with earlier PRs. A `t_k_vnni_layout` row there needs a run on that runner.
+-- **128-dimension heads with kv_mul (the number of query heads that share one KV head) other than 4 (measure before merging).** For qwen-3-30b-a3b (kv_mul 8) the VNNI layout is on. The AMX kernel is not eligible for that shape. So every page goes through the AVX-512 reader of the layout instead of the row-major dotter. The decode store also scatters into cold lines (64-byte cache lines not yet present in the CPU cache). One run (2026-09-15) against base showed -5.4 % decode TPS (a loss: 34.3 vs 36.3 TPS/user). The same run showed -7 % TTFT, a gain of 369 ms (lower TTFT is better). If more repetitions confirm the decode loss, the layout gate `k_vnni::layout_on<head_size>` should also require the AMX shape (kv_mul 4), or the reader needs a faster path for larger groups (more query heads per KV head).
++- **genoa96 cost row for `t_k_vnni_layout`.** The genoa96 block (the AMD benchmark runner) of `config/test-benchmarks.json` has no row for `t_k_vnni_layout`. It has rows for `t_amx_numerics` and `t_amx_dispatch_dtype`. A row needs a run on that runner.
++- **128-dimension heads with kv_mul (the number of query heads that share one KV head) other than 4 (measure before merging).** For qwen-3-30b-a3b (kv_mul 8) the VNNI layout is on. The AMX kernel is not eligible for that shape. So every page goes through the AVX-512 reader of the layout instead of the row-major dotter. The decode store also scatters into cold lines (64-byte cache lines not yet present in the CPU cache). Measured on 2026-09-16 with this branch at 65a1c41d72 against `main` c7844ca2ce (8 users, tp2): decode TPS +1.5 % at prompt 1024 (6 repetitions, inside noise), -4.1 % at prompt 2048 (3 repetitions, a loss), +24.1 % at prompt 8192 (3 repetitions). TTFT was lower by 8 to 16 % in every cell. The cells need a repeat at this head. If the prompt 2048 loss repeats, the layout gate `k_vnni::layout_on<head_size>` should also require the AMX shape (kv_mul 4), or the reader needs a faster path for larger groups (more query heads per KV head).
+ - **Benchmark binary mismatch (reviewers decide).** The legacy CMake workflow compiles `runtron` once, in its `build` job, with `-DTRON_AMX_DISPATCH=ON -DTRON_K_VNNI=ON`, and hands that binary to its `benchmark` job. When the hand-over works, the benchmark measures a binary with the AMX kernels and the VNNI K layout. When the hand-over fails, the benchmark job compiles `runtron` itself through `make`. That `make` build sets neither option. The benchmark then measures a binary with row-major K and no AMX kernels. PR #3879 introduced this mismatch for `TRON_AMX_DISPATCH`. This PR adds `TRON_K_VNNI` to the same line. The default CI (the Nix build on GCP, Google Cloud Platform runners) is not affected: its benchmark binary is built with neither option. If the mismatch is unwanted, both options should move out of the build job into a configuration of their own. `TRON_PAGE_SHARE_COUNTERS` (another CMake option) already works that way, through the `coverage` preset (a CMake configuration preset).
+-- **Kill switch and token divergence (tracked in #4444).** With `TRON_K_VNNI` on, `TRON_AMX_DISABLE=1` runs the VNNI reader (this PR's AVX-512 routine that scores tokens from the VNNI layout) instead of the row-major dotter for 128-dimension heads. The kill switch still gives an AMX-off run of the same binary. It no longer gives the tokens of a clean binary (a build with both options off). Item 4 of Note [AMX attention dispatch] in `h/tron/kernels/amx_attn_iface.hpp` still promises those tokens for rollback. It needs the condition "with `TRON_K_VNNI` off". Note [K VNNI storage] in `kv_cache.hpp` describes the new behavior. The 2026-10-08 identity runs add one fact. The divergence against `main` (generated token 52 of the prompt-1024 run) appears under FPGA attention as well. Under FPGA attention the software path still scores the pages the FPGA does not process.
+-- **A `main` test tolerance was widened (commit 37064d72b2).** `t_llama_unit` "apply and join page ranges / query splits match unsplit page reductions" (added to `main` on 2026-09-11) bounds the split-vs-unsplit difference of the weighted V sum by 0.02 and of the weight sum by 2e-6. The row-major build passes those bounds with 0.018 and 1.9e-6. The VNNI scores move one element to 0.022. The bounds are now 0.05 and a relative 1e-6. The test comment names the mechanism (bf16 conversion of the PV weights at a different scale). The test's author may want to review the change.
+-- **Stacked PRs.** PR #4774 (one `save_k` for the main thread and the helpers, Ben's suggestion) and PR #4737 (row-major tail block for issue #4500) have this branch as their base. Both were written against its previous head 30c4ac82cb. Both need a merge of this head: `save_k` and the K-plane helpers they touch are now typed. PR #4746 (the same port on the old PR #4557 head) is replaced by this head. It can be closed.
++- **Kill switch and token divergence (tracked in #4444).** With `TRON_K_VNNI` on, `TRON_AMX_DISABLE=1` runs the VNNI reader (this PR's AVX-512 routine that scores tokens from the VNNI layout) instead of the row-major dotter for 128-dimension heads. The kill switch still gives an AMX-off run of the same binary. It no longer gives the tokens of a clean binary (a build with both options off). Item 4 of Note [AMX attention dispatch] in `h/tron/kernels/amx_attn_iface.hpp` still promises those tokens for rollback. It needs the condition "with `TRON_K_VNNI` off". Note [K VNNI storage] in `kv_cache.hpp` describes the new behavior. The divergence against `main` (generated token 52 of the prompt-1024 run) appears under FPGA attention as well. Under FPGA attention the software path still scores the pages the FPGA does not process.
++- **A `main` test tolerance is widened.** `t_llama_unit` "apply and join page ranges / query splits match unsplit page reductions" (added to `main` on 2026-09-11) compares a page reduction done in one run with the same reduction done as two ranges and joined. On `main` it bounds the difference of the weighted V sum by 0.02 and of the weight sum by 2e-6. The two runs reach a page with a different running maximum. So each softmax weight (the normalized attention score) is converted to bf16 for the PV product (the product of the softmax weights and V) at a different scale. The AVX path truncates in that conversion. The row-major build passes `main`'s bounds by a small margin (0.018 of 0.020 on one element of the weighted V sum, 1.9e-6 of 2.0e-6 on the weight sum). With VNNI K the scores differ in their last bits. The bf16 conversion then rounds at a different point. One element reaches 0.022. This branch sets the bounds to 0.05 and a relative 1e-6, measured with the option on and off. The test comment names the mechanism. The test's author may want to review the change.
++- **Stacked PRs.** PR #4774 (one `save_k` for the main thread and the helpers) and PR #4737 (row-major tail block for issue #4500) have this branch as their base. Both need a merge of this head: `save_k` and the K-plane helpers they touch are typed here.
+ 
+ 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+-
+-
+-
