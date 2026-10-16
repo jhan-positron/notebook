@@ -51,7 +51,7 @@ The user asked for a review page of the PR 4868 description with three designs t
 - 11:27 Summary in chat: Design A recommended, est. 3,120 words.
 - 11:59 to 12:01 The user asked what "The changes" serves and whether it could become a review guide. Claude measured a three-thread draft at 552 words against 1,654 (the-changes-as-review-guide.md).
 - 12:20 to 12:21 The user liked the Q-and-A draft, asked to drop the mechanical part (trimmed to 490 words), and asked for guideline versions under 100 words from several perspectives. Eight versions were saved (review-guide-rule-versions.md, 52 to 74 words each).
-- 12:30 to 12:35 The user picked version 8 and asked for a skill. SKILL.md (105 lines) and references/example-how-to-review.md written. Memory note pr-description-skill.md written.
+- 12:30 to 12:35 The user picked version 8 and asked for a skill. SKILL.md (105 lines) and references/example-how-to-review.md written. Memory note pr-description-skill.md written. (preserved: artifacts/claude-skills/PR-description/references/example-how-to-review.md)
 - 12:58 to 12:59 The user edited SKILL.md (removed the budget, asked that duplicates always be removed). Claude fixed one grammar line and removed two leftover word limits.
 - 13:09 to 13:10 The user asked whether Measurements and Verification could merge. Answer: yes, with the performance numbers keeping their own subsection and decision rule.
 - 13:50 to 13:53 Design A on the page was changed to the merged section (3,115 to 2,915 words est.). Section 5 "Verification" was added to the skill.
@@ -94,25 +94,33 @@ Token divergence status as read from the posted bodies at 18:05 (not re-measured
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR1-4868/PR-desc-review.html (77,254 bytes). The review page: skeleton, what each section serves, importance, three cut designs, word-count chart, Outcome section (Design A executed 2026-10-13).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR1-4868/PR-desc-review.html (77,254 bytes). The review page: skeleton, what each section serves, importance, three cut designs, word-count chart, Outcome section (Design A executed 2026-10-13). (preserved: artifacts/intel-amx/pr3879/split-4424/PR1-4868/PR-desc-review.html)
   - generator: /tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/f0fb48e7-5749-4983-870b-ce4ee0ace8fa/scratchpad/gen_review.py (42,896 bytes, scratchpad)
   - input: the PR 4868 body snapshot scratchpad/bodies/4868.after.md and secwords.json (per-section word counts)
   - input built by: scratchpad/secwords.py over the body fetched with `gh api repos/positron-ai/tron/pulls/4868`
   - sources: the live PR 4868 body on 2026-10-13, the review threads of PR 4868 and PR 4424, merged60.json
   - regenerate: `cd <scratchpad> && python3 gen_review.py` (writes <OUT>). unavailable if the scratchpad has been cleaned up.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR1-4868/the-changes-as-review-guide.md (3,252 bytes). The three-thread Q-and-A draft of "How to review this PR", 490 words.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR1-4868/review-guide-rule-versions.md (2,946 bytes). Eight guideline versions under 100 words; the user chose version 8.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR1-4868/user-edits-20261014.txt (9,192 bytes). Paragraph diff of the user's own 4868 edits against v3, with the user's "REASON:" lines added afterwards.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/issue-4444/status-20261014.md (4,827 bytes). The status comment posted on issue 4444.
-- claude-agentsrv:/home/jhan/.claude/skills/PR-description/SKILL.md (11,745 bytes). The skill. Hand-written, edited by both the user and Claude. Also references/example-how-to-review.md (2,807 bytes) and evals/evals.json (1,604 bytes, drafted, not run).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/pr-body-v3.md (24,613 bytes, posted at 14:20), pr-body-v4.md (14,428 bytes, draft never posted), pr-body-v5-jhan-edited.md (19,142 bytes, live copy after the 18:29 phrase fix).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/pr-body-before-skill.md (53,809 bytes, the body before the rewrite), pr-body-v2.md (18,489), pr-body-v3.md (18,314), pr-body-v4.md (16,412, posted 19:00).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr3-20261012/pr-body-before-skill.md (62,045 bytes), pr-body-v2.md (16,026), pr-body-v3.md (15,855), pr-body-v4.md (14,400, posted 19:00).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr-body-before-skill.md (58,675 bytes), pr-body-v2.md (17,350), pr-body-v3.md (17,312), pr-body-v4.md (16,729, posted 19:00). Later versions v5 to v16 in that folder come from other sessions.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR1-4868/the-changes-as-review-guide.md (3,252 bytes). The three-thread Q-and-A draft of "How to review this PR", 490 words. (preserved: artifacts/intel-amx/pr3879/split-4424/PR1-4868/the-changes-as-review-guide.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR1-4868/review-guide-rule-versions.md (2,946 bytes). Eight guideline versions under 100 words; the user chose version 8. (preserved: artifacts/intel-amx/pr3879/split-4424/PR1-4868/review-guide-rule-versions.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR1-4868/user-edits-20261014.txt (9,192 bytes). Paragraph diff of the user's own 4868 edits against v3, with the user's "REASON:" lines added afterwards. (preserved: artifacts/intel-amx/pr3879/split-4424/PR1-4868/user-edits-20261014.txt)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/issue-4444/status-20261014.md (4,827 bytes). The status comment posted on issue 4444. (preserved: artifacts/intel-amx/pr3879/split-4424/issue-4444/status-20261014.md)
+- claude-agentsrv:/home/jhan/.claude/skills/PR-description/SKILL.md (11,745 bytes). The skill. Hand-written, edited by both the user and Claude. Also references/example-how-to-review.md (2,807 bytes) and evals/evals.json (1,604 bytes, drafted, not run). (preserved: artifacts/claude-skills/PR-description/SKILL.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/pr-body-v3.md (24,613 bytes, posted at 14:20), pr-body-v4.md (14,428 bytes, draft never posted), pr-body-v5-jhan-edited.md (19,142 bytes, live copy after the 18:29 phrase fix). (preserved: artifacts/intel-amx/exec/pr1-20261010/pr-body-v3.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/pr-body-before-skill.md (53,809 bytes, the body before the rewrite), pr-body-v2.md (18,489), pr-body-v3.md (18,314), pr-body-v4.md (16,412, posted 19:00). (preserved: artifacts/intel-amx/exec/pr2-20261011/pr-body-before-skill.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr3-20261012/pr-body-before-skill.md (62,045 bytes), pr-body-v2.md (16,026), pr-body-v3.md (15,855), pr-body-v4.md (14,400, posted 19:00). (preserved: artifacts/intel-amx/exec/pr3-20261012/pr-body-before-skill.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr-body-before-skill.md (58,675 bytes), pr-body-v2.md (17,350), pr-body-v3.md (17,312), pr-body-v4.md (16,729, posted 19:00). Later versions v5 to v16 in that folder come from other sessions. (preserved: artifacts/intel-amx/exec/pr4-20261012/pr-body-before-skill.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md (270,899 bytes now). Sections appended: "PR-1 description, Design A executed", the budget line, "PR-3 description rewritten", "PR-2 and PR-4 descriptions rewritten", "Token divergence tracked in issue #4444", the 4868 phrase fix, "PRs 4887, 4898, 4901 reshaped".
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/vnni-packed-wording.md (2,919 bytes) and pr-description-skill.md (7,206 bytes, later updated by other sessions). Memory notes. pr1-split-execution.md (8,105 bytes) had one count corrected (641 to 614). MEMORY.md index lines added.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/vnni-packed-wording.md (2,919 bytes) and pr-description-skill.md (7,206 bytes, later updated by other sessions). Memory notes. pr1-split-execution.md (8,105 bytes) had one count corrected (641 to 614). MEMORY.md index lines added. (preserved: artifacts/intel-amx/memory/split-4424/vnni-packed-wording.md)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/f0fb48e7-5749-4983-870b-ce4ee0ace8fa/scratchpad/ (3,303,500 bytes). gen_review.py, secwords.py, packedit.py (10,432), stackcol.py (2,649), postbody.py (1,511, the re-fetch, patch and byte-compare poster), numcheck.py (963, every number in a draft must occur in its sources), bodies/ (body snapshots before and after every patch), patch-*.json, merged60.json, the four PR diffs. Scratchpad, may be cleaned up.
 - GitHub: PRs 4868, 4887, 4898, 4901 bodies edited (see Results). Issue comment https://github.com/positron-ai/tron/issues/4444#issuecomment-6158706248. No code commits.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr1-20261010/` (2 files)
+- `artifacts/intel-amx/exec/pr2-20261011/` (3 files)
+- `artifacts/intel-amx/exec/pr3-20261012/` (3 files)
+- `artifacts/intel-amx/exec/pr4-20261012/` (3 files)
+- `artifacts/intel-amx/memory/split-4424/` (1 files)
 
 ## Current state
 
@@ -125,7 +133,7 @@ Token divergence status as read from the posted bodies at 18:05 (not re-measured
 ## Open items / next steps
 
 - The user's edited 4868 body was last measured at 4,096 words before the user's cuts. Unverified what its counted length is now. The skill's 2,000-word budget was never applied to 4868 by Claude.
-- The skill's evals (evals/evals.json) are drafted and not run.
+- The skill's evals (evals/evals.json) are drafted and not run. (preserved: artifacts/claude-skills/PR-description/evals/evals.json)
 - The PR 4424 reference sentence "PR #4424 remains open as a reference until all four are open" was known stale at 14:20 and left by the user's decision.
 - Issue 4444 items 2 (kill-switch rollback contract) and 3 (model-level bound) are open with no owner named.
 - The "Benchmark binary mismatch" open item was dropped from 4887, 4898 and 4901 on purpose, since none of them changes that workflow. It survives in the pr-body-before-skill.md copies.
