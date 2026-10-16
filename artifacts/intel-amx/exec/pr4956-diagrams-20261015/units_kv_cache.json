@@ -1,0 +1,390 @@
+{
+ "file": "h/tron/models/kv_cache.hpp",
+ "short": [
+  "PR 4956 (tron pull request 4956, the first of four PRs that split PR 4424) adds the build option TRON_K_VNNI (default OFF). With it on, the K plane (the stored keys of one KV head on one 64-token page) of every 128-dimension head is a typed owner (k_vnni_tensor) in the VNNI layout (the pair-interleaved value order that the AMX tile multiply reads as its B operand), instead of one row per token.",
+  "In kv_cache.hpp the plane is reached only through typed views and typed operations: kv_block::k becomes k_storage, the row view page::k exists only for row-major slots, the new page::k_packed hands the read-only plane to the score reader, the new set_k_row / get_k_row move one token's row in and out of any slot, and page copies move a whole page as one owner assignment or any other range token by token.",
+  "This page draws the data model, the two layouts, the call graph, the life of one token's K row and the thread timing once (section 1), then shows each of the seven logical changes of the file beside the diagram it alters (section 2)."
+ ],
+ "base_intro": "Five diagrams carry the context that every change below refers to. B1 is the data model (book, page, kv_block, the typed K plane), B2 the two layouts of one K plane, B3 the function model (who calls what), B4 the sequencing model (the life of one token's K row) and B5 the interaction model (which thread touches the plane when). The per-change diagrams in section 2 reuse their shapes and colours and say which base diagram they update.",
+ "changes_intro": "A unit is one logical change: a data model, one function's new behaviour, one call path. Each unit shows the head code with its comments (added lines green, removed base lines red, head line numbers in the second column, base line numbers in the first) and, beside it, the diagram that updates a base diagram. Units are ordered by dependency: the design note (C0), the typed plane (C1), the row view that no longer exists for a VNNI slot (C2), the read view for the score reader (C3), the row accessors (C4), page copies (C5) and the test-only fill (C6).",
+ "trivial_intro": "Changes that alter no behaviour of the cache and need no picture.",
+ "trivial_bullets": [
+  "Blank separator lines after the new functions (head lines 747, 2052, 2069, 2086, 2097, 2108, 2589, 2596, 2603, 2607: added blank lines) belong to no unit.",
+  "The (void)-free forwarding overloads of C4 (the uniform-geometry forms) only forward to the primary geometry."
+ ],
+ "method": [
+  "The coverage assert of the build (section 5, first bullet) skips blank added lines: the added blank separator lines listed in section 3 sit in no unit or trivial entry.",
+  "Thread and ordering facts in the diagrams come from the comments in the diff itself (Note [K VNNI storage], head lines 685-746, and the function comments) and from the callers' code in model.hpp, self_attention.hpp, full.hpp, gof.hpp and gof.cpp at the PR head a5697f86d3. Every line number was read from the head file. Facts about later PRs of the split (the AMX kernel for the VNNI plane, the block save) are named as future work and never drawn as present.",
+  "The worked example (page 7, storage slot 5, KV head 0, offsets 0..40 saved, token 37, dimension 70) is an illustration, not a measurement. No performance number appears on this page except the ones quoted from the code comments."
+ ],
+ "base": [
+  {
+   "id": "kv_cache-b1",
+   "short": "data model",
+   "title": "Data model: book, page, kv_block and the typed K plane",
+   "intro": "A book holds one storage slot per layer (plus one EAGLE storage), pages of 64 token offsets, and one kv_block per (slot, KV head, page). The PR types the K plane of a kv_block (k_storage: k_vnni_tensor for a VNNI slot, a bf16 array otherwise) and adds the page accessors that reach it. Every arrow says how many. The worked example (page 7, slot 5, KV head 0, offsets 0..40 saved) is the strip at the bottom."
+  },
+  {
+   "id": "kv_cache-b2",
+   "short": "one plane, two layouts",
+   "title": "One K plane, two layouts in the same 16 KiB",
+   "intro": "The K plane of one (slot, KV head, page) is 64 tokens x 128 bf16 = 16 KiB in either layout. Native K is one 256-byte row per token. The VNNI plane is 16 panels of 1 KiB, one per (dimension step, token block), with one dimension pair of 16 tokens per 64-byte line. The layout is a compile-time property of the slot (k_vnni::layout_on). Under each layout are the accessors that reach it; page::k does not exist for the VNNI one."
+  },
+  {
+   "id": "kv_cache-b3",
+   "short": "function model",
+   "title": "Function model: callers, page and book API, k_vnni.hpp operations",
+   "intro": "Each row is one call path through kv_cache.hpp: the caller in another file, the page or book function it calls, and the typed operation of h/tron/tensor/k_vnni.hpp that touches the bytes. Every function cell says in one line what the function does and cites its definition."
+  },
+  {
+   "id": "kv_cache-b4",
+   "short": "sequencing model",
+   "title": "Sequencing model: the life of one token's K row in a VNNI slot",
+   "intro": "Token 37 of the worked example: save_k stores its row through set_k_row and store_row (4 scatters into the token's column), then marks K complete. Three readers take the same bytes through typed views: the attention workers through k_packed and k_vnni::qk_group, the FPGA staging through get_k_row and load_row into a scratch row, and a page copy through copy_token or one owner assignment."
+  },
+  {
+   "id": "kv_cache-b5",
+   "short": "interaction model",
+   "title": "Interaction model: which thread touches the K plane when",
+   "intro": "One forward pass of one layer and the tree work between passes, as lanes. The main thread writes the rows and counts the slot's latch down; the attention workers wait on that latch before they read; the GOF staging runs on idle workers between layers and on main at the forward end; page copies run in the scheduler's defrag under tree_lock. Durations are not to scale. The order is what matters."
+  }
+ ],
+ "units": [
+  {
+   "id": "c0",
+   "title": "Note [K VNNI storage]: the design record of the typed VNNI K plane",
+   "kind": "comment only",
+   "ranges": [
+    [
+     685,
+     746
+    ]
+   ],
+   "lead": [
+    "Comment text only. It is the design record the code below follows, so it is listed first and shown in full.",
+    "The Note says four things about the layout. With TRON_K_VNNI the K plane of every 128-dimension head holds the VNNI layout (687-695). The same bytes and the same page capacity: only the order of the values changes. The gate k_vnni::layout_on<head_size> is a property of the storage geometry, so every reader and writer of a slot sees the same layout. V is unchanged.",
+    "The plane is typed (697-704). kv_block::k is a k_vnni_tensor for a VNNI slot and a bf16 array for a row-major slot. The plane is reached only through k_vnni_view and the typed operations store_row, load_row and copy_token. detail::k_vnni_access is the one route from a view to the plane address: for those operations, the score reader k_vnni::qk_group and the test-only book::fill_random.",
+    "The six numbered items (713-739), one per consumer of a VNNI slot, say how each reader and writer changes: save_k stores with set_k_row; the dense AMX page path is not compiled; the software path uses k_vnni::qk_group with k_packed; the FPGA staging gathers a row with get_k_row; page copies move a whole page as one owner assignment or token by token; page::k does not exist.",
+    "The 'why' paragraph (706-710) and the kill-switch paragraph (740-746) describe work outside this PR: the AMX QK kernel that will read the plane as its B operand is not part of this change, and TRON_AMX_DISABLE=1 changes no score and no visit path for 128-dimension heads until that kernel is merged."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "c1",
+   "title": "kv_block::k becomes a typed owner for VNNI slots",
+   "kind": "changed data model",
+   "ranges": [
+    [
+     2562,
+     2575
+    ],
+    [
+     2590,
+     2611
+    ]
+   ],
+   "lead": [
+    "k_storage is k_vnni_tensor<page_size, head_size> when k_vnni::layout_on<head_size>, and native_k_storage (the bf16 array, one row of head_size values per token) otherwise (2565-2568). Both hold page_size * head_size bf16 values. A static_assert pins the equal size (2573-2574).",
+    "A second static_assert checks at compile time that k_storage is trivial to construct, copy and destroy (2569-2572). The DMA allocation creates the kv_blocks without writing bytes (Note [KV block lifetime], 1559-1582).",
+    "k_view and k_at now require a row-major head size (2590-2610). A packed plane has no contiguous rows. It is reached through k.as_view() instead (tensor/k_vnni.hpp:162-176).",
+    "The member comment (2562-2564) names both forms: native K indexed as [p * head_size + i], packed K per Note [K VNNI storage]."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "c2",
+   "title": "The row view page::k exists only for row-major slots",
+   "kind": "changed",
+   "ranges": [
+    [
+     1974,
+     2039
+    ]
+   ],
+   "lead": [
+    "All eight overloads of page::k gain the clause !k_vnni::layout_on on their head size (1978, 1984, 1990, 1999, 2010, 2017, 2023, 2033). Four overloads return the plane view kv_block::k_view(), four return one token's row k(slot, kv_head)[i_page].",
+    "For a row-major slot nothing changes. The three production callers keep page::k on their row-major branch: save_k (model.hpp:3114), the dotter loop of apply_page_tok (self_attention.hpp:1956) and the FPGA staging callback (full.hpp:2758).",
+    "For a VNNI slot the function does not exist, so a call would not compile. Each caller's if constexpr takes the typed accessor instead: set_k_row, the live mask with k_packed, or get_k_row (Note [K VNNI storage] item 6, 737-739).",
+    "The new comment (1974-1975) points a reader of a VNNI slot at set_k_row / get_k_row. The test page_k_accepts_geometry is STATIC_REQUIRE_FALSE for a VNNI geometry (t_llama_unit.cpp:1096-1102)."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "c3",
+   "title": "page::k_packed: the read-only plane view for the score reader",
+   "kind": "new",
+   "ranges": [
+    [
+     2041,
+     2051
+    ]
+   ],
+   "lead": [
+    "k_packed<geometry>(slot, kv_head) returns kv_block<geometry>(slot, kv_head).k.as_view() from a const page: a k_vnni_view<const bf16, page_size, geometry.head_size> (2047-2050). It exists only for a geometry the layout declares and whose head size is VNNI (2043-2045).",
+    "The comment says who gets writable views instead: internal cache writes take them from the block owner (2041-2042). So set_k_row and copy_storage_slot call k.as_view() on a non-const block (2063, 2341).",
+    "Its one production consumer is k_vnni::qk_group in apply_page_tok, called once per page with the live mask of the loop when relevant_k_tokens > 0 (self_attention.hpp:1963-1971).",
+    "t_llama_unit pins the type rules of the view: the AMX kernels reject it, no construction from a bf16 pointer, bf16 to const bf16 converts and never the reverse, no element write, 64-byte alignment of the owner, and with TRON_K_VNNI the page accepts k_packed for a 128-dimension geometry (t_llama_unit.cpp:433-461)."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "c4",
+   "title": "set_k_row / get_k_row: one token's K row in and out of any slot's layout",
+   "kind": "new",
+   "ranges": [
+    [
+     2053,
+     2107
+    ]
+   ],
+   "lead": [
+    "set_k_row<geometry, Aligned, Dma> takes one token's row as a typed view (const_k_row_view<geometry.head_size, Aligned, Dma>) and stores it in the slot's K layout. The row may be unaligned (2053-2060). get_k_row is the inverse, into a k_row_view (2070-2077).",
+    "Both assert i_page < page_size and branch at compile time on k_vnni::layout_on<geometry.head_size> (2061-2062, 2078-2079). A VNNI slot takes store_row or load_row through the owner's view (2063, 2080). A row-major slot keeps a std::memcpy of head_size * sizeof(bf16) bytes through k_at (2064-2066, 2081-2083).",
+    "The uniform-geometry overloads forward to layout_t::primary_geometry (2087-2107).",
+    "Callers, one per bullet:",
+    "save_k_impl stores a bf16 row directly with k_source_row(kout), and converts other activation types into a 64-byte-aligned bf16 row first (model.hpp:3100-3112).",
+    "page_info::k_head_fn gathers one row into the staging's scratch with k_destination_row(dest) (full.hpp:2751-2756).",
+    "The tests store and load every token of a page, and check the uniform overloads (t_k_vnni_layout.cpp:362-377; t_llama_unit.cpp:485-489; t_amx_dispatch_dtype.cpp:110)."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "c5",
+   "title": "copy_storage_slot: a whole page as one owner assignment, other ranges token by token",
+   "kind": "changed",
+   "ranges": [
+    [
+     2331,
+     2355
+    ]
+   ],
+   "lead": [
+    "For a VNNI geometry the K copy of one KV head has two paths (2331-2344). When the range is the whole page (src_begin == 0 && dst_begin == 0 && count == page_size), the owner is assigned as one value: dst_block.k = src_block.k (2337-2338). k_vnni_tensor is trivially copyable (2569-2572), so this copies the 16 KiB plane.",
+    "Any other range moves token by token with copy_token (2339-2343). The comment says why (2332-2333): a token's column depends on its offset in the page, so a token that changes offset changes column.",
+    "The row-major geometry keeps the memcpy of count * head_size * sizeof(bf16) bytes per KV head (2345-2355). The nine removed lines are that memcpy, re-indented under the new else.",
+    "V is unchanged: append_v per token (2356-2359).",
+    "The worked example: an append of 41 tokens from page 7 to page 9 is 41 copy_token calls (41 load_row + 41 store_row). A full page is one owner assignment. The tests cover both paths (t_k_vnni_layout.cpp:379-436)."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "c6",
+   "title": "The test-only fill reaches a packed K plane through detail::k_vnni_access",
+   "kind": "changed, test-only path",
+   "ranges": [
+    [
+     1337,
+     1340
+    ],
+    [
+     1577,
+     1582
+    ],
+    [
+     1772,
+     1781
+    ]
+   ],
+   "lead": [
+    "book::fill_random fills every kv_block with random bf16 values, for testing only (1334-1349). Its comment now names it the one documented exception to the typed packed-V and packed-K access rules: it interprets no coordinates and marks no token complete (1337-1340).",
+    "fill_storage_slot is its body (1766-1786). The new branch takes the raw plane address of a VNNI slot through detail::k_vnni_access::plane(block.k.as_view()) and writes all page_size * head_size values (1772-1776). The array loop of native K is unchanged under the else (1777-1781). V keeps its own access helper (1782-1784).",
+    "The rewritten paragraph of Note [KV block lifetime] (1577-1582) names the two kinds of K member (a bf16 array, or a trivially copyable owner) and says where SIMD load addresses inside a packed plane come from (the plane's access helper)."
+   ],
+   "base": "(set by the figure module)"
+  }
+ ],
+ "trivial": [
+  {
+   "id": "t1",
+   "title": "Include of the typed K plane header",
+   "ranges": [
+    [
+     33,
+     33
+    ]
+   ],
+   "what": "One include line: h/tron/tensor/k_vnni.hpp."
+  },
+  {
+   "id": "t2",
+   "title": "Comment of the uniform-storage paragraph",
+   "ranges": [
+    [
+     590,
+     591
+    ]
+   ],
+   "what": "Two comment lines name packed-K storage (h/tron/tensor/k_vnni.hpp, Note [K VNNI storage]) next to packed-V storage in the paragraph on uniform storage."
+  }
+ ],
+ "glossary": [
+  [
+   "AMX",
+   "Advanced Matrix Extensions, the tile instruction set of the CPU. Its tile multiply reads its second operand (the B operand) in the VNNI layout. This PR adds no AMX instruction; the AMX kernel that reads the VNNI plane lands in a later PR of the split. [kv_cache.hpp:706-710]"
+  ],
+  [
+   "AVX-512",
+   "Advanced Vector Extensions, the CPU's 512-bit vector instruction set. The score reader of the VNNI plane (k_vnni::qk_group) and the row operations store_row / load_row are AVX-512 code. [kv_cache.hpp:715, 721-724]"
+  ],
+  [
+   "bf16",
+   "The 16-bit brain floating-point format of the stored K and V values. One 128-dimension K row is 128 bf16 = 256 bytes."
+  ],
+  [
+   "book",
+   "The struct that owns one KV cache allocation: it reserves space for a requested number of pages and owns the memory; a page is a lightweight reference into it. [kv_cache.hpp:58 (Note [KV Memory Layout]), 882-883]"
+  ],
+  [
+   "copy_storage_slot / copy_from / book::append (defrag)",
+   "copy_from copies count tokens from a source page into this page for every active slot, through copy_storage_slot per slot. book::append copies one book's tokens after another's, page by page, to defragment books created by tree-shaped speculation; the scheduler runs it with tree_lock held. [kv_cache.hpp:1297-1332, 2324-2375; full.hpp:1257-1259]"
+  ],
+  [
+   "copy_token",
+   "The typed operation of h/tron/tensor/k_vnni.hpp that moves one token between packed K planes (or within one): load_row then store_row through a 64-byte-aligned local row. [tensor/k_vnni.hpp:286-297]"
+  ],
+  [
+   "detail::k_vnni_access",
+   "A friend helper of k_vnni_view with one static function, plane(view), that returns the raw pointer to the plane. It is the one route from a view to the plane address: for store_row / load_row / copy_token, the score reader k_vnni::qk_group and the test-only fill. [tensor/k_vnni.hpp:188-194; kv_cache.hpp:701-704]"
+  ],
+  [
+   "dimension pair / pair row / panel / dimension step / token block",
+   "In the VNNI layout the two values of a dimension pair of one token sit side by side in one 32-bit lane. One 64-byte pair row holds that pair for 16 consecutive tokens (a token block). A panel is the 16 pair rows of one dimension step (32 dimensions) for one token block: 1 KiB. A plane has 4 steps x 4 blocks = 16 panels. [tensor/k_vnni.hpp:10-31]"
+  ],
+  [
+   "DMA",
+   "Direct memory access. The KV books are DMA memory, and the allocation itself creates the kv_block objects without writing bytes (Note [KV block lifetime]). So kv_block's members must be trivial to construct, copy and destroy. [kv_cache.hpp:1559-1582, 2569-2572]"
+  ],
+  [
+   "dotter",
+   "The per-token dot-product loop of self_attention.hpp for row-major K (struct dotter in h/tron/kernels/dotter.hpp). It is compiled only for row-major slots. [kv_cache.hpp:725-727; self_attention.hpp:1916-1926]"
+  ],
+  [
+   "EAGLE storage",
+   "The extra physical slot of a book for EAGLE (a speculation model): kv_storage_offset(logical_slot_count()). [kv_cache.hpp:1027-1030]"
+  ],
+  [
+   "FPGA / GOF / staging / HBM",
+   "FPGA: field-programmable gate array, the card that runs hardware attention. A GOF is a group of four tokens whose K/V rows the staging (gof::populate) copies into a buffer that DMA moves to the card's HBM (High Bandwidth Memory). page_info::k_head_fn hands the staging one token's K row; for a VNNI slot it gathers the row into a caller-owned scratch with get_k_row. [kv_cache.hpp:728-732; gof.hpp:58-70; gof.cpp:186-211; full.hpp:2747-2760]"
+  ],
+  [
+   "help_drain_gof / wait_for_coop_gof",
+   "The two callers of the GOF staging: idle attention workers drain the cooperative GOF queue between layers (help_drain_gof), and the main thread drains the tail at the forward end (wait_for_coop_gof). [model.hpp:3225-3250]"
+  ],
+  [
+   "k_at / k_view / page::k (the row-major K views)",
+   "kv_block::k_view() is the plane as a [token][element] view, k_at(i_page) is one token's row, and page::k(slot, kv_head[, i_page]) returns them for a page. All of them now require a row-major head size. [kv_cache.hpp:1974-2039, 2590-2610]"
+  ],
+  [
+   "k_source_row / k_destination_row / transfer row",
+   "const_k_row_view and k_row_view are rank-1 typed views of one token's head_size bf16 values in dimension order, with the caller's Aligned and Dma flags. k_source_row builds a read-only one, k_destination_row a writable one. They are the argument type of set_k_row / get_k_row. [tensor/k_vnni.hpp:197-225]"
+  ],
+  [
+   "k_storage / native_k_storage",
+   "k_storage is the type of kv_block::k: k_vnni_tensor<page_size, head_size> for a VNNI slot, native_k_storage = bf16[page_size * head_size] otherwise. Both hold the same number of bytes. [kv_cache.hpp:2562-2575]"
+  ],
+  [
+   "k_vnni::layout_on<head_size>",
+   "The compile-time gate of the layout: true only when TRON_K_VNNI is defined and head_size == 128. It depends on the head size only, so every reader and writer of a slot sees the same layout. [tensor/k_vnni.hpp:86-95; kv_cache.hpp:690-694]"
+  ],
+  [
+   "k_vnni::qk_group",
+   "The AVX-512 score reader of the VNNI plane (h/tron/kernels/k_vnni.hpp): for one query group and one page it computes the unscaled scores q_h . K_t for every token whose bit is set in the live mask, one token per vector lane. [kernels/k_vnni.hpp:33-38; kv_cache.hpp:721-727]"
+  ],
+  [
+   "k_vnni_tensor / k_vnni_view",
+   "k_vnni_tensor<64, 128> owns one packed K plane: a 64-byte-aligned bf16 array of 8192 values, no separate allocation. k_vnni_view<T, 64, 128> refers to a plane; at(token, dim) reads one value; there is no element write and no public pointer access. as_view() gives a writable view from an owner and a read-only view from a const owner. [tensor/k_vnni.hpp:119-186]"
+  ],
+  [
+   "kv_block",
+   "The struct that holds the two planes, K and V, of one KV head in one KV slot of one page. k is now k_storage; v is the VNNI-packed v_vnni_tensor, unchanged. [kv_cache.hpp:2558-2611]"
+  ],
+  [
+   "kv_block_at_storage / book::kv_block",
+   "The accessors that return the kv_block of a (slot, KV head, page): by logical slot (kv_block) or by physical storage offset (kv_block_at_storage, used by page copies and the fill). [kv_cache.hpp:1668-1758, 2282-2303]"
+  ],
+  [
+   "kv_saves_ / mark_k_complete / is_kv_complete",
+   "The page's per-token per-slot save counters: mark_k_complete and mark_v_complete count one save each, is_kv_complete is true when both are saved. The staging reads a token only when kv_complete_fn says so. Unchanged by this PR. [kv_cache.hpp:2208-2226, 2255-2258; gof.hpp:69-70]"
+  ],
+  [
+   "kill switch (TRON_AMX_DISABLE)",
+   "TRON_AMX_DISABLE=1 disables the AMX attention kernels at run time. It keeps the layout: a TRON_K_VNNI binary runs the AVX-512 VNNI reader either way. Until the VNNI AMX kernel is merged it changes no score and no visit path for 128-dimension heads. [kv_cache.hpp:740-746]"
+  ],
+  [
+   "KV head / kv_geometry / kv_mul",
+   "One key/value head of grouped-query attention. kv_geometry holds n_kv_heads and head_size. kv_mul is the number of query heads that share one KV head (4 in the worked example). [kv_cache.hpp:108-111]"
+  ],
+  [
+   "layout_t / uniform_geometry / primary_geometry / declares_geometry",
+   "layout_t is the compile-time slot table of a book. uniform_geometry is true when every slot shares one kv_geometry, primary_geometry is that geometry, and declares_geometry<geometry>() is the requires clause of the geometry overloads. The uniform overloads of set_k_row / get_k_row forward to the primary geometry. [kv_cache.hpp:793-796, 1645-1656, 2087-2107]"
+  ],
+  [
+   "live (the live mask)",
+   "A 64-bit mask in apply_page_tok, one bit per page offset: the tokens the loop found relevant for this query. qk_group scores exactly those tokens. [self_attention.hpp:1927, 1954, 1963-1970]"
+  ],
+  [
+   "load_row / store_row",
+   "The typed row operations of h/tron/tensor/k_vnni.hpp: store_row scatters one token's 128 values into its 64 pair slots (4 AVX-512 scatters of 16 dwords); load_row is the inverse (4 gathers). Only the token's own slots are touched. [tensor/k_vnni.hpp:251-284]"
+  ],
+  [
+   "Note [K VNNI storage]",
+   "The kv_cache.hpp note that records the design: the gate, the typed plane, why, the six consumers of a VNNI slot and the kill switch. Unit C0 shows it in full. [kv_cache.hpp:685-746]"
+  ],
+  [
+   "Note [KV block lifetime]",
+   "The kv_cache.hpp note that explains why kv_block and its members must stay trivial: the DMA allocation creates the objects, no bytes are written. [kv_cache.hpp:1559-1582]"
+  ],
+  [
+   "page",
+   "A block of 64 contiguous tokens of KV data (page_size = 64). Attention proceeds page by page. [kv_cache.hpp:1880-1882]"
+  ],
+  [
+   "page offset (i_page)",
+   "A token's position inside its 64-token page, 0..63. In the VNNI plane the offset decides the token's block (offset / 16) and column (offset % 16), so a copy that changes the offset must go token by token. [kv_cache.hpp:2332-2336]"
+  ],
+  [
+   "page::k_packed",
+   "The read-only typed view (k_vnni_view<const bf16, 64, 128>) of one page's K plane for a slot and KV head, VNNI slots only: the argument of k_vnni::qk_group. [kv_cache.hpp:2041-2051]"
+  ],
+  [
+   "plane",
+   "K for one KV head of one page: 64 tokens x 128 dimensions of bf16 = 16 KiB, the same bytes in the row-major and the VNNI layout. [tensor/k_vnni.hpp:21-24; kv_cache.hpp:687-690]"
+  ],
+  [
+   "row-major (native K)",
+   "One row of head_size bf16 values per token, indexed [p * head_size + i]. Every head size other than 128, and every head size when TRON_K_VNNI is off, keeps this layout. [kv_cache.hpp:2562-2565]"
+  ],
+  [
+   "s_pages",
+   "The per-page score buffer of apply_page_tok: s_pages[kv_mul][64] fp32 (32-bit float), filled with -infinity and then written by the dotter or by qk_group. [self_attention.hpp:1901-1906]"
+  ],
+  [
+   "set_k_row / get_k_row",
+   "The layout-agnostic row accessors of a page: store one token's K row into, or load it out of, the slot's K layout (store_row / load_row for VNNI, std::memcpy for row-major). Four overloads: by geometry and for the uniform layout. [kv_cache.hpp:2053-2107]"
+  ],
+  [
+   "slot / kv_slot_id / storage slot / kv_storage_offset",
+   "kv_slot_id selects a logical K/V storage unit of the book. kv_storage_offset is a physical slot offset in the book's allocation (page copies and the fill address storage, not logical slots). [attention_ids.hpp:23; common.hpp:240]"
+  ],
+  [
+   "tree_lock",
+   "The global lock of the scheduler's token tree. defrag_books asserts that the calling thread holds it, so page copies run with no forward pass reading the pages. [full.hpp:1257-1259]"
+  ],
+  [
+   "tron",
+   "The inference program under test. kv_cache.hpp is its KV cache store, whose public interface is the public methods of the book and page structs."
+  ],
+  [
+   "TRON_K_VNNI",
+   "The CMake option (default OFF) that switches the K plane of every 128-dimension head to the VNNI layout through the gate k_vnni::layout_on. The definition is PUBLIC: every translation unit that touches a KV page sees the same layout. [CMakeLists.txt:47; src/tron/CMakeLists.txt:226-234]"
+  ],
+  [
+   "upstream_kvs_ready",
+   "The per-slot latch (a countdown) that orders save_k and the attention of a slot: save_k counts it down after the stores, the attention waits on it before it reads a page. [model.hpp:3127; self_attention.hpp:823; common.hpp:1007, 1186]"
+  ],
+  [
+   "VNNI (layout)",
+   "Vector Neural Network Instructions. In the VNNI layout the two values of a dimension pair of one token are stored side by side; one 64-byte row holds that pair for 16 consecutive tokens. It is the B-operand layout of the AMX tile multiply. [tensor/k_vnni.hpp:12-18]"
+  ]
+ ]
+}

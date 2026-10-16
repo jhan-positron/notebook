@@ -1,0 +1,316 @@
+{
+ "file": "h/tron/kernels/k_vnni.hpp",
+ "short": [
+  "h/tron/kernels/k_vnni.hpp is a new file of PR 4956 (tron PR 4956, the first of the four PRs that split PR 4424). It holds one function, k_vnni::qk_group: the AVX-512 reader that scores one query group against the live tokens of one KV page whose K plane is stored in the VNNI layout (the pair-interleaved order in which one 64-byte line holds one dimension pair of 16 tokens).",
+  "The reader keeps one token per vector lane and one accumulator register per query head, reads only the tokens whose bit is set in the live mask, and adds the same products as the row-major dotter in a different order; it runs no AMX instruction, so any translation unit may include it.",
+  "This page draws the data model, the function model, the loop nest, the numerics contract and the threads once (section 1), then shows each of the five logical parts of the file (Q0 to Q4) beside its diagram (section 2)."
+ ],
+ "base_intro": "Five diagrams carry the context that every part below refers to. B1 is the data model (the four inputs and the output of qk_group, with the worked example), B2 the function model (callers, the three branches, callees, and the two other readers of K), B3 the sequencing model (the loop nest with an instruction count), B4 the numerics model (the same products as the row-major dotter, a different add order) and B5 the interaction model (which thread runs the reader and what it never reads). The per-part diagrams in section 2 reuse their shapes and colours and say which base diagram they update.",
+ "changes_intro": "The file is new, so every line is added. A unit is one logical part: the header comment, the constant MAX_KV_MUL_16 with the contract and the split above 16 heads, the fp16 query path, the masked block loop, and the masked store. Each unit shows the head code with its comments and, beside it, the diagram that updates a base diagram. Units are ordered as the file is.",
+ "trivial_intro": "The include lines need no picture.",
+ "trivial_bullets": [],
+ "method": [
+  "Facts in the diagrams come from the file's own comments (the header at head lines 2-5, the contract at 20-31, the branch comments at 41 and 67) and its code, and from the callers and tests of the same PR: apply_page_tok in h/tron/models/self_attention.hpp, Note [K VNNI storage] in h/tron/models/kv_cache.hpp, the QK diagram in h/tron/kernels/amx_attn_iface.hpp, the row-major dotter in h/tron/kernels/dotter.hpp, and check_reader_against_dotter in t/t_k_vnni_layout.cpp. Every line number was read from the PR head a5697f86d3 (exec/pr4956-diagrams-20261015/figs/base_kernels.py and d_kernels_q*.py).",
+  "The worked example (a query group of kv_mul = 4 heads scoring page 7, storage slot 5, KV head 0, with page offsets 0..40 live; token 37 at dimension 70) is an illustration, not a measurement. Its instruction counts (192 masked loads, 768 VDPBF16PS, 12 masked stores) follow from the loop bounds in the code, not from a profile.",
+  "Every figure is an SVG (Scalable Vector Graphics, the drawing format of the figures). Each SVG was rendered to a PNG image (a pixel image) with cairosvg (a Python SVG renderer) and inspected for overlaps and clipped text; the per-figure colour and font scheme was checked against the styles each SVG uses (check_legend.py)."
+ ],
+ "glossary": [
+  [
+   "acc[h] / accumulator",
+   "One 512-bit register (__m512) per query head h of the pass: 16 fp32 lanes, one per token of the current token block, that hold the running dot products. Zeroed per block and stored once per block. [kernels/k_vnni.hpp:20, 60-63, 92-94]"
+  ],
+  [
+   "AMX",
+   "Advanced Matrix Extensions, the tile instruction set of the CPU. Its tile multiply reads its B operand in the VNNI layout. No AMX instruction runs in this file; the VNNI AMX kernel is a later PR of the stack (PR 4958). [kernels/k_vnni.hpp:3; amx_attn_iface.hpp:60-62]"
+  ],
+  [
+   "apply_page_tok",
+   "The per-page scoring function of self_attention.hpp: for one (query token, page, KV head) it either runs the dense AMX page path (row-major slots only) or scores in software: the dotter loop for row-major K, or the live-mask loop plus one qk_group call for VNNI K. [self_attention.hpp:1882-1886, 1909, 1954, 1966-1970]"
+  ],
+  [
+   "AVX-512",
+   "Advanced Vector Extensions, the CPU's 512-bit vector instruction set. One register has 16 lanes of 32 bits. The reader uses its masked load, its bf16 dot product VDPBF16PS, its FMA and its masked store. [kernels/k_vnni.hpp:2, 68-69, 75-76, 84-87, 93]"
+  ],
+  [
+   "bf16",
+   "The 16-bit brain floating-point format. A bf16 shifted up by 16 bits is the exact fp32 (BF16_BITS_16); two bf16 fill one 32-bit lane (a dword). [k_vnni.hpp:74-75; kernels/k_vnni.hpp:79-82]"
+  ],
+  [
+   "dense AMX page path / qk_rowmajor_128x4",
+   "The AMX fast path of software attention for one (query, page) pair of a row-major slot: the whole 64-token page is scored by the AMX kernel qk_rowmajor_128x4. It is not compiled for a VNNI slot (the gate adds !k_vnni::layout_on), so every page of a VNNI slot takes the software path. [self_attention.hpp:1882-1886; kv_cache.hpp:718-720]"
+  ],
+  [
+   "dimension pair (dp) / dword / lane",
+   "Dimensions 2 dp and 2 dp + 1 of one token, stored together in one 32-bit word (a dword). A 512-bit register has 16 lanes of one dword each; in the reader a lane is one token. [kernels/k_vnni.hpp:67; k_vnni.hpp:59-63]"
+  ],
+  [
+   "dimension step (step)",
+   "32 dimensions = 16 dimension pairs (STEP_DIMS_32, STEP_PAIRS_16). A 128-dimension head has DIM_STEPS_4 = 4 steps; the reader loops over them for every token block. [k_vnni.hpp:65-67; kernels/k_vnni.hpp:64-66]"
+  ],
+  [
+   "dotter (row-major dotter)",
+   "dotter<scalar, 128> in h/tron/kernels/dotter.hpp: the dot product of one query row with one token's K row in row-major storage, 4 (bf16) or 8 (float) vector products into two accumulators and a horizontal reduce_sum. apply_page_tok's loop uses it for row-major slots; the test compares qk_group against it. [dotter.hpp:42, 104-128, 174, 211-221]"
+  ],
+  [
+   "FMA (fused multiply-add)",
+   "_mm512_fmadd_ps(a, b, c) = a * b + c in one instruction, per lane. The float branch issues two per pair row and head, one for the even dimension and one for the odd. [kernels/k_vnni.hpp:30, 84-87]"
+  ],
+  [
+   "fp16",
+   "The 16-bit IEEE half format. qk_group accepts fp16 queries by widening them to float on the stack and then taking the float branch. [kernels/k_vnni.hpp:46-52]"
+  ],
+  [
+   "fp32",
+   "The 32-bit IEEE single format; the type of the accumulators and of the scores s. [kernels/k_vnni.hpp:37, 60]"
+  ],
+  [
+   "HEAD_SIZE_128 / PAGE_TOKENS_64",
+   "The one shape the K VNNI layout exists for: 128-dimension heads and 64-token pages. The reader's k_page type is k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>. [k_vnni.hpp:56-57; kernels/k_vnni.hpp:34]"
+  ],
+  [
+   "k_page / page::k_packed",
+   "The reader's first argument: the read-only typed view (k_vnni_view<const bf16, 64, 128>) of one page's K plane for one slot and KV head. page::k_packed returns it for VNNI slots only. [kernels/k_vnni.hpp:34; kv_cache.hpp:2041-2051]"
+  ],
+  [
+   "k_vnni_access (detail::k_vnni_access::plane)",
+   "The one route from a packed K view to its plane address. The reader takes the plane pointer through it once per call. [k_vnni.hpp:111-113, 188-193; kernels/k_vnni.hpp:56]"
+  ],
+  [
+   "k_vnni_view",
+   "The matrix view of one VNNI packed K plane; T = const bf16 is read-only. It has no public pointer access; qk_group reads the plane through k_vnni_access. [k_vnni.hpp:119-150]"
+  ],
+  [
+   "kill switch (TRON_AMX_DISABLE)",
+   "The environment variable that makes AMX unavailable at run time. With it, a TRON_K_VNNI binary still runs qk_group, not the row-major dotter: the same layout with AMX off, not the row-major binary's numerics. [kv_cache.hpp:740-746; amx_attn_iface.hpp:47-51]"
+  ],
+  [
+   "kv_mul / query group",
+   "The number of query heads that share one KV head (grouped-query attention). qk_group scores all kv_mul heads of the group in one call, 16 per pass (MAX_KV_MUL_16). [kernels/k_vnni.hpp:20-21, 32, 40-45]"
+  ],
+  [
+   "KV page / page offset",
+   "A page is 64 contiguous tokens of the KV cache. A token's page offset is its position 0..63 inside the page; its token block is offset / 16 and its lane is offset % 16. [kv_cache.hpp (page); k_vnni.hpp:56, 63-64]"
+  ],
+  [
+   "live (the live mask)",
+   "A 64-bit word with one bit per token of the page. apply_page_tok's loop sets bit i for every offset i that is visible to the query and inside the sliding window; qk_group scores exactly those tokens and never reads the others. [kernels/k_vnni.hpp:23-27, 36, 58; self_attention.hpp:1927, 1954]"
+  ],
+  [
+   "mask (__mmask16)",
+   "The 16-bit lane mask of one token block: mask = __mmask16(live >> (c * 16)). It gates the loads (clear lanes read nothing and hold 0) and the stores (clear lanes are not written). A block with mask 0 is skipped. [kernels/k_vnni.hpp:58-59, 68-69, 93]"
+  ],
+  [
+   "masked load (_mm512_maskz_loadu_epi32)",
+   "A 64-byte vector load that reads only the dwords whose mask bit is set and zeroes the other lanes. One per pair row per visited block. [kernels/k_vnni.hpp:26-27, 68-69]"
+  ],
+  [
+   "masked store (_mm512_mask_storeu_ps)",
+   "A 64-byte vector store that writes only the lanes whose mask bit is set. One per (block, head). [kernels/k_vnni.hpp:92-94]"
+  ],
+  [
+   "MAX_KV_MUL_16",
+   "Query heads scored per pass of qk_group: 16, one accumulator register per head. A group with more heads is split into passes of 16 and a remainder. [kernels/k_vnni.hpp:20-21, 40-45]"
+  ],
+  [
+   "Note [AMX attention dispatch]",
+   "The note in h/tron/kernels/amx_attn_iface.hpp that states the AMX dispatch rules and the numerics contract between the QK kernel and the caller's softmax update; qk_group's comment refers to it for the add-order statement. [amx_attn_iface.hpp:17, 55-75; kernels/k_vnni.hpp:31]"
+  ],
+  [
+   "Note [K VNNI storage]",
+   "The kv_cache.hpp note that describes the K VNNI layout, who writes it and who reads it. Items 2 and 3 say why a VNNI slot takes qk_group; the last paragraph is the kill switch. [kv_cache.hpp:685-746]"
+  ],
+  [
+   "pair row",
+   "One 64-byte line of a panel: one dimension pair for 16 consecutive tokens = 16 dwords (ROW_ELEMS_32 bf16). The reader loads one pair row per (step, dp). [k_vnni.hpp:61-63, 68; kernels/k_vnni.hpp:67-69]"
+  ],
+  [
+   "panel",
+   "One (step, c) cell of the plane: 16 pair rows of 64 bytes = 1 KiB (PANEL_ELEMS_512 bf16). Panel address: plane + (step * TOKEN_BLOCKS_4 + c) * PANEL_ELEMS_512. [k_vnni.hpp:70-73; kernels/k_vnni.hpp:65]"
+  ],
+  [
+   "plane",
+   "K for one KV head of one page: 64 tokens x 128 dimensions of bf16 = 16 KiB, as 16 panels. [k_vnni.hpp:21-28]"
+  ],
+  [
+   "q / q_scalar",
+   "The reader's query argument: kv_mul rows of 128 values with row stride HEAD_SIZE_128, of type bf16, float or fp16. [kernels/k_vnni.hpp:27-28, 35, 46, 54-55]"
+  ],
+  [
+   "qk_group (k_vnni::qk_group)",
+   "The function of this file: s[h * s_stride + t] = q_h . K_t (UNSCALED) for every live token t of one page, read from the VNNI plane with AVX-512. [kernels/k_vnni.hpp:23-38]"
+  ],
+  [
+   "s / s_stride / s_pages",
+   "The output: s[h * s_stride + t] receives the score of head h and token t; the other entries are left untouched. In apply_page_tok s is &s_pages[0][0] with s_stride = page_size, pre-filled with -infinity. [kernels/k_vnni.hpp:24-26, 37-38; self_attention.hpp:1900, 1906, 1970]"
+  ],
+  [
+   "token block (c)",
+   "16 consecutive tokens of a page (BLOCK_TOKENS_16): page offsets 16 c .. 16 c + 15. A page has TOKEN_BLOCKS_4 blocks; the reader visits each block whose mask is not zero. [k_vnni.hpp:63-64; kernels/k_vnni.hpp:57-59]"
+  ],
+  [
+   "TRON_K_VNNI / layout_on",
+   "The CMake option (default OFF) and the compile-time gate k_vnni::layout_on<head_size> that store the K plane of 128-dimension heads in the VNNI layout. apply_page_tok's VNNI branch and the AMX exclusion test it. [k_vnni.hpp:84-95; self_attention.hpp:1886, 1909]"
+  ],
+  [
+   "UNSCALED",
+   "The reader writes raw dot products q . k: the caller multiplies by the attention scale (or applies the softcap), takes the page max and exponentiates. [kernels/k_vnni.hpp:24; amx_attn_iface.hpp:59-64, 71-75]"
+  ],
+  [
+   "VDPBF16PS (_mm512_dpbf16_ps)",
+   "The AVX-512 instruction that, per lane, multiplies two bf16 pairs and adds both products into an fp32 accumulator. The bf16 branch issues one per pair row and head; the row-major dotter<bf16, 128> uses the same instruction. [kernels/k_vnni.hpp:29, 75-76; dotter.hpp:216-219]"
+  ],
+  [
+   "visit_path",
+   "attn_stats::visit_path: which software path served one apply_page_tok visit: empty, avx or amx. A qk_group visit counts as avx, as a dotter-loop visit does. [attn_stats.hpp:110-116; self_attention.hpp:1977, 2009]"
+  ],
+  [
+   "VNNI layout",
+   "Vector Neural Network Instructions layout: the two values of a dimension pair of one token sit together in one dword, and one 64-byte row holds that pair for 16 consecutive tokens. It is the B-operand layout of the AMX tile multiply and the operand layout of VDPBF16PS. [k_vnni.hpp:10-19]"
+  ],
+  [
+   "worked example",
+   "A query group of kv_mul = 4 heads scores page 7 (storage slot 5, KV head 0) with page offsets 0..40 live: masks 0xffff, 0xffff, 0x01ff, 0x0000. Token 37 is lane 5 of block 2; dimension 70 is pair 3 of step 2. An illustration, not a measurement. [exec/pr4956-diagrams-20261015/STYLE.md]"
+  ]
+ ],
+ "base": [
+  {
+   "id": "kernels-b1",
+   "short": "data model: inputs and output",
+   "title": "Data model: the inputs and the output of qk_group",
+   "intro": "qk_group takes the read-only VNNI plane of one page (k_page, 16 panels of 16 pair rows), the query rows q (kv_mul rows of 128 values), the live mask (one bit per token) and the output pointer s with its row stride. One accumulator register per head holds the 16 running scores of one token block. Every arrow says how many. The worked example (kv_mul = 4, live = offsets 0..40) is traced through the masks and into s."
+  },
+  {
+   "id": "kernels-b2",
+   "short": "function model",
+   "title": "Function model: callers, the three branches of qk_group, callees, and the other readers of K",
+   "intro": "apply_page_tok calls qk_group once per (page, KV head) after its loop marked the live tokens; the layout test calls it with bf16, float and fp16 queries. The function has three if-constexpr branches: the split above 16 heads, the fp16 widening, and the masked block loop. The bottom band shows the row-major dotter loop (row-major slots only), the dense AMX page path (excluded by the layout gate) and the VNNI AMX kernel of a later PR."
+  },
+  {
+   "id": "kernels-b3",
+   "short": "sequencing model",
+   "title": "Sequencing model: the loop nest of qk_group on the worked example",
+   "intro": "The block loop visits the 3 blocks whose mask is not zero and skips block 3. For one block: zero the accumulators, then for each of 4 dimension steps and 16 pair rows one masked 64-byte load and one product per head (a VDPBF16PS for a bf16 query, two FMAs for a float query), then one masked store per head. The yellow box counts the instructions of the worked example."
+  },
+  {
+   "id": "kernels-b4",
+   "short": "numerics model",
+   "title": "Numerics model: the same products as the row-major dotter, a different order of the fp32 adds",
+   "intro": "The comment at lines 28-31 states the contract. The row-major dotter scores one token with 4 VDPBF16PS into two accumulators and a horizontal reduce_sum over 16 lanes; qk_group keeps one lane per token and adds 64 dimension-pair products into that lane in (step, dp) order. The products are the same; the order of the fp32 adds is not. The test bounds the difference with a relative envelope of 1e-4 of the absolute-product mass plus 1e-6."
+  },
+  {
+   "id": "kernels-b5",
+   "short": "interaction model",
+   "title": "Interaction model: who runs qk_group, what it reads, what it never touches",
+   "intro": "An attention worker builds the live mask in its loop, takes the read-only view page::k_packed, calls qk_group and keeps the scores in its own s_pages. save_k writes one token's column with store_row; the reader never reads a token whose live bit is clear, so unwritten tokens cannot change the result. The test poisons dead tokens with NaN and checks that no poison reaches a live score. Threads are lanes."
+  }
+ ],
+ "units": [
+  {
+   "id": "q0",
+   "title": "The header comment: what the file is, what it reads, who may include it",
+   "kind": "comment only",
+   "ranges": [
+    [
+     1,
+     5
+    ]
+   ],
+   "lead": [
+    "Comment text only. The file is the AVX-512 QK score reader of the K VNNI layout defined in h/tron/tensor/k_vnni.hpp (line 2).",
+    "No AMX instruction runs here. So any translation unit may include it (line 3): self_attention.hpp and the layout test do [self_attention.hpp:26; t_k_vnni_layout.cpp:22].",
+    "Who writes and who reads the layout is described in Note [K VNNI storage] in kv_cache.hpp (lines 4-5). Item 3 of that Note names qk_group as the software reader of every page of a VNNI slot [kv_cache.hpp:721-727]."
+   ],
+   "base": "Updates B2: the header places the file between the layout header it reads, the Note that describes its role, and the translation units that may include it."
+  },
+  {
+   "id": "q1",
+   "title": "MAX_KV_MUL_16, the contract of qk_group, and the split above 16 heads",
+   "kind": "new",
+   "ranges": [
+    [
+     18,
+     46
+    ]
+   ],
+   "lead": [
+    "MAX_KV_MUL_16 = 16 is the number of query heads scored per pass: one accumulator register per head (lines 20-21).",
+    "The contract (lines 23-31): s[h * s_stride + t] = q_h . K_t (UNSCALED) for every token t whose bit is set in live. The other entries of s are left untouched. The K storage of a token whose bit is clear is never read (masked loads). So unwritten tokens cannot change the result.",
+    "q points at kv_mul rows of 128 values (lines 27-28). A bf16 q adds the same VDPBF16PS products as the row-major dotter<bf16, 128>, and a float q the same FMA products as dotter<float, 128>. Only the order of the fp32 adds differs (lines 28-31; see B4).",
+    "The signature (lines 32-38): k_page is the read-only view k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>, q a const q_scalar*, live a uint64_t, s a float*, s_stride the row stride of s. static_assert(kv_mul > 0) (line 39).",
+    "The split (lines 40-45): when kv_mul > MAX_KV_MUL_16 the call becomes two: heads 0..15 with the given q and s, then heads 16..kv_mul - 1 with q moved by 16 * HEAD_SIZE_128 and s by 16 * s_stride. Each head has its own accumulator, so the split changes no head's add order (line 41).",
+    "Callers: apply_page_tok with kv_mul = operation_kv_mul [self_attention.hpp:1967]; the test with KV_MUL = 4 (one pass), 20 (16 + 4) and 32 (16 + 16) [t_k_vnni_layout.cpp:301-313]."
+   ],
+   "base": "Updates B2 and B1: the split branch drawn for kv_mul = 20: two passes with their own q and s offsets and their own accumulators."
+  },
+  {
+   "id": "q2",
+   "title": "The fp16 query path: widen to float on the stack, then the float branch",
+   "kind": "new",
+   "ranges": [
+    [
+     47,
+     52
+    ]
+   ],
+   "lead": [
+    "For q_scalar == fp16 the branch converts every query value to float into a 64-byte-aligned stack array qf of kv_mul * HEAD_SIZE_128 floats (lines 47-50).",
+    "It then calls qk_group<kv_mul, float> on qf with the same k_page, live, s and s_stride, and returns (lines 51-52). The block loop itself admits bf16 and float only (static_assert at lines 54-55).",
+    "The stack array is 2 KiB for kv_mul = 4 and 8 KiB for the largest pass of 16 heads. The widening fp16 -> fp32 is exact.",
+    "The test checks the fp16 result against dotter<float, 128> on the same widened queries [t_k_vnni_layout.cpp:213-214, 220-221, 268, 294]."
+   ],
+   "base": "Updates B2: the fp16 branch as its data flow: fp16 q -> float qf on the stack -> the float branch -> return."
+  },
+  {
+   "id": "q3",
+   "title": "The masked block loop: the live mask per token block, the masked loads, and the bf16 and float products",
+   "kind": "new",
+   "ranges": [
+    [
+     53,
+     91
+    ]
+   ],
+   "lead": [
+    "The plane pointer comes from detail::k_vnni_access::plane(k_page), the one route from a packed view to its address (line 56).",
+    "For each token block c (line 57): mask = __mmask16(live >> (c * BLOCK_TOKENS_16)) (line 58). A block with mask 0 is skipped (line 59). The kv_mul accumulators are zeroed (lines 60-63).",
+    "For each dimension step and each pair row dp (lines 64-66): one masked load reads pair row dp of panel (step, c), one token per lane; lanes whose mask bit is clear are not read and hold 0 (lines 67-69). d = step * STEP_DIMS_32 + PAIR_2 * dp names the two dimensions of that pair row in q (line 70).",
+    "bf16 q (lines 71-77): the two bf16 of head h at d and d + 1 are read as one dword (memcpy, lines 73-74), broadcast to 16 lanes, and one VDPBF16PS adds both products of every lane into acc[h] (lines 75-76).",
+    "float q (lines 78-88): k_even is the low bf16 of each lane shifted up BF16_BITS_16 bits (the exact fp32), k_odd the high bf16 masked with HIGH_HALF_0XFFFF0000 (lines 79-82); two FMAs add q[d] * k_even and q[d + 1] * k_odd into acc[h] (lines 84-87). Both constants are defined in the layout header [k_vnni.hpp:74-77].",
+    "Worked example (block c = 2, mask 0x01ff): 4 x 16 = 64 masked loads of 64 bytes, 64 x 4 = 256 VDPBF16PS for kv_mul = 4; lanes 9..15 (tokens 41..47) stay 0. Over the 3 visited blocks: 192 loads and 768 VDPBF16PS (B3)."
+   ],
+   "base": "Updates B3: steps 2-4 of the loop nest at the lane level for the worked example (the masked load of one pair row; the two product branches)."
+  },
+  {
+   "id": "q4",
+   "title": "The masked store of the scores",
+   "kind": "new",
+   "ranges": [
+    [
+     92,
+     99
+    ]
+   ],
+   "lead": [
+    "After the 4 steps of a block, one masked store per head writes the 16 lanes of acc[h] to s + h * s_stride + c * BLOCK_TOKENS_16 under the block's mask (lines 92-94). Lanes whose mask bit is clear are not written, so their entries of s keep what the caller put there.",
+    "In apply_page_tok s is &s_pages[0][0] with s_stride = page_size, pre-filled with -infinity; after the call the live entries hold q_h . K_t (UNSCALED) and the caller scales, takes the page max and exponentiates [self_attention.hpp:1906, 1967-1970; amx_attn_iface.hpp:59-64].",
+    "Worked example: after block 2 the store writes tokens 32..40 of each head; tokens 41..63 keep -infinity (blocks 0 and 1 were stored before, block 3 is never visited).",
+    "The test asserts both halves: a dead token's slot still equals PRESET_NEG_INF and a live one is within the envelope of the dotter [t_k_vnni_layout.cpp:270-295].",
+    "Lines 95-99 close the loop, the branch, the function and the namespace."
+   ],
+   "base": "Updates B1: the s box at the lane level after block 2 of the worked example."
+  }
+ ],
+ "trivial": [
+  {
+   "id": "t1",
+   "title": "Includes",
+   "ranges": [
+    [
+     7,
+     16
+    ]
+   ],
+   "what": "The include lines of the header: the standard headers for size_t, uint64_t, memcpy, the intrinsics and type traits (lines 7-11); the attribute macros (TRON(inline)) [common/attributes.hpp]; bf16 and fp16 [common/numerics/bf16.hpp, fp16.hpp]; and the layout header that defines k_vnni_view, detail::k_vnni_access and the constants the reader uses (line 16) [k_vnni.hpp:56-77, 119-150, 188-193]."
+  }
+ ]
+}

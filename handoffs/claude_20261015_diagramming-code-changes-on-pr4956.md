@@ -44,22 +44,22 @@ Execute the diagramming-code-changes prompt on PR 4956, following the prompt lit
 ## Timeline (2026-10-15, Pacific)
 
 - 17:07 The user asked: "Execute ~/workspace/notebook/artifacts/ai-prompts/diagramming-code-changes.md on PR4956". Claude read the prompt file, two memory notes (stack-reopened-20261015.md, pr-walkthrough-diagram-pages.md), and the PR metadata.
-- 17:08 The PR diff against the merge base was fetched into the scratchpad and split per file (numstat.txt, full.diff, 23 per-file diffs).
-- 17:09 to 17:11 Claude read the PR 4424 toolchain (spec_builder.py, page_common.py, svg_helpers.py, check scripts, units JSON files, figure modules) and the three existing PR 4424 pages in merge-4737-2-4424/ for structure.
-- 17:11 The toolchain was copied to exec/pr4956-diagrams-20261015 with figs/, png/ and facts/. Constants in difflib_units.py, check_page.py, spec_builder.py and page_common.py were repointed at PR 4956 (head a5697f86d3, base 76bb0bf3f4). The file pick was made by added lines among non-test files.
-- 17:12 to 17:14 svg_helpers.py gained a `live` legend key (green, the reader's live mask). STYLE.md was rewritten to list what PR 4956 contains and what it does not. README.md written.
+- 17:08 The PR diff against the merge base was fetched into the scratchpad and split per file (numstat.txt, full.diff, 23 per-file diffs). (preserved: artifacts/intel-amx/exec/scratch-relocated/a48fe469/pr4956/full.diff, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/a48fe469/pr4956/full.diff)
+- 17:09 to 17:11 Claude read the PR 4424 toolchain (spec_builder.py, page_common.py, svg_helpers.py, check scripts, units JSON files, figure modules) and the three existing PR 4424 pages in merge-4737-2-4424/ for structure. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/page_common.py)
+- 17:11 The toolchain was copied to exec/pr4956-diagrams-20261015 with figs/, png/ and facts/. Constants in difflib_units.py, check_page.py, spec_builder.py and page_common.py were repointed at PR 4956 (head a5697f86d3, base 76bb0bf3f4). The file pick was made by added lines among non-test files. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/difflib_units.py)
+- 17:12 to 17:14 svg_helpers.py gained a `live` legend key (green, the reader's live mask). STYLE.md was rewritten to list what PR 4956 contains and what it does not. README.md written. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/README.md)
 - 17:15 to 17:16 Three forks were launched, one per target file: `k_vnni` (h/tron/tensor/k_vnni.hpp, 299 new lines), `kv_cache` (h/tron/models/kv_cache.hpp, +220/-38), `kernels` (h/tron/kernels/k_vnni.hpp, 99 new lines).
-- 17:17 check_page.py gained path entries for the new includes (dotter.hpp, bf16.hpp, fp16.hpp, attributes.hpp). Memory note pr4956-diagram-pages.md written and indexed in MEMORY.md.
-- 17:36 The kernels fork finished: base_kernels.py, d_kernels_q0 to q4, units_kernels.json, page built with 11 SVGs.
-- 17:38 The kv_cache fork finished: base_kv_cache.py, d_kv_cache_c0 to c6, units_kv_cache.json, 13 SVGs. facts/kv_cache.json replaced by a pointer note (the PR 4424 facts had stale line numbers).
-- 17:41 The tensor k_vnni fork finished: base_k_vnni.py, base_k_vnni_b1a.py, d_k_vnni_k0 to k6, units_k_vnni.json, 16 SVGs.
-- 17:42 All three pages rebuilt together with spec_builder.py. check_page.py and check_legend.py reported 0 problems on each. All 40 SVGs rendered to PNG. Claude inspected six PNGs itself (k_vnni-b3, k_vnni-d6a, kv_cache-b1, kv_cache-d5, kernels-b3, kernels-d3a). Memory note updated with the final check status.
+- 17:17 check_page.py gained path entries for the new includes (dotter.hpp, bf16.hpp, fp16.hpp, attributes.hpp). Memory note pr4956-diagram-pages.md written and indexed in MEMORY.md. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/check_page.py)
+- 17:36 The kernels fork finished: base_kernels.py, d_kernels_q0 to q4, units_kernels.json, page built with 11 SVGs. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/units_kernels.json)
+- 17:38 The kv_cache fork finished: base_kv_cache.py, d_kv_cache_c0 to c6, units_kv_cache.json, 13 SVGs. facts/kv_cache.json replaced by a pointer note (the PR 4424 facts had stale line numbers). (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/units_kv_cache.json)
+- 17:41 The tensor k_vnni fork finished: base_k_vnni.py, base_k_vnni_b1a.py, d_k_vnni_k0 to k6, units_k_vnni.json, 16 SVGs. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/figs/base_k_vnni.py)
+- 17:42 All three pages rebuilt together with spec_builder.py. check_page.py and check_legend.py reported 0 problems on each. All 40 SVGs rendered to PNG. Claude inspected six PNGs itself (k_vnni-b3, k_vnni-d6a, kv_cache-b1, kv_cache-d5, kernels-b3, kernels-d3a). Memory note updated with the final check status. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/check_legend.py)
 - 17:43 Summary given in chat with the page table (below).
 - 18:37 Context summary (the session continued from a condensed conversation).
 - 18:44 The user asked what happens when TRON_K_VNNI and head_size 128 both hold but the model uses hardware attention. Claude read layout_on, self_attention.hpp, model.hpp, gof.hpp/gof.cpp, full.hpp and issue 4500.
 - 18:45 Answer: nothing switches the layout off. The layout gate is compile-time and depends on head size only. Hardware attention is a run-time per-operation decision. The FPGA staging path pays a per-row gather (load_row) to get row-major K back out of the VNNI plane. Issue 4500 measured qwen-3-4b with FPGA attention at 5 to 11 % lower decode TPS with the layout (tp4 at 8 users: 149.94 to 133.44 TPS). The planned answer is PR 4959's row-major tail block.
 - 19:00 The user pasted a cell of the kv_cache page's B3 function model that said load_row chose between gathers and a 256 B memcpy, and pointed out that load_row is VNNI only. Claude agreed: the layout branch is in page::get_k_row and page::set_k_row, not in load_row or store_row.
-- 19:01 to 19:02 First fix in figs/base_kv_cache.py: the API cells now carry the branch ("if constexpr layout_on: load_row, else std::memcpy 256 B") with the kv_cache.hpp lines, and the operation cells cite both files. Page rebuilt, checks 0 problems, B3 PNG inspected.
+- 19:01 to 19:02 First fix in figs/base_kv_cache.py: the API cells now carry the branch ("if constexpr layout_on: load_row, else std::memcpy 256 B") with the kv_cache.hpp lines, and the operation cells cite both files. Page rebuilt, checks 0 problems, B3 PNG inspected. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/figs/base_kv_cache.py)
 - 20:43 The user reported that the operation cells still said "(VNNI only) ... the memcpy branch is in get_k_row", which still reads as if the routine took part in the decision, and that store_row had the same fault.
 - 20:43 Second fix: the three right-hand cells now describe only what the k_vnni.hpp routine does ("4 gathers of 16 dwords into the caller's row; it takes a k_vnni_view only and checks no layout"). The branch stays only in the middle column on set_k_row and get_k_row. Page rebuilt, check_page.py 0 problems, check_legend.py 0 problems, B3 PNG inspected, no overlap.
 
@@ -79,29 +79,36 @@ Checks on all three pages (transcript 17:42, and 20:43 for the kv_cache page): c
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4956-tensor-k_vnni.hpp.html (589,019 bytes). Diagram page for h/tron/tensor/k_vnni.hpp, 16 SVGs.
-  - generator: /home/jhan/workspace/intel-AMX/exec/pr4956-diagrams-20261015/spec_builder.py (key `k_vnni`)
-  - input: /home/jhan/workspace/intel-AMX/exec/pr4956-diagrams-20261015/units_k_vnni.json and figs/base_k_vnni.py, figs/base_k_vnni_b1a.py, figs/d_k_vnni_k0.py to d_k_vnni_k6.py
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4956-tensor-k_vnni.hpp.html (589,019 bytes). Diagram page for h/tron/tensor/k_vnni.hpp, 16 SVGs. (preserved: artifacts/intel-amx/pr3879/split-4424/diagramming-code-changes-PR4956-tensor-k_vnni.hpp.html)
+  - generator: /home/jhan/workspace/intel-AMX/exec/pr4956-diagrams-20261015/spec_builder.py (key `k_vnni`) (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/spec_builder.py)
+  - input: /home/jhan/workspace/intel-AMX/exec/pr4956-diagrams-20261015/units_k_vnni.json and figs/base_k_vnni.py, figs/base_k_vnni_b1a.py, figs/d_k_vnni_k0.py to d_k_vnni_k6.py (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/units_k_vnni.json)
   - input built by: the fork "Build tensor/k_vnni.hpp page figures" (hand-written Python and JSON, adapted from the PR 4424 set), from the head file at a5697f86d3 and the diff against 76bb0bf3f4
-  - sources: worktree /home/jhan/workspace/ai-runs/tron-split-pr1 at a5697f86d3, the prompt file, STYLE.md
+  - sources: worktree /home/jhan/workspace/ai-runs/tron-split-pr1 at a5697f86d3, the prompt file, STYLE.md (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/STYLE.md)
   - regenerate: `cd /home/jhan/workspace/intel-AMX/exec/pr4956-diagrams-20261015 && python3 spec_builder.py k_vnni && python3 check_page.py <OUT> && python3 check_legend.py <OUT>`
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4956-kv_cache.hpp.html (451,108 bytes). Diagram page for h/tron/models/kv_cache.hpp, 13 SVGs. Rebuilt twice after the user's B3 correction, last at 20:43.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4956-kv_cache.hpp.html (451,108 bytes). Diagram page for h/tron/models/kv_cache.hpp, 13 SVGs. Rebuilt twice after the user's B3 correction, last at 20:43. (preserved: artifacts/intel-amx/pr3879/split-4424/diagramming-code-changes-PR4956-kv_cache.hpp.html)
   - generator: same spec_builder.py (key `kv_cache`)
-  - input: units_kv_cache.json, figs/base_kv_cache.py (edited by hand at 19:01 and 20:43), figs/d_kv_cache_c0.py to c6.py
+  - input: units_kv_cache.json, figs/base_kv_cache.py (edited by hand at 19:01 and 20:43), figs/d_kv_cache_c0.py to c6.py (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/figs/d_kv_cache_c0.py)
   - input built by: the fork "Build kv_cache.hpp page figures", then Claude's two manual edits of base_kv_cache.py
   - sources: as above
   - regenerate: `python3 spec_builder.py kv_cache` plus the two checks, as above
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4956-kernels-k_vnni.hpp.html (417,045 bytes). Diagram page for h/tron/kernels/k_vnni.hpp, 11 SVGs.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4956-kernels-k_vnni.hpp.html (417,045 bytes). Diagram page for h/tron/kernels/k_vnni.hpp, 11 SVGs. (preserved: artifacts/intel-amx/pr3879/split-4424/diagramming-code-changes-PR4956-kernels-k_vnni.hpp.html)
   - generator: same spec_builder.py (key `kernels`)
-  - input: units_kernels.json, figs/base_kernels.py, figs/d_kernels_q0.py to q4.py
+  - input: units_kernels.json, figs/base_kernels.py, figs/d_kernels_q0.py to q4.py (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/figs/base_kernels.py)
   - input built by: the fork "Build kernels/k_vnni.hpp page figures" (no PR 4424 predecessor, written new)
   - sources: as above
   - regenerate: `python3 spec_builder.py kernels` plus the two checks, as above
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4956-diagrams-20261015/ (record folder). Toolchain and build record: README.md (1,249 bytes), STYLE.md (12,374 bytes), spec_builder.py (2,652), page_common.py (23,845), svg_helpers.py (22,513), difflib_units.py (7,016), check_page.py (9,870), check_legend.py (7,684), render_one.py (1,713), render_check.py (961), units_k_vnni.json (29,252), units_kv_cache.json (27,493), units_kernels.json (23,602), figs/ (23 Python modules, 715,066 bytes), facts/k_vnni.json (199,225 bytes, stale PR 4424 copy, unused), facts/kv_cache.json (384 bytes, pointer note), png/ (40 top-level PNGs plus page/ and page-kernels/, 18,622,634 bytes). Hand-written, `generator: none`.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr4956-diagram-pages.md (2,069 bytes). Memory note: where the pages are, how to rebuild, final check status. Hand-written, `generator: none`.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4956-diagrams-20261015/ (record folder). Toolchain and build record: README.md (1,249 bytes), STYLE.md (12,374 bytes), spec_builder.py (2,652), page_common.py (23,845), svg_helpers.py (22,513), difflib_units.py (7,016), check_page.py (9,870), check_legend.py (7,684), render_one.py (1,713), render_check.py (961), units_k_vnni.json (29,252), units_kv_cache.json (27,493), units_kernels.json (23,602), figs/ (23 Python modules, 715,066 bytes), facts/k_vnni.json (199,225 bytes, stale PR 4424 copy, unused), facts/kv_cache.json (384 bytes, pointer note), png/ (40 top-level PNGs plus page/ and page-kernels/, 18,622,634 bytes). Hand-written, `generator: none`. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/svg_helpers.py)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr4956-diagram-pages.md (2,069 bytes). Memory note: where the pages are, how to rebuild, final check status. Hand-written, `generator: none`. (preserved: artifacts/intel-amx/memory/split-4424/pr4956-diagram-pages.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md (10,006 bytes). One index line added for the note above.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/a48fe469-84d7-4bc1-86bc-64ec51f6b6be/scratchpad/pr4956/ (3,062,949 bytes). The PR diff (full.diff 126,195 bytes), 23 per-file diffs, numstat.txt, kv_cache_head.hpp, kvpng/. Scratchpad, may be cleaned up.
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/a48fe469-84d7-4bc1-86bc-64ec51f6b6be/scratchpad/pr4956/ (3,062,949 bytes). The PR diff (full.diff 126,195 bytes), 23 per-file diffs, numstat.txt, kv_cache_head.hpp, kvpng/. Scratchpad, may be cleaned up. (preserved: artifacts/intel-amx/exec/scratch-relocated/a48fe469/pr4956/kv_cache_head.hpp, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/a48fe469/pr4956/kv_cache_head.hpp)
 - Code: worktree claude-agentsrv:/home/jhan/workspace/ai-runs/tron-split-pr1, branch `jhan-vnnik-1-layout`, head a5697f86d3. Read only, no commits. PR: https://github.com/positron-ai/tron/pull/4956.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr4956-diagrams-20261015/` (2 files)
+- `artifacts/intel-amx/exec/pr4956-diagrams-20261015/facts/` (1 files)
+- `artifacts/intel-amx/exec/pr4956-diagrams-20261015/figs/` (19 files)
+- `artifacts/intel-amx/exec/scratch-relocated/a48fe469/pr4956/` (1 files)
 
 ## Current state
 
@@ -126,7 +133,7 @@ Checks on all three pages (transcript 17:42, and 20:43 for the kv_cache page): c
 - To change a page, edit figs/*.py or units_<key>.json in the record folder and rebuild. Do not hand-edit the HTML.
 - The three pages share one worked example: page 7, storage slot 5, token 37, dimension 70, a 4-head query group scoring offsets 0 to 40.
 - A new legend key `live` (green) marks the reader's live mask, replacing the PR 4424 bit-array colours.
-- facts/k_vnni.json is the stale PR 4424 copy and is not read by the build. facts/kv_cache.json was replaced by a pointer note because its line numbers were stale.
+- facts/k_vnni.json is the stale PR 4424 copy and is not read by the build. facts/kv_cache.json was replaced by a pointer note because its line numbers were stale. (preserved: artifacts/intel-amx/exec/pr4956-diagrams-20261015/facts/k_vnni.json)
 - The wrong B3 cell came from describing both branches of get_k_row in the column that is about the k_vnni.hpp routine. The first fix kept "(VNNI only)" and "the memcpy branch is in ..." in that column, which still read as if the routine took part in the decision. The rule that came out: a cell about a routine says only what the routine does, and a branch is described where it lives.
 - The memory note's timestamp line says "~17:45 UTC" where Pacific 17:45 was meant (the forks finished 17:36 to 17:41 Pacific).
 - Related memory notes in the same directory: pr-walkthrough-diagram-pages.md (a different per-PR page set), stack-reopened-20261015.md, pr4958-pr4959-diagram-pages.md (written by a later session on 2026-10-16).
