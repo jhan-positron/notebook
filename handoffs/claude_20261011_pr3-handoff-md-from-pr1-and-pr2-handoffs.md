@@ -41,9 +41,9 @@ The user asked for PR3-handoff.md, the instruction file an agent will execute to
 ## Timeline (2026-10-11, Pacific)
 
 - 12:21 The user asked for PR3-handoff.md. Claude read the two earlier handoffs, PR2-handoff-update1.md, split-plan.md, split-status.md and the PR-3 patch.
-- 12:30 Probe: the patch applied on the PR-2 head with 3 conflicting files (4 blocks). resolve.py written with the exact-text resolutions. conflicts.txt, numstat-vs-pr2-head.txt and diff-vs-ba69-9files.patch saved.
-- 12:33 to 12:35 22-cell and 38-cell syntax matrices on the resolved tree: 0 errors, 0 warnings (out-22/summary.txt, out-38/summary.txt, pr3probe-38.log). clang-format clean, no PR-4 symbol, every PR-3 symbol present.
-- 12:39 A two-line edit tested (numstat-vs-pr2-head-with-edit.txt, lcheck-edit/). The only C++ differences against ba69cb513e are PR-1's two token-index asserts.
+- 12:30 Probe: the patch applied on the PR-2 head with 3 conflicting files (4 blocks). resolve.py written with the exact-text resolutions. conflicts.txt, numstat-vs-pr2-head.txt and diff-vs-ba69-9files.patch saved. (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr3/resolve.py)
+- 12:33 to 12:35 22-cell and 38-cell syntax matrices on the resolved tree: 0 errors, 0 warnings (out-22/summary.txt, out-38/summary.txt, pr3probe-38.log). clang-format clean, no PR-4 symbol, every PR-3 symbol present. (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr3/pr3probe-38.log)
+- 12:39 A two-line edit tested (numstat-vs-pr2-head-with-edit.txt, lcheck-edit/). The only C++ differences against ba69cb513e are PR-1's two token-index asserts. (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr3/numstat-vs-pr2-head-with-edit.txt)
 - 12:47 PR3-handoff.md written (about 70 KB). 12:50 the memory note pr3-handoff-writing.md written and MEMORY.md indexed. The seven-lens verification workflow launched (verify-pr3-handoff, two refuters per must-fix or should-fix finding).
 - 12:51 Status given: the draft is complete, the two inherited script defects documented (the plugin grep counted 0 for every plugin because the generated K buffer is named rope_1, and the Haskell-suite step grepped a string that never matched).
 - 12:55 The user's codex run wrote PR3-handoff-review.md.
@@ -73,15 +73,21 @@ Probe numbers:
 ## Artifacts
 
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR3-handoff.md (120,710 bytes). The instruction file, header names Update 1. Hand-written with the Write tool, then edited by fold1.py and fold2.py. `generator: none`.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR3-handoff-update1.md (17,008 bytes). The change record: verdict table on codex's points, applied changes, the verification run's grouped findings, what did not change.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR3-handoff-update1.md (17,008 bytes). The change record: verdict table on codex's points, applied changes, the verification run's grouped findings, what did not change. (preserved: artifacts/intel-amx/pr3879/split-4424/PR3-handoff-update1.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR3-handoff-review.md (10,209 bytes). Codex's review, written by the user's codex run, read only.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/handoff-material/probe-pr3/: resolve.py (6,843 bytes, the conflict resolver), conflicts.txt (3,798), diff-vs-ba69-9files.patch (79,581), numstat-vs-pr2-head.txt (275), numstat-vs-pr2-head-with-edit.txt (275), pr3probe-38.log (2,396), out-22/summary.txt (1,191) and 22 empty cell logs, out-38/summary.txt (2,333), out-38/commit.txt (117) and the cell logs, lcheck-edit/ (4 empty logs).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr3-handoff-writing.md (3,999 bytes). New memory note, written at 12:50 and rewritten at 13:21.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/handoff-material/probe-pr3/: resolve.py (6,843 bytes, the conflict resolver), conflicts.txt (3,798), diff-vs-ba69-9files.patch (79,581), numstat-vs-pr2-head.txt (275), numstat-vs-pr2-head-with-edit.txt (275), pr3probe-38.log (2,396), out-22/summary.txt (1,191) and 22 empty cell logs, out-38/summary.txt (2,333), out-38/commit.txt (117) and the cell logs, lcheck-edit/ (4 empty logs). (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr3/conflicts.txt)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr3-handoff-writing.md (3,999 bytes). New memory note, written at 12:50 and rewritten at 13:21. (preserved: artifacts/intel-amx/memory/split-4424/pr3-handoff-writing.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md (10,006 bytes today). Index line added and updated.
-- Workflow script: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/2cd27ffa-6c93-4c74-b687-edb610df970f/workflows/scripts/verify-pr3-handoff-wf_5d325615-2be.js (19,977 bytes).
+- Workflow script: claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/2cd27ffa-6c93-4c74-b687-edb610df970f/workflows/scripts/verify-pr3-handoff-wf_5d325615-2be.js (19,977 bytes). (preserved: artifacts/intel-amx/exec/workflows/verify-pr3-handoff-wf_5d325615-2be.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/verify-pr3-handoff-wf_5d325615-2be.js)
 - Raw workflow output: claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/2cd27ffa-6c93-4c74-b687-edb610df970f/tasks/w6bf8jmhe.output (515,342 bytes, scratch). The other files in that tasks directory are dated after this transcript's last record and belong to a later use of the session id.
 - Scratchpad: fold1.py and fold2.py under /tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/2cd27ffa-6c93-4c74-b687-edb610df970f/scratchpad/ (sizes not verified).
 - Code: no commits. The scratch worktree tron-split-probe-pr3 was removed. split-status.md was not changed by this session.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr3/` (2 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr3/out-22/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr3/out-38/` (2 files)
 
 ## Current state
 
