@@ -1,0 +1,1027 @@
+changed in both
+  base   100644 c0076ac47b0d0e33499f061ab4098b52ed841641 h/tron/kernels/amx_attn_iface.hpp
+  our    100644 a28b9809ffef09b728987c8586f9cc97202cc0ec h/tron/kernels/amx_attn_iface.hpp
+  their  100644 da98f9b4ac49bbd0ae505d25e5c2962a8a166f9d h/tron/kernels/amx_attn_iface.hpp
+@@ -47,9 +47,13 @@
+ //      requires; the result is cached. Hosts without AMX (feature bits, not
+ //      vendor strings, so AMD hosts too) run the AVX path.
+ //   4. runtime disable: TRON_AMX_DISABLE=1 in the environment makes
+-//      available() false. Contract: AMX off, same layout, same AVX dotter,
+-//      clean-binary numerics; it exists for same-binary A/B tests and for
+-//      rollback. It will be listed in the TRON environment-variable document
++//      available() false. Contract: AMX off, same layout, the same AVX-512
++//      readers a host without AMX runs (on a TRON_K_VNNI build
++//      k_vnni::qk_group for the VNNI blocks and the row-major dotter for the
++//      rows of row-major blocks; the dotter alone on the row-major build).
++//      The numerics are those of that AVX-512 path, not the row-major
++//      build's. It exists for same-binary A/B tests and for rollback. It
++//      will be listed in the TRON environment-variable document
+ //      (https://github.com/positron-ai/tron/issues/4338).
+ //   5. per page: the dense-case predicate above, evaluated per (query, page)
+ //      in self_attention.hpp (is_dense_amx_page).
+changed in both
+  base   100644 369a3d9e720892a91599b3ded6896209d6c01e71 h/tron/models/kv_cache.hpp
+  our    100644 cadb11493907089e78ee1e996b5246c160370766 h/tron/models/kv_cache.hpp
+  their  100644 cb3ce5238a473b06c0c890ff5f7e85fc40ed95df h/tron/models/kv_cache.hpp
+@@ -719,9 +719,13 @@
+ // rows saved; a complete block may wait for its conversion. Every reader and
+ // writer of a row takes the layout from the converted-block bit.
+ //   - save_k (model.hpp) sets a row's bit after the row is stored, on the main
+-//     thread. A block completed that way is queued (state::pending_k_blocks_)
++//     thread. A block completed that way is queued once (state::pending_k_blocks_)
+ //     and converted at the forward end (convert_pending_k_blocks, after the
+-//     plugin joined its workers and the cooperative GOF staging drained),
++//     plugin joined its workers and the cooperative GOF staging drained; a
++//     queue of k_convert_parallel_min blocks or more is converted by the
++//     app-pool workers, each a strided share, and the main thread joins them
++//     before the logit delivery reuses the pool; a shorter queue is converted
++//     on the main thread),
+ //     unless the hardware attention scores the operation's K (Note [Row-major
+ //     blocks under hardware attention] below: no bit, no conversion). Why
+ //     not in save_k: a block may be split across two minibatches of one pass
+@@ -823,9 +827,9 @@
+ //      outside the AMX gate (Note [AMX attention dispatch]). That reader is
+ //      AVX-512 code with one token per vector lane. It needs no per-token
+ //      gather and no horizontal reduction. The tokens of the row-major tail
+-//      block are scored with the row-major dotter (the per-token dot-product
+-//      loop of self_attention.hpp) through their typed row (row_major_row),
+-//      4 lines per token.
++//      block are scored with the row-major dotter (the dotter loop over the
++//      row-major rows in self_attention.hpp, after its live-mask loop)
++//      through their typed row (row_major_row), 4 lines per token.
+ //   4. the FPGA (field-programmable gate array) staging path (gof::populate ->
+ //      shuffle_k_entry) needs one row per token. For a row-major block (the
+ //      usual case under hardware attention, Note [Row-major blocks under
+@@ -2203,12 +2207,15 @@
+   }
+ 
+   // Record that the K row of page offset `offset` is saved for `slot` (VNNI
+-  // slots; a row-major slot keeps no bits and returns false). Returns true when
+-  // the row's 16-token block now has all 16 rows saved and is not converted
+-  // yet: the main thread of save_k then queues the block for k_block_to_vnni
+-  // at the forward end. A row saved again into a block that waits for its
+-  // conversion returns true again (the conversion is idempotent); a row of a
+-  // converted block returns false (set_k_row wrote it into the VNNI column).
++  // slots; a row-major slot keeps no bits and returns false). Returns true
++  // once per completion of the row's 16-token block: when this call sets the
++  // last of the block's 16 row bits and the block is not converted yet. The
++  // main thread of save_k then queues the block for k_block_to_vnni at the
++  // forward end, so the queue holds every block once (the forward end
++  // converts the queued blocks in parallel, and two conversions of one block
++  // would transpose it twice). A row saved again returns false: into a block
++  // that waits for its conversion, because the block is queued already; into
++  // a converted block, because set_k_row wrote the row into the VNNI column.
+   template <kv_geometry geometry>
+     requires(book_t::template declares_geometry<geometry>())
+   TRON(nodiscard, inline)
+@@ -2221,8 +2228,10 @@
+     const size_t c = offset / k_vnni::BLOCK_TOKENS_16;
+     const uint64_t bit = k_vnni::offset_bit(offset);
+     auto& saved = k_rows_saved_[ix];
+-    uint64_t before = saved.load(std::memory_order_relaxed);
+-    if ((before & bit) == 0) before = saved.fetch_or(bit, std::memory_order_acq_rel);
++    if ((saved.load(std::memory_order_relaxed) & bit) != 0) {
++      return BLOCK_COMPLETED_FALSE;  // saved again: its completion was reported
++    }
++    const uint64_t before = saved.fetch_or(bit, std::memory_order_acq_rel);
+     const uint64_t after = before | bit;
+     return (after & k_block_bits(c)) == k_block_bits(c) &&
+            (k_vnni_blocks_[ix].load(std::memory_order_acquire) &
+@@ -2250,8 +2259,9 @@
+   // layout in place (Note [Row-major tail block] in h/tron/tensor/k_vnni.hpp)
+   // when its 16 rows are saved and it is not converted yet. Returns whether it
+   // converted.
+-  // Main thread only, at a point where no reader of the block runs (the
+-  // forward end). A row-major slot never converts.
++  // Called at the forward end, when no reader of the block runs: by the main
++  // thread, or by an app-pool worker for its strided share of the queue
++  // (convert_pending_k_blocks in model.hpp). A row-major slot never converts.
+   TRON(inline)
+   bool k_block_to_vnni(kv_slot_id slot, size_t c) noexcept {
+     return k_block_to_vnni_at(k_storage_of(slot), c);
+@@ -2539,7 +2549,7 @@
+   // The 16 bits of block c.
+   static constexpr uint64_t k_block_bits(size_t c) noexcept {
+     static_assert(page_size == k_vnni::PAGE_TOKENS_64, "one bit per page offset");
+-    return uint64_t{k_vnni::FULL_BLOCK_0XFFFF} << (c * k_vnni::BLOCK_TOKENS_16);
++    return k_vnni::block_token_bits(c);
+   }
+ 
+   TRON(nodiscard, inline)
+@@ -2631,6 +2641,17 @@
+   // See Note [KV Token Lifetimes].
+   uint32_t offset_bound;
+ 
++  // Converted 16-token blocks, one bit per block, per storage slot (entry
++  // layout_t::n_slots = the EAGLE storage). Set by the forward-end conversion
++  // and the full-block save, dropped by clear_kv_complete_at; a set bit
++  // implies the block's 16 row bits in k_rows_saved_ below. Declared here, in
++  // the page's first cache line next to lo and offset_bound, which every page
++  // visit of the software attention reads anyway: apply_page_range reads one
++  // entry per visit, and after kv_saves_ (page_size x n_slots bytes) the entry
++  // would sit dozens of cache lines away, one cold line per visit.
++  std::array<std::atomic<uint8_t>, layout_t::n_slots + EAGLE_STORAGE_SLOTS_1>
++      k_vnni_blocks_{};
++
+   // Per-token per-slot save counter. Indexed [offset][slot].
+   // 0 = neither K nor V saved, 1 = one saved, 2 = both saved.
+   std::array<std::array<std::atomic<uint8_t>, layout_t::n_slots>, page_size>
+@@ -2639,18 +2660,13 @@
+   // K rows saved, one bit per page offset, per storage slot (entry
+   // layout_t::n_slots = the EAGLE storage), VNNI slots only (Note [K VNNI
+   // storage]). A block whose 16 bits are set is complete and is queued for its
+-  // conversion; the layout itself is recorded in k_vnni_blocks_ below. Bits
++  // conversion; the layout itself is recorded in k_vnni_blocks_ above. Bits
+   // are set by save_k (main thread; not for the rows of a hardware-scored
+   // operation, Note [Row-major blocks under hardware attention]) and by the
+   // full-block save (any thread of a shared window, fetch_or), dropped by
+   // clear_kv_complete_at, carried by page copies.
+   std::array<std::atomic<uint64_t>, layout_t::n_slots + EAGLE_STORAGE_SLOTS_1>
+       k_rows_saved_{};
+-  // Converted 16-token blocks, one bit per block, per storage slot (the same
+-  // entries). Set by the forward-end conversion and the full-block save,
+-  // dropped by clear_kv_complete_at; a set bit implies the block's 16 row bits.
+-  std::array<std::atomic<uint8_t>, layout_t::n_slots + EAGLE_STORAGE_SLOTS_1>
+-      k_vnni_blocks_{};
+ 
+   // Which page am I in the book?
+   TRON(nodiscard, inline, pure)
+changed in both
+  base   100644 d6edd214acf93102d3cb2cf498d045246fa7e4d0 h/tron/models/model.hpp
+  our    100644 fa8da7712d2fca7733aef5d55a4cc2dd379d16ed h/tron/models/model.hpp
+  their  100644 e1f92022d144762ca82ffa66c3f5d1c797dbdaa5 h/tron/models/model.hpp
+@@ -1837,8 +1837,18 @@
+       // (gof_rodeo_impl dereferences gof_jobs_span). No-op when the queue is empty.
+       wait_for_coop_gof();
+ 
++<<<<<<< .our
+       // run() joined its workers and wait_for_coop_gof drained the staging: no
+       // reader of a completed K block is left (Note [K VNNI storage] in kv_cache.hpp).
++=======
++      // The K blocks this pass completed go to the VNNI layout now: run()
++      // joined its workers and the staging drained, so no reader is left
++      // (Note [K VNNI storage] in kv_cache.hpp). Blocks of a hardware-scored
++      // operation were never queued (Note [Row-major blocks under hardware
++      // attention] there). A queue of k_convert_parallel_min blocks or more is
++      // converted by the app-pool workers, and the call joins them before the
++      // logit delivery below reuses the pool.
++>>>>>>> .their
+       convert_pending_k_blocks();
+ 
+       // Launch logit delivery
+@@ -3149,6 +3159,17 @@
+     // Tokens per page block: the size of one block save and the longest run.
+     static constexpr size_t k_store_block = k_vnni::BLOCK_TOKENS_16;
+ 
++    // Below this many queued blocks the forward-end conversion stays on the
++    // main thread. One queued block is one k_block_to_vnni_at over every KV
++    // head of its storage slot: 3.6 us serial, measured in a Perfetto trace
++    // (the TRACE_EVENT span convert_k_blocks) of a kill-switch decode of
++    // qwen3-4b at tp2 with 8 users and prompt 1024: a queue of 288 blocks
++    // took 1,049 us on this thread and 58 us through thread_pool::parallel_for
++    // (one task per worker and a latch). The hand-off and the join are inside
++    // those 58 us, so the break-even lies between 8 blocks (29 us serial) and
++    // 16 blocks (est.).
++    static constexpr size_t k_convert_parallel_min = 8;
++
+     // Note [K VNNI storage]: the 16-token blocks that this forward pass
+     // completed through runs shorter than a block, for the operations the
+     // hardware attention does not score (Note [Row-major blocks under
+@@ -3157,7 +3178,9 @@
+     // after wait_for_coop_gof: the cooperative GOF staging gather of an
+     // earlier minibatch is the reader that can still hold the block's rows
+     // row-major. The storage reference is taken at the save, so a storage
+-    // view change cannot redirect the conversion.
++    // view change cannot redirect the conversion. Every block is queued once
++    // (note_k_row_saved reports a completion once): the parallel conversion
++    // below needs that.
+     struct pending_k_block {
+       page* pg;
+       typename page::k_storage_ref storage;
+@@ -3165,13 +3188,31 @@
+     };
+     std::vector<pending_k_block> pending_k_blocks_;
+ 
+-    // Convert the queued blocks (Note [K VNNI storage]). Main thread, after
+-    // the plugin's run() returned and the cooperative GOF staging drained.
++    // Convert the queued blocks (Note [K VNNI storage]). Called on the main
++    // thread at the forward end, after the plugin's run() returned and the
++    // cooperative GOF staging drained, and before the logit delivery reuses
++    // the pool. Fewer than k_convert_parallel_min blocks are converted on
++    // this thread. Otherwise every app-pool worker converts a strided share
++    // of the queue and this thread waits for the latch
++    // (thread_pool::parallel_for). The join must complete here: the listener
++    // thunks of the logit delivery take the tree lock on pool workers and may
++    // move or free books. Each worker publishes its blocks with the release
++    // fetch_or of k_block_to_vnni_at; every reader loads the block bits with
++    // acquire before it touches the plane.
+     void convert_pending_k_blocks() noexcept {
+       if (pending_k_blocks_.empty()) return;
+-      TRACE_EVENT("model", "convert_k_blocks", "blocks", pending_k_blocks_.size());
+-      for (pending_k_block const& b : pending_k_blocks_) {
++      const size_t n_blocks = pending_k_blocks_.size();
++      TRACE_EVENT("model", "convert_k_blocks", "blocks", n_blocks);
++      auto convert = [&](size_t i) {
++        pending_k_block const& b = pending_k_blocks_[i];
+         b.pg->k_block_to_vnni_at(b.storage, b.block);
++      };
++      if (n_blocks < k_convert_parallel_min) {
++        for (size_t i = 0; i < n_blocks; ++i) {
++          convert(i);
++        }
++      } else {
++        parallel_for_or_serial(app_pool(), size_t{0}, n_blocks, convert);
+       }
+       pending_k_blocks_.clear();
+     }
+changed in both
+  base   100644 0c9544289d2b20c8d89763e4eaecd0401e81a79a h/tron/models/self_attention.hpp
+  our    100644 06dbf836a6df974779f13b1e2abf853c515233d4 h/tron/models/self_attention.hpp
+  their  100644 3aed9b24ff4b504418972066d73dde9709691445 h/tron/models/self_attention.hpp
+@@ -2,6 +2,7 @@
+ 
+ #include <algorithm>
+ // #include <atomic>
++#include <bit>
+ #include <bitset>
+ #include <cmath>
+ #include <cstring>
+@@ -1584,6 +1585,22 @@
+           page_end_hint = page_begin_hint;
+           continue;
+         }
++        // The page's K block mask (page::k_vnni_blocks, Note [K VNNI storage]
++        // in kv_cache.hpp): one bit per 16-token block, set when the block
++        // holds the VNNI layout. Read once per page for every query of this
++        // call. The mask is page state, not slot storage, so the read needs no
++        // relevant token. The bits cannot change during the call: save_k sets
++        // them before the pending sections start (the latch of Note [Minibatch
++        // Dependency Tracking] in common.hpp), and the forward-end conversion
++        // runs after run() joined every worker. A row-major slot keeps no
++        // mask: it passes 0, which apply_page_tok never reads.
++        [[maybe_unused]] const uint8_t vnni_blocks = [&] {
++          if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
++            return page.template k_vnni_blocks<geometry.kv>(binding.kv_slot);
++          } else {
++            return uint8_t{0};
++          }
++        }();
+         // Page-level visibility gate. The first token's range is exact when
+         // visibility only narrows along the page, the common case. A fresh
+         // page has one range per token, so the union over its ranges costs an
+@@ -1635,9 +1652,10 @@
+             }
+           }
+ #endif
+-          const page_tok_result visit = apply_page_tok<geometry>(was_valid, page,
+-              operation, operation_scale, kv_head, q, q_tok, sp, tok_ix,
+-              page_begin_hint, sliding_window_size, run_visible_in_software, amx_qp);
++          const page_tok_result visit =
++              apply_page_tok<geometry>(was_valid, page, operation, operation_scale,
++                  kv_head, q, q_tok, sp, tok_ix, page_begin_hint, sliding_window_size,
++                  run_visible_in_software, amx_qp, vnni_blocks);
+           const int relevant_k_tokens = visit.relevant_k_tokens;
+           page_end_hint = visit.hint;
+           if (stats_enabled) {
+@@ -1842,6 +1860,9 @@
+     // the attention-score accumulator of one token.  This incorporates
+     // the deferred-softmax trick, whose extra state is carried by the scratchpad.
+     // Returns {number of relevant k tokens, final range hint, path}.
++    // vnni_blocks is the page's K block mask (page::k_vnni_blocks), read once
++    // per page by apply_page_range: one bit per 16-token block, set when the
++    // block holds the VNNI layout. A row-major slot passes 0, never read.
+     template <attention_geometry geometry>
+     TRON(inline)
+     page_tok_result apply_page_tok(bool was_valid,
+@@ -1856,7 +1877,8 @@
+         const token_range* range_hint,
+         int sliding_window_size,
+         bool run_visible_in_software,
+-        tron_maybe_unused const bf16* amx_q_packed) {
++        tron_maybe_unused const bf16* amx_q_packed,
++        tron_maybe_unused uint8_t vnni_blocks) {
+       constexpr size_t operation_kv_mul = geometry.kv_mul();
+       constexpr size_t operation_head_size = geometry.kv.head_size;
+       const attention_binding binding = operation.binding;
+@@ -1894,14 +1916,16 @@
+       // Note [AMX attention dispatch].
+       if constexpr (amx_attn_h128g4::eligible<typename model::activation_scalar>(
+                         operation_head_size, operation_kv_mul)) {
+-        // The third gate of the dense AMX path, after amx_q_packed and
++        // The third gate of the dense AMX path, next to amx_q_packed and
+         // is_dense_amx_page: the whole page must hold the VNNI layout, since
+         // the kernel reads the page as one B operand (Note [K VNNI storage]
+-        // item 2). page::k_vnni_blocks returns one bit per 16-token block of
+-        // the page, bit c set = block c holds the VNNI layout. A 64-token
+-        // page has 4 blocks, so "every block is VNNI" is "all 4 bits set",
+-        // and that is the mask BLOCKS_PER_PAGE_MASK_0XF (binary 1111). A clear bit is a
+-        // row-major block, and the page takes the software loop instead:
++        // item 2). vnni_blocks is the page's block mask, one bit per 16-token
++        // block of the page, bit c set = block c holds the VNNI layout; the
++        // caller (apply_page_range) reads it once per page. A 64-token page
++        // has 4 blocks, so "every block is VNNI" is "all 4 bits set", and
++        // that is the mask BLOCKS_PER_PAGE_MASK_0XF (binary 1111). A clear
++        // bit is a row-major block, and the page takes the software loop
++        // instead:
+         //   - the block this forward pass completed through a run shorter
+         //     than a block (converted at the forward end, so the page is
+         //     dense from the next pass on);
+@@ -1910,20 +1934,16 @@
+         //     attention] in kv_cache.hpp);
+         //   - a page filled by another writer than save_k.
+         // A row-major slot keeps no layout state: the gate is always open.
+-        // Read after the dense predicate: a page nothing is relevant for is
+-        // never asked for its state (a book may have no active KV slot).
+-        const auto k_layout_dense = [&] {
++        const bool k_layout_dense = [&] {
+           if constexpr (k_vnni::layout_on<operation_head_size>) {
+-            return page.template k_vnni_blocks<geometry.kv>(slot) ==
+-                   k_vnni::BLOCKS_PER_PAGE_MASK_0XF;
++            return vnni_blocks == k_vnni::BLOCKS_PER_PAGE_MASK_0XF;
+           } else {
+             return true;  // a row-major slot keeps no layout state
+           }
+-        };
+-        if (amx_q_packed != nullptr &&
++        }();
++        if (amx_q_packed != nullptr && k_layout_dense &&
+             is_dense_amx_page(page, begin, end, query_visible, *range_hint, q_position,
+-                k_position, sliding_window_size) &&
+-            k_layout_dense()) {
++                k_position, sliding_window_size)) {
+           apply_dense_amx_page<geometry>(
+               was_valid, page, slot, operation_scale, kv_head, sp, amx_q_packed);
+           // The hint is returned unchanged: is_dense_amx_page proved that the
+@@ -1937,10 +1957,13 @@
+       tensor<operation_kv_mul, page::page_size> s_pages;
+       int relevant_k_tokens = 0;
+       {
+-        // share the bf16 -> fp32 conversion across the page
++        // scalar_t is the query buffer's element type: bf16 on every hardware
++        // executor, float on host, fp16 on host_fp16. The dotters and the
++        // reader take q in that type.
+         using scalar_t = typename btensor_t<operation_head_size>::element;
+         for (size_t offset = 0; offset < operation_kv_mul; ++offset)
+           s_pages[offset] = constant<page::page_size>(-1.0f / 0.0f);
++<<<<<<< .our
+         // Row-major K is scored in the loop. VNNI K is scored after the loop, for
+         // the tokens the loop marks in `live`.
+         // The tokens of a row-major tail block (Note [Row-major tail block] in
+@@ -1968,13 +1991,55 @@
+         // plane, so `plane` is a placeholder there.
+         uint8_t vnni_blocks = 0;
+         auto plane = [&] {
++=======
++        // The slot's K layout (Note [K VNNI storage] in kv_cache.hpp) decides
++        // how the relevant tokens are scored. A row-major slot scores one
++        // token at a time inside the loop with the dotters. A VNNI slot only
++        // records the relevant tokens in `live` inside the loop, one bit per
++        // page offset. After the loop the page's block mask splits `live` in
++        // two parts. The tokens of VNNI blocks go to the AVX-512 (Advanced
++        // Vector Extensions, 512-bit vectors) reader k_vnni::qk_group in one
++        // call. The tokens of row-major blocks (Note [Row-major tail block]
++        // in h/tron/tensor/k_vnni.hpp) go to the dotters, one row at a time,
++        // through their typed row (row_major_row). The dotters are built only
++        // when such a row exists.
++        constexpr bool k_vnni_on = k_vnni::layout_on<operation_head_size>;
++        // make_dot_q builds one dotter per query head of the group. `dotter`
++        // binds to a view at construction and has no default constructor, so
++        // we can't declare a std::array<dotter,...> and fill it in a loop.
++        // Pack-expand `kv_mul` constructor calls inside the array initializer
++        // instead. Worth the syntax because `kv_mul` is a compile-time
++        // constant and this is the per-page hot path, so we avoid the heap
++        // allocation a std::vector<dotter> would incur. A row-major slot
++        // builds the array before the loop. A VNNI slot builds it after the
++        // loop, and only for a visit with a row-major row: in decode the
++        // newest page of a user, until its block converts at the forward
++        // end; under hardware attention every page that holds rows of runs
++        // shorter than a block (Note [Row-major blocks under hardware
++        // attention] in kv_cache.hpp).
++        auto make_dot_q = [&] {
++          return [&]<size_t... I>(std::index_sequence<I...>) {
++            return std::array{
++                dotter<scalar_t, operation_head_size>(slice<operation_head_size>()(
++                    q, (kv_head * operation_kv_mul + I) * operation_head_size))...};
++          }(std::make_index_sequence<operation_kv_mul>{});
++        };
++        [[maybe_unused]] auto dot_q = [&] {
++>>>>>>> .their
+           if constexpr (k_vnni_on) {
+-            return std::optional<decltype(page.template k_packed<geometry.kv>(
+-                slot, kv_head))>{};
++            return 0;  // no dotters before the loop: built after it when needed
+           } else {
+-            return 0;  // no packed plane: the row-major slot keeps rows
++            return make_dot_q();
+           }
+         }();
++<<<<<<< .our
++=======
++        [[maybe_unused]] uint64_t live = 0;
++        // The row-major loop reads K through one checked page view, fetched on
++        // the first relevant token. A VNNI slot has no row view (its plane is
++        // fetched after the loop), so `keys` is a placeholder there, like
++        // dot_q.
++>>>>>>> .their
+         [[maybe_unused]] auto keys = [&] {
+           if constexpr (k_vnni_on) {
+             return 0;
+@@ -2001,20 +2066,7 @@
+           }
+           relevant_k_tokens++;
+           if constexpr (k_vnni_on) {
+-            if (!plane) {
+-              vnni_blocks = page.template k_vnni_blocks<geometry.kv>(slot);
+-              plane = page.template k_packed<geometry.kv>(slot, kv_head);
+-            }
+-            if ((vnni_blocks & k_vnni::block_bit(i / k_vnni::BLOCK_TOKENS_16)) != 0) {
+-              live |= k_vnni::offset_bit(i);
+-            } else {
+-              // A row of the row-major tail block: 4 whole lines, the
+-              // row-major dotter.
+-              const auto k = row_major_row(*plane, i);
+-              for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
+-                s_pages[offset][i] = dot_q[offset](k);
+-              }
+-            }
++            live |= k_vnni::offset_bit(i);
+           } else {
+             if (!keys.valid()) keys = page.template k<geometry.kv>(slot, kv_head);
+             const auto k = keys[i];
+@@ -2026,10 +2078,38 @@
+         if constexpr (k_vnni_on) {
+           static_assert(page::page_size == k_vnni::PAGE_TOKENS_64,
+               "the live mask is one bit per token");
++          // `live` is zero exactly when no token was relevant: every relevant
++          // token of a VNNI slot set its bit. The plane is fetched only
++          // otherwise: a page nothing is relevant for is never asked for its
++          // plane (the accessor asserts that the slot's storage is present,
++          // and a book may have no active KV slot).
+           if (live != 0) {
+-            k_vnni::qk_group<operation_kv_mul>(*plane,
+-                q.data + kv_head * operation_kv_mul * operation_head_size, live,
+-                &s_pages[0][0], page::page_size);
++            const auto plane = page.template k_packed<geometry.kv>(slot, kv_head);
++            // The split of `live` by layout. vnni_tokens holds the 64 token
++            // bits of the page's VNNI blocks (the caller's vnni_blocks
++            // expanded by k_vnni::block_token_mask). qk_group scores the live tokens of
++            // those blocks and leaves every other lane at -inf. The other
++            // live tokens lie in row-major blocks: the dotters score them one
++            // row at a time. The two readers add in fp32 in different orders
++            // (the numerics contract in Note [AMX attention dispatch] in
++            // amx_attn_iface.hpp), so a token's score changes its add order
++            // when its block converts.
++            const uint64_t vnni_tokens = k_vnni::block_token_mask(vnni_blocks);
++            if (const uint64_t in_vnni = live & vnni_tokens; in_vnni != 0) {
++              k_vnni::qk_group<operation_kv_mul>(plane,
++                  q.data + kv_head * operation_kv_mul * operation_head_size, in_vnni,
++                  &s_pages[0][0], page::page_size);
++            }
++            if (uint64_t rows = live & ~vnni_tokens; rows != 0) {
++              const auto dot_rows = make_dot_q();
++              for (; rows != 0; rows &= rows - 1) {
++                const size_t i = static_cast<size_t>(std::countr_zero(rows));
++                const auto k = row_major_row(plane, i);
++                for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
++                  s_pages[offset][i] = dot_rows[offset](k);
++                }
++              }
++            }
+           }
+         }
+       }
+changed in both
+  base   100644 8aed2a4e7354cfb1c8c9b27a9ff55e8ff508e4ea h/tron/tensor/k_vnni.hpp
+  our    100644 d13b32d0d0061454f3c68982b1999076dcc89641 h/tron/tensor/k_vnni.hpp
+  their  100644 f57c32c0a907007fadd838a55f92ee7bce85fecc h/tron/tensor/k_vnni.hpp
+@@ -99,6 +99,25 @@
+ constexpr uint64_t offset_bit(size_t offset) noexcept {
+   return uint64_t{1} << offset;
+ }
++// The 16 bits of token block c in a page-offset mask: page offsets 16 c ..
++// 16 c + 15.
++constexpr uint64_t block_token_bits(size_t c) noexcept {
++  return uint64_t{FULL_BLOCK_0XFFFF} << (c * BLOCK_TOKENS_16);
++}
++// The page-offset mask of every token of the blocks set in a block mask
++// (page::k_vnni_blocks): bit c of `blocks` becomes the 16 token bits of
++// block c.
++constexpr uint64_t block_token_mask(uint8_t blocks) noexcept {
++  uint64_t tokens = 0;
++  for (size_t c = 0; c < TOKEN_BLOCKS_4; ++c) {
++    if ((blocks & block_bit(c)) != 0) tokens |= block_token_bits(c);
++  }
++  return tokens;
++}
++static_assert(block_token_mask(BLOCKS_PER_PAGE_MASK_0XF) == ~uint64_t{0} &&
++                  block_token_mask(block_bit(1)) == block_token_bits(1) &&
++                  block_token_mask(0) == 0,
++    "bit c of a block mask is the 16 token bits of block c");
+ static_assert(BLOCK_TOKENS_16 == 16 && TOKEN_BLOCKS_4 == 4 && STEP_PAIRS_16 == 16 &&
+                   DIM_STEPS_4 == 4 && ROW_ELEMS_32 == 32 && ROW_DWORDS_16 == 16 &&
+                   PANEL_ELEMS_512 == 512 && PANEL_BYTES_1024 == 1024 &&
+changed in both
+  base   100644 547ddf6097ddb8362c1e2dc9df13fa607b46bbb8 t/t_amx_dispatch_dtype.cpp
+  our    100644 2a2714a3bab2e7608629287acd866db419b3992e t/t_amx_dispatch_dtype.cpp
+  their  100644 607dafa06a954357e3009b1373a12f0c23796ee0 t/t_amx_dispatch_dtype.cpp
+@@ -28,6 +28,7 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <filesystem>
++#include <limits>
+ #include <memory>
+ #include <span>
+ #include <type_traits>
+@@ -41,6 +42,8 @@
+ #include "common/numerics.hpp"
+ #include "common/types.hpp"
+ #include "tron/kernels/amx_attn_iface.hpp"
++#include "tron/kernels/dotter.hpp"
++#include "tron/kernels/k_vnni.hpp"
+ #include "tron/models/common.hpp"
+ #include "tron/models/model.hpp"
+ #include "tron/models/ranged_mask.hpp"
+@@ -69,6 +72,7 @@
+ // the kill switch (TRON_AMX_DISABLE=1) or a CPU without AMX.
+ bool fake_amx_available = true;
+ 
++<<<<<<< .our
+ // Runs apply_page_range over one page holding `n_tokens` tokens, with the
+ // query at the last token, and records the fakes' calls in `probe`. With
+ // `repeat` the call is made a second time with different query values.
+@@ -81,6 +85,99 @@
+     bool repeat = false,
+     bool amx_available = true,
+     bool record_rows = true) {
++=======
++// exercise_page arguments: whether a second call is made, what the fake
++// available() answers, and how many of the stored rows (from offset 0 up)
++// are recorded like save_k records them.
++constexpr bool REPEAT_FALSE = false;
++constexpr bool AMX_AVAILABLE_TRUE = true;
++constexpr bool AMX_AVAILABLE_FALSE = false;
++constexpr size_t RECORDED_ROWS_64 = 64;  // every row of the page
++constexpr size_t RECORDED_ROWS_48 = 48;  // blocks 0 to 2; block 3 stays row-major
++constexpr size_t RECORDED_ROWS_32 = 32;  // blocks 0 and 1; 2 and 3 row-major
++constexpr size_t RECORDED_ROWS_0 = 0;
++// The token whose K row equals the query in the score check: none (every K
++// row is zero, the scores are not checked), a row of block 1 or a row of
++// block 3.
++constexpr size_t NO_DOMINANT_TOKEN = SIZE_MAX;
++constexpr size_t DOMINANT_TOKEN_20 = 20;
++constexpr size_t DOMINANT_TOKEN_50 = 50;
++static_assert(RECORDED_ROWS_64 == amx_attn_h128g4::PAGE_TOKENS_64 &&
++                  RECORDED_ROWS_48 == 3 * k_vnni::BLOCK_TOKENS_16 &&
++                  RECORDED_ROWS_32 == 2 * k_vnni::BLOCK_TOKENS_16 &&
++                  DOMINANT_TOKEN_20 / k_vnni::BLOCK_TOKENS_16 == 1 &&
++                  DOMINANT_TOKEN_50 / k_vnni::BLOCK_TOKENS_16 == 3,
++    "every constant's name states its value");
++
++// The bf16 bit layout, for the value helpers below.
++constexpr unsigned BF16_SIGN_SHIFT_15 = 15;
++constexpr unsigned BF16_EXPONENT_SHIFT_7 = 7;
++constexpr unsigned BF16_EXPONENT_BIAS_127 = 127;
++constexpr unsigned BF16_MANTISSAS_128 = 128;
++constexpr uint16_t BF16_SIGN_BIT_0X8000 = 0x8000;
++// The query values of the score check use 7 exponents, from 2^-4 up, with
++// every mantissa, so that an fp32 sum of their products depends on the add
++// order (the two readers of the software loop add in different orders).
++constexpr unsigned QUERY_EXPONENTS_7 = 7;
++constexpr unsigned QUERY_EXPONENT_OFFSET_4 = 4;
++// Every K row but the dominant one is the query divided by 8: three
++// exponents down.
++constexpr unsigned OTHER_ROW_EXPONENTS_DOWN_3 = 3;
++
++// Dimension d of the query row of the score check (the same row for every
++// head).
++bf16 query_value(size_t d) {
++  const unsigned sign = (d % 3 == 0) ? 1u : 0u;
++  const unsigned exponent =
++      BF16_EXPONENT_BIAS_127 - QUERY_EXPONENT_OFFSET_4 + (d * 5) % QUERY_EXPONENTS_7;
++  const unsigned mantissa = (d * 37 + 11) % BF16_MANTISSAS_128;
++  return bf16::from_bits(static_cast<uint16_t>(
++      (sign << BF16_SIGN_SHIFT_15) | (exponent << BF16_EXPONENT_SHIFT_7) | mantissa));
++}
++
++// Dimension d of K row `token` of the score check: the query value for the
++// dominant token, else the query value divided by 8, with its sign flipped
++// for an odd token + d. So the dominant token's score is the largest of the
++// page for every head.
++bf16 k_row_value(size_t token, size_t d, size_t dominant_token) {
++  const bf16 q = query_value(d);
++  if (token == dominant_token) return q;
++  const uint16_t scaled = static_cast<uint16_t>(
++      q.to_bits() - (OTHER_ROW_EXPONENTS_DOWN_3 << BF16_EXPONENT_SHIFT_7));
++  return bf16::from_bits(((token + d) % 2 == 1)
++                             ? static_cast<uint16_t>(scaled ^ BF16_SIGN_BIT_0X8000)
++                             : scaled);
++}
++
++// The shape of one exercise_page call: how many tokens the page holds,
++// whether a second call is made, what the fake available() answers, how many
++// of the stored rows (from offset 0 up) are recorded like save_k records
++// them, and which token's K row is the dominant one of the score check.
++struct page_shape {
++  size_t n_tokens;
++  bool repeat = REPEAT_FALSE;
++  bool amx_available = AMX_AVAILABLE_TRUE;
++  size_t recorded_rows = RECORDED_ROWS_64;
++  size_t dominant_token = NO_DOMINANT_TOKEN;
++};
++
++// Runs apply_page_range over one page of `shape`, with the query at the last
++// token, and records the fakes' calls in `probe`. With `repeat` the call is
++// made a second time with different query values. `amx_available` is what
++// the fake available() answers during the call. The stored rows at offsets
++// below `recorded_rows` are recorded like save_k records them, so under
++// TRON_K_VNNI every block those rows fill holds the VNNI layout; a block with
++// an unrecorded row keeps the row-major layout, and the dense gate must
++// refuse the AMX path for the page. With a dominant token the K rows carry
++// the values of k_row_value, and the softmax state after the call is checked
++// against the two readers of the software loop (check_scores below).
++template <typename executor_t>
++void exercise_page(const page_shape& shape) {
++  const size_t n_tokens = shape.n_tokens;
++  const bool repeat = shape.repeat;
++  const bool amx_available = shape.amx_available;
++  const size_t recorded_rows = shape.recorded_rows;
++>>>>>>> .their
+   constexpr size_t head_size = 128;
+   constexpr size_t n_heads = 4;
+   constexpr size_t n_kv_heads = 1;
+@@ -113,13 +210,19 @@
+   auto* page = cache.page_of(0);
+   const kv_slot_id slot = book_t::kv_slot(model_layer_id(0));
+   alignas(64) std::array<bf16, head_size> zero{};
++  alignas(64) std::array<bf16, head_size> k_row{};
+   for (size_t token = 0; token < n_tokens; ++token) {
+-    page->set_k_row(slot, 0, token, k_source_row<head_size>(zero.data()));
++    if (shape.dominant_token != NO_DOMINANT_TOKEN) {
++      for (size_t d = 0; d < head_size; ++d) {
++        k_row[d] = k_row_value(token, d, shape.dominant_token);
++      }
++    }
++    page->set_k_row(slot, 0, token, k_source_row<head_size>(k_row.data()));
+     // What save_k and the forward end do after a row store: record the row,
+     // and convert the block to the VNNI layout when it is complete (Note [K
+     // VNNI storage]). The dense AMX path runs only for a page whose 4 blocks
+     // are VNNI.
+-    if (record_rows && page->note_k_row_saved(slot, token)) {
++    if (token < recorded_rows && page->note_k_row_saved(slot, token)) {
+       page->k_block_to_vnni(slot, token / k_vnni::BLOCK_TOKENS_16);
+     }
+     page->template set_v<geometry.kv>(
+@@ -150,7 +253,9 @@
+   std::array<float, n_heads * head_size> expected{};
+   auto& q = state.plugin_state.qs_roped[token_job_id(0)];
+   for (size_t i = 0; i < expected.size(); ++i) {
+-    expected[i] = 1.0f + static_cast<float>(i % 4) * 0.25f;
++    expected[i] = shape.dominant_token == NO_DOMINANT_TOKEN
++                      ? 1.0f + static_cast<float>(i % 4) * 0.25f
++                      : static_cast<float>(query_value(i % head_size));
+     q[i] = static_cast<query_scalar>(expected[i]);
+   }
+   state.self_attn_state.attn[0].clear_validity(1);
+@@ -177,10 +282,53 @@
+   // bf16 query buffer may reach the packer, which copies bf16 values and
+   // converts nothing. With available() false nothing is packed either.
+   const bool packs = std::is_same_v<query_scalar, bf16> && amx_available;
+-  // The dense predicate: the kernels run only for a full page whose blocks
+-  // hold the VNNI layout (a VNNI slot with unrecorded rows keeps them row-major).
+-  const bool dense = packs && n_tokens == book_t::page_size &&
+-                     (record_rows || !k_vnni::layout_on<head_size>);
++  // The dense predicate: the kernels run only for a full page whose 4 blocks
++  // hold the VNNI layout (a VNNI slot keeps a block with an unrecorded row
++  // row-major).
++  const bool dense =
++      packs && n_tokens == book_t::page_size &&
++      (recorded_rows == book_t::page_size || !k_vnni::layout_on<head_size>);
++  // The score check: every token's unscaled score through the reader of its
++  // block's layout (k_vnni::qk_group for a VNNI block, the row-major dotter
++  // for every other row), then the largest score of the page times the
++  // scale, per head. apply_page_range's softmax state keeps that value as
++  // m_star, bit for bit, when the loop scored the same token through the
++  // same reader.
++  auto check_scores = [&] {
++    constexpr size_t page_size = book_t::page_size;
++    auto sp = state.self_attn_state.template token_scratchpad_ref_at<geometry>(0, 0);
++    const auto q_view = state.plugin_state.qs_roped[token_job_id(0)].as_view();
++    std::array<float, n_heads * page_size> s{};
++    s.fill(-std::numeric_limits<float>::infinity());
++    alignas(64) std::array<bf16, head_size> stored_row;
++    for (size_t t = 0; t < n_tokens; ++t) {
++      bool vnni_block = false;
++#ifdef TRON_K_VNNI
++      vnni_block = (page->template k_vnni_blocks<geometry.kv>(slot) &
++                       k_vnni::block_bit(t / k_vnni::BLOCK_TOKENS_16)) != 0;
++      if (vnni_block) {
++        k_vnni::qk_group<n_heads>(page->template k_packed<geometry.kv>(slot, 0),
++            q_view.data, k_vnni::offset_bit(t), s.data(), page_size);
++      }
++#endif
++      if (!vnni_block) {
++        page->get_k_row(slot, 0, t, k_destination_row<head_size>(stored_row.data()));
++        for (size_t h = 0; h < n_heads; ++h) {
++          const dotter<query_scalar, head_size> dot(
++              slice<head_size>()(q_view, h * head_size));
++          s[h * page_size + t] = dot(k_source_row<head_size>(stored_row.data()));
++        }
++      }
++    }
++    for (size_t h = 0; h < n_heads; ++h) {
++      float m = -std::numeric_limits<float>::infinity();
++      for (size_t t = 0; t < n_tokens; ++t) {
++        m = std::max(m, s[h * page_size + t] * operation.config.scale);
++      }
++      CAPTURE(h, m, sp[h].m_star);
++      REQUIRE(sp[h].m_star == m);
++    }
++  };
+   fake_amx_available = amx_available;
+   for (int round = 0; round < (repeat ? 2 : 1); ++round) {
+     if (round == 1) {
+@@ -243,6 +391,7 @@
+         REQUIRE(probe.q[i] == expected[i]);
+       }
+     }
++    if (shape.dominant_token != NO_DOMINANT_TOKEN) check_scores();
+   }
+ }
+ 
+@@ -308,28 +457,35 @@
+   constexpr size_t page_size = amx_attn_h128g4::PAGE_TOKENS_64;
+   SECTION("host_bf16, full page: one pack, one QK, one PV; a second call with "
+           "new queries packs again") {
+-    exercise_page<host_bf16>(page_size, /*repeat=*/true);
++    exercise_page<host_bf16>({.n_tokens = page_size, .repeat = true});
+   }
+   SECTION("host_bf16, partial page: one pack, no kernel call") {
+-    exercise_page<host_bf16>(page_size - 1);
++    exercise_page<host_bf16>({.n_tokens = page_size - 1});
+   }
+   SECTION("host_bf16, full page with unrecorded rows: one pack, and under "
+           "TRON_K_VNNI no kernel call (the blocks are row-major)") {
++    exercise_page<host_bf16>({.n_tokens = page_size, .recorded_rows = RECORDED_ROWS_0});
++  }
++  SECTION("host_bf16, full page with 48 recorded rows: one pack, and under "
++          "TRON_K_VNNI no kernel call (block 3 is row-major)") {
++    // The page's block mask is 0x7 here: three VNNI blocks and one row-major
++    // block. The gate must ask for every block, not for any block.
+     exercise_page<host_bf16>(
+-        page_size, REPEAT_FALSE, AMX_AVAILABLE_TRUE, RECORD_ROWS_FALSE);
++        {.n_tokens = page_size, .recorded_rows = RECORDED_ROWS_48});
+   }
+   SECTION("host_bf16, full page, available() false: no pack, no kernel call, one "
+           "AVX visit that scored the whole page") {
+     // The kill-switch arm of the attention path stats: the visit lands on the
+     // AVX path with the page's every token, and avx_full_page_visits counts it
+     // as AMX-eligible volume that did not take AMX.
+-    exercise_page<host_bf16>(page_size, REPEAT_FALSE, AMX_AVAILABLE_FALSE);
++    exercise_page<host_bf16>(
++        {.n_tokens = page_size, .amx_available = AMX_AVAILABLE_FALSE});
+   }
+   SECTION("host (float): no pack, no kernel call") {
+-    exercise_page<host>(page_size);
++    exercise_page<host>({.n_tokens = page_size});
+   }
+   SECTION("host_fp16: no pack, no kernel call") {
+-    exercise_page<host_fp16>(page_size);
++    exercise_page<host_fp16>({.n_tokens = page_size});
+   }
+ }
+ #else
+@@ -337,3 +493,52 @@
+   SUCCEED("build without TRON_AMX_DISPATCH - nothing to test");
+ }
+ #endif
++
++// The software loop exists in every build: with the AMX path off (the kill
++// switch TRON_AMX_DISABLE=1, a host without AMX, or a build without
++// TRON_AMX_DISPATCH) it scores the page. Under TRON_K_VNNI the page holds
++// two VNNI blocks (rows 0..31 recorded) and two row-major blocks; the
++// row-major build keeps every row row-major. The softmax state's m_star
++// must equal the score check's value bit for bit, with the dominant row in a
++// row-major block and in a VNNI block, for every CPU executor.
++TEST_CASE("the software loop scores row-major rows with the dotter and VNNI blocks "
++          "with the reader",
++    "[attention][k_vnni]") {
++  constexpr size_t page_size = amx_attn_h128g4::PAGE_TOKENS_64;
++  SECTION("host_bf16, the dominant row in a row-major block") {
++    exercise_page<host_bf16>({.n_tokens = page_size,
++        .amx_available = AMX_AVAILABLE_FALSE,
++        .recorded_rows = RECORDED_ROWS_32,
++        .dominant_token = DOMINANT_TOKEN_50});
++  }
++  SECTION("host_bf16, the dominant row in a VNNI block") {
++    exercise_page<host_bf16>({.n_tokens = page_size,
++        .amx_available = AMX_AVAILABLE_FALSE,
++        .recorded_rows = RECORDED_ROWS_32,
++        .dominant_token = DOMINANT_TOKEN_20});
++  }
++  SECTION("host (float), the dominant row in a row-major block") {
++    exercise_page<host>({.n_tokens = page_size,
++        .amx_available = AMX_AVAILABLE_FALSE,
++        .recorded_rows = RECORDED_ROWS_32,
++        .dominant_token = DOMINANT_TOKEN_50});
++  }
++  SECTION("host (float), the dominant row in a VNNI block") {
++    exercise_page<host>({.n_tokens = page_size,
++        .amx_available = AMX_AVAILABLE_FALSE,
++        .recorded_rows = RECORDED_ROWS_32,
++        .dominant_token = DOMINANT_TOKEN_20});
++  }
++  SECTION("host_fp16, the dominant row in a row-major block") {
++    exercise_page<host_fp16>({.n_tokens = page_size,
++        .amx_available = AMX_AVAILABLE_FALSE,
++        .recorded_rows = RECORDED_ROWS_32,
++        .dominant_token = DOMINANT_TOKEN_50});
++  }
++  SECTION("host_fp16, the dominant row in a VNNI block") {
++    exercise_page<host_fp16>({.n_tokens = page_size,
++        .amx_available = AMX_AVAILABLE_FALSE,
++        .recorded_rows = RECORDED_ROWS_32,
++        .dominant_token = DOMINANT_TOKEN_20});
++  }
++}
+changed in both
+  base   100644 afc33177fd8ec2c9c89da88f29a560de35fd84fd t/t_k_vnni_layout.cpp
+  our    100644 6dbaab41ad0b8742f8f6e13ebba31e7467fba506 t/t_k_vnni_layout.cpp
+  their  100644 401bad9bc6030075371f950d122c7b257c9aedcd t/t_k_vnni_layout.cpp
+@@ -630,8 +630,11 @@
+   constexpr size_t LAST_OF_BLOCK_1_31 = 31;
+   constexpr size_t SAVED_TOKENS_32 = 32;
+   constexpr uint8_t BLOCK_0_ONLY_0X1 = 0x1;
++  constexpr uint8_t BLOCK_1_ONLY_0X2 = 0x2;
+   constexpr uint8_t BLOCKS_0_AND_1_0X3 = 0x3;
+-  static_assert(SAVED_TOKENS_21 == 21 && LAST_OF_BLOCK_0_15 == 15,
++  constexpr size_t BLOCK_1 = 1;
++  static_assert(SAVED_TOKENS_21 == 21 && LAST_OF_BLOCK_0_15 == 15 &&
++                    BLOCK_1_ONLY_0X2 == 0x2 && BLOCK_1 == 1,
+       "every constant's name states its value");
+   const bool vnni_build = tron::k_vnni::layout_on<HEAD_SIZE_128>;
+   alignas(LINE_BYTES_64) std::array<tron::bf16, HEAD_SIZE_128> row{}, got{};
+@@ -787,6 +790,32 @@
+       SLOT_0, 0, FORGOTTEN_TOKEN_16, tron::k_source_row<HEAD_SIZE_128>(row.data()));
+   REQUIRE_FALSE(save_row_state(page, SLOT_0, FORGOTTEN_TOKEN_16));
+   REQUIRE(vnni_blocks(page, SLOT_0) == NO_BLOCK_0X0);
++  // A completion is reported once (Note [K VNNI storage]: the forward end
++  // converts every queued block once, in parallel). Rows 16..31 are recorded
++  // without the conversion: row 31 completes block 1, a row saved again into
++  // the complete block does not report the completion again, and the block
++  // converts once.
++  for (size_t tok = FORGOTTEN_TOKEN_16; tok < SAVED_TOKENS_32; ++tok) {
++    fill_row(row, tok, SALT_5);
++    page->set_k_row(SLOT_0, 0, tok, tron::k_source_row<HEAD_SIZE_128>(row.data()));
++    CAPTURE(tok);
++    REQUIRE(page->note_k_row_saved(SLOT_0, tok) ==
++            (vnni_build && tok == LAST_OF_BLOCK_1_31));
++  }
++  fill_row(row, FORGOTTEN_TOKEN_18, SALT_5);
++  page->set_k_row(
++      SLOT_0, 0, FORGOTTEN_TOKEN_18, tron::k_source_row<HEAD_SIZE_128>(row.data()));
++  REQUIRE_FALSE(page->note_k_row_saved(SLOT_0, FORGOTTEN_TOKEN_18));
++  REQUIRE(vnni_blocks(page, SLOT_0) == NO_BLOCK_0X0);
++  REQUIRE(page->k_block_to_vnni(SLOT_0, BLOCK_1) == vnni_build);
++  REQUIRE_FALSE(page->k_block_to_vnni(SLOT_0, BLOCK_1));
++  REQUIRE(vnni_blocks(page, SLOT_0) == (vnni_build ? BLOCK_1_ONLY_0X2 : NO_BLOCK_0X0));
++  for (size_t tok = FORGOTTEN_TOKEN_16; tok < SAVED_TOKENS_32; ++tok) {
++    fill_row(row, tok, SALT_5);
++    page->get_k_row(SLOT_0, 0, tok, tron::k_destination_row<HEAD_SIZE_128>(got.data()));
++    CAPTURE(tok);
++    REQUIRE(same_bits(got, row));
++  }
+ }
+ 
+ TEST_CASE("the EAGLE storage view keeps its own K layout state", "[kv_data][k_vnni]") {
+changed in both
+  base   100644 3d96ad6eb8b05479469ec890cfcf62aac99d811a t/t_llama_unit.cpp
+  our    100644 dab4e5ebad02d494570c55a40b1b599da6bd55a3 t/t_llama_unit.cpp
+  their  100644 9f616204fc01425fdde75a2099c278866bb069a3 t/t_llama_unit.cpp
+@@ -2741,10 +2741,13 @@
+           window_excludes_all ? visible : mask_t<ranged_mask_capacity>{},
+           window_excludes_all ? mask_t<ranged_mask_capacity>{} : visible);
+       state.query_mask = &excluded;
++      // No token of the page is relevant, so the block mask (the last
++      // argument) is never read.
++      constexpr uint8_t no_block_mask = 0;
+       auto const result = state.self_attn_state.apply_page_tok<geometry>(false,
+           *empty_page, operation, operation_scale, 0, q, excluded_token, scratch,
+           excluded_job, &excluded.find_range(token_id(0)),
+-          window_excludes_all ? 1 : 1024, window_excludes_all, nullptr);
++          window_excludes_all ? 1 : 1024, window_excludes_all, nullptr, no_block_mask);
+       REQUIRE(result.relevant_k_tokens == 0);
+       REQUIRE(result.served == tron::attn_stats::visit_path::empty);
+     }
+@@ -3882,11 +3885,21 @@
+   auto scratch = state.self_attn_state.token_scratchpad_ref_at<geometry>(0, 0);
+   auto const q = state.plugin_state.qs_roped[token_job_id(0)].as_view();
+   // Arguments as in check_page_range_reductions: not was_valid, sliding
++<<<<<<< .our
+   // window 1024, not run_visible_in_software.
+   auto const result =
+       state.self_attn_state.apply_page_tok<geometry>(WAS_VALID_FALSE, *page, operation,
+           attention_scale, 0, q, token_id(page_t::page_size), scratch, token_job_id(0),
+           &mask.find_range(token_id(0)), 1024, RUN_VISIBLE_IN_SOFTWARE_FALSE, nullptr);
++=======
++  // window 1024, not run_visible_in_software. No token is relevant, so the
++  // block mask (the last argument) is never read.
++  constexpr uint8_t no_block_mask = 0;
++  auto const result =
++      state.self_attn_state.apply_page_tok<geometry>(false, *page, operation,
++          attention_scale, 0, q, token_id(page_t::page_size), scratch, token_job_id(0),
++          &mask.find_range(token_id(0)), 1024, false, nullptr, no_block_mask);
++>>>>>>> .their
+   REQUIRE(result.relevant_k_tokens == 0);
+   REQUIRE(result.served == tron::attn_stats::visit_path::empty);
+ }
+@@ -4170,6 +4183,90 @@
+     check(before);
+   }
+ 
++  SECTION("the forward end converts a queue of many blocks on the pool") {
++    // One pass completes every block of the three pages: rows 0..14 of each
++    // block are saved and recorded before the pass, and the pass saves the
++    // 16th rows (12 runs of one token). The queue then holds 12 blocks, at
++    // least k_convert_parallel_min, so convert_pending_k_blocks converts them
++    // on the app pool. Every row must read back, every block must be VNNI
++    // and the queue empty: a block converted twice or not at all fails here.
++    if (app_pool().num_workers() == 0) {
++      SKIP("no app-pool worker: the parallel branch cannot run here");
++    }
++    bk.fill_random(gen);
++    constexpr size_t rows_per_block = k_vnni::BLOCK_TOKENS_16;
++    constexpr size_t n_blocks = num_kv_tokens / rows_per_block;
++    static_assert(n_blocks >= state_t::k_convert_parallel_min,
++        "the queue must take the parallel branch");
++    // Bit patterns of the rows saved before the pass, distinct from the
++    // source_bits of the pass's rows: exponent field 0x60..0x6f.
++    auto pre_bits = [](size_t tok, size_t elt) {
++      const size_t mix = tok * 2053 + elt * 29;
++      return static_cast<uint16_t>(0x3000u + mix % 0x0800u);
++    };
++    alignas(64) std::array<bf16, head_size> row;
++    auto is_last_row = [&](size_t tok) {
++      return tok % rows_per_block == rows_per_block - 1;
++    };
++    for (size_t tok = 0; tok < num_kv_tokens; ++tok) {
++      if (is_last_row(tok)) continue;  // the pass saves it
++      page_t* page = token_pages[tok];
++      const size_t offset = static_cast<size_t>(page->offset_in_page(token_id(tok)));
++      for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
++        for (size_t d = 0; d < head_size; ++d) {
++          row[d] = bf16::from_bits(pre_bits(tok, kv_head * head_size + d));
++        }
++        page->set_k_row(slot, kv_head, offset, k_source_row<head_size>(row.data()));
++      }
++      REQUIRE_FALSE(page->note_k_row_saved(slot, offset));
++    }
++    // The pass: job b saves the 16th row of block b (its K row is kouts[b]).
++    indexed_vector<token_job_id, token_id> last_jobs;
++    std::vector<uint8_t> all_kv;
++    std::vector<token_job_id> last_items;
++    for (size_t b = 0; b < n_blocks; ++b) {
++      last_jobs.push_back(token_id(b * rows_per_block + rows_per_block - 1));
++      all_kv.push_back(1);
++      last_items.push_back(token_job_id(b));
++    }
++    state.token_jobs = last_jobs;
++    state.token_jobs_do_kv.items = std::span<const uint8_t>(all_kv);
++    batch last_batch(state, std::move(last_items), latches, 0);
++    last_batch.reset_channels(0, 0);
++    state.template save_k<geometry>(&last_batch, operation, state.plugin_state.kouts);
++    const size_t queued = k_vnni::layout_on<head_size> ? n_blocks : 0;
++    REQUIRE(state.pending_k_blocks_.size() == queued);
++    state.convert_pending_k_blocks();
++    REQUIRE(state.pending_k_blocks_.empty());
++#ifdef TRON_K_VNNI
++    for (size_t pg = 0; pg < num_pages; ++pg) {
++      CAPTURE(pg);
++      REQUIRE(pages[pg]->template k_vnni_blocks<geometry.kv>(slot) ==
++              k_vnni::BLOCKS_PER_PAGE_MASK_0XF);
++    }
++#endif
++    alignas(64) std::array<bf16, head_size> got;
++    for (size_t tok = 0; tok < num_kv_tokens; ++tok) {
++      page_t* page = token_pages[tok];
++      const int offset = page->offset_in_page(token_id(tok));
++      const size_t job = tok / rows_per_block;
++      for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
++        page->get_k_row(
++            slot, kv_head, offset, k_destination_row<head_size>(got.data()));
++        for (size_t d = 0; d < head_size; ++d) {
++          const size_t elt = kv_head * head_size + d;
++          const uint16_t want =
++              is_last_row(tok) ? source_bits(job, elt) : pre_bits(tok, elt);
++          if (got[d].to_bits() != want) {
++            FAIL("token " << tok << " kv_head " << kv_head << " dim " << d
++                          << ": stored 0x" << std::hex << got[d].to_bits()
++                          << " expected 0x" << want);
++          }
++        }
++      }
++    }
++  }
++
+   SECTION("three threads: the helpers share the window and every row is stored once") {
+     bk.fill_random(gen);
+     pre_save();

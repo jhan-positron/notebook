@@ -64,14 +64,14 @@ Three requests from the user, in order:
 - 16:34 Test counts filled into pr-body-v4.md.
 - 16:44 The four traces analysed on claude-box with trace_spans.py (perfetto through uvx). 16:45 Logged in status.md.
 - 17:14 to 17:55 The CPU campaign ran (23:39 to 00:54 UTC, 54 runs, rotated arm order). 17:35 Two of three repetitions already showed fixoff vs headoff at -0.94 TPS at tp2 prompt 1024.
-- 17:56 r2-table-cpu.md written with pr_tables.py.
-- 17:55 to 18:10 The FPGA campaign ran (00:54 to 01:11 UTC, 18 runs). 18:15 r2-table-fpga.md written.
-- 18:16 results-round2.html regenerated with gen_report.py. 18:17 Its SVG panels render-checked with cairosvg.
-- 18:17 to 18:22 pr-body-v4.md completed and trimmed into pr-body-v5.md (1,993 words outside the glossary, no semicolons).
+- 17:56 r2-table-cpu.md written with pr_tables.py. (preserved: artifacts/intel-amx/exec/i4934-20261015/r2-table-cpu.md)
+- 17:55 to 18:10 The FPGA campaign ran (00:54 to 01:11 UTC, 18 runs). 18:15 r2-table-fpga.md written. (preserved: artifacts/intel-amx/exec/i4934-20261015/r2-table-fpga.md)
+- 18:16 results-round2.html regenerated with gen_report.py. 18:17 Its SVG panels render-checked with cairosvg. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4934/results-round2.html)
+- 18:17 to 18:22 pr-body-v4.md completed and trimmed into pr-body-v5.md (1,993 words outside the glossary, no semicolons). (preserved: artifacts/intel-amx/exec/i4934-20261015/pr-body-v4.md)
 - 18:20 The dispatch-off build's six tests passed.
 - 18:24 to 18:32 Token identity: all three cells ok (01:19 to 01:29 UTC). Serving and Bill's marker restored at 01:29 UTC.
 - 18:36 The chain finished at 01:36 UTC. Mutations m1 and m3 were caught. m2 failed to apply because its anchor text held the constant replaced in commit 4.
-- 18:36 to 18:37 mutations.py anchor fixed. mutate-r2b.sh written to run m2 alone. Launched. Memory note updated.
+- 18:36 to 18:37 mutations.py anchor fixed. mutate-r2b.sh written to run m2 alone. Launched. Memory note updated. (preserved: artifacts/intel-amx/exec/i4934-20261015/mutate-r2b.sh)
 - 18:38 MEMORY.md index updated. Serving back with all four rinzler units active.
 - 18:41 m2 caught at 01:38 UTC. status.md appended.
 - 18:42 Round-2 report to the user with the decision rule table and the choice (a) open as is or (b) add a 16-row tail-block kernel first.
@@ -81,7 +81,7 @@ Three requests from the user, in order:
 - 21:00 to 21:05 The 2026-10-13 campaign with a main arm (results/pr4off-E-cpu) found. The reader, dotter and store code read. delphi-3bda busy with the nightly CI.
 - 21:08 tail_bench.cpp written. 21:09 Syntax check passed with no warnings.
 - 21:10 bench-run.sh written and dry-run. 21:11 Launched on delphi-3bda (pid 1469595), waiting for the CI lease.
-- 21:14 bench_tables.py written. handoff.md updated.
+- 21:14 bench_tables.py written. handoff.md updated. (preserved: artifacts/intel-amx/exec/i4934-20261015/bench/bench_tables.py)
 - 21:15 Report to the user: the chained main comparison and the queued benchmark.
 - 22:10 Context compaction.
 
@@ -89,7 +89,7 @@ Three requests from the user, in order:
 
 - 06:16 The first launch had waited for the lease until 13:16 UTC and then failed to link (libgcc_s missing).
 - 06:17 bench-run.sh fixed with -lgcc_s and relaunched. 06:18 Compiled and running on cores 72 and 90.
-- 06:21 Both runs done, 97 s each. tables.md written.
+- 06:21 Both runs done, 97 s each. tables.md written. (preserved: artifacts/intel-amx/exec/results/i4934-tailbench/tables.md)
 - 06:25 bench_page.py written and run: tail-bench.html. Panels render-checked.
 - 06:26 to 06:28 Label fixes in the page. status.md, handoff.md and the memory note updated.
 - 06:28 Final report to the user. The session ended at 06:31.
@@ -178,34 +178,34 @@ Project folder claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/
 - handoff.md (22,765 bytes). The handoff with an update block at the top, the declined option (a), the benchmark result.
 - results-round2.html (93,158 bytes). Chart page of round 2: dot plots per cell with the band, direct labels.
   - generator: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/gen_report.py
-  - input: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/report-config-r2.json, which names /home/jhan/workspace/intel-AMX/exec/results/i4934-E2-cpu/summary.json and i4934-E2-fpga/summary.json
+  - input: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/report-config-r2.json, which names /home/jhan/workspace/intel-AMX/exec/results/i4934-E2-cpu/summary.json and i4934-E2-fpga/summary.json (preserved: artifacts/intel-amx/exec/results/i4934-E2-cpu/summary.json)
   - input built by: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/campaign-rot.sh called from chain-r2.sh, summarized by /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py
   - sources: runtron binaries on delphi-3bda: fix b87d20dd81 in /var/tmp/jhan/tron-i4934, new = PR 4901 at 6b081187e1, head = PR 4898 in /var/tmp/jhan/tron-pr3
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/exec/i4934-20261015/gen_report.py /home/jhan/workspace/intel-AMX/exec/i4934-20261015/report-config-r2.json <OUT>`
-- tail-bench.html (78,614 bytes). Chart page of the micro-benchmark: per-step budget chart, small multiples per arm and scenario, the main comparison dumbbells, exact tables, correctness, method.
-  - generator: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/bench/bench_page.py
-  - input: /home/jhan/workspace/intel-AMX/exec/results/i4934-tailbench/tail_bench-run1.csv and tail_bench-run2.csv
-  - input built by: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/bench/bench-run.sh on delphi-3bda, which compiles tail_bench.cpp inside the nix shell of /var/tmp/jhan/tron-i4934 and runs it twice
-  - sources: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/bench/tail_bench.cpp against the headers of the fix tree at b87d20dd81
-  - regenerate: `cd /home/jhan/workspace/intel-AMX/exec/results/i4934-tailbench && python3 /home/jhan/workspace/intel-AMX/exec/i4934-20261015/bench/bench_page.py <OUT> tail_bench-run1.csv tail_bench-run2.csv`
+- tail-bench.html (78,614 bytes). Chart page of the micro-benchmark: per-step budget chart, small multiples per arm and scenario, the main comparison dumbbells, exact tables, correctness, method. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4934/tail-bench.html)
+  - generator: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/bench/bench_page.py (preserved: artifacts/intel-amx/exec/i4934-20261015/bench/bench_page.py)
+  - input: /home/jhan/workspace/intel-AMX/exec/results/i4934-tailbench/tail_bench-run1.csv and tail_bench-run2.csv (preserved: artifacts/intel-amx/exec/results/i4934-tailbench/tail_bench-run2.csv)
+  - input built by: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/bench/bench-run.sh on delphi-3bda, which compiles tail_bench.cpp inside the nix shell of /var/tmp/jhan/tron-i4934 and runs it twice (preserved: artifacts/intel-amx/exec/i4934-20261015/bench/bench-run.sh)
+  - sources: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/bench/tail_bench.cpp against the headers of the fix tree at b87d20dd81 (preserved: artifacts/intel-amx/exec/i4934-20261015/bench/tail_bench.cpp)
+  - regenerate: `cd /home/jhan/workspace/intel-AMX/exec/results/i4934-tailbench && python3 /home/jhan/workspace/intel-AMX/exec/i4934-20261015/bench/bench_page.py <OUT> tail_bench-run1.csv tail_bench-run2.csv` (preserved: artifacts/intel-amx/exec/results/i4934-tailbench/tail_bench-run1.csv)
 
 Exec folder claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i4934-20261015/ (files this session wrote or changed):
 
-- matrix-rebased.log (2,775 bytes), matrix-rebased2.log (1,241 bytes). The two syntax matrices.
+- matrix-rebased.log (2,775 bytes), matrix-rebased2.log (1,241 bytes). The two syntax matrices. (preserved: artifacts/intel-amx/exec/i4934-20261015/matrix-rebased.log)
 - mutations.py (3,237 bytes). m2 anchor updated to the rebased text.
 - mutate-r2b.sh (5,679 bytes). The m2-only mutation driver.
 - r2-table-cpu.md (1,286 bytes), r2-table-fpga.md (531 bytes). The decision-rule tables from pr_tables.py.
 - report-config-r2.json (7,747 bytes). Page config with the rebased head.
-- pr-body-v4.md (18,977 bytes), pr-body-v5.md (14,613 bytes). The PR body, v5 complete and under the word budget. Not posted.
+- pr-body-v4.md (18,977 bytes), pr-body-v5.md (14,613 bytes). The PR body, v5 complete and under the word budget. Not posted. (preserved: artifacts/intel-amx/exec/i4934-20261015/pr-body-v5.md)
 - bench/tail_bench.cpp (16,823 bytes). The benchmark program: five arms, four cache states, kv_mul 4 and 8, 1 to 15 live rows.
 - bench/bench-run.sh (4,221 bytes). The delphi-3bda driver: waits for the lease, compiles, picks two idle cores, runs twice.
 - bench/bench_tables.py (5,258 bytes). Tables from the CSVs.
 - bench/bench_page.py (27,623 bytes). The chart page generator.
-- bench/lcheck.log (0 bytes). The syntax check log.
+- bench/lcheck.log (0 bytes). The syntax check log. (preserved: artifacts/intel-amx/exec/i4934-20261015/bench/lcheck.log)
 
 Results written on delphi-3bda (same NFS paths):
 
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/i4934-r2/ (99,608,731 bytes, mostly the four Perfetto traces). Builds, tests, traces, spans-*.txt, compare-p1024.txt (782 bytes), compare-p8192.txt (723 bytes).
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/i4934-r2/ (99,608,731 bytes, mostly the four Perfetto traces). Builds, tests, traces, spans-*.txt, compare-p1024.txt (782 bytes), compare-p8192.txt (723 bytes). (preserved: artifacts/intel-amx/exec/results/i4934-r2/compare-p8192.txt)
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/i4934-E2-cpu/ (2,969,794 bytes). summary.md (5,543 bytes), summary.json (36,097 bytes), rt-results.txt, rt/ logs.
   - generator: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py
   - input: rt-results.txt and rt/*.log in the same folder
@@ -227,6 +227,22 @@ Memory:
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md (24,491 bytes today). Index line rewritten.
 
 Scratchpad (claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4934/c4701427-34ef-4086-856d-05ee2f62de05/scratchpad/, 1,484,131 bytes, may be cleaned up): merge-tree.txt (53,932 bytes), fix-old.diff (56,037 bytes), fix-new.diff (55,819 bytes), interdiff.txt (8,030 bytes), sa-c2-orig.hpp (111,994 bytes), show-conflicts.sh (414 bytes), mutcheck/, svg/ and panel*.png (render checks), partial-run1.csv (10,943 bytes), dry/.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/i4934-20261015/` (1 files)
+- `artifacts/intel-amx/exec/results/i4934-E2-cpu/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-E2-cpu/rt/` (54 files)
+- `artifacts/intel-amx/exec/results/i4934-E2-fpga/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-E2-fpga/rt/` (18 files)
+- `artifacts/intel-amx/exec/results/i4934-identity2/` (1 files)
+- `artifacts/intel-amx/exec/results/i4934-identity2/smoke/cpu-p1024/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-identity2/smoke/cpu-p8192/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-identity2/smoke/fpga-p1024/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-mutate2/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-mutate2b/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-r2/` (18 files)
+- `artifacts/intel-amx/exec/scratch-relocated/c4701427/` (7 files)
 
 ## Current state
 
