@@ -1,0 +1,50 @@
+export const meta = {
+  name: 'vnnik-sync-final-review',
+  description: 'Review the PR 4424 branch after the main merge and typed K port: Wade checks, merge drift, tron code review; refute each finding twice',
+  phases: [{ title: 'Find', detail: 'seven lenses over the PR diff vs main' }, { title: 'Verify', detail: 'two refuters per finding' }],
+}
+const CTX = `
+Read-only review. Do NOT edit files or run state-changing git commands.
+Tree: /home/jhan/workspace/ai-runs/tron-vnnik-sync, branch jhan-amx-vnniK-sync, tip 6ce90cd660. It will become the new
+head of PR #4424 (positron-ai/tron, "VNNI K: store the K cache of 128-dimension heads in the AMX VNNI layout, with a
+shared block save"), base = main at be0d5565b3 (origin/main; contains PR #4557 "typed KV-cache tensors", merged 2026-10-07).
+The PR diff = \`git -C /home/jhan/workspace/ai-runs/tron-vnnik-sync diff origin/main HEAD\` (27 files). Branch history:
+PR #4424's 22 commits (30c4ac82cb), then merge commit 66c225cdab of main, then: c6ec38813d (TRON_K_VNNI for the generated
+model objects), 154d02c9bb (typed owner k_vnni_tensor / view k_vnni_view for the packed K plane, ported from PR #4746),
+23800bd34f, a2ad25bf4f (qk_group scores groups wider than 16 heads in passes of 16), e76c6b435b, 879ec1eb22, 228de87fd1
+(follow main and the parent's final review: compile fixes, writable at() dropped, probes trimmed, chunk-size guards
+removed), 0bcea73d3b (shared files keep their local constant spelling), 6ce90cd660 (t_llama_unit split-vs-unsplit
+tolerances). Reference for the port: PR #4746's tree 0f8f9e7c6d merged with the OLD PR #4557 head c12df586b6; its
+adaptation diff is \`git diff c12df586b6 0f8f9e7c6d\`. The parent's final review outcomes are summarized in
+/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/{wade-pr4557-review-response,runar-pr4557-review-response,
+value-suffix-names-shared-files,pr4557-ben-review-response}.md. Project rules: /home/jhan/workspace/ai-runs/tron-vnnik-sync/AGENTS.md
+and CLAUDE.md there. A finding names file:line in the tree, quotes evidence, proposes a concrete change, and has severity
+must (defect, contradiction, would fail CI or the reviewer) or should. Report only what you verified by reading; do not
+restate the project's style guide in general.
+`
+const FINDINGS = { type: 'object', properties: { findings: { type: 'array', items: { type: 'object', properties: {
+  id: { type: 'string' }, file: { type: 'string' }, line: { type: 'integer' }, claim: { type: 'string' },
+  evidence: { type: 'string' }, fix: { type: 'string' }, severity: { type: 'string', enum: ['must', 'should'] } },
+  required: ['id', 'file', 'line', 'claim', 'evidence', 'fix', 'severity'] } } }, required: ['findings'] }
+const VERDICT = { type: 'object', properties: { refuted: { type: 'boolean' }, reason: { type: 'string' } }, required: ['refuted', 'reason'] }
+const WADE = 'Read /home/jhan/.claude/skills/Wade-code-review/SKILL.md first (the reviewer\'s 35 checks). '
+const LENSES = [
+  { key: 'wade-code', prompt: WADE + 'Apply the CODE checks (dead symbols and includes, debug switches, comments that contradict code, magic literals in AMX-owned files, duplicated logic, type and initialization choices, names, silent fallbacks, index and wait-set mismatches, lock placement, buffer lifetime, hot-path cost, instrumentation ownership) to the PR diff vs origin/main. Headers: h/tron/tensor/k_vnni.hpp, h/tron/kernels/k_vnni.hpp, h/tron/models/kv_cache.hpp, model.hpp, common.hpp, self_attention.hpp, scheduler/full.hpp, gof.hpp, kernels/amx_attn_iface.hpp, tensor/kv_cache_fwd.hpp, src/tron/kernels/amx_attn.cpp, src/tron/gof.cpp.' },
+  { key: 'wade-tests', prompt: WADE + 'Apply the TEST checks (value rows without a consumer, hardware-gated or silently skipped tests, duplicate coverage, test names, tests that bypass the changed path, workaround tracking) to t/t_k_vnni_layout.cpp, t/t_llama_unit.cpp (the hunks of this PR only: git diff origin/main HEAD -- t/t_llama_unit.cpp), t/t_amx_numerics.cpp, t/t_amx_dispatch_dtype.cpp, t/t_gof_dma.cpp, t/t_gof_staging_leaks.cpp, t/t_phase1_integration.cpp, ingest/test/LoopyTronSpec.hs, config/test-benchmarks.json, t/CMakeLists.txt. Also judge commit 6ce90cd660 (git show 6ce90cd660): is the tolerance change on main\'s test justified by its message and comment, and is the comment accurate against the code (self_attention.hpp apply_page_tok epilogue, kv_cache.hpp scaled_v_expr, the Note numerics item in amx_attn_iface.hpp)?' },
+  { key: 'wade-claims-scope', prompt: WADE + 'Apply the CLAIM and SCOPE checks: guarantees wider than the code (Notes and comments in kv_cache.hpp Note [K VNNI storage], model.hpp Note [Shared block save], k_vnni headers), CI lanes (README.ci.md hunk, .github/workflows/cmake-single-platform.yml hunk, CMakeLists.txt, src/tron/CMakeLists.txt vs what main actually runs), unrelated hunks in the PR diff, fixup clusters in the commit list after 30c4ac82cb (git log --oneline 30c4ac82cb..HEAD), shared-header ownership. Also check the merge commit 66c225cdab: does its tree equal what a reviewer expects (git diff 66c225cdab^1 66c225cdab -- <our files> should show only main\'s changes plus the conflict resolutions)?' },
+  { key: 'merge-drift', prompt: 'Merge-drift lens. For each of the 9 overlap files (h/tron/models/kv_cache.hpp, self_attention.hpp, model.hpp, h/tron/scheduler/full.hpp, h/tron/kernels/amx_attn_iface.hpp, src/tron/kernels/amx_attn.cpp, t/t_llama_unit.cpp, t/t_amx_dispatch_dtype.cpp, t/t_amx_numerics.cpp) compare THIS PR\'s delta against main (git diff origin/main HEAD -- <file>) with PR #4746\'s delta against the old parent head (git diff c12df586b6 0f8f9e7c6d -- <file>). Every hunk that exists in one delta and not the other must be explained by one of: main\'s own change between c12df586b6 and be0d5565b3 (git diff c12df586b6 origin/main -- <file>), or the three later commits 228de87fd1 / 0bcea73d3b / 6ce90cd660. Report every unexplained hunk (a lost change, a duplicated block, a resolution that kept the wrong side) as a must finding. Also check that main\'s own post-c12df586b6 changes to these files are all present in the tip (nothing of main was reverted by the merge): for each hunk of git diff c12df586b6 origin/main -- <file>, confirm it is in HEAD.' },
+  { key: 'tron-review', prompt: 'Read /home/jhan/.claude/skills/tron-code-review/SKILL.md first. Apply it to the PR diff vs origin/main: execution-path coverage (every production path the port touches has a test on real owners: store_row/load_row/store_block/copy_token, qk_group, qk_vnni_128x4, save_k shared store, copy_storage_slot, gof k_head_fn, fill_random), stats and counter semantics (attn_stats visit_path served values on the VNNI software path), forward-pass bookkeeping, asynchronous ownership (the k_store_window join and the helper threads; the scratch rows of the FPGA staging), meaningful tests.' },
+  { key: 'cpp-guide', prompt: 'Read /home/jhan/.claude/skills/cpp-coding-guide/SKILL.md first. Apply the guide to the code THIS PR adds in its own files (h/tron/tensor/k_vnni.hpp, h/tron/kernels/k_vnni.hpp, t/t_k_vnni_layout.cpp) and to its hunks in src/tron/kernels/amx_attn.cpp and h/tron/kernels/amx_attn_iface.hpp. Shared files (kv_cache.hpp, model.hpp, common.hpp, self_attention.hpp, full.hpp, gof.hpp, t_llama_unit.cpp) keep their local spelling by the parent PR\'s review decision (memory value-suffix-names-shared-files.md): do not report NAME_<value> absence there; report only the other guide rules. Report concrete violations with file:line.' },
+  { key: 'plain-english', prompt: 'Read /home/jhan/.claude/skills/plain-english/SKILL.md first (comment rules: one claim per sentence, no idioms, define terms imported from outside the code). Apply it to the comments THIS PR adds or changes (git diff origin/main HEAD, lines starting with + that are comments) in h/tron/tensor/k_vnni.hpp, h/tron/kernels/k_vnni.hpp, h/tron/models/kv_cache.hpp, model.hpp, common.hpp, self_attention.hpp, gof.hpp, amx_attn_iface.hpp, amx_attn.cpp, t/t_llama_unit.cpp, t/t_k_vnni_layout.cpp, README.ci.md, CMakeLists.txt. Also flag any comment that contradicts the code next to it, and any comment that names something the tree no longer has (k_vnni_plane, K_PLANE_ALIGNMENT_64, matrix_indexes_rows, chunk-8, cross-avx512, the K mirror). Report at most the 25 most important violations, severity should.' },
+]
+const found = await pipeline(LENSES,
+  l => agent(CTX + '\n' + l.prompt + '\nReturn every finding; an empty list is a valid answer.', { label: 'find:' + l.key, phase: 'Find', schema: FINDINGS }),
+  (r, l) => (r ? r.findings : []).map(f => ({ ...f, lens: l.key })),
+  fs => parallel(fs.map(f => () => parallel([0, 1].map(i => () =>
+    agent(CTX + `\nA reviewer claims (lens ${f.lens}, severity ${f.severity}): ${f.file}:${f.line} — ${f.claim}\nEvidence given: ${f.evidence}\nProposed fix: ${f.fix}\nYour job: try to REFUTE it by reading the actual files (and main's version where relevant). ${i === 0 ? 'Lens: is the claim factually true of the tree (quote the lines)? Is the severity right?' : 'Lens: is the proposed fix correct and minimal, and would the project\'s reviewers (Wade, Ben, Runar) actually ask for it, or is it taste / already settled the other way in the parent PR?'} Default to refuted=true if uncertain.`,
+      { label: `verify:${f.lens}:${f.id}`, phase: 'Verify', schema: VERDICT })))
+    .then(vs => ({ ...f, votes: vs.filter(Boolean), survives: vs.filter(Boolean).filter(v => !v.refuted).length >= 2 })))))
+const all = found.filter(Boolean).flat()
+const confirmed = all.filter(f => f.survives)
+log(`${all.length} findings, ${confirmed.length} confirmed, ${all.length - confirmed.length} refuted`)
+return { confirmed, refuted: all.filter(f => !f.survives).map(f => ({ lens: f.lens, file: f.file, line: f.line, claim: f.claim, reasons: f.votes.map(v => v.reason.slice(0, 300)) })) }

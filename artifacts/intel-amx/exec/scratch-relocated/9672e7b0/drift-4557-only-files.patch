@@ -1,0 +1,417 @@
+diff --git a/h/system/memory.hpp b/h/system/memory.hpp
+index a18f920157..9b169f874b 100644
+--- a/h/system/memory.hpp
++++ b/h/system/memory.hpp
+@@ -185,6 +185,11 @@ inline constexpr dma_allocation_t dma_allocation{};
+ // call creates the objects. The wrapper writes no bytes and runs no
+ // constructor.
+ //
++// The wrapper covers the KV-book path only. The four make_unique_dma and
++// make_unique_dma_for_overwrite templates below still call dma_allocate_aligned
++// directly, and std::memset is not on the list above. So for a class element
++// type that no constructor runs for, the memory they return holds no objects.
++//
+ // Call the wrapper directly, never from a new-expression. An array
+ // new-expression may ask for extra bytes ([expr.new]), and dma_deallocate would
+ // not free them.
+diff --git a/h/tron/tensor/v_vnni.hpp b/h/tron/tensor/v_vnni.hpp
+index b7d4e3e2a4..e6288fdb11 100644
+--- a/h/tron/tensor/v_vnni.hpp
++++ b/h/tron/tensor/v_vnni.hpp
+@@ -5,11 +5,11 @@
+ // out (append_v_row, load_row, copy_token). See Note [VNNI Packed V layout].
+ //
+ // Words used here: A plane is V for one KV head of one 64-token page.
+-// AVX-512 and AVX2 are the 512-bit and the 256-bit x86 vector instruction families;
+-// they give the 16-lane and the 8-lane build. A lane is one 32-bit slot of a vector
+-// register, here holding one bf16 pair. A chunk is one register of chunk_size fp32
+-// values (16 or 8). A pair is two adjacent tokens (2p, 2p + 1). A pair chunk is the
+-// 64-byte load that holds one chunk of both tokens of a pair (32 bf16).
++// AVX-512 is the 512-bit x86 vector instruction family; the build is 16-lane. A
++// lane is one 32-bit slot of a vector register, here holding one bf16 pair. A
++// chunk is one register of chunk_size (16) fp32 values. A pair is two adjacent
++// tokens (2p, 2p + 1). A pair chunk is the 64-byte load that holds one chunk of
++// both tokens of a pair (32 bf16).
+ 
+ #include <concepts>
+ #include <cstddef>
+@@ -18,6 +18,7 @@
+ 
+ #include "common/assert.hpp"
+ #include "common/attributes.hpp"
++#include "common/memory.hpp"
+ #include "common/numerics/bf16.hpp"
+ #include "common/numerics/fp16.hpp"
+ #include "tron/simd/auto.hpp"
+@@ -28,9 +29,9 @@
+ 
+ // Note [VNNI Packed V layout]
+ // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-// In the 16-lane (AVX-512) build the V plane of a kv_block stores token pairs
+-// interleaved: for each dimension d, the values of tokens 2p and 2p + 1 sit
+-// next to each other. With D dimensions per token, element (token, d) is at
++// The V plane of a kv_block stores token pairs interleaved: for each dimension
++// d, the values of tokens 2p and 2p + 1 sit next to each other. With D
++// dimensions per token, element (token, d) is at
+ //
+ //   plane[(token / 2) * (2 * D) + 2 * d + token % 2]      (in bf16 elements)
+ //
+@@ -43,11 +44,6 @@
+ // (detail::scaled_v_expr in kv_cache.hpp) and the AMX PV kernel
+ // (amx_attn_h128g4::weights_times_v_128x4) therefore read the plane in place.
+ //
+-// The 8-lane (AVX2) build keeps V row-major and does not use these types for
+-// storage. The classes are still defined there, so that declarations naming
+-// them (the AMX kernel signatures and their CPU fakes) compile. The vector
+-// operations exist only at 16 lanes.
+-//
+ // Who may compute a packed address: the typed operations in this header, and
+ // the two layout-specific kernels named above, which reach the plane through
+ // detail::v_vnni_access. Cache code, the model, hardware staging and the tests
+@@ -58,8 +54,9 @@
+ //
+ // Writing rules are the cache's: see Note [Zero-Initialized V Slots] in
+ // kv_cache.hpp. In short, appending an even token also zeroes its odd partner,
+-// and appending an odd token merges into an initialized pair. Direct element
+-// writes through a view (at()) do neither; they serve fixtures.
++// and appending an odd token merges into an initialized pair. A view has no
++// element write: at() is read-only, and rows enter only through append_v_row
++// and copy_token.
+ 
+ namespace tron {
+ 
+@@ -69,31 +66,10 @@ namespace detail {
+ struct v_vnni_access;
+ }  // namespace detail
+ 
+-// Two tokens share one pair row of the packed plane.
+-inline constexpr size_t V_PAIR_TOKENS_2 = 2;
+-
+-// Byte alignment of one packed V plane. In the 16-lane build every pair chunk is
+-// one 64-byte vector load, and the AMX PV kernel reads the plane in 64-byte tile
+-// rows. Fixed for both lane counts (chunk_alignment is 32 bytes at 8 lanes).
+-inline constexpr size_t V_PLANE_ALIGNMENT_64 = 64;
+-
+-// page::set_v and page::get_v have always required head_size % 32 == 0. The
+-// moved loops step one chunk (16 dims) at a time and do not need it. The
+-// constraint stays so that the accepted row widths do not change.
+-inline constexpr size_t V_ROW_WIDTH_MULTIPLE_32 = 32;
+-
+-// Width of one stored bf16 value: the shift that moves a value between the
+-// low (even token) and the high (odd token) half of a 32-bit lane.
+-inline constexpr unsigned BF16_BITS_16 = 16;
+-
+-// Lane masks selecting the odd (high half) or the even (low half) token.
+-inline constexpr int V_ODD_TOKEN_LANE_MASK_0XFFFF0000 = static_cast<int>(0xffff0000u);
+-inline constexpr int V_EVEN_TOKEN_LANE_MASK_0X0000FFFF = 0x0000ffff;
+-
+ template <typename T>
+ concept v_vnni_element = std::same_as<T, bf16> || std::same_as<T, const bf16>;
+ 
+-// A packed V plane of [Rows tokens * Cols dimensions]. One element is reached
++// A packed V plane of [Rows tokens * Cols dimensions]. One element is read
+ // through at(token, dim). Whole token rows move through the operations below
+ // (append_v_row, load_row, copy_token). Views come only from an owner
+ // (v_vnni_tensor::as_view). A writable view (bf16) converts to a read-only one
+@@ -103,7 +79,7 @@ concept v_vnni_element = std::same_as<T, bf16> || std::same_as<T, const bf16>;
+ template <typename T, size_t Rows, size_t Cols>
+ struct v_vnni_view final {
+   static_assert(v_vnni_element<T>, "a packed V plane holds bf16 or const bf16");
+-  static_assert(Rows > 0 && Rows % V_PAIR_TOKENS_2 == 0,
++  static_assert(Rows > 0 && Rows % 2 == 0,
+       "packed V pairs tokens, so a plane has an even number of rows");
+   static_assert(
+       Cols > 0 && Cols % chunk_size == 0, "a packed V row spans whole SIMD chunks");
+@@ -116,21 +92,14 @@ struct v_vnni_view final {
+   v_vnni_view(v_vnni_view<U, Rows, Cols> other) noexcept
+   : data_(other.data_) {}
+ 
+-  // Bounds-checked element (token, dim). Writing through it neither clears the
+-  // pair partner nor marks the token complete (page::mark_v_complete does
+-  // that); see Note [Zero-Initialized V Slots].
+-  TRON(nodiscard, inline, pure)
+-  T& at(size_t token, size_t dim) noexcept {
+-    TRON_ASSERT_LT(token, Rows);
+-    TRON_ASSERT_LT(dim, Cols);
+-    return pair_base(token)[V_PAIR_TOKENS_2 * dim + token % V_PAIR_TOKENS_2];
+-  }
+-
++  // Bounds-checked read of element (token, dim). There is no element write:
++  // rows enter through append_v_row and copy_token, which keep the pair rule
++  // of Note [Zero-Initialized V Slots] in kv_cache.hpp.
+   TRON(nodiscard, inline, pure)
+   const bf16& at(size_t token, size_t dim) const noexcept {
+     TRON_ASSERT_LT(token, Rows);
+     TRON_ASSERT_LT(dim, Cols);
+-    return pair_base(token)[V_PAIR_TOKENS_2 * dim + token % V_PAIR_TOKENS_2];
++    return pair_base(token)[2 * dim + token % 2];
+   }
+ 
+ private:
+@@ -147,7 +116,7 @@ private:
+   // Note [VNNI Packed V layout].
+   TRON(nodiscard, inline, pure)
+   T* pair_base(size_t token) const noexcept {
+-    return data_ + (token / V_PAIR_TOKENS_2) * (V_PAIR_TOKENS_2 * Cols);
++    return data_ + (token / 2) * (2 * Cols);
+   }
+ 
+   T* data_;
+@@ -158,9 +127,11 @@ private:
+ // kv_blocks that hold it; see Note [KV block lifetime] in kv_cache.hpp).
+ // Trivial to construct, copy and destroy; copying an owner copies the plane.
+ // as_view() on a temporary is deleted: a view must not outlive its owner.
++// 64-byte alignment: every pair chunk is one 64-byte vector load, and the AMX
++// PV kernel reads the plane in 64-byte tile rows.
+ template <size_t Rows, size_t Cols>
+-struct alignas(V_PLANE_ALIGNMENT_64) v_vnni_tensor final {
+-  static_assert(Rows > 0 && Rows % V_PAIR_TOKENS_2 == 0,
++struct alignas(64) v_vnni_tensor final {
++  static_assert(Rows > 0 && Rows % 2 == 0,
+       "packed V pairs tokens, so a plane has an even number of rows");
+   static_assert(
+       Cols > 0 && Cols % chunk_size == 0, "a packed V row spans whole SIMD chunks");
+@@ -181,7 +152,7 @@ struct alignas(V_PLANE_ALIGNMENT_64) v_vnni_tensor final {
+   v_vnni_view<const bf16, Rows, Cols> as_view() const&& = delete;
+ 
+ private:
+-  alignas(V_PLANE_ALIGNMENT_64) bf16 data_[Rows * Cols];
++  alignas(64) bf16 data_[Rows * Cols];
+ };
+ 
+ namespace detail {
+@@ -193,13 +164,16 @@ struct v_vnni_access final {
+     return v.data_;
+   }
+ 
+-  // First element of the pair row holding `token`. No bounds check here: this
+-  // is the route of the bulk save/load/copy operations, whose callers (the
+-  // page methods) already index inside the page, and page::set_v never checked
+-  // it either. Checked element access goes through at().
++  // First element of the pair row holding `token`: the route of the bulk
++  // save/load/copy operations. Precondition: token < Rows. It is asserted here,
++  // one compare-and-branch per call (TRON_ASSERT is active in release builds).
++  // The callers satisfy it: save_v_impl passes the token's offset in its page,
++  // page::copy_from asserts both ranges, and the tests loop over the rows of
++  // one plane.
+   template <typename T, size_t Rows, size_t Cols>
+   TRON(nodiscard, inline, pure)
+   static T* pair_base(v_vnni_view<T, Rows, Cols> v, size_t token) noexcept {
++    TRON_ASSERT_LT(token, Rows);
+     return v.pair_base(token);
+   }
+ };
+@@ -212,22 +186,24 @@ using const_v_row_view = const_view<T, VIEW_ALIGNED_TRUE, Dma, seq<Cols>, sseq<1
+ template <typename T, size_t Cols, bool Dma = VIEW_DMA_FALSE>
+ using v_row_view = view<T, VIEW_ALIGNED_TRUE, Dma, seq<Cols>, sseq<1>>;
+ 
+-// The caller must provide Cols elements aligned to chunk_alignment.
+-// These helpers neither check alignment nor copy data.
++// The row must hold Cols elements aligned to chunk_alignment (64 bytes): the
++// row operations use the aligned vector loads and stores. Each helper asserts
++// that alignment, one compare-and-branch per call, and copies nothing.
+ template <size_t Cols, bool Dma = VIEW_DMA_FALSE, typename T>
+ TRON(nodiscard, inline)
+ const_v_row_view<T, Cols, Dma> v_source_row(const T* row) noexcept {
++  TRON_ASSERT(is_aligned(row, chunk_alignment), "V source row is not 64-byte aligned");
+   return const_v_row_view<T, Cols, Dma>{row};
+ }
+ 
+ template <size_t Cols, bool Dma = VIEW_DMA_FALSE, typename T>
+ TRON(nodiscard, inline)
+ v_row_view<T, Cols, Dma> v_destination_row(T* row) noexcept {
++  TRON_ASSERT(
++      is_aligned(row, chunk_alignment), "V destination row is not 64-byte aligned");
+   return v_row_view<T, Cols, Dma>{row};
+ }
+ 
+-#if TRON_CHUNK_SIZE == 16
+-
+ // Element types a packed V row may be appended from and loaded into.
+ template <typename Source>
+ concept v_vnni_source = std::same_as<Source, bf16> || std::same_as<Source, fp16> ||
+@@ -241,18 +217,17 @@ concept v_vnni_destination =
+ // pass, without reading the destination; an odd token merges into the
+ // initialized pair and keeps its even partner (Note [Zero-Initialized V Slots]
+ // in kv_cache.hpp). bf16 input keeps its bits. fp16 and float inputs become
+-// fp32 and keep their upper 16 bits (truncation, no NaN correction), exactly as
+-// page::set_v always did. The `aligned` flag of `src` is a precondition:
+-// wrapping a pointer does not make it aligned.
++// fp32 and keep their upper 16 bits (truncation, no NaN correction). The
++// `aligned` flag of `src` is a precondition: wrapping a pointer does not make
++// it aligned.
+ template <size_t Rows, size_t Cols, v_vnni_source Source, bool Dma>
+-  requires(Cols % V_ROW_WIDTH_MULTIPLE_32 == 0)
+ TRON(inline)
+ void append_v_row(v_vnni_view<bf16, Rows, Cols> dst,
+     size_t token,
+     const_v_row_view<Source, Cols, Dma> src) noexcept {
+   bf16* v_ptr = detail::v_vnni_access::pair_base(dst, token);
+   const Source* vout_ptr = src.data;
+-  if (token % V_PAIR_TOKENS_2 == 0) {
++  if (token % 2 == 0) {
+     // The odd half of every lane is written as zero: see Note [Zero-Initialized
+     // V Slots] in kv_cache.hpp.
+     for (size_t i = 0; i < Cols; i += chunk_size) {
+@@ -263,30 +238,30 @@ void append_v_row(v_vnni_view<bf16, Rows, Cols> dst,
+       } else if constexpr (std::same_as<Source, fp16>) {
+         fp16x16 lo_fp16 = _mm256_load_epi32(vout_ptr + i);  // 7 6 5 4 3 2 1 0
+         fp32x16 lo_fp32 = _mm512_cvtph_ps(lo_fp16);         // 7 6 5 4 3 2 1 0
+-        even = _mm512_srli_epi32(_mm512_castps_si512(lo_fp32), BF16_BITS_16);
++        even = _mm512_srli_epi32(_mm512_castps_si512(lo_fp32), 16 /* bf16 */);
+       } else {
+         fp32x16 lo_fp32 = _mm512_load_ps(vout_ptr + i);  // 7 6 5 4 3 2 1 0
+-        even = _mm512_srli_epi32(_mm512_castps_si512(lo_fp32), BF16_BITS_16);
++        even = _mm512_srli_epi32(_mm512_castps_si512(lo_fp32), 16 /* bf16 */);
+       }
+-      _mm512_store_si512(v_ptr + i * V_PAIR_TOKENS_2, even);
++      _mm512_store_si512(v_ptr + i * 2, even);
+     }
+   } else if constexpr (std::same_as<Source, bf16>) {
+     // Load even; interleave with odd; and store.
+-    const __m512i lo_16_of_32 = _mm512_set1_epi32(V_EVEN_TOKEN_LANE_MASK_0X0000FFFF);
++    const __m512i lo_16_of_32 = _mm512_set1_epi32(0x0000ffff);
+     for (size_t i = 0; i < Cols; i += chunk_size) {
+       bf16x16 hi = _mm256_load_epi32(vout_ptr + i);  // f e d c b a 9 8
+       // f _ e _ d _ c _ b _ a _ 9 _ 8 _
+-      bf16x32 odd = _mm512_slli_epi32(_mm512_cvtepu16_epi32(hi), BF16_BITS_16);
++      bf16x32 odd = _mm512_slli_epi32(_mm512_cvtepu16_epi32(hi), 16 /* bf16 */);
+       // _ 7 _ 6 _ 5 _ 4 _ 3 _ 2 _ 1 _ 0
+-      bf16x32 even = _mm512_load_si512(v_ptr + i * V_PAIR_TOKENS_2);
++      bf16x32 even = _mm512_load_si512(v_ptr + i * 2);
+       // f 7 e 6 d 5 c 4 b 3 a 2 9 1 8 0
+       bf16x32 both = _mm512_ternarylogic_epi32(
+           odd, even, lo_16_of_32, _MM_TERNLOG_A | (_MM_TERNLOG_B & _MM_TERNLOG_C));
+-      _mm512_store_si512(v_ptr + i * V_PAIR_TOKENS_2, both);
++      _mm512_store_si512(v_ptr + i * 2, both);
+     }
+   } else {
+     // Load even; interleave with odd; and store.
+-    const __m512i hi_16_of_32 = _mm512_set1_epi32(V_ODD_TOKEN_LANE_MASK_0XFFFF0000);
++    const __m512i hi_16_of_32 = _mm512_set1_epi32(0xffff0000);
+     for (size_t i = 0; i < Cols; i += chunk_size) {
+       bf16x32 odd;  // f _ e _ d _ c _ b _ a _ 9 _ 8 _
+       if constexpr (std::same_as<Source, fp16>) {
+@@ -298,11 +273,11 @@ void append_v_row(v_vnni_view<bf16, Rows, Cols> dst,
+         odd = _mm512_castps_si512(hi_fp32);
+       }
+       // _ 7 _ 6 _ 5 _ 4 _ 3 _ 2 _ 1 _ 0
+-      bf16x32 even = _mm512_load_si512(v_ptr + i * V_PAIR_TOKENS_2);
++      bf16x32 even = _mm512_load_si512(v_ptr + i * 2);
+       // f 7 e 6 d 5 c 4 b 3 a 2 9 1 8 0
+       bf16x32 both = _mm512_ternarylogic_epi32(even, odd, hi_16_of_32,
+           (_MM_TERNLOG_A & ~_MM_TERNLOG_C) | (_MM_TERNLOG_B & _MM_TERNLOG_C));
+-      _mm512_store_si512(v_ptr + i * V_PAIR_TOKENS_2, both);
++      _mm512_store_si512(v_ptr + i * 2, both);
+     }
+   }
+ }
+@@ -312,20 +287,19 @@ void append_v_row(v_vnni_view<bf16, Rows, Cols> dst,
+ // value, lower half zero) or as the stored bf16 bits (one narrowing per chunk,
+ // no conversion). The `aligned` flag of `dst` is a precondition.
+ template <size_t Rows, size_t Cols, v_vnni_destination Destination, bool Dma>
+-  requires(Cols % V_ROW_WIDTH_MULTIPLE_32 == 0)
+ TRON(inline)
+ void load_row(v_vnni_view<const bf16, Rows, Cols> src,
+     size_t token,
+     v_row_view<Destination, Cols, Dma> dst) noexcept {
+   const bf16* v_ptr = detail::v_vnni_access::pair_base(src, token);
+   Destination* vout_ptr = dst.data;
+-  if (token % V_PAIR_TOKENS_2 == 0) {
++  if (token % 2 == 0) {
+     for (size_t i = 0; i < Cols; i += chunk_size) {
+       // f 7 e 6 d 5 c 4 b 3 a 2 9 1 8 0
+-      bf16x32 both = _mm512_load_si512(v_ptr + i * V_PAIR_TOKENS_2);
++      bf16x32 both = _mm512_load_si512(v_ptr + i * 2);
+       // 7 6 5 4 3 2 1 0
+       if constexpr (std::same_as<Destination, float>) {
+-        fp32x16 lo_fp32 = _mm512_castsi512_ps(_mm512_slli_epi32(both, BF16_BITS_16));
++        fp32x16 lo_fp32 = _mm512_castsi512_ps(_mm512_slli_epi32(both, 16 /* bf16 */));
+         _mm512_store_ps(vout_ptr + i, lo_fp32);
+       } else {
+         __m256i lo = _mm512_cvtepi32_epi16(both);
+@@ -333,16 +307,16 @@ void load_row(v_vnni_view<const bf16, Rows, Cols> src,
+       }
+     }
+   } else {
+-    const __m512i hi_16_of_32 = _mm512_set1_epi32(V_ODD_TOKEN_LANE_MASK_0XFFFF0000);
++    const __m512i hi_16_of_32 = _mm512_set1_epi32(0xffff0000);
+     for (size_t i = 0; i < Cols; i += chunk_size) {
+       // f 7 e 6 d 5 c 4 b 3 a 2 9 1 8 0
+-      bf16x32 both = _mm512_load_si512(v_ptr + i * V_PAIR_TOKENS_2);
++      bf16x32 both = _mm512_load_si512(v_ptr + i * 2);
+       // f e d c b a 9 8
+       if constexpr (std::same_as<Destination, float>) {
+         fp32x16 hi_fp32 = _mm512_castsi512_ps(_mm512_and_si512(both, hi_16_of_32));
+         _mm512_store_ps(vout_ptr + i, hi_fp32);
+       } else {
+-        __m256i hi = _mm512_cvtepi32_epi16(_mm512_srli_epi32(both, BF16_BITS_16));
++        __m256i hi = _mm512_cvtepi32_epi16(_mm512_srli_epi32(both, 16 /* bf16 */));
+         _mm256_store_si256(reinterpret_cast<__m256i*>(vout_ptr + i), hi);
+       }
+     }
+@@ -363,48 +337,46 @@ void copy_token(v_vnni_view<bf16, Rows, Cols> dst,
+     size_t src_token) noexcept {
+   const bf16* src_pair = detail::v_vnni_access::pair_base(src, src_token);
+   bf16* dst_pair = detail::v_vnni_access::pair_base(dst, dst_token);
+-  const __m512i hi_16_of_32 = _mm512_set1_epi32(V_ODD_TOKEN_LANE_MASK_0XFFFF0000);
+-  if (src_token % V_PAIR_TOKENS_2 == 0) {
+-    if (dst_token % V_PAIR_TOKENS_2 == 0) {
++  const __m512i hi_16_of_32 = _mm512_set1_epi32(0xffff0000);
++  if (src_token % 2 == 0) {
++    if (dst_token % 2 == 0) {
+       // src=[a b]; store [0 b]. See Note [Zero-Initialized V Slots].
+       for (size_t i = 0; i < Cols; i += chunk_size) {
+-        bf16x32 a_b = _mm512_load_si512(src_pair + i * V_PAIR_TOKENS_2);
++        bf16x32 a_b = _mm512_load_si512(src_pair + i * 2);
+         bf16x32 zero_b = _mm512_andnot_si512(hi_16_of_32, a_b);
+-        _mm512_store_si512(dst_pair + i * V_PAIR_TOKENS_2, zero_b);
++        _mm512_store_si512(dst_pair + i * 2, zero_b);
+       }
+     } else {
+       // Load src=[a b] and dst=[c d]; store [b d].
+       for (size_t i = 0; i < Cols; i += chunk_size) {
+-        bf16x32 a_b = _mm512_load_si512(src_pair + i * V_PAIR_TOKENS_2);
+-        bf16x32 c_d = _mm512_load_si512(dst_pair + i * V_PAIR_TOKENS_2);
+-        bf16x32 b_zero = _mm512_slli_epi32(a_b, BF16_BITS_16);
++        bf16x32 a_b = _mm512_load_si512(src_pair + i * 2);
++        bf16x32 c_d = _mm512_load_si512(dst_pair + i * 2);
++        bf16x32 b_zero = _mm512_slli_epi32(a_b, 16 /* bf16 */);
+         bf16x32 b_d = _mm512_ternarylogic_epi32(
+             b_zero, c_d, hi_16_of_32, _MM_TERNLOG_A | (_MM_TERNLOG_B & ~_MM_TERNLOG_C));
+-        _mm512_store_si512(dst_pair + i * V_PAIR_TOKENS_2, b_d);
++        _mm512_store_si512(dst_pair + i * 2, b_d);
+       }
+     }
+   } else {
+-    if (dst_token % V_PAIR_TOKENS_2 == 0) {
++    if (dst_token % 2 == 0) {
+       // src=[a b]; store [0 a]. See Note [Zero-Initialized V Slots].
+       for (size_t i = 0; i < Cols; i += chunk_size) {
+-        bf16x32 a_b = _mm512_load_si512(src_pair + i * V_PAIR_TOKENS_2);
+-        bf16x32 zero_a = _mm512_srli_epi32(a_b, BF16_BITS_16);
+-        _mm512_store_si512(dst_pair + i * V_PAIR_TOKENS_2, zero_a);
++        bf16x32 a_b = _mm512_load_si512(src_pair + i * 2);
++        bf16x32 zero_a = _mm512_srli_epi32(a_b, 16 /* bf16 */);
++        _mm512_store_si512(dst_pair + i * 2, zero_a);
+       }
+     } else {
+       // Load src=[a b] and dst=[c d]; store [a d].
+       for (size_t i = 0; i < Cols; i += chunk_size) {
+-        bf16x32 a_b = _mm512_load_si512(src_pair + i * V_PAIR_TOKENS_2);
+-        bf16x32 c_d = _mm512_load_si512(dst_pair + i * V_PAIR_TOKENS_2);
++        bf16x32 a_b = _mm512_load_si512(src_pair + i * 2);
++        bf16x32 c_d = _mm512_load_si512(dst_pair + i * 2);
+         bf16x32 a_zero = _mm512_and_si512(hi_16_of_32, a_b);
+         bf16x32 a_d = _mm512_ternarylogic_epi32(
+             a_zero, c_d, hi_16_of_32, _MM_TERNLOG_A | (_MM_TERNLOG_B & ~_MM_TERNLOG_C));
+-        _mm512_store_si512(dst_pair + i * V_PAIR_TOKENS_2, a_d);
++        _mm512_store_si512(dst_pair + i * 2, a_d);
+       }
+     }
+   }
+ }
+ 
+-#endif  // TRON_CHUNK_SIZE == 16
+-
+ }  // namespace tron

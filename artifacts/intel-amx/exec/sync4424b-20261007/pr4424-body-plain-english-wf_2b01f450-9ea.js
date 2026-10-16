@@ -1,0 +1,15 @@
+export const meta = {
+  name: 'pr4424-body-plain-english',
+  description: 'Plain-English check of the rewritten PR 4424 description sections, two checkers, one fact checker',
+  phases: [{ title: 'Check' }],
+}
+const FILE = '/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-sync-tensor-type-2-PR4424/9672e7b0-18f8-49c1-ae4f-4719f6cc8ca7/scratchpad/pr4424-new-sections.md'
+const CTX = `Read the plain-English rules first: /home/jhan/.claude/skills/plain-english/SKILL.md (Check mode: list every rule violation with the exact phrase and a corrected version). The text under check is the file ${FILE}: the rewritten sections (Words used here, The changes, Measurements, Verification, Open items) of a GitHub pull-request description for positron-ai/tron PR #4424. The sections before it (Short version, Background, two design sections) are NOT in the file and are protected; terms they define (VNNI layout, AMX, tp2/tp4, TTFT, TPS, decode, prefill, KV cache, 128-dimension heads, kill switch TRON_AMX_DISABLE) count as already defined for Rule 1 — they are listed in the Words table too. The project's term list to define at first use is in /home/jhan/workspace/intel-AMX/CLAUDE.md. Report violations as a list of {rule, original phrase (exact), fix} objects; at most 40, most important first. Do not invent violations.`
+const SCHEMA = { type: 'object', properties: { violations: { type: 'array', items: { type: 'object', properties: { rule: { type: 'string' }, original: { type: 'string' }, fix: { type: 'string' } }, required: ['rule', 'original', 'fix'] } } }, required: ['violations'] }
+phase('Check')
+const [a, b, facts] = await parallel([
+  () => agent(CTX + '\nLens: Rules 1, 3 and 4 (undefined terms, numbers without units or meaning, citations).', { label: 'check:terms-numbers', schema: SCHEMA }),
+  () => agent(CTX + '\nLens: Rules 2, 6, 7, 8 (one claim per sentence, idioms and uncommon words, bullets, sentence length). Also the banned words from /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/english-banned-words.md.', { label: 'check:sentences-idioms', schema: SCHEMA }),
+  () => agent(`Fact check. The file ${FILE} describes the tree /home/jhan/workspace/ai-runs/tron-vnnik-sync (branch jhan-amx-vnniK-sync, tip 4bbf97ef78, base origin/main) and the results under /home/jhan/workspace/intel-AMX/exec/results/sync4424b-20261007/ (tests-sync6.txt, tests-sync6rm.txt, ingest-test-sync6.txt, host-suite-sync6.txt, smoke/*/smoke.txt) and /home/jhan/workspace/intel-AMX/exec/results/sync6-E-cpu/summary.md. Verify every number, file name, function name, commit id and claim in the file against those sources and the tree (git -C <tree> diff origin/main HEAD; git log). Report each wrong or unverifiable statement as {rule: "fact", original: exact phrase, fix: corrected phrase or "unverifiable: <why>"}. Do not report style.`, { label: 'check:facts', schema: SCHEMA }),
+])
+return { style: [...(a ? a.violations : []), ...(b ? b.violations : [])], facts: facts ? facts.violations : [] }
