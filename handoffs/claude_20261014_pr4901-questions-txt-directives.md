@@ -54,13 +54,13 @@ Act per ~/tmp/PR4901-questions.txt: answer twelve questions about the PR 4901 co
 - 18:39 to 18:40 split-status.md, the memory note and MEMORY.md updated.
 - 18:50 Review returned (plain-English 66 violations, technical 1 error 5 warnings 2 nits). Page rewritten at 18:54 with the confirmed fixes.
 - 18:55 First summary given. Context ran out and the session was continued from a summary at 19:50.
-- 19:58 The user: undo the Q5 helper change, and why not `~uint64_t{0}`. Q5 reverted at 19:59, B patch regenerated (B-proposals-v1-with-q5.patch kept), compile demo under g++ 11.4 and clang 19.1.7, step 4 re-run (step4-q16.out), round-2 refuters (workflow pr4901-r2-verify).
+- 19:58 The user: undo the Q5 helper change, and why not `~uint64_t{0}`. Q5 reverted at 19:59, B patch regenerated (B-proposals-v1-with-q5.patch kept), compile demo under g++ 11.4 and clang 19.1.7, step 4 re-run (step4-q16.out), round-2 refuters (workflow pr4901-r2-verify). (preserved: artifacts/intel-amx/exec/pr4-20261012/review-20261015/B-proposals-v1-with-q5.patch)
 - 20:16 Q5 and Q11 answered. 20:11 the user installed the simplify-cpp-comments skill themselves.
 - 20:51 The user asked why A and B were split and why Claude could not commit. Claude explained (authorization split, the hook) and prepared msg-AB.txt.
 - 20:51 The user: change to `~uint64_t{0}`. Applied.
 - 20:55 The user asked which coding-guide rule conflicted. Claude showed the added "or is a default argument" clause was its own extension.
 - 21:01 The user asked how to enter a nix shell. Claude found no nix on claude-agentsrv and lefthook present on delphi-3bda.
-- 21:07 (04:07 UTC) The user committed 8ad54a13b1 on delphi-3bda with msg-AB.txt (A and B together, 4 files, +19/-43). Step 4 re-run on the commit (step4-q18.out).
+- 21:07 (04:07 UTC) The user committed 8ad54a13b1 on delphi-3bda with msg-AB.txt (A and B together, 4 files, +19/-43). Step 4 re-run on the commit (step4-q18.out). (preserved: artifacts/intel-amx/exec/pr4-20261012/review-20261015/msg-AB.txt)
 - 21:19 The user: "you push, you take care update". Pushed at 04:19 UTC.
 - 21:22 The user gave the exact new text of the bool rule for the skill. Applied at 21:25 (the default-argument clause removed).
 - 21:26 PR body v9 posted after two refuters (workflow pr4901-body-v9-verify).
@@ -89,27 +89,34 @@ Unit tests were not re-run at any of the three heads (last run at 175b1837b9). T
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR4901-explain.html (65,800 bytes). The answer page: the twelve answers with evidence, the refuter record, the commits, the skill proposal, and an "Open decisions for you" section that now says none.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR4901-explain.html (65,800 bytes). The answer page: the twelve answers with evidence, the refuter record, the commits, the skill proposal, and an "Open decisions for you" section that now says none. (preserved: artifacts/intel-amx/pr3879/split-4424/PR4901-explain.html)
   - generator: none (hand-written with the Write tool, then edited by page_edit_r2.py and page_edit_r3.py in the scratchpad)
   - input: the workflow answers (scratchpad answers.md) and the step-4 outputs
   - input built by: workflow pr4901-questions-answer-verify (wf_efda9be3-a1d)
   - sources: worktree tron-split-pr4 at 175b1837b9 to 4d64013dff, exec/pr4-20261012/step4-q15.out to step4-q20.out
   - regenerate: unavailable (hand-written)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR4901-explain/simplify-cpp-comments/SKILL.md (4,903 bytes). The skill draft. The user revised and installed it at 20:11 as ~/.claude/skills/simplify-cpp-comments/SKILL.md (4,903 bytes, same content, with a rule 0 "do diff only" and without the draft's rules 7 and 8).
-- claude-agentsrv:/home/jhan/.claude/skills/cpp-coding-guide/SKILL.md (2,577 bytes). Edited twice by Claude (18:29 bool rule with the default-argument clause, 21:25 the user's exact text) and once by the user at 21:38 (template arguments).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/review-20261015/ (11 files): A-ordered.patch (4,127 bytes), A-ordered-v1.patch (3,610), B-proposals.patch (5,367), B-proposals-v1-with-q5.patch (7,108), C-default-args.patch (2,112), D-template-args.patch (931), msg-A.txt (524), msg-B.txt (874), msg-AB.txt (1,235), msg-C.txt (617), msg-D.txt (474). The patches and commit messages of the four change sets.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR4901-explain/simplify-cpp-comments/SKILL.md (4,903 bytes). The skill draft. The user revised and installed it at 20:11 as ~/.claude/skills/simplify-cpp-comments/SKILL.md (4,903 bytes, same content, with a rule 0 "do diff only" and without the draft's rules 7 and 8). (preserved: artifacts/intel-amx/pr3879/split-4424/PR4901-explain/simplify-cpp-comments/SKILL.md)
+- claude-agentsrv:/home/jhan/.claude/skills/cpp-coding-guide/SKILL.md (2,577 bytes). Edited twice by Claude (18:29 bool rule with the default-argument clause, 21:25 the user's exact text) and once by the user at 21:38 (template arguments). (preserved: artifacts/claude-skills/cpp-coding-guide/SKILL.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/review-20261015/ (11 files): A-ordered.patch (4,127 bytes), A-ordered-v1.patch (3,610), B-proposals.patch (5,367), B-proposals-v1-with-q5.patch (7,108), C-default-args.patch (2,112), D-template-args.patch (931), msg-A.txt (524), msg-B.txt (874), msg-AB.txt (1,235), msg-C.txt (617), msg-D.txt (474). The patches and commit messages of the four change sets. (preserved: artifacts/intel-amx/exec/pr4-20261012/review-20261015/A-ordered.patch)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/step4-q15.out to step4-q20.out (1,697, 1,697, 1,697, 1,697, 1,266, 1,280 bytes). Step-4 check outputs for each tree state.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/step4.sh (4,102 bytes). The step-4 script, its expected-warnings line updated after d0e6f816dd.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/handoff-material/probe-pr4/out-38/summary.txt (2,333 bytes) and summary-before-d0e6f816dd.txt (2,333 bytes). The reference matrix summary, new and old.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr-body-v9.md (14,341 bytes), pr-body-v10.md (14,550), pr-body-v11.md (14,831). The three posted body versions (1,890, 1,922 and 1,957 words). v8 was the base.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/handoff-material/probe-pr4/out-38/summary.txt (2,333 bytes) and summary-before-d0e6f816dd.txt (2,333 bytes). The reference matrix summary, new and old. (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr4/out-38/summary.txt)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr-body-v9.md (14,341 bytes), pr-body-v10.md (14,550), pr-body-v11.md (14,831). The three posted body versions (1,890, 1,922 and 1,957 words). v8 was the base. (preserved: artifacts/intel-amx/exec/pr4-20261012/pr-body-v9.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md (270,899 bytes today). Nine sections appended for this session's rounds.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr4-split-execution.md (25,221 bytes today). Seven UPDATE blocks appended.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/no-minor-refactors.md (1,592 bytes). New feedback note: answer "consider X" and "why not Y" with an assessment, not an edit.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/tron-commit-hook.md (2,188 bytes today). New note: commit over ssh on delphi-3bda because the hook needs lefthook. Modified by a later session.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/no-minor-refactors.md (1,592 bytes). New feedback note: answer "consider X" and "why not Y" with an assessment, not an edit. (preserved: artifacts/intel-amx/memory/split-4424/no-minor-refactors.md)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/tron-commit-hook.md (2,188 bytes today). New note: commit over ssh on delphi-3bda because the hook needs lefthook. Modified by a later session. (preserved: artifacts/intel-amx/memory/split-4424/tron-commit-hook.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md (10,006 bytes today). Index lines added or extended.
-- Workflow scripts (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/e6f04fce-1790-4fc0-8220-267a113c6ec1/workflows/scripts/): pr4901-questions-answer-verify-wf_efda9be3-a1d.js (30,030 bytes), pr4901-explain-review-wf_818990e4-46f.js (7,785), pr4901-r2-verify-wf_5850daa8-fd3.js (7,579), pr4901-body-v9-verify-wf_efb549a2-a00.js (3,714), pr4901-body-v10-verify-wf_2d5f5e9c-e19.js (3,497), pr4901-body-v11-verify-wf_ed12f054-5a9.js (3,584).
+- Workflow scripts (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/e6f04fce-1790-4fc0-8220-267a113c6ec1/workflows/scripts/): pr4901-questions-answer-verify-wf_efda9be3-a1d.js (30,030 bytes), pr4901-explain-review-wf_818990e4-46f.js (7,785), pr4901-r2-verify-wf_5850daa8-fd3.js (7,579), pr4901-body-v9-verify-wf_efb549a2-a00.js (3,714), pr4901-body-v10-verify-wf_2d5f5e9c-e19.js (3,497), pr4901-body-v11-verify-wf_ed12f054-5a9.js (3,584). (preserved: artifacts/intel-amx/exec/pr4-20261012/pr4901-questions-answer-verify-wf_efda9be3-a1d.js, relocated to /home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr4901-questions-answer-verify-wf_efda9be3-a1d.js)
 - Raw workflow outputs (claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/e6f04fce-1790-4fc0-8220-267a113c6ec1/tasks/, scratch): wpuj7vkk2.output (624,272 bytes, the twelve answers), wpd5tah8m.output (135,845, page review), w0vx94n2e.output (64,823, round 2), wbikqpqwa.output (19,104, body v9), wmwb22c4c.output (16,894, body v10), wsv5s8ryq.output (16,545, body v11), plus 43 small background-command outputs not listed.
 - Code: commits 8ad54a13b1, d0e6f816dd, 4d64013dff on `jhan-vnnik-4-tail-block`, all pushed to origin. PR https://github.com/positron-ai/tron/pull/4901.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/claude-skills/simplify-cpp-comments/` (1 files)
+- `artifacts/intel-amx/exec/pr4-20261012/` (7 files)
+- `artifacts/intel-amx/exec/pr4-20261012/review-20261015/` (8 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr4/out-38/` (1 files)
 
 ## Current state
 

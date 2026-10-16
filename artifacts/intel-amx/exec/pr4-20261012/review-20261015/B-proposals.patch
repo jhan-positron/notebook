@@ -1,0 +1,106 @@
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index 8aa0d31693..07957f0cc8 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -2165,7 +2165,6 @@ struct alignas(64) page final {
+   bool note_k_row_saved(kv_slot_id slot, size_t offset) noexcept {
+     TRON_ASSERT_LT(offset, page_size);
+     if constexpr (!k_vnni::layout_on<geometry.head_size>) {
+-      (void)slot;
+       return false;
+     }
+     const size_t ix = k_state_ix(slot);
+@@ -2519,16 +2518,12 @@ private:
+     }
+   }
+ 
+-  // Whether the bytes of this page's storage slot may be read and written
+-  // now: the book's storage is published (no private KV restore in flight)
+-  // and the page's storage is resident. A sliding-window slot keeps its pages
+-  // in chunks that are reclaimed one by one (free_reclaimable_kv_chunk), so
+-  // the page's own chunk decides, not the slot's first chunk.
+-  // clear_kv_complete_at runs on both sides of a KV restore commit (full.hpp
+-  // invalidate_restored_book).
++  // Whether the bytes of this page's storage slot may be read and written now.
+   TRON(nodiscard, inline)
+   bool k_storage_readable(kv_storage_offset storage_offset) const noexcept {
++    // No private KV restore in flight (finish or abort clears the attempt).
+     return book.reclaimable_kv_restore_attempt_ == 0 &&
++           // The page's own chunk has memory (chunks are reclaimed one by one).
+            book.slot_page(storage_offset, pageno()).base != nullptr;
+   }
+ 
+@@ -2685,14 +2680,13 @@ private:
+       size_t dst_begin,
+       size_t count) noexcept {
+     const kv_storage_offset storage_offset = storage.offset;
+-    [[maybe_unused]] const size_t state_ix = storage.state_ix;
++    const size_t state_ix = storage.state_ix;
+     // The K bits: the saved-row bits of the destination range are replaced by
+     // the source range's; the converted-block bits follow the conversions
+     // below. Computed once per slot, applied after the last KV head.
+-    [[maybe_unused]] uint64_t src_saved = 0, dst_saved = 0, new_saved = 0;
+-    [[maybe_unused]] uint8_t src_blocks = 0, dst_blocks = 0, new_blocks = 0;
+-    [[maybe_unused]] const bool whole_page =
+-        src_begin == 0 && dst_begin == 0 && count == page_size;
++    uint64_t src_saved = 0, dst_saved = 0, new_saved = 0;
++    uint8_t src_blocks = 0, dst_blocks = 0, new_blocks = 0;
++    const bool whole_page = src_begin == 0 && dst_begin == 0 && count == page_size;
+     if constexpr (k_vnni::layout_on<geometry.head_size>) {
+       static_assert(page_size == k_vnni::PAGE_TOKENS_64, "one bit per page offset");
+       TRON_ASSERT(count != 0, "copy_storage_slot: empty range");
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index d6edd214ac..32bb6bedeb 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -1839,11 +1839,8 @@ public:
+       // (gof_rodeo_impl dereferences gof_jobs_span). No-op when the queue is empty.
+       wait_for_coop_gof();
+ 
+-      // The K blocks this pass completed go to the VNNI layout now: run()
+-      // joined its workers and the staging drained, so no reader is left
+-      // (Note [K VNNI storage] in kv_cache.hpp). Blocks of a hardware-scored
+-      // operation were never queued (Note [Row-major blocks under hardware
+-      // attention] there).
++      // run() joined its workers and wait_for_coop_gof drained the staging: no
++      // reader of a completed K block is left (Note [K VNNI storage] in kv_cache.hpp).
+       convert_pending_k_blocks();
+ 
+       // Launch logit delivery
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 0c9544289d..e0b48ae6bd 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -1972,15 +1972,15 @@ struct self_attention {
+                   dotter<scalar_t, operation_head_size>(slice<operation_head_size>()(
+                       q, (kv_head * operation_kv_mul + I) * operation_head_size))...};
+             }(std::make_index_sequence<operation_kv_mul>{});
+-        [[maybe_unused]] uint64_t live = 0;
++        uint64_t live = 0;
+         // The VNNI slot: the blocks of the page that hold the VNNI layout, and
+         // the packed plane (page::k_packed) whose row-major tail rows the
+         // dotters read. Both are fetched at the first relevant token, like the
+         // row view below: a page nothing is relevant for is never asked (a
+         // book may have no active KV slot). A row-major slot has no packed
+         // plane, so `plane` is a placeholder there.
+-        [[maybe_unused]] uint8_t vnni_blocks = 0;
+-        [[maybe_unused]] auto plane = [&] {
++        uint8_t vnni_blocks = 0;
++        auto plane = [&] {
+           if constexpr (k_vnni_on) {
+             return std::optional<decltype(page.template k_packed<geometry.kv>(
+                 slot, kv_head))>{};
+diff --git a/t/t_k_vnni_layout.cpp b/t/t_k_vnni_layout.cpp
+index afc33177fd..68360b11f1 100644
+--- a/t/t_k_vnni_layout.cpp
++++ b/t/t_k_vnni_layout.cpp
+@@ -612,8 +612,7 @@ TEST_CASE(
+ 
+ namespace {
+ 
+-[[maybe_unused]] constexpr tron::kv_geometry GEOMETRY_1X128{
+-    N_KV_HEADS_1, HEAD_SIZE_128};
++constexpr tron::kv_geometry GEOMETRY_1X128{N_KV_HEADS_1, HEAD_SIZE_128};
+ // No block of the page holds the VNNI layout.
+ constexpr uint8_t NO_BLOCK_0X0 = 0x0;
+ // The rows 0 .. tok are tok + NEXT_ROW_1 rows.
