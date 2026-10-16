@@ -96,17 +96,23 @@ Findings tied to the data:
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/Was-AMX-boosting-all-models.html (252,648 bytes). The report page: 8 sections, 4 inline SVG charts (per-row dot plots of the Intel and AMD medians, night-by-night small multiples, prefill, gap), 5 tables, a Words section and a Data and method section.
-  - generator: /home/jhan/workspace/intel-AMX/exec/ci-poll-20261004/gen_page.py
-  - input: /home/jhan/workspace/intel-AMX/exec/ci-poll-20261004/findings.json (narrative), chartdata.json, summary.json, steps.json, packages.json, rows.csv, audit.json (same folder)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/Was-AMX-boosting-all-models.html (252,648 bytes). The report page: 8 sections, 4 inline SVG charts (per-row dot plots of the Intel and AMD medians, night-by-night small multiples, prefill, gap), 5 tables, a Words section and a Data and method section. (preserved: artifacts/intel-amx/pr3879/new-counters/Was-AMX-boosting-all-models.html)
+  - generator: /home/jhan/workspace/intel-AMX/exec/ci-poll-20261004/gen_page.py (preserved: artifacts/intel-amx/exec/ci-poll-20261004/gen_page.py)
+  - input: /home/jhan/workspace/intel-AMX/exec/ci-poll-20261004/findings.json (narrative), chartdata.json, summary.json, steps.json, packages.json, rows.csv, audit.json (same folder) (preserved: artifacts/intel-amx/exec/ci-poll-20261004/findings.json)
   - input built by: extract.py (rows.csv and runs.json from the 40 nightly logs), summarize.py (summary.json), steps.py (steps.json), the audit workflow amx-ci-boost-audit (audit.json), findings.json hand-written in the session
   - sources: nightly run logs of positron-ai/systems_test for both machines, 09-15 to 10-04 (40 runs, fetched with gh into the session scratchpad logs folder, 8 Intel logs reused from exec/ci-amx-row-20260923); tron merges 3faba6d0..fb3c50e3 read in /home/jhan/workspace/ai-runs/tron-main-ro; PR bodies fetched with gh; Slack #ci-cd-notifications read by the workflow
   - regenerate: `cd /home/jhan/workspace/intel-AMX/exec/ci-poll-20261004 && python3 gen_page.py <OUT>` (with no argument it writes the canonical path above)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/ci-poll-20261004/gen_page.py (23,635 bytes). Page generator. findings.json (40,507). extract.py (5,056), summarize.py (2,615), steps.py (1,362). Data: rows.csv (141,892), runs.json (1,246,683), summary.json (36,860), steps.json (27,295), packages.json (5,279), chartdata.json (32,918), prs.json (382,093), tron-merges.txt (20,418), audit.json (460,251, the workflow result).
-- Workflow scripts (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/16931533-000e-4b8c-af35-4a0b6747a6bf/workflows/scripts/): amx-ci-boost-audit-wf_a0b09d44-c2d.js (18,598 bytes), verify-amx-page-wf_1146af31-cf5.js (5,611 bytes).
-- Session scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/16931533-000e-4b8c-af35-4a0b6747a6bf/scratchpad/ (may be cleaned up): work/ (35 files: the same data files as above, preview.html 250,114 bytes, fig1..fig4 .svg and .png renders, crop PNGs, page.txt and prose.txt used by the verification, audit.json), logs/ (40 nightly logs, 158 MB), work/prs/ (155 PR body files).
+- Workflow scripts (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/16931533-000e-4b8c-af35-4a0b6747a6bf/workflows/scripts/): amx-ci-boost-audit-wf_a0b09d44-c2d.js (18,598 bytes), verify-amx-page-wf_1146af31-cf5.js (5,611 bytes). (preserved: artifacts/intel-amx/exec/workflows/amx-ci-boost-audit-wf_a0b09d44-c2d.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/amx-ci-boost-audit-wf_a0b09d44-c2d.js)
+- Session scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/16931533-000e-4b8c-af35-4a0b6747a6bf/scratchpad/ (may be cleaned up): work/ (35 files: the same data files as above, preview.html 250,114 bytes, fig1..fig4 .svg and .png renders, crop PNGs, page.txt and prose.txt used by the verification, audit.json), logs/ (40 nightly logs, 158 MB), work/prs/ (155 PR body files). (preserved: artifacts/intel-amx/exec/scratch-relocated/16931533/work/page.txt, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/16931533/work/page.txt)
 - Task outputs claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/16931533-000e-4b8c-af35-4a0b6747a6bf/tasks/: w0j3izmc9.output (625,645 bytes, the audit), wh1au1668.output (99,370, the page verification), bbihk96fi.output (1,286), b2dif43uz.output (267).
 - No memory note was written. No code, PR or GitHub state was changed.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/ci-poll-20261004/` (12 files)
+- `artifacts/intel-amx/exec/scratch-relocated/16931533/work/` (14 files)
+- `artifacts/intel-amx/exec/workflows/` (1 files)
 
 ## Current state
 

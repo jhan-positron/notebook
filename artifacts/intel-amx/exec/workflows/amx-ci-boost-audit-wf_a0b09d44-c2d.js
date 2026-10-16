@@ -1,0 +1,93 @@
+export const meta = {
+  name: 'amx-ci-boost-audit',
+  description: 'Audit 155 tron merges, machine state, Slack and harness for causes of the post-9/22 nightly perf changes',
+  phases: [
+    { title: 'Classify', detail: 'runtime perf relevance of every tron merge since the pre-AMX package' },
+    { title: 'Refute', detail: 'two skeptics per flagged merge' },
+    { title: 'Context', detail: 'machine state, Slack, harness, prior #4353 analysis' },
+    { title: 'Attribute', detail: 'map each detected step to candidate merges' },
+  ],
+}
+const W = '/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/16931533-000e-4b8c-af35-4a0b6747a6bf/scratchpad/work'
+const TRON = '/home/jhan/workspace/ai-runs/tron-main-ro'
+const ST = '/home/jhan/workspace/ai-runs/systems_test'
+const prs = args.prs
+const batches = []
+for (let i = 0; i < prs.length; i += 20) batches.push(prs.slice(i, i + 20))
+
+const CLASS_SCHEMA = {
+  type: 'object',
+  properties: {
+    results: { type: 'array', items: { type: 'object', properties: {
+      number: { type: 'integer' },
+      title: { type: 'string' },
+      author: { type: 'string' },
+      runtime_relevant: { type: 'boolean', description: 'true if code that executes inside rinzler during the nightly perf rows (serving, kernels, attention, routing, KV cache, scheduling, wait loops, placement, build flags of the .deb, codegen output used by ingested models) changed' },
+      category: { type: 'string', description: 'one of: cpu-attention, fpga-attention, amx, moe-routing, kv-cache, wait-sync, placement, build-flags, codegen-ingested-runtime, model-config, rinzler-api, ingest-tooling-only, ci-tests-only, docs-only, other' },
+      models_affected: { type: 'array', items: { type: 'string' }, description: 'nightly CI model rows plausibly affected, e.g. ingested-gpt-oss-120b-tp4, ingested-qwen-3-4b-instruct-2507-tp2/tp4, llama-3.1-8b-instruct-good-tp2, llama-3.3-70b-*, mixtral-8x7b, qwen-2.5-32b, gemma-2-9b, ingested-gemma-4-31b-it-tp2, or "all"' },
+      machine_scope: { type: 'string', description: 'intel-only, amd-only, both, or none' },
+      decode_or_prefill: { type: 'string', description: 'decode, prefill, both, none' },
+      expected_direction: { type: 'string', description: 'faster, slower, neutral, unknown' },
+      evidence: { type: 'string', description: 'file paths and one-line reasoning; cite PR body perf claims verbatim if any' },
+      confidence: { type: 'string', description: 'high, medium, low' },
+    }, required: ['number','title','author','runtime_relevant','category','models_affected','machine_scope','decode_or_prefill','expected_direction','evidence','confidence'] } },
+  },
+  required: ['results'],
+}
+
+phase('Classify')
+const classified = await pipeline(batches, (batch, _, idx) => agent(`You audit tron pull requests for runtime performance relevance in the nightly System CI perf benchmark.
+Context: tron is the inference program; rinzler is its production server binary installed from a .deb. The nightly CI runs rinzler on two machines: delphi-3bda (Intel Xeon 6 6962P Granite Rapids, has AMX) and andoria-b1a3 (AMD Genoa, no AMX). Perf rows: llama-3.2-3b-fast-tp2 (32 users), llama-3.1-8b-good-tp2 (8 users; and a 32-user prompt-4096 "AMX benchmark" row since 9/22), llama-3.3-70b-good tp2 (4u, 8u) and tp4 (4u), mixtral-8x7b tp2, qwen-2.5-32b tp2, ingested-qwen-3-4b-instruct-2507 tp2 and tp4 (generated code, FPGA attention), gemma-2-9b tp2, ingested-gpt-oss-120b-tp4 (generated code, MoE, FPGA attention), ingested-gemma-4-31b-it-tp2, and from 10/01 ingested-meta-models--Muse-Glimmer-30B-tp4. "ingested-" models are compiled from the ingest code generator, so codegen changes in ingest/ CAN change their runtime code. Hand-written models (llama, mixtral, qwen-2.5, gemma-2) are not affected by codegen changes. AMX kernels (TRON_AMX_DISPATCH) only serve attention for head size 128 with 4 query heads per KV head when attention runs on the CPU; in the nightly, qwen-3-4b and gpt-oss-120b use FPGA attention.
+
+Your PRs: ${JSON.stringify(batch)}.
+Data: ${W}/prs.json holds for every PR: number, title, author, mergedAt, additions, deletions, files (paths), body. Read only your PRs' entries (python3 -c one-liners or jq). The tron repo checkout is ${TRON} (origin/main fetched 2026-10-04). To see a PR's diff: find its merge commit with "git -C ${TRON} log --first-parent --format='%h %s' origin/main | grep '#NNNN'" then "git -C ${TRON} show --stat <merge>" and "git -C ${TRON} diff <merge>^1 <merge> -- <path>" for runtime files under src/, lib/, kernels, config/models.yaml, CMakePresets.json, packaging/, ingest/ emitters. Do not read whole huge diffs; read stat first and then the runtime-relevant hunks.
+Rules: decide runtime_relevant strictly (does the changed code execute inside rinzler while serving the listed models, or change what code is compiled into the .deb?). Tests, CI yaml, docs, ingest tooling that only affects export/testing of models not in the CI list are NOT runtime relevant. Quote any performance numbers the PR body claims. Return one entry per PR in the batch, all ${batch.length} of them.`, { label: `classify:${idx}`, phase: 'Classify', schema: CLASS_SCHEMA }))
+
+const flat = classified.filter(Boolean).flatMap(r => r.results)
+const flagged = flat.filter(r => r.runtime_relevant)
+log(`classified ${flat.length}/${prs.length} PRs; ${flagged.length} flagged runtime-relevant`)
+
+const VERDICT = { type: 'object', properties: {
+  number: { type: 'integer' }, refuted: { type: 'boolean' },
+  reason: { type: 'string' }, corrected_models: { type: 'array', items: { type: 'string' } },
+  corrected_machine_scope: { type: 'string' }, corrected_category: { type: 'string' },
+  magnitude_estimate: { type: 'string', description: 'could it move decode or prefill of the listed rows by >=1%? yes/no/unknown with one line of reasoning' } },
+  required: ['number','refuted','reason','corrected_models','corrected_machine_scope','corrected_category','magnitude_estimate'] }
+
+phase('Refute')
+const verified = await pipeline(flagged, f => parallel([
+  () => agent(`Skeptic lens: DOES THIS CODE RUN in the nightly rinzler for the models listed? A first-pass auditor flagged tron PR #${f.number} ("${f.title}", by ${f.author}) as runtime-relevant: category ${f.category}, models ${JSON.stringify(f.models_affected)}, machine scope ${f.machine_scope}, evidence: ${f.evidence}. Try to REFUTE: read the actual diff in ${TRON} (find the merge commit via git log --first-parent origin/main | grep '#${f.number}', then git show). Check whether the changed code path is reachable in production rinzler serving the nightly rows (CPU attention vs FPGA attention; generated vs hand-written models; default-off env flags such as TRON_ATTN_STATS, TRON_MWAIT_STATS; build options actually set in the deb preset in CMakePresets.json). PR metadata is in ${W}/prs.json. Default to refuted=true if you cannot find a reachable runtime path. Return corrected fields.`, { label: `refute-reach:${f.number}`, phase: 'Refute', schema: VERDICT }),
+  () => agent(`Skeptic lens: MAGNITUDE AND MACHINE SCOPE. A first-pass auditor flagged tron PR #${f.number} ("${f.title}", by ${f.author}) as runtime-relevant: category ${f.category}, models ${JSON.stringify(f.models_affected)}, machine scope ${f.machine_scope}, expected ${f.expected_direction}, evidence: ${f.evidence}. Read the diff in ${TRON} (git log --first-parent origin/main | grep '#${f.number}'; git show) and the PR body in ${W}/prs.json. Decide: could it change decode TPS or prefill (prompt tokens per second, derived from time to first token) of the named nightly rows by at least 1%? Would the effect differ between the Intel machine (Granite Rapids, AMX, RTM-based timed wait) and the AMD machine (Genoa, MWAITX-based timed wait, no AMX)? Refute only if the change cannot plausibly move any row by 1%. Return corrected fields.`, { label: `refute-mag:${f.number}`, phase: 'Refute', schema: VERDICT }),
+]).then(vs => ({ ...f, votes: vs.filter(Boolean) })))
+
+const survivors = verified.filter(Boolean).filter(v => v.votes.filter(x => x.refuted).length < 2)
+const dropped = verified.filter(Boolean).filter(v => v.votes.filter(x => x.refuted).length >= 2)
+log(`${survivors.length} PRs survive verification, ${dropped.length} refuted by both skeptics`)
+
+phase('Context')
+const ctx = await parallel([
+  () => agent(`Read-only machine-state check of delphi-3bda (the Intel CI machine). Goal: find any machine-side change between 2026-09-25 and 2026-10-01 UTC that could raise every nightly perf row by 1-2% (a broad Intel-only step appeared in the nightly that ran 2026-09-29 04:05-05:22 UTC; the previous nightly ran 2026-09-28 04:10-05:28 UTC). FIRST run: ssh -o BatchMode=yes delphi-3bda 'cat /run/lock/systems-test-ci.lease; date -u'. If the lease file exists with state busy and a future expires_at_epoch, STOP and report that CI holds the machine. The nightly starts at 03:30 UTC; finish all commands before 02:30 UTC. ONLY read-only commands over ssh (no writes, no restarts, no builds, no runtron, no sudo). Collect: uptime and last -x reboot; /var/log/dpkg.log and /var/log/apt/history.log entries between 2026-09-24 and 2026-10-01 (apt installs of tron, platformd, kernel, microcode, firmware, linux-tools, tuned, intel-speed-select); ls -l --time-style=full-iso /etc/systemd/system/rinzler@.service /etc/rinzler/ /etc/systemd/system/platformd* /opt/positron/user/config.env 2>/dev/null and their contents (look for --num-expert-replicas, USE_HW_ATTN, TRON_* env, CPUAFFINITY); journalctl --since 2026-09-24 --until 2026-10-01 -u platformd --no-pager | tail -80; journalctl --since 2026-09-24 --until 2026-10-01 --no-pager -k | grep -i -E 'cpufreq|intel_pstate|microcode|thermal|hugepage|numa|sst|speed' | head -40; cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor /sys/devices/system/cpu/intel_pstate/* 2>/dev/null; intel-speed-select -c 0 perf-profile get-config-current-level 2>/dev/null | head -20; grep -E 'HugePages_(Total|Free)' /proc/meminfo; last -F | grep -E 'Sep (2[4-9]|30)|Oct  1' | head -40 (who logged in; note user bill or rhys); ls -la --time-style=full-iso /var/tmp/jhan/ | head; also check whether any jhan campaign under ~/workspace/intel-AMX/exec/ (i4500fix-20260928, i4500b-20260930, i4500c-20260930, attnstats-20260929-w1, attnstats-20260930-objdump) changed machine configuration: read their scripts' headers on THIS host (claude-box) for commands touching /etc, sysfs, cpupower, intel-speed-select, hugepages, or rinzler units. Report every finding with its timestamp and the exact command that produced it. Say "nothing found" explicitly for each probe that shows no change.`, { label: 'machine-state:3bda', phase: 'Context' }),
+  () => agent(`Slack cross-check. Use the Slack MCP tools (load with ToolSearch "select:mcp__claude_ai_Slack__slack_read_channel,mcp__claude_ai_Slack__slack_read_thread,mcp__claude_ai_Slack__slack_search_public_and_private"). Channel #ci-cd-notifications is C06S8PNDBQA; the bot "talos" posts a Nightly Report per rig (GRANITE_RAPIDS_72_RINZLER DUT delphi-3bda = Intel; GENOA96_RINZLER DUT andoria-b1a3 = AMD) each morning about 06:00-07:00 PDT (13:00-14:00 UTC). Tasks: (1) Read the channel from 2026-09-22 through 2026-10-04 (oldest unix ts 1790000000 approx; 2026-09-22 00:00 UTC = 1790035200; 2026-10-05 00:00 UTC = 1791158400). For each rig and date, extract the decode TPS, prefill and TTFT printed for these rows: ingested-qwen-3-4b-instruct-2507-tp4 @8u, ingested-gpt-oss-120b-tp4 @8u, llama-3.1-8b-instruct-good-tp2 @32u (AMX benchmark), llama-3.3-70b-instruct-good-tp4 @4u, mixtral-8x7b @8u. Compare each with ${W}/rows.csv (columns machine,date,model,users,tps_mean,prefill_tps,ttft_rounded_ms; machine intel=delphi, amd=andoria; date = UTC date the perf row ran, which is the same date as the Slack report). Report every mismatch larger than 0.05 TPS and the count of matches. (2) Search Slack (keywords such as AMX, Granite, boost, faster, "TPS", threshold; after:2026-09-22) for human messages that attribute nightly performance gains to AMX, or that discuss the Intel nightly gains, including Rhys's threshold updates ("Raise nightly TPS floors after sustained Granite gains", 2026-10-01). Quote the messages verbatim with author, channel, date and permalink. Also search for messages about andoria-b1a3 cancelled nightlies 2026-09-26..29 and about any platformd or rinzler config changes on delphi-3bda in that window. Do not post anything.`, { label: 'slack:crosscheck', phase: 'Context' }),
+  () => agent(`Harness-side check. Repo ${ST} (systems_test, the nightly CI harness; origin fetched 2026-10-04). The nightly workflow heads per night were: 09-15 0ab579bf, 09-16 6b20db06, 09-17 ac52a591, 09-18..21 fc27f073, 09-22 73271843, 09-23 5b2250b9, 09-24..29 6a38e6e1, 09-30 7dd141e8, 10-01 ff8d05d7, 10-02..04 b1ccc0b8. Question: did any harness change between 0ab579bf and b1ccc0b8 alter HOW decode TPS or TTFT is measured or the load applied (users, rounds, prompt lengths, generate lengths, stagger, sample windows, prompt dataset, proxy, warmup, speculation flag, posadm config.set, inference restart between rows, the order of phases before perf) for the existing rows? Use git log/diff on scripts/perf.py, testlib/tps.py, testlib/perf_metrics.py, scripts/system_ci.py, .github/workflows/*.yaml, testlib/*.py. Separately list the threshold-only commits (thresholds/*.yaml, get_goal) which do not change measurements. Also answer: the AMD (genoa96) workflow runs on 2026-09-26, 27, 28, 29 were "cancelled" and the Intel runs all "failure" -- from the workflow yaml and scripts, which phase order is used (functional -> perf -> MMLU -> soak?) and does a cancellation or an earlier phase failure change the state in which the perf phase runs? Cite file:line for each claim.`, { label: 'harness:systems_test', phase: 'Context' }),
+  () => agent(`Find the prior analysis that EXCLUDED Bill's 2026-09-23 change as the cause of the nightly gains. The user (jhan) says: "We analyzed 1 change from Bill on 9/23 and excluded it." The candidate is tron PR #4353 "Split software attention pages across cores by query" by BillBaumann, merged 2026-09-23 15:50 UTC, first in nightly package 2026.09.24-2a527a4b. Search: /home/jhan/workspace/notebook/handoffs/*.md (grep -l 4353), /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX*/memory/*.md, /home/jhan/workspace/intel-AMX/ (grep -rl 4353 --include=*.md --include=*.html --include=*.json, skip node_modules), /home/jhan/workspace/notebook/artifacts/intel-amx/ (grep -rl 4353). Report: which document(s) analysed #4353, what measurement or reasoning excluded it, the date, and quote the key sentences. Also check whether Bill's OTHER merge in the window, PR #4258 "HW attention: start join work earlier (long context win)" (merged 2026-09-18 19:32 UTC but first shipped in nightly package 2026.09.23-5cf65b92 because the deb build failed 09-19..09-22), was analysed anywhere (grep 4258 in the same places) and what was concluded. Quote verbatim with file paths.`, { label: 'prior:4353-4258', phase: 'Context' }),
+])
+
+phase('Attribute')
+const steps = args.steps
+const ATTR = { type: 'object', properties: {
+  step: { type: 'string' },
+  candidates: { type: 'array', items: { type: 'object', properties: {
+    number: { type: 'integer' }, title: { type: 'string' }, author: { type: 'string' }, mergedAt: { type: 'string' },
+    why: { type: 'string' }, models: { type: 'array', items: { type: 'string' } }, machine_scope: { type: 'string' },
+    rank: { type: 'string', description: 'strong, plausible, weak' } }, required: ['number','title','author','mergedAt','why','models','machine_scope','rank'] } },
+  non_pr_explanations: { type: 'string', description: 'machine, harness or timing explanations considered, with evidence for or against' },
+  what_would_isolate: { type: 'string', description: 'the concrete A/B measurement that would isolate the cause' },
+}, required: ['step','candidates','non_pr_explanations','what_would_isolate'] }
+const attributions = await parallel(steps.map(s => () => agent(`Attribute one detected nightly-CI performance step to candidate causes.
+Step: ${s.name}. Nightly package first seen: ${s.package}. Previous package: ${s.prev}. Rows that moved (machine, model, users, metric, median of 3 nights before -> after, %): ${JSON.stringify(s.rows)}. Rows that did NOT move on that night: ${s.unmoved}.
+The PRs new in that package (vs the previous package) are listed in ${W}/packages.json under key "${s.package}" (field new_prs). Verified runtime-relevant PRs (after two-skeptic review) with their classification: ${JSON.stringify(survivors.map(v => ({ number: v.number, title: v.title, author: v.author, category: v.category, models: v.models_affected, scope: v.machine_scope, decode_or_prefill: v.decode_or_prefill, direction: v.expected_direction, evidence: v.evidence, votes: v.votes.map(x => x.magnitude_estimate) })))}. PRs refuted by both skeptics (treat as not runtime-relevant unless you find new evidence): ${JSON.stringify(dropped.map(v => v.number))}.
+Context findings from other agents: MACHINE STATE: ${String(ctx[0]).slice(0, 6000)} ... SLACK: ${String(ctx[1]).slice(0, 4000)} ... HARNESS: ${String(ctx[2]).slice(0, 4000)}.
+Facts: AMX kernels serve CPU attention only for head size 128 with 4 query heads per KV head (llama-3.1-8b and llama-3.3-70b qualify by shape; qwen-3-4b qualifies by shape but uses FPGA attention in the nightly; gpt-oss-120b uses FPGA attention and does not match the shape; mixtral, qwen-2.5-32b, gemma, llama-3.2-3b do not match). A same-code AMX on/off A/B on 2026-09-20 measured +14.0% decode on the llama-3.1-8b 32-user row and the AMD machine did not move on that row. tp4 rows run 2 engines; tp2 rows run 4 engines. Intel's timed wait uses RTM (TSX), AMD's uses MWAITX.
+Rank the candidates. Be explicit when the data cannot separate candidates. You may read diffs in ${TRON} and PR bodies in ${W}/prs.json to sharpen the ranking.`, { label: `attribute:${s.id}`, phase: 'Attribute', schema: ATTR })))
+
+return { classified: flat, survivors: survivors.map(v => ({ number: v.number, title: v.title, author: v.author, category: v.category, models_affected: v.models_affected, machine_scope: v.machine_scope, decode_or_prefill: v.decode_or_prefill, expected_direction: v.expected_direction, evidence: v.evidence, votes: v.votes })), dropped: dropped.map(v => ({ number: v.number, title: v.title, votes: v.votes })), context: { machine: ctx[0], slack: ctx[1], harness: ctx[2], prior: ctx[3] }, attributions: attributions.filter(Boolean) }
