@@ -10,7 +10,7 @@
   - Transcript: claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/sessions/2026/10/16/rollout-2026-10-16T10-01-33-01a145a9-6c0a-7431-9165-1f983eb1dab9.jsonl
   - App link: codex://threads/01a145a9-6c0a-7431-9165-1f983eb1dab9
 
-Short version: The user approved the batch. The 30 handoffs, 412 artifact files, and 20 registry and lineage files are applied. Both missing originals are restored. Publication and remote content verification are the next steps.
+Short version: The approved batch is published. All 464 approved files matched origin/main at c92b04e18f07. Both missing originals are restored.
 
 ## Objective
 
@@ -30,6 +30,8 @@ The chat ran on claude-agentsrv in Linux and Bash. Its recorded working director
 
 - The user replied “yes” to the complete approval request. Rechecked all source hashes and restored both originals with their timestamps.
 
+- Published 30 commits ending at https://github.com/jhan-positron/notebook/commit/c92b04e18f075823d33f72049fdfb8d0619a0592. Fetched origin and compared the Git content identifiers for all 464 approved files. All matched. The four renamed source paths are absent from origin/main.
+
 ## Artifacts
 
 - `claude-agentsrv:/home/jhan/workspace/notebook/codex-handoff-generation-prompt.md`
@@ -39,16 +41,16 @@ The chat ran on claude-agentsrv in Linux and Bash. Its recorded working director
 
 ## Current state
 
-The user approved the batch. The 30 handoffs, 412 artifact files, and 20 registry and lineage files are applied. Both missing originals are restored. Publication and remote content verification are the next steps.
+The approved batch is published. All 464 approved files matched origin/main at c92b04e18f07. Both missing originals are restored. The batch contains 28 new handoffs, 2 updates, 412 artifact files, 20 registry and lineage files, and 2 run logs. Four report regeneration checks matched after copying the approved files.
 
 ## Open items / next steps
 
-Commit and push the approved paths. Then fetch origin and compare all 464 approved files with origin/main. Preserve the 31 pre-existing unstaged files. The remaining 63 missing-original alerts and 39 unreachable Windows originals remain open.
+The remaining 63 missing-original alerts need a later restoration or deliberate registry decision. The 39 Windows originals remain unreachable from this environment. The 28 earlier unapproved handoff drafts, two earlier run logs, and the pre-existing HTML edit remain unstaged.
 
 ## Gotchas & decisions
 
-The checkout already contained 28 untracked October 2 handoff drafts and a modified kv-head-vs-query-head.html. Preserve these existing edits. The current chat’s handoff records the approved publication checkpoint.
+The checkout already contained 28 untracked October 2 handoff drafts and a modified kv-head-vs-query-head.html. Preserve these existing edits. The current chat’s handoff records publication and the remote content comparison.
 
 ## Evidence coverage
 
-Read the substantive user requests and assistant final answers from the header transcript, with recorded commands/results for the changes and validation summarized above. This handoff records the approved publication checkpoint. It includes the user’s approval and the restoration results. Title evidence: `session_index.jsonl`. Historical test and review results have not been rerun by this handoff preparation.
+Read the substantive user requests and assistant final answers from the header transcript, with recorded commands/results for the changes and validation summarized above. This handoff records the user’s approval, the restoration results, the successful push, and the 464-file remote comparison. Title evidence: `session_index.jsonl`. Historical test and review results have not been rerun by this handoff preparation.
