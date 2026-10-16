@@ -1,0 +1,276 @@
+diff --git a/t/t_clearhbm.cpp b/t/t_clearhbm.cpp
+index c284abcbdea..21d7aea66e8 100644
+--- a/t/t_clearhbm.cpp
++++ b/t/t_clearhbm.cpp
+@@ -1,6 +1,7 @@
+ #include <atomic>
+ #include <cstdlib>
+ #include <cstring>
++#include <latch>
+ #include <thread>
+ #include <vector>
+ 
+@@ -15,6 +16,7 @@
+ #include "pos/dma/common.hpp"
+ #include "pos/lib.hpp"
+ #include "system/memory.hpp"
++#include "tron/hardware/tensor.hpp"
+ 
+ using namespace tron::hardware;
+ 
+@@ -27,20 +29,29 @@ class ClearHbmListener : public Catch::EventListenerBase {
+       log_level_str = "info";
+     }
+     spdlog::set_level(spdlog::level::from_str(log_level_str));
+-    if (pos_startup() < 0) throw std::runtime_error("pos_startup failed");
++    // get_devices() runs pos_startup() lazily AND spawns the per-device
++    // TX/RX worker threads, blocking until they're ready. Calling plain
++    // pos_startup() populates the device mask but skips the worker start,
++    // which leaves set_hardware_weights and any matmul launch spinning
++    // forever on the tx_worker_ready/rx_worker_ready flags.
++    if (get_devices().empty())
++      throw std::runtime_error("get_devices returned empty mask");
+   }
+ };
+ CATCH_REGISTER_LISTENER(ClearHbmListener)
+ 
+-static bool device_thread(PosDevice* dev, uint16_t poison_bits) {
++// Zeroize mode: the confirmed workaround for the post-power-cycle Attention
++// defect. Writes zeros into the KV HBM region via the WIM/RIM Bypass (8/8)
++// window. The bypass window addresses only data bytes, but the side effect
++// of any bypass DMA is that the fetcher auto-fills the ECC region's scale
++// bytes with bf16(1.0). Per STORY-397 that auto-fill is *why* this clears
++// the defect (or at least is correlated with clearing it).
++static bool zeroize_device(PosDevice* dev) {
+   constexpr size_t chunk = dmaMaxPayload;
+   size_t kv_region = dev->hbm_map[0].len;
+ 
+   auto* zbuf = static_cast<uint8_t*>(dma_allocate_aligned(chunk, 64));
+-  size_t zbuf_elems = chunk / sizeof(tron::bf16);
+-  auto* zbuf_bf16 = reinterpret_cast<tron::bf16*>(zbuf);
+-  for (size_t i = 0; i < zbuf_elems; i++)
+-    zbuf_bf16[i] = tron::bf16::from_bits(poison_bits);
++  std::memset(zbuf, 0, chunk);
+ 
+   size_t total_bytes = static_cast<size_t>(dev->num_fetchers) * kv_region;
+   size_t bytes_done = 0;
+@@ -48,7 +59,8 @@ static bool device_thread(PosDevice* dev, uint16_t poison_bits) {
+ 
+   for (size_t fi = 0; fi < dev->num_fetchers; fi++) {
+     for (size_t off = 0; off < kv_region; off += chunk) {
+-      auto xfer = xfer_blocks(dev, dev->load_weight_q, off, fi, zbuf, chunk, true);
++      auto xfer = xfer_blocks(dev, dev->load_weight_q, off, fi, zbuf, chunk,
++          /*kv_xfer=*/true);
+       wait_for_xfer_blocks(dev, xfer);
+ 
+       bytes_done += chunk;
+@@ -61,32 +73,196 @@ static bool device_thread(PosDevice* dev, uint16_t poison_bits) {
+   }
+ 
+   dma_deallocate(zbuf, chunk);
+-  spdlog::info("dev {} complete: cleared {} fetchers x {:#x} bytes", dev->idx,
++  spdlog::info("dev {} complete: zeroize cleared {} fetchers x {:#x} bytes", dev->idx,
+       dev->num_fetchers, kv_region);
+   return true;
+ }
+ 
++// Direct-mode poison: writes a strip-shaped pattern into the WIM/RIM (9/8)
++// window of every fetcher. Because the 9/8 path does NOT auto-fill ECC
++// (verified in STORY-397 via the calibrate-only control), the source
++// buffer's bytes land in both data and ECC regions of each 576-byte strip.
++// Every byte of the strip gets `poison_bits` (repeated as uint16) so
++// `scales` = bf16(poison_bits), `reserved` = poison bytes, and `groups`
++// = poison bytes interpreted as int4 nibble pairs.
++//
++// Per-fetcher length is `hbmw_map[fi].len` = 0x48000000 = 1.125 GiB =
++// 2097152 strips. `chunk` = 1820 × 576 B = 1048320 B fits in dmaMaxPayload;
++// 2097152 isn't a multiple of 1820, so the loop handles a tail whose size
++// is clamped to `wmem_region - off`. The tail size remains a multiple of
++// 576 because `wmem_region` is.
++static bool poison_device_direct(PosDevice* dev, uint16_t poison_bits) {
++  constexpr size_t STRIP_BYTES = 576;
++  constexpr size_t STRIPS_PER_CHUNK = 1820;
++  constexpr size_t chunk = STRIP_BYTES * STRIPS_PER_CHUNK;  // 1,048,320 B
++  static_assert(chunk <= dmaMaxPayload, "chunk must fit in one DMA payload");
++
++  size_t wmem_region = dev->hbmw_map[0].len;
++  TRON_ASSERT((wmem_region % STRIP_BYTES) == 0,
++      "hbmw_map[].len {:#x} not a multiple of strip size 576", wmem_region);
++
++  auto* zbuf = static_cast<uint8_t*>(dma_allocate_aligned(chunk, 64));
++  auto* zbuf_u16 = reinterpret_cast<uint16_t*>(zbuf);
++  for (size_t i = 0; i < chunk / sizeof(uint16_t); i++)
++    zbuf_u16[i] = poison_bits;
++
++  size_t total_bytes = static_cast<size_t>(dev->num_fetchers) * wmem_region;
++  size_t bytes_done = 0;
++  size_t last_pct = 0;
++
++  for (size_t fi = 0; fi < dev->num_fetchers; fi++) {
++    for (size_t off = 0; off < wmem_region; off += chunk) {
++      size_t this_chunk = std::min(chunk, wmem_region - off);
++      auto xfer = xfer_blocks(dev, dev->load_weight_q, off, fi, zbuf, this_chunk,
++          /*kv_xfer=*/false);
++      wait_for_xfer_blocks(dev, xfer);
++
++      bytes_done += this_chunk;
++      size_t pct = (bytes_done * 100) / total_bytes;
++      if (pct / 5 > last_pct / 5) {
++        spdlog::info(
++            "dev {}: {}% weight HBM poisoned (0x{:04x})", dev->idx, pct, poison_bits);
++        last_pct = pct;
++      }
++    }
++  }
++
++  dma_deallocate(zbuf, chunk);
++  spdlog::info(
++      "dev {} complete: direct-mode poison 0x{:04x} on {} fetchers x {:#x} bytes",
++      dev->idx, poison_bits, dev->num_fetchers, wmem_region);
++  return true;
++}
++
++// The fp4 dequantization table used by the FPGA's systolic. Low nibble of
++// each data byte indexes this table; the result is multiplied by the
++// group's bf16 scale to produce the output bf16 value. Duplicated here
++// from h/tron/hardware/quantization.hpp:99 to keep this test self-contained.
++static const float g_dequant[16] = {0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, -8.0, -7.0,
++    -6.0, -5.0, -4.0, -3.0, -2.0, -1.0};
++
++// Verify mode: identity-matmul readback that confirms the poison write
++// landed as intended within the observable `scale × int4` product. For a
++// uniform-byte poison pattern, every output cell should equal
++// `bf16(poison_bits) × dequant[low_nibble_of_low_byte(poison_bits)]`.
++// Diverging outputs indicate the direct-mode write did not survive.
++//
++// Coverage caveat (STORY-396): `reserved` bytes of each strip are not
++// consumed by the systolic, so we cannot verify them here. If the defect
++// pattern ends up mapping to `reserved`, a different observation mechanism
++// is needed — out of scope for this story.
++static bool verify_device(PosDevice* dev, uint16_t poison_bits) {
++  constexpr size_t N = 4096;
++  constexpr size_t K = 4096;
++  constexpr size_t B = 1;
++
++  // Must match the per-fetcher-size math in `quantize_and_load_hardware_weights`:
++  //   n_supertiles = N / SYSTOLIC_COLUMNS = 32
++  //   n_strips     = (K + 1023) / 1024     = 4
++  //   len          = sizeof(strip) * 32 * 4_cols * 4 = 294912 B
++  size_t weight_len = sizeof(strip) * 32 * 4 * 4;
++  hbm_address_t base = alloc_hardware_weights(dev, weight_len);
++
++  auto* r_region =
++      static_cast<tron::bf16*>(dma_allocate_aligned(N * B * sizeof(tron::bf16), 64));
++  auto* a_region =
++      static_cast<tron::bf16*>(dma_allocate_aligned(K * B * sizeof(tron::bf16), 64));
++  std::memset(r_region, 0, N * B * sizeof(tron::bf16));
++  std::memset(a_region, 0, K * B * sizeof(tron::bf16));
++
++  // Identity activations: eye<K, B=1>() has a 1 at row 0, col 0 and
++  // zeros everywhere else. With B=1 the matmul output is the first column
++  // of the weight matrix — one value per output row.
++  a_region[0] = tron::bf16(1.0f);
++
++  tron::bf16* results[B] = {r_region};
++  tron::bf16 const* activations[B] = {a_region};
++
++  std::latch done(1);
++  hardware_job launcher;
++  fill_hardware_matmul_job_template(
++      N, K, B, results, activations, launcher, {}, "verify_ecc");
++  prepare_hardware_matmul_job(launcher, dev, base);
++  launcher([&] { done.count_down(); });
++  done.wait();
++
++  // Compute the expected output. The strip was filled with `poison_bits`
++  // repeated as uint16, so in memory the first byte is (poison_bits & 0xff)
++  // (little-endian), whose low nibble picks an entry in the dequant table.
++  // Scales read back as bf16(poison_bits).
++  uint8_t low_nibble = static_cast<uint8_t>(poison_bits & 0xf);
++  tron::bf16 scale = tron::bf16::from_bits(poison_bits);
++  tron::bf16 expected = tron::bf16(float(scale) * g_dequant[low_nibble]);
++
++  spdlog::info("dev {} verify: poison_bits=0x{:04x} scale=bf16(0x{:04x})={} "
++               "int4=dequant[0x{:x}]={} "
++               "expected output=0x{:04x} ({})",
++      dev->idx, poison_bits, poison_bits, float(scale), low_nibble,
++      g_dequant[low_nibble], expected.to_bits(), float(expected));
++
++  size_t mismatches = 0;
++  for (size_t i = 0; i < N; i++) {
++    if (r_region[i].to_bits() != expected.to_bits()) {
++      if (mismatches < 5) {
++        spdlog::error("dev {} verify mismatch at row {}: got 0x{:04x} ({}), expected "
++                      "0x{:04x} ({})",
++            dev->idx, i, r_region[i].to_bits(), float(r_region[i]), expected.to_bits(),
++            float(expected));
++      }
++      mismatches++;
++    }
++  }
++
++  dma_deallocate(r_region, N * B * sizeof(tron::bf16));
++  dma_deallocate(a_region, K * B * sizeof(tron::bf16));
++
++  if (mismatches == 0) {
++    spdlog::info("dev {} verify PASS: all {} outputs match expected 0x{:04x}", dev->idx,
++        N, expected.to_bits());
++    return true;
++  }
++  spdlog::error(
++      "dev {} verify FAIL: {} of {} outputs mismatch", dev->idx, mismatches, N);
++  return false;
++}
++
+ TEST_CASE("clearhbm") {
+   uint16_t poison_bits = 0;
+-  const char* poison_env = std::getenv("TRON_POISON_BITS");
+-  if (poison_env)
+-    poison_bits = static_cast<uint16_t>(std::stoul(poison_env, nullptr, 0));
++  if (const char* p = std::getenv("TRON_POISON_BITS"))
++    poison_bits = static_cast<uint16_t>(std::stoul(p, nullptr, 0));
++  const bool verify_mode = std::getenv("TRON_VERIFY_ECC") != nullptr;
+ 
+-  spdlog::info("poison_bits={:#06x}", poison_bits);
++  spdlog::info("TRON_POISON_BITS=0x{:04x} TRON_VERIFY_ECC={}", poison_bits,
++      verify_mode ? "1" : "0");
+ 
+   auto const& devlist = *pos_list_devices();
+   REQUIRE(!devlist.empty());
+ 
++  // Phase 1: zeroize (poison_bits == 0) or direct-mode poison (nonzero).
++  // Parallel per device; each takes O(several seconds) so parallelism helps.
+   std::vector<std::atomic<bool>> results(devlist.size());
+-  std::vector<std::thread> threads;
+-  for (size_t i = 0; i < devlist.size(); i++) {
+-    threads.emplace_back(
+-        [&, i]() { results[i].store(device_thread(devlist[i], poison_bits)); });
++  {
++    std::vector<std::thread> threads;
++    for (size_t i = 0; i < devlist.size(); i++) {
++      threads.emplace_back([&, i]() {
++        results[i].store(poison_bits == 0
++                             ? zeroize_device(devlist[i])
++                             : poison_device_direct(devlist[i], poison_bits));
++      });
++    }
++    for (auto& t : threads)
++      t.join();
+   }
+-
+-  for (auto& t : threads)
+-    t.join();
+-
+   for (size_t i = 0; i < devlist.size(); i++)
+     REQUIRE(results[i].load());
++
++  // Phase 2: verify (optional). Only meaningful after direct-mode poison —
++  // zeroize leaves scales at bf16(1.0) due to bypass auto-fill and groups
++  // at 0, so verify's expected value (from poison_bits=0) is 0 which
++  // matches trivially.
++  if (verify_mode) {
++    for (size_t i = 0; i < devlist.size(); i++) {
++      REQUIRE(verify_device(devlist[i], poison_bits));
++    }
++  }
+ }

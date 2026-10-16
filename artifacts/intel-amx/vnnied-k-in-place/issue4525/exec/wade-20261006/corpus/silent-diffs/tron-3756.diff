@@ -1,0 +1,1735 @@
+diff --git a/h/libpos.hpp b/h/libpos.hpp
+index 3a80290ecd3..03349c96aab 100644
+--- a/h/libpos.hpp
++++ b/h/libpos.hpp
+@@ -114,7 +114,7 @@ TRON(nodiscard)
+ extern device_mask get_devices_v2() noexcept;
+ 
+ // Get a specific device by index
+-PosDevice* get_device(uint32_t dev_idx) noexcept;
++PosDevice* get_device(process_device_id dev_idx) noexcept;
+ 
+ // Device capability inspection
+ // ----------------------------
+@@ -543,10 +543,11 @@ extern dma_xfer_state xfer_n_blocks(PosDevice* dev,
+ 
+ void dump_debug_card_regs(std::string label) noexcept;
+ void debug_exit(std::string label) noexcept;
+-void debug_exit(std::string label, int idx) noexcept;
++void debug_exit(std::string label, process_device_id idx) noexcept;
+ 
+-extern uint64_t read_scratch_reg(int idx, int regnum) noexcept;
+-extern void write_scratch_reg(int idx, int regnum, uint64_t value) noexcept;
++extern uint64_t read_scratch_reg(process_device_id idx, int regnum) noexcept;
++extern void write_scratch_reg(
++    process_device_id idx, int regnum, uint64_t value) noexcept;
+ 
+ /***************************************************************************************
+  * Debug code to validate a range of BF16 values as being finite numebrs and report
+diff --git a/h/pos/device.hpp b/h/pos/device.hpp
+index 7fde563e051..46140b5ccec 100644
+--- a/h/pos/device.hpp
++++ b/h/pos/device.hpp
+@@ -17,6 +17,7 @@
+ 
+ #include <spdlog/spdlog.h>
+ 
++#include "common/indexed.hpp"
+ #include "libpos.hpp"
+ #include "pos/alloc.hpp"
+ #include "pos/config.hpp"
+@@ -268,7 +269,7 @@ struct hbm_region_t {
+ struct v2;
+ 
+ struct PosDevice {
+-  int idx;
++  tron::hardware::process_device_id idx;
+   std::atomic<uint64_t> enqueued_work;  // TODO(axch) what are the units of this number?
+   std::atomic<uint64_t> dequeued_work;  // TODO(axch) what are the units of this number?
+   uint8_t pci_bus;                      // PCI bus Addres
+@@ -459,7 +460,7 @@ struct PosDevice {
+   constexpr static size_t hbm_alignment = 512;
+ 
+   uint64_t timers[128][2];
+-  PosDevice(int index,
++  PosDevice(tron::hardware::process_device_id index,
+       uint8_t _bus,
+       uint8_t _dev,
+       uint8_t _func,
+@@ -667,7 +668,7 @@ struct PosDevice {
+   std::atomic<uint64_t> sw_fallback_total{0};
+ };
+ 
+-void scan(std::vector<PosDevice*>&);
++void scan(tron::indexed_vector<tron::hardware::process_device_id, PosDevice*>&);
+ extern pthread_barrier_t workers_ready;
+ 
+ int blind_reset(PosDevice* dev);
+diff --git a/h/pos/dma_tracker.hpp b/h/pos/dma_tracker.hpp
+index 9e3befb25bf..fceaa6ea0a9 100644
+--- a/h/pos/dma_tracker.hpp
++++ b/h/pos/dma_tracker.hpp
+@@ -8,7 +8,6 @@
+  */
+ #pragma once
+ 
+-#include <array>
+ #include <functional>
+ #include <memory>
+ #include <mutex>
+@@ -16,6 +15,8 @@
+ #include <string>
+ #include <vector>
+ 
++#include "common/indexed.hpp"
++#include "libpos.hpp"
+ #include "tron/shard.hpp"
+ 
+ namespace tron::hardware {
+@@ -65,7 +66,7 @@ using pending_xfer_queue = std::
+ 
+ struct dma_tracker {
+   std::mutex mu;
+-  std::array<pending_xfer_queue, MAX_DEVICES> queues;
++  indexed_array<process_device_id, pending_xfer_queue, MAX_DEVICES> queues;
+   // Per-layer last-V-xfer tracking for await_layer.  Sized by ctor.
+   std::vector<dma_xfer_state> last_v_xfer;
+   std::vector<PosDevice*> last_v_dev;
+@@ -84,7 +85,7 @@ struct dma_tracker {
+   // noexcept: callers commit() the inflight_guard before push (descriptors are already
+   // live), so push must not unwind -- a post-submit allocation failure terminates
+   // rather than freeing staging under an active DMA. See Note [GOF staging eviction].
+-  void push(uint32_t dev_idx, pending_xfer xfer) noexcept;
++  void push(process_device_id dev_idx, pending_xfer xfer) noexcept;
+   void poll_completions();
+   void await_layer(size_t layer);
+   void clear();
+diff --git a/h/pos/hwattention.hpp b/h/pos/hwattention.hpp
+index 2884a93e9d4..02dea8bf099 100644
+--- a/h/pos/hwattention.hpp
++++ b/h/pos/hwattention.hpp
+@@ -19,6 +19,7 @@
+ #include <spdlog/spdlog.h>
+ 
+ #include "common/assert.hpp"
++#include "common/indexed.hpp"
+ #include "common/perfetto.hpp"
+ #include "libpos.hpp"
+ #include "pos/config.hpp"
+@@ -29,7 +30,7 @@
+ 
+ constexpr size_t PAGES_PER_WMEM = 32;
+ using tron::hardware::POS_PER_PAGE;
+-extern std::vector<PosDevice*> devices;
++extern tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> devices;
+ 
+ // #define WRITEBACK_HEXDUMPS
+ namespace tron::hardware {
+@@ -122,7 +123,7 @@ inline void shuffle_k_entry(bf16** k_heads,
+ inline void shuffle_v_entry(bf16** v_locations_in,
+     v_hwcacheblock* v_hwblock,
+     uint32_t position,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     uint32_t n_kv_heads,
+     size_t kv_head_size);
+ 
+@@ -239,7 +240,7 @@ struct hwcacheblock {
+    * @return dma_xfer_state struct for completion waiting.
+    */
+   virtual dma_xfer_state xfer(uint32_t position,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint64_t hbm_addr,
+       size_t layer,
+       const hw_attn_params* params,
+@@ -260,7 +261,7 @@ struct hwcacheblock {
+    * false).
+    */
+   virtual void xfer_blocking(uint32_t position,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint64_t hbm_addr,
+       size_t layer,
+       const hw_attn_params* params,
+@@ -275,7 +276,7 @@ struct hwcacheblock {
+    * parallel arrays to xfer_n_blocks for a single-lock batch transfer.
+    */
+   virtual size_t prep_xfer(uint32_t position,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint64_t hbm_addr,
+       size_t layer,
+       const hw_attn_params* params,
+@@ -412,7 +413,7 @@ struct k_hwcacheblock : public hwcacheblock {
+    * @return dma_xfer_state struct for completion waiting.
+    */
+   dma_xfer_state xfer(uint32_t position,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint64_t hbm_addr,
+       size_t layer,
+       const hw_attn_params* params,
+@@ -431,14 +432,14 @@ struct k_hwcacheblock : public hwcacheblock {
+    * @param readback        Enable readback verification on final transfer.
+    */
+   void xfer_blocking(uint32_t position,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint64_t hbm_addr,
+       size_t layer,
+       const hw_attn_params* params,
+       bool readback) noexcept override;
+ 
+   size_t prep_xfer(uint32_t position,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint64_t hbm_addr,
+       [[maybe_unused]] size_t layer,
+       const hw_attn_params* params,
+@@ -446,7 +447,7 @@ struct k_hwcacheblock : public hwcacheblock {
+       xfer_block_spec* out,
+       size_t idx) noexcept override {
+     TRACE_EVENT("hwattention-detail", "k_prep_xfer", "position", position, "fpga_index",
+-        fpga_index);
++        fpga_index.i);
+     PosDevice* dev = devices[fpga_index];
+     uint32_t fetcher = (position >> 2) % dev->num_fetchers;
+     uint32_t fpos = position & 0x3;
+@@ -609,7 +610,7 @@ struct v_hwcacheblock : public hwcacheblock {
+    */
+   v_hwcacheblock(size_t kv_head_size,
+       uint32_t n_kv_heads,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       const std::vector<bf16**>& positions_data)
+   : v_hwcacheblock() {
+     size_t num_positions = std::min(positions_data.size(), size_t(4));
+@@ -633,7 +634,7 @@ struct v_hwcacheblock : public hwcacheblock {
+    */
+   void set_position(uint32_t position,
+       bf16** v_heads,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint32_t n_kv_heads,
+       size_t kv_head_size) {
+     TRON_ASSERT(position < 4, "Position must be 0-3, got {}", position);
+@@ -653,7 +654,7 @@ struct v_hwcacheblock : public hwcacheblock {
+    * @return dma_xfer_state struct for completion waiting.
+    */
+   dma_xfer_state xfer(uint32_t position,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint64_t hbm_addr,
+       size_t layer,
+       const hw_attn_params* params,
+@@ -671,14 +672,14 @@ struct v_hwcacheblock : public hwcacheblock {
+    * @param readback        Enable readback verification on final transfer.
+    */
+   void xfer_blocking(uint32_t position,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint64_t hbm_addr,
+       size_t layer,
+       const hw_attn_params* params,
+       bool readback) noexcept override;
+ 
+   size_t prep_xfer(uint32_t position,
+-      uint32_t fpga_index,
++      process_device_id fpga_index,
+       uint64_t hbm_addr,
+       [[maybe_unused]] size_t layer,
+       const hw_attn_params* params,
+@@ -686,7 +687,7 @@ struct v_hwcacheblock : public hwcacheblock {
+       xfer_block_spec* out,
+       size_t idx) noexcept override {
+     TRACE_EVENT("hwattention-detail", "v_prep_xfer", "position", position, "fpga_index",
+-        fpga_index);
++        fpga_index.i);
+     // Same steer as the K path: shapes past the bitfile's slot never stage a V block.
+     // Checked before touching the device so the precondition is host-testable.
+     TRON_ASSERT(params->n_kv_heads >= 1 && params->n_kv_heads <= HW_MAX_KV_HEADS,
+@@ -861,13 +862,13 @@ inline void shuffle_v_entry_padded(bf16** v_locations_in,
+ inline void shuffle_v_entry(bf16** v_locations_in,
+     v_hwcacheblock* v_hwblock,
+     uint32_t position,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     uint32_t n_kv_heads,
+     size_t kv_head_size) {
+   TRON_ASSERT((position < 4), "shuffle_v_entry got a position smaller than those held "
+                               "in a hwblock cache entry");
+   TRACE_EVENT("hwattention-detail", "shuffle_v_entry", "position", position,
+-      "fpga_index", fpga_index);
++      "fpga_index", fpga_index.i);
+   PosDevice* dev = devices[fpga_index];
+   // Fast path: kv_head_size == HW_BAKED_HEAD_SIZE == 128 with num_fetchers == 32
+   // uses the packed-uint64 path. Otherwise fall back to the parameterized
+@@ -960,7 +961,7 @@ inline void unshuffle_k_entry(k_hwcacheblock* k_hwblock,
+  */
+ inline void unshuffle_v_entry(v_hwcacheblock* v_hwblock,
+     uint32_t position,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     bf16** v_locations_out,
+     uint32_t n_kv_heads,
+     uint32_t head_size) {
+@@ -994,10 +995,14 @@ inline void unshuffle_v_entry(v_hwcacheblock* v_hwblock,
+ // TODO: restore HBM bounds validation once shard-aware bounds tracking
+ // is wired in. The pre-shard implementation actively checked here; the
+ // no-op body lets the call sites remain in place during the transition.
+-inline void check_k_range(
+-    size_t /*layer*/, uint32_t /*didx*/, size_t /*hbm_addr*/, size_t /*dlen*/) {}
+-inline void check_v_range(
+-    size_t /*layer*/, uint32_t /*didx*/, size_t /*hbm_addr*/, size_t /*dlen*/) {}
++inline void check_k_range(size_t /*layer*/,
++    process_device_id /*didx*/,
++    size_t /*hbm_addr*/,
++    size_t /*dlen*/) {}
++inline void check_v_range(size_t /*layer*/,
++    process_device_id /*didx*/,
++    size_t /*hbm_addr*/,
++    size_t /*dlen*/) {}
+ 
+ /**
+  * @brief Transfer one pre-packed K token entry with a single contiguous DMA.
+@@ -1032,7 +1037,7 @@ inline dma_xfer_state xfer_k_packed_entry(PosDevice* dev,
+     bf16* input_ptr,
+     uint32_t position,
+     uint32_t n_kvheads,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     uint64_t hbm_addr,
+     size_t head_size,
+     size_t layer,
+@@ -1086,7 +1091,7 @@ inline dma_xfer_state xfer_k_entry(bf16** k_locations_in,
+     k_hwcacheblock* k_hwblock,
+     uint32_t position,
+     uint32_t n_kvheads,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     uint64_t hbm_addr,
+     size_t head_size,
+     size_t layer) noexcept {
+@@ -1098,7 +1103,7 @@ inline dma_xfer_state xfer_k_entry(bf16** k_locations_in,
+   uint32_t fetcher = (position >> 2) % dev->num_fetchers;
+   size_t total_xfer_len = size_t(n_kvheads) * head_size * POS_DATA_SIZE;
+   TRACE_EVENT("hwattention", "xfer_k_entry", "position", position, "fpga_index",
+-      fpga_index, "fetcher", fetcher, "bytes", total_xfer_len);
++      fpga_index.i, "fetcher", fetcher, "bytes", total_xfer_len);
+ 
+   // Call common utility that will transfer all kv_heads for this token
+   // in a single contiguous DMA transfer
+@@ -1136,7 +1141,7 @@ inline dma_xfer_state xfer_v_entry(bf16** v_locations_in,
+     v_hwcacheblock* v_hwblock,
+     uint32_t position,
+     uint32_t n_kvheads,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     uint64_t hbm_addr,
+     size_t head_size,
+     size_t layer) noexcept {
+diff --git a/h/pos/hwattention_dump.hpp b/h/pos/hwattention_dump.hpp
+index be3bd3c6a8c..8c4a5fa0cdd 100644
+--- a/h/pos/hwattention_dump.hpp
++++ b/h/pos/hwattention_dump.hpp
+@@ -65,7 +65,7 @@ inline void dump_k_cache_from_hbm(const shard& sh,
+     const std::string& output_file,
+     const gof* expected_gof = nullptr) {
+   PosDevice* dev = sh.dev;
+-  size_t device_idx = dev->idx;
++  process_device_id device_idx = dev->idx;
+   uint64_t hbm_base_addr = sh.kv_shard_layers[layer].hbm_k_base;
+ 
+   std::ofstream out(output_file, std::ios::out | std::ios::trunc);
+@@ -197,7 +197,7 @@ inline void dump_v_cache_from_hbm(const shard& sh,
+     const std::string& output_file,
+     const gof* expected_gof = nullptr) {
+   PosDevice* dev = sh.dev;
+-  size_t device_idx = dev->idx;
++  process_device_id device_idx = dev->idx;
+   uint64_t hbm_base_addr = sh.kv_shard_layers[layer].hbm_v_base;
+ 
+   std::ofstream out(output_file, std::ios::out | std::ios::trunc);
+@@ -321,7 +321,7 @@ inline void dump_v_cache_from_hbm(const shard& sh,
+ inline void dump_q_data(const bf16* q_data,
+     uint32_t token_idx,
+     size_t layer,
+-    size_t device_idx,
++    process_device_id device_idx,
+     size_t head_size,
+     size_t n_heads,
+     const std::string& output_file) {
+@@ -371,7 +371,7 @@ inline void dump_attention_result(const bf16* result_data,
+     const float* smax_values,
+     uint32_t token_idx,
+     size_t layer,
+-    size_t device_idx,
++    process_device_id device_idx,
+     size_t head_size,
+     size_t n_heads,
+     const std::string& result_type,
+@@ -517,7 +517,7 @@ inline void dump_k_cache_from_sw(const bf16* k_data,
+     uint32_t start_token,
+     uint32_t end_token,
+     size_t layer,
+-    size_t device_idx,
++    process_device_id device_idx,
+     size_t head_size,
+     size_t n_kv_heads,
+     const std::string& output_file) {
+@@ -582,7 +582,7 @@ inline void dump_v_cache_from_sw(const bf16* v_data,
+     uint32_t start_token,
+     uint32_t end_token,
+     size_t layer,
+-    size_t device_idx,
++    process_device_id device_idx,
+     size_t head_size,
+     size_t n_kv_heads,
+     const std::string& output_file) {
+@@ -655,7 +655,7 @@ inline void dump_kv_cache_from_hbm(const shard& sh,
+     size_t n_kv_heads,
+     const std::string& base_filename,
+     const gof* expected_gof = nullptr) {
+-  size_t device_idx = sh.dev->idx;
++  process_device_id device_idx = sh.dev->idx;
+   std::string k_file = base_filename + "_k.json";
+   std::string v_file = base_filename + "_v.json";
+ 
+@@ -681,7 +681,7 @@ inline void dump_qkv_data(const shard& sh,
+     size_t n_kv_heads,
+     const std::string& base_filename,
+     const gof* expected_gof = nullptr) {
+-  size_t device_idx = sh.dev->idx;
++  process_device_id device_idx = sh.dev->idx;
+   std::string k_file = base_filename + "_k.json";
+   std::string v_file = base_filename + "_v.json";
+   std::string q_file = base_filename + "_q.json";
+@@ -718,7 +718,7 @@ inline void dump_qkv_and_results(const shard& sh,
+     const bf16* sw_k_data = nullptr,
+     const bf16* sw_v_data = nullptr,
+     const gof* expected_gof = nullptr) {
+-  size_t device_idx = sh.dev->idx;
++  process_device_id device_idx = sh.dev->idx;
+   std::string k_file = base_filename + "_k.json";
+   std::string v_file = base_filename + "_v.json";
+   std::string q_file = base_filename + "_q.json";
+diff --git a/h/pos/lib.hpp b/h/pos/lib.hpp
+index 1f051fca0d8..566e73aaac1 100644
+--- a/h/pos/lib.hpp
++++ b/h/pos/lib.hpp
+@@ -6,11 +6,11 @@
+ #include "pos/worker.hpp"
+ // IWYU pragma: end_exports
+ 
+-#include <vector>
+-
++#include "common/indexed.hpp"
+ #include "libpos.hpp"  // IWYU pragma: keep
+ 
+-extern std::vector<PosDevice*> const* pos_list_devices() noexcept;
++extern tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> const*
++pos_list_devices() noexcept;
+ // extern void *pos_malloc(size_t) noexcept;
+ // extern void pos_free(void *) noexcept;
+ extern void* pos_allocate(size_t) noexcept;
+@@ -23,7 +23,10 @@ extern void pos_deallocate(void*, size_t) noexcept;
+ extern int pos_startup_host(void) noexcept;
+ extern int pos_startup(void) noexcept;
+ extern void pos_shutdown(void) noexcept;
+-extern std::thread* get_workers() noexcept;
++extern tron::indexed_array<tron::hardware::process_device_id,
++    std::thread,
++    tron::hardware::MAX_DEVICES>*
++get_workers() noexcept;
+ extern void join_workers() noexcept;
+ extern size_t get_num_devices() noexcept;
+ extern std::string debug_hexdump(std::string preface,
+@@ -53,6 +56,6 @@ extern std::string debug_fp32dump(std::string preface,
+ //       client code using the 'debug_XXXXdump()' functions.
+ namespace tron::hardware {
+ extern void debug_exit(std::string label) noexcept;
+-extern void debug_exit(std::string label, int idx) noexcept;
++extern void debug_exit(std::string label, process_device_id idx) noexcept;
+ extern void dump_debug_card_regs(std::string label) noexcept;
+ }  // namespace tron::hardware
+diff --git a/h/pos/metrics.hpp b/h/pos/metrics.hpp
+index 538723a5096..7c6bf17cdc7 100644
+--- a/h/pos/metrics.hpp
++++ b/h/pos/metrics.hpp
+@@ -6,6 +6,7 @@
+ #include <spdlog/fmt/fmt.h>  // IWYU pragma: keep
+ #include <spdlog/spdlog.h>   // IWYU pragma: keep
+ 
++#include "libpos.hpp"
+ #include "system/metrics.hpp"
+ #include "system/system.hpp"
+ 
+@@ -130,7 +131,7 @@ struct metrics {
+ 
+   // Print all metrics when called if the specified number of seconds has passed since
+   // we last printed metrics.
+-  void timelog(int64_t sec_to_wait, int idx);
++  void timelog(int64_t sec_to_wait, process_device_id idx);
+ };
+ 
+ // The FPGA Tracer code is effectively metrics related so we're keeping it here as well
+diff --git a/h/pos/vfio.hpp b/h/pos/vfio.hpp
+index a0f5f9375d6..bf136318d2a 100644
+--- a/h/pos/vfio.hpp
++++ b/h/pos/vfio.hpp
+@@ -1,7 +1,6 @@
+ #pragma once
+ 
+ #include <cstdint>
+-#include <vector>
+ 
+ #include "pos/device.hpp"
+ 
+@@ -18,7 +17,8 @@ struct vfio_group_t {
+ 
+ extern int vfio_start(void) noexcept;
+ extern void vfio_stop(void) noexcept;
+-extern int vfio_init_groups(std::vector<PosDevice*> const& devices,
++extern int vfio_init_groups(
++    tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> const& devices,
+     uint64_t const heap_start,
+     uint64_t const heap_size) noexcept;
+ extern int vfio_device_init(PosDevice*) noexcept;
+diff --git a/h/tron/hardware/driver.hpp b/h/tron/hardware/driver.hpp
+index fb7ec9a7e42..6f399ab1b93 100644
+--- a/h/tron/hardware/driver.hpp
++++ b/h/tron/hardware/driver.hpp
+@@ -74,8 +74,7 @@ void prepare_hardware_matmul_job(
+     hardware_job& launcher, const device_map& map, process_device_id device) noexcept {
+   TRON_ASSERT(map.mask.contains(device),
+       "Selected device {} does not hold this matmul's weights", device);
+-  prepare_hardware_matmul_job(
+-      launcher, get_device(static_cast<uint32_t>(device.i)), map.addresses[device]);
++  prepare_hardware_matmul_job(launcher, get_device(device), map.addresses[device]);
+ }
+ 
+ TRON(inline)
+@@ -103,7 +102,7 @@ void prepare_hardware_attn_job(
+   idx_offset = (idx_offset + 11) % get_num_devices();
+   process_device_id dev_idx = mask.cyclic_at(idx_offset);
+ 
+-  prepare_hardware_attn_job(launcher, get_device(static_cast<uint32_t>(dev_idx.i)));
++  prepare_hardware_attn_job(launcher, get_device(dev_idx));
+ }
+ 
+ }  // namespace tron::hardware
+diff --git a/h/tron/hardware/tensor.hpp b/h/tron/hardware/tensor.hpp
+index 3d43622706c..a627a97dc1c 100644
+--- a/h/tron/hardware/tensor.hpp
++++ b/h/tron/hardware/tensor.hpp
+@@ -41,7 +41,7 @@ device_map alloc_hardware_weights(size_t len) noexcept {
+   // spdlog::debug("{}> len = {}, mask = {}", __FUNCTION__, len, mask);
+   device_map map;
+   for (process_device_id d : mask) {
+-    auto addr = alloc_hardware_weights(get_device(static_cast<uint32_t>(d.i)), len);
++    auto addr = alloc_hardware_weights(get_device(d), len);
+     // spdlog::debug("map[{}] := 0x{:016x}", d, addr);
+     map.insert(d, addr);
+   }
+@@ -59,8 +59,8 @@ void set_hardware_weights(device_map map,
+   app_pool().parallel_for(size_t(0), map.mask.count(), [&](size_t i) {
+     process_device_id dev_idx = map.mask[i];
+     TRACE_EVENT("loading", "Load weights on card", "dev_idx", dev_idx.i);
+-    set_hardware_weights(get_device(static_cast<uint32_t>(dev_idx.i)),
+-        map.addresses[dev_idx], fetcher, data, len);
++    set_hardware_weights(
++        get_device(dev_idx), map.addresses[dev_idx], fetcher, data, len);
+   });
+ };
+ 
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index da13b696b82..72d5fc6e617 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -3109,9 +3109,9 @@ struct model : noncopyable<model<plugin_type>> {
+         // instead of unwinding while DMA may still read staging. After a successful
+         // push, poll_completions() decrements dma_inflight on completion.
+         guard.commit();
+-        dma_tracker->push(static_cast<uint32_t>(sh->dev->idx),
+-            pending_xfer{last_v, sh, static_cast<uint32_t>(gof_in_shard),
+-                static_cast<uint32_t>(layer), g});
++        dma_tracker->push(
++            sh->dev->idx, pending_xfer{last_v, sh, static_cast<uint32_t>(gof_in_shard),
++                              static_cast<uint32_t>(layer), g});
+       }
+     }
+ 
+diff --git a/h/tron/scheduler/full.hpp b/h/tron/scheduler/full.hpp
+index 4d647aa4a20..ad9895105dc 100644
+--- a/h/tron/scheduler/full.hpp
++++ b/h/tron/scheduler/full.hpp
+@@ -2298,7 +2298,8 @@ struct full_scheduler : scheduler {
+               // position so placement stays spread, advancing only on success.
+               auto capable_device = [&]() -> ::PosDevice* {
+                 for (size_t i = 0; i < devs->size(); ++i) {
+-                  ::PosDevice* cand = (*devs)[(next_shard_dev_ix + i) % devs->size()];
++                  ::PosDevice* cand = (*devs)[tron::hardware::process_device_id{
++                      (next_shard_dev_ix + i) % devs->size()}];
+                   if (tron::hardware::kv_weights_free_bytes(cand) >= shard_bytes &&
+                       tron::hardware::kv_weights_free_max_bytes(cand) >= region_bytes) {
+                     next_shard_dev_ix += i + 1;
+@@ -2332,7 +2333,8 @@ struct full_scheduler : scheduler {
+                   }
+                   // No shard here yet, so one must exist even if it degrades.
+                   // Round-robin keeps degraded ranges spread across cards.
+-                  dev = (*devs)[next_shard_dev_ix++ % devs->size()];
++                  dev = (*devs)[tron::hardware::process_device_id{
++                      next_shard_dev_ix++ % devs->size()}];
+                 }
+                 // spdlog::debug("{}:{} allocating {} shard base {} "
+                 //               "on dev{}/{} ({})",
+diff --git a/src/list_devices.cpp b/src/list_devices.cpp
+index faa7ec0bda8..a36374aee90 100644
+--- a/src/list_devices.cpp
++++ b/src/list_devices.cpp
+@@ -1,6 +1,5 @@
+ #include <iostream>
+ #include <string>
+-#include <vector>
+ 
+ #include <spdlog/fmt/fmt.h>  // IWYU pragma: keep
+ #include <spdlog/spdlog.h>
+@@ -8,7 +7,7 @@
+ #include "pos/device.hpp"
+ 
+ int main(int, char**) {
+-  std::vector<PosDevice*> devices;
++  tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> devices;
+   scan(devices);
+ 
+   std::cout << "Found " << devices.size() << " card";
+diff --git a/src/pos/alloc.cpp b/src/pos/alloc.cpp
+index d5ab83a45a9..36a0435f80e 100644
+--- a/src/pos/alloc.cpp
++++ b/src/pos/alloc.cpp
+@@ -312,7 +312,8 @@ void pos_devices_register_fuse_stats() noexcept {
+   using value_t = tron::fuse::fuse_sysfs::value_type;
+   if (!stats::is_initialized()) return;
+ 
+-  std::vector<PosDevice*> const* devices = pos_list_devices();
++  tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> const* devices =
++      pos_list_devices();
+   if (devices == nullptr || devices->empty()) return;
+ 
+   static constexpr std::string_view kDescCapacity =
+diff --git a/src/pos/device.cpp b/src/pos/device.cpp
+index abf58edcaab..55df243702e 100644
+--- a/src/pos/device.cpp
++++ b/src/pos/device.cpp
+@@ -19,6 +19,7 @@ extern "C" {
+ #include <spdlog/spdlog.h>  // IWYU pragma: keep
+ 
+ #include "common/assert.hpp"
++#include "libpos.hpp"
+ #include "pos/addr.hpp"  // IWYU pragma: keep
+ #include "pos/config.hpp"
+ #include "pos/device.hpp"
+@@ -59,7 +60,8 @@ using namespace tron::hardware::system;
+ #define dbg_inflight_init_log(...)
+ #endif
+ 
+-void scan(std::vector<PosDevice*>& devices) {
++void scan(
++    tron::indexed_vector<tron::hardware::process_device_id, PosDevice*>& devices) {
+   struct pci_access* pa = pci_alloc();
+   int index = 0;
+ 
+@@ -79,8 +81,8 @@ void scan(std::vector<PosDevice*>& devices) {
+         if (char* iommu_group = pci_get_string_property(dev, PCI_FILL_IOMMU_GROUP)) {
+           dbg_vfio_log("Found Positron Device at {:02X}:{:02X}.{:X}", dev->bus,
+               dev->dev, dev->func);
+-          devices.emplace_back(new PosDevice(index++, dev->bus, dev->dev, dev->func,
+-              std::stoi(iommu_group), dev->device_id));
++          devices.push_back(new PosDevice(tron::hardware::process_device_id(index++),
++              dev->bus, dev->dev, dev->func, std::stoi(iommu_group), dev->device_id));
+         } else {
+           dbg_vfio_warn("Skipping device at {:02X}:{:02X}.{:X}, no IOMMU group",
+               dev->bus, dev->dev, dev->func);
+@@ -641,7 +643,8 @@ void pos_driver_register_fuse_stats() noexcept {
+     return;
+   }
+ 
+-  std::vector<PosDevice*> const* devices = pos_list_devices();
++  tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> const* devices =
++      pos_list_devices();
+   if (devices == nullptr || devices->empty()) {
+     spdlog::debug("No PosDevices found; skipping registration of metrics");
+     return;
+@@ -780,7 +783,8 @@ void pos_hbm_thermal_regs_fuse_stats() noexcept {
+     return;
+   }
+ 
+-  std::vector<PosDevice*> const* devices = pos_list_devices();
++  tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> const* devices =
++      pos_list_devices();
+   if (devices == nullptr || devices->empty()) {
+     spdlog::debug("No PosDevices found; skipping HBM thermal registration");
+     return;
+@@ -837,7 +841,7 @@ void pos_hbm_thermal_regs_fuse_stats() noexcept {
+ 
+     // Casual helper: rinzler's internal device index, which its logs often
+     // print without the PCI address ("... on dev 2 ...").
+-    stats::make_file(prefix + "/idx", uint64_t(dev->idx), /*read_only=*/true);
++    stats::make_file(prefix + "/idx", uint64_t(dev->idx.i), /*read_only=*/true);
+     spdlog::debug("Registered HBM thermal FUSE stats under {} for device {}", prefix,
+         dev->addr());
+   }
+diff --git a/src/pos/dma_tracker.cpp b/src/pos/dma_tracker.cpp
+index 7f0b3b9b8df..c42b737a812 100644
+--- a/src/pos/dma_tracker.cpp
++++ b/src/pos/dma_tracker.cpp
+@@ -64,9 +64,9 @@ dma_tracker::~dma_tracker() {
+ // dma_tracker
+ // ---------------------------------------------------------------------------
+ 
+-void dma_tracker::push(uint32_t dev_idx, pending_xfer xfer) noexcept {
++void dma_tracker::push(process_device_id dev_idx, pending_xfer xfer) noexcept {
+   std::lock_guard<std::mutex> lk(mu);
+-  TRON_ASSERT(dev_idx < MAX_DEVICES,
++  TRON_ASSERT(dev_idx.i < MAX_DEVICES,
+       "dev_idx {} out of bounds (MAX_DEVICES={}, model={})", dev_idx, MAX_DEVICES,
+       model_id);
+   TRON_ASSERT(xfer.layer < last_v_xfer.size(),
+@@ -87,7 +87,7 @@ void dma_tracker::poll_completions() {
+   size_t attempts_left = 0;
+   {
+     std::lock_guard<std::mutex> lk(mu);
+-    for (size_t d = 0; d < get_num_devices(); d++) {
++    for (process_device_id d{0}; d.i < get_num_devices(); d.i++) {
+       attempts_left += queues[d].size();
+     }
+   }
+@@ -98,7 +98,7 @@ void dma_tracker::poll_completions() {
+     bool popped = false;
+     {
+       std::lock_guard<std::mutex> lk(mu);
+-      for (size_t d = 0; d < get_num_devices(); d++) {
++      for (process_device_id d{0}; d.i < get_num_devices(); d.i++) {
+         auto& q = queues[d];
+         if (q.empty()) continue;
+         auto& top = q.top();
+diff --git a/src/pos/driver.cpp b/src/pos/driver.cpp
+index 7606c6bb3f4..9042d04b121 100644
+--- a/src/pos/driver.cpp
++++ b/src/pos/driver.cpp
+@@ -48,7 +48,7 @@
+ 
+ // todo: use tron::pinned_vector<PosDevice> devices so we clean up properly and don't
+ // have to move
+-std::vector<PosDevice*> devices;
++tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> devices;
+ tron::hardware::device_mask dev_mask;
+ tron::hardware::device_mask v1_dev_mask;
+ tron::hardware::device_mask v2_dev_mask;
+@@ -78,11 +78,17 @@ pthread_barrier_t workers_ready;
+ #define dbg_inflight_init_log(...)
+ #endif
+ 
+-std::thread workers[8];
++tron::indexed_array<tron::hardware::process_device_id,
++    std::thread,
++    tron::hardware::MAX_DEVICES>
++    workers;
+ // Single shared atomic counter used for request_id in our enqueue process.
+ std::atomic<uint64_t> shared_request_id;  // intiialized in pos_startup()
+-std::thread* get_workers() noexcept {
+-  return workers;
++tron::indexed_array<tron::hardware::process_device_id,
++    std::thread,
++    tron::hardware::MAX_DEVICES>*
++get_workers() noexcept {
++  return &workers;
+ }
+ 
+ size_t get_num_devices() noexcept {
+@@ -90,11 +96,12 @@ size_t get_num_devices() noexcept {
+ }
+ 
+ void join_workers() noexcept {
+-  for (size_t i = 0; i < get_num_devices(); i++)
+-    workers[i].join();
++  for (tron::hardware::process_device_id device : devices.indices())
++    workers[device].join();
+ }
+ 
+-std::vector<PosDevice*> const* pos_list_devices(void) noexcept {
++tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> const*
++pos_list_devices(void) noexcept {
+   return &devices;
+ }
+ 
+@@ -348,7 +355,7 @@ int pos_startup() noexcept {
+     tbb::parallel_for(tbb::blocked_range<size_t>(size_t(0), size_t(devices.size())),
+         [&](tbb::blocked_range<size_t> const& range) {
+           for (size_t i = range.begin(); i < range.end(); ++i) {
+-            fn(devices[i]);
++            fn(devices[tron::hardware::process_device_id{i}]);
+           }
+         });
+ #endif
+@@ -463,7 +470,7 @@ size_t get_num_devices() noexcept {
+   return ::get_num_devices();
+ }
+ 
+-PosDevice* get_device(uint32_t dev_idx) noexcept {
++PosDevice* get_device(process_device_id dev_idx) noexcept {
+   return devices[dev_idx];
+ }
+ 
+@@ -802,10 +809,10 @@ device_mask get_devices() noexcept {
+       //      const std::vector<PosDevice *> devs = pos_list_devices();
+       size_t num_devices = devices.size();
+       pthread_barrier_init(&workers_ready, NULL, (num_devices * 2) + 1);
+-      for (size_t i = 0; i < num_devices; i++) {
++      for (PosDevice* device : devices) {
+         // set the worker_cmd word to 0 (no active cmd) before starting the worker.
+-        devices.at(i)->worker_cmd = 0;
+-        workers[i] = tron::worker_start(devices.at(i));
++        device->worker_cmd = 0;
++        workers[device->idx] = tron::worker_start(device);
+       }
+       // Wait for workers to be up before proceeding.
+       spdlog::debug("INIT: waiting for workers to be ready");
+@@ -1157,8 +1164,8 @@ dma_xfer_state xfer_n_blocks(PosDevice* dev,
+     bool kv_xfer,
+     bool rx_xfer,
+     uint32_t readback_offset) noexcept {
+-  TRACE_EVENT(
+-      "hwattention-detail", "xfer_n_blocks", "dev index", dev->idx, "nblocks", nblocks);
++  TRACE_EVENT("hwattention-detail", "xfer_n_blocks", "dev index", dev->idx.i, "nblocks",
++      nblocks);
+   TRON_ASSERT(nblocks > 0, "xfer_n_blocks called with nblocks == 0");
+ 
+   // Pre-validate all blocks before acquiring the lock.
+@@ -1180,7 +1187,7 @@ dma_xfer_state xfer_n_blocks(PosDevice* dev,
+         qe, hs, he, bi);
+     total_desc += 1 + ((qlens[bi] - 1) / dmaMaxPayload);
+   }
+-  TRACE_EVENT("hwattention-detail", "xfer_n_blocks waiting", "dev index", dev->idx);
++  TRACE_EVENT("hwattention-detail", "xfer_n_blocks waiting", "dev index", dev->idx.i);
+   uint32_t final_desc = 0;
+   uint64_t wrap_count = 0;
+ 
+@@ -1188,7 +1195,7 @@ dma_xfer_state xfer_n_blocks(PosDevice* dev,
+     std::lock_guard<std::mutex> guard(q->producer_mutex);
+     q->reserve_descriptor_slots_locked(total_desc);
+     uint64_t next_wrap_count = q->producer_wrap_count.load(std::memory_order_relaxed);
+-    TRACE_EVENT("hwattention-detail", "xfer_n_blocks haslock", "dev index", dev->idx);
++    TRACE_EVENT("hwattention-detail", "xfer_n_blocks haslock", "dev index", dev->idx.i);
+     for (size_t bi = 0; bi < nblocks; ++bi) {
+       hbm_address_t base = bases[bi];
+       size_t fetcher = fetchers[bi];
+@@ -1528,7 +1535,7 @@ size_t maximum_hwattn_batch_size(PosDevice* dev, size_t rows) noexcept {
+ // DEPRECATED: maximum batch size looks at the first device instead of a hand coded
+ // constant. We REALLY should always use a device specific call.
+ size_t maximum_batch_size(size_t rows) noexcept {
+-  return maximum_batch_size(get_device(0), rows);
++  return maximum_batch_size(get_device(process_device_id{0}), rows);
+ }
+ 
+ void dump_debug_card_regs(std::string label) noexcept {
+@@ -1611,7 +1618,7 @@ std::pair<size_t, size_t> find_matched_range(
+   return {first, len};
+ }
+ 
+-void debug_exit(std::string label, int idx) noexcept {
++void debug_exit(std::string label, process_device_id idx) noexcept {
+   auto dev = devices[idx];
+   spdlog::debug("Debug exit called for device {} at index {}", dev->idx, idx);
+   // dump the commands rings
+@@ -1840,8 +1847,8 @@ void debug_exit(std::string label, int idx) noexcept {
+   std::terminate();
+ }
+ 
+-uint64_t read_scratch_reg(int idx, int regnum) noexcept {
+-  if ((regnum > 1) || ((size_t)idx > get_num_devices())) {
++uint64_t read_scratch_reg(process_device_id idx, int regnum) noexcept {
++  if ((regnum > 1) || (idx.i > get_num_devices())) {
+     spdlog::error("read_scratch_reg({}, {}) invalid dev or reg index. (max reg {}, "
+                   "num_devices{})",
+         idx, regnum, 1, get_num_devices());
+@@ -1857,8 +1864,8 @@ uint64_t read_scratch_reg(int idx, int regnum) noexcept {
+   }
+   return 0;
+ }
+-void write_scratch_reg(int idx, int regnum, uint64_t value) noexcept {
+-  if ((regnum > 1) || ((size_t)idx > get_num_devices())) {
++void write_scratch_reg(process_device_id idx, int regnum, uint64_t value) noexcept {
++  if ((regnum > 1) || (idx.i > get_num_devices())) {
+     spdlog::error("write_scratch_reg({}, {}) invalid dev or reg index. (max reg {}, "
+                   "num_devices{})",
+         idx, regnum, 1, get_num_devices());
+diff --git a/src/pos/fake.cpp b/src/pos/fake.cpp
+index c79d3fe1933..b01c581a745 100644
+--- a/src/pos/fake.cpp
++++ b/src/pos/fake.cpp
+@@ -1,4 +1,3 @@
+-#include <array>
+ #include <atomic>
+ #include <functional>
+ #include <limits>
+@@ -26,9 +25,10 @@ struct DmaQueue;
+ 
+ // Global device list — needed by gof.cpp (now in libtron.a) for
+ // pos_list_devices() and the extern devices vector.
+-std::vector<PosDevice*> devices;
++tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> devices;
+ 
+-std::vector<PosDevice*> const* pos_list_devices() noexcept {
++tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> const*
++pos_list_devices() noexcept {
+   return &devices;
+ }
+ 
+@@ -37,7 +37,10 @@ std::vector<PosDevice*> const* pos_list_devices() noexcept {
+ // TODO: any caller that dereferences a fake device (e.g. via dev->idx in
+ // gof::populate or shard::xfer_gof) will null-deref; current callers
+ // either short-circuit on max_layers==0 or never run on fake builds.
+-static std::array<PosDevice*, tron::hardware::MAX_DEVICES> fake_devices = {nullptr};
++static tron::indexed_array<tron::hardware::process_device_id,
++    PosDevice*,
++    tron::hardware::MAX_DEVICES>
++    fake_devices;
+ 
+ namespace tron {
+ struct bf16;
+@@ -162,7 +165,7 @@ size_t get_num_devices() noexcept {
+   return 8;
+ }
+ 
+-PosDevice* get_device(uint32_t dev_idx) noexcept {
++PosDevice* get_device(process_device_id dev_idx) noexcept {
+   return fake_devices[dev_idx];
+ }
+ 
+@@ -170,7 +173,7 @@ size_t get_num_fetchers([[maybe_unused]] PosDevice* dev) noexcept {
+   return 32;
+ }
+ 
+-static std::array<hwm_allocator, MAX_DEVICES> device_hwm;
++static tron::indexed_array<process_device_id, hwm_allocator, MAX_DEVICES> device_hwm;
+ 
+ TRON(noinline)
+ void fill_hardware_matmul_job_template(size_t,
+@@ -198,18 +201,34 @@ void fill_attn_job_template(size_t,
+     PosDevice*) noexcept {}
+ 
+ // hwcacheblock vtable stubs (needed because gof instantiates them)
+-dma_xfer_state k_hwcacheblock::xfer(
+-    uint32_t, uint32_t, uint64_t, size_t, const hw_attn_params*, bool) noexcept {
++dma_xfer_state k_hwcacheblock::xfer(uint32_t,
++    process_device_id,
++    uint64_t,
++    size_t,
++    const hw_attn_params*,
++    bool) noexcept {
+   return {};
+ }
+-void k_hwcacheblock::xfer_blocking(
+-    uint32_t, uint32_t, uint64_t, size_t, const hw_attn_params*, bool) noexcept {}
+-dma_xfer_state v_hwcacheblock::xfer(
+-    uint32_t, uint32_t, uint64_t, size_t, const hw_attn_params*, bool) noexcept {
++void k_hwcacheblock::xfer_blocking(uint32_t,
++    process_device_id,
++    uint64_t,
++    size_t,
++    const hw_attn_params*,
++    bool) noexcept {}
++dma_xfer_state v_hwcacheblock::xfer(uint32_t,
++    process_device_id,
++    uint64_t,
++    size_t,
++    const hw_attn_params*,
++    bool) noexcept {
+   return {};
+ }
+-void v_hwcacheblock::xfer_blocking(
+-    uint32_t, uint32_t, uint64_t, size_t, const hw_attn_params*, bool) noexcept {}
++void v_hwcacheblock::xfer_blocking(uint32_t,
++    process_device_id,
++    uint64_t,
++    size_t,
++    const hw_attn_params*,
++    bool) noexcept {}
+ void hwcacheblock::wait(PosDevice*, const dma_xfer_state&) noexcept {}
+ bool hwcacheblock::isdone(PosDevice*, const dma_xfer_state&) noexcept {
+   return true;
+@@ -381,7 +400,8 @@ void debug_exit([[maybe_unused]] std::string label) noexcept {
+   exit(1);
+ }
+ 
+-void debug_exit([[maybe_unused]] std::string label, [[maybe_unused]] int idx) noexcept {
++void debug_exit([[maybe_unused]] std::string label,
++    [[maybe_unused]] process_device_id idx) noexcept {
+   spdlog::error("DEBUG EXIT CALLED (fake mode): {} at index {}", label, idx);
+   exit(1);
+ }
+diff --git a/src/pos/hwattention.cpp b/src/pos/hwattention.cpp
+index a4ccc5b0b0e..25093055d14 100644
+--- a/src/pos/hwattention.cpp
++++ b/src/pos/hwattention.cpp
+@@ -11,13 +11,13 @@
+ namespace tron::hardware {
+ 
+ dma_xfer_state k_hwcacheblock::xfer(uint32_t position,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     uint64_t hbm_addr,
+     size_t layer,
+     const hw_attn_params* params,
+     bool readback) noexcept {
+   TRACE_EVENT("hwattention-detail", "k_hwcacheblock::xfer", "position", position,
+-      "fpga_index", fpga_index);
++      "fpga_index", fpga_index.i);
+   PosDevice* dev = devices[fpga_index];
+   // DMA size and stride follow the bitfile's HBM layout (HW_BAKED_HEAD_SIZE),
+   // not the model's kv_head_size. When the two differ the upper cells
+@@ -27,13 +27,13 @@ dma_xfer_state k_hwcacheblock::xfer(uint32_t position,
+ }
+ 
+ dma_xfer_state v_hwcacheblock::xfer(uint32_t position,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     uint64_t hbm_addr,
+     size_t layer,
+     const hw_attn_params* params,
+     bool readback) noexcept {
+   TRACE_EVENT("hwattention-detail", "v_hwcacheblock::xfer", "position", position,
+-      "fpga_index", fpga_index);
++      "fpga_index", fpga_index.i);
+   TRON_ASSERT(params->n_kv_heads >= 1 && params->n_kv_heads <= HW_MAX_KV_HEADS,
+       "n_kv_heads {} outside 1..HW_MAX_KV_HEADS ({})", params->n_kv_heads,
+       HW_MAX_KV_HEADS);
+@@ -94,7 +94,7 @@ void hwcacheblock::wait(PosDevice* dev, const dma_xfer_state& xfer) noexcept {
+ }
+ 
+ void k_hwcacheblock::xfer_blocking(uint32_t position,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     uint64_t hbm_addr,
+     size_t layer,
+     const hw_attn_params* params,
+@@ -104,7 +104,7 @@ void k_hwcacheblock::xfer_blocking(uint32_t position,
+ }
+ 
+ void v_hwcacheblock::xfer_blocking(uint32_t position,
+-    uint32_t fpga_index,
++    process_device_id fpga_index,
+     uint64_t hbm_addr,
+     size_t layer,
+     const hw_attn_params* params,
+diff --git a/src/pos/metrics.cpp b/src/pos/metrics.cpp
+index 445b06e74ea..d4e75b26f50 100644
+--- a/src/pos/metrics.cpp
++++ b/src/pos/metrics.cpp
+@@ -1,11 +1,12 @@
+ #include <string>
+ #include <thread>
+-#include <vector>
+ 
+ #include <spdlog/spdlog.h>
+ 
++#include "common/indexed.hpp"
+ #include "common/numerics/std.hpp"
+ #include "common/perfetto.hpp"
++#include "libpos.hpp"
+ #include "pos/config.hpp"
+ #include "pos/device.hpp"
+ #include "pos/lib.hpp"
+@@ -19,7 +20,7 @@ namespace tron::hardware::metrics {
+ // Print all metrics when called if the specified number of seconds has passed since we
+ // last printed metrics. This version is designed to be called from each devices worker
+ // thread and should be superceded by a cleaner method of periodic invacation.
+-void metrics::timelog(int64_t sec_to_wait, int idx) {
++void metrics::timelog(int64_t sec_to_wait, process_device_id idx) {
+   uint64_t current = tron::hardware::system::tsc_in_ns();
+   int64_t delta = current - last_logged_time;
+   if (delta > (sec_to_wait * 1000000000)) {
+@@ -28,7 +29,7 @@ void metrics::timelog(int64_t sec_to_wait, int idx) {
+     // calling the metrics timelog inside the driver loop we'll only print those for the
+     // first card. When metrics transition to being dumped via an independent thread or
+     // another vehicle this should be changed.
+-    if (idx == 0) {
++    if (idx.i == 0) {
+       spdlog::debug("HEAP METRICS {}", hmetrics->str());
+       hmetrics->tick_forward();
+     }
+@@ -185,9 +186,12 @@ void fpga_state_tracer(int corenum) noexcept {
+   auto devices = pos_list_devices();
+   // Keeping the tracer data IN the monitoring thread for now.  Could move into the
+   // device.
+-  std::vector<fpga_tracer_data> prior_tracers(devices->size());
+-  std::vector<uint32_t> current_tracer_values(devices->size());
+-  std::vector<fpga_use_ratios> fpga_use_samples(devices->size());
++  tron::indexed_vector<process_device_id, fpga_tracer_data> prior_tracers(
++      devices->size());
++  tron::indexed_vector<process_device_id, uint32_t> current_tracer_values(
++      devices->size());
++  tron::indexed_vector<process_device_id, fpga_use_ratios> fpga_use_samples(
++      devices->size());
+ 
+   // See Note [FPGA Use Metric Sampling]. The first window opens here so that the
+   // first sample below has a full fpga_use_period behind it.
+diff --git a/src/pos/vfio.cpp b/src/pos/vfio.cpp
+index 3b975ff47b5..68977718021 100644
+--- a/src/pos/vfio.cpp
++++ b/src/pos/vfio.cpp
+@@ -212,7 +212,8 @@ static int map_regions(PosDevice* device) noexcept {
+ // vfio_device_init loop — group setup involves IOMMU container
+ // configuration and shared unordered_map mutation that is not safe for
+ // concurrent access.
+-int vfio_init_groups(std::vector<PosDevice*> const& devices,
++int vfio_init_groups(
++    tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> const& devices,
+     uint64_t const heap_start,
+     uint64_t const heap_size) noexcept {
+   for (auto const* device : devices) {
+diff --git a/src/rinzler.cpp b/src/rinzler.cpp
+index 0f79795898d..74b5ae848e0 100644
+--- a/src/rinzler.cpp
++++ b/src/rinzler.cpp
+@@ -4071,7 +4071,8 @@ static void register_memory_pressure_fuse_stats() {
+ // pairs with the integer device index, so it carries no .skip marker.
+ static void register_hbm_shard_pressure_fuse_stats() {
+   if (!stats::is_initialized()) return;
+-  std::vector<PosDevice*> const* devices = pos_list_devices();
++  tron::indexed_vector<tron::hardware::process_device_id, PosDevice*> const* devices =
++      pos_list_devices();
+   if (devices == nullptr || devices->empty()) return;
+   using value_t = fuse_sysfs::value_type;
+ 
+@@ -4085,7 +4086,7 @@ static void register_hbm_shard_pressure_fuse_stats() {
+   for (PosDevice* dev : *devices) {
+     if (dev == nullptr) continue;
+     const std::string path = "/rinzler/stats/memory_pressure/hbm/" +
+-                             std::to_string(dev->idx) + "/sw_fallback_total";
++                             std::to_string(dev->idx.i) + "/sw_fallback_total";
+     auto f = stats::make_file(path, uint64_t{0}, /*read_only=*/true,
+         /*exported=*/true);
+     // Devices outlive the FUSE stats layer (pos_shutdown runs after its
+diff --git a/src/tron/gof.cpp b/src/tron/gof.cpp
+index 8e5ead8442e..66d322fd7f8 100644
+--- a/src/tron/gof.cpp
++++ b/src/tron/gof.cpp
+@@ -144,7 +144,7 @@ dma_xfer_state shard::xfer_gof(gof& g, uint32_t gof_in_shard, uint32_t layer) {
+   TRON_ASSERT(kv_shard_layers[layer].layer_alloc_bytes > 0,
+       "xfer_gof: shard base={} layer={} has no HBM allocation (sw_fallback={})",
+       base_tok_ix, layer, sw_fallback);
+-  TRACE_EVENT("hwattention-detail", "xfer_gof", "layer", layer, "dev", dev->idx);
++  TRACE_EVENT("hwattention-detail", "xfer_gof", "layer", layer, "dev", dev->idx.i);
+ 
+   uint32_t shard_rel_tok = gof_in_shard * gof_tokens;
+   uint64_t hbm_k =
+@@ -269,9 +269,9 @@ void backfill_shard(
+         // drop the GOF's last owner and free staging under the DMA). On success the
+         // pushed pending_xfer owns the decrement.
+         guard.commit();
+-        tracker.push(static_cast<uint32_t>(sh->dev->idx),
+-            pending_xfer{last_v, sh, static_cast<uint32_t>(gof_in_shard),
+-                static_cast<uint32_t>(layer), g});
++        tracker.push(
++            sh->dev->idx, pending_xfer{last_v, sh, static_cast<uint32_t>(gof_in_shard),
++                              static_cast<uint32_t>(layer), g});
+       }
+     }
+ 
+diff --git a/t/t_clearhbm.cpp b/t/t_clearhbm.cpp
+index 6c40438e779..4ef90479782 100644
+--- a/t/t_clearhbm.cpp
++++ b/t/t_clearhbm.cpp
+@@ -276,29 +276,29 @@ TEST_CASE("clearhbm") {
+ 
+   // Phase 1: zeroize (poison_bits == 0) or direct-mode poison (nonzero).
+   // Parallel per device; each takes O(several seconds) so parallelism helps.
+-  std::vector<std::atomic<bool>> results(devlist.size());
++  tron::indexed_vector<process_device_id, std::atomic<bool>> results(devlist.size());
+   {
+     std::vector<std::thread> threads;
+-    for (size_t i = 0; i < devlist.size(); i++) {
+-      threads.emplace_back([&, i]() {
+-        results[i].store(poison_bits == 0
+-                             ? zeroize_device(devlist[i])
+-                             : poison_device_direct(devlist[i], poison_bits));
++    for (process_device_id device : devlist.indices()) {
++      threads.emplace_back([&, device]() {
++        results[device].store(poison_bits == 0
++                                  ? zeroize_device(devlist[device])
++                                  : poison_device_direct(devlist[device], poison_bits));
+       });
+     }
+     for (auto& t : threads)
+       t.join();
+   }
+-  for (size_t i = 0; i < devlist.size(); i++)
+-    REQUIRE(results[i].load());
++  for (process_device_id device : results.indices())
++    REQUIRE(results[device].load());
+ 
+   // Phase 2: verify (optional). Only meaningful after direct-mode poison —
+   // zeroize leaves scales at bf16(1.0) due to bypass auto-fill and groups
+   // at 0, so verify's expected value (from poison_bits=0) is 0 which
+   // matches trivially.
+   if (verify_mode) {
+-    for (size_t i = 0; i < devlist.size(); i++) {
+-      REQUIRE(verify_device(devlist[i], poison_bits));
++    for (process_device_id device : devlist.indices()) {
++      REQUIRE(verify_device(devlist[device], poison_bits));
+     }
+   }
+ }
+diff --git a/t/t_dma.cpp b/t/t_dma.cpp
+index 615707470fe..03783a7ff75 100644
+--- a/t/t_dma.cpp
++++ b/t/t_dma.cpp
+@@ -154,8 +154,9 @@ TEST_CASE("DmaRing builds the ring correctly", "[DmaRing::DmaRing]") {
+ 
+ TEST_CASE("xfer_blocks reports descriptor one on the new producer lap", "[DmaQueue]") {
+   dma_qcsr_t qcsr{};
+-  PosDevice dev(0, /*bus=*/uint8_t{0}, /*dev=*/uint8_t{0}, /*func=*/uint8_t{0},
+-      /*group=*/0, /*devid=*/uint16_t{0x0100});
++  PosDevice dev(tron::hardware::process_device_id{0}, /*bus=*/uint8_t{0},
++      /*dev=*/uint8_t{0}, /*func=*/uint8_t{0}, /*group=*/0,
++      /*devid=*/uint16_t{0x0100});
+   dev.pos_device_offset = pos_get_device_addr(uint64_t{0});
+   dev.pos_host_offset = pos_get_host_addr(uint64_t{0});
+   dev.hbmw_map[0] = hbm_region_t{.addr = 0, .len = dmaMaxPayload};
+@@ -191,8 +192,9 @@ TEST_CASE("xfer_blocks reports descriptor one on the new producer lap", "[DmaQue
+ TEST_CASE(
+     "DmaQueue wrap inference reads one submitted producer position", "[DmaQueue]") {
+   dma_qcsr_t qcsr{};
+-  PosDevice dev(0, /*bus=*/uint8_t{0}, /*dev=*/uint8_t{0}, /*func=*/uint8_t{0},
+-      /*group=*/0, /*devid=*/uint16_t{0x0100});
++  PosDevice dev(tron::hardware::process_device_id{0}, /*bus=*/uint8_t{0},
++      /*dev=*/uint8_t{0}, /*func=*/uint8_t{0}, /*group=*/0,
++      /*devid=*/uint16_t{0x0100});
+   DmaQueue q(&dev, &qcsr, DMA_DIRECTION_TX);
+ 
+   constexpr uint64_t consumer_wrap = 7;
+@@ -219,8 +221,9 @@ TEST_CASE(
+ 
+ TEST_CASE("DmaQueue serializes consumed-head sampling", "[DmaQueue]") {
+   dma_qcsr_t qcsr{};
+-  PosDevice dev(0, /*bus=*/uint8_t{0}, /*dev=*/uint8_t{0}, /*func=*/uint8_t{0},
+-      /*group=*/0, /*devid=*/uint16_t{0x0100});
++  PosDevice dev(tron::hardware::process_device_id{0}, /*bus=*/uint8_t{0},
++      /*dev=*/uint8_t{0}, /*func=*/uint8_t{0}, /*group=*/0,
++      /*devid=*/uint16_t{0x0100});
+   DmaQueue q(&dev, &qcsr, DMA_DIRECTION_TX);
+ 
+   constexpr uint64_t initial_wrap = 4;
+@@ -254,8 +257,9 @@ TEST_CASE("DmaQueue serializes consumed-head sampling", "[DmaQueue]") {
+ TEST_CASE(
+     "DmaQueue reserves link slots and waits for consumer capacity", "[DmaQueue]") {
+   dma_qcsr_t qcsr{};
+-  PosDevice dev(0, /*bus=*/uint8_t{0}, /*dev=*/uint8_t{0}, /*func=*/uint8_t{0},
+-      /*group=*/0, /*devid=*/uint16_t{0x0100});
++  PosDevice dev(tron::hardware::process_device_id{0}, /*bus=*/uint8_t{0},
++      /*dev=*/uint8_t{0}, /*func=*/uint8_t{0}, /*group=*/0,
++      /*devid=*/uint16_t{0x0100});
+   dev.pos_device_offset = pos_get_device_addr(uint64_t{0});
+   dev.pos_host_offset = pos_get_host_addr(uint64_t{0});
+ 
+diff --git a/t/t_dma_tracker.cpp b/t/t_dma_tracker.cpp
+index 11c61d3f196..cbd23783f49 100644
+--- a/t/t_dma_tracker.cpp
++++ b/t/t_dma_tracker.cpp
+@@ -66,9 +66,11 @@ std::shared_ptr<shard> make_stub_shard(
+ // the tracker's dtor (members destroyed in reverse declaration order). If
+ // the device went out of scope first, the shard dtor would deref a dangling
+ // `dev`.
+-std::unique_ptr<PosDevice> make_stub_device(int idx = 0) {
+-  return std::make_unique<PosDevice>(idx, /*bus=*/uint8_t{0}, /*dev=*/uint8_t{0},
+-      /*func=*/uint8_t{0}, /*group=*/0, /*devid=*/uint16_t{0x0100});
++std::unique_ptr<PosDevice> make_stub_device(
++    process_device_id idx = process_device_id{0}) {
++  return std::make_unique<PosDevice>(idx, /*bus=*/uint8_t{0},
++      /*dev=*/uint8_t{0}, /*func=*/uint8_t{0}, /*group=*/0,
++      /*devid=*/uint16_t{0x0100});
+ }
+ 
+ // Distinguishable dma_xfer_state. queue must be non-null for await_layer
+@@ -140,8 +142,9 @@ TEST_CASE("push records last V xfer and dev per layer", "[dma_tracker]") {
+   dma_tracker tracker(8);
+   auto sh = make_stub_shard(dev.get());
+ 
+-  tracker.push(/*dev_idx=*/0, pending_xfer{make_xfer(/*desc=*/7, /*wrap=*/1), sh,
+-                                  /*gof_in_shard=*/0, /*layer=*/3});
++  tracker.push(/*dev_idx=*/process_device_id{0},
++      pending_xfer{make_xfer(/*desc=*/7, /*wrap=*/1), sh,
++          /*gof_in_shard=*/0, /*layer=*/3});
+ 
+   REQUIRE(tracker.last_v_xfer[3].end_desc == 7);
+   REQUIRE(tracker.last_v_xfer[3].end_wrap_count == 1);
+@@ -155,15 +158,17 @@ TEST_CASE("push at layer == max_layers-1 succeeds (boundary)", "[dma_tracker]")
+   constexpr uint32_t L = 16;
+   dma_tracker tracker(L);
+   auto sh = make_stub_shard();
+-  tracker.push(0, pending_xfer{make_xfer(0, 0), sh, 0, L - 1});
++  tracker.push(process_device_id{0}, pending_xfer{make_xfer(0, 0), sh, 0, L - 1});
+   REQUIRE(tracker.last_v_xfer[L - 1].queue != nullptr);
+ }
+ 
+ TEST_CASE("repeated push to same layer keeps the most recent V", "[dma_tracker]") {
+   dma_tracker tracker(4);
+   auto sh = make_stub_shard();
+-  tracker.push(0, pending_xfer{make_xfer(/*desc=*/1, /*wrap=*/0), sh, 0, 2});
+-  tracker.push(0, pending_xfer{make_xfer(/*desc=*/2, /*wrap=*/3), sh, 1, 2});
++  tracker.push(
++      process_device_id{0}, pending_xfer{make_xfer(/*desc=*/1, /*wrap=*/0), sh, 0, 2});
++  tracker.push(
++      process_device_id{0}, pending_xfer{make_xfer(/*desc=*/2, /*wrap=*/3), sh, 1, 2});
+   REQUIRE(tracker.last_v_xfer[2].end_desc == 2);
+   REQUIRE(tracker.last_v_xfer[2].end_wrap_count == 3);
+ }
+@@ -171,8 +176,8 @@ TEST_CASE("repeated push to same layer keeps the most recent V", "[dma_tracker]"
+ TEST_CASE("poll_completions advances gof_state.dma_done", "[dma_tracker]") {
+   dma_tracker tracker(4);
+   auto sh = make_stub_shard();
+-  tracker.push(0, pending_xfer{make_xfer(1, 0), sh,
+-                      /*gof_in_shard=*/5, /*layer=*/2});
++  tracker.push(process_device_id{0}, pending_xfer{make_xfer(1, 0), sh,
++                                         /*gof_in_shard=*/5, /*layer=*/2});
+ 
+   REQUIRE(sh->gof_state[5].dma_done == 0);
+   tracker.poll_completions();
+@@ -187,8 +192,8 @@ TEST_CASE("poll_completions never regresses dma_done", "[dma_tracker]") {
+   // be pulled backward.
+   dma_tracker tracker(8);
+   auto sh = make_stub_shard();
+-  tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/5});
+-  tracker.push(0, pending_xfer{make_xfer(2, 0), sh, 0, /*layer=*/2});
++  tracker.push(process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/5});
++  tracker.push(process_device_id{0}, pending_xfer{make_xfer(2, 0), sh, 0, /*layer=*/2});
+   tracker.poll_completions();
+   REQUIRE(sh->gof_state[0].dma_done == 6);
+ }
+@@ -197,8 +202,10 @@ TEST_CASE("poll drains each device queue independently", "[dma_tracker]") {
+   dma_tracker tracker(4);
+   auto sh0 = make_stub_shard();
+   auto sh1 = make_stub_shard();
+-  tracker.push(/*dev_idx=*/0, pending_xfer{make_xfer(1, 0), sh0, 0, /*layer=*/1});
+-  tracker.push(/*dev_idx=*/1, pending_xfer{make_xfer(1, 0), sh1, 0, /*layer=*/3});
++  tracker.push(/*dev_idx=*/process_device_id{0},
++      pending_xfer{make_xfer(1, 0), sh0, 0, /*layer=*/1});
++  tracker.push(/*dev_idx=*/process_device_id{1},
++      pending_xfer{make_xfer(1, 0), sh1, 0, /*layer=*/3});
+   tracker.poll_completions();
+   REQUIRE(sh0->gof_state[0].dma_done == 2);
+   REQUIRE(sh1->gof_state[0].dma_done == 4);
+@@ -208,7 +215,7 @@ TEST_CASE("clear() drains queues and resets per-layer state", "[dma_tracker]") {
+   auto dev = make_stub_device();
+   dma_tracker tracker(4);
+   auto sh = make_stub_shard(dev.get());
+-  tracker.push(0, pending_xfer{make_xfer(7, 1), sh, 0, /*layer=*/2});
++  tracker.push(process_device_id{0}, pending_xfer{make_xfer(7, 1), sh, 0, /*layer=*/2});
+   REQUIRE(tracker.last_v_xfer[2].queue != nullptr);
+   REQUIRE(tracker.last_v_dev[2] == dev.get());
+ 
+@@ -236,13 +243,13 @@ TEST_CASE("clear_all_dma_trackers drains a live tracker", "[dma_tracker]") {
+   auto dev = make_stub_device();
+   dma_tracker tracker(4);
+   auto sh = make_stub_shard(dev.get());
+-  tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1});
+-  REQUIRE(tracker.queues[0].size() == 1);
++  tracker.push(process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1});
++  REQUIRE(tracker.queues[process_device_id{0}].size() == 1);
+   REQUIRE(tracker.last_v_dev[1] == dev.get());
+ 
+   clear_all_dma_trackers();
+ 
+-  REQUIRE(tracker.queues[0].empty());
++  REQUIRE(tracker.queues[process_device_id{0}].empty());
+   REQUIRE(tracker.last_v_dev[1] == nullptr);
+   REQUIRE(tracker.last_v_xfer[1].queue == nullptr);
+ }
+@@ -253,12 +260,12 @@ TEST_CASE("trackers are isolated from each other", "[dma_tracker]") {
+   dma_tracker draft(8);
+   auto sh = make_stub_shard(dev.get());
+ 
+-  target.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/3});
++  target.push(process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/3});
+ 
+   REQUIRE(target.last_v_dev[3] == dev.get());
+   REQUIRE(draft.last_v_dev[3] == nullptr);
+-  REQUIRE(target.queues[0].size() == 1);
+-  REQUIRE(draft.queues[0].empty());
++  REQUIRE(target.queues[process_device_id{0}].size() == 1);
++  REQUIRE(draft.queues[process_device_id{0}].empty());
+ }
+ 
+ TEST_CASE("tracker dtor deregisters from the live list", "[dma_tracker]") {
+@@ -267,15 +274,17 @@ TEST_CASE("tracker dtor deregisters from the live list", "[dma_tracker]") {
+   // builds; under ASAN this is a use-after-free trap.
+   dma_tracker outer(4);
+   auto outer_sh = make_stub_shard();
+-  outer.push(0, pending_xfer{make_xfer(1, 0), outer_sh, 0, /*layer=*/1});
++  outer.push(
++      process_device_id{0}, pending_xfer{make_xfer(1, 0), outer_sh, 0, /*layer=*/1});
+   {
+     dma_tracker inner(4);
+     auto inner_sh = make_stub_shard();
+-    inner.push(0, pending_xfer{make_xfer(2, 0), inner_sh, 0, /*layer=*/2});
++    inner.push(
++        process_device_id{0}, pending_xfer{make_xfer(2, 0), inner_sh, 0, /*layer=*/2});
+     // inner dtor must remove `inner` from live_trackers here.
+   }
+   clear_all_dma_trackers();
+-  REQUIRE(outer.queues[0].empty());
++  REQUIRE(outer.queues[process_device_id{0}].empty());
+ }
+ 
+ TEST_CASE("clear_all_dma_trackers is safe with no live trackers", "[dma_tracker]") {
+@@ -294,7 +303,8 @@ TEST_CASE("clear_all_dma_trackers drops shard refs while device lives",
+     dma_tracker tracker(4);
+     auto sh = make_stub_shard(dev.get());
+     observer = sh;
+-    tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1});
++    tracker.push(
++        process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1});
+     sh.reset();
+     REQUIRE_FALSE(observer.expired());
+ 
+@@ -316,8 +326,10 @@ TEST_CASE(
+     auto sh_b = make_stub_shard(dev.get());
+     observer_a = sh_a;
+     observer_b = sh_b;
+-    tracker_a.push(0, pending_xfer{make_xfer(1, 0), sh_a, 0, /*layer=*/1});
+-    tracker_b.push(0, pending_xfer{make_xfer(2, 0), sh_b, 0, /*layer=*/2});
++    tracker_a.push(
++        process_device_id{0}, pending_xfer{make_xfer(1, 0), sh_a, 0, /*layer=*/1});
++    tracker_b.push(
++        process_device_id{0}, pending_xfer{make_xfer(2, 0), sh_b, 0, /*layer=*/2});
+     sh_a.reset();
+     sh_b.reset();
+     REQUIRE_FALSE(observer_a.expired());
+@@ -366,15 +378,15 @@ TEST_CASE("concurrent push and poll on same tracker", "[dma_tracker][concurrency
+       expected_max_layer[gof] = static_cast<int>(layer);
+     }
+     expected_last_desc[layer] = i;
+-    tracker.push(
+-        0, pending_xfer{make_xfer(static_cast<uint32_t>(i), 0), sh, gof, layer});
++    tracker.push(process_device_id{0},
++        pending_xfer{make_xfer(static_cast<uint32_t>(i), 0), sh, gof, layer});
+   }
+ 
+   stop.store(true, std::memory_order_release);
+   poller.join();
+   tracker.poll_completions();  // final drain so the queue post-condition holds
+ 
+-  REQUIRE(tracker.queues[0].empty());
++  REQUIRE(tracker.queues[process_device_id{0}].empty());
+   for (uint32_t gof = 0; gof < gof_count; ++gof) {
+     INFO("gof=" << gof);
+     if (expected_max_layer[gof] < 0) {
+@@ -417,7 +429,8 @@ TEST_CASE("concurrent tracker lifecycle vs clear_all", "[dma_tracker][concurrenc
+       for (int i = 0; i < iters_per_worker; ++i) {
+         dma_tracker tracker(4);
+         auto sh = make_stub_shard();
+-        tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1});
++        tracker.push(
++            process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1});
+         tracker_round_trips.fetch_add(1, std::memory_order_relaxed);
+       }
+     });
+@@ -437,7 +450,8 @@ TEST_CASE("concurrent tracker lifecycle vs clear_all", "[dma_tracker][concurrenc
+     dma_tracker tracker(4);
+     auto sh = make_stub_shard();
+     probe = sh;
+-    tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1});
++    tracker.push(
++        process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1});
+     sh.reset();
+     REQUIRE_FALSE(probe.expired());
+     clear_all_dma_trackers();
+@@ -555,13 +569,14 @@ TEST_CASE(
+   auto g = std::make_shared<gof>(HW_BAKED_HEAD_SIZE);
+   g->dma_inflight.store(2);  // GOF submitted to two shard/layer targets
+ 
+-  tracker.push(
+-      0, pending_xfer{make_xfer(1, 0), sh, /*gof_in_shard=*/0, /*layer=*/0, g});
++  tracker.push(process_device_id{0},
++      pending_xfer{make_xfer(1, 0), sh, /*gof_in_shard=*/0, /*layer=*/0, g});
+   tracker.poll_completions();  // 2 -> 1: a prior target completed, do not free
+   CHECK(g->dma_inflight.load() == 1);
+   CHECK(g->k.is_allocated());
+ 
+-  tracker.push(0, pending_xfer{make_xfer(2, 0), sh, 0, /*layer=*/1, g});
++  tracker.push(
++      process_device_id{0}, pending_xfer{make_xfer(2, 0), sh, 0, /*layer=*/1, g});
+   tracker.poll_completions();  // 1 -> 0: last target done, free staging
+   CHECK(g->dma_inflight.load() == 0);
+   CHECK_FALSE(g->k.is_allocated());
+@@ -575,7 +590,8 @@ TEST_CASE("clear() drops the gof pin without freeing staging (abandon path)",
+   auto g = std::make_shared<gof>(HW_BAKED_HEAD_SIZE);
+   g->dma_inflight.store(1);  // an in-flight DMA the abandon path does not await
+   std::weak_ptr<gof> observer = g;
+-  tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1, g});
++  tracker.push(
++      process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1, g});
+ 
+   tracker
+       .clear();  // abandon-only: pop entries and drop references, not completion proof
+@@ -635,19 +651,21 @@ namespace {
+ void push_dev_idx_at_max_devices() {
+   dma_tracker tracker(4);
+   auto sh = std::make_shared<shard>(nullptr, 0u, 0u, nullptr);
+-  tracker.push(/*dev_idx=*/MAX_DEVICES, pending_xfer{make_xfer(1, 0), sh, 0, 0});
++  tracker.push(/*dev_idx=*/process_device_id{MAX_DEVICES},
++      pending_xfer{make_xfer(1, 0), sh, 0, 0});
+ }
+ 
+ void push_layer_at_max_layers() {
+   dma_tracker tracker(4);
+   auto sh = std::make_shared<shard>(nullptr, 0u, 0u, nullptr);
+-  tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/4});
++  tracker.push(process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/4});
+ }
+ 
+ void push_layer_past_max_layers() {
+   dma_tracker tracker(4);
+   auto sh = std::make_shared<shard>(nullptr, 0u, 0u, nullptr);
+-  tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/99});
++  tracker.push(
++      process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/99});
+ }
+ 
+ void push_layer_zero_into_zero_size_tracker() {
+@@ -655,7 +673,7 @@ void push_layer_zero_into_zero_size_tracker() {
+   // but any push must reject — there are no per-layer slots.
+   dma_tracker tracker(0);
+   auto sh = std::make_shared<shard>(nullptr, 0u, 0u, nullptr);
+-  tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/0});
++  tracker.push(process_device_id{0}, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/0});
+ }
+ 
+ void await_layer_at_max_layers() {
+diff --git a/t/t_gof_dma.cpp b/t/t_gof_dma.cpp
+index 868fa9976f7..5d2567f02b5 100644
+--- a/t/t_gof_dma.cpp
++++ b/t/t_gof_dma.cpp
+@@ -44,7 +44,7 @@ class TestGofDmaListener : public Catch::EventListenerBase {
+     if (pos_startup() < 0)
+       throw std::runtime_error("Error initializing libpos context");
+ 
+-    g_dev = (*pos_list_devices())[0];
++    g_dev = pos_list_devices()->front();
+     g_rx = DmaQueue::acquire(g_dev, DMA_DIRECTION_RX, dmaDescPerPage);
+     if (!g_rx) throw std::runtime_error("Failed to acquire RX queue");
+   }
+diff --git a/t/t_gof_staging_leaks.cpp b/t/t_gof_staging_leaks.cpp
+index 0f5431aed5c..ace213eadb5 100644
+--- a/t/t_gof_staging_leaks.cpp
++++ b/t/t_gof_staging_leaks.cpp
+@@ -197,7 +197,7 @@ TEST_CASE("real gof staging repeated free and reacquire is allocation-neutral",
+ // ---------------------------------------------------------------------------
+ 
+ TEST_CASE("prepare_for_dma rollback is allocation-neutral", "[gof][leak][fpga]") {
+-  auto* dev = (*pos_list_devices())[0];
++  auto* dev = pos_list_devices()->front();
+   gof_books books;
+   dma_alloc_checkpoint allocs;
+   auto g = std::make_shared<gof>(HEAD_SIZE);
+@@ -219,7 +219,7 @@ TEST_CASE("prepare_for_dma rollback is allocation-neutral", "[gof][leak][fpga]")
+ 
+ TEST_CASE("prepare_for_dma commit then manual completion is allocation-neutral",
+     "[gof][leak][fpga]") {
+-  auto* dev = (*pos_list_devices())[0];
++  auto* dev = pos_list_devices()->front();
+   gof_books books;
+   dma_alloc_checkpoint allocs;
+   auto g = std::make_shared<gof>(HEAD_SIZE);
+@@ -245,7 +245,7 @@ TEST_CASE("prepare_for_dma commit then manual completion is allocation-neutral",
+ 
+ TEST_CASE("real xfer completion frees staging and drops tracker gof pin",
+     "[dma_tracker][gof][leak][fpga]") {
+-  auto* dev = (*pos_list_devices())[0];
++  auto* dev = pos_list_devices()->front();
+   auto params = make_test_params();
+   auto sh = std::make_shared<shard>(dev, uint32_t{0}, uint32_t{1}, &params);
+   dma_tracker tracker(/*max_layers=*/1);
+@@ -263,8 +263,8 @@ TEST_CASE("real xfer completion frees staging and drops tracker gof pin",
+     auto guard = g->prepare_for_dma(N_KV_HEADS, HEAD_SIZE, 0, dev, books.pages);
+     auto last_v = sh->xfer_gof(*g, /*gof_in_shard=*/0, /*layer=*/0);
+     guard.commit();
+-    tracker.push(static_cast<uint32_t>(dev->idx),
+-        pending_xfer{last_v, sh, /*gof_in_shard=*/0, /*layer=*/0, g});
++    tracker.push(
++        dev->idx, pending_xfer{last_v, sh, /*gof_in_shard=*/0, /*layer=*/0, g});
+     g.reset();
+   }
+ 
+@@ -279,7 +279,7 @@ TEST_CASE("real xfer completion frees staging and drops tracker gof pin",
+ 
+ TEST_CASE("real completion frees staging while external gof owner survives",
+     "[dma_tracker][gof][leak][fpga]") {
+-  auto* dev = (*pos_list_devices())[0];
++  auto* dev = pos_list_devices()->front();
+   auto params = make_test_params();
+   auto sh = std::make_shared<shard>(dev, uint32_t{0}, uint32_t{1}, &params);
+   dma_tracker tracker(1);
+@@ -293,7 +293,7 @@ TEST_CASE("real completion frees staging while external gof owner survives",
+   auto guard = g->prepare_for_dma(N_KV_HEADS, HEAD_SIZE, 0, dev, books.pages);
+   auto last_v = sh->xfer_gof(*g, 0, 0);
+   guard.commit();
+-  tracker.push(static_cast<uint32_t>(dev->idx), pending_xfer{last_v, sh, 0, 0, g});
++  tracker.push(dev->idx, pending_xfer{last_v, sh, 0, 0, g});
+ 
+   poll_until_empty(tracker);
+ 
+@@ -342,8 +342,7 @@ TEST_CASE("real multi-device fanout does not leak gof staging or pins",
+       auto guard = g->prepare_for_dma(N_KV_HEADS, HEAD_SIZE, 0, sh->dev, books.pages);
+       auto last_v = sh->xfer_gof(*g, 0, 0);
+       guard.commit();
+-      tracker.push(
+-          static_cast<uint32_t>(sh->dev->idx), pending_xfer{last_v, sh, 0, 0, g});
++      tracker.push(sh->dev->idx, pending_xfer{last_v, sh, 0, 0, g});
+     }
+ 
+     CHECK(g->dma_inflight.load() == shards.size());
+@@ -362,7 +361,7 @@ TEST_CASE("real multi-device fanout does not leak gof staging or pins",
+ 
+ TEST_CASE("real clear drops tracker gof pin without retaining allocations",
+     "[dma_tracker][gof][leak][fpga]") {
+-  auto* dev = (*pos_list_devices())[0];
++  auto* dev = pos_list_devices()->front();
+   auto params = make_test_params();
+   auto sh = std::make_shared<shard>(dev, uint32_t{0}, uint32_t{1}, &params);
+   dma_tracker tracker(1);
+@@ -376,7 +375,7 @@ TEST_CASE("real clear drops tracker gof pin without retaining allocations",
+   auto guard = g->prepare_for_dma(N_KV_HEADS, HEAD_SIZE, 0, dev, books.pages);
+   auto last_v = sh->xfer_gof(*g, 0, 0);
+   guard.commit();
+-  tracker.push(static_cast<uint32_t>(dev->idx), pending_xfer{last_v, sh, 0, 0, g});
++  tracker.push(dev->idx, pending_xfer{last_v, sh, 0, 0, g});
+   REQUIRE(g.use_count() >= 2);  // local owner + tracker reference
+ 
+   tracker.clear();            // abandon: drops the reference; NOT completion proof
+@@ -398,7 +397,7 @@ TEST_CASE("real clear drops tracker gof pin without retaining allocations",
+ 
+ TEST_CASE(
+     "real staging churn long-run returns to baseline", "[gof][leak][fpga][.stress]") {
+-  auto* dev = (*pos_list_devices())[0];
++  auto* dev = pos_list_devices()->front();
+   auto params = make_test_params();
+   auto sh = std::make_shared<shard>(dev, uint32_t{0}, uint32_t{1}, &params);
+   dma_tracker tracker(1);
+@@ -425,8 +424,7 @@ TEST_CASE(
+         auto guard = g->prepare_for_dma(N_KV_HEADS, HEAD_SIZE, 0, dev, books.pages);
+         auto last_v = sh->xfer_gof(*g, 0, 0);
+         guard.commit();
+-        tracker.push(
+-            static_cast<uint32_t>(dev->idx), pending_xfer{last_v, sh, 0, 0, g});
++        tracker.push(dev->idx, pending_xfer{last_v, sh, 0, 0, g});
+         g.reset();
+       }
+       poll_until_empty(tracker);
+diff --git a/t/t_hwattention.cpp b/t/t_hwattention.cpp
+index ddd668a4fe5..1d439b49dfa 100644
+--- a/t/t_hwattention.cpp
++++ b/t/t_hwattention.cpp
+@@ -39,7 +39,7 @@ using namespace tron::hardware;
+ 
+ struct fixture {
+   device_mask devices;
+-  std::vector<PosDevice*> const& devlist;
++  indexed_vector<process_device_id, PosDevice*> const& devlist;
+   PosDevice* dev;
+ 
+   fixture()
+diff --git a/t/t_hwattention_2.cpp b/t/t_hwattention_2.cpp
+index bd4c9ce485a..7721a349f0b 100644
+--- a/t/t_hwattention_2.cpp
++++ b/t/t_hwattention_2.cpp
+@@ -60,7 +60,7 @@ struct gof_guard {
+ // tests share a consistent setup.
+ struct fixture {
+   device_mask devs;
+-  std::vector<PosDevice*> const& devlist;
++  indexed_vector<process_device_id, PosDevice*> const& devlist;
+   PosDevice* dev;
+   fixture()
+   : devs(hardware::get_devices())
+diff --git a/t/t_hwattention_batch.cpp b/t/t_hwattention_batch.cpp
+index 169279dd087..c07e946aacf 100644
+--- a/t/t_hwattention_batch.cpp
++++ b/t/t_hwattention_batch.cpp
+@@ -41,7 +41,7 @@ namespace {
+ 
+ struct fixture {
+   device_mask devs;
+-  std::vector<PosDevice*> const& devlist;
++  indexed_vector<process_device_id, PosDevice*> const& devlist;
+   PosDevice* dev;
+   fixture()
+   : devs(hardware::get_devices())
+diff --git a/t/t_hwattention_replay.cpp b/t/t_hwattention_replay.cpp
+index 3b5da06cd60..b27d53d6c63 100644
+--- a/t/t_hwattention_replay.cpp
++++ b/t/t_hwattention_replay.cpp
+@@ -36,7 +36,7 @@ using json = nlohmann::json;
+ 
+ struct fixture {
+   device_mask devices;
+-  std::vector<PosDevice*> const& devlist;
++  indexed_vector<process_device_id, PosDevice*> const& devlist;
+   PosDevice* dev;
+ 
+   fixture()
+diff --git a/t/t_newregs.cpp b/t/t_newregs.cpp
+index 4a5ddb9e093..8301739c2a5 100644
+--- a/t/t_newregs.cpp
++++ b/t/t_newregs.cpp
+@@ -18,7 +18,7 @@ using namespace tron::hardware;
+ 
+ struct fixture {
+   device_mask devices;
+-  std::vector<PosDevice*> const& devlist;
++  indexed_vector<process_device_id, PosDevice*> const& devlist;
+   PosDevice* dev;
+ 
+   fixture()
+diff --git a/t/t_phase1_integration.cpp b/t/t_phase1_integration.cpp
+index a615b48f01a..699a2ef7ff4 100644
+--- a/t/t_phase1_integration.cpp
++++ b/t/t_phase1_integration.cpp
+@@ -770,7 +770,7 @@ struct fake_device_guard {
+   PosDevice* dev;
+   fake_device_guard() {
+     dev = static_cast<PosDevice*>(std::calloc(1, sizeof(PosDevice)));
+-    dev->idx = 0;
++    dev->idx = tron::hardware::process_device_id{0};
+     dev->num_fetchers = 32;
+     devices.push_back(dev);
+   }
+diff --git a/t/t_weight_load_reuse.cpp b/t/t_weight_load_reuse.cpp
+index 03677417960..bb60409527d 100644
+--- a/t/t_weight_load_reuse.cpp
++++ b/t/t_weight_load_reuse.cpp
+@@ -45,7 +45,7 @@ namespace {
+ // FPGA fixture: binds to the first real device.
+ struct fixture {
+   device_mask devs;
+-  std::vector<PosDevice*> const& devlist;
++  indexed_vector<process_device_id, PosDevice*> const& devlist;
+   PosDevice* dev;
+   fixture()
+   : devs(hardware::get_devices())
+diff --git a/t/t_worker_unit.cpp b/t/t_worker_unit.cpp
+index 40c7f0cb70f..fb196658fb1 100644
+--- a/t/t_worker_unit.cpp
++++ b/t/t_worker_unit.cpp
+@@ -48,7 +48,7 @@ TEST_CASE("WCMD prepare window reserves whole-request headroom", "[worker]") {
+ TEST_CASE("weight_workers_ready requires both tx and rx workers", "[worker]") {
+   // See Note [Weight worker readiness]. Ready only when both workers are up;
+   // not-ready if either is down.
+-  PosDevice dev(0, 0, 0, 0, 0, 0);
++  PosDevice dev(tron::hardware::process_device_id{0}, 0, 0, 0, 0, 0);
+ 
+   // The constructor leaves both workers not-ready.
+   REQUIRE(dev.tx_worker_ready == false);

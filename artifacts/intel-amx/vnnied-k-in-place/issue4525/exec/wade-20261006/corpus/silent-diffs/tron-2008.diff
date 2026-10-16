@@ -1,0 +1,122 @@
+diff --git a/h/pos/hwattention.hpp b/h/pos/hwattention.hpp
+index 80ee9ee5a82..b331519fa67 100644
+--- a/h/pos/hwattention.hpp
++++ b/h/pos/hwattention.hpp
+@@ -676,7 +676,11 @@ inline std::pair<uint32_t, uint32_t> xfer_k_entry(bf16** k_locations_in,
+             input_ptr, xferlen, true, false);
+     end_desc = last_desc_index;
+     curr_desc = curr_consumed_head;
++    // as a workaround for DMA/NOC issue, we wait for DMA to signal done, then we
++    // perform a readback check on the last bits of data written
+     if (head + 1 == n_kvheads) {
++      // temporarily block here for testing purposes
++      wait_for_xfer_blocks(dev, dev->load_weight_q, end_desc, curr_desc);
+       wait_for_hbm_kwrite_complete(
+           fpga_index, fetcher, hbm_addr_for_head, input_ptr, head_size);
+     }
+@@ -754,12 +758,14 @@ inline std::pair<uint32_t, uint32_t> xfer_v_entry(bf16** v_locations_in,
+               input_ptr, per_fetcher_len, true, false);
+       end_desc = last_desc_index;
+       curr_desc = curr_consumed_head;
+-      // wait after every transfer for now. This is needed to work around a chip hang
+-      // and should be reduced once we have an updated bitfile.
+-      wait_for_hbm_vwrite_complete(fpga_index, pdc, position, adjusted_hbm_addr,
+-          v_hwblock->positions, per_fetcher_len, layer);
+     }
+   }
++  // Due to DMA/NOC chip-hang issue we are doing our wait at this point, and before the
++  // readback wait is run
++  wait_for_xfer_blocks(dev, dev->load_weight_q, end_desc, curr_desc);
++  // we always end on pdc 31
++  wait_for_hbm_vwrite_complete(fpga_index, 31, position, adjusted_hbm_addr,
++      v_hwblock->positions, per_fetcher_len, layer);
+ 
+   return std::make_pair(end_desc, curr_desc);
+ }
+@@ -797,18 +803,17 @@ inline void xfer_v_entry_blocking(bf16** v_locations_in,
+   // (void*)vblock->positions[0][0], vblock->debug_string());
+ 
+   // save this off to all devices
+-  PosDevice* dev;
+   for (size_t idx = 0; idx < get_num_devices(); idx++) {
+     uint64_t hbm_addr = get_hw_page_addr(position, layer, hwkv->hw_v_map[layer][idx]);
+     // spdlog::debug("saving hw v cache for token {} layer {} device {} to  page at
+     // {:016x}", position, layer, idx, hbm_addr);
+ 
+-    dev = devices[idx];
+     std::tie(end_desc, curr_desc) = xfer_v_entry(
+         v_locations_in, vblock, position, n_kvheads, idx, hbm_addr, head_size, layer);
+   }
+-
+-  wait_for_xfer_blocks(dev, dev->load_weight_q, end_desc, curr_desc);
++  // as a workaround for DMA/NOC issue, we are currently performing our wait one layer
++  // down inside the xfer function itself.
++  // wait_for_xfer_blocks(dev, dev->load_weight_q, end_desc, curr_desc);
+ }
+ 
+ // test version will stream kv entries to all fpgas in the instance,
+@@ -830,17 +835,16 @@ inline void xfer_k_entry_blocking(bf16** k_locations_in,
+   // kblock->debug_string());
+ 
+   // save this off to all devices
+-  PosDevice* dev;
+   for (size_t idx = 0; idx < get_num_devices(); idx++) {
+     uint64_t hbm_addr = get_hw_page_addr(position, layer, hwkv->hw_k_map[layer][idx]);
+     // spdlog::debug("saving hw k cache for tok {} layer {} device {} to page at
+     // {:016x}", position, layer, idx, hbm_addr);
+-    dev = devices[idx];
+     std::tie(end_desc, curr_desc) = xfer_k_entry(
+         k_locations_in, kblock, position, n_kvheads, idx, hbm_addr, head_size, layer);
+   }
+-
+-  wait_for_xfer_blocks(dev, dev->load_weight_q, end_desc, curr_desc);
++  // As a workaround for a DMA/NOC issue, we are currently performing the wait one layer
++  // down inside the xfer function itself.
++  // wait_for_xfer_blocks(dev, dev->load_weight_q, end_desc, curr_desc);
+ }
+ 
+ /**
+diff --git a/src/pos/worker.cpp b/src/pos/worker.cpp
+index db9421f4587..a0c74841f4a 100644
+--- a/src/pos/worker.cpp
++++ b/src/pos/worker.cpp
+@@ -989,10 +989,10 @@ inline void prepare_hwattn_cmds(PosDevice* dev,
+     // page_offset +=
+ 
+     // Debug output
+-    dbg_hwattn_cmds_log(
+-        "prepare_hwattn_cmds: acmd_len {} req_id {} tok_ix {} layer {} at index{} (num_acmds {}) {}",
+-        acmd_len, workreq->request_id, workreq->tok_ix, workreq->layer, metadata_tail, num_acmds,
+-        metadata.debug_string());
++    dbg_hwattn_cmds_log("prepare_hwattn_cmds: acmd_len {} req_id {} tok_ix {} layer {} "
++                        "at index{} (num_acmds {}) {}",
++        acmd_len, workreq->request_id, workreq->tok_ix, workreq->layer, metadata_tail,
++        num_acmds, metadata.debug_string());
+ 
+     dev->prepare_mdwd_tail = ++metadata_tail;
+ 
+diff --git a/t/t_hwattention.cpp b/t/t_hwattention.cpp
+index 32a2031fc8d..569524c95e2 100644
+--- a/t/t_hwattention.cpp
++++ b/t/t_hwattention.cpp
+@@ -1153,9 +1153,8 @@ TEST_CASE_METHOD(fixture,
+   static const size_t gqa = 4;
+   static const size_t n_kv_heads = n_heads / gqa;
+   static const size_t head_size = 128;
+-  static size_t num_tokens = 512; // for MIN_TOK 385
+-  if (hardware::MIN_TOK_FOR_HWATTN < 385)
+-    num_tokens = 144; // for testing MIN_TOK 129
++  static size_t num_tokens = 512;                            // for MIN_TOK 385
++  if (hardware::MIN_TOK_FOR_HWATTN < 385) num_tokens = 144;  // for testing MIN_TOK 129
+ 
+   uint64_t res_elements = expected_num_results * dev->rmem_width;  // 32
+   uint64_t res_bytes = res_elements * sizeof(bf16);
+@@ -1243,7 +1242,7 @@ TEST_CASE_METHOD(fixture,
+       if (*v_el != bf16(WEIGHT_VALUE)) {
+         spdlog::debug("V MISMATCH Fetcher {} element {} @{} mismatch.  {}!={}", pdc, el,
+             (void*)v_el, *v_el, WEIGHT_VALUE);
+-            // for V here make sure we account for the %4 at the tail end!
++        // for V here make sure we account for the %4 at the tail end!
+         fv_mm++;
+       }
+       k_el++;

@@ -1,0 +1,181 @@
+diff --git a/h/common/fixed_string.hpp b/h/common/fixed_string.hpp
+new file mode 100644
+index 00000000000..d9b1132cc7a
+--- /dev/null
++++ b/h/common/fixed_string.hpp
+@@ -0,0 +1,27 @@
++#pragma once
++
++#include <cstddef>
++
++namespace tron {
++
++// A compile-time string usable as a non-type template parameter. Enables
++// passing a string literal as a template argument so downstream code can
++// derive `constexpr` artefacts (e.g. per-instance debug labels) without
++// any runtime allocation. Construct directly from a string literal:
++// `template <fixed_string Name> struct X { ... };  X<"foo"> x;`
++template <std::size_t N>
++struct fixed_string {
++  char data[N]{};
++  constexpr fixed_string(const char (&s)[N]) {
++    for (std::size_t i = 0; i < N; ++i)
++      data[i] = s[i];
++  }
++  constexpr const char* c_str() const {
++    return data;
++  }
++  static constexpr std::size_t size = N - 1;  // excludes terminating null
++};
++template <std::size_t N>
++fixed_string(const char (&)[N]) -> fixed_string<N>;
++
++}  // namespace tron
+diff --git a/h/tron/models/feed_forward.hpp b/h/tron/models/feed_forward.hpp
+index a5421604f81..d520f2b4ede 100644
+--- a/h/tron/models/feed_forward.hpp
++++ b/h/tron/models/feed_forward.hpp
+@@ -218,18 +218,21 @@ struct mixture_of_experts {
+     // Routing (rebuilt each forward pass, holds const ref to per_token_routing)
+     std::optional<routing_t> routing;
+ 
+-    expert_matmul_launcher<typename model::w1_t::launch_matmul,
++    expert_matmul_launcher<"w1",
++        typename model::w1_t::launch_matmul,
+         n_routed_experts,
+         n_routed_experts_chosen>
+-        w1_mm{"w1"};
+-    expert_matmul_launcher<typename model::w3_t::launch_matmul,
++        w1_mm;
++    expert_matmul_launcher<"w3",
++        typename model::w3_t::launch_matmul,
+         n_routed_experts,
+         n_routed_experts_chosen>
+-        w3_mm{"w3"};
+-    expert_matmul_launcher<typename model::w2_t::launch_matmul,
++        w3_mm;
++    expert_matmul_launcher<"w2",
++        typename model::w2_t::launch_matmul,
+         n_routed_experts,
+         n_routed_experts_chosen>
+-        w2_mm{"w2"};
++        w2_mm;
+ 
+     model::state* enclosing_state;
+ 
+diff --git a/h/tron/models/mixture_of_experts.hpp b/h/tron/models/mixture_of_experts.hpp
+index 647bfcc98f7..a44f4d186da 100644
+--- a/h/tron/models/mixture_of_experts.hpp
++++ b/h/tron/models/mixture_of_experts.hpp
+@@ -5,8 +5,10 @@
+ #include <random>
+ #include <span>
+ 
++#include <spdlog/fmt/bundled/compile.h>
+ #include <spdlog/fmt/ranges.h>
+ 
++#include "common/fixed_string.hpp"
+ #include "common/indexed.hpp"
+ #include "tron/hardware/callbacks.hpp"
+ #include "tron/hardware/permuted.hpp"
+@@ -315,7 +317,7 @@ struct expert_weights {
+               outs, tokens.size()),
+           lambda_views<decltype(acts), scalar_t, true, is_dma, seq<DYN_SIZE, in_dim>>(
+               acts, tokens.size()),
+-          launcher.launcher[expert], act_ready, launcher.expert_names[expert].c_str());
++          launcher.launcher[expert], act_ready, launcher.expert_names[expert.i]);
+       (*this)[expert].prepare_matmul(launcher.launcher[expert]);
+     }
+   }
+@@ -374,29 +376,53 @@ struct expert_weights {
+               outs, tokens.size()),
+           lambda_views<decltype(acts), scalar_t, true, is_dma, seq<DYN_SIZE, in_dim>>(
+               acts, tokens.size()),
+-          launcher.launcher[expert], act_ready, launcher.expert_names[expert].c_str());
++          launcher.launcher[expert], act_ready, launcher.expert_names[expert.i]);
+       (*this)[expert].prepare_and_launch_matmul(launcher.launcher[expert], shared_done);
+     }
+   }
+ };
+ 
++namespace expert_label_detail {
++// Compile-time storage for "<Base>[expert <I>]\0". `value.data()` has
++// program lifetime.
++template <fixed_string Base, size_t I>
++struct one {
++  static constexpr auto fmt_str = FMT_COMPILE("{} [expert {}]");
++  static constexpr size_t size = fmt::formatted_size(fmt_str, Base.c_str(), I) + 1;
++  static constexpr auto value = []() {
++    std::array<char, size> a{};
++    auto end = fmt::format_to(a.data(), fmt_str, Base.c_str(), I);
++    *end = '\0';
++    return a;
++  }();
++};
++
++template <fixed_string Base, size_t N, size_t... Is>
++constexpr std::array<const char*, N> make_table(std::index_sequence<Is...>) {
++  return {one<Base, Is>::value.data()...};
++}
++}  // namespace expert_label_detail
++
++// Compile-time table of `const char*` labels, one per expert, with
++// program-lifetime storage.
++template <fixed_string Base, size_t N>
++inline constexpr auto expert_labels =
++    expert_label_detail::make_table<Base, N>(std::make_index_sequence<N>{});
++
+ // Manages per-expert matmul launchers. Lives on state to persist launcher
+ // state across async matmul execution.
+-template <typename launch_matmul_t,
++template <fixed_string Name,
++    typename launch_matmul_t,
+     size_t n_routed_experts,
+     size_t n_routed_experts_chosen>
+ struct expert_matmul_launcher {
+   using routing_t = moe_routing<n_routed_experts, n_routed_experts_chosen>;
+ 
+   indexed_vector<expert_id, launch_matmul_t> launcher;
+-  // Per-expert debug labels.
+-  indexed_vector<expert_id, std::string> expert_names;
++  static constexpr auto expert_names = expert_labels<Name, n_routed_experts>;
+ 
+-  expert_matmul_launcher(std::string name) {
++  expert_matmul_launcher() {
+     launcher.resize(n_routed_experts);
+-    expert_names.resize(n_routed_experts);
+-    for (size_t i = 0; i < n_routed_experts; ++i)
+-      expert_names[expert_id(i)] = fmt::format("{}[expert {}]", name, i);
+   }
+ 
+   // Launch all expert matmuls. Callback fires once after all experts complete.
+diff --git a/ingest/src/TronCpp.hs b/ingest/src/TronCpp.hs
+index adb37a085e7..aca8c4e5cbd 100644
+--- a/ingest/src/TronCpp.hs
++++ b/ingest/src/TronCpp.hs
+@@ -1851,21 +1851,21 @@ findBufferForChannel env channelName =
+ 
+ -- | Generates the C++ type definition for a launcher field.
+ -- As described in Note [Expert matmuls], MoE launchers generate
+--- expert_matmul_launcher<typename T::launch_matmul, N, K> whereas
++-- expert_matmul_launcher<"name", typename T::launch_matmul, N, K> whereas
+ -- regular launchers result in T::launch_matmul_for<BufferTypes...>.
+ launcherField :: (Name Launcher, LauncherInfo) -> Field
+ launcherField (launcherName, LauncherInfo shape (Just (MoeLauncherInfo n k)) _) =
+-  -- MoE: expert_matmul_launcher<typename PerExpertTensor::launch_matmul, N, K>.
+   let perExpertTy = expertTensorTypeFromShape (drop 1 shape)
+       launchTy = TypenameType $ NamespacedType perExpertTy "launch_matmul"
+       emtTy =
+         TemplateType
+           "expert_matmul_launcher"
+-          [ launchTy
++          [ ExprType (LiteralExpr (StringLit $ show launcherName))
++          , launchTy
+           , ExprType (LiteralExpr (IntLit $ fromIntegral n))
+           , ExprType (LiteralExpr (IntLit $ fromIntegral k))
+           ]
+-   in FieldBraceInit emtTy (asCpp launcherName) (LiteralExpr (StringLit $ show launcherName))
++   in Field emtTy (asCpp launcherName)
+ launcherField (launcherName, LauncherInfo shape Nothing _) =
+   -- Regular launcher: T::launch_matmul_for<BufferTypes...>
+   let baseTy = TemplateType launchMatmulFor $ map batchTensorType shape

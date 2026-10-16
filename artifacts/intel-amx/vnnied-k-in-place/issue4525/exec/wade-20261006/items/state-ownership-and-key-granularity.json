@@ -1,0 +1,203 @@
+{
+ "label": "state-ownership-and-key-granularity",
+ "name": "One logical record or gated subsystem is written or called from two sites, a table key is unstable across forwards, or a classification is decided at the wrong granularity for production batching",
+ "description": "What breaks: half-filled, mixed or misattributed state. forwards/wall_cycles written by full_scheduler while token_jobs/fpga_queries come from model::run_forward, so another caller of state.forward leaves the record inconsistent (4125033653 'Any other caller of state.forward(...) gives forwards == 0 next to nonzero token_jobs'); gof_on_save_k/v called unconditionally while gof_configure is gated by a model-shape condition (2948090978 'we should be consistent'); per-worker rows sized by the pool (27) but indexed by attention-worker index (20) so a row mixes threads across forwards (4125033686); a forward class decided per forward so under rinzler continuous batching most decode attention lands in prompt_or_mixed, which the runtron validation cannot show (4125033664). Procedure: for every struct or counter set the diff writes, list every writer and check one function owns the record; for every gated subsystem list all calls into it and compare their guards with the configure call's guard; for every table keyed by an index check the index maps to the same thread/core in every forward; for every whole-batch predicate validated only under runtron ask how rinzler's mixed forwards land. Design concerns are posed as a question with two alternatives ('was keying by attention index deliberate, or key by pool worker index ... or record n_attn_workers per forward?').",
+ "disposition": "add_new",
+ "existing_check": null,
+ "disposition_reason": "No existing check enumerates writers of a record or compares gates across call sites; 4 rows over 2 PRs meets the threshold.",
+ "count": 4,
+ "prs_spanned": 2,
+ "representative_ids": [
+  4125033653,
+  4125033686,
+  4125033664,
+  2948090978
+ ],
+ "evidence_needed": [
+  "hunk",
+  "full_file",
+  "other_file",
+  "callers",
+  "pr_body",
+  "runtime_behavior"
+ ],
+ "agent_feasibility": "yes for writer enumeration, gate comparison and size-vs-index mismatch; the continuous-batching granularity question needs domain knowledge of rinzler batching.",
+ "members": [
+  {
+   "id": 2948090978,
+   "pr": "tron-2176",
+   "kind": "inline",
+   "path": "h/tron/models/model.hpp",
+   "is_reply": true,
+   "concern": "Endorsing the cursor bot finding that gof_on_save_k/v are called unconditionally while gof_configure is gated by a compile-time model-shape condition, Wade asks for consistent gating and says the author's earlier observer-callback mechanism (kv_save_observer_t) achieved that cleanly.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "feature-gate-applied-inconsistently-across-call-sites",
+   "detection": {
+    "trigger": "The diff replaces a registered callback (std::function vector iterated in a loop) with a direct call into a subsystem whose initialization elsewhere is guarded by an `if constexpr` or runtime condition.",
+    "procedure": "For the direct callee (gof_on_save_k), grep the file for the condition that guards the subsystem's configure call (`if constexpr (head_size == 128 && n_kv_heads <= 32)`); list every call site of the subsystem in the diff and record whether each sits under the same guard; read the callee to see what it does when the subsystem is unconfigured (gof_n_layers == 0, division by it).",
+    "question": "Is every call into the gated subsystem under the same condition as its configure call, or can an ungated call run with the subsystem unconfigured?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file",
+    "other_file"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "good point... if we are going to conditionally use the HW KV-tree/GoF stuff based on acceptable model parameters, we should be consistent. I think your original `kv_save_observer_t` was a pretty slick way to achieve that",
+   "reviewable_by_agent": "yes",
+   "note": "Reply to cursor[bot] 'Unconditional gof_on_save calls without configuration guard' (division by zero at key / gof_max_layers()). Outcome: commit 'Restore observer pattern for flush_partial, await_dma, and forward_poll'; at 8e19ea3e62 model.hpp:792-810 registers on_save_k/on_save_v/on_flush_partial/on_await_dma/on_forward_poll inside the if constexpr block and model.hpp:1453 iterates on_save_k. Pattern: Wade amplifies a bot finding and adds the design preference (keep the observer indirection as the gating mechanism)."
+  },
+  {
+   "id": 4125033653,
+   "pr": "positron-ai/tron#4596",
+   "kind": "inline",
+   "path": "h/tron/scheduler/full.hpp",
+   "is_reply": false,
+   "concern": "The per-forward record is written from two sites (forwards/wall_cycles from full_scheduler around state.forward, token_jobs/fpga_queries from model::run_forward via begin_forward/end_forward), so any other caller of state.forward gets an inconsistent record (forwards 0 next to nonzero token_jobs) and note_forward_wall silently depends on current_class set elsewhere; one site should own the record.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "one-record-written-from-two-sites",
+   "detection": {
+    "trigger": "The diff adds writes to one logical record (struct, row, counter set) from two different functions or layers (e.g. a scheduler and the model), especially a begin/end pair in one place and a wall-time stamp in another.",
+    "procedure": "List every field of the record and the function that writes each (grep the record's member names at HEAD). If writers sit in different files or layers, list every caller of the inner function (`git grep -n 'state.forward(\\|\\.forward(' HEAD -- h src t`) and check which callers reach the outer writer. Check whether an inner writer reads state (current_class) that only the outer or an earlier writer sets.",
+    "question": "Can any caller reach one writer of the record without the other, leaving the record half filled or filed under a stale class?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file",
+    "callers"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "Any other caller of `state.forward(...)` (another scheduler, a test harness, a draft path) gives `forwards == 0` next to nonzero `token_jobs`. `note_forward_wall` also relies on `current_class` having been set by `begin_forward` inside the forward.",
+   "reviewable_by_agent": "yes",
+   "note": "Verified at 1430736b2a: full.hpp:2093-2100 (attn_stats_enabled, rdtsc, state.forward, note_forward_wall) and model.hpp:1745-1750 (begin_forward/end_forward). Remedy offered as two options ('own T1 inside run_forward, or wrap begin/end/wall in one scoped helper'). Author took option 2: a forward_scope RAII object constructed at the top of model::state::forward (commit b6fd226982)."
+  },
+  {
+   "id": 4125033686,
+   "pr": "positron-ai/tron#4596",
+   "kind": "inline",
+   "path": "h/tron/models/self_attention.hpp",
+   "is_reply": false,
+   "concern": "Design question: the per-worker rows are sized by the whole app pool (attn.size(), 27) but indexed by attention-worker index (0..n_attn_workers, 20), so rows exist for workers that never do attention, end_forward loops over all pool workers per token job on the main thread, and when n_attn_workers changes between forwards one row mixes different threads/cores; was keying by attention index deliberate, or key by pool worker index (stable per thread) or record n_attn_workers per forward?",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "row-key-unstable-across-forwards",
+   "detection": {
+    "trigger": "The diff adds a per-worker (per-thread, per-core) table sized by one count (pool size) and indexed by another (attention worker index), or indexed by a value that a per-forward decision (the main-helper/attention split) can change.",
+    "procedure": "Find the table's size expression and every index expression that writes it (grep the member name at HEAD). Find where the index is defined and whether it is relative to a per-forward value (grep `n_attn_workers`, `recommend_n_main_helpers`, the Note on attention workers being the last pool workers in model.hpp). Count the leaves or rows the sizing exposes vs the rows that can receive data. Check the fold over the table (end_forward) for its loop bounds and the thread it runs on.",
+    "question": "Does the same row index refer to the same thread/core in every forward, and are rows and loops sized to the set that can actually receive data?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file",
+    "other_file",
+    "pr_body"
+   ],
+   "form": "question",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "If `n_attn_workers` changes between forwards, attention worker `W` maps to a different pool thread (`num_workers() - n_attn_workers + W`), so a per-worker row mixes cores over the run.",
+   "reviewable_by_agent": "yes",
+   "note": "The 27 and 20 come from the PR body's sample run (n_workers 27, active_workers). Wade lists three concrete consequences as bullets before the question and offers two remedies plus a fallback (record n_attn_workers per forward). Author re-keyed rows by pool worker index, the index the per-worker speed estimator and perfetto already use, and moved T3/T4 to a per-(class, layer) struct (commit bff317e0d3)."
+  },
+  {
+   "id": 4125033664,
+   "pr": "positron-ai/tron#4596",
+   "kind": "inline",
+   "path": "h/tron/models/model.hpp",
+   "is_reply": false,
+   "concern": "Design question: the forward class (decode_like vs prompt_or_mixed) is decided per forward, so under rinzler's continuous batching (prompt chunks of one user share a forward with the generated tokens of all others) most decode attention lands in prompt_or_mixed, and the runtron validation could not show this; was that deliberate, is a per-token-job tag nearly free, and if per-forward stays, should the README say decode_like means pure-decode forwards only?",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "classification-granularity-vs-serving-reality",
+   "detection": {
+    "trigger": "The diff adds a classification or bucket decided by one condition over a whole batch/forward (`n_listeners == token_jobs.size()`, 'every job has X') and the PR body's validation ran only under a tool (runtron) whose batches are homogeneous.",
+    "procedure": "Read how the production server composes a forward (continuous batching in rinzler: does one forward carry prompt chunks of one user next to decode tokens of others? grep the scheduler for where token jobs of different users join one forward). Ask whether the whole-batch condition fails for the common production batch. Check whether the per-element information (listener per token job) is already available where the per-element work is counted (apply_page_range), so a finer key would be cheap. Check the README for the exact meaning of the bucket name.",
+    "question": "Under the production batching, does the whole-forward condition put the common case (decode tokens in a mixed forward) into the bucket a reader will misread, and is a per-element key available at the counting site?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file",
+    "pr_body",
+    "runtime_behavior"
+   ],
+   "form": "question",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "Under rinzler continuous batching, most forwards that carry any prefill chunk are mixed, so `decode_like` would show only the pure-decode forwards and misattribute most decode attention. The runtron validation can't show this because prefill and decode forwards are separate there.",
+   "reviewable_by_agent": "needs_domain",
+   "note": "Wade needed knowledge of how rinzler (the production server) batches users across forwards and that runtron (the command-line tool) does not mix prompt and decode; the second half (is per-token tagging cheap) is code-readable: he points at the `stats_enabled` hoist in apply_page_range as the place to hoist a per-q_batch class. Form: question with two alternatives plus a documentation fallback. Author kept per-forward granularity (deliberate) and added the README sentence plus a listeners count per forward (commit ae8a6d38d9)."
+  }
+ ],
+ "missing_member_ids": [],
+ "codex_bullets": [
+  {
+   "id": "C8",
+   "bullet": "Check that batching or fanout does not repeat a whole gather for each fragment or rebuild the same staging data for each consumer. Use an explicit workload classification when a count threshold confuses decode work with prefill work.",
+   "pick_up": "yes",
+   "reason": "Three Wade comments (PRs 4128, 4596) plus the 4128 paste. The second sentence (count threshold vs explicit classification) appears twice (4128 budget, 4596 forward class) and is the general part worth adopting; the gather sentence is PR 4128 specific.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C12",
+   "bullet": "Consider the cost of diagnostics too: enabled trace categories, buffer capacity, polling, assertions, and aggregation can affect the path they measure.",
+   "pick_up": "yes",
+   "reason": "Four comments (PRs 3016, 4128, 2148, 4596) on the cost of logging, asserts and stats folds. No Claude check.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C22",
+   "bullet": "Map each counter or timer to all promised execution paths, including software-only, hardware, mixed, and alternate callers. A zero can mean an uninstrumented path rather than no work.",
+   "pick_up": "yes",
+   "reason": "Three comments (PRs 4596, 2766). The 4596 review is the only counters PR in the corpus, so the count is low but the finding was his headline item there.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C23",
+   "bullet": "Give one place responsibility for a complete operation record, or prove the split producers stay paired on every call path. Check begin/end, reset, aggregation, and publication together.",
+   "pick_up": "yes",
+   "reason": "Three comments (PRs 4596, 2287). No Claude check on paired producers or reset.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C24",
+   "bullet": "Define the unit being counted and the classification granularity. A forward containing prefill and decode work cannot establish decode-only behavior unless that limitation is explicit.",
+   "pick_up": "yes",
+   "reason": "One strong comment (4596) and two weaker naming checks (3490, 2980). The second sentence is PR 4596 specific; adopt the first sentence only.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C25",
+   "bullet": "Use stable worker or device identity for cumulative rows. Distinguish a pool thread from its temporary role. Verify exported names, debug strings, and documentation against the actual index.",
+   "pick_up": "yes",
+   "reason": "Four comments (PRs 4596, 2980). The third sentence (exported names vs actual index) has two independent hits.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C39",
+   "bullet": "For a design question, state the tradeoff and preserve a deliberate staged limitation.",
+   "pick_up": "already",
+   "reason": "Five comments (PRs 4596, 4557, 2777, 2176). Already in the Claude skill.",
+   "claude_skill_coverage": "covered (How Wade words: \"A design concern is a question with two alternatives\"; check 6: \"preserve a deliberate staged limitation\")"
+  },
+  {
+   "id": "C58",
+   "bullet": "For every metric, write its unit and scope, then locate all writers and readers. Check software, hardware, mixed, and alternate entry paths. Trace reset, begin, end, aggregation, and publication. Check row identity stays stable when workers change roles. Verify trace categories and event rates fit the capture buffer.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 4596, 2287, 3016), plus 3406007619 on atomics for the FUSE reader thread. Procedure form of C22, C23, C25; adopt as one instrumentation check.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C59",
+   "bullet": "If the code measures a narrower scope than the documentation promises, offer either implementing the missing measurement or narrowing the claim. Do not require a new instrumentation design when the author explicitly accepts the narrower scope.",
+   "pick_up": "already",
+   "reason": "Two comments (PR 4596). The both-repairs rule is already in the Claude skill; the second sentence is author-side guidance from the 4596 round.",
+   "claude_skill_coverage": "partial (How Wade words: \"Every text-versus-code mismatch offers both repairs\")"
+  }
+ ]
+}

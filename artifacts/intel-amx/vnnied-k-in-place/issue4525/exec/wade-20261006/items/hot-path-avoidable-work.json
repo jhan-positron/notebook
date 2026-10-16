@@ -1,0 +1,189 @@
+{
+ "label": "hot-path-avoidable-work",
+ "name": "Per-call allocation, zeroing, sorting, repeated gathers, duplicated asserts or unconditional eviction added on a per-token, per-layer or spin path",
+ "description": "What breaks: throughput. xfer_gofs runs about 4608 times per 4096-token prefill and adds a 128 KiB memset the loops overwrite, six heap vectors where the singleton sibling uses stack arrays, a std::sort emission order makes unnecessary, and a piece-major gather calling v_head_fn 32x more (3907183627); drain helpers construct and reserve a vector before the empty check inside a spin loop, and a TRON_ASSERT re-evaluates 8 std::function calls the caller already asserted (3907185740); ns_to_cycles paid on every entry before the `0 == wait_cycles` indefinite-wait branch (3350064944 'check for the else if (0 == wait_cycles) case first?'); free_staging_if_idle releases and rebuilds the same GOF buffers with no hysteresis (4674512577 'I'm always concerned with performance'). Procedure: identify functions on prefill/decode/spin paths (callers from token or layer loops); in added lines list heap containers, whole-buffer fills, sorts, nested gathers, asserts duplicating the caller's, and computations before a branch that does not need them; compare with the singleton sibling on the same path; for added frees on a counter reaching zero ask what steady-state pattern re-pays the rebuild. Since 2026-07 he sometimes has Claude word the perf concern and pastes it.",
+ "disposition": "add_new",
+ "existing_check": null,
+ "disposition_reason": "No existing check reads for cost on a hot path; 4 rows over 3 PRs.",
+ "count": 4,
+ "prs_spanned": 3,
+ "representative_ids": [
+  3907183627,
+  3907185740,
+  3350064944,
+  4674512577
+ ],
+ "evidence_needed": [
+  "full_file",
+  "other_file",
+  "callers",
+  "perf_knowledge",
+  "pr_body"
+ ],
+ "agent_feasibility": "yes for the static pattern scan and sibling comparison; sizing the cost needs call-frequency knowledge or a trace.",
+ "members": [
+  {
+   "id": 3907183627,
+   "pr": "positron-ai/tron#4128",
+   "kind": "inline",
+   "path": "src/tron/gof.cpp",
+   "is_reply": false,
+   "concern": "xfer_gofs (the new batched GOF transfer function) runs about 4608 times per long prefill and does avoidable per-call work: a memset of up to 128 KiB the populate loops overwrite anyway, six heap vectors where the sibling single-GOF function uses stack arrays, a std::sort that order-of-emission makes unnecessary, and a piece-major V gather that calls v_head_fn 32x more than the path it replaces while widening a pre-existing cross-layer v_buf race.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "perf-avoidable-alloc-on-hot-path",
+   "detection": {
+    "trigger": "A new function on a per-token or per-layer path (called from prefill/decode loops) contains heap containers (std::vector), a whole-buffer memset/fill, a std::sort, or a nested loop that re-runs a gather per inner element, where a sibling function on the same path uses fixed arrays or does the gather once.",
+    "procedure": "Find the callers of the new function (grep its name in src/ and h/) and count calls per forward pass from the loop structure (layers x GOFs). Inside the function list every std::vector, memset/std::fill, std::sort and lambda call inside a loop. For each, read the sibling function that handled the singleton case (xfer_gof, gof::populate) and compare: fixed std::array bounded by a constant, zeroing limited to padded regions, order-by-construction instead of sort, gather once per (pos,head). For a shared scratch (v_buf) check what key it is indexed by versus the key of the busy flag (staging_busy) and name the race window.",
+    "question": "Does the hot-path function do per-call work (allocation, zeroing, sorting, repeated gathers) that its singleton sibling already avoids with bounded stack storage and emission order?"
+   },
+   "evidence_read": [
+    "full_file",
+    "other_file",
+    "callers",
+    "perf_knowledge"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "xfer_gofs does some avoidable per-call work on the prefill critical path (a 4096-token 36-layer prefill runs this ~4608 times):",
+   "reviewable_by_agent": "yes",
+   "note": "Wade computed 4096/128 tokens... x 36 layers = 4608 calls and ~576 MB dead stores (4608 x 128 KiB) - arithmetic from the hunk plus the constants. Also names the exact sibling helper (shuffle_v_entry_padded) and the 1024-vs-32 gather count. Secondary pattern in the same comment: shared-scratch-race-widened (v_buf keyed per gal/position but staging_busy keyed per gal/layer). Head 7f80aa17da evidence: gof.cpp:249-252 std::array<...,max_specs> bases/fetchers/qdatas/qlens, comment at :244-247 'without a sort or generic coalescing pass', std::fill only on padded regions (:294,:300,:323), no memset. So all three bullets were adopted."
+  },
+  {
+   "id": 3907185740,
+   "pr": "positron-ai/tron#4128",
+   "kind": "inline",
+   "path": "h/tron/models/model.hpp",
+   "is_reply": false,
+   "concern": "The decode drain helpers help_drain_gof and wait_for_coop_gof construct and reserve a std::vector before checking whether the queue is empty, adding a malloc/free per spin iteration per worker per layer per token where the old code allocated nothing; gof_rodeo_impl_batch repeats an assert fire_gof_rodeo already made (TRON_ASSERT is live in release, 8 std::function calls instead of 4); and the prompt-sized-pass predicate counts token jobs, so a decode pass with 32 or more sessions gets the escalated budget at the pre-barrier idle point.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "perf-avoidable-alloc-on-hot-path",
+   "detection": {
+    "trigger": "A diff replaces a zero-allocation loop (try_dequeue into a local) with a container that is allocated before the empty check, in a function called from a spin-wait or per-token path; or a diff adds a TRON_ASSERT that re-evaluates a callback already asserted by the caller on identical inputs; or a comment says 'generation keeps X' while the predicate tests a count that decode can also satisfy.",
+    "procedure": "grep the callers of help_drain_gof / wait_for_coop_gof (hw_q_released_layer spin, begin_attention_job) and state the call frequency. Compare the removed lines (gof_coop_task task; try_dequeue loop) with the added lines (std::vector constructed before try_dequeue). For the duplicated assert, follow fire_gof_rodeo into gof_rodeo_impl_batch and list the asserts on the same inputs; check whether TRON_ASSERT compiles into release builds. For the predicate, read the comment and compute which decode batch sizes make gof_jobs_span.size() >= hwkv_coalesce_tokens true.",
+    "question": "On the per-token spin path, does the new code allocate or re-assert where the old code did not, and does the budget predicate admit decode passes the comment says it excludes?"
+   },
+   "evidence_read": [
+    "full_file",
+    "callers",
+    "perf_knowledge"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "the std::vector<gof_coop_task> is constructed and reserved before checking whether the coop queue has anything. These run from the hw_q_released_layer spin and begin_attention_job \u2014 per worker, per layer, per decode token",
+   "reviewable_by_agent": "yes",
+   "note": "Three patterns in one comment: perf-avoidable-alloc-on-hot-path (primary), duplicate-assert-on-release-path (TRON_ASSERT stays in release, so cost is real), decode-budget-gated-on-token-count-not-pass-shape (also in 5498556672). He proposes the exact remedy: try-dequeue first, early-return on empty, fixed std::array bounded by max(4, coalesce_gofs). Head 7f80aa17da evidence: commit 'Replaced cooperative drain vectors with bounded std::array batches and immediate empty-queue exits in model.hpp'; hunk under 3960538961 shows std::array<gof_coop_task, drain_capacity> tasks; if (!try_dequeue(tasks[0])) return; and gof_prompt_sized_pass flag at model.hpp:1166; only one kv_complete_fn(layer) assert remains (model.hpp:3089)."
+  },
+  {
+   "id": 3350064944,
+   "pr": "tron-2903",
+   "kind": "inline",
+   "path": "src/system/mwaitx.cpp",
+   "is_reply": false,
+   "concern": "In monitor_and_wait (the mwaitx spin-wait helper) the new threshold computation calls ns_to_cycles on every entry, and Wade asks to test the `0 == wait_cycles` indefinite-wait case first so that callers who asked for an indefinite wait do not pay that cost.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "perf-extra-work-on-hot-path",
+   "detection": {
+    "trigger": "A hunk in a hot-path function (a wait, poll, enqueue or per-command routine) adds a computation (function call, division, static initializer) before a branch, and one branch of the following if/else chain does not need that computation.",
+    "procedure": "Read the whole function at HEAD. For each branch of the if/else chain after the added computation, check whether the branch uses the computed value. If a branch does not, and that branch is a common call pattern (grep callers for the special argument, here `wait_for_not_event(..., 0)` or timeout 0), propose reordering so the branch that does not need the value is tested first. Check whether the computation is `static const` (one-time init plus a guard check per call) versus per-call; state the actual per-call cost.",
+    "question": "Does a branch that runs without needing the newly added computation get evaluated only after that computation is paid?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file",
+    "perf_knowledge"
+   ],
+   "form": "question",
+   "severity": "nit",
+   "author_outcome": "accepted",
+   "quote": "this is maybe a nit... but it seems like we should check for the `else if (0 == wait_cycles)` case first? This change is forcing a call to `ns_to_cycles` every time through here now, even if the caller asked for an indefinite wait.",
+   "reviewable_by_agent": "yes",
+   "note": "Code fact at both 64ea13a671 and head b8739108f7 (src/system/mwaitx.cpp:112-124): `static const uint64_t mwaitx_min_cycles = ns_to_cycles(300) + 300;` then `if (wait_cycles > mwaitx_min_cycles) {...} else if (0 == wait_cycles) {...}`. Because the variable is `static const`, ns_to_cycles runs once per process, not every call; the per-call cost is the static-init guard check. Wade's 'every time' is an over-statement that nobody corrected. Author replied 'seems like a reasonable change'; Bill replied that ns_to_cycles could be made cheap and he would patch it. The branch order is unchanged at head b8739108f7, so the agreed change was not made in this PR."
+  },
+  {
+   "id": 4674512577,
+   "pr": "tron-2906",
+   "kind": "issue",
+   "path": null,
+   "is_reply": false,
+   "concern": "The staging-buffer free (free_staging_if_idle, which releases the GOF's two 8 KB host buffers whenever the in-flight DMA count reaches zero) is unconditional, so a workload that re-DMAs the same GOF repeatedly pays a full free + reallocate + repopulate (the 'swizzle', the data reordering into the hardware layout) each time with no hysteresis; he flags this as a possible performance regression to watch after merge.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "cache-evict-unconditional-no-hysteresis",
+   "detection": {
+    "trigger": "The diff adds a release/free of a reusable buffer or cache entry that fires on a counter reaching zero or on every completion event, with no delay, threshold, LRU or reuse check between the free and the next rebuild.",
+    "procedure": "Find the free function (grep for release_buffer, free_, evict, deallocate in the diff). Read its condition: is it only 'in-flight == 0'? Find every caller (grep the function name in src/ and h/) and the rebuild path (the function that reallocates and repopulates). Then list every production site that submits the same object again (grep the submit function: xfer_gof, backfill_shard, prepare_for_dma) and ask whether two submissions of the same object can occur close together (multi-shard fanout loops, speculation, retries). Estimate the rebuild cost from the repopulate function (does it copy and reorder the whole buffer?).",
+    "question": "Can the same object be freed and rebuilt repeatedly in steady state, and does the rebuild cost (copy + reorder) exceed the memory saved for that pattern?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file",
+    "callers",
+    "pr_body",
+    "perf_knowledge"
+   ],
+   "form": "statement",
+   "severity": "minor",
+   "author_outcome": "unknown",
+   "quote": "I can't help it lol... I'm always concerned with performance. So I asked Claude to summarize my concern (cuz it often words things better than I can):",
+   "reviewable_by_agent": "yes",
+   "note": "Posted at 21:05, the same minute as the APPROVED review; explicitly not blocking ('Maybe it won't materialize ... worth keeping in mind'). The quoted block is Claude output he pasted. Code fact at the merged head 678f559d5d: h/tron/gof.hpp:224-237 free_staging_if_idle() releases k and v whenever dma_inflight == 0 and either is allocated, with no other condition; src/pos/dma_tracker.cpp:108-110 calls it on every completed pending_xfer outside the tracker mutex. No reply from the author appears in the digest. Pattern: he raises a design/perf concern as a conversation comment with two alternatives implied (fine now, optimize later), not as a change request."
+  }
+ ],
+ "missing_member_ids": [],
+ "codex_bullets": [
+  {
+   "id": "C7",
+   "bullet": "Multiply a new operation by its real frequency: per element, token, layer, worker, submission, or polling iteration. Inspect allocation before an empty-queue check, redundant zeroing, repeated gathers, extra passes, and unnecessary sorting.",
+   "pick_up": "yes",
+   "reason": "Four Wade comments (PRs 4128, 2903, 4258) plus the 2906 paste. The sub-list (memset, six vectors, sort, alloc-before-empty-check) is lifted verbatim from the two PR 4128 inline comments. Generalize the frequency rule; do not copy the 4128 item list.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C8",
+   "bullet": "Check that batching or fanout does not repeat a whole gather for each fragment or rebuild the same staging data for each consumer. Use an explicit workload classification when a count threshold confuses decode work with prefill work.",
+   "pick_up": "yes",
+   "reason": "Three Wade comments (PRs 4128, 4596) plus the 4128 paste. The second sentence (count threshold vs explicit classification) appears twice (4128 budget, 4596 forward class) and is the general part worth adopting; the gather sentence is PR 4128 specific.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C9",
+   "bullet": "Separate a computed work count from a measured time cost. Request comparable before-and-after measurements when the performance tradeoff matters. Label an unmeasured slowdown as a hypothesis and name the measurement that would decide it.",
+   "pick_up": "yes",
+   "reason": "Three Wade comments (PRs 2898, 3733, 2713) ask for before/after trace data; the \"Maybe it won't materialize\" sentence in 4674512577 is Wade's own hedge after the paste. Claude skill only has the generic \"name the check that would resolve\" line. Note the tension with the Claude sentence \"He does not comment on ... benchmark method\".",
+   "claude_skill_coverage": "partial"
+  },
+  {
+   "id": "C12",
+   "bullet": "Consider the cost of diagnostics too: enabled trace categories, buffer capacity, polling, assertions, and aggregation can affect the path they measure.",
+   "pick_up": "yes",
+   "reason": "Four comments (PRs 3016, 4128, 2148, 4596) on the cost of logging, asserts and stats folds. No Claude check.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C38",
+   "bullet": "For a performance concern, distinguish measurement from hypothesis.",
+   "pick_up": "already",
+   "reason": "Three comments (PRs 2906, 2698, 2777) where Wade labels his own speculation. Claude skill has the generic hypothesis line.",
+   "claude_skill_coverage": "partial (Report the result: \"If a point is only a hypothesis, name the check\")"
+  },
+  {
+   "id": "C56",
+   "bullet": "Compute operation counts from loops and actual inputs. Keep units explicit (allocations per poll, bytes cleared per submission, gathers per token, rows folded per forward). Do not translate these into elapsed time without measurement.",
+   "pick_up": "yes",
+   "reason": "Two Wade comments (PR 4128, flagged) plus the 4128 paste. Procedure form of C7; adopt with C7 and keep the unit rule (it matches jhan's CLAUDE.md number rule).",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C57",
+   "bullet": "For before-and-after runs, record revisions, build settings, model, workload, device, and environment. Inspect comparable trace regions. A memory-saving change can add repeated reconstruction work; distinguish the measured tradeoff from a workload-dependent regression.",
+   "pick_up": "yes",
+   "reason": "Two Wade comments (PRs 2898, 3733) plus the 2906 paste. The third sentence is PR 2906 specific; adopt the first two.",
+   "claude_skill_coverage": "partial (check 8 labels result revisions; nothing on trace comparison)"
+  }
+ ]
+}

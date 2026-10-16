@@ -1,0 +1,160 @@
+{
+ "label": "buffer-lifetime-or-alignment",
+ "name": "A buffer is freed, reallocated or under-aligned while something still uses it or needs stronger alignment",
+ "description": "What breaks: a DMA reads freed memory, a reference dangles, or an aligned SIMD store faults. A queued pending_xfer dropped without abandon() releases its buffer while the DMA still reads it (5498556672, forwarded Claude review with four sibling items: decode passes with >= 32 users get the prompt drain budget, hot-path costs, per-shard batch buffers under fanout, two consistency nits); push_back beyond reserve(64) invalidates references into a std::vector held while pushing child frames, where std::deque would not (3120788282); a stack std::array passed to page::get_v() which stores with _mm256_store_si256 with no alignas while the batch sibling has alignas(HWCACHEBLOCK_ALIGN_BYTES) (3960506641). Procedure: for every struct that owns a buffer handed to an asynchronous engine check the destructor or every drop path releases it only after completion; for every function holding a reference into a vector list grow calls while the reference is live; for every buffer passed to a callback find the consumer's intrinsics and compare required alignment with the declared alignment and the sibling buffer's alignas.",
+ "disposition": "add_new",
+ "existing_check": null,
+ "disposition_reason": "Count 3 over 2 PRs; the procedures (drop paths of an async buffer, reference invalidation, alignas vs intrinsic) differ from the lock-placement procedure of the concurrency check.",
+ "count": 3,
+ "prs_spanned": 2,
+ "representative_ids": [
+  5498556672,
+  3120788282,
+  3960506641
+ ],
+ "evidence_needed": [
+  "hunk",
+  "full_file",
+  "other_file",
+  "callers",
+  "hardware_knowledge",
+  "test_run"
+ ],
+ "agent_feasibility": "yes for the static alignment and reference-invalidation reads; proving a fault needs a test that drives the real gather (Wade asked for one).",
+ "members": [
+  {
+   "id": 5498556672,
+   "pr": "positron-ai/tron#4128",
+   "kind": "issue",
+   "path": null,
+   "is_reply": false,
+   "concern": "Wade noticed the V-populate path (the code that gathers value-cache rows into the DMA staging buffer) does far more work than the path it replaces, ran a Claude review on the PR, and relays five items: a queued batch pending_xfer (the record of one in-flight DMA) freed without abandon() releases the buffer while the DMA still reads it; decode passes with 32 or more users wrongly get the prompt-sized drain budget; hot-path costs (32x gather, memset, mallocs, sort, duplicated assert); per-shard batch buffers under branch fanout; two consistency nits (missing n_kv_heads assert, % FETCHERS_PER_DEVICE vs % dev->num_fetchers spelling).",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "buffer-freed-while-dma-in-flight",
+   "detection": {
+    "trigger": "The diff adds a struct that owns a buffer handed to an asynchronous engine (DMA descriptor, in-flight transfer record) and the only release path is a manual call (abandon(), clear()) rather than the destructor; or adds a budget/eligibility predicate that tests a token count where the comment speaks of pass shape (prompt vs decode).",
+    "procedure": "Read the new struct in h/pos/dma_tracker.hpp and every site that constructs or drops it (grep pending_xfer, push(, abandon(, clear(); list each path where the object can be destroyed before completion and check whether the destructor releases the buffer. For the budget: read the predicate (gof_jobs_span.size() >= hwkv_coalesce_tokens) and the comment above it, then ask which pass shapes satisfy it. For the nits: grep the sibling writers of the same storage for the assert and the modulus spelling and compare the new path.",
+    "question": "Is there a path where this object is dropped before the DMA completes without the destructor releasing the buffer, and do the new path's asserts and spellings match every sibling writer of the same storage?"
+   },
+   "evidence_read": [
+    "other_file",
+    "full_file",
+    "callers",
+    "perf_knowledge"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "I seemed to notice the V-populate path doing a lot of extra work in these changes. So I prompted Claude with that (and told it to look at the PR overall). I also asked it to evaluate any collateral concurrency risks... below are those results:",
+   "reviewable_by_agent": "yes",
+   "note": "Meta-pattern: Wade relays a Claude review verbatim as bullets (CONTEXT.md: PRs 3490, 4128, 2906). Other patterns inside this one comment: decode-budget-gated-on-token-count-not-pass-shape, perf-extra-work-on-hot-path, batch-buffer-per-shard-under-fanout, assert-parity-with-sibling-writers, spelling-parity-with-sibling-path. Outcome evidence read at head 7f80aa17da: commit subject 'Improve V path handling to reduce extra work as per ...#issuecomment-5498556672' cites this comment; model.hpp:1166 adds bool gof_prompt_sized_pass (pass-shape gate); gof.cpp:414 batch path now carries TRON_ASSERT(n_kv_heads <= HW_MAX_KV_HEADS). NOT visible at head: any abandon() or destructor release in dma_tracker.hpp/.cpp (grep 'abandon' empty) - Insufficient data on the top robustness item. 'Consistency nits' is Wade's own severity word for the last bullet."
+  },
+  {
+   "id": 3120788282,
+   "pr": "tron-2499",
+   "kind": "inline",
+   "path": "h/tron/scheduler/full.hpp",
+   "is_reply": true,
+   "concern": "Self-reply adding a mechanism concern: push_back beyond capacity on a std::vector invalidates references to existing elements, while std::deque keeps references valid; relevant because the loop holds a reference to the top frame while pushing child frames.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "container-realloc-invalidates-references",
+   "detection": {
+    "trigger": "A function takes a reference or pointer to an element of a std::vector (back(), operator[], iterator) and the same function calls push_back/emplace_back/insert/resize on that vector while the reference is still live.",
+    "procedure": "In the changed function, find every 'auto& x = vec.back()' or element reference; then find every growth call on the same vector between that line and the last use of x. If one exists on a path with no 'continue', 'break' or return before the next use, it is a dangling reference. Here: 'frame_t& f = stk.back();' at line 1403, 'stk.push_back' at 1852 followed by 'continue', so f is not used after the push.",
+    "question": "Is any reference into this vector used after a call that can grow the vector?"
+   },
+   "evidence_read": [
+    "hunk",
+    "perf_knowledge"
+   ],
+   "form": "statement",
+   "severity": "nit",
+   "author_outcome": "unknown",
+   "quote": "if you do `push_back` enough times to exceed 64 and it has to reallocate, it will invalidate any **references** you are currently holding. Whereas, a std::deque won't...",
+   "reviewable_by_agent": "yes",
+   "note": "Reply to his own comment 3120756577; no author reply in the digest. Author kept std::vector at head. Verified at head: after stk.push_back (line 1852) the code sets pushed_child and breaks, then 'if (pushed_child) continue;' (line 1860), so the reference f is never read after a push; the concern does not bite at head. Ends with 'in case you think it matters' = offered, not demanded. Classified with a real label rather than 'none' because the reply carries a new technical finding, not a social answer."
+  },
+  {
+   "id": 3960506641,
+   "pr": "positron-ai/tron#4128",
+   "kind": "inline",
+   "path": "src/tron/gof.cpp",
+   "is_reply": false,
+   "concern": "The singleton V-gather scratch introduced at gof.cpp:436 is an ordinary stack std::array that is passed through v_head_into_fn to page::get_v(), which stores with _mm256_store_si256 (an AVX2 aligned store needing 32-byte alignment); the compiled function can place it 16 bytes off, so singleton decode submissions and singleton remainders can fault or silently corrupt; fix is alignas(HWCACHEBLOCK_ALIGN_BYTES) like the batch scratch plus a test that drives the real gather.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "stack-buffer-alignment-vs-intrinsic",
+   "detection": {
+    "trigger": "The diff adds a stack or member buffer (std::array, C array) with no alignas and passes its pointer into a callback or function whose implementation uses an aligned SIMD store/load (_mm256_store_si256, _mm512_store_*, _tile_*), or the sibling buffer in the same file carries alignas and the new one does not.",
+    "procedure": "For each new buffer, follow the pointer to every consumer (grep the callback name v_head_into_fn; read page::get_v in the KV cache header) and grep the consumer for aligned intrinsics. Compare with sibling buffers in the same file (grep alignas). Compile the changed function and inspect the stack frame offset of the buffer (objdump/-S), or build a UBSan (-fsanitize=alignment) reproducer that calls the gather's exact intrinsics with the misaligned destination.",
+    "question": "Does any consumer of this buffer require an alignment stronger than the buffer's declared alignment?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file",
+    "test_run",
+    "hardware_knowledge"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "This singleton V-gather scratch is insufficiently aligned.\n     gof.cpp:436 introduces an ordinary stack array, then passes it through v_head_into_fn to page::get_v(). That gather uses _mm256_store_si256, requiring 32-byte alignment.",
+   "reviewable_by_agent": "needs_runtime",
+   "note": "Only comment in this PR where Wade reports having run something: 'Compiling the changed function confirmed that its scratch can be misaligned by 16 bytes. A small UBSan reproducer ... fails with that alignment'. He also warns the bug is masked by optimized Clang ('can mask the violation by fusing instructions'), i.e. tests on the normal build will not catch it - hence the ask for a test that exercises the real gather through singleton population. The static part (alignas missing where the sibling at :417 has it) is reviewable by code reading alone; the proof needed a compile. Head 7f80aa17da evidence: gof.cpp:352 alignas(HWCACHEBLOCK_ALIGN_BYTES) std::array<bf16, HW_BAKED_HEAD_SIZE> v_scratch; and :417 alignas on the batch scratch."
+  }
+ ],
+ "missing_member_ids": [],
+ "codex_bullets": [
+  {
+   "id": "C2",
+   "bullet": "Identify who owns each buffer, reference, queue entry, and completion signal from submission through completion, cancellation, and reuse. Check container reallocation and scheduler storage rebuilds while references remain live.",
+   "pick_up": "yes",
+   "reason": "Four Wade comments across PRs 2499, 2906, 4128 trace buffer and reference lifetime under DMA or reallocation; the Claude skill has no check on asynchronous ownership.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C8",
+   "bullet": "Check that batching or fanout does not repeat a whole gather for each fragment or rebuild the same staging data for each consumer. Use an explicit workload classification when a count threshold confuses decode work with prefill work.",
+   "pick_up": "yes",
+   "reason": "Three Wade comments (PRs 4128, 4596) plus the 4128 paste. The second sentence (count threshold vs explicit classification) appears twice (4128 budget, 4596 forward class) and is the general part worth adopting; the gather sentence is PR 4128 specific.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C48",
+   "bullet": "Ownership and progress: for each changed asynchronous path, write the sequence from creation to release and answer the five-question table (who can still read, what permits reuse, which operation completion identifies, what protects mutation, what guarantees progress).",
+   "pick_up": "yes",
+   "reason": "Same evidence as C2 to C5 (PRs 2777, 2011, 2766, 2499, 4128); the table is the executable form of those four bullets. Adopt the table and fold C2 to C5 under it.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C49",
+   "bullet": "Do not infer safety from a buffer being logically unused; follow the real read width and address range. Do not infer a reference stays valid from an initial `reserve`; follow every operation that can exceed capacity.",
+   "pick_up": "yes",
+   "reason": "Two Wade comments (PRs 2499, 4128) plus the 4191 paste. The reserve sentence is Wade's own (3120788282, with 3120756577 \"why 64?\"); the masked-read sentence rests on the paste.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C51",
+   "bullet": "Hardware geometry: trace dimensions from model configuration through hardware eligibility, packing, transfer construction, and consumption. Keep the model's logical shape separate from the hardware's stored shape. Check padding and alignment against the instructions actually used.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 4007, 2176, 4128, 2148). Procedure form of C6; adopt together.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C52",
+   "bullet": "Compare singleton, batched, partial, and fallback routes that the change affects. Distinguish a production route from a test utility or an inactive debug file. Recheck current hardware and build constraints instead of assuming those in an old review still hold.",
+   "pick_up": "yes",
+   "reason": "Three Wade comments (PRs 4007, 4128) plus the 4128 paste. The production-vs-test-utility distinction (4007, two comments) is worth one sentence.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C56",
+   "bullet": "Compute operation counts from loops and actual inputs. Keep units explicit (allocations per poll, bytes cleared per submission, gathers per token, rows folded per forward). Do not translate these into elapsed time without measurement.",
+   "pick_up": "yes",
+   "reason": "Two Wade comments (PR 4128, flagged) plus the 4128 paste. Procedure form of C7; adopt with C7 and keep the unit rule (it matches jhan's CLAUDE.md number rule).",
+   "claude_skill_coverage": "none"
+  }
+ ]
+}

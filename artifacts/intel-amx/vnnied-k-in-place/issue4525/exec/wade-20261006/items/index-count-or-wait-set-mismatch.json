@@ -1,0 +1,268 @@
+{
+ "label": "index-count-or-wait-set-mismatch",
+ "name": "A count, bound, out-value or completion wait does not match the set it is supposed to cover",
+ "description": "What breaks: memory or hardware state. nshards copied from vector.size() into a MAX_B-sized array with no bound check at two write sites (2982760463 'something somewhere should ensure that nshards is <= MAX_B', 3002034511); num_wcmds pre-computed from the full input while a break leaves slots uninitialized (2983833171, endorsing Cursor); a loop bound `<= (tok_ix / shard_tokens) * shard_tokens` includes the freshly allocated empty shard at an exact boundary (3002297607 'perhaps a quick diag test'); write_tx_descriptors returns its sentinel first_desc for legacy requests (3437517809, relayed from GPT); wait_for_xfer_blocks on get_device(0) after a loop that issued one DMA per device (2789792758 'we'll be waiting on the first device's xfer', 2789796269 'same comment'); (*pos_list_devices())[0] on a path that runs under TP2/TP4 (3029339639). Procedure: for every runtime count that indexes a fixed-capacity array find a statement on every path proving count <= capacity; for every pre-computed count read after a loop with break check it is reset to the number filled; for every out-value initialized to a sentinel list the branches that assign it; for every wait/join after a per-device loop check it iterates the same set; for every literal index into a per-device container ask what selects the device under multi-device configurations. Wade endorses bot findings here ('I do think there's merit') and asks for a diagnostic test when reading cannot settle it.",
+ "disposition": "add_new",
+ "existing_check": null,
+ "disposition_reason": "No existing check follows a count or wait to the set it must cover; 8 rows over 4 PRs.",
+ "count": 8,
+ "prs_spanned": 4,
+ "representative_ids": [
+  2982760463,
+  2789792758,
+  2983833171,
+  3437517809
+ ],
+ "evidence_needed": [
+  "hunk",
+  "full_file",
+  "other_file",
+  "callers",
+  "hardware_knowledge"
+ ],
+ "agent_feasibility": "yes for bound checks, sentinel-return branches and fixed-index waits after loops; the exact-boundary off-by-one (3002297607) needs a runtime diagnostic, which Wade himself asked for.",
+ "members": [
+  {
+   "id": 2982760463,
+   "pr": "positron-ai/tron#2233",
+   "kind": "inline",
+   "path": "src/pos/driver.cpp",
+   "is_reply": false,
+   "concern": "`work_req->nshards = shards.size()` is copied from a caller-supplied vector into a fixed-size array of MAX_B (32) entries with no check that the count fits, so a longer vector would overrun the array.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "array-index-bound-unchecked",
+   "detection": {
+    "trigger": "A diff assigns a runtime count from a dynamic container (vector.size(), a parameter) and then loops with it as the index bound into a fixed-capacity array (std::array<T, N>, T[N]) or copies into one.",
+    "procedure": "For each added loop or memcpy into a fixed-size member, find the array's declared capacity (grep the struct) and trace the bound back to its source; check for a TRON_ASSERT / clamp / early return on the path between the source and the write.",
+    "question": "Is there any statement on every path from where the count is produced to the array write that guarantees count <= capacity?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "something somewhere should ensure that `nshards` is <= `MAX_B`",
+   "reviewable_by_agent": "yes",
+   "note": "Head af9438799a src/pos/driver.cpp ~449-455 adds `TRON_ASSERT(work_req->nshards <= MAX_B, \"Too many shards in {} ...\")` with a comment that 32 equals the WMEM addressable regions. MAX_B = 32 at h/libpos.hpp:35. Same ask repeated at 3002034511 for the second write site."
+  },
+  {
+   "id": 3002034511,
+   "pr": "positron-ai/tron#2233",
+   "kind": "inline",
+   "path": "h/tron/models/self_attention.hpp",
+   "is_reply": false,
+   "concern": "The second write site of `work_req->nshards` (from gof_collect_shards' vector size) also copies into the MAX_B-sized array without a bound check.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "array-index-bound-unchecked",
+   "detection": {
+    "trigger": "Same as 2982760463; here the mechanism recurs at a second write site for the same fixed-size array.",
+    "procedure": "Grep every assignment to the count field (nshards) across h/ and src/; for each, check for an assert against the array capacity before the copy loop.",
+    "question": "Does every writer of the count assert count <= capacity before indexing the array?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file"
+   ],
+   "form": "ask",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "check `work_req->nshards <= MAX_B`",
+   "reviewable_by_agent": "yes",
+   "note": "Head af9438799a self_attention.hpp:635 has `TRON_ASSERT((work_req->nshards <= hardware::MAX_B), ...)`. Author's reply deferred the design question (whether late gathering stays) to Bill but the assert was added anyway. Three-word imperative comment."
+  },
+  {
+   "id": 2983833171,
+   "pr": "positron-ai/tron#2233",
+   "kind": "inline",
+   "path": "src/pos/worker.cpp",
+   "is_reply": true,
+   "concern": "He endorses the Cursor bot's finding that an early `break` out of the per-shard loop leaves `num_wcmds` (pre-computed as 2 * nshards * num_acmds) too large, so the caller `hw_prepare()` would emit uninitialized weight-command slots.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "loop-early-exit-leaves-stale-count",
+   "detection": {
+    "trigger": "A diff pre-computes a count from the full input size, then adds a loop over that input with a `break` (early_release) that may stop before the count is reached, and the count is read by a caller after the loop.",
+    "procedure": "Find every variable set before the loop that encodes 'how many entries will be filled'; find every `break`/`return` inside the loop; check whether the count is reassigned from the loop index on that exit path; find the caller (grep the out-parameter name, here num_wcmds in hw_prepare) and confirm it iterates the count over the array.",
+    "question": "On the early-exit path, is every count that a caller uses to read the filled array reset to the number actually filled?"
+   },
+   "evidence_read": [
+    "hunk",
+    "callers",
+    "other_file"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "I do think there's merit to this complaint. Not sure it has to do with your current behavior of not reaching > 1024, but for sure if we released early inside of `prepare_hwattn_cmds()` then `hw_prepare()` will use the wrong `num_wcmds` value",
+   "reviewable_by_agent": "yes",
+   "note": "Reply to cursor[bot]. Wade separates 'does it bite today' (no, context stays under one command) from 'is the mechanism wrong' (yes). Head af9438799a src/pos/worker.cpp ~1000-1010: the early_release path now does `num_wcmds = w_idx;` before `break`, so the fix landed. Wade reads bot findings and judges them rather than ignoring them."
+  },
+  {
+   "id": 3002297607,
+   "pr": "positron-ai/tron#2233",
+   "kind": "inline",
+   "path": "src/tron/gof.cpp",
+   "is_reply": false,
+   "concern": "He relays a Claude review finding that the loop bound `base <= (tok_ix / shard_tokens) * shard_tokens` in gof_collect_shards includes the freshly allocated empty shard when tok_ix is an exact shard boundary, so the hardware would load uninitialized K/V; he says it is hard to verify by reading and asks for a quick diagnostic test.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "off-by-one-loop-bound-at-boundary",
+   "detection": {
+    "trigger": "A diff adds a loop whose upper bound is derived from a rounded-down index (`<= (x / n) * n`) over blocks that may be allocated before they contain data.",
+    "procedure": "Pick x = n (exact boundary) and evaluate the bound by hand; find where the block at base x is created (on_save_impl comment in the diff says a new shard is allocated when tok_ix first crosses a boundary) and whether it holds data for token x yet; propose `< tok_ix` or a direct test with tok_ix = shard_tokens.",
+    "question": "At tok_ix exactly equal to a multiple of shard_tokens, does the loop include a shard that holds no DMA'd data yet?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file"
+   ],
+   "form": "ask",
+   "severity": "normal",
+   "author_outcome": "unknown",
+   "quote": "hard to truly analyze visually... perhaps a quick diag test would be worth it to prove/disprove this?",
+   "reviewable_by_agent": "needs_runtime",
+   "note": "Head af9438799a src/tron/gof.cpp:421-431 keeps the `<=` bound. No reply in the digest. Pattern: Wade pastes a Claude-generated finding verbatim in a code block, states he cannot settle it by inspection, and asks for a test rather than asserting the bug. Also an instance of the 'ask-for-diag-test' remedy."
+  },
+  {
+   "id": 3437517809,
+   "pr": "tron-3008",
+   "kind": "inline",
+   "path": "src/pos/worker.cpp",
+   "is_reply": false,
+   "concern": "Wade relays a GPT review finding: write_tx_descriptors (the new helper that writes the TX DMA descriptor chain) sets first_desc only in the metadata loop, so for legacy requests (num_metadata_wds == 0) it returns 0 and fill_rxinfo records a wrong tx_desc_start_idx, contradicting the helper's own comment contract.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "helper-return-not-set-on-one-branch",
+   "detection": {
+    "trigger": "The diff extracts a helper that returns or writes an out-value (here first_desc) and its header comment states what the value is ('first descriptor index'), while the value is initialised to a sentinel and assigned inside only one of several loops/branches.",
+    "procedure": "For each out-value of a new helper, list every assignment site and the branch condition guarding it. Enumerate the callers' input classes (here attn_req true/false -> num_metadata_wds 0 or >0) and check whether some class skips every assignment, leaving the init sentinel. Then find the consumer of the value (grep for the struct field it is stored into, rxinfo.tx_desc_start_idx, and its readers in the RX worker / debug dump) to state the consequence. Also compare with the pre-refactor code at BASE to see whether the old inline code set it on that path.",
+    "question": "Is there an input class for which the helper returns its initial sentinel instead of the value its comment promises, and who reads that value?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file",
+    "callers",
+    "other_file"
+   ],
+   "form": "statement",
+   "severity": "minor",
+   "author_outcome": "changed",
+   "quote": "GPT had this to say about `first_desc`:\n\n>   **1. Low**: write_tx_descriptors() does not actually return the first TX descriptor for legacy requests.",
+   "reviewable_by_agent": "yes",
+   "note": "Wade pasted an LLM (GPT) review item verbatim, with the LLM's own severity label 'Low'. Author fixed in 381ed8ed4a ('Integrate review feedback.  Fixes mssed set of first_desc.'); at head 17c6e0117d worker.cpp:1428 adds 'if ((act_num == 0) && (num_metadata_wds == 0)) first_desc = act_desc_idx;'. The pattern of Wade running an external LLM review and posting items is noted in CONTEXT.md (PRs 3490, 4128, 2906); here the tool is GPT, not Claude. Note the 'other_file' evidence: GPT cited worker.cpp:1486 fill_rxinfo as consumer, in the same file."
+  },
+  {
+   "id": 2789792758,
+   "pr": "tron-2011",
+   "kind": "inline",
+   "path": "h/pos/hwattention.hpp",
+   "is_reply": false,
+   "concern": "xfer_v_entry_blocking loops over every FPGA device issuing a DMA transfer per device, then calls wait_for_xfer_blocks on get_device(0) only, so the wait covers the first device's transfer and not the last one as the new comment claims; Wade proposes capturing the device pointer per loop iteration and waiting on that device.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "completion-wait-covers-one-device-after-multi-device-loop",
+   "detection": {
+    "trigger": "A hunk places a completion wait, join or flush after a loop that issues one asynchronous operation per iteration (per device, per queue, per thread), and the wait call takes a fixed index or a single handle (get_device(0), queues[0], the last loop variable) rather than iterating the same set.",
+    "procedure": "Read the whole function at HEAD. List the loop variable (idx over devices) and the resources each iteration touches (devices[idx], its load_weight_q). Compare with the argument of the wait call below the loop. If the wait's device or queue is a constant while the loop issued work on several, every iteration except the one matching the constant is unwaited. Also compare the comment above the wait ('after the last xfer, wait for completion') with the code.",
+    "question": "Does the wait after the loop observe the completion of every operation the loop issued, or only of one fixed member?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "question",
+   "severity": "normal",
+   "author_outcome": "pushed_back",
+   "quote": "As is, we aren't actually waiting 'after the last xfer', we'll be waiting on the 'first' device's xfer (`get_device(0)`)",
+   "reviewable_by_agent": "yes",
+   "note": "Verified at head d4795f37a5: hwattention.hpp lines 645 and 674 still call wait_for_xfer_blocks(get_device(0), xfer); the xfer value is the result of the last loop iteration (last device), but the device argument is device 0. The author deferred to a 'next pass' that makes calls device specific; Wade approved anyway. Wade's wording follows his pattern: fact, 'As is' consequence, two-alternative question."
+  },
+  {
+   "id": 2789796269,
+   "pr": "tron-2011",
+   "kind": "inline",
+   "path": "h/pos/hwattention.hpp",
+   "is_reply": false,
+   "concern": "The K-cache twin of the previous finding: xfer_k_entry_blocking also waits on get_device(0) after a loop over all devices.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "completion-wait-covers-one-device-after-multi-device-loop",
+   "detection": {
+    "trigger": "The same pattern (fixed-device wait after a per-device loop) appears in a second function of the same file; the reviewer flags each site and links the first comment.",
+    "procedure": "After finding one instance, grep the file for the same wait call (grep -n 'wait_for_xfer_blocks(get_device' h/pos/hwattention.hpp) and report every site, citing the first finding's comment URL.",
+    "question": "Does every call site of the same wait pattern share the defect, and has each one been named?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "pushed_back",
+   "quote": "same comment as https://github.com/positron-ai/tron/pull/2011/changes#r2789792758",
+   "reviewable_by_agent": "yes",
+   "note": "Unchanged at head (line 674). Wade cross-links the earlier comment rather than repeating the argument."
+  },
+  {
+   "id": 3029339639,
+   "pr": "tron-2287",
+   "kind": "inline",
+   "path": "h/tron/scheduler/full.hpp",
+   "is_reply": false,
+   "concern": "The shard-creation code picks the first device with (*pos_list_devices())[0]; Wade suggests reusing the local `devs` and asks whether index 0 is correct when tensor parallelism (TP2/TP4, two or four devices) is in use.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "hardcoded-device-index-ignores-multi-device",
+   "detection": {
+    "trigger": "The diff indexes a per-device or per-rank container with a literal (devices[0], shards[0], instances.front()) on a path that runs for every device configuration.",
+    "procedure": "Grep the diff for `[0]` and `.front()` applied to a device, rank or instance list. For each hit, find how other production call sites choose the device for the same object (grep `pos_list_devices()` and the shard constructor's device argument; look for a tp rank, a layer-to-device map, or a device_ix field). Check whether any configuration (tensor parallel, multi-instance) runs with more than one device, by grepping run configs and the scheduler for n_devices > 1.",
+    "question": "Is there a supported configuration with more than one device where this object must be bound to a specific device other than the first, and what selects it?"
+   },
+   "evidence_read": [
+    "hunk",
+    "hardware_knowledge"
+   ],
+   "form": "suggestion_block",
+   "severity": "normal",
+   "author_outcome": "accepted",
+   "quote": "... but is index 0 always the correct thing to use? What if we're doing TP2 or TP4?",
+   "reviewable_by_agent": "yes",
+   "note": "Two asks in one comment: (a) a suggestion block `auto dev = devs[0];` to reuse the local computed three lines above (note: `devs` is a pointer to the list, so `devs[0]` as written would not compile as intended; `(*devs)[0]` is the faithful form, so the suggestion is approximate), (b) the TP question. The author deferred (b) to an upcoming PR and recorded it in the Phase II document; the PR commit 'Document multi-device shard allocation as future work' matches. At head 1a88e897e1 full.hpp:1598 still reads `(*pos_list_devices())[0]`, so neither (a) nor (b) changed the code in this PR. The TP2/TP4 knowledge is in the repository (tensor-parallel instance configs), so an agent can produce it from code; the domain knowledge is that a shard binds to one device."
+  }
+ ],
+ "missing_member_ids": [],
+ "codex_bullets": [
+  {
+   "id": "C3",
+   "bullet": "Match completion checks to the device, queue, descriptor range, and generation that received the work. Trace the ordering that permits release or reuse.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 2011, 1860, 1920, 2872) ask which device, queue or descriptor a wait actually observes; the last paragraph of 3342904643 is in Wade's own words. No Claude check covers it.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C6",
+   "bullet": "Separate model dimensions from hardware storage dimensions. Trace bounds, padding, alignment, and unsupported-model fallback through the production caller. Do not infer production behavior from a test-only helper.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 4007, 2176, 2233); also 3002034511 and 3283298134. Recurring theme in the hardware-attention code. No Claude check.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C17",
+   "bullet": "Choose boundary cases from the failure mechanism: nonzero offsets, partial windows, page boundaries, queue wrap and full states, competing producers, branch fanout, and unsupported shapes. Do not add a generic matrix unrelated to the change.",
+   "pick_up": "yes",
+   "reason": "Four Wade comments (PRs 4128, 2903) plus Wade's own closing line after the 2233 paste. Claude check 4 is about duplicates, not about which boundary cases to add.",
+   "claude_skill_coverage": "partial (check 4 says \"prefer small cases\"; no boundary list)"
+  },
+  {
+   "id": "C48",
+   "bullet": "Ownership and progress: for each changed asynchronous path, write the sequence from creation to release and answer the five-question table (who can still read, what permits reuse, which operation completion identifies, what protects mutation, what guarantees progress).",
+   "pick_up": "yes",
+   "reason": "Same evidence as C2 to C5 (PRs 2777, 2011, 2766, 2499, 4128); the table is the executable form of those four bullets. Adopt the table and fold C2 to C5 under it.",
+   "claude_skill_coverage": "none"
+  }
+ ]
+}

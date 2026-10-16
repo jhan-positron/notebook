@@ -1,0 +1,242 @@
+diff --git a/h/pos/hwattention.hpp b/h/pos/hwattention.hpp
+index 98ee388590a..a75452fa8d9 100644
+--- a/h/pos/hwattention.hpp
++++ b/h/pos/hwattention.hpp
+@@ -10,6 +10,7 @@
+ #pragma once
+ 
+ #include <cstddef>
++#include <cstring>
+ #include <fstream>
+ #include <mutex>
+ #include <sstream>
+@@ -454,6 +455,7 @@ struct v_hwcacheblock : public hwcacheblock {
+ 
+ static constexpr size_t hwkv_pages_per_layer = 256;
+ static constexpr size_t hwkv_tok_per_page = 128;
++static constexpr size_t hwkv_tok_per_layer = hwkv_pages_per_layer * hwkv_tok_per_page;
+ // allocate enough HBM for 128k tokens across 32 layers for now
+ static constexpr size_t hwkv_pchannel_page_size_B = 8192;  // 8k per psuedochannel
+ // we want 1024 pages worth for each psuedochannel for now
+@@ -468,6 +470,7 @@ static constexpr size_t hwkv_max_tok_ix = hwkv_pages_per_layer * hwkv_tok_per_pa
+ struct hwkv_rings {
+   k_hwcacheblock* k_ring[hwkv_max_layers][kv_xfer_ring_size];
+   v_hwcacheblock* v_ring[hwkv_max_layers][kv_xfer_ring_size];
++  v_hwcacheblock* empty_v_block;
+   uint32_t head_size;
+   uint32_t index;
+   // Per-layer HBM allocations for K and V caches
+@@ -477,6 +480,8 @@ struct hwkv_rings {
+   hwkv_rings(size_t head_sz)
+   : head_size(head_sz)
+   , index(0) {
++    empty_v_block = new v_hwcacheblock();
++
+     // Initialize all k_hwcacheblocks with the head size (per layer)
+     for (uint32_t layer = 0; layer < hwkv_max_layers; ++layer) {
+       for (uint32_t i = 0; i < kv_xfer_ring_size; i++) {
+@@ -516,6 +521,33 @@ struct hwkv_rings {
+   }
+ };
+ 
++// Until we get a new bitfile that filters v/ktok for attention, we need to make sure
++// that there is not garbage that can be pulled into the MAtmul
++[[maybe_unused]] static void init_clear_kv_hbm(
++    size_t num_tokens, size_t n_kv_heads, size_t head_size, size_t layer) {
++  size_t token_bytes = n_kv_heads * head_size * sizeof(bf16);
++  auto vinput = pos_allocate_aligned(token_bytes, 64);
++
++  auto vinput_bf16 = reinterpret_cast<bf16*>(vinput);
++  size_t token_elems = token_bytes / sizeof(bf16);
++  for (size_t i = 0; i < token_elems; i++) {
++    // this will fill with nan to break ASAP
++    // vinput_bf16[i] = tron::bf16::from_bits(0x7F80);
++    vinput_bf16[i] = bf16(0);
++  }
++
++  std::vector<bf16*> v_data_by_head(n_kv_heads);
++  for (size_t head = 0; head < n_kv_heads; ++head) {
++    v_data_by_head[head] = &vinput_bf16[head * head_size];
++  }
++
++  for (size_t tok_ix = 0; tok_ix < num_tokens; tok_ix++) {
++    save_v_to_hardware(v_data_by_head.data(), tok_ix, n_kv_heads, layer, head_size);
++  }
++
++  pos_deallocate(vinput, token_bytes);
++}
++
+ /**
+  * @brief shuffle_k_entry arranges the elements in a kcache entry and rearranges them
+  * in place to split the elements across a set of 4 HBM words.
+@@ -720,15 +752,34 @@ inline dma_xfer_state xfer_k_entry(bf16** k_locations_in,
+   auto num_fetchers = dev->num_fetchers;
+   uint32_t fetcher = (position / 4) % num_fetchers;
+   uint32_t fpos = position % 4;
++  // if we are postion 0 in the block, let's clear out the rest as well for safety
+   // spdlog::debug("xfer_k_entry k_hwblock: {}", (void *) k_hwblock);
+   //  pack K entries into HW format at the designated position in the cache block
+   shuffle_k_entry(k_locations_in, k_hwblock, position, n_kvheads, head_size);
+   // spdlog::debug("{} tok: {}, host: {}, hbm: {:#016x}", __FUNCTION__, position,
+   //     (void*)k_hwblock->positions[0][0], hbm_addr);
+-
+   dma_xfer_state xfer_state;
+   size_t xferlen = head_size * sizeof(bf16);
+   uint32_t readback_offset = (head_size * sizeof(bf16)) - sizeof(uint64_t);
++#if 0
++  if (fpos == 0) {
++    for (size_t pos = 1; pos < 4; pos++) {
++      for (uint32_t head = 0; head < n_kvheads && head < 8; head++) {
++        hbm_address_t hbm_addr_for_head =
++            hbm_addr + (pos * head_size * 2 * n_kvheads) + (head * head_size * 2);
++        uint8_t* input_ptr = (uint8_t*)k_hwblock->positions[pos][head];
++        check_k_range(layer, fpga_index, (size_t)hbm_addr_for_head, xferlen);
++        [[maybe_unused]] auto xfer_state_2 = hardware::xfer_blocks(dev,
++            dev->load_weight_q, hbm_addr_for_head, fetcher, input_ptr, xferlen, true,
++            false, (head + 1 == n_kvheads) ? readback_offset : 0);
++      }
++    }
++  }
++#endif
++
++  // dma_xfer_state xfer_state;
++  // size_t xferlen = head_size * sizeof(bf16);
++  // uint32_t readback_offset = (head_size * sizeof(bf16)) - sizeof(uint64_t);
+   // walk the k locations in the cache block and set up the descriptors for the transfer
+   for (uint32_t head = 0; head < n_kvheads && head < 8; head++) {
+     hbm_address_t hbm_addr_for_head =
+@@ -742,6 +793,7 @@ inline dma_xfer_state xfer_k_entry(bf16** k_locations_in,
+         fetcher, input_ptr, xferlen, true, false,
+         (head + 1 == n_kvheads) ? readback_offset : 0);
+   }
++
+   return xfer_state;
+ }
+ 
+diff --git a/h/runtron/stream_generate.hpp b/h/runtron/stream_generate.hpp
+index 29d672d9a86..11cf48398cc 100644
+--- a/h/runtron/stream_generate.hpp
++++ b/h/runtron/stream_generate.hpp
+@@ -27,6 +27,9 @@
+ 
+ namespace tron {
+ 
++// uncomment to add per tokoen selection logging to alderaan.log
++// #define LOG_TOKEN_SELECTION
++
+ using clock = std::chrono::high_resolution_clock;
+ 
+ using prompt_t = std::vector<token_t>;
+@@ -394,7 +397,7 @@ std::tuple<std::vector<token_t>, std::vector<std::vector<float>>> stream_generat
+           }
+ 
+           auto tokens = result.get_tokens();
+-#if 0
++#ifdef LOG_TOKEN_SELECTION
+           // Log each selected token with an "AoF" (Attention-on-FPGA) prefix
+           // indicating whether it was produced by SW or HW attention. Tokens
+           // below MIN_TOK_IDX_FOR_HWATTN are always SW; at or above that
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 35b9526bc8e..d7a660e5f18 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -43,7 +43,7 @@ static constexpr uint64_t HW_RES_WORD_MAGIC = 0xdeadbeefc0def000;
+ #endif
+ 
+ #if defined(MORE_HWATTN_DEBUG) || defined(DEBUG_GET_ALLKV)
+-#define TOKEN_IDX_FOR_DEBUG 130 //hardware::MIN_TOK_IDX_FOR_HWATTN
++#define TOKEN_IDX_FOR_DEBUG 130  // hardware::MIN_TOK_IDX_FOR_HWATTN
+ #define TOKEN_IDX2_FOR_DEBUG 512
+ #define LAYER_IDX_FOR_DEBUG 2
+ // set to false to ONLY compare the debug token/layer above, otherwise
+@@ -654,8 +654,8 @@ struct self_attention {
+     // (stride head_size+32) into the contiguous scratchpad format that
+     // join_page_ranges expects.  Thread-safe: exactly one worker performs
+     // the actual unpack; others spin until it completes.
+-    void unpack_hw_for_fwd(
+-        tron_maybe_unused batch* q_batch, tron_maybe_unused size_t layer,
++    void unpack_hw_for_fwd(tron_maybe_unused batch* q_batch,
++        tron_maybe_unused size_t layer,
+         size_t batch_job_ix) {
+       int expected = 0;
+       if (hw_fwd.unpack_state[batch_job_ix].compare_exchange_strong(
+@@ -839,7 +839,7 @@ struct self_attention {
+             sw_sumes, sw_smaxs, hw_sumes.data(), hw_smaxs.data());
+       }
+     }
+-#endif // !FWD_HW_RESULTS
++#endif  // !FWD_HW_RESULTS
+ 
+     void prepare_hw_attention(batch* q_batch, tron_maybe_unused size_t layer) {
+       for (const hw_kv_section& section : q_batch->hw_kv_schedule) {
+@@ -862,10 +862,8 @@ struct self_attention {
+     // fill/prepare/launch the hardware job asynchronously.  When skip_compare
+     // is true (FWD_HW_RESULTS path), the completion callback omits the HW/SW
+     // comparison since the SW scratchpads may be in an intermediate state.
+-    void prepare_and_launch_hw(batch* outer_batch,
+-        token_job_ix tj_ix,
+-        size_t tok_ix,
+-        size_t layer) {
++    void prepare_and_launch_hw(
++        batch* outer_batch, token_job_ix tj_ix, size_t tok_ix, size_t layer) {
+       const auto& q_ptr = enclosing_state.qs_for_attn[tj_ix].as_view();
+       dbg_hwattn_log("{}: tok/layer: ({},{}) kv_head_size: {}, n_kv-heads: "
+                      "{}, n_heads: {}, gqa; {}, dim: {}, head_size: {} "
+@@ -1241,17 +1239,15 @@ struct self_attention {
+                 join_page_ranges(target, source, kv_head);
+               }
+               for (size_t w = 1; w < num_workers; w++) {
+-                token_scratchpad_ref source =
+-                    token_scratchpad_ref_at(w, batch_job_ix);
++                token_scratchpad_ref source = token_scratchpad_ref_at(w, batch_job_ix);
+                 join_page_ranges(target, source, kv_head);
+               }
+             }
+             if constexpr (sinks) {
+               apply_attn_sinks(batch_job_ix, layer, kv_head);
+             }
+-            attn[0].finish(
+-                enclosing_state.vo_from_attn, q_batch->items[batch_job_ix], kv_head,
+-                batch_job_ix);
++            attn[0].finish(enclosing_state.vo_from_attn, q_batch->items[batch_job_ix],
++                kv_head, batch_job_ix);
+           }
+           kv_heads_to_join.erase(kv_head);
+         }
+diff --git a/src/pos/driver.cpp b/src/pos/driver.cpp
+index 337ad448480..dded6205269 100644
+--- a/src/pos/driver.cpp
++++ b/src/pos/driver.cpp
+@@ -287,6 +287,17 @@ int pos_startup() noexcept {
+   // set up the hwkv rings
+   hwkv = new tron::hardware::hwkv_rings(128);
+ 
++  // Until we get a fixed bitfile, we need to ensure that V locations in HBM are
++  // initialized to a safe value before we run so we zero them out.
++  for (uint32_t layer = 0; layer < 32; ++layer) {
++
++    spdlog::info("clearing out HBM for layer {} zeroing {} tokens of space", layer,
++        tron::hardware::hwkv_tok_per_layer/2);
++    tron::hardware::init_clear_kv_hbm(
++        tron::hardware::hwkv_tok_per_layer/2, 8, 128, layer);
++
++  }
++
+   spdlog::info("INIT: pos_startup() completed");
+   // spdlog::info("pausing to allow Devices to come up");
+   // sleep(5);
+diff --git a/src/pos/hwattention.cpp b/src/pos/hwattention.cpp
+index fab79752fe2..69126d25d37 100644
+--- a/src/pos/hwattention.cpp
++++ b/src/pos/hwattention.cpp
+@@ -1,9 +1,9 @@
+ #include <cstdint>
+ 
+ #include "common/assert.hpp"
++#include "common/perfetto.hpp"
+ #include "pos/config.hpp"
+ #include "pos/hwattention.hpp"
+-#include "common/perfetto.hpp"
+ 
+ // #define DEBUG_SAVE_KV
+ #ifdef DEBUG_SAVE_KV

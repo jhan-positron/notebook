@@ -1,0 +1,384 @@
+{
+ "label": "debug-switch-or-output-left-on",
+ "name": "Debug macro flipped on, debug output unguarded or routed through the wrong switch, debug-only include unguarded, trace volume raised on a production path",
+ "description": "What breaks: a commented-out `// #define DEBUG_*` becomes active (DEBUG_HWATTN 2789808472 'leaving enabled intentionally?', DEBUG_GET_ALLKV + MORE_HWATTN_DEBUG 2759894229, DEBUG_HWATTN_CMD_GEN 2759903853, LOG_TOKEN_TIMES 3124878965 'can we comment this back out before merge?'); a debug_hexdump or spdlog::debug is added where siblings sit under #ifdef WRITEBACK_HEXDUMPS or the file's dbg_*_log macro (2719160746, 2719161128, 2737832765); new log calls use an older sibling macro (dbg_hwattn_cmds_log) where the same diff defined dbg_wlr_log for this category (3405973171, 3405974281 'here too maybe?'); a log line carries a developer tag ('MRC allocated shard' 3002085391 'still need this log?'); a debug_string prints fields only when tok_ix > 4000 with no explanation (2915186372); a 745-line debug-only header is included unconditionally while its only use is under #ifdef DEBUG_GET_ALLKV (2737953233); a TRACE_EVENT moves from 'driver-detail' to the always-on 'driver' category while the Perfetto buffer already overflows (3456320516). Procedure: diff lines matching ^\\+#define (DEBUG|LOG_|TRACE|VERBOSE|MORE_) or ^\\+// -> ^\\+#define; added dump/debug-log calls in h/ and src/ compared with the guard the file uses for siblings; call sites in the diff that use an older category macro when the diff defines a newer one; includes whose every use is under a debug guard; TRACE_EVENT category changes. Ask form: 'intend to leave this enabled?', 'wrap in #ifdef X?', 'still need this log?'.",
+ "disposition": "add_new",
+ "existing_check": null,
+ "disposition_reason": "No existing check looks at debug switches or log guards; 13 rows over 8 PRs, mostly regex-detectable.",
+ "count": 13,
+ "prs_spanned": 8,
+ "representative_ids": [
+  2789808472,
+  2719160746,
+  2737953233,
+  3405973171
+ ],
+ "evidence_needed": [
+  "hunk",
+  "full_file",
+  "other_file",
+  "perf_knowledge"
+ ],
+ "agent_feasibility": "yes: regex over added lines plus a per-file lookup of the existing guard macro; the Perfetto buffer-pressure judgement (3456320516) needs runtime knowledge.",
+ "members": [
+  {
+   "id": 2719160746,
+   "pr": "tron-1920",
+   "kind": "inline",
+   "path": "h/pos/hwattention.hpp",
+   "is_reply": false,
+   "concern": "A debug_hexdump call in the new K-write guard runs unconditionally while the sibling V-write guard wraps its hexdump in `#ifdef WRITEBACK_HEXDUMPS`; Wade asks to wrap this one the same way so the debug dump is compiled out by default.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "debug-output-not-behind-guard",
+   "detection": {
+    "trigger": "The diff adds a call to a dump/hexdump/debug-print function (debug_hexdump, debug_bf16dump, spdlog::debug with large payload) in a production header or source path, and the same file defines a compile-time debug macro (`// #define WRITEBACK_HEXDUMPS`, `#ifdef DEBUG_*`) that guards sibling calls.",
+    "procedure": "grep -n '#ifdef\\|#define' on the touched file to list the debug macros; grep -n 'debug_hexdump\\|debug_bf16dump\\|dump_' on the diff's added lines; for each hit check whether the enclosing lines sit inside one of those #ifdef blocks.",
+    "question": "Is every added debug dump on a production path guarded by the same compile-time macro the file already uses for its siblings?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "question",
+   "severity": "minor",
+   "author_outcome": "accepted",
+   "quote": "wrap in `#ifdef WRITEBACK_HEXDUMPS`?",
+   "reviewable_by_agent": "yes",
+   "note": "At the approved head hwattention.hpp:33 has `// #define WRITEBACK_HEXDUMPS` (off by default) and the K guard's hexdump is inside `#ifdef WRITEBACK_HEXDUMPS` at :407, so the author applied it. Author's reply says the fix existed locally but a crash prevented the push."
+  },
+  {
+   "id": 2719161128,
+   "pr": "tron-1920",
+   "kind": "inline",
+   "path": "h/pos/hwattention.hpp",
+   "is_reply": false,
+   "concern": "Same as 2719160746, anchored at the function header of wait_for_hbm_kwrite_complete: the hexdump inside the K guard should be behind the WRITEBACK_HEXDUMPS compile-time guard.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "debug-output-not-behind-guard",
+   "detection": {
+    "trigger": "Same as 2719160746: an added debug dump call on a production path while the file defines a compile-time debug macro that guards sibling calls.",
+    "procedure": "Same as 2719160746.",
+    "question": "Is every added debug dump on a production path guarded by the same compile-time macro the file already uses for its siblings?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "question",
+   "severity": "minor",
+   "author_outcome": "accepted",
+   "quote": "wrap in `#ifdef WRITEBACK_HEXDUMPS`?",
+   "reviewable_by_agent": "yes",
+   "note": "Duplicate of 2719160746 posted one minute later on the same function (line 408 vs 435); three separate one-comment reviews within three minutes on 2026-01-23 suggest he submits each comment as its own review."
+  },
+  {
+   "id": 2737832765,
+   "pr": "tron-1920",
+   "kind": "inline",
+   "path": "src/pos/worker.cpp",
+   "is_reply": false,
+   "concern": "A new `spdlog::debug(...)` call in hw_prepare sits directly below a line that uses the file's `dbg_hwattn_cmds_log` macro (which compiles to spdlog::debug or to nothing depending on a build flag); Wade's suggestion block routes the new log through the same macro and notes the `dbg_ac1` local would then need `[[maybe_unused]]` to avoid a warning when the macro is empty.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "debug-output-not-behind-guard",
+   "detection": {
+    "trigger": "An added spdlog::debug / spdlog::info / printf in a hot path of a file that defines a conditional logging macro (`#define dbg_*_log(...) spdlog::debug(__VA_ARGS__)` with an empty alternate), especially when an adjacent line already uses the macro.",
+    "procedure": "grep -n '#define dbg_.*_log' on the file; grep the added lines for direct spdlog::debug calls; check whether a local variable introduced only to feed the log would become unused when the macro expands to nothing (compile with the flag off, or inspect by reading).",
+    "question": "Should this debug log go through the file's existing conditional macro, and does any variable exist only to feed it?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "suggestion_block",
+   "severity": "minor",
+   "author_outcome": "pushed_back",
+   "quote": "... probably have to add `maybe_unused` to the `dbg_ac1` declaration above as well",
+   "reviewable_by_agent": "yes",
+   "note": "worker.cpp:103-105 at head defines dbg_hwattn_cmds_log as spdlog::debug or empty. Author replied dbg_ac1 is used elsewhere when defined, so no maybe_unused needed. Whether the suggestion itself was applied: worker.cpp final diff is +5 -0; the grep at head shows no `spdlog::debug(\"Token` line, consistent with the macro suggestion being applied."
+  },
+  {
+   "id": 2789808472,
+   "pr": "tron-2011",
+   "kind": "inline",
+   "path": "h/tron/models/self_attention.hpp",
+   "is_reply": false,
+   "concern": "The PR flips the commented-out '// #define DEBUG_HWATTN' to an active '#define DEBUG_HWATTN', which turns on debug logging for hardware attention in a production header; Wade asks whether that is intended.",
+   "existing_check": 10,
+   "existing_check_fit": "partial",
+   "candidate_label": "debug-flag-left-enabled",
+   "detection": {
+    "trigger": "A diff line uncomments or adds a '#define DEBUG_*', 'VERBOSE', 'TRACE' macro, sets a debug log level, or flips a '#if 0' to '#if 1', in a file outside t/, and no PR body sentence mentions debug output.",
+    "procedure": "grep the diff for '^\\+#define DEBUG\\|^\\+#define .*TRACE\\|^-// #define' and for added spdlog::set_level or 'debug' toggles. For each hit, grep the PR body and commit messages for the macro name. If absent, ask whether it is intentional; check at HEAD whether it is still enabled.",
+    "question": "Is this debug switch meant to ship enabled, and does any PR text say so?"
+   },
+   "evidence_read": [
+    "hunk"
+   ],
+   "form": "question",
+   "severity": "normal",
+   "author_outcome": "unknown",
+   "quote": "leaving enabled intentionally?",
+   "reviewable_by_agent": "yes",
+   "note": "No reply in the digest. At head d4795f37a5 line 18 of h/tron/models/self_attention.hpp is still '#define DEBUG_HWATTN' (enabled), and Wade approved. Check 10 would classify this as a hunk no body sentence describes, but check 10's procedure (identifier set, removed-line match at BASE) is aimed at refactor hunks, not a toggled debug macro, hence partial."
+  },
+  {
+   "id": 3124878965,
+   "pr": "tron-2499",
+   "kind": "inline",
+   "path": "h/runtron/stream_generate.hpp",
+   "is_reply": false,
+   "concern": "The PR enabled a debug logging #define (LOG_TOKEN_TIMES, per-token timing output every Nth token) in the header; Wade asks that it be commented out again before merge so production builds do not log.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "debug-logging-left-enabled",
+   "detection": {
+    "trigger": "An added or un-commented line defines a debug/logging macro (#define LOG_*, DEBUG_*, TRACE_*, VERBOSE), or enables a verbose log level, in a header or source file whose neighboring sibling macros are kept commented out ('uncomment to ...').",
+    "procedure": "Grep the diff's added lines for '#define LOG_', '#define DEBUG', 'spdlog::set_level', 'verbose = true'. For each hit, read the surrounding lines: if a comment says 'uncomment to' or the sibling macro is commented out, the enabled define is a development leftover. Check the commit list for a later 'turn off' commit.",
+    "question": "Does this diff turn on a logging or debug switch that the file's convention keeps off by default?"
+   },
+   "evidence_read": [
+    "hunk"
+   ],
+   "form": "ask",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "can we comment this back out before merge?",
+   "reviewable_by_agent": "yes",
+   "note": "Commit 1 'Enable every Nth token output as a progress indicator' enabled the define; commit 4 'turn off periodic token time logging by default' answered Wade. At head 269418ce4d lines 34-37: '// #define LOG_TOKEN_SELECTION' and '// #define LOG_TOKEN_TIMES 512' are both commented out. Commit ab5c1c2919 is not in the worktree (rewritten), so the enabled line itself could not be re-read; inferred from the commit subjects and the head."
+  },
+  {
+   "id": 2759894229,
+   "pr": "tron-1973",
+   "kind": "inline",
+   "path": "h/tron/models/self_attention.hpp",
+   "is_reply": false,
+   "concern": "The diff flips `// #define DEBUG_GET_ALLKV` to an active `#define DEBUG_GET_ALLKV` (and MORE_HWATTN_DEBUG is also defined) in a shared header; Wade asks whether leaving these debug macros enabled on the hwattention_sync branch is intentional.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "debug-macro-left-enabled",
+   "detection": {
+    "trigger": "A diff line changes a commented-out `// #define DEBUG_*` (or any *_DEBUG / *_DUMP / *_TRACE macro) into an active `#define`, or adds a new active debug `#define` in a header or production .cpp.",
+    "procedure": "Grep the diff's added lines for `^\\+#define [A-Z_]*(DEBUG|DUMP|TRACE|VERBOSE)[A-Z_]*` and the removed lines for the same name commented out; for each, grep the file at HEAD for `#ifdef <NAME>` to see what the macro enables (extra logging, dumps, slower paths); check whether the PR body or commit message says the debug output is meant to ship.",
+    "question": "Is this debug macro meant to stay enabled in the merged branch, or was it flipped on for local debugging and forgotten?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "question",
+   "severity": "none",
+   "author_outcome": "pushed_back",
+   "quote": "is it your intention to leave this and MORE_HWATTN_DEBUG enabled in the hwattention_sync branch?",
+   "reviewable_by_agent": "yes",
+   "note": "Verified at 5e0606f0d8: h/tron/models/self_attention.hpp:20 `#define DEBUG_GET_ALLKV`, :25 `#define MORE_HWATTN_DEBUG` (not in the shown hunk; Wade read beyond the hunk), with `#ifdef MORE_HWATTN_DEBUG` blocks at :315, :353, :425. The author answered 'for the moment, yes'; Wade approved 3 minutes after asking, so the question was informational, not blocking. Existing check 10 would explicitly NOT fire here (its 'do not fire on' excludes hunks whose removed lines are comment-only)."
+  },
+  {
+   "id": 2759903853,
+   "pr": "tron-1973",
+   "kind": "inline",
+   "path": "src/pos/worker.cpp",
+   "is_reply": false,
+   "concern": "The diff flips `// #define DEBUG_HWATTN_CMD_GEN` to an active `#define` in the worker; Wade asks whether it is meant to stay enabled.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "debug-macro-left-enabled",
+   "detection": {
+    "trigger": "A diff line changes a commented-out `// #define DEBUG_*` into an active `#define` in a production .cpp or header.",
+    "procedure": "Same as for 2759894229: grep added lines for active debug-style #defines whose removed twin was commented out; grep the file at HEAD for the `#ifdef` blocks it enables (src/pos/worker.cpp:117 and :1144 at this head) to state what extra work or logging ships.",
+    "question": "Is this debug macro meant to stay enabled, or was it flipped on for local debugging and forgotten?"
+   },
+   "evidence_read": [
+    "hunk"
+   ],
+   "form": "question",
+   "severity": "none",
+   "author_outcome": "unknown",
+   "quote": "intend to leave this enabled?",
+   "reviewable_by_agent": "yes",
+   "note": "Verified at 5e0606f0d8: src/pos/worker.cpp:80 `#define DEBUG_HWATTN_CMD_GEN`, guarded blocks at :117 and :1144. No author reply in the digest; Wade approved 3 minutes later on the same commit. Second instance of the same pattern in one PR; he asks per site, in one short line."
+  },
+  {
+   "id": 3002085391,
+   "pr": "positron-ai/tron#2233",
+   "kind": "inline",
+   "path": "src/tron/gof.cpp",
+   "is_reply": false,
+   "concern": "A `spdlog::debug(\"MRC allocated shard ...\")` line in the shard constructor looks like leftover development logging (author-initials prefix 'MRC').",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "leftover-debug-log",
+   "detection": {
+    "trigger": "A diff adds a log call whose text carries a developer tag (initials, 'XXX', 'TEMP', 'DEBUG') or that sits in a constructor/allocation path with no corresponding log on the release path.",
+    "procedure": "Grep added lines for spdlog::debug/info/printf with author initials or ad-hoc tags; check whether the PR body describes the log as a feature.",
+    "question": "Is this log line part of the feature or a development trace the author forgot to remove?"
+   },
+   "evidence_read": [
+    "hunk"
+   ],
+   "form": "question",
+   "severity": "nit",
+   "author_outcome": "changed",
+   "quote": "still need this log?",
+   "reviewable_by_agent": "yes",
+   "note": "Author: 'nope. should have been removed and I missed it.' Head af9438799a src/tron/gof.cpp:94-104 no longer has the line. Comment was at commit df0bfaeb95."
+  },
+  {
+   "id": 2915186372,
+   "pr": "positron-ai/tron#2148",
+   "kind": "inline",
+   "path": "h/pos/device.hpp",
+   "is_reply": false,
+   "concern": "A debug formatter (rxinfo::debug_string, the text dump of one receive-queue entry) prints the new token and layer fields only when tok_ix > 4000; Wade asks what that threshold buys, since debug_exit() dumps every interesting rx_entries ring entry anyway, and says the conditional is more confusing than useful.",
+   "existing_check": 13,
+   "existing_check_fit": "partial",
+   "candidate_label": "leftover-dev-debug-gate",
+   "detection": {
+    "trigger": "A diff adds a bare numeric literal that gates whether debug or log output is produced (a threshold compare inside a debug_string, a log statement, or a dump), and the literal matches no named constant and no comment explains it.",
+    "procedure": "Read the hunk; find the literal in a condition that selects output. grep h/ src/ for the function name (here debug_string) to list its callers and see whether callers already select which entries get dumped. Ask whether the gate saves anything a caller does not already save.",
+    "question": "What does this output-gating literal buy the reader of the dump that the callers' own selection does not, and is that worth an unexplained threshold?"
+   },
+   "evidence_read": [
+    "hunk",
+    "callers"
+   ],
+   "form": "question",
+   "severity": "minor",
+   "author_outcome": "changed",
+   "quote": "I'm still not quite sure what this `tok_ix > 4000` is really buying us. If we trip debug_exit() we're going to call this `debug_string()` function on any/all 'interesting' entries in our 'rx_entries' ring buffer anyway right?",
+   "reviewable_by_agent": "yes",
+   "note": "Wade relied on knowing that debug_exit() iterates rx_entries and calls debug_string() on each (callers knowledge). Author reply: the gate was a development aid to watch the 4096 command boundary in logs; author agreed to make it always on. Check 13 covers named constants only, so a bare literal inside a condition does not trigger it as written."
+  },
+  {
+   "id": 2737953233,
+   "pr": "tron-1920",
+   "kind": "inline",
+   "path": "h/tron/models/self_attention.hpp",
+   "is_reply": false,
+   "concern": "self_attention.hpp (a core model header) now unconditionally includes pos/hwattention.hpp (the FPGA attention header, 745 lines larger after this PR) although the only use is inside `#ifdef DEBUG_GET_ALLKV`; Wade says the include should sit under the same guard so the debug-only dependency does not reach every includer by default.",
+   "existing_check": 12,
+   "existing_check_fit": "partial",
+   "candidate_label": "include-only-needed-under-debug-guard",
+   "detection": {
+    "trigger": "The diff adds an #include to a widely included header, and every use of the included header's symbols in that file is inside an `#ifdef <DEBUG macro>` block that is off by default.",
+    "procedure": "List the symbols the include provides that the file uses (grep for dump_, hwattention::, hardware::); for each use site find the enclosing #ifdef; if all uses are guarded and the macro is commented out by default (`// #define DEBUG_GET_ALLKV`), the include belongs under the guard. Count direct includers of the file (grep -rln 'self_attention.hpp' h src t) to state the blast radius.",
+    "question": "Is every use of this include guarded by a debug macro that is off by default, so that the include itself could move under the guard?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file",
+    "other_file"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "accepted",
+   "quote": "IMO we should wrap this include in the `#ifdef DEBUG_GET_ALLKV` guard somewhere",
+   "reviewable_by_agent": "yes",
+   "note": "At the approved head self_attention.hpp:6 still includes pos/hwattention.hpp unguarded; `// #define DEBUG_GET_ALLKV` at :21 is off by default and the dump code at :470-513 is under #ifdef DEBUG_GET_ALLKV. Author said 'Can do.' but it was not pushed before approval. Check 12 is about global definitions in shared headers; this is about a dependency edge added to a shared header."
+  },
+  {
+   "id": 3456320516,
+   "pr": "positron-ai/tron#3016",
+   "kind": "inline",
+   "path": "src/pos/worker.cpp",
+   "is_reply": false,
+   "concern": "The hunk moves the hw_prepare Perfetto trace event from the low-volume 'driver-detail' category to the always-on 'driver' category; Wade questions the change because the Perfetto trace buffer already overflows and discards events, and says he is about to remove deep traces in his own push.",
+   "existing_check": 10,
+   "existing_check_fit": "partial",
+   "candidate_label": "trace-category-promotion-adds-buffer-pressure",
+   "detection": {
+    "trigger": "A hunk changes the first argument (category string) of a TRACE_EVENT from a detail/verbose category to a default category, or adds a TRACE_EVENT on a per-request or per-layer path, with no body sentence about tracing.",
+    "procedure": "grep the diff for TRACE_EVENT lines whose removed and added versions differ only in the category string; read README.perfetto.md for the category list and which are enabled by default; count how often the enclosing function runs per token (hw_prepare runs per request per layer); ask whether the PR body mentions tracing at all.",
+    "question": "Does this hunk raise the number of events in the default Perfetto buffer for a path the PR's stated purpose does not require to be traced?"
+   },
+   "evidence_read": [
+    "hunk",
+    "runtime_behavior",
+    "perf_knowledge"
+   ],
+   "form": "question",
+   "severity": "minor",
+   "author_outcome": "unknown",
+   "quote": "do you really want to change this away from \"driver-detail\"? I'm actually gonna comment out some of the deep gof/k_v xfer \"hwattention\" traces in my next push, cuz we're getting so many events these days it's overflowing our Perfetto buffer pretty quickly",
+   "reviewable_by_agent": "needs_domain",
+   "note": "No reply in the thread. At head 39396c8728 worker.cpp:1713 still uses the 'driver' category (`TRACE_EVENT(\"driver\", workreq->attn_req ? \"attn hw_prepare\" : \"legacy hw_prepare\", ...`), so the change stayed. Check 10 fit is partial: the hunk is unrelated to the PR's stated purpose, but check 10's procedure (identifier set from the body, revert test) is not what Wade did; he reasoned from the Perfetto buffer overflow he observes at runtime and from his own pending push. The buffer-overflow fact is operational knowledge, not in the repo."
+  },
+  {
+   "id": 3405973171,
+   "pr": "tron-2980",
+   "kind": "inline",
+   "path": "src/pos/worker.cpp",
+   "is_reply": false,
+   "concern": "New weight-load-reuse (WLR) log lines in the legacy-matmul path use the hardware-attention debug macro dbg_hwattn_cmds_log instead of the PR's own new dbg_wlr_log macro; Wade supplies the replacement.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "new-code-bypasses-its-own-new-helper",
+   "detection": {
+    "trigger": "a diff defines a new macro, helper or category (here #define dbg_wlr_log at worker.cpp:131) and the same diff adds call sites in the same subsystem that use an older sibling helper (dbg_hwattn_cmds_log) instead",
+    "procedure": "list helpers the diff defines; for each, grep the diff's added lines for calls to sibling helpers with the same prefix and signature (grep -n 'dbg_.*_log' on added lines); classify each added call by the subsystem its message text names (messages that say 'legacy wcmd MATCH' or 'reuse' are WLR, not hwattn)",
+    "question": "Does an added call use an older category helper when the diff itself introduced a helper for exactly this category, so that the log is toggled by the wrong switch?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "suggestion_block",
+   "severity": "nit",
+   "author_outcome": "accepted",
+   "quote": "```suggestion\n          dbg_wlr_log(\n```\n\n... right?",
+   "reviewable_by_agent": "yes",
+   "note": "Verified at 247c8a4c22: dbg_wlr_log is defined at worker.cpp:131-133 and already used at :1287 and :1290, while the legacy MATCH/DIFFERS log lines at :1267 and :1276 still used dbg_hwattn_cmds_log. Author: 'I had added these before I added that macro.' At a62d15a3dc lines 1267 and 1272 use dbg_wlr_log."
+  },
+  {
+   "id": 3405974281,
+   "pr": "tron-2980",
+   "kind": "inline",
+   "path": "src/pos/worker.cpp",
+   "is_reply": false,
+   "concern": "Second instance of the same macro mix-up a few lines below (the DIFFERS log line); Wade points to it with a one-line question.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "new-code-bypasses-its-own-new-helper",
+   "detection": {
+    "trigger": "same as 3405973171: an added call to an older sibling helper in a region the diff's new helper covers",
+    "procedure": "same grep over added lines; report every site, not just the first",
+    "question": "Does this added call also belong to the new category helper?"
+   },
+   "evidence_read": [
+    "hunk"
+   ],
+   "form": "question",
+   "severity": "nit",
+   "author_outcome": "accepted",
+   "quote": "here too maybe?",
+   "reviewable_by_agent": "yes",
+   "note": "No reply in the digest, but at a62d15a3dc worker.cpp:1272 ('prev legacy wcmd DIFFERS') uses dbg_wlr_log, so it was applied. Shows Wade reports each repeat site of one finding separately with a minimal pointer instead of one aggregated comment."
+  }
+ ],
+ "missing_member_ids": [],
+ "codex_bullets": [
+  {
+   "id": "C12",
+   "bullet": "Consider the cost of diagnostics too: enabled trace categories, buffer capacity, polling, assertions, and aggregation can affect the path they measure.",
+   "pick_up": "yes",
+   "reason": "Four comments (PRs 3016, 4128, 2148, 4596) on the cost of logging, asserts and stats folds. No Claude check.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C33",
+   "bullet": "Keep comments about lasting behavior and rationale. Remove review-round labels, story narration, stale questions, and debug residue. A large explanatory Note is useful only when the mechanism needs it.",
+   "pick_up": "yes",
+   "reason": "Largest cluster in the corpus: at least 14 comments on debug residue, commented-out code, left-enabled debug macros, stale comments and review narration (also 4146959502, 2771711406, 2737935271, 2789808472, 2759903853, 3350412400, 3973917755, 3102601258, 2915191812). The positron-code-review skill covers narration but the Wade skill has nothing.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C58",
+   "bullet": "For every metric, write its unit and scope, then locate all writers and readers. Check software, hardware, mixed, and alternate entry paths. Trace reset, begin, end, aggregation, and publication. Check row identity stays stable when workers change roles. Verify trace categories and event rates fit the capture buffer.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 4596, 2287, 3016), plus 3406007619 on atomics for the FUSE reader thread. Procedure form of C22, C23, C25; adopt as one instrumentation check.",
+   "claude_skill_coverage": "none"
+  }
+ ]
+}

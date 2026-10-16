@@ -1,0 +1,795 @@
+diff --git a/h/tron/models/common.hpp b/h/tron/models/common.hpp
+index 9b335964118..97a5c0a8da8 100644
+--- a/h/tron/models/common.hpp
++++ b/h/tron/models/common.hpp
+@@ -680,7 +680,7 @@ struct page_id {
+ // A `kv_section` represents a chunk of attention work.
+ //
+ // Which chunk?
+-// - For every q token in the minibatch,
++// - For every q token in the section's query range within the minibatch,
+ // - For every attention head relating to this `kv_head`,
+ // - For every page in `page_ixs`,
+ // the partial softmax of that q token's queries, in those attention
+@@ -697,6 +697,13 @@ struct kv_section {
+   size_t kv_head;
+   std::vector<page_id> page_ixs;
+   work_estimate_t work_estimate;
++  // The batch items (indices into the batch's `items`) this section covers:
++  // the hull of the query ranges of its pages, narrowed when a section is
++  // split across workers. Each piece computes its pages in full for a
++  // disjoint slice of the queries, so every result is a complete per-query
++  // partial and the joins are unaffected.
++  size_t q_begin = 0;
++  size_t q_end = SIZE_MAX;
+ };
+ 
+ // Forward declarations for hw_pass.
+@@ -873,20 +880,49 @@ struct kv_plan {
+   }
+ 
+   // Assign a page to this plan. If the last section for this worker
+-  // is for the same kv_head, the page is added to that section;
++  // is for the same kv_head and has the same zero/nonzero work status,
++  // the page is added to that section;
+   // otherwise a new section is created.
+   // Returns true if a new section was created.
+   bool assign_page(
+       size_t worker_ix, size_t kv_head, page_id page_ix, const work_estimate_t& work) {
++    return assign_page(worker_ix, kv_head, page_ix, work, 0, SIZE_MAX);
++  }
++
++  // `q_lo`/`q_hi` bound the batch items with software work on this page (see
++  // estimate_work). A section's query range is the hull over its pages.
++  bool assign_page(size_t worker_ix,
++      size_t kv_head,
++      page_id page_ix,
++      const work_estimate_t& work,
++      size_t q_lo,
++      size_t q_hi) {
+     auto& worker_plan = plan[worker_ix];
+-    if (!worker_plan.empty() && worker_plan.back().kv_head == kv_head) {
+-      worker_plan.back().page_ixs.push_back(page_ix);
+-      worker_plan.back().work_estimate += work;
++    // Keep zero-work runs separate: hardware-covered context must not hide a
++    // productive single page inside a large, otherwise empty section.
++    if (!worker_plan.empty() && worker_plan.back().kv_head == kv_head &&
++        (worker_plan.back().work_estimate.work() > 0) == (work.work() > 0)) {
++      kv_section& section = worker_plan.back();
++      section.page_ixs.push_back(page_ix);
++      section.work_estimate += work;
++      if (q_lo < q_hi) {
++        section.q_begin =
++            section.q_begin < section.q_end ? std::min(section.q_begin, q_lo) : q_lo;
++        section.q_end = std::max(section.q_end, q_hi);
++      }
+       return false;
+     }
+-    worker_plan.push_back(kv_section{kv_head, {page_ix}, work});
++    kv_section section{kv_head, {page_ix}, work};
++    section.q_begin = q_lo;
++    section.q_end = q_hi;
++    worker_plan.push_back(std::move(section));
+     return true;
+   }
++
++  // Mutable access for the section split in finish_sw_plan.
++  std::vector<kv_section>& mutable_worker_plan(size_t worker_ix) {
++    return plan[worker_ix];
++  }
+ };
+ 
+ // Note [Mini-batching]
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index 9d5bb600eb7..1a777eeb530 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -3,8 +3,10 @@
+ // The common parts of all tron models, that do not vary across plugins.
+ 
+ #include <algorithm>  // For std::find, std::remove_if
+-#include <atomic>     // For gof_coop_outstanding_
++#include <array>
++#include <atomic>  // For gof_coop_outstanding_
+ #include <cerrno>
++#include <charconv>
+ #include <concepts>  // For std::convertible_to
+ #include <cstdio>    // For std::remove
+ #include <cstdlib>
+@@ -126,6 +128,27 @@ size_t init_hwattn_early_launch_min_b() {
+   return result;
+ }
+ 
++inline constexpr size_t max_attn_section_split = 16;
++
++// TRON_ATTN_SECTION_SPLIT caps how many pieces one section may be split
++// into; 0 or 1 disables splitting.
++TRON(inline)
++size_t init_attn_section_split_cap() {
++  static const size_t cap = []() -> size_t {
++    const char* v = getenv("TRON_ATTN_SECTION_SPLIT");
++    if (v == nullptr) return size_t{8};
++    std::string_view value(v);
++    size_t parsed = 0;
++    const auto [end, error] =
++        std::from_chars(value.data(), value.data() + value.size(), parsed);
++    const bool valid = error == std::errc{} && end == value.data() + value.size();
++    TRON_ASSERT(valid,
++        "invalid TRON_ATTN_SECTION_SPLIT '{}'; expected a nonnegative integer", value);
++    return std::min(parsed, max_attn_section_split);
++  }();
++  return cap;
++}
++
+ enum class hw_attention_launch_phase : uint8_t { late, early };
+ 
+ TRON(nodiscard, inline, pure)
+@@ -1164,6 +1187,11 @@ struct model : noncopyable<model<plugin_type>> {
+       std::vector<indexed_vector<attention_plan_id,
+           std::array<std::vector<work_estimate_t>, 2>>>
+           page_work;
++      // Per page, the half-open range of batch items with software work on
++      // it; parallel to page_work, {0, 0} for a page with none.
++      std::vector<indexed_vector<attention_plan_id,
++          std::array<std::vector<std::pair<uint32_t, uint32_t>>, 2>>>
++          page_qrange;
+     };
+     attention_work_t attn_work;
+ 
+@@ -1823,6 +1851,8 @@ struct model : noncopyable<model<plugin_type>> {
+       attn_work.page_ixs.resize(q_batches.size());
+       attn_work.page_work.clear();
+       attn_work.page_work.resize(q_batches.size());
++      attn_work.page_qrange.clear();
++      attn_work.page_qrange.resize(q_batches.size());
+       std::vector<indexed_vector<attention_plan_id, work_estimate_t>> batch_work_total(
+           q_batches.size());
+       int64_t weighted_total_work = 0;
+@@ -1830,6 +1860,7 @@ struct model : noncopyable<model<plugin_type>> {
+         batch* q_batch = q_batches[b].get();
+         attn_work.page_ixs[b].resize(n_plans);
+         attn_work.page_work[b].resize(n_plans);
++        attn_work.page_qrange[b].resize(n_plans);
+         batch_work_total[b].resize(n_plans);
+         for (attention_plan_id plan_id : attention_plan_profiles.indices()) {
+           attention_plan_profile const& profile = attention_plan_profiles[plan_id];
+@@ -1846,9 +1877,10 @@ struct model : noncopyable<model<plugin_type>> {
+           // Work is in units of dot products.
+           // Work is identical for all KV heads but differs in ready vs pending.
+           estimate_work(q_batch->items, attn_work.page_ixs[b][plan_id],
+-              attn_work.page_work[b][plan_id], batch_work_total[b][plan_id],
+-              profile.sliding_window_size, profile.geometry.n_query_heads,
+-              profile.geometry.kv.n_kv_heads, profile.uses_hw);
++              attn_work.page_work[b][plan_id], attn_work.page_qrange[b][plan_id],
++              batch_work_total[b][plan_id], profile.sliding_window_size,
++              profile.geometry.n_query_heads, profile.geometry.kv.n_kv_heads,
++              profile.uses_hw);
+ 
+           weighted_total_work += batch_work_total[b][plan_id].work() *
+                                  (int64_t)attention_plan_operation_count[plan_id];
+@@ -2268,7 +2300,8 @@ struct model : noncopyable<model<plugin_type>> {
+           // all remaining pages.  Try to distribute total work among
+           // workers in proportion to their speed.
+           finish_sw_plan(q_batch, plan_state, attn_work.page_ixs[b][plan_id],
+-              attn_work.page_work[b][plan_id], worker_cumsum, operation_kv_heads);
++              attn_work.page_work[b][plan_id], attn_work.page_qrange[b][plan_id],
++              worker_cumsum, operation_kv_heads);
+ 
+           // Step 5. Update work estimates and plan workers to join tasks.
+           for (size_t worker = 0; worker < n_attn_workers; ++worker)
+@@ -2357,6 +2390,7 @@ struct model : noncopyable<model<plugin_type>> {
+     void estimate_work(const std::vector<token_job_id>& items,
+         const std::array<std::vector<page_id>, 2>& batch_page_ixs,
+         std::array<std::vector<work_estimate_t>, 2>& page_work,
++        std::array<std::vector<std::pair<uint32_t, uint32_t>>, 2>& page_qrange,
+         work_estimate_t& work_total,
+         int sliding_window_size,
+         size_t operation_query_heads,
+@@ -2379,6 +2413,7 @@ struct model : noncopyable<model<plugin_type>> {
+       for (int pending : {0, 1}) {
+         const auto& page_ixs = batch_page_ixs[pending];
+         page_work[pending].resize(page_ixs.size());
++        page_qrange[pending].assign(page_ixs.size(), {0, 0});
+         const token_range* range_hint =
+             page_ixs.empty()
+                 ? nullptr
+@@ -2404,6 +2439,7 @@ struct model : noncopyable<model<plugin_type>> {
+           runs.push_back({entry_range, run_begin, page.count()});
+           range_hint = entry_range;
+           // Accumulate each minibatch item's dot products against this page.
++          size_t q_lo = SIZE_MAX, q_hi = 0;
+           for (size_t ix = 0; ix < items.size(); ++ix) {
+             bool has_sw_work = false;
+             const int q_position =
+@@ -2427,9 +2463,15 @@ struct model : noncopyable<model<plugin_type>> {
+                   operation_query_heads * (run.end - begin);
+               has_sw_work = true;
+             }
+-            if (has_sw_work) page_work[pending][p].scaled_vs += operation_kv_heads;
++            if (has_sw_work) {
++              page_work[pending][p].scaled_vs += operation_kv_heads;
++              q_lo = std::min(q_lo, ix);
++              q_hi = ix + 1;
++            }
+           }
+           if (page_work[pending][p].scaled_vs == 0) continue;
++          page_qrange[pending][p] = {
++              static_cast<uint32_t>(q_lo), static_cast<uint32_t>(q_hi)};
+           page_work[pending][p].kv_heads += operation_kv_heads;
+           work_total += page_work[pending][p];
+         }
+@@ -2690,11 +2732,11 @@ struct model : noncopyable<model<plugin_type>> {
+         typename batch::attention_plan& plan_state,
+         const std::array<std::vector<page_id>, 2>& batch_page_ixs,
+         const std::array<std::vector<work_estimate_t>, 2>& page_work,
++        const std::array<std::vector<std::pair<uint32_t, uint32_t>>, 2>& page_qrange,
+         const std::vector<float>& worker_cumsum,
+         size_t operation_kv_heads) {
+       // KV paging dominates attention planning; count it as its own category.
+       alloc_cat_scope _(alloc_cat::kv_plan);
+-      (void)q_batch;
+       size_t worker = 0;
+       size_t work_cumsum = 0;
+       size_t total_work = 0;
+@@ -2731,7 +2773,8 @@ struct model : noncopyable<model<plugin_type>> {
+               work_cumsum += plan_state.ready_kv_plan.work_estimate(worker).work();
+               work_cumsum += plan_state.pending_kv_plan.work_estimate(worker).work();
+             }
+-            if (plan.assign_page(worker, kv_head, page_ixs[p], on_this_page)) {
++            if (plan.assign_page(worker, kv_head, page_ixs[p], on_this_page,
++                    page_qrange[pending][p].first, page_qrange[pending][p].second)) {
+               plan_state.n_sections[kv_head]++;
+             }
+             work_cumsum += on_this_page.work();
+@@ -2739,6 +2782,168 @@ struct model : noncopyable<model<plugin_type>> {
+         }
+       }
+       TRON_ASSERT_EQ(work_cumsum, total_work);
++      split_sections_by_query(
++          q_batch, plan_state, worker_cumsum, init_attn_section_split_cap());
++    }
++
++    // Parallelize single-page sections by query in both Ready and Pending phases.
++    //
++    // Hardware offload and sliding windows can leave too few software pages
++    // to keep workers busy. Assign disjoint query ranges from a page to
++    // different workers, preserving each query's full-page reduction. Split
++    // only when there are at least two workers per productive (page, KV head)
++    // task and enough relevant queries to amortize the extra section overhead.
++    //
++    // Place pieces by predicted finish time, accounting for worker load and
++    // speed, relevant query count, and fixed setup/join costs per section.
++    // Require a meaningful predicted gain to cover unmodeled worker arrival
++    // skew, and prefer fewer pieces when their finish time is near the best.
++    void split_sections_by_query(batch* q_batch,
++        typename batch::attention_plan& plan_state,
++        const std::vector<float>& worker_cumsum,
++        size_t cap) {
++      const size_t n_workers = plan_state.ready_kv_plan.size();
++      const size_t n_q = q_batch->items.size();
++      constexpr int64_t split_min_queries = 32;
++      cap = std::min({cap, n_workers, max_attn_section_split});
++      if (cap < 2 || n_q < static_cast<size_t>(split_min_queries)) return;
++      TRON_ASSERT_EQ(worker_cumsum.size(), n_workers);
++      TRON_ASSERT_EQ(plan_state.pending_kv_plan.size(), n_workers);
++      // Charge a conservative 20 query units per section for page setup
++      // and the additional bookkeeping and joins introduced by splitting.
++      constexpr int64_t fixed_cost = 20;
++      auto section_cost = [&](const kv_section& s) {
++        return s.work_estimate.work() == 0 ? int64_t{0}
++                                           : fixed_cost + s.work_estimate.work();
++      };
++      struct candidate {
++        size_t worker;
++        size_t ix;
++        size_t span;
++      };
++      std::vector<candidate> cands;
++      std::vector<int64_t> base_load(n_workers), load(n_workers);
++      std::vector<double> inverse_speed(n_workers);
++      for (size_t w = 0; w < n_workers; ++w) {
++        const float speed = worker_cumsum[w] - (w == 0 ? 0.0f : worker_cumsum[w - 1]);
++        TRON_ASSERT(std::isfinite(speed) && speed > 0,
++            "invalid attention worker speed {}", speed);
++        inverse_speed[w] = 1.0 / speed;
++      }
++      std::vector<std::pair<size_t, kv_section>> placed;
++      for (int pending : {0, 1}) {
++        auto& plan = pending ? plan_state.pending_kv_plan : plan_state.ready_kv_plan;
++        // Ready sections run before pending ones on the same worker, so the
++        // pending phase starts behind both.
++        for (size_t w = 0; w < n_workers; ++w) {
++          base_load[w] = 0;
++          for (const kv_section& s : plan_state.ready_kv_plan[w])
++            base_load[w] += section_cost(s);
++          if (pending)
++            for (const kv_section& s : plan_state.pending_kv_plan[w])
++              base_load[w] += section_cost(s);
++        }
++        cands.clear();
++        size_t page_tasks = 0;
++        for (size_t w = 0; w < n_workers; ++w) {
++          auto& worker_plan = plan.mutable_worker_plan(w);
++          for (size_t i = 0; i < worker_plan.size(); ++i) {
++            const kv_section& s = worker_plan[i];
++            if (s.work_estimate.work() > 0) page_tasks += s.page_ixs.size();
++            if (s.page_ixs.size() != 1 || s.work_estimate.scaled_vs < split_min_queries)
++              continue;
++            const size_t q_end = std::min(s.q_end, n_q);
++            if (q_end <= s.q_begin + 1) continue;
++            cands.push_back({w, i, q_end - s.q_begin});
++          }
++        }
++        if (cands.empty() || page_tasks > n_workers / 2) continue;
++        // Use the same partitioning and placement for simulation and execution.
++        // Proportional boundaries make exactly k nonempty pieces even when the
++        // query count is not divisible by k. Retain rounding remainders in the
++        // work estimates; every piece still visits all of the original pages.
++        auto place_splits = [&](size_t ways, auto&& emit) {
++          load = base_load;
++          for (const candidate& c : cands) {
++            const kv_section& s = plan.mutable_worker_plan(c.worker)[c.ix];
++            const size_t k = std::min(ways, c.span);
++            if (k < 2) continue;
++            const size_t q_begin = s.q_begin;
++            const work_estimate_t work = s.work_estimate;
++            load[c.worker] -= section_cost(s);
++            for (size_t i = 0; i < k; ++i) {
++              const size_t begin = c.span * i / k;
++              const size_t end = c.span * (i + 1) / k;
++              auto share = [&](int64_t total) {
++                return total * static_cast<int64_t>(end) /
++                           static_cast<int64_t>(c.span) -
++                       total * static_cast<int64_t>(begin) /
++                           static_cast<int64_t>(c.span);
++              };
++              const work_estimate_t piece_work{
++                  share(work.k_dot_products), share(work.scaled_vs), work.kv_heads};
++              const int64_t cost = fixed_cost + piece_work.work();
++              // Keep the first piece on the original worker; moving the whole
++              // section would discard the page assignment's locality choice.
++              size_t target = c.worker;
++              if (i > 0) {
++                target = 0;
++                for (size_t w = 1; w < n_workers; ++w)
++                  if ((load[w] + cost) * inverse_speed[w] <
++                      (load[target] + cost) * inverse_speed[target])
++                    target = w;
++              }
++              load[target] += cost;
++              emit(c, i, target, q_begin + begin, q_begin + end, piece_work);
++            }
++          }
++          double makespan = 0;
++          for (size_t w = 0; w < n_workers; ++w)
++            makespan = std::max(makespan, load[w] * inverse_speed[w]);
++          return makespan;
++        };
++        auto ignore_piece = [](const auto&...) {};
++        std::array<double, max_attn_section_split> makespans;
++        makespans[0] = place_splits(1, ignore_piece);
++        double best_makespan = makespans[0];
++        for (size_t ways = 2; ways <= cap; ++ways) {
++          makespans[ways - 1] = place_splits(ways, ignore_piece);
++          best_makespan = std::min(best_makespan, makespans[ways - 1]);
++        }
++        // Both conditions apply to the chosen split, not just the optimum:
++        // save at least 10% over leaving the phase unsplit, and use the fewest
++        // pieces within 3% of the best predicted finish time.
++        constexpr double min_gain = 0.10;
++        constexpr double near_best = 0.03;
++        const double limit =
++            std::min(makespans[0] * (1 - min_gain), best_makespan * (1 + near_best));
++        size_t best_ways = 2;
++        while (best_ways <= cap && makespans[best_ways - 1] > limit)
++          ++best_ways;
++        if (best_ways > cap) continue;
++        // Apply what was simulated. Each original section keeps the first
++        // piece; the rest are appended after the loop so the references
++        // above stay valid.
++        placed.clear();
++        place_splits(best_ways, [&](const candidate& c, size_t i, size_t target,
++                                    size_t begin, size_t end, work_estimate_t work) {
++          kv_section& original = plan.mutable_worker_plan(c.worker)[c.ix];
++          if (i == 0) {
++            original.q_begin = begin;
++            original.q_end = end;
++            original.work_estimate = work;
++          } else {
++            kv_section piece = original;
++            piece.q_begin = begin;
++            piece.q_end = end;
++            piece.work_estimate = work;
++            placed.emplace_back(target, std::move(piece));
++            plan_state.n_sections[original.kv_head]++;
++          }
++        });
++        for (auto& [target, piece] : placed)
++          plan.mutable_worker_plan(target).push_back(std::move(piece));
++      }
+     }
+ 
+     template <attention_geometry geometry, typename kv_buffer_t>
+diff --git a/h/tron/models/ranged_mask.hpp b/h/tron/models/ranged_mask.hpp
+index 586cc6eb6d4..e24fef9e729 100644
+--- a/h/tron/models/ranged_mask.hpp
++++ b/h/tron/models/ranged_mask.hpp
+@@ -245,7 +245,9 @@ struct ranged_mask {
+ 
+   /// Find range with hint for O(1) sequential access.
+   /// hint must be a valid reference into this ranged_mask's ranges.
+-  TRON(nodiscard)
++  // Attention keeps query vectors live across sequential mask lookups. Inline
++  // this overload to avoid spilling those vectors across a function call.
++  TRON(nodiscard, inline)
+   const token_range& find_range(
+       token_id tok_ix, const token_range& hint) const noexcept {
+     // Check if still in the hinted range
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index b236c31e962..38c484c0aea 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -1115,7 +1115,7 @@ struct self_attention {
+       for (const kv_section& section : plan) {
+         apply_page_range<geometry>(q_batch->items, operation, queries, section.kv_head,
+             worker_ix, n_attn_workers, section.page_ixs, section.work_estimate,
+-            q_batch->items_mask, uses_hw, pending);
++            q_batch->items_mask, uses_hw, pending, section.q_begin, section.q_end);
+         plan_state.sections_left[section.kv_head]--;
+       }
+     }
+@@ -1381,7 +1381,9 @@ struct self_attention {
+         work_estimate_t work_estimate,
+         const mask_t<ranged_mask_capacity>& batch_queries,
+         bool uses_hw = false,
+-        bool pending = false) noexcept {
++        bool pending = false,
++        size_t q_begin = 0,
++        size_t q_end = SIZE_MAX) noexcept {
+       const attention_binding binding = operation.binding;
+       // MODEL_DEBUG("{} layer {} kv_head {} scratchpad {} qbatch [{}]",
+       // __PRETTY_FUNCTION__, layer, kv_head, scratchpad,
+@@ -1394,12 +1396,14 @@ struct self_attention {
+           "app thread id", app_pool().num_workers() - n_attn_workers + scratchpad,
+           "relevant q tokens", work_estimate.scaled_vs, "dot products",
+           work_estimate.k_dot_products, "pages",
+-          work_estimate.kv_heads  // KV heads are counted in pages here
+-      );
++          work_estimate.kv_heads,  // KV heads are counted in pages here
++          // Bounds also exclude queries with no software work on these pages.
++          "q begin", q_begin, "q end", std::min(q_end, items.size()));
+       const ranged_mask* query_mask = enclosing_state.query_mask;
+       TRON_ASSERT(query_mask && !query_mask->empty(),
+           "query_mask must be populated before attention");
+-      if (page_range.empty()) return;
++      q_end = std::min(q_end, items.size());
++      if (page_range.empty() || q_begin >= q_end) return;
+       int const sliding_window_size =
+           enclosing_state.attention_runtime_configs[binding.operation]
+               .sliding_window_size;
+@@ -1493,7 +1497,7 @@ struct self_attention {
+         // range.
+         bool have_page_visible = false;
+         mask_t<ranged_mask_capacity> page_visible;
+-        for (size_t batch_job_ix = 0; batch_job_ix < items.size(); batch_job_ix++) {
++        for (size_t batch_job_ix = q_begin; batch_job_ix < q_end; batch_job_ix++) {
+           token_job_id tok_ix = items[batch_job_ix];
+           token_id q_tok = enclosing_state.token_jobs[tok_ix];
+           bool sees_page = page_begin_hint->visible(tok_ix);
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index 3adced31838..6e8e9a01f7d 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -2194,8 +2194,8 @@ TEST_CASE(
+   }
+ }
+ 
+-TEST_CASE("apply and join page ranges", "[page_range]") {
+-  bool const uses_hw = GENERATE(false, true);
++template <size_t n_q_tokens, bool split_queries, bool uses_hw = false>
++static void check_page_range_reductions(int sliding_window) {
+   std::mt19937 gen(18);
+   std::normal_distribution<> dis(0.0, 1.0);  // mean 0.0, standard deviation 1.0
+ 
+@@ -2207,7 +2207,6 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+   constexpr size_t n_layers = 2;
+   constexpr size_t n_kv_heads = 8;
+   constexpr size_t kv_mul = n_heads / n_kv_heads;
+-  constexpr size_t n_q_tokens = 8;
+   // Exercise a scale distinct from the conventional value so the reference
+   // comparison detects whether the operation-owned value reaches the kernel.
+   constexpr float operation_scale = 0.0884f;
+@@ -2246,7 +2245,7 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+   // 2. Initialize a few pages of KV cache with random bf16 values
+   // Preserve the two-page join case with offload disabled. With offload,
+   // use enough resident pages to exercise range dismissal before the SW tail.
+-  const size_t num_pages = uses_hw ? 10 : 2;
++  constexpr size_t num_pages = uses_hw ? 10 : 2;
+   const size_t num_kv_tokens = num_pages * page_t::page_size;
+   book_t bk(num_pages, n_layers);
+   bk.fill_random(gen);
+@@ -2304,7 +2303,7 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+   state.token_positions.items = std::span<const uint32_t>(positions);
+ 
+   // Build a ranged mask encoding the visibility for this test.
+-  // For queries 0..6: query q at position first_q_token+q can see entries at
++  // Every query except the last can see entries at
+   // positions <= first_q_token+q. So as entry position rises past a query's
+   // position, that query drops out.
+   ranged_mask mask;
+@@ -2312,9 +2311,15 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+     mask_t<ranged_mask_capacity> sw{};
+     for (size_t q = 0; q < n_q_tokens - 1; ++q)
+       sw.insert(q);
+-    const size_t hw_tokens = (num_pages - 1) * page_t::page_size;
+-    mask.add_range(token_id(0), token_id(hw_tokens), {}, sw);
+-    mask.add_range(token_id(hw_tokens), token_id(first_q_token + 1), sw, {});
++    if constexpr (split_queries) {
++      // [0, first_q_token+1): all but the last query are visible.
++      mask.add_range(
++          token_id(0), token_id(first_q_token + 1), sw, mask_t<ranged_mask_capacity>{});
++    } else {
++      const size_t hw_tokens = (num_pages - 1) * page_t::page_size;
++      mask.add_range(token_id(0), token_id(hw_tokens), {}, sw);
++      mask.add_range(token_id(hw_tokens), token_id(first_q_token + 1), sw, {});
++    }
+     // Each subsequent position drops the lowest remaining query.
+     for (size_t q = 0; q < n_q_tokens - 1; ++q) {
+       sw.erase(q);
+@@ -2342,6 +2347,8 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+       attention_operation_config{std::nullopt, std::nullopt, operation_scale}};
+   attention_plan_id plan_id =
+       state.attention_plan_id_for_operation[operation.binding.operation];
++  state.attention_runtime_configs[operation.binding.operation].sliding_window_size =
++      sliding_window;
+   auto& plan = q_batch.plans[plan_id];
+   plan.n_sections = std::vector<size_t>(n_kv_heads, 2);
+   plan.sections_left = std::vector<std::atomic_size_t>(n_kv_heads);
+@@ -2366,20 +2373,26 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+     for (size_t i = 0; i < page_t::page_size; ++i)
+       empty_cache.increment_tokens_used();
+     empty_page->set_offset_bound(page_t::page_size);
+-    auto scratch = state.self_attn_state.token_scratchpad_ref_at<geometry>(0, 0);
+-    auto const q = state.plugin_state.qs_roped[token_job_id(0)].as_view();
++    // The first query can still see this page in larger minibatches. Select
++    // the last query so a one-token window excludes every entry in the page.
++    const token_job_id excluded_job(n_q_tokens - 1);
++    const token_id excluded_token = state.token_jobs[excluded_job];
++    REQUIRE(state.token_positions[excluded_token] >= page_t::page_size);
++    auto scratch =
++        state.self_attn_state.token_scratchpad_ref_at<geometry>(0, n_q_tokens - 1);
++    auto const q = state.plugin_state.qs_roped[excluded_job].as_view();
+     for (bool window_excludes_all : {false, true}) {
+       INFO("window_excludes_all=" << window_excludes_all);
+       ranged_mask excluded;
+       mask_t<ranged_mask_capacity> visible{};
+-      visible.insert(0);
++      visible.insert(excluded_job.i);
+       excluded.add_range(token_id(0), token_id(page_t::page_size),
+           window_excludes_all ? visible : mask_t<ranged_mask_capacity>{},
+           window_excludes_all ? mask_t<ranged_mask_capacity>{} : visible);
+       state.query_mask = &excluded;
+       auto const result = state.self_attn_state.apply_page_tok<geometry>(false,
+-          *empty_page, operation, operation_scale, 0, q, token_id(first_q_token),
+-          scratch, token_job_id(0), &excluded.find_range(token_id(0)),
++          *empty_page, operation, operation_scale, 0, q, excluded_token, scratch,
++          excluded_job, &excluded.find_range(token_id(0)),
+           window_excludes_all ? 1 : 1024, window_excludes_all, nullptr);
+       REQUIRE(result.first == 0);
+     }
+@@ -2403,8 +2416,9 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+       std::make_unique<decltype(state.self_attn_state.attn[0].m_stars)>(
+           state.self_attn_state.attn[0].m_stars);
+ 
+-  // 9. Validate against compute_attention
+-  {
++  // Compare small batches with attention emulation. Larger query splits
++  // compare with the unsplit page reduction saved above.
++  if constexpr (!split_queries) {
+     // Create mask from ranged mask (the single source of visibility truth).
+     std::vector<std::vector<bool>> vis(
+         n_q_tokens, std::vector<bool>(num_kv_tokens, false));
+@@ -2412,8 +2426,11 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+     for (size_t kv_token = 0; kv_token < num_kv_tokens; ++kv_token) {
+       hint = &state.query_mask->find_range(token_id(kv_token), *hint);
+       for (size_t q_token = 0; q_token < n_q_tokens; ++q_token) {
+-        vis[q_token][kv_token] = uses_hw ? hint->sw_required(token_job_id(q_token))
+-                                         : hint->visible(token_job_id(q_token));
++        vis[q_token][kv_token] =
++            (uses_hw ? hint->sw_required(token_job_id(q_token))
++                     : hint->visible(token_job_id(q_token))) &&
++            static_cast<int>(first_q_token + q_token) - static_cast<int>(kv_token) <
++                sliding_window;
+       }
+     }
+ 
+@@ -2482,6 +2499,168 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+   };
+   check_kv_head_0_against_saved();
+ 
++  if constexpr (split_queries) {
++    // Splitting the query dimension must keep every query's full page reduction
++    // and section-completion accounting intact. Reverse batch order so query
++    // bounds are batch positions, not token job IDs, and the no-work query makes
++    // the relevant range start after position zero.
++    std::reverse(q_batch.items.begin(), q_batch.items.end());
++    constexpr size_t n_workers = 4;
++    state.self_attn_state.attn.resize(
++        std::max(state.self_attn_state.attn.size(), n_workers));
++    for (bool pending : {false, true}) {
++      std::array<std::vector<page_id>, 2> batch_pages;
++      batch_pages[pending] = page_ixs;
++      std::array<std::vector<work_estimate_t>, 2> page_work;
++      std::array<std::vector<std::pair<uint32_t, uint32_t>>, 2> page_qrange;
++      work_estimate_t total;
++      // Only KV head 0 is computed in this fixture.
++      state.estimate_work(q_batch.items, batch_pages, page_work, page_qrange, total,
++          sliding_window, kv_mul, 1, false);
++
++      auto prepare_plan = [&] {
++        plan.ready_kv_plan = {};
++        plan.pending_kv_plan = {};
++        plan.ready_kv_plan.resize(n_workers);
++        plan.pending_kv_plan.resize(n_workers);
++        plan.n_sections.assign(n_kv_heads, 0);
++        auto& kv_plan = pending ? plan.pending_kv_plan : plan.ready_kv_plan;
++        // Hardware-covered context leaves zero-work sections in the plan for
++        // join-worker accounting. It must not absorb the next productive page.
++        REQUIRE(kv_plan.assign_page(0, 0, page_ixs[0], {}, 0, 0));
++        ++plan.n_sections[0];
++        for (size_t p = 0; p < page_ixs.size(); ++p) {
++          const auto [begin, end] = page_qrange[pending][p];
++          if (kv_plan.assign_page(
++                  2 * p, 0, page_ixs[p], page_work[pending][p], begin, end))
++            ++plan.n_sections[0];
++        }
++      };
++
++      for (size_t cap : {0, 1, 3, 16}) {
++        CAPTURE(pending, cap);
++        prepare_plan();
++        state.split_sections_by_query(&q_batch, plan, {0.25f, 0.5f, 0.75f, 1.0f}, cap);
++        if (cap < 2)
++          REQUIRE(plan.n_sections[0] == num_pages + 1);
++        else
++          REQUIRE(plan.n_sections[0] > num_pages + 1);
++
++        // A query/page pair appears exactly once, including unequal slices and
++        // caps greater than the worker count. Counting planned pairs detects
++        // duplicates even when a duplicated normalized attention result agrees.
++        std::array<std::array<size_t, num_pages>, n_q_tokens> visits{};
++        work_estimate_t split_work;
++        size_t section_count = 0;
++        size_t active_workers = 0;
++        auto& kv_plan = pending ? plan.pending_kv_plan : plan.ready_kv_plan;
++        for (size_t worker = 0; worker < n_workers; ++worker) {
++          bool has_queries = false;
++          for (const auto& section : kv_plan[worker]) {
++            REQUIRE(section.q_begin <= section.q_end);
++            REQUIRE(section.q_end <= q_batch.items.size());
++            ++section_count;
++            split_work += section.work_estimate;
++            has_queries |= section.q_begin < section.q_end;
++            for (size_t q = section.q_begin; q < section.q_end; ++q)
++              for (page_id p : section.page_ixs)
++                ++visits[q][p.i];
++          }
++          active_workers += has_queries;
++        }
++        // Splitting must actually engage idle cores, not just create more
++        // sections on the workers that already owned these pages.
++        if (cap < 2)
++          CHECK(active_workers == num_pages);
++        else
++          CHECK(active_workers > num_pages);
++        CHECK(section_count == plan.n_sections[0]);
++        CHECK(split_work.k_dot_products == total.k_dot_products);
++        CHECK(split_work.scaled_vs == total.scaled_vs);
++        for (size_t q = 0; q < n_q_tokens; ++q)
++          for (size_t p = 0; p < num_pages; ++p)
++            // Job 0 is at position 63 and cannot see the second page. The
++            // reversed batch puts it last; its last job has no work anywhere.
++            CHECK(visits[q][p] == (q == 0 || (p == 1 && q == n_q_tokens - 1) ||
++                                              (p == 0 && sliding_window == 32 && q < 33)
++                                          ? 0
++                                          : 1));
++
++        state.self_attn_state.free_scratchpads<geometry>(&q_batch, operation);
++        for (size_t worker = 0; worker < n_workers; ++worker)
++          state.self_attn_state.run_sections<geometry>(&q_batch, operation,
++              state.plugin_state.qs_roped, worker, n_workers, false, pending);
++        REQUIRE(plan.sections_left[0].load() == 0);
++        for (size_t q = 0; q < n_q_tokens; ++q) {
++          auto target = state.self_attn_state.token_scratchpad_ref_at<geometry>(0, q);
++          for (size_t worker = 1; worker < n_workers; ++worker) {
++            auto source =
++                state.self_attn_state.token_scratchpad_ref_at<geometry>(worker, q);
++            state.self_attn_state.join_page_ranges(target, source, 0);
++          }
++          REQUIRE(target.is_valid_for(0) == (q != 0));
++          if (q == 0) continue;
++          const size_t job = q_batch.items[q].i;
++          for (size_t head = 0; head < kv_mul; ++head) {
++            CHECK_THAT(state.self_attn_state.attn[0].s_stars[q][head],
++                Catch::Matchers::WithinRel((*s_stars_saved)[job][head], 2e-6f));
++            CHECK_THAT(state.self_attn_state.attn[0].m_stars[q][head],
++                Catch::Matchers::WithinRel((*m_stars_saved)[job][head], 1e-6f));
++          }
++          assert_allclose(slice<kv_mul * head_size>()(
++                              state.self_attn_state.attn[0].v_stars[q].as_view(), 0),
++              slice<kv_mul * head_size>()((*v_stars_saved)[job].as_view(), 0), 2e-2);
++        }
++      }
++
++      // Idle workers are not necessarily faster: the split should be declined
++      // when moving pieces to much slower workers cannot shorten this phase.
++      prepare_plan();
++      state.split_sections_by_query(&q_batch, plan, {0.49f, 0.5f, 0.99f, 1.0f}, 8);
++      CHECK(plan.n_sections[0] == num_pages + 1);
++
++      // Decline a small predicted saving that cannot cover worker arrival skew.
++      auto prepare_single_page = [&] {
++        prepare_plan();
++        auto& kv_plan = pending ? plan.pending_kv_plan : plan.ready_kv_plan;
++        kv_plan = {};
++        kv_plan.resize(n_workers);
++        const auto [begin, end] = page_qrange[pending][1];
++        REQUIRE(
++            kv_plan.assign_page(0, 0, page_ixs[1], page_work[pending][1], begin, end));
++        plan.n_sections.assign(n_kv_heads, 0);
++        plan.n_sections[0] = 1;
++      };
++      prepare_single_page();
++      state.split_sections_by_query(&q_batch, plan, {0.42f, 0.62f, 0.81f, 1.0f}, 8);
++      CHECK(plan.n_sections[0] == 1);
++
++      // Two pieces already capture most of the benefit here. Spare workers
++      // should not acquire extra sections for a nearly tied finish time.
++      prepare_single_page();
++      state.split_sections_by_query(&q_batch, plan, {0.25f, 0.41f, 0.59f, 1.0f}, 8);
++      CHECK(plan.n_sections[0] == 2);
++      auto& single_page_plan = pending ? plan.pending_kv_plan : plan.ready_kv_plan;
++      CHECK(single_page_plan[0].size() == 1);
++      CHECK(single_page_plan[3].size() == 1);
++
++      // An already balanced phase should not pay additional section setup costs.
++      prepare_plan();
++      auto& kv_plan = pending ? plan.pending_kv_plan : plan.ready_kv_plan;
++      for (size_t worker : {1, 3}) {
++        const auto [begin, end] = page_qrange[pending][0];
++        if (kv_plan.assign_page(
++                worker, worker, page_ixs[0], page_work[pending][0], begin, end))
++          ++plan.n_sections[worker];
++      }
++      state.split_sections_by_query(&q_batch, plan, {0.25f, 0.5f, 0.75f, 1.0f}, 8);
++      CHECK(plan.n_sections[0] == num_pages + 1);
++      CHECK(plan.n_sections[1] == 1);
++      CHECK(plan.n_sections[3] == 1);
++    }
++    return;
++  }
++
+   // 13. The streaming hardware join folds a device's passes into the first
+   // pass's scratchpad and adopts that accumulator into worker 0's scratchpad.
+   // See Note [Streaming hardware attention join]. Stage the two page halves as
+@@ -2674,6 +2853,20 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+   workload.clear();
+ }
+ 
++TEST_CASE("apply and join page ranges", "[page_range]") {
++  SECTION("page splits match emulation") {
++    const bool uses_hw = GENERATE(false, true);
++    if (uses_hw)
++      check_page_range_reductions<8, false, true>(std::numeric_limits<int>::max());
++    else
++      check_page_range_reductions<8, false>(std::numeric_limits<int>::max());
++  }
++  SECTION("query splits match unsplit page reductions") {
++    const int sliding_window = GENERATE(std::numeric_limits<int>::max(), 32);
++    check_page_range_reductions<65, true>(sliding_window);
++  }
++}
++
+ // book::try_create — the fallible KV-book factory (memory_pressure_governor
+ // §8). The public ctor aborts on a payload-DMA OOM; try_create returns nullptr instead.
+ // Driven host-side via the fault seam (see Note [DMA fault injection seam],

@@ -1,0 +1,183 @@
+{
+ "label": "silent-behavior-change-or-unexamined-threshold",
+ "name": "A hunk changes behavior while presenting as a refactor, cleanup, one-character edit or 'debug-value revert'",
+ "description": "What breaks: a latent bug fix, a regression or a new log storm that no sentence announces. tok_ix switched from .i to token_positions[] with no comment (2948176586 'were we grabbing the (potentially) wrong token-id all this time?'); the NaN/inf special case dropped when the comparison moved into comberr, so hardware-vs-software comparison can produce a false pass (2771743559 'don't we still need to consider nan / inf values?'); `!= 0` to `!= 1` inverting TRON_ARENA_ALLOCATOR_DEFAULT_ON against its documented meaning (3463061252 'was this intentional?'); usleep(10) commented out, turning a 10 ms wait into a tight spin (3307473806 'Cursorbot's observation seems valid'); max_xfer_time_in_ns cut from 10 s to 100 ms while the 'DMA XFER saw wait time' log already fires with 18446744073709551614 ns on the branch (3236579299 'do we see these in main too?'). Procedure: for every hunk that replaces one expression with another of the same type, name an input where they differ and check the body states it; for every removed isnan/isfinite/isinf line trace whether NaN still reaches the mismatch branch; for every changed comparison sense or default resolution compare with the comment above it and the commit message; for every removed sleep, wait, assert or lock (including one turned into a comment) ask whether it was on purpose; for every lowered threshold find the code whose behavior changes when a measured value crosses it and any values already observed at runtime. Ask form: 'was this intentional?', 'were we just getting lucky so far?'.",
+ "disposition": "add_new",
+ "existing_check": null,
+ "disposition_reason": "No existing check compares old and new behavior of a same-type expression swap; 5 rows over 5 PRs. The threshold row (3236579299) is folded in rather than left as a singleton.",
+ "count": 5,
+ "prs_spanned": 5,
+ "representative_ids": [
+  2948176586,
+  2771743559,
+  3463061252,
+  3236579299
+ ],
+ "evidence_needed": [
+  "hunk",
+  "full_file",
+  "other_file",
+  "pr_body",
+  "commits",
+  "runtime_behavior"
+ ],
+ "agent_feasibility": "yes: detect same-type expression swaps, removed special-value lines, flipped comparisons, commented-out waits and lowered thresholds; naming the differing input needs reading the data structures; the observed-values question needs a runtime log.",
+ "members": [
+  {
+   "id": 2948176586,
+   "pr": "tron-2176",
+   "kind": "inline",
+   "path": "h/tron/models/self_attention.hpp",
+   "is_reply": false,
+   "concern": "The diff switches tok_ix from the token job's linearization index (.i) to token_positions[...] (the token's position in the sequence); Wade asks whether the old code was wrong all along, why it worked so far, and for an example input where the two differ.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "silent-bug-fix-ask-why-old-code-worked",
+   "detection": {
+    "trigger": "A diff hunk in a production path replaces one index or lookup with a different one of the same type (`x.i` -> `positions[x]`) with no comment, no body sentence and no test naming the change.",
+    "procedure": "Read both expressions' definitions (token_jobs[].i vs token_positions[]) and find the condition under which they coincide (single user, in-order processing); grep the PR body and commit messages for the change; check whether a test or commit names the case where they differ.",
+    "question": "Under what input do the old and new expressions differ, and does the PR say that the old one was a latent bug?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "question",
+   "severity": "normal",
+   "author_outcome": "discussed",
+   "quote": "hmmm... were we grabbing the (potentially) wrong token-id all this time? When I look at `token_positions` that actually looks like the _correct_ thing to be using. So we were just getting lucky so far because our current token processing happens to assign token-ids in 'sequence-position' order?",
+   "reviewable_by_agent": "yes",
+   "note": "mcherba: safe in the single-user case, wrong for multi-user. Author: 'fixed in commit 1fd45e6' = 'Use tree position instead of linearization index for GOF and HW attention' (the commit that carries the hunk itself). At head 429249ead6 self_attention.hpp:860 and :1308-1368 use token_positions. Wade frames the question as a learner ('just newb trying to understand'); the substance is a request to name the input class that the fix changes."
+  },
+  {
+   "id": 2771743559,
+   "pr": "tron-1997",
+   "kind": "inline",
+   "path": "h/tron/models/self_attention.hpp",
+   "is_reply": true,
+   "concern": "The refactor replaced an explicit NaN/inf special case (which set the difference to infinity so a NaN or inf mismatch counted as a failure) with a call to comberr; Wade asks whether NaN/inf still need handling so that the hardware-versus-software comparison cannot produce a false pass.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "special-value-handling-dropped-in-refactor",
+   "detection": {
+    "trigger": "A hunk removes lines containing std::isnan, std::isfinite, std::isinf or a comment about NaN/inf (here 'to prevent false passes') and replaces the computation with a call to a helper, and the result of the helper feeds a `>` or `<` comparison against a tolerance.",
+    "procedure": "Read the helper at HEAD (here comberr/abserr/relerr in h/common/util.hpp). Trace what it returns for NaN and inf inputs. Then evaluate the consuming comparison with that return value: `NaN > tolerance` is false in C++, so a NaN result does not take the failure branch. Compare with what the removed code did for the same inputs. Cite the repository NaN rule (AGENTS.md: treat NaN as corruption) if present at that date.",
+    "question": "For a NaN or inf value on either side of the comparison, does the new code still reach the mismatch branch, as the removed code did?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file"
+   ],
+   "form": "question",
+   "severity": "normal",
+   "author_outcome": "unknown",
+   "quote": "also, don't we still need to consider nan / inf values? In order for the comparisons to be trust-worthy?",
+   "reviewable_by_agent": "yes",
+   "note": "No reply from the author in the digest, and h/common/util.hpp is identical between d306b805ce and c502e4d61a. Verified mechanism at d306b805ce h/common/util.hpp:271-282: abserr returns quiet_NaN when either input is NaN, and infinity for an inf mismatch (0 when both inf and equal); relerr (:259-268) has no NaN branch. The consumer at self_attention.hpp:642-643 tests `(abs_err > abs_tolerance) || (rel_err > rel_tolerance)`; for a NaN both comparisons are false, so mismatch_count is not incremented. The removed code set diff to infinity for any NaN/non-finite value, which did count. So Wade's concern holds by reading: a NaN on either side passes silently at the approved head. Wade approved anyway, 9 minutes after this reply."
+  },
+  {
+   "id": 3463061252,
+   "pr": "positron-ai/tron#3016",
+   "kind": "inline",
+   "path": "src/system/memory.cpp",
+   "is_reply": true,
+   "concern": "A one-character change flips the compile-time arena-allocator default from `!= 0` to `!= 1`, so the macro TRON_ARENA_ALLOCATOR_DEFAULT_ON now means the opposite of its documented meaning; cursor[bot] flagged it as High Severity and Wade asks the author whether the inversion was intended.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "default-flag-inversion-vs-documented-semantics",
+   "detection": {
+    "trigger": "A hunk changes the comparison or boolean sense of a line that resolves a compile-time or environment default (`!= 0` to `!= 1`, `return false` to `return true`, `> 0` to `>= 0`), while the comment block, macro name, or referenced doc above it still states the old meaning.",
+    "procedure": "grep added/removed line pairs that differ only in a literal or a negation; read the comment block and #define above (here memory.cpp:68-76 says the CMake option flips the default from 0 to 1) and the doc it cites (doc/pos_heap_v2.md Configuration); read the commit subject that introduced it ('turn on arena allocator by default to match hw_attention default'); check whether the author changed the macro default or the doc as well.",
+    "question": "After this change, does the named macro or variable still mean what its own comment and documentation say, and does the commit message state that the default is intentionally flipped?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file",
+    "commits"
+   ],
+   "form": "question",
+   "severity": "normal",
+   "author_outcome": "unknown",
+   "quote": "was this intentional?",
+   "reviewable_by_agent": "yes",
+   "note": "Reply to cursor[bot] comment 3454639145 ('Arena default selection inverted', High Severity). No author reply. At head 39396c8728 memory.cpp:80 still reads `return TRON_ARENA_ALLOCATOR_DEFAULT_ON != 1;` while the comment at :68-71 and the `#define ... 0` default at :73-75 are unchanged, so with the macro at its default 0 the arena allocator is now ON. The commit 'turn on arena allocator by default to match hw_attention default' shows the ON default was intended, but the mechanism (inverting the comparison instead of changing the macro default) contradicts the documented semantics. Pattern of interest for the skill: Wade reads bot findings and escalates one by asking the author a single question rather than restating the bot's text."
+  },
+  {
+   "id": 3307473806,
+   "pr": "tron-2766",
+   "kind": "inline",
+   "path": "src/pos/worker.cpp",
+   "is_reply": false,
+   "concern": "The retry loop for the canary value in tx_launch had its usleep(10) commented out, turning a 1000 x 10 us wait into a tight 1000-iteration spin; Wade asks whether that was intentional and cites the Cursor bot's observation as valid.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "commented-out-code-behavior-change",
+   "detection": {
+    "trigger": "The diff changes a code line into a comment (added line is '// ' plus the removed line's text), especially a sleep, wait, assert or lock.",
+    "procedure": "Diff-scan for added lines of the form '+ // <code>' whose text equals a removed line; for each, state what the loop or path does without the statement (here a retry loop with no delay); ask whether the removal is intended and if so to delete the line rather than comment it out, or to retune the value.",
+    "question": "Was the statement disabled on purpose, and does the surrounding loop still do what its comment says without it?"
+   },
+   "evidence_read": [
+    "hunk",
+    "pr_body"
+   ],
+   "form": "question",
+   "severity": "minor",
+   "author_outcome": "changed",
+   "quote": "was this intentional as well? Cursorbot's observation seems valid.",
+   "reviewable_by_agent": "yes",
+   "note": "Wade reads the automated (Cursor Bugbot) review and endorses it rather than repeating it. Author: 'Semi deliberate. We need to retune this loop. the 10usec sleep was a longer delay than needed.' Head worker.cpp:1042 has usleep(1) (retuned, not removed)."
+  },
+  {
+   "id": 3236579299,
+   "pr": "positron-ai/tron#2698",
+   "kind": "inline",
+   "path": "h/pos/config.hpp",
+   "is_reply": false,
+   "concern": "Cutting max_xfer_time_in_ns (the DMA transfer wait limit) from 10 s back to 100 ms will make the 'DMA XFER saw wait time of ... ns' log fire more often; Wade has already seen that log with the value 18446744073709551614 while loading oss-120b-tp4 on the branch and asks what it implies and whether main shows it too.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "tightened-limit-vs-observed-runtime-values",
+   "detection": {
+    "trigger": "A hunk lowers a timeout, poll count or other threshold constant in a header (here h/pos/config.hpp, labelled a 'debug-value revert' in the body).",
+    "procedure": "grep h/ and src/ for every reader of the constant; for each reader that logs or errors when the measured value exceeds it (here src/pos/driver.cpp:1058 `spdlog::debug(\"DMA XFER saw wait time of {} ns\", etime)` under `if (etime > max_xfer_time_in_ns)`), state what the new limit does to that path; look for any recent log or run report that shows the measured values, and ask whether they exceed the new limit on main as well as on the branch.",
+    "question": "Which code path changes behavior when the measured value crosses the new, smaller limit, and do observed runtime values on the target branch already cross it?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file",
+    "runtime_behavior"
+   ],
+   "form": "question",
+   "severity": "normal",
+   "author_outcome": "discussed",
+   "quote": "With this reduction, I'm speculating we'll see a LOT more... not saying that's a reason to keep the larger value, but I wonder what it implies in our branch? Or do we see these in `main` too? Does anyone know?",
+   "reviewable_by_agent": "needs_runtime",
+   "note": "Code fact at 159e09a940: src/pos/driver.cpp:1055-1061 computes etime = ctime - stime from two TSC reads and logs the debug line the first time etime > max_xfer_time_in_ns. The logged value 18446744073709551614 is 2^64 - 2, i.e. a negative difference wrapped to unsigned. mcherba's reply (2026-05-21) says this comes from a paired TSC read where the second read was smaller than the first; the code logs it, copies the second value over the first and continues; max_xfer_time_in_ns does not affect it. So Wade's hypothesis (more logs because of the smaller limit) was refuted for the specific log he saw, but the question was answered rather than dismissed. He addressed two people (@mcherba, @BillBaumann), not only the author."
+  }
+ ],
+ "missing_member_ids": [],
+ "codex_bullets": [
+  {
+   "id": "C11",
+   "bullet": "Check how numerical comparisons handle not-a-number and infinite values. A tolerance check must not silently treat an invalid result as a successful comparison.",
+   "pick_up": "yes",
+   "reason": "Two direct comments (PRs 1997, 4557). Claude check 1 and setup step 2 cite the NaN rule for value rows only; a NaN-aware comparison helper (the 1997 case) has no check.",
+   "claude_skill_coverage": "partial"
+  },
+  {
+   "id": "C29",
+   "bullet": "Trace each changed area to the stated behavior or an explicitly requested bundled change. Suggest splitting unrelated cleanup. A missing body sentence alone does not make a necessary regression test unrelated.",
+   "pick_up": "already",
+   "reason": "Five comments (PRs 4557, 1920, 2148, 2659, 3016). Claude check 10 has the full procedure; the third sentence matches check 10's \"regression guard\" clause.",
+   "claude_skill_coverage": "covered (check 10)"
+  },
+  {
+   "id": "C38",
+   "bullet": "For a performance concern, distinguish measurement from hypothesis.",
+   "pick_up": "already",
+   "reason": "Three comments (PRs 2906, 2698, 2777) where Wade labels his own speculation. Claude skill has the generic hypothesis line.",
+   "claude_skill_coverage": "partial (Report the result: \"If a point is only a hypothesis, name the check\")"
+  }
+ ]
+}

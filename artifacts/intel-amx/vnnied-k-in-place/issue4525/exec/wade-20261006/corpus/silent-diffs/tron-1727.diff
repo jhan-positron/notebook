@@ -1,0 +1,166 @@
+diff --git a/README.perfetto.md b/README.perfetto.md
+index 023773e67c6..64829204966 100644
+--- a/README.perfetto.md
++++ b/README.perfetto.md
+@@ -24,15 +24,31 @@ The `perfetto/tronperf` script is designed to simplify performance testing for t
+ You might need to adjust paths at the top of the `tronperf` script if your environment differs from its assumptions (e.g., `PERFETTO_HOME`).
+ 
+ **Usage:**
+-Arguments passed to `perfetto/tronperf` are forwarded directly to `runtron`.
++Arguments passed to `perfetto/tronperf` are forwarded directly to `runtron`,
++except for `--output-file`.
+ 
+ *Example:*
+ To trace `runtron` using the Mixtral8x7B model, with a prompt from `myprompt.txt`, `p` of 0.7, and generating 1024 response tokens:
+ ```bash
+-perfetto/tronperf -p 0.7 -m mixtral-8x7b-instruct-v0.1 -f myprompt.txt -l 1024
++perfetto/tronperf --output-file /tmp/runtron.trace -p 0.7 -m mixtral-8x7b-instruct-v0.1 \
++  -f myprompt.txt -l 1024
+ ```
+ This script likely uses a Perfetto configuration file similar to `perfetto/runtron.cfg` or one specifically tailored for `runtron`.
+ 
++**Notes:**
++*   `perfetto/tronperf` always runs `runtron` with `--trace traced` (or
++    `--trace-gen traced` when `--gen` is provided). Avoid passing `--trace
++    /path` or `--trace-gen /path` to the wrapper, because that enables
++    runtron's in-process trace mode (short, fixed-duration trace) instead of
++    the perfetto-daemon trace.
++*   Prompt sources:
++    *   `-f/--file` and `--dir` add prompt files.
++    *   `-u/--users` implicitly adds prompt files from
++        `/scratch/prompts/md_ch<N>.txt`.
++    *   Inline prompts come only from trailing arguments after `--`.
++    *   If no prompts or prompt files are provided, runtron defaults to
++        "We hold these truths to be self-evident".
++
+ ### 2. `perfetto/wrapper` (General Purpose & `rinzler`)
+ 
+ The `perfetto/wrapper` script is a more general-purpose tool for initiating Perfetto tracing. It handles the setup of Perfetto daemons (`traced`, `traced_probes`) and the `perfetto` client. It can also signal a target application to start emitting its trace events.
+diff --git a/perfetto/tronperf b/perfetto/tronperf
+index 8e2ff1f6212..668bbeb4b76 100755
+--- a/perfetto/tronperf
++++ b/perfetto/tronperf
+@@ -7,7 +7,7 @@ PERFETTO_HOME=$HOME/perfetto
+ SELF_DIR=$(dirname "${BASH_SOURCE[0]}")
+ 
+ # Where the alderaan repo lives. Assumes binaries are in a "gen" directory.
+-ALDERAAN_HOME=$(dirname $SELF_DIR)
++ALDERAAN_HOME=$(dirname "$SELF_DIR")
+ 
+ # Where the perfetto binaries live. These should not need to be changed.
+ PERFETTO=$PERFETTO_HOME/out/linux/perfetto
+@@ -23,13 +23,65 @@ RUNTRON=$ALDERAAN_HOME/gen/runtron
+ # Where to put the final trace file. Change this to wherever you want.
+ OUTPUT=$HOME/runtron.trace
+ 
++usage() {
++  printf '%s\n' \
++    "Usage: perfetto/tronperf [--output-file FILE] [--gen] [runtron args...]" \
++    "" \
++    "Options:" \
++    "  --output-file FILE  trace file for the perfetto client" \
++    "  -h, --help              show this help" \
++    "" \
++    "All other arguments are forwarded to runtron."
++}
++
++gen=false
++forward_args=()
++while [ "$#" -gt 0 ]; do
++  case "$1" in
++    --output-file)
++      if [ "$#" -lt 2 ]; then
++        echo "error: --output-file requires a path" >&2
++        exit 2
++      fi
++      OUTPUT=$2
++      shift 2
++      ;;
++    --output-file=*)
++      OUTPUT="${1#*=}"
++      if [ "$OUTPUT" = "" ]; then
++        echo "error: --output-file requires a path" >&2
++        exit 2
++      fi
++      shift
++      ;;
++    -h | --help)
++      usage
++      exit 0
++      ;;
++    --)
++      shift
++      forward_args+=("--")
++      forward_args+=("$@")
++      break
++      ;;
++    --gen)
++      gen=true
++      shift
++      ;;
++    *)
++      forward_args+=("$1")
++      shift
++      ;;
++  esac
++done
++
+ # Make sure user can read system traces. Copied from the tools/tmux program in the SDK.
+ if [ ! -w /sys/kernel/tracing ]; then
+   echo "tracefs not accessible, try sudo chown -R $USER /sys/kernel/tracing"
+   sudo chown -R "$USER" /sys/kernel/tracing
+ fi
+ 
+-echo 0 > /sys/kernel/tracing/tracing_on
++echo 0 >/sys/kernel/tracing/tracing_on
+ 
+ $TRACED &
+ traced_pid=$!
+@@ -37,7 +89,7 @@ traced_pid=$!
+ $TRACED_PROBES &
+ traced_probes_pid=$!
+ 
+-$PERFETTO --txt -c $CONFIG -o $OUTPUT &
++$PERFETTO --txt -c "$CONFIG" -o "$OUTPUT" &
+ perfetto_pid=$!
+ 
+ echo "traced running as PID $traced_pid"
+@@ -45,28 +97,26 @@ echo "traced_probes running as PID $traced_probes_pid"
+ echo "perfetto client running as PID $perfetto_pid"
+ 
+ # Run the binary and enable tracing to traced
+-if [[ "$@" == *"--gen"* ]]
+-then
+-  $RUNTRON --trace-gen traced ${@/--gen/}
++if [ "$gen" = true ]; then
++  $RUNTRON --trace-gen traced "${forward_args[@]}"
+ else
+-  $RUNTRON --trace traced $@
++  $RUNTRON --trace traced "${forward_args[@]}"
+ fi
+ 
+ # Stop the perfetto client and wait for it to exit
+ echo "Stopping trace..."
+-kill -TERM $perfetto_pid
+-wait $perfetto_pid
++kill -TERM "$perfetto_pid"
++wait "$perfetto_pid"
+ 
+ # Now stop the daemons
+-kill -TERM $traced_pid
+-kill -TERM $traced_probes_pid
++kill -TERM "$traced_pid"
++kill -TERM "$traced_probes_pid"
+ 
+ # Copy file to your local machine, if you want to. You can set
+ # TRACE_DEST_IP in your .bash_login file, or at the top of this
+ # file.
+-if [ "x$TRACE_DEST_IP" != "x" ]
+-then
+-  scp -C $OUTPUT $TRACE_DEST_IP:
++if [ "$TRACE_DEST_IP" != "" ]; then
++  scp -C "$OUTPUT" "$TRACE_DEST_IP":
+ fi
+ 
+-exit 0;
++exit 0

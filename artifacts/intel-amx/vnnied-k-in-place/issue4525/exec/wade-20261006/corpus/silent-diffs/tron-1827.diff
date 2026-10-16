@@ -1,0 +1,63 @@
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 3038a44bfea..041acb255b9 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -319,12 +319,23 @@ struct self_attention {
+         double sum_abs = 0.0;
+         size_t count = n_heads * head_size;
+         token_id tok = enclosing_state.token_jobs[q_batch->items[idx]];
+-
+-        // spdlog::debug("{} for token {} HW results {}/{} (hw, sw, max_abs) ",
+-        // __FUNCTION__, tok.i, idx, q_batch->items.size());
+-
+ #ifdef MORE_HWATTN_DEBUG
+         if (tok.i == TOKEN_IDX_FOR_DEBUG && layer == LAYER_IDX_FOR_DEBUG) {
++          spdlog::debug("{} for token {} HW results {}/{}  ", __FUNCTION__, tok.i, idx,
++              q_batch->items.size());
++          // Ensure that out outputs from Hardware are all valid before proceeding.
++          // find last element and wait for HW output to be valid there.
++          volatile uint64_t* hw_final_word =
++              (uint64_t*)((uint64_t)hw + (hw_result_size * sizeof(bf16)) - 8);
++          spdlog::debug("{} for token {} HW results {}/{}  ", __FUNCTION__, tok.i, idx,
++              q_batch->items.size());
++          while (*hw_final_word == 0xdeadbeefc0def000) {
++            hardware::mwaitx::delay_ns(10000);
++            dbg_hwattn_log("{} waiting for HW results: {} still == {:#016x} ",
++                __FUNCTION__, (void*)hw_final_word, uint64_t(*hw_final_word));
++          }
++          dbg_hwattn_log("{} hw results ready!", __FUNCTION__);
++
+           static std::ofstream smax_dumps_file(
+               "for_agent/attn_smax_dumps.txt", std::ios::out | std::ios::trunc);
+ 
+@@ -548,15 +559,23 @@ struct self_attention {
+                   activation_pointers, attn_launcher, "hwattn", tok_ix, layer,
+                   hw_attn_cfg);
+ 
+-              // spdlog::debug("{},{} hw attn preparing", tok_ix, layer);
+               hardware::prepare_hardware_attn_job(attn_launcher, attn_mask);
+ 
+-              // we dont' use a callback with hw_attn right now. we just wait on the
+-              // output data to proceed
+-              // to do a comparison between SW and HW attention, we should capture the
+-              // SW vstars and hw vstars and do a TVD style comparison in the callback.
+-              // attn_launcher(nullptr);
+-              // spdlog::debug("{},{} hw attn launching", tok_ix, layer);
++#ifdef MORE_HWATTN_DEBUG
++              if (tok_ix == TOKEN_IDX_FOR_DEBUG && layer == LAYER_IDX_FOR_DEBUG) {
++                // write a watchdog into the final 64B word of the HW output
++                // this is used within the callback to ensure data is valid before
++                // triggering the comparisons between HW and SW outputs
++                uint64_t* hw_final_word =
++                    (uint64_t*)((uint64_t)result_pointers[0] +
++                                (hw_result_size * sizeof(bf16)) - 8);
++                *hw_final_word = 0xdeadbeefc0def000;
++                dbg_hwattn_log("wrote {:#016x} to {} start: {} length: {}",
++                    *hw_final_word, (void*)hw_final_word, (void*)result_pointers[0],
++                    hw_result_size);
++              }
++#endif
++
+               attn_launcher([this, outer_batch, tok_ix, layer]() {
+                 {
+                   std::scoped_lock lock(hw_results_mutex[0]);

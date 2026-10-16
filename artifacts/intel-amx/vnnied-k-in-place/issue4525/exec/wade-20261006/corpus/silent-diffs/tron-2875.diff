@@ -1,0 +1,837 @@
+diff --git a/h/runtron/stream_generate.hpp b/h/runtron/stream_generate.hpp
+index f78924e4de0..5eb7f664e61 100644
+--- a/h/runtron/stream_generate.hpp
++++ b/h/runtron/stream_generate.hpp
+@@ -474,8 +474,11 @@ std::tuple<std::vector<token_t>, std::vector<std::vector<float>>> stream_generat
+     set_location_speculator(root, draft_root);
+   } else if (root->speculator) {
+     // Clear any speculator that make_location may have created from eagle_child.
+-    // Set node to nullptr before reset() to avoid enqueuing a release request
+-    // for the shared root node.
++    // Balance the pin its constructor added on the shared eagle root, but clear
++    // `node` directly rather than via set_node so we do not enqueue a release
++    // request for the shared root node. unpin_node is an out-of-line helper
++    // because node_base is incomplete in this header. See Note [Tracking Node Users].
++    tron::unpin_node(root->speculator->node);
+     root->speculator->node = nullptr;
+     root->speculator.reset();
+   }
+diff --git a/h/tron/scheduler/full.hpp b/h/tron/scheduler/full.hpp
+index 8613cd337db..30c61d45ec9 100644
+--- a/h/tron/scheduler/full.hpp
++++ b/h/tron/scheduler/full.hpp
+@@ -261,7 +261,32 @@ struct node_base : std::enable_shared_from_this<node_base> {
+   // The cache needs to know because the eviction queue keeps a shared_ptr to me, whose
+   // use_count the cache wants to inspect.
+   bool in_evictable_queue = false;
+-  bool used = true;
++  // Note [Tracking Node Users]
++  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
++  // A node is `used` iff it is the root or some *pin* lies within its subtree.
++  // `subtree_pins` counts the pins over this node's whole subtree, *inclusive of
++  // this node itself* (so a directly pinned leaf has subtree_pins == 1, not 0),
++  // and `used()` derives from it. Pins come from two sources, both balanced
++  // incr/decr:
++  //   1. a client `seq_tip` directly holding this node (retained locations and
++  //      in-flight tips), pinned via seq_tip::set_node / released on the worker;
++  //   2. a pending listener attached to this node (in-flight work that a forward
++  //      pass must still service), pinned at attach and released when it fires.
++  // Source 2 keeps `compute_forward_args` from skipping a subtree that still
++  // owes a request a token; t_token_tree_stress guards this with its used-set
++  // invariant (every uncancelled request stays serviceable).
++  //
++  // Because the count is inclusive, a pin sits *exactly at* a node (rather than
++  // deeper) iff the node's subtree_pins exceeds the total over its children --
++  // for a single-child node, iff its subtree_pins > child->subtree_pins. That is
++  // how coalesce_if_unpinned_single_child distinguishes a directly pinned prefix
++  // (a client still holds it, so it cannot merge away) from an idle pass-through
++  // intermediate (every pin is in the child -> safe to merge). A pin names a
++  // node position, not a token: it says nothing about the node's edge length.
++  // See also Note [Deferred Coalescing Under Listener].
++  //
++  // Maintenance is via adjust_pins(), which walks to the root.
++  int subtree_pins = 0;
+ 
+   // Tombstone support
+   std::shared_ptr<node_base> tombstone_next = nullptr;  // Points to replacement node
+@@ -280,6 +305,13 @@ struct node_base : std::enable_shared_from_this<node_base> {
+   virtual int64_t reserved_dma_bytes() const noexcept = 0;
+   virtual int used_children() noexcept = 0;
+   virtual void defrag_books(size_t depth) noexcept = 0;
++  // If this node has exactly one contiguous child and carries no pin or listener
++  // of its own, merge it into that child. "No pin of its own" is read off the
++  // counter (subtree_pins == child's); see Note [Tracking Node Users]. Called
++  // from the release and listener-fire paths to flatten single-child
++  // intermediates that the ~node() 2->1 trigger never sees (split-born, or made
++  // idle only after a listener cleared).
++  virtual void coalesce_if_unpinned_single_child() noexcept {}
+ 
+   // Navigation helpers.
+   std::shared_ptr<node_base> tree_parent() const {
+@@ -299,40 +331,46 @@ struct node_base : std::enable_shared_from_this<node_base> {
+   // Return the gals on this node's edge.
+   virtual std::span<const std::unique_ptr<hardware::gal>> tree_edge_gals() const = 0;
+ 
+-  // Mark this node and ancestors as unused (for cache eviction).
+-  // Walks up the tree marking nodes unused until finding one with used children.
+-  void mark_unused() noexcept {
+-    std::lock_guard<std::mutex> lock(mtx);
+-    if (!used) return;
+-    if (is_root()) return;  // Never mark root unused
+-    used = false;
+-
+-    std::shared_ptr<node_base> ancestor = parent_locked();
+-    while (ancestor) {
+-      std::lock_guard<std::mutex> ancestor_lock(ancestor->mtx);
+-      if (ancestor->is_root()) break;
+-      if (ancestor->used_children_locked() > 0) break;
+-      ancestor->used = false;
+-      ancestor = ancestor->parent_locked();
+-    }
++  // See Note [Tracking Node Users]. `used` is derived, never stored.
++  TRON(nodiscard, inline)
++  bool used() const noexcept {
++    return subtree_pins > 0 || is_root();
+   }
+ 
+-  // Mark this node and all ancestors as used.
+-  // Inverse of mark_unused's ancestor walking logic.
+-  void mark_used() noexcept {
+-    std::lock_guard<std::mutex> lock(mtx);
+-    used = true;
+-    if (is_root()) return;
+-    std::shared_ptr<node_base> ancestor = parent_locked();
+-    while (ancestor) {
+-      std::lock_guard<std::mutex> ancestor_lock(ancestor->mtx);
+-      if (ancestor->used) break;  // Already used, ancestors must be too
+-      ancestor->used = true;
+-      if (ancestor->is_root()) break;
+-      ancestor = ancestor->parent_locked();
++  // Add `delta` pins at this node and propagate the subtree count up to the
++  // root, locking one node at a time (releasing each before acquiring its
++  // parent, so two node mutexes are never held at once).
++  //
++  // The per-node lock guards the parent-pointer read on each hop, not the
++  // counter. Tree mutation (split/coalesce/tombstone) is single-threaded on the
++  // worker, but a client thread can pin concurrently (make_location pins the
++  // root; a retained seq_tip pins its node), so the parent chain this walk
++  // reads can change underneath it. An atomic subtree_pins with fetch_add would
++  // make the increment lock-free but would not remove the lock -- the walk
++  // still has to read a stable parent at each node -- so the lock stays and a
++  // plain int suffices.
++  void adjust_pins(int delta) noexcept {
++    std::shared_ptr<node_base> n = shared_from_this();
++    while (n) {
++      std::shared_ptr<node_base> parent;
++      {
++        std::lock_guard<std::mutex> lock(n->mtx);
++        n->subtree_pins += delta;
++        TRON_ASSERT(
++            n->subtree_pins >= 0, "subtree_pins underflow at ht={}", n->abs_ht.i);
++        parent = n->parent_locked();
++      }
++      n = parent;
+     }
+   }
+ 
++  void pin() noexcept {
++    adjust_pins(+1);
++  }
++  void unpin() noexcept {
++    adjust_pins(-1);
++  }
++
+   bool is_root() const noexcept {
+     return abs_ht == tron::token_pos_ht(0);
+   }
+@@ -381,21 +419,6 @@ struct node_base : std::enable_shared_from_this<node_base> {
+   }
+ };
+ 
+-TRON(inline)
+-void check_usage(std::shared_ptr<node_base> const& node) {
+-  std::unique_lock<std::mutex> lock(node->mtx);
+-  // Children's parent pointers
+-  // + one for the evictable queue if it's there
+-  // + one for the caller
+-  int internal_references = node->n_children + node->in_evictable_queue + 1;
+-  if (node.use_count() <= internal_references) {
+-    lock.unlock();
+-    if (node->used_children() == 0) {
+-      node->mark_unused();
+-    }
+-  }
+-}
+-
+ // Follow tombstone chain and cast to specific node type
+ template <typename book>
+ std::shared_ptr<node<book>> follow_tombstones(std::shared_ptr<node_base> n) {
+@@ -458,13 +481,10 @@ struct node : node_base {
+     size_t matching_tokens = static_cast<size_t>(tok_ptr - tokens);
+ 
+     if (edge.token_count() == num_tokens && matching_tokens == num_tokens) {
+-      // Exact match found
++      // Exact match found. The caller will pin this node when it becomes the
++      // request's tip (seq_tip::set_node) or when its listener attaches; we do
++      // not force `used` here. See Note [Tracking Node Users].
+       metrics.tokens_reused += num_tokens;
+-      if (!child->used) {
+-        child->used = true;
+-        // Note: tokens were already counted when the edge was created,
+-        // so we don't increment here
+-      }
+       return child;
+     }
+     if (matching_tokens < edge.token_count()) {
+@@ -492,11 +512,6 @@ struct node : node_base {
+       // to add. Always count the matched tokens as reused
+       metrics.tokens_reused += matching_tokens;
+ 
+-      // Mark the child used if it wasn't, and then continue from it
+-      // unconditionally.
+-      if (!child->used) {
+-        child->used = true;
+-      }
+       return std::dynamic_pointer_cast<node>(child->add_tokens(
+           tokens + matching_tokens, num_tokens - matching_tokens, metrics));
+     }
+@@ -535,7 +550,6 @@ struct node : node_base {
+         std::move(token_entries), kv_book, kv_first_entry_nr);
+ 
+     auto new_child = std::make_shared<node>(std::move(new_edge));
+-    new_child->used = true;
+ 
+     // Calculate DMA bytes if this is a new book
+     int64_t total_dma_bytes = 0;
+@@ -756,15 +770,13 @@ struct node : node_base {
+     return {current_book, next_index};
+   }
+ 
+-  // Note [Marking Split Child Used]
+-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-  // We must mark the original child as used when splitting an edge.
+-  // This is required because the split operation structurally modifies the tree,
+-  // and the child node (now the tail of the original edge) must be treated as
+-  // live to ensure proper KV cache management and consistency during the
+-  // transition. If left unused, the scheduler might skip necessary updates
+-  // or validations for the tokens moved to the child node, leading to
+-  // potential corruption or logic errors in subsequent passes.
++  // Note [Split Child Pins]
++  // ~~~~~~~~~~~~~~~~~~~~~~~~
++  // Splitting child C's edge inserts an intermediate I between the parent and
++  // C (parent -> I -> C). Under Note [Tracking Node Users] the intermediate must
++  // start with subtree_pins == C->subtree_pins: I's only child is C, and I carries
++  // no direct pins of its own, so its subtree pin count equals C's. The parent
++  // chain above is unchanged (the same pins still sit below it).
+ 
+   // Split an edge at the given position (alderaan-specific version)
+   // This member function wraps the generic tron::split_edge_at and adds
+@@ -781,12 +793,12 @@ struct node : node_base {
+   // Invariants maintained:
+   //   - All invariants from tron::split_edge_at (tree structure, tokens, KV cache)
+   //   - Alderaan-specific state:
+-  //     * intermediate->used = true (intermediate nodes are always used)
++  //     * intermediate->subtree_pins = child->subtree_pins (see Note [Split Child
++  //     Pins])
+   //     * intermediate->abs_ht = parent_abs_ht + first_part_len
+   //     * intermediate->max_layers = this->max_layers
+   //     * intermediate->support_eagle = this->support_eagle
+   //     * intermediate->n_children = 1 (has the original child)
+-  //   - Child remains marked as used (prevents cleanup during split)
+   //
+   // Assumptions:
+   //   - child has a parent edge (enforced by TRON_ASSERT)
+@@ -803,9 +815,6 @@ struct node : node_base {
+     // Get parent height before modifying edge
+     tron::token_pos_ht parent_abs_ht = child->parent_edge.parent->abs_ht;
+ 
+-    // See Note [Marking Split Child Used]
+-    child->used = true;
+-
+     // Save gals and shards before split_edge_at overwrites
+     // the edge. Lock child->mtx to synchronize, then release before
+     // split_edge_at which also acquires child->mtx.
+@@ -824,8 +833,8 @@ struct node : node_base {
+     auto intermediate = std::dynamic_pointer_cast<node>(intermediate_base);
+     TRON_ASSERT(intermediate, "Failed to cast intermediate node");
+ 
+-    // Set alderaan-specific state
+-    intermediate->used = true;  // Intermediate nodes are always used
++    // See Note [Split Child Pins].
++    intermediate->subtree_pins = child->subtree_pins;
+     intermediate->abs_ht = tron::token_pos_ht(parent_abs_ht.i + first_part_len);
+     intermediate->max_layers = max_layers;
+     intermediate->support_eagle = support_eagle;
+@@ -864,11 +873,6 @@ struct node : node_base {
+   // Get or create child with multiple tokens
+   std::shared_ptr<node> get_or_create_children(
+       const ::token_t* tokens, size_t num_tokens, scheduler_metrics_t& metrics) {
+-    // If the node was marked unused by concurrent cleanup, mark it used again.
+-    // This can happen when a release runs between canonicalize and add_tokens.
+-    if (!used) {
+-      mark_used();
+-    }
+     TRON_ASSERT(num_tokens > 0, "Cannot create edge with zero tokens");
+ 
+     // Check if child exists with first token
+@@ -956,7 +960,7 @@ struct node : node_base {
+     int count = 0;
+     for (const auto& [key, weak_child] : children) {
+       if (auto child = weak_child.lock()) {
+-        count += child->used;
++        count += child->used();
+       }
+     }
+     return count;
+@@ -984,6 +988,30 @@ struct node : node_base {
+       n->_defrag_books();
+   }
+ 
++  // See node_base::coalesce_if_unpinned_single_child and Note [Tracking Node Users].
++  // "Directly pinned" is derivable from the pin counter alone: a single-child
++  // node whose subtree_pins exceeds its child's has a pin of its own (a seq_tip at
++  // exactly this prefix), so it cannot be coalesced until that client releases.
++  // Equal counts mean every pin lies in the child's subtree -> safe to merge.
++  void coalesce_if_unpinned_single_child() noexcept override {
++    std::shared_ptr<node> child;
++    {
++      std::lock_guard<std::mutex> lock(mtx);
++      if (parent_edge.is_empty()) return;  // root has nothing to merge into
++      if (!listeners[0].empty() || !listeners[1].empty()) return;  // in-flight work
++      if (children.size() != 1) return;
++      child = std::get<1>(*children.begin()).lock();
++      if (!child) return;
++      if (subtree_pins != child->subtree_pins)
++        return;  // subtree_pins > child => direct pin
++    }
++    // Mirror ~node(): give defrag a chance to make the child's book contiguous,
++    // then coalesce. coalesce_nodes no-ops if the books still cannot merge.
++    child->_defrag_books();
++    tron::coalesce_nodes(
++        std::dynamic_pointer_cast<node>(shared_from_this()), std::move(child));
++  }
++
+   size_t get_edge_token_count() const override {
+     std::lock_guard<std::mutex> lock(mtx);
+     return parent_edge.is_empty() ? 0 : parent_edge.token_count();
+@@ -1003,8 +1031,9 @@ struct node : node_base {
+ 
+   std::vector<std::shared_ptr<node_base>> get_children() const override {
+     // First, collect strong refs to children while holding lock.
+-    // Then follow tombstones without lock to avoid deadlock with mark_unused
+-    // (which locks child then parent, opposite of our parent-then-child order).
++    // Then follow tombstones without lock to avoid deadlock with adjust_pins'
++    // up-walk (which locks child then parent, opposite of our
++    // parent-then-child order).
+     std::vector<std::shared_ptr<node<book>>> locked_children;
+     {
+       std::lock_guard<std::mutex> lock(mtx);
+@@ -1237,32 +1266,44 @@ struct full_scheduler : scheduler {
+     // a used node is pinned, hence alive, as are all its (used) ancestors.
+     size_t used_seen = 0;
+     std::vector<node_t const*> extra;  // used but not in expected
++    // At a quiescent point no node may still hold a pending listener -- one
++    // that survives here is a stranded request.
++    std::vector<node_t const*> stranded;
+     std::vector<node_t*> stack{root.get()};
+     while (!stack.empty()) {
+       node_t* n = stack.back();
+       stack.pop_back();
+-      if (n->used) {
++      if (n->used()) {
+         ++used_seen;
+         if (!expected.contains(n)) extra.push_back(n);
+       }
++      if (!n->listeners[0].empty() || !n->listeners[1].empty()) stranded.push_back(n);
+       for (auto const& [tok, wchild] : n->children)
+         if (std::shared_ptr<node_t> child = wchild.lock())
+           stack.push_back(follow_tombstones<book>(child).get());
+     }
+-    if (extra.empty() && used_seen == expected.size()) return true;
++    if (extra.empty() && stranded.empty() && used_seen == expected.size()) return true;
+ 
+     std::string m = "used-set mismatch: " + std::to_string(used_seen) + " used, " +
+                     std::to_string(expected.size()) + " expected (pinned closure), " +
+-                    std::to_string(extra.size()) + " used-but-unpinned";
++                    std::to_string(extra.size()) + " used-but-unpinned, " +
++                    std::to_string(stranded.size()) + " with-pending-listener";
+     for (size_t i = 0; i < extra.size() && i < 8; ++i) {
+       node_t const* n = extra[i];
+       node_t const* parent =
+           n->parent_edge.is_empty() ? nullptr : n->parent_edge.parent.get();
+       m += "\n  used-but-unpinned @ht=" + std::to_string(n->abs_ht.i) +
+            " n_children=" + std::to_string(n->n_children) +
++           " subtree_pins=" + std::to_string(n->subtree_pins) +
+            " in_evictable_queue=" + std::to_string(n->in_evictable_queue) +
+            " parent_ht=" + (parent ? std::to_string(parent->abs_ht.i) : "none");
+     }
++    for (size_t i = 0; i < stranded.size() && i < 8; ++i) {
++      node_t const* n = stranded[i];
++      m += "\n  pending-listener @ht=" + std::to_string(n->abs_ht.i) +
++           " subtree_pins=" + std::to_string(n->subtree_pins) +
++           " used=" + std::to_string(n->used());
++    }
+     return set_error(m);
+   }
+ 
+@@ -1461,10 +1502,23 @@ struct full_scheduler : scheduler {
+     listener_buffers.push_back(node_listener_buffers);
+     listener_notifications.push_back(
+         [prevent_dangle, &node_listeners, &node_listener_buffers]() mutable {
++          int fired = static_cast<int>(node_listeners.size());
+           for (auto& lst : node_listeners)
+             lst();
+           node_listeners.clear();
+           node_listener_buffers.clear();
++          // Release the listener pins added at extend time (one per listener).
++          // After this the node is still `used` if a seq_tip holds it or a
++          // descendant carries a pin. See Note [Tracking Node Users].
++          if (fired > 0) {
++            prevent_dangle->adjust_pins(-fired);
++            // Dropping the listener pin may have left this node an idle
++            // single-child intermediate. coalesce_nodes refuses to coalesce a
++            // node with a pending listener, so the ~node()/release paths can
++            // skip it while a listener is live; re-check here once the listener
++            // is gone, or it could linger un-coalesced (verify_tree check 6).
++            prevent_dangle->coalesce_if_unpinned_single_child();
++          }
+           prevent_dangle.reset();
+         });
+   }
+@@ -1598,19 +1652,25 @@ struct full_scheduler : scheduler {
+         f.descended = true;
+         ++nodes_traversed;
+ 
+-        if (!n->used) {
+-          if (!n->listeners[is_eagle].empty()) {
+-            n->mark_used();
+-          } else {
+-            TRON_ASSERT(!n->parent_edge.is_empty(), "Root node unexpectedly unused");
+-            if (!n->parent_edge.is_empty()) {
+-              auto& edge = n->parent_edge;
+-              TRON_ASSERT(edge.kv_book != nullptr);
+-              TRON_ASSERT(edge.kv_first_entry_nr < edge.kv_book->size(),
+-                  "Unused node points to unallocated KV space");
+-            }
+-            f.skip = true;
++        if (!n->used()) {
++          // Skip this subtree for this traversal: it holds no pin, so no
++          // descendant owes a request a token. A pending listener pins its
++          // node and every ancestor (Note [Tracking Node Users]), so an
++          // unused node cannot carry one; the assert makes that load-bearing,
++          // which is what keeps the skip from dropping live work (the
++          // lost-wakeup fix).
++          TRON_ASSERT(n->listeners[is_eagle].empty(),
++              "compute_forward_args skipping an unused node that still has a "
++              "listener (ht={})",
++              n->abs_ht.i);
++          TRON_ASSERT(!n->parent_edge.is_empty(), "Root node unexpectedly unused");
++          if (!n->parent_edge.is_empty()) {
++            auto& edge = n->parent_edge;
++            TRON_ASSERT(edge.kv_book != nullptr);
++            TRON_ASSERT(edge.kv_first_entry_nr < edge.kv_book->size(),
++                "Unused node points to unallocated KV space");
+           }
++          f.skip = true;
+         }
+ 
+         if (!f.skip) {
+@@ -2274,7 +2334,7 @@ struct full_scheduler : scheduler {
+       if (!n || n->parent_edge.is_empty()) return;
+ 
+       auto& edge = n->parent_edge;
+-      if (edge.kv_book != nullptr && n->used) {
++      if (edge.kv_book != nullptr && n->used()) {
+         auto* book_ptr = edge.kv_book.get();
+         auto& info = book_usage[book_ptr];
+ 
+diff --git a/h/tron/scheduler/token_tree.hpp b/h/tron/scheduler/token_tree.hpp
+index f2898166823..84b8c9b6654 100644
+--- a/h/tron/scheduler/token_tree.hpp
++++ b/h/tron/scheduler/token_tree.hpp
+@@ -320,6 +320,11 @@ struct parent_edge {
+ template <typename book>
+ using token_info = typename detail::parent_edge<book>::token_info;
+ 
++// Release one client pin from `n` (no-op if null). Out-of-line so callers in
++// headers where node_base is incomplete (e.g. runtron/stream_generate.hpp) can
++// drop a pin without enqueuing a release. See Note [Tracking Node Users].
++void unpin_node(std::shared_ptr<node_base> const& n) noexcept;
++
+ }  // namespace tron
+ 
+ struct seq_tip {
+@@ -338,16 +343,24 @@ struct seq_tip {
+   seq_tip(
+       std::shared_ptr<tron::scheduler> scheduler, std::shared_ptr<tron::node_base> n)
+   : s(std::move(scheduler))
+-  , node(std::move(n))
+-  , abs_ht(tron::token_pos_ht(0)) {}
++  , abs_ht(tron::token_pos_ht(0)) {
++    set_node(std::move(n));
++  }
+ 
+   // Constructor with scheduler, node, and explicit position
+   seq_tip(std::shared_ptr<tron::scheduler> scheduler,
+       std::shared_ptr<tron::node_base> n,
+       tron::token_pos_ht absolute_position)
+   : s(std::move(scheduler))
+-  , node(std::move(n))
+-  , abs_ht(absolute_position) {}
++  , abs_ht(absolute_position) {
++    set_node(std::move(n));
++  }
++
++  // Repoint this tip at `n`, keeping the pin accounting balanced: pin the new
++  // node and release (unpin, on the worker) the old one. The single funnel for
++  // all `node` mutations so a client pin is added/removed exactly once. See
++  // Note [Tracking Node Users].
++  void set_node(std::shared_ptr<tron::node_base> n);
+ 
+   // Canonicalize the seq_tip
+   // Resolve tombstones and move to ancestors as needed
+@@ -367,7 +380,9 @@ namespace tron {
+ // 3. No null parent edges (except root)
+ // 4. Children are correctly indexed by first token of their edge
+ // 5. At most, one child refers to the same book, that child's KV indices are contiguous
+-// 6. The parent of a child with used=true must itself have used=true
++// 6. If a node's unique child refers to the same book, it should have been coalesced.
++// 7. The parent of a child with used=true must itself have used=true
++// 8. A node with a pending listener must be pinned (subtree_pins > 0)
+ template <typename book>
+ bool verify_tree(std::shared_ptr<node<book>> node, std::string* error_msg) {
+   // Helper to set error message
+@@ -380,6 +395,16 @@ bool verify_tree(std::shared_ptr<node<book>> node, std::string* error_msg) {
+     return set_error("Null node provided");
+   }
+ 
++  // Check 8: a node with a pending listener must be pinned (subtree_pins > 0).
++  // A listener is in-flight work; extend pins the node when it attaches the
++  // listener and the pin is released only when the notification fires, so the
++  // two must coexist. See Note [Tracking Node Users].
++  if ((!node->listeners[0].empty() || !node->listeners[1].empty()) &&
++      node->subtree_pins <= 0) {
++    return set_error("Node has a pending listener but subtree_pins <= 0 (ht=" +
++                     std::to_string(node->abs_ht.i) + ")");
++  }
++
+   // Check 1: Height consistency
+   if (!node->parent_edge.is_empty()) {
+     auto& edge = node->parent_edge;
+@@ -447,11 +472,26 @@ bool verify_tree(std::shared_ptr<node<book>> node, std::string* error_msg) {
+             edge.kv_first_entry_nr + edge.token_count()) {
+           return set_error("Child KV indices are not contiguous");
+         }
++        // Check 6: Non-branching nodes should coalesce into their contiguous
++        // children. The exception is a node that cannot be coalesced yet: one
++        // that is directly pinned (a client retained exactly this prefix, so it
++        // owns this node position) or that still carries a pending listener.
++        // Such a node is flattened only once that pin is released
++        // (coalesce_if_unpinned_single_child on the release path). A directly
++        // pinned node has subtree_pins strictly greater than its single child's
++        // (the surplus is its own pin). See Note [Tracking Node Users] and, for
++        // the listener case, Note [Deferred Coalescing Under Listener].
++        bool directly_pinned = node->subtree_pins > child->subtree_pins;
++        bool has_listener = !node->listeners[0].empty() || !node->listeners[1].empty();
++        if (node->children.size() == 1 && !directly_pinned && !has_listener) {
++          return set_error(
++              "Node with exactly one child which is contiguous hasn't been coalesced");
++        }
+       }
+     }
+ 
+-    // Check 6: A used child's parent must be used
+-    if (child->used && !node->used) {
++    // Check 7: A used child's parent must be used
++    if (child->used() && !node->used()) {
+       return set_error("Parent of used child is not itself used");
+     }
+ 
+@@ -538,6 +578,18 @@ std::shared_ptr<node<book>> split_edge_at(
+   return intermediate_node;
+ }
+ 
++// Note [Deferred Coalescing Under Listener]
++// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++// coalesce_nodes does not move listeners, so it refuses to coalesce a parent
++// that still has a pending listener. Tombstoning such a parent would strand the
++// listener on a node compute_forward_args never visits (a lost wakeup) and zero
++// a subtree_pins that the listener's notification will later decrement (an
++// underflow). A listener is position-specific and cannot move to the child, so
++// the flattening is deferred: once the listener fires and its tip is released,
++// coalesce_if_unpinned_single_child finishes the merge. A listener-bearing
++// single-child node may therefore linger un-coalesced meanwhile. coalesce_nodes
++// is the single chokepoint for both the ~node() 2->1 path and the release path.
++
+ // Coalesce a node with its single child
+ // Returns true if coalescing was successful
+ template <typename book>
+@@ -578,6 +630,11 @@ bool coalesce_nodes(
+     return false;
+   }
+ 
++  // See Note [Deferred Coalescing Under Listener].
++  if (!parent_node->listeners[0].empty() || !parent_node->listeners[1].empty()) {
++    return false;
++  }
++
+   // Check if coalescing would create invalid KV allocations
+   auto& parent_node_edge = parent_node->parent_edge;
+   auto& child_node_edge = child_node->parent_edge;
+@@ -659,6 +716,27 @@ bool coalesce_nodes(
+     grandparent->children[child_node->parent_edge.token_at(0)] = child_node;
+   }
+ 
++  // Transfer pins from the tombstoned parent to the surviving child. See
++  // Note [Tracking Node Users]: the parent's subtree was {parent} U child-subtree,
++  // so parent->subtree_pins already includes child->subtree_pins plus the parent's
++  // own direct pins. The merged node (child) must end up with that full count;
++  // the grandparent chain is unchanged (same pins still sit below it). A client
++  // still referencing the tombstoned parent unpins via follow_tombstones ->
++  // child, keeping the accounting balanced.
++  //
++  // The single child's subtree is contained in the parent's, so the parent's
++  // count can never be below the child's. A violation would mean a pin was
++  // added to the child without walking up to the parent -- only possible if a
++  // pin originated on an internal node off the worker thread, which the
++  // single-threaded work queue forbids (the sole client-thread pin is on the
++  // root, which is never coalesced). Assert it to catch any future change that
++  // breaks that assumption rather than silently losing a pin.
++  TRON_ASSERT(parent_node->subtree_pins >= child_node->subtree_pins,
++      "coalesce: parent subtree_pins {} < child {} (off-worker internal pin?)",
++      parent_node->subtree_pins, child_node->subtree_pins);
++  child_node->subtree_pins = parent_node->subtree_pins;
++  parent_node->subtree_pins = 0;
++
+   // Remove parent_node from tree, marking it with tombstone for safe seq_tip handling
+   parent_node->children.clear();
+   parent_node->n_children = 0;
+diff --git a/src/tron/scheduler/full.cpp b/src/tron/scheduler/full.cpp
+index a1281aeaad2..6856e5a2719 100644
+--- a/src/tron/scheduler/full.cpp
++++ b/src/tron/scheduler/full.cpp
+@@ -96,8 +96,8 @@ struct extend_request {
+     int64_t reused_before =
+         tokens_reused_out ? from->s->metrics.tokens_reused.load() : 0;
+     if (from->lazy_tokens.empty()) {
+-      to->node =
+-          token_cache().add_tokens(from->node, tokens, from->s->metrics, num_ephemeral);
++      to->set_node(token_cache().add_tokens(
++          from->node, tokens, from->s->metrics, num_ephemeral));
+       to->abs_ht = tron::token_pos_ht(from->abs_ht.i + tokens.size());
+     } else {
+       std::vector<::token_t> all_tokens;
+@@ -105,8 +105,8 @@ struct extend_request {
+       all_tokens.insert(
+           all_tokens.end(), from->lazy_tokens.begin(), from->lazy_tokens.end());
+       all_tokens.insert(all_tokens.end(), tokens.begin(), tokens.end());
+-      to->node = token_cache().add_tokens(
+-          from->node, all_tokens, from->s->metrics, num_ephemeral);
++      to->set_node(token_cache().add_tokens(
++          from->node, all_tokens, from->s->metrics, num_ephemeral));
+       to->abs_ht = tron::token_pos_ht(from->abs_ht.i + all_tokens.size());
+     }
+     if (tokens_reused_out) {
+@@ -121,6 +121,12 @@ struct extend_request {
+     bool is_eagle = to->s->is_eagle;
+     to->node->listener_buffers[is_eagle].emplace_back(logits);
+     to->node->listeners[is_eagle].emplace_back(std::move(cb));
++    // Pin for the pending listener: this in-flight request must be serviced by
++    // a forward pass, so the node (and its ancestors) must stay `used` until the
++    // listener fires -- independent of any cache bookkeeping. The matching
++    // unpin happens when the notification fires (ensure_listener). This is the
++    // direct guard against the lost-wakeup. See Note [Tracking Node Users].
++    to->node->pin();
+     // Only queue this scheduler if it isn't already, to avoid
+     // redundant `computing_forward_args` sweeps.
+     const bool already_queued = std::any_of(queued_scheds.begin(), queued_scheds.end(),
+diff --git a/src/tron/scheduler/token_cache.cpp b/src/tron/scheduler/token_cache.cpp
+index b6ca3209c58..d167ccf7ebc 100644
+--- a/src/tron/scheduler/token_cache.cpp
++++ b/src/tron/scheduler/token_cache.cpp
+@@ -162,9 +162,6 @@ std::tuple<bool, int64_t> token_cache_t::evict_once(int64_t room_needed) {
+   // put it back in the evictable structure, because I might have stopped
+   // because I'm done evicting.
+   hold_if_evictable(candidate);
+-  // The candidate's usage status should not have changed from this,
+-  // but let's defensively check it anyway.
+-  check_usage(candidate);
+   return {progress, sz_evicted};
+ }
+ 
+@@ -263,12 +260,30 @@ std::shared_ptr<node_base> token_cache_t::add_tokens(std::shared_ptr<node_base>
+ }
+ 
+ void token_cache_t::release_node(std::shared_ptr<node_base>& node) {
+-  // Check whether the node is evictable now, as the client is about to release a
+-  // pointer to it
+-  hold_if_evictable(node);
+-  check_usage(node);
+-  node = nullptr;  // Zero out the caller's pointer, so evict sees the right use_count
+-  evict();         // Try to get back under target if we were over
++  // The client is releasing its pin on this node. Unpin the live survivor --
++  // following tombstones, since the node may have been coalesced away since the
++  // seq_tip last canonicalized -- so the pin count stays balanced and the
++  // survivor's ancestors are decremented too. See Note [Tracking Node Users].
++  // Scope this temporary ref: it must be gone before the evictability check
++  // below, which reads use_count (an extra live shared_ptr would read as
++  // non-evictable and silently drop the node from the cache).
++  {
++    std::shared_ptr<node_base> live = node->follow_tombstones();
++    if (live) {
++      live->unpin();
++      // Now that this node may be idle, flatten it if it became an unpinned
++      // single-child intermediate -- the case the ~node 2->1 trigger never sees.
++      live->coalesce_if_unpinned_single_child();
++    }
++  }
++  // Resolve to the surviving node (coalesce above may have tombstoned it) and
++  // drop the caller's reference *before* the evictability check, so use_count
++  // reflects exactly the expected internal references ("one for the caller").
++  std::shared_ptr<node_base> survivor = node->follow_tombstones();
++  node = nullptr;
++  if (survivor) hold_if_evictable(survivor);
++  survivor = nullptr;  // drop our ref so evict() sees the right use_count
++  evict();             // Try to get back under target if we were over
+ }
+ 
+ }  // namespace tron
+diff --git a/src/tron/scheduler/token_tree.cpp b/src/tron/scheduler/token_tree.cpp
+index 54ed66305ca..eb83b771591 100644
+--- a/src/tron/scheduler/token_tree.cpp
++++ b/src/tron/scheduler/token_tree.cpp
+@@ -8,8 +8,23 @@ namespace tron {
+ // Add this declaration before seq_tip
+ void enqueue_release_request(std::shared_ptr<node_base>& node);
+ 
++// Out-of-line so headers with an incomplete node_base can drop a pin.
++// See Note [Tracking Node Users].
++void unpin_node(std::shared_ptr<node_base> const& n) noexcept {
++  if (n) n->unpin();
++}
++
+ }  // end namespace tron
+ 
++// Repoint at `n`: pin the new node now, release (unpin on the worker) the old.
++// See Note [Tracking Node Users].
++void seq_tip::set_node(std::shared_ptr<tron::node_base> n) {
++  if (node == n) return;
++  if (n) n->pin();
++  if (node) tron::enqueue_release_request(node);  // unpins on the worker thread
++  node = std::move(n);
++}
++
+ // Canonicalize by resolving tombstones and moving ancestors as needed.
+ void seq_tip::canonicalize() {
+   if (!node) return;
+@@ -19,7 +34,7 @@ void seq_tip::canonicalize() {
+ 
+   // First follow any tombstones
+   auto original_node = node.get();
+-  node = node->follow_tombstones();
++  set_node(node->follow_tombstones());
+   if (!node) return;
+   if (node.get() != original_node) {
+     dbg_ttree_log("canonicalize_position: followed tombstone from {} to {}",
+@@ -37,7 +52,7 @@ void seq_tip::canonicalize() {
+   while (node->parent() && abs_ht <= node->parent()->get_height()) {
+     dbg_ttree_log("seq_tip::canonicalize UP: node={} h={} parent_h={} abs_ht={}",
+         (void*)node.get(), node->get_height(), node->parent()->get_height(), abs_ht);
+-    node = node->parent();
++    set_node(node->parent());
+   }
+ 
+   // Walk Down / Split if necessary
+@@ -65,7 +80,7 @@ void seq_tip::canonicalize() {
+         if (split_len < edge_tokens.size()) {
+           auto intermediate =
+               parent->add_tokens(edge_tokens.data(), split_len, s->metrics);
+-          node = intermediate;
++          set_node(intermediate);
+           dbg_ttree_log("seq_tip::canonicalize SPLIT DONE: new_node={} h={}",
+               (void*)node.get(), node->get_height());
+         }
+diff --git a/t/t_token_cache.cpp b/t/t_token_cache.cpp
+index a42a93085ed..4ef6bbf4735 100644
+--- a/t/t_token_cache.cpp
++++ b/t/t_token_cache.cpp
+@@ -49,11 +49,11 @@ void log_token_tree(scheduler_t s) {
+ 
+     if (prefix.empty()) {
+       spdlog::debug("{}: h={} ROOT{}", static_cast<void*>(n.get()), n->get_height(),
+-          n->used ? "" : " UNUSED");
++          n->used() ? "" : " UNUSED");
+     } else {
+       spdlog::debug("{}{}: h={} {}{}", prefix + (is_last ? "└── " : "├── "),
+           static_cast<void*>(n.get()), n->get_height(), edge_str,
+-          n->used ? "" : " UNUSED");
++          n->used() ? "" : " UNUSED");
+     }
+ 
+     std::string child_prefix = prefix + (is_last ? "    " : "│   ");
+@@ -91,7 +91,7 @@ size_t count_used_nodes(scheduler_t s) {
+   while (!stack.empty()) {
+     auto n = stack.back();
+     stack.pop_back();
+-    if (n->used) count++;
++    if (n->used()) count++;
+     auto children = n->get_children();
+     for (auto& child : children) {
+       stack.push_back(child);
+@@ -118,7 +118,7 @@ size_t node_path_length(location_t loc) {
+   }
+ 
+   while (n) {
+-    if (n->used) count++;
++    if (n->used()) count++;
+     n = n->parent();
+   }
+   return count;
+diff --git a/t/t_token_tree_stress.cpp b/t/t_token_tree_stress.cpp
+index abab7bcf9b6..55ee810825e 100644
+--- a/t/t_token_tree_stress.cpp
++++ b/t/t_token_tree_stress.cpp
+@@ -88,7 +88,7 @@ const std::vector<std::vector<token_t>> kBasePrefixes = {
+ // All tunables governing workload generation. build_plan reads these and bakes
+ // the result into the plan.
+ struct plan_config {
+-  size_t num_waves = 10;
++  size_t num_waves = 100;
+   size_t min_sessions_per_wave = 6;
+   size_t max_sessions_per_wave = 20;
+ 
+@@ -348,6 +348,16 @@ void execute_plan(plan_t& plan) {
+     INFO("session_states destroyed " << sessions_destroyed.load() << " of "
+                                      << created_so_far << " created");
+     REQUIRE(sessions_destroyed.load() == created_so_far);
++
++    // With this wave settled, the used nodes must be exactly the retained
++    // pool's closure (plus root). The extra barrier ensures the node releases
++    // enqueued by sessions.clear() above have been processed first, so the
++    // `used` flags are settled.
++    std::string used_msg;
++    bool used_ok = true;
++    work_barrier([&]() { used_ok = s->verify_used_set(retained_pool, &used_msg); });
++    INFO("wave " << w << " used-set mismatch: " << used_msg);
++    REQUIRE(used_ok);
+   }
+ 
+   // Drop everything; the resulting node releases are processed before the
+@@ -359,6 +369,8 @@ void execute_plan(plan_t& plan) {
+   work_barrier([&]() {
+     s->pre_forward_hook = nullptr;
+     final_ok = s->verify_tree(&final_msg);
++    // Pool is empty now, so the only used node must be the root.
++    if (final_ok) final_ok = s->verify_used_set(retained_pool, &final_msg);
+   });
+ 
+   {
+@@ -367,7 +379,7 @@ void execute_plan(plan_t& plan) {
+                                                       << first_failure);
+     REQUIRE(all_ok.load());
+   }
+-  INFO("final verify_tree: " << final_msg);
++  INFO("final tree/used-set check: " << final_msg);
+   REQUIRE(final_ok);
+   REQUIRE(passes.load() > 0);  // the hook actually ran
+ 

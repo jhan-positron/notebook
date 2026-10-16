@@ -1,0 +1,234 @@
+{
+ "label": "concurrency-race-or-lock-placement",
+ "name": "Shared state reached from more than one thread without the lock, atomic or wait that protects it, or a lock placed away from the state it guards",
+ "description": "What breaks: a race or a torn read. A new parallel weight loader reaches set_hardware_weights on the same PosDevice with no lock on load_weight_q (3275212298); a per-device mutex array added at the caller in tensor.hpp instead of inside PosDevice or DmaQueue, spanning the busy-wait and missable by future callers (3277240111 'free-floating lock placement is detached from what it's actually protecting'); count_complete_gofs() (racy by design) read twice in one block (3125517302 'see line 1783 above for other instances of this I've already fixed'); token_ix_needed narrowed so a minibatch no longer waits for a later minibatch writing V entries on the same shared page while scaled_v reads the whole page (3970590653, the only blocking-severity row, endorsed via GPT text); a lock_guard held across a whole loop with no comment saying why (2983867856); only two counters atomic because a FUSE reader runs on another thread (3406007619 'I assume ... because the FUSE reader ... is a different thread?'). Procedure: for every diff that adds parallel_for, threads or a worker fanout, trace each call inside to its mutable shared object and list the locks on that path; for every added mutex check it lives with the state it guards and covers only the mutating section; for every racy getter count calls per block; for every narrowed readiness predicate (needed, ready, wait, depends) check the consumer's read granularity against the writer's; for every atomic/plain mix list which thread reads each member. He states the thread model back to the author as a question before asking for a change.",
+ "disposition": "add_new",
+ "existing_check": null,
+ "disposition_reason": "No existing check reads thread ownership; 6 rows over 5 PRs, including the one blocking finding in the corpus.",
+ "count": 6,
+ "prs_spanned": 5,
+ "representative_ids": [
+  3275212298,
+  3277240111,
+  3970590653,
+  3125517302
+ ],
+ "evidence_needed": [
+  "hunk",
+  "full_file",
+  "other_file",
+  "callers",
+  "runtime_behavior",
+  "hardware_knowledge"
+ ],
+ "agent_feasibility": "yes for lock placement, double reads of racy getters and narrowed wait predicates (static call-graph reading); confirming an actual race needs runtime evidence.",
+ "members": [
+  {
+   "id": 2983867856,
+   "pr": "positron-ai/tron#2233",
+   "kind": "inline",
+   "path": "src/tron/gof.cpp",
+   "is_reply": false,
+   "concern": "He asks whether the mutex `gof_save_mu` is deliberately held for the whole shard-gathering loop in `gof_collect_shards` so that no other thread mutates the shard tree during the traversal.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "lock-scope-intent-question",
+   "detection": {
+    "trigger": "A diff adds a std::lock_guard (or mutex acquire) at the top of a function that then loops over a shared structure, or holds a lock across more than the single read/write it protects.",
+    "procedure": "Identify the mutex and grep for every other acquirer of it (here gof_save_mu in gof.cpp) to see what it guards; determine whether the loop reads a structure those acquirers mutate; check whether the function is called from the owning thread already.",
+    "question": "Is the lock held across the whole loop because the structure can be mutated concurrently, and does the comment say so?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "question",
+   "severity": "minor",
+   "author_outcome": "discussed",
+   "quote": "I assume you're locking the mutex for the entire loop, because you don't want someone to update the tree during your search/gather?",
+   "reviewable_by_agent": "yes",
+   "note": "Author confirmed and hopes the gather becomes unnecessary after Bill's scheduler; bham0n (Bill) asked for a `// TODO remove when new scheduler is done` and stated all tree traversals must run on the main thread. Wade's form: states his assumption, asks for confirmation."
+  },
+  {
+   "id": 3406007619,
+   "pr": "tron-2980",
+   "kind": "inline",
+   "path": "h/pos/device.hpp",
+   "is_reply": false,
+   "concern": "Wade asks the author to confirm the concurrency reasoning: the two reuse counters are std::atomic, and only those, because the FUSE stats reader runs on a different thread from the TX worker that increments them.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "atomic-choice-needs-cross-thread-rationale",
+   "detection": {
+    "trigger": "a diff adds a mix of plain and std::atomic members to one struct, or adds std::atomic to some fields of a group that one thread writes",
+    "procedure": "for each new atomic member, grep src/ for its readers and writers (here the writer is the TX worker in worker.cpp fetch_add, the reader is the FUSE stats registration in device.cpp:626-627 which hands pointers to the fuse layer thread); for each new plain member in the same hunk, confirm every reader and writer run on the same thread; the comment above the members should state the cross-thread reader",
+    "question": "Which thread reads each new member, and does the atomic/plain split match exactly the set of members read from another thread?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file"
+   ],
+   "form": "question",
+   "severity": "minor",
+   "author_outcome": "discussed",
+   "quote": "I assume these reuse counters (and _only_ these counters) are `atomic`s because the FUSE reader that reads them is a different thread? Not that familiar with FUSE yet, but that would make sense.",
+   "reviewable_by_agent": "yes",
+   "note": "A question that checks a design decision rather than demanding a change; the author confirmed. Wade states his own uncertainty ('Not that familiar with FUSE yet'). Verified at a62d15a3dc: device.cpp:626-627 passes &PosDevice::legacy_wcmd_reuse_count / attn_wcmd_reuse_count to the FUSE stats table, and the other prev_* members are read and written only in worker.cpp hw_prepare and the soft-reset path (device.cpp:456)."
+  },
+  {
+   "id": 3275212298,
+   "pr": "tron-2777",
+   "kind": "inline",
+   "path": "h/tron/hardware/tensor.hpp",
+   "is_reply": true,
+   "concern": "Answering another reviewer's question about thread safety under the new parallel loader: alloc_hardware_weights (the HBM allocator call) is already mutex-protected, but set_hardware_weights (the per-device DMA weight transfer) is not, so concurrent calls on the same PosDevice (one FPGA card object) would race on its load_weight_q DMA queue.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "shared-resource-not-thread-safe-under-new-parallelism",
+   "detection": {
+    "trigger": "The diff introduces or widens parallel execution (parallel_for, new threads, a worker fanout) around a call that reaches a shared mutable resource (a device queue, a descriptor ring, a hardware handle).",
+    "procedure": "Follow every call inside the new parallel region to its definition (here h/tron/hardware/tensor.hpp -> src/pos/driver.cpp set_hardware_weights). For each shared object it touches (dev->load_weight_q, allocator), grep its definition and the function body for a std::mutex, lock_guard or atomic; note which calls are protected and which are not. Check whether two parallel iterations can map to the same device/queue instance.",
+    "question": "Can two iterations of the new parallel loop reach the same mutable shared object, and does every function on that path take a lock before mutating it?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file",
+    "callers"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "But `set_hardware_weights` is not. So concurrent accesses on the *same* PosDevice would contend on (e.g.) `load_weight_q` DmaQueue with no lock/guard protection.",
+   "reviewable_by_agent": "yes",
+   "note": "Verified at b556b55: h/pos/alloc.hpp:136 `mutable std::mutex mutex_` backs allocator::allocate (Wade's 'is thread-safe (uses a mutex)' holds); src/pos/driver.cpp:1007-1024 set_hardware_weights(PosDevice*) does xfer_blocks(dev, dev->load_weight_q, ...) then wait_for_xfer_blocks with no lock (Wade's 'is not' holds). The author then added hardware_weight_load_mutex(dev_idx) and a lock_guard in tensor.hpp:66-71 and :93 (present at b556b55, which Wade critiques in 3277240111). Wade's wording: fact first, 'So' consequence second. Reply to axch, but the content is a finding, not a social answer."
+  },
+  {
+   "id": 3277240111,
+   "pr": "tron-2777",
+   "kind": "inline",
+   "path": "h/tron/hardware/tensor.hpp",
+   "is_reply": false,
+   "concern": "The new per-device mutex is taken at the caller (a free-floating mutex array in tensor.hpp) rather than inside the object it protects (PosDevice or its DmaQueue), so the lock is far from the protected state, spans more than needed (the busy-wait in wait_for_xfer_blocks could run concurrently), fully serializes parallel callers, and future callers of the same queue can forget it; he also worries about adding a mutex to a hot path, and defers to the driver owner.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "lock-at-call-site-instead-of-in-owning-object",
+   "detection": {
+    "trigger": "The diff adds a mutex, lock_guard or lock table in a file other than the one that defines the mutated object, or adds a lock around a call whose body contains both the mutation and a wait/poll.",
+    "procedure": "Locate the object the lock protects (grep the callee for the member it mutates: here dev->load_weight_q in src/pos/driver.cpp:1022). List every other caller of that mutation (grep xfer_blocks / load_weight_q in h/ src/) and check whether each would also need the new lock. Read the callee body and split it into the mutating part (xfer_blocks) and the read-only waiting part (wait_for_xfer_blocks, driver.cpp:966-994, reads q->consumed_head and monotonic descriptor indices); ask whether the lock span could end after the mutating part. Check whether the device object already owns mutexes for sibling resources (h/pos/device.hpp: qalloc_mutex, hw_prepare_mutex, wcmd_post_mutex) that show the house convention.",
+    "question": "Does the lock live with the state it protects, cover only the mutating section, and get taken by every path that mutates that state?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file",
+    "callers",
+    "hardware_knowledge"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "unknown",
+   "quote": "this sort of free-floating lock placement is detached from what it's actually protecting. IMO it would be better to add a mutex member to the PosDevice (or DmaQueue) and use it directly inside of `device::set_hardware_weights`.",
+   "reviewable_by_agent": "yes",
+   "note": "Verified: tensor.hpp:66-71 at b556b55 defines `static std::array<std::mutex, MAX_DEVICES> mutexes` in a free function; tensor.hpp:93 takes it around the whole device call; driver.cpp:1021-1023 = xfer_blocks then wait_for_xfer_blocks; wait_for_xfer_blocks only reads q->consumed_head->fields.desc_idx and compares with start/end descriptors (monotonic, per-range), matching Wade's point 2. h/pos/device.hpp already holds qalloc_mutex / hw_prepare_mutex / wcmd_post_mutex as members (house convention supports his ask). Four numbered reasons, then a counter-consideration ('nervous about introducing mutex locks in high-volume functions'), then 'probably fine ... may be acceptable', then deferral to @mcherba. No reply in the digest; PR still open, so outcome unknown."
+  },
+  {
+   "id": 3125517302,
+   "pr": "tron-2499",
+   "kind": "inline",
+   "path": "h/tron/scheduler/full.hpp",
+   "is_reply": true,
+   "concern": "Endorses the Cursor bot's finding that sh.count_complete_gofs() (a counter that races with asynchronous GOF DMA) is read twice in one block, once in the guard and once in the dma_last calculation, and points the author to line 1783 where Wade already cached the value in a local.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "racy-value-read-twice",
+   "detection": {
+    "trigger": "Within one block, a getter documented or named as racy/volatile/asynchronously updated (count_complete_gofs, dma_complete, an atomic load, a progress counter) is called more than once, with one call in a condition and another in a computation that must agree with the condition.",
+    "procedure": "Grep the diff for every call to the getter; group calls by enclosing block. For a block with two or more calls, check whether a sibling block in the same file (here line 1783) caches it in a local ('size_t completed_gof_cnt = sh.count_complete_gofs();') and whether the header of the getter or a Note warns that it races with DMA. Also check the base branch log for an earlier fix of the same pattern (git log -S'count_complete_gofs' on the base).",
+    "question": "Can the value returned by this getter change between the guard and the use, and is the guard then inconsistent with the computed value?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file",
+    "commits",
+    "prior_pr"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "@mcherba see line 1783 above for other instances of this I've already fixed",
+   "reviewable_by_agent": "yes",
+   "note": "Reply to cursor[bot] 'Double call to count_complete_gofs() introduces TOCTOU race'. 'I've already fixed' refers to Wade's own commit on the base branch hwattention_sync: 40fa9f459e 'trivial cleanup, and don't read count_complete_gofs() twice in a row' (2026-04-21), after 10b023e108 and 6d82fddc05 TOCTOU fixes. At head 269418ce4d both sites cache the value: line 1783 and line 1804 'size_t completed_gof_cnt = sh.count_complete_gofs();' (commit 5 'fix TOCTOU race and align initial allocation with shard size'). Posted 4 minutes after his APPROVED review. Pattern: Wade amplifies a bot finding by citing the precedent fix rather than restating the mechanism."
+  },
+  {
+   "id": 3970590653,
+   "pr": "tron-4191",
+   "kind": "inline",
+   "path": "h/tron/models/common.hpp",
+   "is_reply": true,
+   "concern": "Wade endorses the Cursor Bugbot high-severity finding that narrowing token_ix_needed to a single mask range lets a minibatch stop waiting for a later minibatch writing V entries on the same shared KV page, while scaled_v still reads the whole page (interleaved storage, zero times NaN corrupts), and asks (via pasted GPT text) to keep waiting for every writer of a read page and to extend t_llama_unit coverage for shared-page readiness.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "reader-no-longer-waits-for-concurrent-writer",
+   "detection": {
+    "trigger": "A hunk narrows or removes a readiness, dependency or wait predicate (a function whose name contains needed, ready, visible, depends, wait) on a path where another thread or minibatch writes into shared storage that the consumer reads at a coarser granularity (whole page, whole cache line, interleaved pair).",
+    "procedure": "Read the old and new predicate (common.hpp:1003-1012 at 92ff9b9e49: page-level `find_range(page.at_offset(0))` loop replaced by one `find_range(tok).any_visible(items_mask)`). Find the consumer's read granularity: grep `scaled_v` and the V accessor in h/tron/models/kv_cache.hpp for whether it reads a full page including masked-out entries, and whether even/odd tokens share storage (the interleaved V layout). Construct the case: a prompt split into two minibatches sharing one 64-token page, where the second batch's tokens are causally invisible to the first. Then check whether an existing test pre-initializes all V data (which hides the race) and whether any test covers shared-page readiness. The PR body at the merged head confirms the mechanism: 'Restoring only the old producer-token visibility predicate makes both shared-page readiness cases fail'.",
+    "question": "After the narrowing, can a consumer read storage (a page, an interleaved pair) that a writer the consumer no longer waits for is still writing?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file",
+    "runtime_behavior"
+   ],
+   "form": "statement",
+   "severity": "blocking",
+   "author_outcome": "changed",
+   "quote": "I asked GPT to evaluate this... it agrees:\n\n> \u2022 One P1 correctness issue remains in common.hpp:1009: the narrower dependency check allows attention to read unfinished V data.",
+   "reviewable_by_agent": "yes",
+   "note": "Wade's own words are one line; the substance is pasted GPT output (P1 correctness, 64-token prompt split into two 32-token minibatches sharing one page, scaled_v reads every V entry, zero times NaN, 'The existing t_llama_unit case preinitializes all V data, so it misses this scenario. Extend that coverage for shared-page readiness.'). He did not mark it blocking in words, but it is a correctness finding with no approval until fixed: review 5156942587 COMMENTED 2026-09-09; fix commit fe516bb512 'Preserve KV page readiness while skipping empty attention ranges' 2026-09-11; APPROVED 2026-09-14 at df9b800181. At head 9653307d68 common.hpp:957-971 token_ix_needed waits for every producer of a page any query sees via mask.for_each_range_run over the whole page, and the comment states 'scaled_v reads the entire page, including masked-out entries, and V writes share interleaved storage'. Pattern since 2026-07 per CONTEXT.md: Wade runs an LLM review and pastes it when it confirms a bot finding."
+  }
+ ],
+ "missing_member_ids": [],
+ "codex_bullets": [
+  {
+   "id": "C1",
+   "bullet": "Follow every physical read and write. A logically masked token can still be read by a vectorized kernel.",
+   "pick_up": "no",
+   "reason": "The only support is the GPT paste on PR 4191 (3970590653); Wade only says \"I asked GPT to evaluate this... it agrees\". No Wade comment in his own words traces a masked read. Paste-derived rules should not be written in his name.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C4",
+   "bullet": "Check whether the lock protects the actual shared state at its mutation boundary. A caller-side lock may miss another caller or serialize an independent wait. Ask for evidence before changing lock placement.",
+   "pick_up": "yes",
+   "reason": "Four comments (PRs 2777, 2233, 2565). 3277240111 gives the full reasoning (co-locate the lock, finer grain, independent waiters, future drift) and ends by deferring to the owner. No Claude check.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C38",
+   "bullet": "For a performance concern, distinguish measurement from hypothesis.",
+   "pick_up": "already",
+   "reason": "Three comments (PRs 2906, 2698, 2777) where Wade labels his own speculation. Claude skill has the generic hypothesis line.",
+   "claude_skill_coverage": "partial (Report the result: \"If a point is only a hypothesis, name the check\")"
+  },
+  {
+   "id": "C39",
+   "bullet": "For a design question, state the tradeoff and preserve a deliberate staged limitation.",
+   "pick_up": "already",
+   "reason": "Five comments (PRs 4596, 4557, 2777, 2176). Already in the Claude skill.",
+   "claude_skill_coverage": "covered (How Wade words: \"A design concern is a question with two alternatives\"; check 6: \"preserve a deliberate staged limitation\")"
+  },
+  {
+   "id": "C48",
+   "bullet": "Ownership and progress: for each changed asynchronous path, write the sequence from creation to release and answer the five-question table (who can still read, what permits reuse, which operation completion identifies, what protects mutation, what guarantees progress).",
+   "pick_up": "yes",
+   "reason": "Same evidence as C2 to C5 (PRs 2777, 2011, 2766, 2499, 4128); the table is the executable form of those four bullets. Adopt the table and fold C2 to C5 under it.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C49",
+   "bullet": "Do not infer safety from a buffer being logically unused; follow the real read width and address range. Do not infer a reference stays valid from an initial `reserve`; follow every operation that can exceed capacity.",
+   "pick_up": "yes",
+   "reason": "Two Wade comments (PRs 2499, 4128) plus the 4191 paste. The reserve sentence is Wade's own (3120788282, with 3120756577 \"why 64?\"); the masked-read sentence rests on the paste.",
+   "claude_skill_coverage": "none"
+  }
+ ]
+}

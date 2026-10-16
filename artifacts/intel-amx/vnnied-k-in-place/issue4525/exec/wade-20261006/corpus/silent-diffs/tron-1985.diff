@@ -1,0 +1,359 @@
+diff --git a/t/t_hwattention_replay.cpp b/t/t_hwattention_replay.cpp
+index eba959a9c0f..6a243038bf7 100644
+--- a/t/t_hwattention_replay.cpp
++++ b/t/t_hwattention_replay.cpp
+@@ -11,6 +11,7 @@
+ #include <spdlog/spdlog.h>
+ 
+ #include "common/json.hpp"
++#include "libpos.hpp"
+ #include "pos/device.hpp"
+ #include "pos/hwattention.hpp"
+ #include "pos/lib.hpp"
+@@ -295,7 +296,8 @@ TEST_CASE_METHOD(fixture, "replay_from_json_dumps", "[replay_from_json_dumps]")
+ 
+   static const bool reload_from_sw_json = true;
+   // what degree of disagreement do we allow between the results
+-  static const double diff_tolerance = .01;
++  static const double relerr_tolerance = .03;
++  static const double abserr_tolerance = 1;
+   // we can run n times if needed to verify we see
+   // the same results each time. Inital testing at 10 passes inidcated we see the same
+   // results from HW each time
+@@ -510,17 +512,22 @@ TEST_CASE_METHOD(fixture, "replay_from_json_dumps", "[replay_from_json_dumps]")
+   // Structure to track iteration results
+   struct IterationStats {
+     int iter_num;
+-    double hw_max_diff;
+-    double hw_mean_diff;
++    double hw_max_rel;
++    double hw_mean_rel;
++    double hw_max_abs;
++    double hw_mean_abs;
+     size_t hw_mismatches;
+-    double sw_max_diff;
+-    double sw_mean_diff;
++    double sw_max_rel;
++    double sw_mean_rel;
++    double sw_max_abs;
++    double sw_mean_abs;
+     size_t sw_mismatches;
+     bool results_count_ok;
+     bool hw_validation_passed;
+     bool sw_validation_passed;
+   };
+   std::vector<IterationStats> all_stats;
++  auto hwkv = get_hwkv();
+ 
+   for (int iter = 0; iter < num_iterations; ++iter) {
+     spdlog::info("\n========== ITERATION {}/{} ==========", iter + 1, num_iterations);
+@@ -531,7 +538,11 @@ TEST_CASE_METHOD(fixture, "replay_from_json_dumps", "[replay_from_json_dumps]")
+     spdlog::info("Sending attention commands for {} tokens", num_tokens);
+ 
+     weights_cmd_attn_fields wcm0(0x1100040010000000);
++    // since we're specifying the layer, we need to use the layer to access the proper
++    // k and v addresses to load from
++    wcm0.fields.host_base_addr = hwkv->hw_k_map[layer].addresses[dev->idx];
+     weights_cmd_attn_fields wcm1(0xa100040000000000);
++    wcm1.fields.host_base_addr = hwkv->hw_v_map[layer].addresses[dev->idx];
+     metadata_fields metadata0(0x2da800800000000f);
+     metadata0.fields.ktok = ((num_tokens - 1) % 128) + 1;
+     att_activ_cmd_0_fields ac0(0x0000000000002000);
+@@ -630,12 +641,16 @@ TEST_CASE_METHOD(fixture, "replay_from_json_dumps", "[replay_from_json_dumps]")
+ 
+     size_t hw_mismatches = 0;
+     size_t hw_total_elements = 0;
+-    double hw_max_diff = 0.0;
+-    double hw_sum_diff = 0.0;
++    float hw_max_rel = 0.0f;
++    float hw_sum_rel = 0.0f;
++    float hw_max_abs = 0.0f;
++    float hw_sum_abs = 0.0f;
+     size_t sw_mismatches = 0;
+     size_t sw_total_elements = 0;
+-    double sw_max_diff = 0.0;
+-    double sw_sum_diff = 0.0;
++    float sw_max_rel = 0.0f;
++    float sw_sum_rel = 0.0f;
++    float sw_max_abs = 0.0f;
++    float sw_sum_abs = 0.0f;
+ 
+     for (size_t head = 0; head < n_heads; ++head) {
+       spdlog::debug("--------------------------");
+@@ -672,22 +687,22 @@ TEST_CASE_METHOD(fixture, "replay_from_json_dumps", "[replay_from_json_dumps]")
+           iter, head, hw_smax, *hw_sume, expected_smax, expected_sume, sw_expected_smax,
+           sw_expected_sume);
+ 
+-      if (sume_diff > diff_tolerance) {
++      if (sume_diff > relerr_tolerance) {
+         spdlog::warn("Iteration {} Head {} HW SUME mismatch: got {}, expected {} (hw "
+                      "saved), diff {}",
+             iter, head, *hw_sume, expected_sume, sume_diff);
+       }
+-      if (smax_diff > diff_tolerance) {
++      if (smax_diff > relerr_tolerance) {
+         spdlog::warn("Iteration {} Head {} HW SMAX mismatch: got {} (scaled), expected "
+                      "{} (hw saved), diff {}",
+             iter, head, hw_smax, expected_smax, smax_diff);
+       }
+-      if (sw_sume_diff > diff_tolerance) {
++      if (sw_sume_diff > relerr_tolerance) {
+         spdlog::warn("Iteration {} Head {} SW SUME mismatch: got {}, expected {} (sw "
+                      "saved), diff {}",
+             iter, head, *hw_sume, sw_expected_sume, sw_sume_diff);
+       }
+-      if (sw_smax_diff > diff_tolerance) {
++      if (sw_smax_diff > relerr_tolerance) {
+         spdlog::warn("Iteration {} Head {} SW SMAX mismatch: got {}, expected "
+                      "{} (sw saved), diff {}",
+             iter, head, hw_smax, sw_expected_smax, sw_smax_diff);
+@@ -698,141 +713,170 @@ TEST_CASE_METHOD(fixture, "replay_from_json_dumps", "[replay_from_json_dumps]")
+         bf16 sw_expected_val = hex_to_bf16(sw_expected_data[i].get<std::string>());
+         bf16 hw_val = hw_head_base[i];
+ 
+-        float expected_f = static_cast<float>(expected_val);
+-        float sw_expected_f = static_cast<float>(sw_expected_val);
+-        float hw_f = static_cast<float>(hw_val);
+-        float sw_f = hw_f / *hw_sume;
+-        // double diff = std::abs(expected_f - hw_f);
+-        // double sw_diff = std::abs(sw_expected_f - sw_f);
+-        double diff = relerr(expected_f, hw_f);
+-        double sw_diff = relerr(sw_expected_f, sw_f);
+-        if ((sw_diff > diff_tolerance) || (diff > diff_tolerance)) {
+-          spdlog::warn("DIFF out of tolerance: (I {}, H {}, E {}) RA={}, O={}, "
+-                       "SW Expected={}, HW Expected={}  (relative error vs prior HW: "
+-                       "{} (RA), vs prior SW: {} (O))",
+-              iter, head, i, hw_f, sw_f, expected_f, sw_expected_f, diff, sw_diff);
++        float hw_expected = static_cast<float>(expected_val);
++        float sw_expected = static_cast<float>(sw_expected_val);
++        float ra = static_cast<float>(hw_val);
++        float o = ra / *hw_sume;
++        auto [abs_err_hw, rel_err_hw] = comberr(expected_val, ra);
++        auto [abs_err_sw, rel_err_sw] = comberr(sw_expected_val, o);
++        if (((rel_err_hw > relerr_tolerance) || (abs_err_hw > abserr_tolerance))) {
++          spdlog::warn(
++              "DIFF vs Prior HW out of tolerance: [I={:>2}, H={:>2}, E={:>3}] "
++              "RA={:>12.6f} | HW_Exp={:>12.6f} | vs HW: rel={:>10.6e} abs={:>10.6e}",
++              iter, head, i, ra, hw_expected, rel_err_hw, abs_err_hw);
+         }
+-
+-        if (diff > diff_tolerance) {
++        if ((rel_err_sw > relerr_tolerance) || (abs_err_sw > abserr_tolerance)) {
++          spdlog::warn(
++              "DIFF VS Prior SW out of tolerance: [I={:>2}, H={:>2}, E={:>3}] "
++              " O={:>12.6f} | SW_Exp={:>12.6f} | vs SW: rel={:>10.6e} abs={:>10.6e}",
++              iter, head, i, o, sw_expected, rel_err_sw, abs_err_sw);
++        }
++        if (rel_err_hw > relerr_tolerance) {
+           hw_mismatches++;
+         }
+-        if (sw_diff > diff_tolerance) {
++        if (rel_err_sw > relerr_tolerance) {
+           sw_mismatches++;
+         }
+ 
+-        if (diff > hw_max_diff) {
+-          spdlog::debug(
+-              "new max diff of {} at head {} element {} calculated {} read {}", diff,
+-              head, i, hw_f, expected_f);
+-        }
+-        hw_max_diff = std::max(hw_max_diff, diff);
+-        hw_sum_diff += diff;
++        // Track relative errors
++        hw_max_rel = std::max(hw_max_rel, rel_err_hw);
++        hw_sum_rel += rel_err_hw;
++        // Track absolute errors
++        hw_max_abs = std::max(hw_max_abs, abs_err_hw);
++        hw_sum_abs += abs_err_hw;
+         hw_total_elements++;
+-        if (diff > hw_max_diff) {
+-          spdlog::debug(
+-              "new max diff of {} at head {} element {} calculated {} read {}", diff,
+-              head, i, hw_f, expected_f);
+-        }
+-        sw_max_diff = std::max(sw_max_diff, sw_diff);
+-        sw_sum_diff += sw_diff;
++
++        // Track SW errors
++        sw_max_rel = std::max(sw_max_rel, rel_err_sw);
++        sw_sum_rel += rel_err_sw;
++        sw_max_abs = std::max(sw_max_abs, abs_err_sw);
++        sw_sum_abs += abs_err_sw;
+         sw_total_elements++;
+       }
+     }
+ 
+-    double hw_mean_diff = hw_total_elements > 0 ? hw_sum_diff / hw_total_elements : 0.0;
++    double hw_mean_rel = hw_total_elements > 0 ? hw_sum_rel / hw_total_elements : 0.0;
++    double hw_mean_abs = hw_total_elements > 0 ? hw_sum_abs / hw_total_elements : 0.0;
+ 
+     spdlog::info("HW validation (iter {}) vs JSON HW:", iter + 1);
+     spdlog::info("  Total elements compared: {}", hw_total_elements);
+-    spdlog::info("  Mismatches (diff > {}%): {} ({:.2f}%)", diff_tolerance * 100,
++    spdlog::info("  Mismatches (diff > {}%): {} ({:.2f}%)", relerr_tolerance * 100,
+         hw_mismatches, 100.0 * hw_mismatches / hw_total_elements);
+-    spdlog::info("  Max difference: {:.6f}", hw_max_diff);
+-    spdlog::info("  Mean difference: {:.6f}", hw_mean_diff);
++    spdlog::info(
++        "  Max rel error: {:.6e}, Mean rel error: {:.6e}", hw_max_rel, hw_mean_rel);
++    spdlog::info(
++        "  Max abs error: {:.6e}, Mean abs error: {:.6e}", hw_max_abs, hw_mean_abs);
+ 
+     // Check for tolerance but don't stop on failure
+     bool hw_validation_passed =
+-        (hw_max_diff < 0.01) && (hw_mismatches < hw_total_elements * 0.01);
++        (hw_max_rel < 0.01) && (hw_mismatches < hw_total_elements * 0.01);
+     if (!hw_validation_passed) {
+-      spdlog::error(
+-          "Iter {} FAILED HW validation: max_diff={:.6f}, mismatches={}/{} ({:.2f}%)",
+-          iter + 1, hw_max_diff, hw_mismatches, hw_total_elements,
++      spdlog::error("Iter {} FAILED HW validation: max_rel={:.6e}, max_abs={:.6e}, "
++                    "mismatches={}/{} "
++                    "({:.2f}%)",
++          iter + 1, hw_max_rel, hw_max_abs, hw_mismatches, hw_total_elements,
+           100.0 * hw_mismatches / hw_total_elements);
+     }
+ 
+-    double sw_mean_diff = sw_total_elements > 0 ? sw_sum_diff / sw_total_elements : 0.0;
++    double sw_mean_rel = sw_total_elements > 0 ? sw_sum_rel / sw_total_elements : 0.0;
++    double sw_mean_abs = sw_total_elements > 0 ? sw_sum_abs / sw_total_elements : 0.0;
+ 
+     spdlog::info("SW validation (iter {}) vs JSON SW:", iter + 1);
+     spdlog::info("  Total elements compared: {}", sw_total_elements);
+-    spdlog::info("  Mismatches (diff > {}%): {} ({:.2f}%)", diff_tolerance * 100,
++    spdlog::info("  Mismatches (diff > {}%): {} ({:.2f}%)", relerr_tolerance * 100,
+         sw_mismatches, 100.0 * sw_mismatches / sw_total_elements);
+-    spdlog::info("  Max difference: {:.6f}", sw_max_diff);
+-    spdlog::info("  Mean difference: {:.6f}", sw_mean_diff);
++    spdlog::info(
++        "  Max rel error: {:.6e}, Mean rel error: {:.6e}", sw_max_rel, sw_mean_rel);
++    spdlog::info(
++        "  Max abs error: {:.6e}, Mean abs error: {:.6e}", sw_max_abs, sw_mean_abs);
+ 
+     // Check for tolerance but don't stop on failure
+     bool sw_validation_passed =
+-        (sw_max_diff < 0.1) && (sw_mismatches < sw_total_elements * 0.1);
++        (sw_max_rel < 0.1) && (sw_mismatches < sw_total_elements * 0.1);
+     if (!sw_validation_passed) {
+-      spdlog::error(
+-          "Iter {} FAILED SW validation: max_diff={:.6f}, mismatches={}/{} ({:.2f}%)",
+-          iter + 1, sw_max_diff, sw_mismatches, sw_total_elements,
++      spdlog::error("Iter {} FAILED SW validation: max_rel={:.6e}, max_abs={:.6e}, "
++                    "mismatches={}/{} "
++                    "({:.2f}%)",
++          iter + 1, sw_max_rel, sw_max_abs, sw_mismatches, sw_total_elements,
+           100.0 * sw_mismatches / sw_total_elements);
+     }
+ 
+     // Record statistics for this iteration
+-    all_stats.push_back({iter + 1, hw_max_diff, hw_mean_diff, hw_mismatches,
+-        sw_max_diff, sw_mean_diff, sw_mismatches, results_count_ok,
+-        hw_validation_passed, sw_validation_passed});
++    all_stats.push_back({iter + 1, hw_max_rel, hw_mean_rel, hw_max_abs, hw_mean_abs,
++        hw_mismatches, sw_max_rel, sw_mean_rel, sw_max_abs, sw_mean_abs, sw_mismatches,
++        results_count_ok, hw_validation_passed, sw_validation_passed});
+   }
+ 
+   // Display summary across all iterations
+   spdlog::info("\n========== SUMMARY ACROSS ALL ITERATIONS ==========");
+-  // 12737353231093249026238873807618048.000000
+-  spdlog::info("Iteration | HW Max Diff | HW Mean Diff "
+-               "| HW Mismatches | SW Max Diff "
+-               "| SW Mean Diff | SW Mismatches | Results OK | HW Pass | SW Pass");
+-  spdlog::info("----------|-------------|--------------|---------------|-------------|"
+-               "--------------|---------------|------------|---------|--------");
++  spdlog::info(
++      "Iteration | HW Max Rel  | HW Mean Rel | HW Max Abs  | HW Mean Abs | HW "
++      "Mismatches | SW Max Rel  | SW Mean Rel | SW Max Abs  | SW Mean Abs | SW "
++      "Mismatches | Results OK | HW Pass | SW Pass");
++  spdlog::info(
++      "----------|-------------|-------------|-------------|-------------|------"
++      "---------|-------------|-------------|-------------|-------------|------"
++      "---------|------------|---------|--------");
+   for (const auto& stats : all_stats) {
+-    spdlog::info("{:9} | {:11.6f} | {:12.6f} | {:13} | {:11.6f} | {:12.6f} | {:13} "
+-                 "| {:10} | {:7} | {:7}",
+-        stats.iter_num, stats.hw_max_diff, stats.hw_mean_diff, stats.hw_mismatches,
+-        stats.sw_max_diff, stats.sw_mean_diff, stats.sw_mismatches,
++    spdlog::info(
++        "{:9} | {:11.6e} | {:11.6e} | {:11.6e} | {:11.6e} | {:13} | {:11.6e} | "
++        "{:11.6e} | {:11.6e} | {:11.6e} | {:13} | {:10} | {:7} | {:7}",
++        stats.iter_num, stats.hw_max_rel, stats.hw_mean_rel, stats.hw_max_abs,
++        stats.hw_mean_abs, stats.hw_mismatches, stats.sw_max_rel, stats.sw_mean_rel,
++        stats.sw_max_abs, stats.sw_mean_abs, stats.sw_mismatches,
+         stats.results_count_ok ? "YES" : "NO",
+         stats.hw_validation_passed ? "YES" : "NO",
+         stats.sw_validation_passed ? "YES" : "NO");
+   }
+ 
+   // Calculate and display aggregate statistics
+-  double avg_hw_max_diff = 0.0;
+-  double avg_hw_mean_diff = 0.0;
+-  double avg_sw_max_diff = 0.0;
+-  double avg_sw_mean_diff = 0.0;
++  double avg_hw_max_rel = 0.0;
++  double avg_hw_mean_rel = 0.0;
++  double avg_hw_max_abs = 0.0;
++  double avg_hw_mean_abs = 0.0;
++  double avg_sw_max_rel = 0.0;
++  double avg_sw_mean_rel = 0.0;
++  double avg_sw_max_abs = 0.0;
++  double avg_sw_mean_abs = 0.0;
+   size_t total_hw_mismatches = 0;
+   size_t total_sw_mismatches = 0;
+ 
+   for (const auto& stats : all_stats) {
+-    avg_hw_max_diff += stats.hw_max_diff;
+-    avg_hw_mean_diff += stats.hw_mean_diff;
+-    avg_sw_max_diff += stats.sw_max_diff;
+-    avg_sw_mean_diff += stats.sw_mean_diff;
++    avg_hw_max_rel += stats.hw_max_rel;
++    avg_hw_mean_rel += stats.hw_mean_rel;
++    avg_hw_max_abs += stats.hw_max_abs;
++    avg_hw_mean_abs += stats.hw_mean_abs;
++    avg_sw_max_rel += stats.sw_max_rel;
++    avg_sw_mean_rel += stats.sw_mean_rel;
++    avg_sw_max_abs += stats.sw_max_abs;
++    avg_sw_mean_abs += stats.sw_mean_abs;
+     total_hw_mismatches += stats.hw_mismatches;
+     total_sw_mismatches += stats.sw_mismatches;
+   }
+ 
+-  avg_hw_max_diff /= num_iterations;
+-  avg_hw_mean_diff /= num_iterations;
+-  avg_sw_max_diff /= num_iterations;
+-  avg_sw_mean_diff /= num_iterations;
++  avg_hw_max_rel /= num_iterations;
++  avg_hw_mean_rel /= num_iterations;
++  avg_hw_max_abs /= num_iterations;
++  avg_hw_mean_abs /= num_iterations;
++  avg_sw_max_rel /= num_iterations;
++  avg_sw_mean_rel /= num_iterations;
++  avg_sw_max_abs /= num_iterations;
++  avg_sw_mean_abs /= num_iterations;
+ 
+   spdlog::info("\nAggregate Statistics:");
+-  spdlog::info("  Average HW max diff: {:.6f}", avg_hw_max_diff);
+-  spdlog::info("  Average HW mean diff: {:.6f}", avg_hw_mean_diff);
+-  spdlog::info("  Total HW mismatches: {}", total_hw_mismatches);
+-  spdlog::info("  Average SW max diff: {:.6f}", avg_sw_max_diff);
+-  spdlog::info("  Average SW mean diff: {:.6f}", avg_sw_mean_diff);
+-  spdlog::info("  Total SW mismatches: {}", total_sw_mismatches);
++  spdlog::info("  HW - Avg max rel: {:.6e}, Avg mean rel: {:.6e}", avg_hw_max_rel,
++      avg_hw_mean_rel);
++  spdlog::info("  HW - Avg max abs: {:.6e}, Avg mean abs: {:.6e}", avg_hw_max_abs,
++      avg_hw_mean_abs);
++  spdlog::info("  HW - Total mismatches: {}", total_hw_mismatches);
++  spdlog::info("  SW - Avg max rel: {:.6e}, Avg mean rel: {:.6e}", avg_sw_max_rel,
++      avg_sw_mean_rel);
++  spdlog::info("  SW - Avg max abs: {:.6e}, Avg mean abs: {:.6e}", avg_sw_max_abs,
++      avg_sw_mean_abs);
++  spdlog::info("  SW - Total mismatches: {}", total_sw_mismatches);
+   spdlog::info("  HW results consistency: {}",
+-      (avg_hw_max_diff < 1e-10) ? "PERFECT (all iterations identical)"
+-                                : "VARIABLE (differences between iterations)");
++      (avg_hw_max_rel < 1e-10) ? "PERFECT (all iterations identical)"
++                               : "VARIABLE (differences between iterations)");
+ 
+   // Count iterations that passed all checks
+   int passed_iterations = 0;

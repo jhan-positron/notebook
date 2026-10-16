@@ -1,0 +1,156 @@
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index 9733dedf26c..b103545e633 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -7,7 +7,6 @@
+ 
+ #include <sys/mman.h>  // mmap, munmap
+ 
+-#include "common/indexed.hpp"
+ #include "common/numerics/bf16.hpp"
+ #include "system/memory.hpp"
+ #include "tron/kernels/expr.hpp"
+@@ -83,6 +82,8 @@
+ 
+ namespace tron {
+ 
++struct node_base;
++
+ // Implements a mask interface that is actually a contiguous range [lo,hi).
+ struct page_mask_t {
+   static const size_t capacity = 1ul << 16;
+@@ -357,7 +358,18 @@ struct alignas(64) page final {  // approximately 1MB data + 16kB vout scratch
+   explicit page(book_t& book) noexcept
+   : book(book)
+   , offset_bound(0) {}
+-  page(page&& other) noexcept = default;
++
++  // Explicit move: std::atomic is not movable, so copy counter
++  // values. Only called during vector construction (single-threaded).
++  page(page&& other) noexcept
++  : book(other.book)
++  , lo(other.lo)
++  , offset_bound(other.offset_bound) {
++    for (size_t o = 0; o < page_size; ++o)
++      for (size_t l = 0; l < n_layers; ++l)
++        kv_saves_[o][l].store(other.kv_saves_[o][l].load(std::memory_order_relaxed),
++            std::memory_order_relaxed);
++  }
+ 
+   // How many kv entries are live (see Note [KV Token Lifetimes]) on
+   // this page alone.  Count will typically be `page_size` for
+@@ -460,9 +472,11 @@ struct alignas(64) page final {  // approximately 1MB data + 16kB vout scratch
+   void get_v(
+       size_t layer, size_t kv_head, size_t i_page, float* vout_ptr) const noexcept
+     requires(head_size % 32 == 0);
+-#endif
+ 
+-#if TRON_CHUNK_SIZE != 16
++  TRON(inline)
++  void get_v(size_t layer, size_t kv_head, size_t i_page, bf16* vout_ptr) const noexcept
++    requires(head_size % 32 == 0);
++#else  // TRON_CHUNK_SIZE != 16
+   // Else, `v` is a `view.`
+   TRON(nodiscard, inline, pure)
+   auto v(size_t layer, size_t kv_head, size_t i_page) noexcept TRON(this_lifetimebound)
+@@ -478,6 +492,11 @@ struct alignas(64) page final {  // approximately 1MB data + 16kB vout scratch
+     return const_view<bf16, true, false, seq<head_size>>{
+         reinterpret_cast<const bf16*>(kv_block(layer, kv_head).v[i_page])};
+   }
++
++  TRON(nodiscard, inline, pure)
++  bf16* v_ptr(size_t layer, size_t kv_head, size_t i_page) noexcept {
++    return v(layer, kv_head, i_page).data;
++  }
+ #endif
+ 
+   // The useful thing to do with V data in this page, namely compute a
+@@ -503,6 +522,43 @@ struct alignas(64) page final {  // approximately 1MB data + 16kB vout scratch
+         book.x_data->get() + (pageno() * page_size + i_page) * x_bytes);
+   }
+ 
++  // ---------------------------------------------------------------------------
++  // Per-token KV completion tracking for GOF dispatch.
++  //
++  // Indexed [offset][layer]. Atomic counter per entry: save_k and
++  // save_v each increment by 1. Exactly one thread sees the count
++  // reach 2 and fires gof_rodeo for that (offset, layer).
++  // ---------------------------------------------------------------------------
++
++  // Returns true if this was the completing save (count reached 2).
++  bool mark_k_complete(size_t layer, size_t offset) noexcept {
++    TRON_ASSERT_LT(layer, n_layers);
++    TRON_ASSERT_LT(offset, page_size);
++    return kv_saves_[offset][layer].fetch_add(1, std::memory_order_acq_rel) == 1;
++  }
++
++  // Returns true if this was the completing save (count reached 2).
++  bool mark_v_complete(size_t layer, size_t offset) noexcept {
++    TRON_ASSERT_LT(layer, n_layers);
++    TRON_ASSERT_LT(offset, page_size);
++    return kv_saves_[offset][layer].fetch_add(1, std::memory_order_acq_rel) == 1;
++  }
++
++  TRON(nodiscard, inline)
++  bool is_kv_complete(size_t layer, size_t offset) const noexcept {
++    TRON_ASSERT_LT(layer, n_layers);
++    TRON_ASSERT_LT(offset, page_size);
++    return kv_saves_[offset][layer].load(std::memory_order_acquire) >= 2;
++  }
++
++  // Clear completion state for a single offset across all layers.
++  // Called when a new token is assigned to this page offset.
++  void clear_kv_complete_at(size_t offset) noexcept {
++    TRON_ASSERT_LT(offset, page_size);
++    for (size_t l = 0; l < n_layers; ++l)
++      kv_saves_[offset][l].store(0, std::memory_order_relaxed);
++  }
++
+ private:
+   using kv_block_t = detail::kv_block<page_size, head_size>;
+   friend struct book<n_layers, n_kv_heads, head_size, x_bytes>;
+@@ -522,6 +578,10 @@ struct alignas(64) page final {  // approximately 1MB data + 16kB vout scratch
+   // See Note [KV Token Lifetimes].
+   uint32_t offset_bound;
+ 
++  // Per-token per-layer save counter. Indexed [offset][layer].
++  // 0 = neither K nor V saved, 1 = one saved, 2 = both saved.
++  std::atomic<uint8_t> kv_saves_[page_size][n_layers] = {};
++
+   // Which page am I in the book?
+   TRON(nodiscard, inline, pure)
+   size_t pageno() const noexcept {
+@@ -994,6 +1054,33 @@ void page<n_layers, n_kv_heads, head_size, x_bytes>::get_v(
+     }
+   }
+ }
++
++template <size_t n_layers, size_t n_kv_heads, size_t head_size, size_t x_bytes>
++TRON(inline)
++void page<n_layers, n_kv_heads, head_size, x_bytes>::get_v(
++    size_t layer, size_t kv_head, size_t i_page, bf16* vout_ptr) const noexcept
++  requires(head_size % 32 == 0)
++{
++  const bf16* v_ptr =
++      reinterpret_cast<const bf16*>(kv_block(layer, kv_head).v[i_page / 2]);
++  if (i_page % 2 == 0) {
++    for (size_t i = 0; i < head_size; i += 16) {
++      // f 7 e 6 d 5 c 4 b 3 a 2 9 1 8 0
++      bf16x32 both = _mm512_load_si512(v_ptr + i * 2);
++      // 7 6 5 4 3 2 1 0
++      __m256i lo = _mm512_cvtepi32_epi16(both);
++      _mm256_store_si256(reinterpret_cast<__m256i*>(vout_ptr + i), lo);
++    }
++  } else {
++    for (size_t i = 0; i < head_size; i += 16) {
++      // f 7 e 6 d 5 c 4 b 3 a 2 9 1 8 0
++      bf16x32 both = _mm512_load_si512(v_ptr + i * 2);
++      // f e d c b a 9 8
++      __m256i hi = _mm512_cvtepi32_epi16(_mm512_srli_epi32(both, 16));
++      _mm256_store_si256(reinterpret_cast<__m256i*>(vout_ptr + i), hi);
++    }
++  }
++}
+ #endif  // TRON_CHUNK_SIZE == 16
+ 
+ }  // namespace tron

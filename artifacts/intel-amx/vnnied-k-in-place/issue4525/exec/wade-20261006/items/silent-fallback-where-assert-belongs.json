@@ -1,0 +1,294 @@
+{
+ "label": "silent-fallback-where-assert-belongs",
+ "name": "Code clamps, skips, spins or returns silently on a state that should abort loudly, or an assert omits the offending value",
+ "description": "What breaks: a defect is hidden instead of caught. std::min of n_kv_heads against HW_MAX_KV_HEADS on a path the shape screen already makes unreachable (3866435051 'we should assert at this level'); hook range guards that return early so wrong indices go uncounted in production while row() already asserts the same bounds (4125033677 'Prefer asserting'); `if (this != &other)` in a move assignment where self-move is never intended (2825119397 'should we just assert this?'); a shard_stride == 0 branch that continues building a device command (2983787051 'We can't meaningfully continue on with this right?'); a prep_done wait whose comment does not say whether the state occurs normally (3307359535 'defensive/sanity guarding?'); an unbounded spin on in_flight that replaces a TRON_ASSERT and duplicates rxinfo_ring backpressure (3342904643 'It turns a loud tripwire into a silent forever-hang'); ck_pr_stall loops with no bound and no way to reach debug_exit (3307412051); an assert message that omits the offending head_size (2670489106). Procedure: for every added clamp, early return, sentinel branch or spin loop ask whether a bug-free caller can reach the condition; if not, propose TRON_ASSERT or debug_exit; for every added wait loop require a bound or timeout that ends in a diagnosed exit; for every assertion on a runtime variable require the value in the message. He asks whether the guard is defensive or expected before asking for the assert, and marks unbounded spins 'probably a next iteration/enhancement effort'.",
+ "disposition": "add_new",
+ "existing_check": null,
+ "disposition_reason": "No existing check looks for silent guards or unbounded waits; 8 rows over 7 PRs.",
+ "count": 8,
+ "prs_spanned": 7,
+ "representative_ids": [
+  3866435051,
+  4125033677,
+  3342904643,
+  2670489106
+ ],
+ "evidence_needed": [
+  "hunk",
+  "full_file",
+  "callers",
+  "other_file",
+  "runtime_behavior"
+ ],
+ "agent_feasibility": "yes: find added guards and spin loops and trace whether an upstream screen already excludes the condition; the root-cause masking claim (3342904643) needs hardware and runtime knowledge.",
+ "members": [
+  {
+   "id": 3866435051,
+   "pr": "tron-4007",
+   "kind": "inline",
+   "path": "h/pos/hwattention.hpp",
+   "is_reply": true,
+   "concern": "Wade agrees with another reviewer that the K transfer helper should assert that the model's KV-head count fits the hardware slot (HW_MAX_KV_HEADS, the fixed 8-head slot the FPGA reserves per token) instead of silently clamping it with std::min, because this code is unreachable for shapes hardware attention cannot support; he also corrects the other reviewer's claim that model_shape_is_hwattn_eligible() asserts the bound, stating it only steers unsupported shapes to software attention.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "silent-clamp-where-assert-belongs",
+   "detection": {
+    "trigger": "A diff hunk keeps or adds a std::min / std::max / clamp of a model-shape parameter against a hardware limit constant, on a path that an upstream shape screen already makes unreachable for out-of-range values.",
+    "procedure": "Grep the diff for std::min<...>(<shape param>, <LIMIT constant>). Find the upstream screen: grep h/ and src/ for the LIMIT constant and for the function that decides eligibility (here model_shape_is_hwattn_eligible in h/tron/models/model.hpp). Read whether the screen asserts or merely returns false/steers. Grep for existing asserts on the same bound in sibling paths (e.g. gof::populate) to show the house convention is assert.",
+    "question": "Can this code run with the parameter out of range, and if not, why does it clamp instead of assert?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file",
+    "callers"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "yes, IMO we should assert at this level because we should never reach this code if HWA can't support the model shape.",
+   "reviewable_by_agent": "yes",
+   "note": "Verified at 29a39ac33e: model_shape_is_hwattn_eligible() is a constexpr bool returning ... && n_kv_heads <= hardware::HW_MAX_KV_HEADS (h/tron/models/model.hpp:789-795); it does not assert, which matches Wade's correction 'model_shape_is_hwattn_eligible() does NOT assert these things. It simply steers everything toward SW-attention'. Author outcome: commit 'hw attention: assert the KV-head count fits the slot instead of truncating' and the PR body sentence 'Every K and V transfer helper now asserts that the KV-head count is between 1 and 8 instead of clamping it'. Second pattern inside this comment: Wade checks a reviewer's factual claim about what a function does before accepting it (verify-claim-about-function-behavior)."
+  },
+  {
+   "id": 4125033677,
+   "pr": "positron-ai/tron#4596",
+   "kind": "inline",
+   "path": "h/tron/models/attn_stats.hpp",
+   "is_reply": false,
+   "concern": "The hooks' range guards (worker >= n_workers || layer >= n_layers, and token_path_span returning nullptr) silently drop counts in production to accommodate test states that grow the attn vector; prefer asserting (row() already asserts the same bounds, so the early return is redundant) and fix the tests to build a correctly sized state.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "silent-guard-hides-production-bug",
+   "detection": {
+    "trigger": "The diff adds an early `return` / `continue` / `nullptr` result on an index or size check in production code, and a comment next to it names tests as the reason ('unit tests drive X without Y', 'test states that grow').",
+    "procedure": "Grep the added code for `if (... >= ...) return` and `return nullptr` with a comment mentioning test or unit test. For each, find the function the guarded index is then passed to (e.g. row()) and check whether it already asserts the same bound (grep TRON_ASSERT_LT / TRON_ASSERT). List every production caller and ask whether an out-of-range index there is a bug that should abort. List the tests that rely on the guard (those that call the hook on a state smaller than the index).",
+    "question": "Would an out-of-range index at this guard in production be a bug, and if so does the guard turn an abort into a silently wrong count?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "changed",
+   "quote": "In production a wrong index would quietly go uncounted instead of failing. Prefer asserting (`row()` already asserts the same bounds, so the early return is also redundant) and fix the tests to build a correctly sized state.",
+   "reviewable_by_agent": "yes",
+   "note": "Verified at 1430736b2a attn_stats.hpp: row() asserts at :327-329 (TRON_ASSERT_LT on cls, worker, layer); guards at :382, :409, :421; `return nullptr` at :350. The hunk's own comment ('unit tests drive apply_page_range without a forward, so the vectors may be empty') is what gave the guard away. Author converted every guard to TRON_ASSERT, deleted note_token_path (no production caller), added a fork-based negative test (commit 15f355acb2)."
+  },
+  {
+   "id": 2825119397,
+   "pr": "tron-2078",
+   "kind": "inline",
+   "path": "h/pos/dma/queue.hpp",
+   "is_reply": false,
+   "concern": "Wade asks whether the `if (this != &other)` self-move guard in the new DmaQueue move assignment (DmaQueue = the DMA descriptor ring queue class) should be an assertion instead, since a self-move is never intended and a silent guard would hide an accidental one.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "defensive-guard-on-impossible-state",
+   "detection": {
+    "trigger": "A hunk adds a runtime guard that silently no-ops or returns on a condition the surrounding comment or design says cannot happen: `if (this != &other)` in a move/copy assignment, a null check with early return on a pointer that is never null, a bounds clamp on an index computed by the same class.",
+    "procedure": "List every added conditional whose false branch does nothing or returns. For each, read the comment that justifies the operation (here 'Move constructor - needed because atomics are not movable') and grep callers for the operation (`std::move(` of the type, `operator=` uses, vector reallocation of the type). If no caller can reach the condition, ask whether an assert, or deleting the operation, is the better contract.",
+    "question": "Is there a legitimate caller that reaches this condition, or should the condition be asserted or the operation deleted?"
+   },
+   "evidence_read": [
+    "hunk"
+   ],
+   "form": "question",
+   "severity": "minor",
+   "author_outcome": "discussed",
+   "quote": "should we just assert this? Are there legit scenarios where we would want to 'self-move'? Is this just a common defensive coding pattern, in the case we accidentally perform such an operation?",
+   "reviewable_by_agent": "yes",
+   "note": "Author answered: pure defensive coding; removed the one place that might have self-moved, kept the guard 'just in case', and said the struct should never be moved and would accept deleting the move operations. Verified at the final head f0134b976b: h/pos/dma/queue.hpp:91-92 still has `operator=(DmaQueue&& other)` with `if (this != &other)`. Wade approved without the change. Three-question form: should we X? are there legit scenarios? is this just a pattern? Review was posted at commit 6399789f67 although the digest header lists f0134b976b."
+  },
+  {
+   "id": 2983787051,
+   "pr": "positron-ai/tron#2233",
+   "kind": "inline",
+   "path": "src/pos/worker.cpp",
+   "is_reply": false,
+   "concern": "When the computed weight-load stride `shard_stride` is 0 the code handles it as a branch; he asks whether that state should instead be an assert or debug_exit because the driver cannot meaningfully continue.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "invalid-state-should-abort-not-continue",
+   "detection": {
+    "trigger": "A diff adds an `if (x == 0)` / sentinel branch on a value that feeds a hardware command, and the branch body logs, skips or continues instead of asserting or exiting.",
+    "procedure": "Read the branch body and what runs after it with the invalid value (the command still gets built or stored?); compare with how the same function treats other invalid inputs (here spdlog::error + debug_exit, TRON_ASSERT a few lines above).",
+    "question": "If this condition is true, can the rest of the function produce a valid device command, or is every outcome wrong?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file"
+   ],
+   "form": "question",
+   "severity": "normal",
+   "author_outcome": "unknown",
+   "quote": "should we just assert this, or debug_exit()? We can't meaningfully continue on with this right?",
+   "reviewable_by_agent": "yes",
+   "note": "No reply in the digest. At head af9438799a a grep for 'shard_stride == 0' in src/pos/worker.cpp returns nothing, so the branch was rewritten or removed; which way is not visible from the digest. Wade's two-alternative question form ('assert this, or debug_exit()?')."
+  },
+  {
+   "id": 3307359535,
+   "pr": "tron-2766",
+   "kind": "inline",
+   "path": "src/pos/driver.cpp",
+   "is_reply": false,
+   "concern": "Two things in one comment: a typo fix ('isnot' -> 'is not') as a suggestion block, and a question whether the new wait on prep_done (the wqentry flag that says the previous pass finished with this work-queue entry) before reusing the entry is a guard for an unexpected scenario rather than a normal path.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "ask-whether-guard-is-defensive-or-expected",
+   "detection": {
+    "trigger": "The diff adds a wait or early-return guard whose comment says it prevents a state ('to prevent reuse prematurely') without saying whether that state occurs in normal operation.",
+    "procedure": "Read the added guard and its comment; find every writer of the flag it waits on (grep the flag name across h/ and src/) and check whether the normal call sequence can reach the guard with the flag unset; if the comment does not say whether the guard is expected to fire, ask.",
+    "question": "Can the normal (bug-free) call sequence reach this guard with the condition unmet, or does it exist only to catch a bug?"
+   },
+   "evidence_read": [
+    "hunk"
+   ],
+   "form": "question",
+   "severity": "nit",
+   "author_outcome": "accepted",
+   "quote": "... I assume this is a very unexpected scenario? So this is defensive/sanity guarding?",
+   "reviewable_by_agent": "yes",
+   "note": "Author: 'I hit it a couple of times early on so i put a guard in ... it felt safer to leave the guard.' Guard kept at head (driver.cpp:669 while (!work_req->prep_done.load(acquire)) prep_done_view.wait(500)); the typo is fixed at driver.cpp:664. Wade accepted the answer, no further ask. Second pattern in this comment: comment-typo-suggestion."
+  },
+  {
+   "id": 3342904643,
+   "pr": "tron-2872",
+   "kind": "inline",
+   "path": "src/pos/driver.cpp",
+   "is_reply": false,
+   "concern": "Objects to adding an unbounded spin-wait on wqentry::in_flight (a per-work-request busy flag cleared by the hardware completion callback): it replaces a loud assertion with a silent hang when the completion path is stuck, duplicates the backpressure the rxinfo_ring (receive-descriptor ring) already provides, and may be masking a different root cause (a false completion on matmul_rx_q feeding a stale scratchpad).",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "unbounded-spin-wait-replaces-assert",
+   "detection": {
+    "trigger": "the diff adds a loop that polls an atomic or flag with no timeout, no iteration bound and no abort, on a path where the flag is cleared by an asynchronous completion callback; or the diff removes or bypasses a TRON_ASSERT on the same condition",
+    "procedure": "grep the diff for `while (` or `for (;;)` around `.load(` / `in_flight` / `_pause()` without a deadline; find who clears the flag (grep the store of the flag with release ordering) and whether that clearer runs on an RX/worker thread that can itself be stuck; read the function the wait is inserted into (hw_prepare, fill) for an existing ordering guarantee (ring-overflow check at the top, head/tail backpressure); check `git log -S<flag>` for an earlier assert on the same condition and for an earlier reverted attempt of the same wait",
+    "question": "when the completion callback never fires, does the new code hang silently where the old code asserted, and does an existing ring backpressure already serialize the reuse this wait is meant to prevent?"
+   },
+   "evidence_read": [
+    "hunk",
+    "full_file",
+    "prior_pr",
+    "runtime_behavior",
+    "hardware_knowledge"
+   ],
+   "form": "statement",
+   "severity": "normal",
+   "author_outcome": "unknown",
+   "quote": "It turns a loud tripwire into a silent forever-hang.",
+   "reviewable_by_agent": "needs_domain",
+   "note": "Wade had tried the same spin-wait weeks earlier and backed it out; he cites his own wrap-count fix commit 9e4ebd056e. He explicitly does not block: 'I suppose we can land this if it's critical to get the test pipeline moving forward.' He asks a root-cause question: 'is \"m_star == -inf\" really even a \"reused too soon\" bug? It's on matmul_rx_q (raw desc_idx polling, no check_xfer_complete).' Part of the text is a pasted Claude summary ('which I let Claude summarize for me below'). The PR was closed without merge; no author reply in the digest. The structural half (unbounded poll loop, assert removed) is agent-detectable; the backpressure argument and the false-completion hypothesis need hardware queue knowledge."
+  },
+  {
+   "id": 3307412051,
+   "pr": "tron-2766",
+   "kind": "inline",
+   "path": "src/pos/driver.cpp",
+   "is_reply": false,
+   "concern": "The new wait loops use ck_pr_stall (a concurrencykit busy-wait pause) instead of the repository's mwaitx::wait_for_* helpers, and the loops have no bound and no way to exit to debug_exit (the process-abort-with-diagnostics path); Wade asks whether the helper mismatch is the reason and flags the unbounded spin as dangerous but deferrable.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "unbounded-spin-wait-no-timeout",
+   "detection": {
+    "trigger": "The diff adds a while loop whose body is only a pause/stall primitive (ck_pr_stall, _mm_pause, yield) or a wait with no deadline, and the loop condition reads a flag set by another thread.",
+    "procedure": "List each added spin loop; check for a deadline, counter or timeout inside it; compare with how the same file's other waits are written (grep mwaitx::wait_for_ and debug_exit in src/pos/worker.cpp and driver.cpp) to see whether the repository already has a timed-wait helper; if the loop has no exit, ask why the existing helper was not used and what happens on a hang.",
+    "question": "If the other thread never sets the flag, can this loop end in a diagnosed exit, or does the process hang silently?"
+   },
+   "evidence_read": [
+    "hunk",
+    "other_file"
+   ],
+   "form": "question",
+   "severity": "minor",
+   "author_outcome": "changed",
+   "quote": "Also, all of these `ck_pr_stall` loops are unbounded... no way to break out in a sane manner and at least debug_exit. Just seems a bit dangerous, but probably a 'next iteration/enhancement' effort.",
+   "reviewable_by_agent": "yes",
+   "note": "Wade knew the mwaitx helpers have alignment/parameter requirements (other_file knowledge of h/tron/hardware mwaitx). Author replied the stall was simpler and offered to flip; commit 'Integrate review feedback and move from concurrencykit stall to mwait' did so: head driver.cpp:812-813 and worker.cpp:1064-1065 use workreq->hw_prepared_view.wait(500) (mwaitx waitable_view, timed wait per iteration) but the enclosing while loop is still unbounded with no debug_exit. So the helper part changed, the unbounded part did not."
+  },
+  {
+   "id": 2670489106,
+   "pr": "tron-1807",
+   "kind": "inline",
+   "path": "h/pos/hwattention.hpp",
+   "is_reply": false,
+   "concern": "The new TRON_ASSERT (the project's assertion macro, which takes a format string plus arguments) rejects a head_size not divisible by 8 but its message does not include the offending head_size value, so a failure log would not say which size tripped it.",
+   "existing_check": null,
+   "existing_check_fit": "none",
+   "candidate_label": "assert-message-missing-value",
+   "detection": {
+    "trigger": "A diff adds an assertion or throw whose condition tests a runtime variable (here `head_size % 8 == 0`) and whose message is a fixed string that does not interpolate that variable.",
+    "procedure": "Grep the diff's added lines for `TRON_ASSERT(`, `TRON_ASSERT_*`, `throw`, `spdlog::error`; for each, list the variables in the condition and check whether the message's format arguments include them (h/pos/assert.hpp:68 shows TRON_ASSERT(cond, ...) accepts format args).",
+    "question": "If this assertion fires in a log, can the reader recover the value that violated the condition from the message alone?"
+   },
+   "evidence_read": [
+    "hunk"
+   ],
+   "form": "ask",
+   "severity": "minor",
+   "author_outcome": "unknown",
+   "quote": "would be useful to print the head_size as well",
+   "reviewable_by_agent": "yes",
+   "note": "Verified at d03129dad0: h/pos/hwattention.hpp:293-295 `TRON_ASSERT((head_size % 8 == 0), \"Unanticipated head size cannot be evenly divided \" \"for type conversion during K shuffle\");` with no format args; a sibling assert at :323 has the same shape. TRON_ASSERT is variadic (h/pos/assert.hpp:68), so adding the value is cheap. Wade approved 7 minutes later without waiting for the change."
+  }
+ ],
+ "missing_member_ids": [],
+ "codex_bullets": [
+  {
+   "id": "C3",
+   "bullet": "Match completion checks to the device, queue, descriptor range, and generation that received the work. Trace the ordering that permits release or reuse.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 2011, 1860, 1920, 2872) ask which device, queue or descriptor a wait actually observes; the last paragraph of 3342904643 is in Wade's own words. No Claude check covers it.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C5",
+   "bullet": "Do not accept an unbounded wait as proof that a race is fixed. Identify the event that ends the wait and whether the failure being handled prevents that event. Preserve actionable diagnostics.",
+   "pick_up": "yes",
+   "reason": "Three comments (PRs 2872, 2766, 1485). 3342904643 carries a Claude-summarized block but the position (\"I loathe spin-waits\", \"there's more sleuthing to be done\") is Wade's own. No Claude check.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C6",
+   "bullet": "Separate model dimensions from hardware storage dimensions. Trace bounds, padding, alignment, and unsupported-model fallback through the production caller. Do not infer production behavior from a test-only helper.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 4007, 2176, 2233); also 3002034511 and 3283298134. Recurring theme in the hardware-attention code. No Claude check.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C20",
+   "bullet": "Keep test names, setup, comments, and passing assertions consistent. Fix an invalid test fixture instead of adding production guards that silently hide bad state.",
+   "pick_up": "yes",
+   "reason": "Four comments (PRs 4557, 4596, 2078, 1666). The second sentence (4125033677) is a distinct rule the Claude skill lacks; see also C26.",
+   "claude_skill_coverage": "partial (check 5 covers the name; the fixture-vs-production-guard sentence has no check)"
+  },
+  {
+   "id": "C21",
+   "bullet": "Prefer the closest existing test suite. A temporary workaround's regression test needs a documented reason and a replacement condition; do not remove protection before the underlying failure is understood.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 4265, 4128, 2713, 2872). The workaround-needs-a-tracked-exit rule (2713, two comments) is new to the Claude skill.",
+   "claude_skill_coverage": "partial (setup 2 quotes AGENTS.md \"extend the closest existing test\"; the workaround sentence has no check)"
+  },
+  {
+   "id": "C26",
+   "bullet": "Do not silently discard impossible indices to accommodate a test. Distinguish internal invariant failures from intentionally supported external inputs and optional features.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 4596, 4007, 2233, 2078, 2713). \"Should we just assert this?\" is a recurring Wade question; no Claude check.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C48",
+   "bullet": "Ownership and progress: for each changed asynchronous path, write the sequence from creation to release and answer the five-question table (who can still read, what permits reuse, which operation completion identifies, what protects mutation, what guarantees progress).",
+   "pick_up": "yes",
+   "reason": "Same evidence as C2 to C5 (PRs 2777, 2011, 2766, 2499, 4128); the table is the executable form of those four bullets. Adopt the table and fold C2 to C5 under it.",
+   "claude_skill_coverage": "none"
+  },
+  {
+   "id": "C51",
+   "bullet": "Hardware geometry: trace dimensions from model configuration through hardware eligibility, packing, transfer construction, and consumption. Keep the model's logical shape separate from the hardware's stored shape. Check padding and alignment against the instructions actually used.",
+   "pick_up": "yes",
+   "reason": "Five comments (PRs 4007, 2176, 4128, 2148). Procedure form of C6; adopt together.",
+   "claude_skill_coverage": "none"
+  }
+ ]
+}

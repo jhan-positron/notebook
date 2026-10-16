@@ -1,0 +1,170 @@
+diff --git a/h/common/numerics/bf16.hpp b/h/common/numerics/bf16.hpp
+index 8ff67aaaf9f..986d112ba6f 100644
+--- a/h/common/numerics/bf16.hpp
++++ b/h/common/numerics/bf16.hpp
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <cmath>
++#include <cstdlib>
+ #include <type_traits>
+ 
+ #include "common/attributes.hpp"
+diff --git a/h/common/util.hpp b/h/common/util.hpp
+index b30870bdae5..02eb6d12d3a 100644
+--- a/h/common/util.hpp
++++ b/h/common/util.hpp
+@@ -1,7 +1,9 @@
+ #pragma once
+ 
++#include <cmath>
+ #include <concepts>
+ #include <future>
++#include <limits>
+ #include <optional>
+ #include <tuple>
+ #include <type_traits>
+@@ -253,6 +255,37 @@ struct missing_t {
+ template <bool present, typename T>
+ using static_option = std::conditional_t<present, T, missing_t>;
+ 
++TRON(inline)
++double relerr(double trueValue, double approxValue) {
++  if (trueValue == 0.0) {
++    if (approxValue == 0.0) {
++      return 0.0;
++    } else {
++      return std::numeric_limits<double>::infinity();
++    }
++  }
++  return std::abs((trueValue - approxValue) / trueValue);
++}
++
++TRON(inline)
++double abserr(double trueValue, double approxValue) {
++  // handle nan and infinite cases
++  if (std::isnan(trueValue) || std::isnan(approxValue)) {
++    return std::numeric_limits<double>::quiet_NaN();
++  }
++  // standard seems to be matching inf is 0 opposite is inf
++  if (std::isinf(trueValue) || std::isinf(approxValue)) {
++    if (trueValue == approxValue) return 0.0;
++    return std::numeric_limits<double>::infinity();
++  }
++  return std::abs(trueValue - approxValue);
++}
++
++TRON(inline)
++std::pair<double, double> comberr(double trueValue, double approxValue) {
++  return {abserr(trueValue, approxValue), relerr(trueValue, approxValue)};
++}
++
+ // Note [Uninitialized Weight Tensors]
+ // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ // Tensor types (tensor, dmatensor) zero-initialize by default: tensor<N>
+diff --git a/h/tron/emulation/matmul.hpp b/h/tron/emulation/matmul.hpp
+index c4693e3df40..948b687759f 100644
+--- a/h/tron/emulation/matmul.hpp
++++ b/h/tron/emulation/matmul.hpp
+@@ -6,6 +6,7 @@
+ #include <tbb/blocked_range.h>
+ #include <tbb/parallel_for.h>
+ 
++#include "common/util.hpp"
+ #include "tron/emulation/debug.hpp"
+ #include "tron/emulation/matrix.hpp"
+ #include "tron/hardware/quantization.hpp"
+@@ -214,18 +215,6 @@ matrix<N, M, float> host_matmul_eye(matrix<N, K, float> weights) noexcept {
+   return ans;
+ }
+ 
+-TRON(inline)  // Inline to avoid multiple definition errors
+-float relerr(float trueValue, float approxValue) {
+-  if (trueValue == 0.0f) {
+-    if (approxValue == 0.0f) {
+-      return 0.0;
+-    } else {
+-      return std::numeric_limits<float>::infinity();
+-    }
+-  }
+-  return std::abs((trueValue - approxValue) / trueValue);
+-}
+-
+ template <size_t N, size_t B>
+ auto describe_discrepancy(matrix<N, B, float> device_ans,
+     matrix<N, B, float> host_ans,
+@@ -240,13 +229,13 @@ auto describe_discrepancy(matrix<N, B, float> device_ans,
+   // One unit in last place in bf16 is a relative error of 2^-7.  In fp32,
+   // we can represent this and a little fudge factor quite easily.
+   float bf16_ulp = std::pow(2.0, -7) + std::pow(2.0, -15);
+-  float max_err = 0;
++  double max_err = 0;
+   size_t max_err_i = 0;
+   size_t max_err_j = 0;
+-  float max_abs_err = 0;
++  double max_abs_err = 0;
+   size_t max_abs_err_i = 0;
+   size_t max_abs_err_j = 0;
+-  float min_err = 1000.0;
++  double min_err = 1000.0;
+   int num_errs = 0;
+   float sum_sq_host = 0;
+   float sum_sq_errs = 0;
+@@ -260,8 +249,8 @@ auto describe_discrepancy(matrix<N, B, float> device_ans,
+       // spdlog::debug("Result at ({},{}) FPGA: {}, Host: {}", i,j, dev, host);
+       sum_sq_host += host * host;
+       sum_sq_errs += (host - dev) * (host - dev);
+-      float err = relerr(host, dev);
+-      float abs_err = std::abs(dev - host);
++      double err = relerr(host, dev);
++      double abs_err = std::abs(dev - host);
+       if (!(err <= max_err)) {
+         max_err = err;
+         max_err_i = i;
+@@ -272,7 +261,7 @@ auto describe_discrepancy(matrix<N, B, float> device_ans,
+         max_abs_err_i = i;
+         max_abs_err_j = j;
+       }
+-      float max_allowed = bf16_ulp * ulp_tol;
++      double max_allowed = bf16_ulp * ulp_tol;
+       if (!(err <= max_allowed || abs_err < tol)) {
+         num_errs++;
+         min_err = std::min(min_err, err);
+diff --git a/h/tron/simd/bf16.hpp b/h/tron/simd/bf16.hpp
+index c53cbc87762..b8f3f4542e1 100644
+--- a/h/tron/simd/bf16.hpp
++++ b/h/tron/simd/bf16.hpp
+@@ -16,6 +16,7 @@
+ // * 2023-10-30: Initial draft by Edward Kmett
+ 
+ #include "common/attributes.hpp"
++#include "tron/simd/fp16.hpp"
+ #include "tron/simd/fp32.hpp"
+ #include "tron/simd/types.hpp"
+ #include "tron/simd/uint16.hpp"
+@@ -109,8 +110,24 @@ bf16x16 fp32s_to_bf16s(fp32x16 x) noexcept {
+ }
+ #endif  // defined(TRON_AVX512_ENABLED)
+ 
+-// transpose 8x8 bf16
++// convert 8 bf16 values to 8 fp16 values via fp32
++// ~6-9 cycles (bf16->fp32 is ~2-4 cycles, fp32->fp16 is ~4-5 cycles)
++TRON(nodiscard, inline, const)
++fp16x8 bf16s_to_fp16s(bf16x8 x) noexcept {
++  fp32x8 fp32_intermediate = bf16s_to_fp32s(x);
++  return fp32s_to_fp16s(fp32_intermediate);
++}
+ 
++// convert 8 fp16 values to 8 bf16 values via fp32
++// ~12-15 cycles (fp16->fp32 is ~4-5 cycles, fp32->bf16 is ~8-10 cycles)
++// Note: this lives here rather than in fp16.hpp to avoid circular dependencies.
++TRON(nodiscard, inline, const)
++bf16x8 fp16s_to_bf16s(fp16x8 x) noexcept {
++  fp32x8 fp32_intermediate = fp16s_to_fp32s(x);
++  return fp32s_to_bf16s(fp32_intermediate);
++}
++
++// transpose 8x8 bf16
+ template <typename K>
+ inline void btranspose8x8(bf16x8& row0,
+     bf16x8& row1,

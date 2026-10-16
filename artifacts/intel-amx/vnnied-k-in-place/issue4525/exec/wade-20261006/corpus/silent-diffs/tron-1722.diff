@@ -1,0 +1,593 @@
+diff --git a/h/pos/hwattention.hpp b/h/pos/hwattention.hpp
+new file mode 100644
+index 00000000000..24911a66280
+--- /dev/null
++++ b/h/pos/hwattention.hpp
+@@ -0,0 +1,495 @@
++/**
++ * @file hwattention.hpp
++ * @author Mike Cherba (mcherba@positron.ai)
++ * @brief  Access point for transforms and other manipulations specific to HW attention.
++ * @version 0.1
++ * @date 2025-07-08
++ *
++ * @copyright Copyright (c) 2025
++ */
++#pragma once
++
++#include <cstddef>
++#include <mutex>
++#include <sstream>
++#include <string>
++
++#include "pos/assert.hpp"
++#include "pos/config.hpp"
++#include "pos/lib.hpp"
++#include "pos/mwaitx.hpp"
++#include "tron/hardware/driver.hpp"
++#include "tron/hardware/memory.hpp"
++
++constexpr size_t pos_per_page = 128;
++extern std::vector<PosDevice*> devices;
++
++namespace tron::hardware {
++/*
++ * because of the way we arrange k and v entries in HBM, we want/need
++ * to interact with these in sets of 4.  HW uses 128 tokens per allocated page max.
++ * with 3 fetchers, this means 4 K entries per fetcher, and for V, we have to interleave
++ * 4 entries across the same stripe of HBM.
++ * NOTE, this is named hwcacheblock because it is a temporary holding place for K and V
++ * blocks that get transferred to HW.  The only portion that needs to be in HW format
++ * and packed properly is pointed to by data. The rest is host side management
++ * details.
++ */
++struct hwcacheblock {
++  bf16* data;
++  uint64_t hw_base_addr;
++  uint32_t fetcher;
++  uint32_t position;
++  uint32_t blockpos;
++
++  hwcacheblock()
++  : hw_base_addr(0) {
++    data = static_cast<bf16*>(tron::hardware::dma_allocate_aligned(8192, 64));
++    clear();
++  }
++
++  ~hwcacheblock() {
++    if (data) {
++      tron::hardware::dma_deallocate(data, 8192);
++    }
++  }
++
++  void clear() {
++    if (data) {
++      std::memset(data, 0, 8192);
++    }
++  }
++
++  std::string debug_bf16expand(bf16* src, size_t len, int linelen) const noexcept {
++    std::stringstream aline;
++    auto start = src;
++    for (bf16* cpt = start; cpt < start + (len / 2); cpt += linelen) {
++      for (ptrdiff_t lc = 0; lc < linelen; ++lc) {
++        bf16 outval = (volatile bf16) * (cpt + lc);
++        aline << std::setw(7) << outval << " ";
++      }
++    }
++    return aline.str();
++  }
++};
++
++struct k_hwcacheblock : public hwcacheblock {
++  // in k blocks we have a simple structure. the data holds 4 adjacent positions in a
++  // single fetcher. Each position contains 8 heads.
++  bf16* positions[4][8];
++  // when we create a k_hwcacheblock, we ensure that the hwcacheblock constructor is
++  // invoked, and we then fill the positions array with pointers into the data region
++  // that are every head_size * 2 Bytes apart, calculated filling all 8 pointers for the
++  // first outer element etc.
++
++  k_hwcacheblock(size_t head_size) {
++    // Fill positions array with pointers into the data region
++    // Each position contains 8 heads, spaced head_size * 2 bytes apart
++    for (int pos = 0; pos < 4; pos++) {
++      for (int head = 0; head < 8; head++) {
++        // Calc offset: position * (8 heads * head_size * 2) + head * (head_size * 2)
++        size_t offset = pos * (8 * head_size * 2) + head * (head_size * 2);
++        positions[pos][head] = data + offset / sizeof(bf16);
++      }
++    }
++  }
++
++  // need a default so we'll just run with head size 128 for now
++  k_hwcacheblock() {
++    k_hwcacheblock(128);
++  }
++
++  std::string debug_string(bool expand_values = false) const {
++    std::string out =
++        fmt::format("k_hwcacheblock {{ data: {} }}\n", static_cast<const void*>(data));
++    for (int pos = 0; pos < 4; ++pos) {
++      for (int head = 0; head < 8; ++head) {
++        out += fmt::format("  positions[{}][{}] = {}", pos, head,
++            static_cast<const void*>(positions[pos][head]));
++        if (expand_values) {
++          out += fmt::format(
++              " (values: {})", debug_bf16expand(positions[pos][head], 8, 128));
++        }
++        out += "\n";
++      }
++    }
++    return out;
++  }
++};
++
++struct v_hwcacheblock : public hwcacheblock {
++  // In v blocks the structure is a bit more complex.  the Data is spread across the
++  // 32 fetchers in a 3d fashion.  Each fetcher has 4 rows of data, and each row
++  // contains elements of each of 4 positions
++  bf16* positions[32][4][4];  // fetcher, row, position
++
++  // when we create a v_hwcacheblock, we ensure that the hwcacheblock constructor is
++  // invoked, and we then fill the positions array with pointers into the data region
++  // that are every elementsize * 8 apart. We fill these incrementing across the rows
++  // for each fetcher.
++  v_hwcacheblock() {
++    size_t element_offset = 0;  // each time we cycle, push one element forward
++    for (int pch = 0; pch < 32; pch++) {
++      for (int row = 0; row < 4; row++) {
++        for (int pos = 0; pos < 4; pos++) {
++          positions[pch][row][pos] = data + element_offset;
++          element_offset += 8;
++        }
++      }
++    }
++  }
++
++  std::string debug_string(bool expand_values = false) const {
++    std::string out =
++        fmt::format("v_hwcacheblock {{ data: {} }}\n", static_cast<const void*>(data));
++    for (int pch = 0; pch < 32; ++pch) {
++      for (int row = 0; row < 4; ++row) {
++        for (int pos = 0; pos < 4; ++pos) {
++          out += fmt::format("  positions[{}][{}][{}] = {}", pch, row, pos,
++              static_cast<const void*>(positions[pch][row][pos]));
++          if (expand_values) {
++            out += fmt::format(
++                " (values: {})", debug_bf16expand(positions[pch][row][pos], 8, 16));
++          }
++          out += "\n";
++        }
++      }
++    }
++    return out;
++  }
++};
++
++static constexpr size_t hwkv_pages_per_layer = 1024;
++static constexpr size_t hwkv_tok_per_page = 128;
++// allocate enough HBM for 128k tokens across 32 layers for now
++static constexpr size_t hwkv_pchannel_page_size_B = 8192;  // 8k per psuedochannel
++// we want 1024 pages worth for eahc psuedochannel for now
++static constexpr size_t hwkv_pchannel_total_size_B =
++    hwkv_pages_per_layer * hwkv_pchannel_page_size_B;
++// allocate enough space for 32 layers
++static constexpr size_t hwkv_cache_alloc_size_B = hwkv_pchannel_total_size_B * 32;
++static constexpr size_t hwkv_max_tok_ix = hwkv_pages_per_layer * hwkv_tok_per_page;
++struct hwkv_rings {
++  k_hwcacheblock* k_ring[kv_xfer_ring_size];
++  v_hwcacheblock* v_ring[kv_xfer_ring_size];
++  uint32_t head_size;
++  uint32_t index;
++  // for now allocate enough space for 128k tokens for all layers
++
++  hardware::device_map hw_k_map;  // = hardware::alloc_hardware_weights(128 *1024 * 32);
++  hardware::device_map hw_v_map;  // = hardware::alloc_hardware_weights(128 *1024 * 32);
++  hwkv_rings(size_t head_sz)
++  : head_size(head_sz)
++  , index(0) {
++    // Initialize all k_hwcacheblocks with the head size
++    for (uint32_t i = 0; i < kv_xfer_ring_size; i++) {
++      k_hwcacheblock* ktmp = new k_hwcacheblock(128);
++      v_hwcacheblock* vtmp = new v_hwcacheblock();
++      k_ring[i] = ktmp;
++      v_ring[i] = vtmp;
++    }
++    // prep the hbm maps
++    for (device d : get_devices()) {
++      auto vaddr = alloc_kv_weights(d, hwkv_cache_alloc_size_B);
++      auto kaddr = alloc_kv_weights(d, hwkv_cache_alloc_size_B);
++      spdlog::debug(
++          "k map[{}] := 0x{:016x} v map[{}] := 0x{:016x}", d, kaddr, d, vaddr);
++      hw_k_map.insert(d, kaddr);
++      hw_v_map.insert(d, vaddr);
++    }
++  }
++
++  uint32_t get_next_slot() {
++    index = (index + 1) % kv_xfer_ring_size;
++    return index;
++  }
++};
++
++/**
++ * @brief shuffle_k_entry arranges the elements in a kcache entry and rearranges them
++ * in place to split the elements across a set of 4 HBM words.
++ *
++ * @param k_head pointer to the head to rearrange
++ */
++inline void shuffle_k_head(bf16* k_head, bf16* k_hw_head, size_t head_size) {
++  size_t nwords = head_size / hbm_word_width;  // use sizes here in numbers of elements
++  for (size_t element = 0; element < head_size; element++) {
++    // find the row and column to write to based on the element number and the
++    // number of hbm memory words needed
++    size_t col = element / nwords;
++    size_t word = element % nwords;
++    // calculate the offset to write to based on row and column
++    size_t offset = (word * hbm_word_width) + (col);
++    k_hw_head[offset] = k_head[element];
++  }
++}
++
++inline void shuffle_k_entry(bf16** k_heads,
++    k_hwcacheblock* k_hwblock,
++    uint32_t position,
++    uint32_t n_kv_heads,
++    size_t head_size) {
++  uint32_t hwblock_pos = position % 4;
++  // Remember which logical position within the cacheblock this data belongs to
++  k_hwblock->position = hwblock_pos;
++  for (uint32_t head = 0; head < n_kv_heads && head < 8; head++) {
++    shuffle_k_head(k_heads[head], k_hwblock->positions[hwblock_pos][head], head_size);
++  }
++}
++
++inline void shuffle_v_entry(bf16** v_locations_in,
++    v_hwcacheblock* v_hwblock,
++    uint32_t position,
++    uint32_t fpga_index,
++    uint32_t n_kv_heads,
++    uint32_t head_size) {
++  TRON_ASSERT((position < 4), "shuffle_v_entry got a position larger than those held "
++                              "in a hwblock cache entry");
++
++  PosDevice* dev = devices[fpga_index];
++  auto num_fetchers = dev->num_fetchers;
++  uint32_t v_offset = 0;
++  // Remember which logical position within the cacheblock this data belongs to
++  v_hwblock->position = position;
++  // iterate over the v heads, placing the elements into the fetchers at the specified
++  // position
++  for (uint32_t head = 0; head < n_kv_heads; head++) {
++    // the entries from each head are split across the pseudo-channels in order
++    for (uint32_t entry = 0; entry < head_size; entry++) {
++      uint32_t pseudochannel = entry % num_fetchers;
++      uint32_t row = v_offset / 8;
++      uint32_t e_offset = v_offset % 8;
++      bf16* src = v_locations_in[head] + (entry);
++      bf16* dst = v_hwblock->positions[pseudochannel][row][position] + e_offset;
++      *dst = *src;
++      if (pseudochannel == num_fetchers - 1) {
++        v_offset++;
++      }
++    }
++  }
++}
++
++/**
++ * @brief Validate that a V-transfer address range is within the configured HBM region.
++ *
++ * @param didx Index of the target device.
++ * @param hbm_addr Starting HBM address for the transfer.
++ * @param dlen     Length in bytes of the transfer.
++ */
++inline void check_k_range(uint32_t didx, size_t hbm_addr, size_t dlen) {
++  auto hwkv = get_hwkv();
++  auto ds = hwkv->hw_k_map[didx];
++  auto de = ds + hwkv_cache_alloc_size_B;
++  bool addr_valid = (hbm_addr >= ds) && (hbm_addr < de) && ((hbm_addr + dlen) >= ds) &&
++                    ((hbm_addr + dlen) < de);
++
++  TRON_ASSERT(addr_valid,
++      "HBM address for k xfer out of bounds  violation of {:#016x} < {:#016x} < "
++      "{:#016x}",
++      ds, hbm_addr, de);
++}
++
++inline void check_v_range(uint32_t didx, size_t hbm_addr, size_t dlen) {
++  auto hwkv = get_hwkv();
++  auto ds = hwkv->hw_v_map[didx];
++  auto de = ds + hwkv_cache_alloc_size_B;
++  bool addr_valid = (hbm_addr >= ds) && (hbm_addr < de) && ((hbm_addr + dlen) >= ds) &&
++                    ((hbm_addr + dlen) < de);
++
++  TRON_ASSERT(addr_valid,
++      "HBM address for v xfer out of bounds  violation of {:#016x} < {:#016x} < "
++      "{:#016x}",
++      ds, hbm_addr, de);
++}
++
++/**
++ * @brief Transfer a single token's K cache into HBM using a cacheblock layout.
++ *
++ * This function takes per-head K cache pointers for one token, packs them into the
++ * provided `k_hwcacheblock` at the given logical token position, and then issues
++ * DMA transfers to copy the packed data into HBM on the specified FPGA.
++ *
++ * The transfer is non-blocking; the returned descriptor indices can be used with
++ * `wait_for_xfer_blocks` to wait for completion.
++ *
++ * @param k_locations_in  Pointers to each head's K cache for the token.
++ * @param k_hwblock       Cacheblock into which the K data is packed prior to DMA.
++ * @param position        Logical token idx in the cacheblock ring (0..3).
++ * @param n_kvheads       Number of KV heads in the model.
++ * @param fpga_index      Index of the FPGA to place the values on.
++ * @param hbm_addr        Base HBM address for the K page (per pseudochannel/layer).
++ * @param head_size       Number of bf16 elements in a single head.
++ * @return Pair of (end_desc, curr_desc) descriptor indices for completion waiting.
++ */
++inline std::pair<uint32_t, uint32_t> xfer_k_entry(bf16** k_locations_in,
++    k_hwcacheblock* k_hwblock,
++    uint32_t position,
++    uint32_t n_kvheads,
++    uint32_t fpga_index,
++    uint64_t hbm_addr,
++    size_t head_size) noexcept {
++  PosDevice* dev = devices[fpga_index];
++  auto num_fetchers = dev->num_fetchers;
++  uint32_t fetcher = (position / 4) % num_fetchers;
++  uint32_t fpos = position % 4;
++  shuffle_k_entry(k_locations_in, k_hwblock, position, n_kvheads, head_size);
++
++  uint32_t end_desc = 0;
++  uint32_t curr_desc = 0;
++  size_t xferlen = head_size * sizeof(bf16);
++  // walk the k locations in the cache block and set up the descriptors for the transfer
++  for (uint32_t head = 0; head < n_kvheads && head < 8; head++) {
++    hbm_address_t hbm_addr_for_head =
++        hbm_addr + (fpos * head_size * 2 * n_kvheads) + (head * head_size * 2);
++    uint8_t* input_ptr = (uint8_t*)k_hwblock->positions[fpos][head];
++    check_k_range(fpga_index, (size_t)hbm_addr_for_head, xferlen);
++    auto [last_desc_index, curr_consumed_head] =
++        hardware::xfer_blocks(fpga_index, dev->load_weight_q, hbm_addr_for_head,
++            fetcher, input_ptr, xferlen, true, false);
++    end_desc = last_desc_index;
++    curr_desc = curr_consumed_head;
++  }
++  return std::make_pair(end_desc, curr_desc);
++}
++
++/**
++ * @brief Transfer a single token's V cache into HBM using a cacheblock layout.
++ *
++ * This function takes per-head V cache pointers for one token, packs them into the
++ * provided `v_hwcacheblock` at the given logical token position, and then issues
++ * DMA transfers to copy the packed data into HBM across all fetchers on the
++ * specified FPGA.
++ *
++ * Unlike K (which is laid out per head), V is striped across fetchers and rows;
++ * this helper hides that layout by first calling `shuffle_v_entry` to arrange
++ * values into the cacheblock, and then emitting one descriptor per fetcher for
++ * a contiguous slice of that cacheblock.
++ *
++ * The transfer is non-blocking; the returned descriptor indices can be used with
++ * `wait_for_xfer_blocks` to wait for completion.
++ *
++ * @param v_locations_in  Pointers to each head's V cache for the token.
++ * @param v_hwblock       Cacheblock into which the V data is packed prior to DMA.
++ * @param position        Logical token idx in the cacheblock ring (0..3).
++ * @param n_kvheads       Number of KV heads in the model.
++ * @param fpga_index      Index of the FPGA to place the values on.
++ * @param hbm_addr        Base HBM address for the V page (per pseudochannel/layer).
++ * @param head_size       Number of bf16 elements in a single head.
++ * @return Pair of (end_desc, curr_desc) descriptor indices for completion waiting.
++ */
++inline std::pair<uint32_t, uint32_t> xfer_v_entry(bf16** v_locations_in,
++    v_hwcacheblock* v_hwblock,
++    uint32_t position,
++    uint32_t n_kvheads,
++    uint32_t fpga_index,
++    uint64_t hbm_addr,
++    size_t head_size) noexcept {
++  PosDevice* dev = devices[fpga_index];
++  auto num_fetchers = dev->num_fetchers;
++  // we need the  factor of 4 here because we pack 4 tokens into one set of transfers
++  size_t per_fetcher_len = (4 * n_kvheads * head_size * sizeof(bf16)) / num_fetchers;
++  size_t page_pos = position % hwkv_tok_per_page;
++  // we need to know WHICH of the 4 element blocks within the 128 element page we're in
++  size_t page_block = page_pos / 4;
++
++  // shuffle the v entries into the specified position of the cache block
++  shuffle_v_entry(
++      v_locations_in, v_hwblock, position % 4, fpga_index, n_kvheads, head_size);
++  uint32_t end_desc = 0;
++  uint32_t curr_desc = 0;
++  uint64_t adjusted_hbm_addr =
++      hbm_addr + (page_block * (4 * (hwkv_pchannel_page_size_B / hwkv_tok_per_page)));
++
++  // transfer the shuffled entries one descriptor per fetcher
++  for (size_t pdc = 0; pdc < dev->num_fetchers; pdc++) {
++    uint8_t* input_ptr = (uint8_t*)v_hwblock->positions[pdc][0][0];
++    check_v_range(fpga_index, (size_t)adjusted_hbm_addr, per_fetcher_len);
++    auto [last_desc_index, curr_consumed_head] =
++        hardware::xfer_blocks(fpga_index, dev->load_weight_q, adjusted_hbm_addr, pdc,
++            input_ptr, per_fetcher_len, true, false);
++    end_desc = last_desc_index;
++    curr_desc = curr_consumed_head;
++  }
++  return std::make_pair(end_desc, curr_desc);
++}
++
++// Mutex to protect shared hardware cache ring resources
++static std::mutex hwkv_mutex;
++
++inline uint64_t get_hw_page_addr(uint32_t tok_idx, size_t layer, uint64_t base) {
++  // using tok_idx and layer and the base address of the allocation return the
++  // calculated offset into the allocation where the kv cache entry should be placed
++  // for now we divide our K and V allocations into per layer parts
++  //
++  // layers are the widest separation
++  size_t loffset = layer * hwkv_pchannel_total_size_B;
++  // then the page
++  size_t poffset = (tok_idx / 128) * hwkv_pchannel_page_size_B;
++
++  // add the layer and page offsets to the allocated base to get the page hbm addr
++  return base + loffset + poffset;
++}
++// test version will stream kv entries to all fpgas in the instance,
++inline void xfer_v_entry_blocking(bf16** v_locations_in,
++    uint32_t position,
++    uint32_t n_kvheads,
++    size_t layer,
++    size_t head_size) noexcept {
++  std::lock_guard<std::mutex> lock(hwkv_mutex);
++
++  uint32_t end_desc;
++  uint32_t curr_desc;
++  auto hwkv = get_hwkv();
++  size_t ring_index = (position / 4) % kv_xfer_ring_size;
++  v_hwcacheblock* vblock = hwkv->v_ring[ring_index];
++
++  // save this off to all devices
++  PosDevice* dev;
++  for (size_t idx = 0; idx < get_num_devices(); idx++) {
++    uint64_t hbm_addr = get_hw_page_addr(position, layer, hwkv->hw_v_map[idx]);
++    dev = devices[idx];
++    std::tie(end_desc, curr_desc) = xfer_v_entry(
++        v_locations_in, vblock, position, n_kvheads, idx, hbm_addr, head_size);
++  }
++  wait_for_xfer_blocks(dev->idx, dev->load_weight_q, end_desc, curr_desc);
++}
++
++// test version will stream kv entries to all fpgas in the instance,
++inline void xfer_k_entry_blocking(bf16** k_locations_in,
++    uint32_t position,
++    uint32_t n_kvheads,
++    size_t layer,
++    size_t head_size) noexcept {
++  std::lock_guard<std::mutex> lock(hwkv_mutex);
++
++  uint32_t end_desc;
++  uint32_t curr_desc;
++  auto hwkv = get_hwkv();
++
++  size_t ring_index = (position / 4) % kv_xfer_ring_size;
++  k_hwcacheblock* kblock = hwkv->k_ring[ring_index];
++
++  // save this off to all devices
++  PosDevice* dev;
++  for (size_t idx = 0; idx < get_num_devices(); idx++) {
++    uint64_t hbm_addr = get_hw_page_addr(position, layer, hwkv->hw_k_map[idx]);
++    dev = devices[idx];
++    std::tie(end_desc, curr_desc) = xfer_k_entry(
++        k_locations_in, kblock, position, n_kvheads, idx, hbm_addr, head_size);
++  }
++
++  wait_for_xfer_blocks(dev->idx, dev->load_weight_q, end_desc, curr_desc);
++}
++// Current in progress connector code.
++void save_k_to_hardware(bf16* k_data,
++    size_t tok_ix,
++    size_t n_kv_heads,
++    size_t layer,
++    size_t head_size) noexcept;
++
++void save_v_to_hardware(bf16* v_data,
++    size_t tok_ix,
++    size_t n_kv_heads,
++    size_t layer,
++    size_t head_size) noexcept;
++}  // namespace tron::hardware
+diff --git a/src/pos/CMakeLists.txt b/src/pos/CMakeLists.txt
+index 9cc3e1b1ec8..0d36fd2a20b 100644
+--- a/src/pos/CMakeLists.txt
++++ b/src/pos/CMakeLists.txt
+@@ -26,6 +26,7 @@ add_library(pos STATIC
+   mwaitx.cpp
+   metrics.cpp
+   alloc.cpp
++  hwattention.cpp
+   debug.cpp
+ )
+ 
+diff --git a/src/pos/hwattention.cpp b/src/pos/hwattention.cpp
+new file mode 100644
+index 00000000000..240a6453f30
+--- /dev/null
++++ b/src/pos/hwattention.cpp
+@@ -0,0 +1,74 @@
++#include "pos/assert.hpp"
++#include "pos/hwattention.hpp"
++
++// #define DEBUG_SAVE_KV 1
++#ifdef DEBUG_SAVE_KV
++#define dbg_savekv_log(...) spdlog::debug(__VA_ARGS__)
++#else
++#define dbg_savekv_log(...)
++#endif
++
++namespace tron::hardware {
++
++void save_k_to_hardware(bf16* k_data,
++    size_t tok_ix,
++    size_t n_kv_heads,
++    size_t layer,
++    size_t head_size) noexcept {
++  if ((n_kv_heads > 32) || (layer > 31) || (head_size != 128)) {
++    spdlog::error("{} invalid parameter passed in tok_ix {}, n_kv_heads {}, layer {}, "
++                  "head_size {}",
++        __FUNCTION__, tok_ix, n_kv_heads, layer, head_size);
++  }
++
++  TRON_ASSERT((layer <= 32), "layer value given is not valid!  {} > 31", layer);
++  TRON_ASSERT((head_size <= 128), "Head size given is not valid! {} > 128", head_size);
++  TRON_ASSERT((tok_ix < hwkv_max_tok_ix),
++      "HWKV cache size exceeded!  tok_ix: {} >=  hwkv_max_tok_ix: {}", tok_ix,
++      hwkv_max_tok_ix);
++
++  // Extract per-head pointers from the intermediate data
++  bf16* k_head_ptrs[32];  // allocate 32 slots for kv head ptrs, even if we use fewer.
++  for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
++    dbg_savekv_log("save_k_to_hardware: tok {} head {} addr {}", tok_ix, kv_head,
++        (void*)(k_data + (kv_head * head_size)));
++    k_head_ptrs[kv_head] = k_data + (kv_head * head_size);
++  }
++
++  // Call the existing hardware transfer function
++  xfer_k_entry_blocking(
++      k_head_ptrs, (uint32_t)tok_ix, (uint32_t)n_kv_heads, layer, head_size);
++}
++
++void save_v_to_hardware(bf16* v_data,
++    size_t tok_ix,
++    size_t n_kv_heads,
++    size_t layer,
++    size_t head_size) noexcept {
++
++  if ((n_kv_heads > 32) || (layer > 31) || (head_size != 128)) {
++    spdlog::error("{} invalid parameter passed in tok_ix {}, n_kv_heads {}, layer {}, "
++                  "head_size {}",
++        __FUNCTION__, tok_ix, n_kv_heads, layer, head_size);
++  }
++
++  TRON_ASSERT((layer <= 32), "layer value given is not valid!  {} > 31", layer);
++  TRON_ASSERT((head_size <= 128), "Head size given is not valid! {} > 128", head_size);
++  TRON_ASSERT((tok_ix < hwkv_max_tok_ix),
++      "HWKV cache size exceeded!  tok_ix: {} >=  hwkv_max_tok_ix: {}", tok_ix,
++      hwkv_max_tok_ix);
++
++  // Extract per-head pointers from the intermediate data
++  bf16* v_head_ptrs[32];  // allocate 32 slots for kv head ptrs, even if we use fewer.
++  for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
++    dbg_savekv_log("save_v_to_hardware: tok {} head {} addr {}", tok_ix, kv_head,
++        (void*)(v_data + (kv_head * head_size)));
++    v_head_ptrs[kv_head] = v_data + (kv_head * head_size);
++  }
++
++  // Call the existing hardware transfer function
++  xfer_v_entry_blocking(
++      v_head_ptrs, (uint32_t)tok_ix, (uint32_t)n_kv_heads, layer, head_size);
++}
++
++}  // namespace tron::hardware

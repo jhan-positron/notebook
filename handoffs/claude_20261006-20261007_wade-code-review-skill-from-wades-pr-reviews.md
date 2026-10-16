@@ -49,29 +49,29 @@ Three requests from the user:
 2026-10-06:
 
 - 10:08 The user gave the task. Claude read the v1 skill, the memory note wade-code-review-skill.md, the 2026-10-05 campaign data (exec/wade-20261005/skill/) and the reviewer-personas note.
-- 10:09 exec/wade-20261006/corpus/ created. `gh search prs --reviewed-by Wado-posi` listed the PRs. fetch.py written to pull every review, inline comment and conversation comment per PR.
+- 10:09 exec/wade-20261006/corpus/ created. `gh search prs --reviewed-by Wado-posi` listed the PRs. fetch.py written to pull every review, inline comment and conversation comment per PR. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/corpus/fetch.py)
 - 10:15 to 10:17 The corpus was counted and split into batches for classifier agents. digest files written per PR.
 - 10:18 Workflow 1 started (`wade-corpus-classify`): one classifier agent per PR batch, then three taxonomists and a judge.
-- 10:19 style_stats.py written: counts of Wade's wording and verdict habits.
-- 10:31 The user asked for the Codex cross-check. Claude found Codex had rewritten its copy at 10:26 (SKILL.md 11 KB plus a new references/review-history.md) and snapshotted it to codex-skill-snapshot-1026/.
-- 10:32 `gh search prs --commenter Wado-posi` found two PRs the reviewed-by search missed (tron 3879 and 2898). They were added to the corpus. digest.py written.
+- 10:19 style_stats.py written: counts of Wade's wording and verdict habits. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/style_stats.py)
+- 10:31 The user asked for the Codex cross-check. Claude found Codex had rewritten its copy at 10:26 (SKILL.md 11 KB plus a new references/review-history.md) and snapshotted it to codex-skill-snapshot-1026/. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/codex-skill-snapshot-1026/references/review-history.md)
+- 10:32 `gh search prs --commenter Wado-posi` found two PRs the reviewed-by search missed (tron 3879 and 2898). They were added to the corpus. digest.py written. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/corpus/digest.py)
 - 10:34 Two side agents started: a fact-check of the Codex skill's eight contradicting claims, and a mapping of the Codex skill's 65 guidance bullets to corpus evidence.
-- 10:42 Fact-check done (codex-factcheck.md): 4 claims hold, 4 partly, 0 refuted. Claims 4 and 5 refute v1 wording.
-- 10:52 Mapping done (codex-map.json): 65 bullets, 58 with Wade evidence, 39 to pick up, 24 already covered, 2 no, 6 contradictions listed.
-- 10:56 Workflow 1 done. wf1-result.json, classified.json, merged-taxonomy.json and taxonomies.json saved.
+- 10:42 Fact-check done (codex-factcheck.md): 4 claims hold, 4 partly, 0 refuted. Claims 4 and 5 refute v1 wording. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/codex-factcheck.md)
+- 10:52 Mapping done (codex-map.json): 65 bullets, 58 with Wade evidence, 39 to pick up, 24 already covered, 2 no, 6 contradictions listed. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/codex-map.json)
+- 10:56 Workflow 1 done. wf1-result.json, classified.json, merged-taxonomy.json and taxonomies.json saved. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/classified.json)
 - 10:57 items/ built: one file per candidate check with its evidence.
 - 10:58 Workflow 2 started (`wade-skill-draft-verify`): one drafter per check, three refuter lenses each (precision, verbatim facts, executability), a false-positive probe against 15 silently approved PR diffs, and a style-section drafter.
 - 10:59 wade-corpus.md written: corpus boundary, counts and method.
-- 12:19 Workflow 2 done. wf2-result.json saved. 32 drafts survived.
+- 12:19 Workflow 2 done. wf2-result.json saved. 32 drafts survived. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/wf2-result.json)
 - 12:20 Workflow 3 started (`wade-skill-compress`): one agent per check compressing to skill size (SKILL entry at most 170 words, procedure at most 260 words), applying the critic and fact-check corrections.
-- 12:21 skill-snapshot-v1/ taken. gen_skill.py and out/frame-head.md written.
-- 12:46 Workflow 3 done. wf3-result.json saved.
+- 12:21 skill-snapshot-v1/ taken. gen_skill.py and out/frame-head.md written. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/gen_skill.py)
+- 12:46 Workflow 3 done. wf3-result.json saved. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/wf3-result.json)
 - 12:47 to 12:48 gen_skill.py assembled out/SKILL.md, out/references/procedures.md and out/references/wade-style.md.
-- 12:48 to 12:49 Four review agents started: three plain-English checkers over SKILL.md in three line ranges and one consistency reviewer. fix_xref.py fixed check-number cross-references.
+- 12:48 to 12:49 Four review agents started: three plain-English checkers over SKILL.md in three line ranges and one consistency reviewer. fix_xref.py fixed check-number cross-references. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/fix_xref.py)
 - 12:51 gen_report.py written and run: status/Wade-code-review-skill-v2.html. Memory note wade-code-review-skill.md rewritten.
 - 12:52 Browser render of the report page failed (chromium lacks libcups). Flagged as not render-checked.
-- 12:53 to 12:56 The three English passes returned 54, (second pass count not in the digest) and 44 violations. apply_edits.py applied edits-e1.json, edits-e2.json and edits-e3.json.
-- 13:03 to 13:05 The consistency review returned 16 contradictions, 24 cross-reference errors, 8 duplicate-ownership gaps, 14 precedent gaps and 13 broken commands out of 61 run (consistency-report.md). Fourteen contradiction fixes applied, then the cross-references and procedure headings.
+- 12:53 to 12:56 The three English passes returned 54, (second pass count not in the digest) and 44 violations. apply_edits.py applied edits-e1.json, edits-e2.json and edits-e3.json. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/edits-e2.json)
+- 13:03 to 13:05 The consistency review returned 16 contradictions, 24 cross-reference errors, 8 duplicate-ownership gaps, 14 precedent gaps and 13 broken commands out of 61 run (consistency-report.md). Fourteen contradiction fixes applied, then the cross-references and procedure headings. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/consistency-report.md)
 - 13:06 The four typo-check scripts (prose.py, spell.py, step5.py, width.py) copied from the scratchpad into out/references/check15/.
 - 13:07 wade-corpus.md and pr4557-misses.md copied into out/references/. The v2 files installed into ~/.claude/skills/Wade-code-review/. skill-snapshot-v2/ taken. The report page regenerated with the agent count corrected to 235.
 - 13:08 Final report to the user.
@@ -121,8 +121,8 @@ Installed skill (claude-agentsrv):
 
 - claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/SKILL.md (79,222 bytes). The v2 skill: 35 checks, style section, report format.
 - claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/procedures.md (105,059 bytes). Per-check procedures with commands.
-- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/wade-style.md (27,917 bytes). Wade's two registers by date, verdict calibration, the nine disclosed assistant pastes, what he rarely comments on, how to reply to him.
-- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/wade-corpus.md (5,684 bytes). Corpus boundary, counts and method.
+- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/wade-style.md (27,917 bytes). Wade's two registers by date, verdict calibration, the nine disclosed assistant pastes, what he rarely comments on, how to reply to him. (preserved: artifacts/claude-skills/Wade-code-review/references/wade-style.md)
+- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/wade-corpus.md (5,684 bytes). Corpus boundary, counts and method. (preserved: artifacts/claude-skills/Wade-code-review/references/wade-corpus.md)
 - claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/pr4557-misses.md (13,822 bytes). Carried over from v1.
 - claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/check15/ (prose.py 1,262 bytes, spell.py 1,609 bytes, step5.py 1,861 bytes, width.py 1,238 bytes). The typo-check scripts of check 15.
 - claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/agents/openai.yaml (313 bytes).
@@ -130,29 +130,29 @@ Installed skill (claude-agentsrv):
 
 Campaign folder claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261006/ (3,663,912 bytes in total):
 
-- CONTEXT.md (3,773 bytes). Context file the side agents read first.
-- corpus/ (2,451,664 bytes): fetch.py (3,681 bytes), fetch.log (3,716 bytes), corpus.json (1,402,832 bytes, one entry per PR with reviews, inline and conversation comments), prs-reviewed.json (67,594 bytes), prs-commented.json (71,017 bytes), prs-authored.json (28,641 bytes), prs-extra.json (935 bytes), batches.json (980 bytes), silent.json (687 bytes), silent-ranked.json (4,875 bytes), digest.py (2,573 bytes), pr/ (592,879 bytes, one digest per PR), silent-diffs/ (271,239 bytes, diffs of 15 silently approved PRs).
-- style_stats.py (4,342 bytes), style-stats.json (2,670 bytes). Wording and verdict counts.
+- CONTEXT.md (3,773 bytes). Context file the side agents read first. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/CONTEXT.md)
+- corpus/ (2,451,664 bytes): fetch.py (3,681 bytes), fetch.log (3,716 bytes), corpus.json (1,402,832 bytes, one entry per PR with reviews, inline and conversation comments), prs-reviewed.json (67,594 bytes), prs-commented.json (71,017 bytes), prs-authored.json (28,641 bytes), prs-extra.json (935 bytes), batches.json (980 bytes), silent.json (687 bytes), silent-ranked.json (4,875 bytes), digest.py (2,573 bytes), pr/ (592,879 bytes, one digest per PR), silent-diffs/ (271,239 bytes, diffs of 15 silently approved PRs). (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/corpus/prs-commented.json)
+- style_stats.py (4,342 bytes), style-stats.json (2,670 bytes). Wording and verdict counts. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/style-stats.json)
 - codex-skill-snapshot-1026/ (38,418 bytes). Codex's own rewrite, as found at 10:31.
 - codex-factcheck.md (23,730 bytes). The eight-claim fact-check with verbatim quotes.
 - codex-map.json (92,008 bytes). The 65-bullet evidence map.
-- wf1-result.json (963,364 bytes), classified.json (599,747 bytes), taxonomies.json (196,210 bytes), merged-taxonomy.json (96,596 bytes). Workflow 1 outputs.
+- wf1-result.json (963,364 bytes), classified.json (599,747 bytes), taxonomies.json (196,210 bytes), merged-taxonomy.json (96,596 bytes). Workflow 1 outputs. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/merged-taxonomy.json)
 - items/ (603,873 bytes). One evidence file per candidate check.
 - wf2-result.json (1,010,448 bytes). Workflow 2 output: 32 verified drafts, critic, style.
 - items2/ (1,020,715 bytes). Per-check inputs for workflow 3, with numbers.json.
 - wf3-result.json (333,354 bytes). Workflow 3 output: compressed checks and style.
-- gen_skill.py (9,191 bytes), fix_xref.py (1,829 bytes), apply_edits.py (500 bytes), edits-e1.json (10,099 bytes), edits-e2.json (13,448 bytes), edits-e3.json (19,990 bytes). Assembly and English-pass edit scripts.
-- out/ (417,043 bytes): SKILL.md, frame-head.md (6,008 bytes), body.md (57,537 bytes), procs.md (106,177 bytes), questions.md (5,535 bytes), style.md (3,776 bytes), agents-openai.yaml, references/. The assembled v2 before installation.
+- gen_skill.py (9,191 bytes), fix_xref.py (1,829 bytes), apply_edits.py (500 bytes), edits-e1.json (10,099 bytes), edits-e2.json (13,448 bytes), edits-e3.json (19,990 bytes). Assembly and English-pass edit scripts. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/edits-e3.json)
+- out/ (417,043 bytes): SKILL.md, frame-head.md (6,008 bytes), body.md (57,537 bytes), procs.md (106,177 bytes), questions.md (5,535 bytes), style.md (3,776 bytes), agents-openai.yaml, references/. The assembled v2 before installation. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/out/style.md)
 - consistency-report.md (21,085 bytes). The consistency reviewer's full report.
 - wade-corpus.md (5,684 bytes). Source of the installed reference.
-- body2698.md (4,518 bytes). One PR body fetched for a check.
+- body2698.md (4,518 bytes). One PR body fetched for a check. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/body2698.md)
 - skill-snapshot-v1/ (75,716 bytes) and skill-snapshot-v2/ (238,008 bytes). The skill before and after.
 - gen_report.py (13,288 bytes). Generator of the report page.
 
 Report page:
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/Wade-code-review-skill-v2.html (21,444 bytes). How the skill was rebuilt and the cross-check, with bar charts of the counts. Not browser-rendered (chromium lacks libcups in the container).
-  - generator: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261006/gen_report.py
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/Wade-code-review-skill-v2.html (21,444 bytes). How the skill was rebuilt and the cross-check, with bar charts of the counts. Not browser-rendered (chromium lacks libcups in the container). (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/status/Wade-code-review-skill-v2.html)
+  - generator: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261006/gen_report.py (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/gen_report.py)
   - input: merged-taxonomy.json, style-stats.json, codex-factcheck.md, codex-map.json, wf2-result.json and wf3-result.json in the campaign folder
   - input built by: fetch.py and the three workflows (wade-corpus-classify, wade-skill-draft-verify, wade-skill-compress)
   - sources: GitHub reviews and comments by Wado-posi on 115 PRs in positron-ai repos, fetched 2026-10-06 10:09 to 10:32 PDT
@@ -162,9 +162,34 @@ Memory and workflows:
 
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-code-review-skill.md (4,261 bytes). Memory note: v2 contents, the campaign folder, the Codex copy state, the 2026-10-07 install.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md (24,491 bytes today). Index line updated.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525-exec-wade-20261006/e3464929-24a2-4b17-a0e1-8ff95273256c/workflows/scripts/wade-corpus-classify-wf_43b557bb-13a.js (12,273 bytes), wade-skill-draft-verify-wf_fe06ca4b-5f3.js (14,558 bytes), wade-skill-compress-wf_11314980-9a8.js (6,538 bytes). The three workflow scripts.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525-exec-wade-20261006/e3464929-24a2-4b17-a0e1-8ff95273256c/workflows/scripts/wade-corpus-classify-wf_43b557bb-13a.js (12,273 bytes), wade-skill-draft-verify-wf_fe06ca4b-5f3.js (14,558 bytes), wade-skill-compress-wf_11314980-9a8.js (6,538 bytes). The three workflow scripts. (preserved: artifacts/intel-amx/exec/workflows/wade-corpus-classify-wf_43b557bb-13a.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/wade-corpus-classify-wf_43b557bb-13a.js)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/tasks/wx3vp2kfd.output (1,038,946 bytes), w5gtnaxpf.output (1,266,833 bytes), wozwsm9m0.output (391,760 bytes). Raw workflow outputs (wrapper objects, result under the `result` key). May be cleaned up.
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/e3464929-24a2-4b17-a0e1-8ff95273256c/scratchpad/ (29,701,482 bytes, 392 entries). Working files of the workflow agents: PR diffs, bodies, per-check drafts, c14m/ with the typo-check scripts. May be cleaned up.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/claude-skills/Wade-code-review/references/check15/` (4 files)
+- `artifacts/intel-amx/exec/workflows/` (2 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/` (5 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/codex-skill-snapshot-1026/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/codex-skill-snapshot-1026/agents/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/codex-skill-snapshot-1026/references/` (2 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/corpus/` (7 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/corpus/pr/` (67 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/corpus/silent-diffs/` (15 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/items/` (33 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/items2/` (33 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/items2/check14-scripts/` (4 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/out/` (6 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/out/references/` (4 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/out/references/check15/` (4 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/skill-snapshot-v1/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/skill-snapshot-v1/agents/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/skill-snapshot-v1/references/` (2 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/skill-snapshot-v2/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/skill-snapshot-v2/agents/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/skill-snapshot-v2/references/` (4 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261006/skill-snapshot-v2/references/check15/` (4 files)
 
 ## Current state
 
