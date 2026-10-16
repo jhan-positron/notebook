@@ -71,11 +71,15 @@ After the stop:
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/83f7784b-7adf-45c6-87cb-5266639ee792/workflows/scripts/verify-herdr-kill-safety-wf_38b795af-185.js (3,444 bytes). The refutation workflow script.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/83f7784b-7adf-45c6-87cb-5266639ee792/workflows/scripts/verify-herdr-kill-safety-wf_38b795af-185.js (3,444 bytes). The refutation workflow script. (preserved: artifacts/intel-amx/exec/workflows/verify-herdr-kill-safety-wf_38b795af-185.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/verify-herdr-kill-safety-wf_38b795af-185.js)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/83f7784b-7adf-45c6-87cb-5266639ee792/tasks/wjvaqyy1y.output (26,246 bytes). The raw workflow result (three votes, none refuting). Scratchpad, may be cleaned up.
 - No memory note was written. No file under the workspace was changed.
-- Side effects of the stop, not written by Claude: /home/jhan/.config/herdr/session.json and /home/jhan/.config/herdr/sessions/claude-agentsrv/session.json were saved by herdr at shutdown, and the four socket files (herdr.sock, herdr-client.sock in both directories) were removed.
+- Side effects of the stop, not written by Claude: /home/jhan/.config/herdr/session.json and /home/jhan/.config/herdr/sessions/claude-agentsrv/session.json were saved by herdr at shutdown, and the four socket files (herdr.sock, herdr-client.sock in both directories) were removed. (preserved: artifacts/dev-machines/herdr-config/session.json)
 - Code: none. No commit, no PR.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/dev-machines/herdr-config/sessions/claude-agentsrv/` (1 files)
 
 ## Current state
 
