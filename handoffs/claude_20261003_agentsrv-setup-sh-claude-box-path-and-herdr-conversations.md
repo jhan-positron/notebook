@@ -87,11 +87,11 @@ The live agents under host server 4168986 at 21:42:
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/agentsrv-setup.sh (2,015 bytes today, modified 2026-10-04 10:54 by a later session, so the content this session wrote is unverified today). The prompt block replaced by the PROMPT_COMMAND version with `herdr --session "$(hostname)"`.
-- claude-agentsrv:/home/jhan/agentsrv-setup.sh.bak-20261003 (1,055 bytes). Backup of the file before the change (mtime kept from the Codex edit, 2026-10-02 22:09).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/herdr-agentsrv-topology-2026-10-03.md (2,748 bytes). Memory note: the host server holds the real agents, container clients re-bind the socket path, check host-side servers and socket peers before declaring panes dead. Hand-written, `generator: none`.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/MEMORY.md (4,408 bytes today). One index line added.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/c7b1e2c1-2bb3-489b-af22-c6a5ac1846a3/workflows/scripts/herdr-orphans-and-login-prompt-wf_e806bfaf-a4a.js (11,446 bytes). The workflow script.
+- claude-agentsrv:/home/jhan/agentsrv-setup.sh (2,015 bytes today, modified 2026-10-04 10:54 by a later session, so the content this session wrote is unverified today). The prompt block replaced by the PROMPT_COMMAND version with `herdr --session "$(hostname)"`. (preserved: artifacts/dev-machines/agentsrv-setup.sh)
+- claude-agentsrv:/home/jhan/agentsrv-setup.sh.bak-20261003 (1,055 bytes). Backup of the file before the change (mtime kept from the Codex edit, 2026-10-02 22:09). (preserved: artifacts/dev-machines/agentsrv-setup.sh.bak-20261003)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/herdr-agentsrv-topology-2026-10-03.md (2,748 bytes). Memory note: the host server holds the real agents, container clients re-bind the socket path, check host-side servers and socket peers before declaring panes dead. Hand-written, `generator: none`. (preserved: artifacts/tron/memory/herdr-agentsrv-topology-2026-10-03.md)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/MEMORY.md (4,408 bytes today). One index line added. (preserved: artifacts/tron/memory/MEMORY.md)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/c7b1e2c1-2bb3-489b-af22-c6a5ac1846a3/workflows/scripts/herdr-orphans-and-login-prompt-wf_e806bfaf-a4a.js (11,446 bytes). The workflow script. (preserved: artifacts/intel-amx/exec/workflows/herdr-orphans-and-login-prompt-wf_e806bfaf-a4a.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/herdr-orphans-and-login-prompt-wf_e806bfaf-a4a.js)
 - Host scratchpad /tmp/claude-644434775/-home-jhan-workspace-random/c7b1e2c1-2bb3-489b-af22-c6a5ac1846a3/scratchpad/ with fakehome/, design-prompt-command/, design-trap/ and design-late-hook/ (the prototypes and pty harnesses), and tasks/w3egpphog.output (the workflow result). Not visible from the container today. Existence and sizes unverified.
 - ~/sw-dev-01-setup.sh: read only, not changed. It still carries the original Codex block.
 
