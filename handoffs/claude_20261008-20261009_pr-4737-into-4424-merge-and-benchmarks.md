@@ -24,9 +24,9 @@ The session merged PR 4737 (the row-major tail block) into PR 4424 (the VNNI K l
 - **save_k_helper**: the old helper function of PR 4737's branch that the merge had to replace, because PR 4424 had folded the helpers into `save_k(worker_ix)` (PR 4774).
 - **Typed K owner**: the K storage API that PR 4424 took from PR 4557 (typed KV tensors). The merge rewrote PR 4737's raw pointer helpers (`row_ptr`, `block_to_vnni`, `block_to_rows`) as typed operations in h/tron/tensor/k_vnni.hpp.
 - **delphi-3bda**: the shared Intel Xeon 6 test server (ssh alias `delphi-3bda`). The nightly System CI runs there. **Bill's marker**: the file /bill-has-instance-0,2 that says whether Bill's half of the machine is in use. **CI lease**: the lock the nightly holds while it runs.
-- **Nightly layout, campaign**: the perf phase of the nightly System CI (scripts/perf.py of positron-ai/systems_test) run by hand, with the harness driver `st_ci_perf.py` on claude-agentsrv and the device under test on delphi-3bda. **Base**: the nightly deb 2026.10.08-be0d5565 (main at be0d5565b3, the commit PR 4424 was synced to). **Target**: the merged head plus TRON_K_VNNI=ON in the deb preset.
+- **Nightly layout, campaign**: the perf phase of the nightly System CI (scripts/perf.py of positron-ai/systems_test) run by hand, with the harness driver `st_ci_perf.py` on claude-agentsrv and the device under test on delphi-3bda. **Base**: the nightly deb 2026.10.08-be0d5565 (main at be0d5565b3, the commit PR 4424 was synced to). **Target**: the merged head plus TRON_K_VNNI=ON in the deb preset. (preserved: artifacts/intel-amx/exec/pr4424ci-20261009/st_ci_perf.py)
 - **TPS**: decode tokens per second per user. **TTFT**: time to first token, the prefill time. **Resolved**: the campaign's rule for a real change, paired t at least 2.26 over 20 round pairs and a change of at least 1 %.
-- **Pre-check chain**: a separate set of correctness steps (host test suite, token-identity smokes, runtron cells base versus new) in exec/merge4737-20261008/precheck.sh, run on delphi-3bda.
+- **Pre-check chain**: a separate set of correctness steps (host test suite, token-identity smokes, runtron cells base versus new) in exec/merge4737-20261008/precheck.sh, run on delphi-3bda. (preserved: artifacts/intel-amx/exec/merge4737-20261008/precheck.sh)
 - **Protected sections**: the first four sections of the PR 4424 description (lines 1 to 28), which the user asked not to change without approval.
 - **claude-agentsrv**: the podman container this Claude Code ran in, on the user's Linux dev server `agentsrv` (same home directory and files).
 
@@ -51,10 +51,10 @@ The user asked, on 2026-10-08 at 16:00 PDT: merge PR 4737 into PR 4424 (replace 
 - 16:02 to 16:05 The harness was inspected. The nightly now has 14 perf configs, not 12 (an llama-8b 32-user prompt-4096 "AMX benchmark" row and a Muse-Glimmer-30B tp4 row were added).
 - 16:05 Worktree ai-runs/tron-vnnik-i4500m was created and the merge of origin/jhan-amx-vnniK produced 28 conflict hunks in 8 files.
 - 16:11 The agent campaign-scripts was spawned to write exec/pr4424ci-20261009 (no launch, no change on delphi-3bda).
-- 16:19 to 16:26 The conflicts were resolved by scratchpad scripts resolve.py and resolve2.py, which replace conflict blocks by index and port the raw helpers to the typed API. clang-format 19 was clean. A syntax-only compile of the three touched test units passed in both K layouts.
+- 16:19 to 16:26 The conflicts were resolved by scratchpad scripts resolve.py and resolve2.py, which replace conflict blocks by index and port the raw helpers to the typed API. clang-format 19 was clean. A syntax-only compile of the three touched test units passed in both K layouts. (preserved: artifacts/intel-amx/exec/scratch-relocated/19680312/resolve.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/19680312/resolve.py)
 - 16:28 The merge was committed as 3723bf601a, first parent ba69cb513e (PR 4424 head), second parent bb32a80774 (PR 4737 head).
 - 16:29 The build-test chain exec/merge4737-20261008 (scripts derived from savek2-20261008 by sed) was launched on delphi-3bda.
-- 16:32 to 16:35 precheck.sh and launch-precheck.sh were written (host suite, token-identity smokes, runtron cells base versus new).
+- 16:32 to 16:35 precheck.sh and launch-precheck.sh were written (host suite, token-identity smokes, runtron cells base versus new). (preserved: artifacts/intel-amx/exec/merge4737-20261008/launch-precheck.sh)
 - 16:34 Memory note merge-4737-into-4424.md was written and indexed in MEMORY.md.
 - 16:37 to 16:39 The agent reported the campaign scripts done and validated (CHECK mode rc 0, pytest 2006 passed). Claude asked for a wait on the pre-check marker, and the agent confirmed one marker-wait block in campaign.sh.
 - 16:43 The chain reported one test failure: t_llama_unit line 3890. PR 4737's save_k test calls the row check twice, and the fold of PR 4774 had put a K-mark check inside that same check. Fixed with a separate check_marks call once per section, amended into the merge commit, and the chain was relaunched.
@@ -65,15 +65,15 @@ The user asked, on 2026-10-08 at 16:00 PDT: merge PR 4737 into PR 4424 (replace 
 
 ## Timeline (2026-10-09, Pacific)
 
-- 08:07 Checkpoint 1. The campaign had started base-pass1 at 06:42 PDT (13:42 UTC) and had 10 of 14 configs done. The pre-check chain had lost a race with the campaign for the CI-lease event and was parked on the campaign lock. precheck2.sh was written as a clean after-check for the next day.
+- 08:07 Checkpoint 1. The campaign had started base-pass1 at 06:42 PDT (13:42 UTC) and had 10 of 14 configs done. The pre-check chain had lost a race with the campaign for the CI-lease event and was parked on the campaign lock. precheck2.sh was written as a clean after-check for the next day. (preserved: artifacts/intel-amx/exec/merge4737-20261008/precheck2.sh)
 - 08:27 to 08:40 The user asked for status. Claude explained the parked pre-check does not affect the campaign and gave an end estimate of about 16:30 PDT.
 - 13:07 Checkpoint 2. 6 of 8 tags done, no errors. Early read of the finished passes given.
 - 15:02 The campaign ended (22:02 UTC), 8 of 8 tags, no problems. The restore installed the nightly deb 2026.10.09-26b6df7d, brought 4 engines up and released Bill's marker.
-- 15:07 to 15:13 The summary was read, the PR body was assembled by assemble_body.py (protected lines 1 to 28 kept byte for byte) and patched on GitHub at 15:12 PDT. A third checkpoint cron was created.
+- 15:07 to 15:13 The summary was read, the PR body was assembled by assemble_body.py (protected lines 1 to 28 kept byte for byte) and patched on GitHub at 15:12 PDT. A third checkpoint cron was created. (preserved: artifacts/intel-amx/exec/scratch-relocated/19680312/assemble_body.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/19680312/assemble_body.py)
 - 15:14 Results message to the user, with the proposal for the protected sections and two decisions (deb preset, wording).
 - 15:39 The parked pre-check chain finished (22:37 UTC). The smokes and the runtron cells were ok. The host suite failed because the production engines held the hugepages. The PR body was patched again at 15:40 PDT.
 - 16:03 The user asked four questions (why the llama-3.1 TTFT item was called a deviation, whether the layout is independent of AMX, what the llama-3.2-3b row means, and why not run the remaining test today).
-- 16:04 Answers given. precheck3.sh (the after-check with Bill's marker taken, NOT_BEFORE now) was launched. The redundant next-day instance was stopped.
+- 16:04 Answers given. precheck3.sh (the after-check with Bill's marker taken, NOT_BEFORE now) was launched. The redundant next-day instance was stopped. (preserved: artifacts/intel-amx/exec/merge4737-20261008/precheck3.sh)
 - 16:11 The host suite ran with serving down (23:05 to 23:10 UTC): 93 passed, 1 skipped, 1 failed (the venv-less proxy test, same as main). The PR body was patched at 16:12 PDT. The checkpoint-3 cron was deleted.
 - 16:26 The user said "yes, add dev preset, and keep reminding me the protected-section wording until I specifically stop you".
 - 16:27 Commit 0a5334ccb6 on jhan-amx-vnniK added `"TRON_K_VNNI": "ON"` to the `deb` preset and a README.ci.md paragraph. Pushed. The PR body was patched at 16:28 PDT. Memory note remind-protected-section-proposal.md was written.
@@ -136,28 +136,52 @@ qwen3-4b tp2, 8 users, 3 repetitions. Base = be0d5565b3, new = 9d5c7a389b. Sourc
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/merge-4737-into-4424.md (15,841 bytes). Memory note of the whole merge and campaign, appended at each checkpoint. Hand-written, `generator: none`.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/remind-protected-section-proposal.md (1,495 bytes). The standing reminder rule. `generator: none`.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md (24,227 bytes at handoff time). Two index lines added. Later sessions changed the file.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/merge4737-20261008/: build-test.sh (6,342 bytes), launch.sh (324), precheck.sh (7,816), launch-precheck.sh (416), precheck2.sh (9,931), launch-precheck2.sh (469), precheck3.sh (10,500). The build-test chain and the three pre-check variants.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4424ci-20261009/: build-target.sh (8,032 bytes), campaign.sh (40,337), launch.sh (5,284), dut.sh (22,732), st_ci_perf.py (44,083), talos_stub/talos.py (2,058), configs.py (2,991), sw8k.json (382), nightly14.json (4,870), summarize.py (18,356), nightly_to_arm.py (4,754), README.md (20,841). The campaign, written by the agent campaign-scripts, with the marker wait and README line added by Claude.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4424ci-20261009/summary.md (5,183 bytes). The campaign result tables above.
-  - generator: /home/jhan/workspace/intel-AMX/exec/pr4424ci-20261009/summarize.py
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/merge4737-20261008/: build-test.sh (6,342 bytes), launch.sh (324), precheck.sh (7,816), launch-precheck.sh (416), precheck2.sh (9,931), launch-precheck2.sh (469), precheck3.sh (10,500). The build-test chain and the three pre-check variants. (preserved: artifacts/intel-amx/exec/merge4737-20261008/build-test.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4424ci-20261009/: build-target.sh (8,032 bytes), campaign.sh (40,337), launch.sh (5,284), dut.sh (22,732), st_ci_perf.py (44,083), talos_stub/talos.py (2,058), configs.py (2,991), sw8k.json (382), nightly14.json (4,870), summarize.py (18,356), nightly_to_arm.py (4,754), README.md (20,841). The campaign, written by the agent campaign-scripts, with the marker wait and README line added by Claude. (preserved: artifacts/intel-amx/exec/pr4424ci-20261009/build-target.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4424ci-20261009/summary.md (5,183 bytes). The campaign result tables above. (preserved: artifacts/intel-amx/exec/results/pr4424ci-20261009/summary.md)
+  - generator: /home/jhan/workspace/intel-AMX/exec/pr4424ci-20261009/summarize.py (preserved: artifacts/intel-amx/exec/pr4424ci-20261009/summarize.py)
   - input: the perf.json and memory snapshot files under exec/results/pr4424ci-20261009/<tag>/ for the eight tags base-pass1, target-pass1, base-sw8k-pass1, target-sw8k-pass1, base-pass2, target-pass2, base-sw8k-pass2, target-sw8k-pass2
-  - input built by: exec/pr4424ci-20261009/campaign.sh driving st_ci_perf.py from claude-agentsrv against delphi-3bda, 2026-10-09 06:36 to 15:02 PDT
-  - sources: exec/results/pr4424ci-20261009/<tag>/perf.json (eight directories), status-history.log, outcome.txt
+  - input built by: exec/pr4424ci-20261009/campaign.sh driving st_ci_perf.py from claude-agentsrv against delphi-3bda, 2026-10-09 06:36 to 15:02 PDT (preserved: artifacts/intel-amx/exec/pr4424ci-20261009/campaign.sh)
+  - sources: exec/results/pr4424ci-20261009/<tag>/perf.json (eight directories), status-history.log, outcome.txt (preserved: artifacts/intel-amx/exec/results/pr4424ci-20261009/status-history.log)
   - regenerate: `~/workspace/ai-runs/systems_test/.venv/bin/python ~/workspace/intel-AMX/exec/pr4424ci-20261009/summarize.py --res ~/workspace/intel-AMX/exec/results/pr4424ci-20261009 > <OUT>`
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4424ci-20261009/: summary.json (29,889 bytes), outcome.txt (92), status-history.log (7,158), preflight.txt (3,738), base-identity.txt (207), configs-used.txt (160), configs-used-nightly14.json (4,870), configs-used-sw8k.json (382), check-mode/driver.log (2,350), check-mode/perf.json (17,452), and the eight tag directories listed above.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4424ci-20261009/: summary.json (29,889 bytes), outcome.txt (92), status-history.log (7,158), preflight.txt (3,738), base-identity.txt (207), configs-used.txt (160), configs-used-nightly14.json (4,870), configs-used-sw8k.json (382), check-mode/driver.log (2,350), check-mode/perf.json (17,452), and the eight tag directories listed above. (preserved: artifacts/intel-amx/exec/results/pr4424ci-20261009/outcome.txt)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/pr4424ci-20261009.log (37,001 bytes). The campaign log.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/merge4737-20261008/: steps.txt (2,595 bytes), all.done (3), tests-m4737.txt (3,999), tests-m4737rm.txt (682), build-m4737.log (8,797), build-m4737rm.log (3,913), ingest-test-m4737.txt (4,983), format-m4737.txt (2,881), plus one .out file per test binary. The build-test chain record.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/merge4737-precheck/: steps.txt (1,124 bytes), precheck.done (34), host-suite-m4737.txt (6,501), host-suite-m4737.log (60,095), smoke/cpu-p1024/, smoke/cpu-p8192/, smoke/fpga-p1024/ (each with smoke.txt). The pre-check record.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/m4737-E-cpu/summary.md (1,783 bytes). The runtron cell table above. Its title line still says "sync4424-20261002 summary" because the chain reuses that campaign's summarizer.
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/merge4737-20261008/: steps.txt (2,595 bytes), all.done (3), tests-m4737.txt (3,999), tests-m4737rm.txt (682), build-m4737.log (8,797), build-m4737rm.log (3,913), ingest-test-m4737.txt (4,983), format-m4737.txt (2,881), plus one .out file per test binary. The build-test chain record. (preserved: artifacts/intel-amx/exec/results/merge4737-20261008/tests-m4737.txt)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/merge4737-precheck/: steps.txt (1,124 bytes), precheck.done (34), host-suite-m4737.txt (6,501), host-suite-m4737.log (60,095), smoke/cpu-p1024/, smoke/cpu-p8192/, smoke/fpga-p1024/ (each with smoke.txt). The pre-check record. (preserved: artifacts/intel-amx/exec/results/merge4737-precheck/host-suite-m4737.txt)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/m4737-E-cpu/summary.md (1,783 bytes). The runtron cell table above. Its title line still says "sync4424-20261002 summary" because the chain reuses that campaign's summarizer. (preserved: artifacts/intel-amx/exec/results/m4737-E-cpu/summary.md)
   - generator: the summarizer of /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/ called by exec/merge4737-20261008/precheck.sh
-  - input: exec/results/m4737-E-cpu/rt-results.txt (46,318 bytes) and the rt/ run records
+  - input: exec/results/m4737-E-cpu/rt-results.txt (46,318 bytes) and the rt/ run records (preserved: artifacts/intel-amx/exec/results/m4737-E-cpu/rt-results.txt)
   - input built by: precheck.sh step 3b on delphi-3bda, 2026-10-09 15:19 to 16:06 PDT
   - sources: exec/results/m4737-E-cpu/rt/, summary.json (6,610 bytes)
   - regenerate: unavailable (the exact summarizer command line is inside precheck.sh and was not shown in the transcript)
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/logs/merge4737-20261008-build-test.log (6,551 bytes), merge4737-precheck-chain.log (9,868 bytes), pr4424ci-20261009-build-target.log (4,475 bytes).
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/19680312-df5d-4bfa-9f32-ac8dc69334d0/scratchpad/: resolve.py (49,374 bytes), resolve2.py (13,091), merge-msg.txt (2,963), merge-msg.final.txt (3,136), protected-proposal.md (2,712), body-draft-parts.md (6,386), assemble_body.py (24,619), new-body.md (36,888), new-body-2.md (38,072), new-body-3.md (38,032), new-body-4.md (37,777), live-body-4424.md (27,771) and live-body-4424.v2.md to v10.md (the live PR body before each patch), preset-msg.txt (435), summary-interim.md (5,132), lcheck_x.sh (1,692), nightly-37880831014.log (6,250,607) and nightly-37880831014.arm.json (108,564, the same-day nightly for the base comparison). Scratchpad, may be cleaned up.
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/19680312-df5d-4bfa-9f32-ac8dc69334d0/scratchpad/: resolve.py (49,374 bytes), resolve2.py (13,091), merge-msg.txt (2,963), merge-msg.final.txt (3,136), protected-proposal.md (2,712), body-draft-parts.md (6,386), assemble_body.py (24,619), new-body.md (36,888), new-body-2.md (38,072), new-body-3.md (38,032), new-body-4.md (37,777), live-body-4424.md (27,771) and live-body-4424.v2.md to v10.md (the live PR body before each patch), preset-msg.txt (435), summary-interim.md (5,132), lcheck_x.sh (1,692), nightly-37880831014.log (6,250,607) and nightly-37880831014.arm.json (108,564, the same-day nightly for the base comparison). Scratchpad, may be cleaned up. (preserved: artifacts/intel-amx/exec/scratch-relocated/19680312/resolve2.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/19680312/resolve2.py)
 - Code: tron, branch `jhan-amx-vnniK` (PR 4424), commits 9d5c7a389b23078398028bce0d1fe1a6c5c64e31 (the merge, also pushed to `jhan-amx-vnniK-i4500`, which closed PR 4737 as merged) and 0a5334ccb69d038d6bbe3d76ddc77c6b1a2d1a8f (deb preset and README.ci.md). Commit 3723bf601af4fd75eb58e7d075f04d81bfb51257 was the first merge, superseded by the amend. Local worktree claude-agentsrv:/home/jhan/workspace/ai-runs/tron-vnnik-i4500m at 9d5c7a389b.
 - GitHub: the PR 4424 description was patched four times (15:12, 15:40, 16:12 and 16:28 PDT on 2026-10-09). Lines 1 to 28 were unchanged each time.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/merge4737-20261008/` (2 files)
+- `artifacts/intel-amx/exec/pr4424ci-20261009/` (7 files)
+- `artifacts/intel-amx/exec/pr4424ci-20261009/talos_stub/` (1 files)
+- `artifacts/intel-amx/exec/results/m4737-E-cpu/` (1 files)
+- `artifacts/intel-amx/exec/results/m4737-E-cpu/rt/` (12 files)
+- `artifacts/intel-amx/exec/results/merge4737-20261008/` (4 files)
+- `artifacts/intel-amx/exec/results/merge4737-precheck/` (2 files)
+- `artifacts/intel-amx/exec/results/merge4737-precheck/smoke/cpu-p1024/` (1 files)
+- `artifacts/intel-amx/exec/results/merge4737-precheck/smoke/cpu-p8192/` (1 files)
+- `artifacts/intel-amx/exec/results/merge4737-precheck/smoke/fpga-p1024/` (1 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/` (6 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/base-pass1/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/base-pass2/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/base-sw8k-pass1/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/base-sw8k-pass2/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/check-mode/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/target-pass1/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/target-pass2/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/target-sw8k-pass1/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4424ci-20261009/target-sw8k-pass2/` (2 files)
+- `artifacts/intel-amx/exec/scratch-relocated/19680312/` (13 files)
 
 ## Current state
 

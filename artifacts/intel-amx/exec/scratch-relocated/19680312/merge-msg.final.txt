@@ -1,0 +1,53 @@
+VNNI K: keep short K-cache writes row-major, on the typed K owner (merge of PR 4737)
+
+Merge of jhan-amx-vnniK-i4500 (bb32a80774: the issue 4500 row-major tail
+block, and the policy that blocks completed under hardware attention stay
+row-major) into jhan-amx-vnniK (ba69cb513e: the typed K owner and views of
+PR 4557, one save_k for the main thread and the main helpers).
+
+Resolution of the 28 conflict hunks in 8 files, plus the auto-merged
+regions that still used PR 4737's raw plane helpers:
+
+- The raw helpers row_ptr, block_to_vnni and block_to_rows of
+  h/tron/kernels/k_vnni.hpp become typed operations of
+  h/tron/tensor/k_vnni.hpp: row_major_row (a token's row inside a
+  row-major block, as const_k_row_view / k_row_view), store_row_major,
+  load_row_major, block_to_vnni and block_to_rows take the packed view.
+  The constants PANEL_ROWS_4, BLOCKS_PER_PAGE_MASK_0XF, block_bit and
+  offset_bit and Note [Row-major tail block] move with them. The kernel
+  header keeps only the reader qk_group.
+- page::set_k_row and page::get_k_row follow the block's recorded layout
+  (store_row / load_row for a converted block, store_row_major /
+  load_row_major otherwise). page::set_k_block stores whole blocks only:
+  the `present` mask of the masked block save goes, because a run shorter
+  than a block is now stored row by row into the row-major block.
+  page::k_row_if_row_major returns a typed row view (invalid for a
+  converted block). copy_storage_slot converts the touched destination
+  blocks through row-major rows with the typed operations. The block
+  conversions of k_block_to_vnni_at and k_forget_row take the owner's
+  view.
+- The software loop of self_attention.hpp keeps page::k_packed in a
+  std::optional, fetched at the first relevant token, and scores the
+  tokens of a row-major tail block with the dotter through row_major_row.
+  The FPGA staging callback of full.hpp returns the row-major row in
+  place and gathers a converted block's row into the scratch.
+- model.hpp keeps the fold's save_k(worker_ix, n_workers) form (no
+  save_k_helper is left), the lower-case constant spelling of the shared
+  file (k_store_block), and adds the pending-block queue, its forward-end
+  conversion and the hardware-attention policy of PR 4737.
+- Tests: t_k_vnni_layout ports the tail-block case and the page-state
+  cases to the typed owner, views and accessors (plane bytes are checked
+  through at() and row_major_row). t_amx_dispatch_dtype takes both new
+  exercise_page arguments (amx_available, record_rows).
+  t_llama_unit reads the random K instance through the inverse index map
+  and keeps the file's local constant spelling. Its save_k case checks the
+  K marks once per section (check_marks): the row check runs a second
+  time after the forward-end conversion, and the marks complete the token.
+
+Verified on claude-box: syntax-only compile (clang 19) of t_k_vnni_layout,
+t_amx_dispatch_dtype and t_llama_unit with and without TRON_K_VNNI, and
+clang-format 19.1.7 on the ten changed files. Build, unit tests and the
+machine tests run on delphi-3bda next.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
