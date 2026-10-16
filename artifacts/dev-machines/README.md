@@ -93,3 +93,18 @@ Files left behind are enumerated in `logs/codex-handoff-20261016-artifacts.json`
 
 - amx-ci-monitor: [codex_20260925_schedule-daily-amx-monitoring.md](../../handoffs/codex_20260925_schedule-daily-amx-monitoring.md), [codex_20261009_add-amx-alert-expected-ranges.md](../../handoffs/codex_20261009_add-amx-alert-expected-ranges.md).
 - registered-refresh: [codex_20261016_follow-codex-handoff-prompt.md](../../handoffs/codex_20261016_follow-codex-handoff-prompt.md).
+
+## Batch: 2026-10-16 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-10-16 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first.
+
+New prefix this batch: `herdr-config/` mirrors `claude-agentsrv:/home/jhan/.config/herdr/` (the herdr terminal multiplexer configuration and session records).
+
+- `agentsrv-setup.sh` -> `claude-agentsrv:/home/jhan/agentsrv-setup.sh` (2015 bytes). host login script that enters the claude-box container and starts herdr (2026-10-03 and 2026-10-04 versions). (handoff: [claude_20261003_agentsrv-setup-sh-claude-box-path-and-herdr-conversations.md](../../handoffs/claude_20261003_agentsrv-setup-sh-claude-box-path-and-herdr-conversations.md))
+- `agentsrv-setup.sh.bak-20261003` -> `claude-agentsrv:/home/jhan/agentsrv-setup.sh.bak-20261003` (1055 bytes). host login script that enters the claude-box container and starts herdr (2026-10-03 and 2026-10-04 versions). (handoff: [claude_20261003_agentsrv-setup-sh-claude-box-path-and-herdr-conversations.md](../../handoffs/claude_20261003_agentsrv-setup-sh-claude-box-path-and-herdr-conversations.md))
+- `agentsrv-setup.sh.bak-20261004` -> `claude-agentsrv:/home/jhan/agentsrv-setup.sh.bak-20261004` (1770 bytes). host login script that enters the claude-box container and starts herdr (2026-10-03 and 2026-10-04 versions). (handoff: [claude_20261004_herdr-shell-prompt-and-tab-completion.md](../../handoffs/claude_20261004_herdr-shell-prompt-and-tab-completion.md))
+- `claude-box.bak-shell-env-20261004T183916Z` -> `claude-agentsrv:/home/jhan/claude-container/claude-box.bak-shell-env-20261004T183916Z` (12228 bytes). claude-box wrapper before the `-e SHELL=/bin/bash` change of 2026-10-04. (handoff: [claude_20261004_herdr-shell-prompt-and-tab-completion.md](../../handoffs/claude_20261004_herdr-shell-prompt-and-tab-completion.md))
+- `herdr-config/config.toml` -> `claude-agentsrv:/home/jhan/.config/herdr/config.toml` (231 bytes). herdr configuration (shell prompt fix of 2026-10-04). (handoff: [claude_20261004_herdr-shell-prompt-and-tab-completion.md](../../handoffs/claude_20261004_herdr-shell-prompt-and-tab-completion.md))
+- `herdr-config/config.toml.bak-20261004` -> `claude-agentsrv:/home/jhan/.config/herdr/config.toml.bak-20261004` (45 bytes). herdr configuration (shell prompt fix of 2026-10-04). (handoff: [claude_20261004_herdr-shell-prompt-and-tab-completion.md](../../handoffs/claude_20261004_herdr-shell-prompt-and-tab-completion.md))
+- `herdr-config/session.json` -> `claude-agentsrv:/home/jhan/.config/herdr/session.json` (2943 bytes). herdr session record. (handoff: [claude_20261003_duplicate-herdr-server-processes.md](../../handoffs/claude_20261003_duplicate-herdr-server-processes.md))
+- `herdr-config/sessions/claude-agentsrv/session.json` -> `claude-agentsrv:/home/jhan/.config/herdr/sessions/claude-agentsrv/session.json` (10576 bytes). herdr session record. (handoff: [claude_20261003_duplicate-herdr-server-processes.md](../../handoffs/claude_20261003_duplicate-herdr-server-processes.md))
