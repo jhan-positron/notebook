@@ -57,7 +57,7 @@ Between the two, the user asked for one due diligence check: whether the PR 4812
 - 14:32 `gh pr view` of PR 4812 and PR 4424 (state, head, base, mergeable). PR 4812 inline comments after 20:00 UTC were listed.
 - 14:33 Fast-forward merge of ba69cb513e into `jhan-amx-vnniK` and push. The remote branch was re-read after the push.
 - 14:33 to 14:36 The live PR 4424 body and the PR 4812 body were saved to the scratchpad. The fold diff 6b939d25d2..ba69cb513e was checked (4 files, +91/-91). `git grep save_k_helper` at the head found 0 lines. The 3bda result files of the fold (exec/results/savek2-20261008) gave the unit-test counts.
-- 14:37 A fact base for the workflow agents was written (facts.md).
+- 14:37 A fact base for the workflow agents was written (facts.md). (preserved: artifacts/intel-amx/exec/scratch-relocated/d4ac9706/facts.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/d4ac9706/facts.md)
 - 14:39 The workflow `pr4424-desc-proposal` was launched: Find (four lenses over the live body), Refute, Draft, Judge, Check. The memory note was appended with the merge outcome. The comment lines of ba69cb513e were checked against the 80-column limit. The local PR 4812 worktree was fast-forwarded to the remote tip.
 - 15:01 The user asked the due diligence question.
 - 15:02 to 15:05 Checks: GitHub base and head sha of PR 4812, `gh pr diff 4812` against the local `git diff 6b939d25d2 ba69cb513e`, blob ids of the four files, local refs and reflogs, other clones under /home/jhan and /scratch/jhan, the two build worktrees on delphi-3bda (/var/tmp/jhan/tron-savek2 and tron-savek2rm, both at 45e6bb266d, detached, clean), and the codex session store.
@@ -104,17 +104,21 @@ The two assertion counts come from the delphi-3bda result files of the fold [exe
 ## Artifacts
 
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4812-merge-4774-onto-4424-head.md (10,587 bytes). Memory note. Three sections appended in this session: MERGED (the fast-forward), DESCRIPTION PROPOSAL (the 15 edits), APPLIED (the PATCH at 22:30:38 UTC). Hand-written, `generator: none`.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4774-2-4424/d4ac9706-06c9-4ef8-94c0-0ee3dd53e686/workflows/scripts/pr4424-desc-proposal-wf_ddeccd8f-033.js (17,746 bytes). The workflow script.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4774-2-4424/d4ac9706-06c9-4ef8-94c0-0ee3dd53e686/workflows/scripts/pr4424-desc-proposal-wf_ddeccd8f-033.js (17,746 bytes). The workflow script. (preserved: artifacts/intel-amx/exec/workflows/pr4424-desc-proposal-wf_ddeccd8f-033.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/pr4424-desc-proposal-wf_ddeccd8f-033.js)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4774-2-4424/d4ac9706-06c9-4ef8-94c0-0ee3dd53e686/tasks/wysiox3q9.output (181,593 bytes). Raw workflow result (65 agents). Scratchpad, may be cleaned up.
 - Scratchpad directory claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4774-2-4424/d4ac9706-06c9-4ef8-94c0-0ee3dd53e686/scratchpad/ (50 top-level files plus the judge0, judge1, judge2 and final directories). The ones that matter:
   - facts.md (6,261 bytes). The fact base given to the workflow agents.
-  - pr4424-live-body.md (27,770 bytes) and pr4424.json (45,575 bytes). The live PR 4424 body as fetched at 21:33 UTC.
-  - pr4812-body.md (11,173 bytes) and pr4812.json (27,031 bytes). The PR 4812 body and metadata.
-  - fold.diff (17,243 bytes), gh-pr4812.diff (17,497 bytes), diff-of-diffs.txt (710 bytes). The local fold diff, the GitHub PR diff, and their difference (hunk headers only).
-  - pr4737.diff (100,329 bytes) and mt4737.txt (112,369 bytes). PR 4737 diff and merge-tree output read by the Find phase.
-  - proposal-edits.json (1,813 bytes), proposal-before-after.md (2,465 bytes), edits-final.json (1,679 bytes), edits-final.json.newtext (618 bytes). The proposal and its word-count check.
-  - payload.json (28,180 bytes). The PATCH payload. pr4424-live2.json (45,576 bytes) the re-fetch before the PATCH, pr4424-after.json (45,822 bytes) the re-fetch after it, body.diff (2,395 bytes) the diff as written.
+  - pr4424-live-body.md (27,770 bytes) and pr4424.json (45,575 bytes). The live PR 4424 body as fetched at 21:33 UTC. (preserved: artifacts/intel-amx/exec/scratch-relocated/d4ac9706/pr4424-live-body.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/d4ac9706/pr4424-live-body.md)
+  - pr4812-body.md (11,173 bytes) and pr4812.json (27,031 bytes). The PR 4812 body and metadata. (preserved: artifacts/intel-amx/exec/scratch-relocated/d4ac9706/pr4812-body.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/d4ac9706/pr4812-body.md)
+  - fold.diff (17,243 bytes), gh-pr4812.diff (17,497 bytes), diff-of-diffs.txt (710 bytes). The local fold diff, the GitHub PR diff, and their difference (hunk headers only). (preserved: artifacts/intel-amx/exec/scratch-relocated/d4ac9706/diff-of-diffs.txt, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/d4ac9706/diff-of-diffs.txt)
+  - pr4737.diff (100,329 bytes) and mt4737.txt (112,369 bytes). PR 4737 diff and merge-tree output read by the Find phase. (preserved: artifacts/intel-amx/exec/scratch-relocated/d4ac9706/mt4737.txt, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/d4ac9706/mt4737.txt)
+  - proposal-edits.json (1,813 bytes), proposal-before-after.md (2,465 bytes), edits-final.json (1,679 bytes), edits-final.json.newtext (618 bytes). The proposal and its word-count check. (preserved: artifacts/intel-amx/exec/scratch-relocated/d4ac9706/edits-final.json, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/d4ac9706/edits-final.json)
+  - payload.json (28,180 bytes). The PATCH payload. pr4424-live2.json (45,576 bytes) the re-fetch before the PATCH, pr4424-after.json (45,822 bytes) the re-fetch after it, body.diff (2,395 bytes) the diff as written. (preserved: artifacts/intel-amx/exec/scratch-relocated/d4ac9706/body.diff, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/d4ac9706/body.diff)
 - Code: no commit was made. Branch `jhan-amx-vnniK` of positron-ai/tron was fast-forwarded from 6b939d25d2 to ba69cb513e and pushed. PR: https://github.com/positron-ai/tron/pull/4424.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/scratch-relocated/d4ac9706/` (12 files)
 
 ## Current state
 
