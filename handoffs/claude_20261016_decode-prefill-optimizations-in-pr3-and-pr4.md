@@ -37,7 +37,7 @@ This is a question. The deliverable is an assessment. No code change was asked o
 - Host: claude-agentsrv only. No ssh to delphi-3bda. No new measurement was run.
 - Working directory (cwd): /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424.
 - Code read in the worktrees /home/jhan/workspace/ai-runs/tron-split-pr3 (PR 3 diff 26b86a279a..b39765ec29), tron-split-pr4 (PR 4 diff b39765ec29..6b081187e1), tron-main-ro (main, the code generator ingest/src/TronCpp.hs and h/tron/models/model.hpp), and ~/workspace/tron. No worktree file was changed.
-- Trace record read: /home/jhan/workspace/intel-AMX/exec/results/vnnik-trace-20260914 (analysis.md, base-tp2 and base-tp4 perfetto lane JSON files). Also exec/results/vnnik2-20260915 (the striping-only arm), exec/results/pr3-E-cpu/summary.md, and the 2026-09-14 handoff VNNIed-K-in-place/status/handoff-store-remedies.md.
+- Trace record read: /home/jhan/workspace/intel-AMX/exec/results/vnnik-trace-20260914 (analysis.md, base-tp2 and base-tp4 perfetto lane JSON files). Also exec/results/vnnik2-20260915 (the striping-only arm), exec/results/pr3-E-cpu/summary.md, and the 2026-09-14 handoff VNNIed-K-in-place/status/handoff-store-remedies.md. (preserved: artifacts/intel-amx/exec/results/vnnik-trace-20260914/analysis.md)
 - Scratchpad: /tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/851b8402-d93e-4edb-b919-4c0fd806a57a/scratchpad.
 
 ## Timeline (2026-10-16, Pacific)
@@ -48,7 +48,7 @@ This is a question. The deliverable is an assessment. No code change was asked o
 - 08:26 to 08:27 Read the save_k record folders (savek-20261006, savek2-20261008, savek-E-cpu), main's code generator attention statement (TronCpp.hs), and the per-file diff sizes of PR 3 and PR 4.
 - 08:29 Workflow `pr3-pr4-technique-independence` launched (wf_9f2be325-560): four readers (main helpers code, PR 3 line classification, PR 4 mechanism classification, decode trace timeline), then three claims with three refuter lenses each, 13 agents in all.
 - 08:29 While it ran, Claude pulled the qwen3-4b rows of pr3-E-cpu/summary.md.
-- 08:31 to 08:35 Scratchpad scripts layer_timeline.py, extra.py and tail.py written under decode-trace/ to extract one prefill layer and one decode layer at tp2 from the trace spans.
+- 08:31 to 08:35 Scratchpad scripts layer_timeline.py, extra.py and tail.py written under decode-trace/ to extract one prefill layer and one decode layer at tp2 from the trace spans. (preserved: artifacts/intel-amx/exec/scratch-relocated/851b8402/decode-trace/layer_timeline.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/851b8402/decode-trace/layer_timeline.py)
 - 08:45 The workflow completed (task wxwj92plv). The result confirmed the code claims and corrected Claude's numbers (the PR 3 line split and the decode idle figures came from the readers).
 - 08:47 gen.py written and run. The page helper-sharing-on-main-20261016.html was published as a private artifact https://claude.ai/artifact/UP5X2Mqfa84u8fxJK1cBms.
 - 08:48 Answer given in chat (see Results).
@@ -89,17 +89,24 @@ PR 4: its FPGA-attention gains against its parent are +2.5 % at tp2 and +12.1 % 
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/helper-sharing-on-main-20261016.html (31,456 bytes). The answer page: wall-clock lanes of one prefill layer and one decode layer at tp2 from the real trace spans, the tables above, the PR 3 line classes, the PR 4 verdict. Published as https://claude.ai/artifact/UP5X2Mqfa84u8fxJK1cBms (private).
-  - generator: /tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/851b8402-d93e-4edb-b919-4c0fd806a57a/scratchpad/page/gen.py (9,734 bytes)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/helper-sharing-on-main-20261016.html (31,456 bytes). The answer page: wall-clock lanes of one prefill layer and one decode layer at tp2 from the real trace spans, the tables above, the PR 3 line classes, the PR 4 verdict. Published as https://claude.ai/artifact/UP5X2Mqfa84u8fxJK1cBms (private). (preserved: artifacts/intel-amx/pr3879/split-4424/helper-sharing-on-main-20261016.html)
+  - generator: /tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/851b8402-d93e-4edb-b919-4c0fd806a57a/scratchpad/page/gen.py (9,734 bytes) (preserved: artifacts/intel-amx/exec/scratch-relocated/851b8402/page/gen.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/851b8402/page/gen.py)
   - input: the trace lane JSON files exec/results/vnnik-trace-20260914/base-tp2.perfetto-trace.lanes.json and base-tp4.perfetto-trace.lanes.json, the workflow result, and numbers typed into gen.py
   - input built by: the 2026-09-14 trace campaign (lanes JSON from perfetto traces), and the workflow wf_9f2be325-560
-  - sources: exec/results/vnnik-trace-20260914, exec/results/vnnik2-20260915, exec/results/pr3-E-cpu/summary.md, the PR 3 and PR 4 diffs
+  - sources: exec/results/vnnik-trace-20260914, exec/results/vnnik2-20260915, exec/results/pr3-E-cpu/summary.md, the PR 3 and PR 4 diffs (preserved: artifacts/intel-amx/exec/results/vnnik2-20260915/summary.md)
   - regenerate: `python3 <scratchpad>/page/gen.py` (writes <OUT>). unavailable if the scratchpad has been cleaned up.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/851b8402-d93e-4edb-b919-4c0fd806a57a/workflows/scripts/pr3-pr4-technique-independence-wf_9f2be325-560.js (13,188 bytes). The workflow script.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/851b8402-d93e-4edb-b919-4c0fd806a57a/workflows/scripts/pr3-pr4-technique-independence-wf_9f2be325-560.js (13,188 bytes). The workflow script. (preserved: artifacts/intel-amx/exec/workflows/pr3-pr4-technique-independence-wf_9f2be325-560.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/pr3-pr4-technique-independence-wf_9f2be325-560.js)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/851b8402-d93e-4edb-b919-4c0fd806a57a/tasks/wxwj92plv.output (137,184 bytes). The raw workflow result (wrapper object, result under the `result` key).
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/851b8402-d93e-4edb-b919-4c0fd806a57a/tool-results/b10sh7zwq.txt (73,086 bytes). The full printout of the workflow findings.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/851b8402-d93e-4edb-b919-4c0fd806a57a/scratchpad/lanes_main.py (1,239 bytes), decode-trace/layer_timeline.py (10,430), decode-trace/extra.py (3,622), decode-trace/tail.py (2,574). Trace extraction helpers. Scratchpad, may be cleaned up.
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/851b8402-d93e-4edb-b919-4c0fd806a57a/scratchpad/lanes_main.py (1,239 bytes), decode-trace/layer_timeline.py (10,430), decode-trace/extra.py (3,622), decode-trace/tail.py (2,574). Trace extraction helpers. Scratchpad, may be cleaned up. (preserved: artifacts/intel-amx/exec/scratch-relocated/851b8402/lanes_main.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/851b8402/lanes_main.py)
 - No memory note was written. No file in a git repository was changed. No commits.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/results/vnnik-trace-20260914/` (1 files)
+- `artifacts/intel-amx/exec/results/vnnik2-20260915/` (1 files)
+- `artifacts/intel-amx/exec/results/vnnik2-20260915/rt/` (84 files)
+- `artifacts/intel-amx/exec/scratch-relocated/851b8402/decode-trace/` (2 files)
 
 ## Current state
 

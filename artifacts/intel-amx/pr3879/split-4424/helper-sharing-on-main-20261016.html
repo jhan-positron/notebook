@@ -1,0 +1,295 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/split-4424/helper-sharing-on-main-20261016.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/pr3879/split-4424/helper-sharing-on-main-20261016.html
+-->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Helper-thread sharing on main</title>
+<style>:root{--bg:#fff;--fg:#1a1a1a}body{background:#fff;color:#1a1a1a;font-family:system-ui,sans-serif;max-width:1140px;margin:0 auto;padding:16px;line-height:1.45}
+table{border-collapse:collapse;margin:8px 0 16px}td,th{border:1px solid #ccc;padding:4px 8px;text-align:left;font-size:14px}th{background:#f3f3f3}h2{font-size:18px;margin-top:28px}code{background:#f3f3f3;padding:0 3px}.sv{background:#f6f8fa;border-left:4px solid #2c7fb8;padding:8px 12px}</style></head><body>
+<h1 style="font-size:22px">Can PR 3's helper sharing and PR 4's tail block boost tron without the VNNI layout?</h1>
+<div class="sv"><b>Short version.</b> PR 3's sharing of the K store with the idle helpers is layout-independent and could be applied to main's K and V stores in an independent PR. It would shorten prefill only: est. 1.4 to 2.6 % of time to first token at tp2 and about 6 % at tp4 (qwen3-4b, 8 users, prompt 1,024 tokens), and nothing in decode. PR 4 has no technique that helps without the layout, and the stack's decode gains come from the layout-bound scoring paths of PR 1 and PR 2.</div>
+<h2>Words used here</h2>
+<table><tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>main thread, main helpers, attention workers</td><td>A generated plugin runs the schedule on one main thread. The main helpers run the per-token kernels (rmsnorm, rope, swish). The attention workers run the CPU attention sections. The split (1 + 7 + 20 at tp2) is decided once per pass by <code>recommend_n_main_helpers</code>.</td></tr>
+<tr><td>Save K, Save V</td><td><code>save_k_impl</code> / <code>save_v_impl</code> in model.hpp: the main thread copies every token's K and V rows of the pass into the KV cache, once per layer.</td></tr>
+<tr><td>Ready, Pending</td><td>Attention sections over pages complete before this pass (Ready) and over pages written in this pass (Pending). A Pending section cannot start before Save V ends.</td></tr>
+<tr><td>tp2, tp4</td><td>The model split over 2 or 4 FPGA cards. TTFT = time to first token (the batched prefill). TPS = decode tokens per second per user.</td></tr>
+<tr><td>VNNI layout</td><td>The K storage of PR 1 (#4956): one 64-byte line holds one dimension pair of 16 tokens. Main's K is row-major (one 256-byte row per token). Main's V is already VNNI-packed with even and odd tokens merged in one line.</td></tr>
+<tr><td>est.</td><td>An estimate, not a measurement.</td></tr></table>
+<h2>What the trace shows: who works when</h2>
+<svg viewBox="0 0 1100 458" width="100%" style="max-width:1100px;font-family:system-ui,sans-serif;font-size:11px">
+<text x="120" y="18" font-size="14" font-weight="600">One prefill layer, tp2 (qwen3-4b, 8 users, prompt 1024, row-major K build 544ca05c7a, trace 2026-09-14)</text>
+<line x1="120.0" y1="56" x2="120.0" y2="376" stroke="#ddd"/>
+<text x="120.0" y="390" text-anchor="middle" fill="#555">0</text>
+<line x1="210.1" y1="56" x2="210.1" y2="376" stroke="#ddd"/>
+<text x="210.1" y="390" text-anchor="middle" fill="#555">1</text>
+<line x1="300.2" y1="56" x2="300.2" y2="376" stroke="#ddd"/>
+<text x="300.2" y="390" text-anchor="middle" fill="#555">2</text>
+<line x1="390.3" y1="56" x2="390.3" y2="376" stroke="#ddd"/>
+<text x="390.3" y="390" text-anchor="middle" fill="#555">3</text>
+<line x1="480.4" y1="56" x2="480.4" y2="376" stroke="#ddd"/>
+<text x="480.4" y="390" text-anchor="middle" fill="#555">4</text>
+<line x1="570.5" y1="56" x2="570.5" y2="376" stroke="#ddd"/>
+<text x="570.5" y="390" text-anchor="middle" fill="#555">5</text>
+<line x1="660.5" y1="56" x2="660.5" y2="376" stroke="#ddd"/>
+<text x="660.5" y="390" text-anchor="middle" fill="#555">6</text>
+<line x1="750.6" y1="56" x2="750.6" y2="376" stroke="#ddd"/>
+<text x="750.6" y="390" text-anchor="middle" fill="#555">7</text>
+<line x1="840.7" y1="56" x2="840.7" y2="376" stroke="#ddd"/>
+<text x="840.7" y="390" text-anchor="middle" fill="#555">8</text>
+<line x1="930.8" y1="56" x2="930.8" y2="376" stroke="#ddd"/>
+<text x="930.8" y="390" text-anchor="middle" fill="#555">9</text>
+<line x1="1020.9" y1="56" x2="1020.9" y2="376" stroke="#ddd"/>
+<text x="1020.9" y="390" text-anchor="middle" fill="#555">10</text>
+<text x="1070" y="406" text-anchor="end" fill="#555">wall-clock time, ms from this layer's Save K start (durations to scale)</text>
+<rect x="120.0" y="54" width="51.8" height="318" fill="#fdecea" stroke="#c0392b" stroke-dasharray="4 3"/>
+<text x="114" y="69" text-anchor="end" fill="#c0392b" font-weight="600">main thread (1)</text>
+<line x1="120" y1="65.5" x2="1070" y2="65.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.0" y="61" width="24.5" height="9" fill="#c0392b"><title>Save K 271.6 us</title></rect>
+<rect x="145.4" y="61" width="26.4" height="9" fill="#c0392b"><title>Save V 293.2 us</title></rect>
+<rect x="822.2" y="61" width="2.6" height="9" fill="#c0392b"><title>Free scratchpads 29.2 us</title></rect>
+<text x="114" y="80" text-anchor="end" fill="#2c7fb8" font-weight="600">main helpers (7)</text>
+<line x1="120" y1="76.5" x2="1070" y2="76.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="443.4" y="72" width="58.4" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_20 648.6 us</title></rect>
+<rect x="656.6" y="72" width="152.9" height="9" fill="#2c7fb8"><title>kernel_swish_mul_10 1696.9 us</title></rect>
+<rect x="810.2" y="72" width="148.5" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_21 1648.1 us</title></rect>
+<rect x="1024.7" y="72" width="45.2" height="9" fill="#2c7fb8"><title>kernel_rmsnorm_rope_rmsnorm_rope_11 502.2 us</title></rect>
+<line x1="120" y1="87.5" x2="1070" y2="87.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.0" y="83" width="0.8" height="9" fill="#2c7fb8"><title>kernel_rmsnorm_rope_rmsnorm_rope_10 501.8 us</title></rect>
+<rect x="443.2" y="83" width="58.7" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_20 652.0 us</title></rect>
+<rect x="656.1" y="83" width="153.8" height="9" fill="#2c7fb8"><title>kernel_swish_mul_10 1706.9 us</title></rect>
+<rect x="809.9" y="83" width="148.7" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_21 1651.1 us</title></rect>
+<rect x="1024.6" y="83" width="45.4" height="9" fill="#2c7fb8"><title>kernel_rmsnorm_rope_rmsnorm_rope_11 503.7 us</title></rect>
+<line x1="120" y1="98.5" x2="1070" y2="98.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="443.2" y="94" width="58.4" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_20 648.4 us</title></rect>
+<rect x="656.1" y="94" width="153.0" height="9" fill="#2c7fb8"><title>kernel_swish_mul_10 1698.5 us</title></rect>
+<rect x="809.6" y="94" width="148.4" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_21 1646.8 us</title></rect>
+<rect x="1024.6" y="94" width="45.2" height="9" fill="#2c7fb8"><title>kernel_rmsnorm_rope_rmsnorm_rope_11 501.4 us</title></rect>
+<line x1="120" y1="109.5" x2="1070" y2="109.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="443.3" y="105" width="58.5" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_20 649.8 us</title></rect>
+<rect x="656.3" y="105" width="153.0" height="9" fill="#2c7fb8"><title>kernel_swish_mul_10 1698.3 us</title></rect>
+<rect x="809.9" y="105" width="148.2" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_21 1645.3 us</title></rect>
+<rect x="1024.6" y="105" width="45.4" height="9" fill="#2c7fb8"><title>kernel_rmsnorm_rope_rmsnorm_rope_11 503.6 us</title></rect>
+<line x1="120" y1="120.5" x2="1070" y2="120.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="443.3" y="116" width="58.4" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_20 648.2 us</title></rect>
+<rect x="656.2" y="116" width="153.1" height="9" fill="#2c7fb8"><title>kernel_swish_mul_10 1699.4 us</title></rect>
+<rect x="809.6" y="116" width="148.3" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_21 1646.6 us</title></rect>
+<rect x="1024.6" y="116" width="45.3" height="9" fill="#2c7fb8"><title>kernel_rmsnorm_rope_rmsnorm_rope_11 502.8 us</title></rect>
+<line x1="120" y1="131.5" x2="1070" y2="131.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="443.1" y="127" width="58.9" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_20 654.0 us</title></rect>
+<rect x="656.1" y="127" width="153.7" height="9" fill="#2c7fb8"><title>kernel_swish_mul_10 1705.6 us</title></rect>
+<rect x="809.8" y="127" width="148.9" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_21 1652.8 us</title></rect>
+<rect x="1024.6" y="127" width="45.4" height="9" fill="#2c7fb8"><title>kernel_rmsnorm_rope_rmsnorm_rope_11 503.9 us</title></rect>
+<line x1="120" y1="142.5" x2="1070" y2="142.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="443.4" y="138" width="58.4" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_20 648.3 us</title></rect>
+<rect x="656.8" y="138" width="152.8" height="9" fill="#2c7fb8"><title>kernel_swish_mul_10 1695.7 us</title></rect>
+<rect x="810.4" y="138" width="148.2" height="9" fill="#2c7fb8"><title>kernel_add_rmsnorm_21 1645.6 us</title></rect>
+<rect x="1024.7" y="138" width="45.3" height="9" fill="#2c7fb8"><title>kernel_rmsnorm_rope_rmsnorm_rope_11 503.7 us</title></rect>
+<text x="114" y="157" text-anchor="end" fill="#41ab5d" font-weight="600">attention workers (20)</text>
+<line x1="120" y1="153.5" x2="1070" y2="153.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="149" width="84.5" height="9" fill="#41ab5d"><title>Attention Ready 938.3 us</title></rect>
+<rect x="204.8" y="149" width="115.0" height="9" fill="#006d2c"><title>Attention Pending 1277.0 us</title></rect>
+<rect x="319.9" y="149" width="19.9" height="9" fill="#a1d99b"><title>attention: join 220.5 us</title></rect>
+<rect x="394.8" y="149" width="15.4" height="9" fill="#a1d99b"><title>attention: join 170.6 us</title></rect>
+<line x1="120" y1="164.5" x2="1070" y2="164.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="160" width="81.5" height="9" fill="#41ab5d"><title>Attention Ready 904.3 us</title></rect>
+<rect x="201.8" y="160" width="111.3" height="9" fill="#006d2c"><title>Attention Pending 1234.9 us</title></rect>
+<rect x="313.1" y="160" width="19.1" height="9" fill="#a1d99b"><title>attention: join 212.3 us</title></rect>
+<rect x="395.1" y="160" width="21.2" height="9" fill="#a1d99b"><title>attention: join 235.4 us</title></rect>
+<line x1="120" y1="175.5" x2="1070" y2="175.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="171" width="150.3" height="9" fill="#41ab5d"><title>Attention Ready 1667.9 us</title></rect>
+<rect x="394.8" y="171" width="16.7" height="9" fill="#a1d99b"><title>attention: join 185.4 us</title></rect>
+<line x1="120" y1="186.5" x2="1070" y2="186.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="182" width="150.6" height="9" fill="#41ab5d"><title>Attention Ready 1671.4 us</title></rect>
+<rect x="392.4" y="182" width="25.8" height="9" fill="#a1d99b"><title>attention: join 285.9 us</title></rect>
+<line x1="120" y1="197.5" x2="1070" y2="197.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="193" width="155.6" height="9" fill="#41ab5d"><title>Attention Ready 1727.3 us</title></rect>
+<rect x="313.1" y="193" width="16.8" height="9" fill="#a1d99b"><title>attention: join 187.0 us</title></rect>
+<line x1="120" y1="208.5" x2="1070" y2="208.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="204" width="160.2" height="9" fill="#41ab5d"><title>Attention Ready 1778.0 us</title></rect>
+<rect x="319.9" y="204" width="13.6" height="9" fill="#a1d99b"><title>attention: join 150.8 us</title></rect>
+<line x1="120" y1="219.5" x2="1070" y2="219.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="215" width="17.1" height="9" fill="#41ab5d"><title>Attention Ready 189.4 us</title></rect>
+<rect x="171.8" y="215" width="220.5" height="9" fill="#006d2c"><title>Attention Pending 2447.2 us</title></rect>
+<rect x="392.4" y="215" width="33.1" height="9" fill="#a1d99b"><title>attention: join 367.0 us</title></rect>
+<line x1="120" y1="230.5" x2="1070" y2="230.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="226" width="11.6" height="9" fill="#41ab5d"><title>Attention Ready 129.2 us</title></rect>
+<rect x="131.9" y="226" width="11.7" height="9" fill="#41ab5d"><title>Attention Ready 129.5 us</title></rect>
+<rect x="171.8" y="226" width="223.2" height="9" fill="#006d2c"><title>Attention Pending 2477.8 us</title></rect>
+<rect x="395.1" y="226" width="28.9" height="9" fill="#a1d99b"><title>attention: join 320.8 us</title></rect>
+<rect x="424.1" y="226" width="16.6" height="9" fill="#a1d99b"><title>attention: join 184.4 us</title></rect>
+<line x1="120" y1="241.5" x2="1070" y2="241.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="237" width="156.3" height="9" fill="#41ab5d"><title>Attention Ready 1735.2 us</title></rect>
+<rect x="333.2" y="237" width="16.3" height="9" fill="#a1d99b"><title>attention: join 181.2 us</title></rect>
+<line x1="120" y1="252.5" x2="1070" y2="252.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="248" width="76.7" height="9" fill="#41ab5d"><title>Attention Ready 851.9 us</title></rect>
+<rect x="197.1" y="248" width="112.7" height="9" fill="#006d2c"><title>Attention Pending 1250.8 us</title></rect>
+<rect x="327.0" y="248" width="20.3" height="9" fill="#a1d99b"><title>attention: join 225.4 us</title></rect>
+<line x1="120" y1="263.5" x2="1070" y2="263.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="259" width="150.9" height="9" fill="#41ab5d"><title>Attention Ready 1675.3 us</title></rect>
+<rect x="392.4" y="259" width="26.6" height="9" fill="#a1d99b"><title>attention: join 295.7 us</title></rect>
+<line x1="120" y1="274.5" x2="1070" y2="274.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="270" width="83.2" height="9" fill="#41ab5d"><title>Attention Ready 923.5 us</title></rect>
+<rect x="203.9" y="270" width="82.4" height="9" fill="#006d2c"><title>Attention Pending 915.0 us</title></rect>
+<rect x="333.2" y="270" width="24.1" height="9" fill="#a1d99b"><title>attention: join 267.1 us</title></rect>
+<line x1="120" y1="285.5" x2="1070" y2="285.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="281" width="78.2" height="9" fill="#41ab5d"><title>Attention Ready 868.4 us</title></rect>
+<rect x="198.5" y="281" width="111.7" height="9" fill="#006d2c"><title>Attention Pending 1240.4 us</title></rect>
+<rect x="313.1" y="281" width="20.4" height="9" fill="#a1d99b"><title>attention: join 226.7 us</title></rect>
+<line x1="120" y1="296.5" x2="1070" y2="296.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="292" width="11.7" height="9" fill="#41ab5d"><title>Attention Ready 129.5 us</title></rect>
+<rect x="131.9" y="292" width="11.5" height="9" fill="#41ab5d"><title>Attention Ready 127.2 us</title></rect>
+<rect x="171.8" y="292" width="222.9" height="9" fill="#006d2c"><title>Attention Pending 2473.9 us</title></rect>
+<rect x="394.8" y="292" width="27.6" height="9" fill="#a1d99b"><title>attention: join 306.5 us</title></rect>
+<rect x="422.4" y="292" width="15.6" height="9" fill="#a1d99b"><title>attention: join 173.1 us</title></rect>
+<line x1="120" y1="307.5" x2="1070" y2="307.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="303" width="145.7" height="9" fill="#41ab5d"><title>Attention Ready 1617.3 us</title></rect>
+<rect x="395.1" y="303" width="24.6" height="9" fill="#a1d99b"><title>attention: join 273.0 us</title></rect>
+<line x1="120" y1="318.5" x2="1070" y2="318.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="314" width="73.8" height="9" fill="#41ab5d"><title>Attention Ready 818.6 us</title></rect>
+<rect x="194.1" y="314" width="139.0" height="9" fill="#006d2c"><title>Attention Pending 1543.4 us</title></rect>
+<rect x="333.2" y="314" width="24.2" height="9" fill="#a1d99b"><title>attention: join 268.7 us</title></rect>
+<rect x="392.4" y="314" width="20.4" height="9" fill="#a1d99b"><title>attention: join 226.0 us</title></rect>
+<line x1="120" y1="329.5" x2="1070" y2="329.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="325" width="89.6" height="9" fill="#41ab5d"><title>Attention Ready 994.8 us</title></rect>
+<rect x="209.9" y="325" width="117.0" height="9" fill="#006d2c"><title>Attention Pending 1298.3 us</title></rect>
+<rect x="327.0" y="325" width="20.4" height="9" fill="#a1d99b"><title>attention: join 226.5 us</title></rect>
+<rect x="392.4" y="325" width="16.1" height="9" fill="#a1d99b"><title>attention: join 178.9 us</title></rect>
+<line x1="120" y1="340.5" x2="1070" y2="340.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="336" width="156.6" height="9" fill="#41ab5d"><title>Attention Ready 1738.2 us</title></rect>
+<rect x="327.0" y="336" width="14.3" height="9" fill="#a1d99b"><title>attention: join 158.7 us</title></rect>
+<line x1="120" y1="351.5" x2="1070" y2="351.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="347" width="75.1" height="9" fill="#41ab5d"><title>Attention Ready 833.3 us</title></rect>
+<rect x="195.4" y="347" width="109.9" height="9" fill="#006d2c"><title>Attention Pending 1219.7 us</title></rect>
+<rect x="319.9" y="347" width="19.8" height="9" fill="#a1d99b"><title>attention: join 220.1 us</title></rect>
+<line x1="120" y1="362.5" x2="1070" y2="362.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.2" y="358" width="18.5" height="9" fill="#41ab5d"><title>Attention Ready 205.6 us</title></rect>
+<rect x="171.8" y="358" width="220.5" height="9" fill="#006d2c"><title>Attention Pending 2447.2 us</title></rect>
+<rect x="392.4" y="358" width="33.0" height="9" fill="#a1d99b"><title>attention: join 366.6 us</title></rect>
+<text x="120" y="424" fill="#222">Red band: Save K (272 us) then Save V (293 us) on the main thread. All 7 helpers idle (dashed = no work). The first Pending attention section starts 0.3 us after Save V ends.</text>
+<text x="120" y="439" fill="#222">Then the helpers idle for the whole attention phase (to 3.6 ms) and the attention workers idle for the whole kernel phase (3.6 ms to the end). Empty stretches = CPU waits for the FPGA linear layers.</text>
+</svg>
+<svg viewBox="0 0 1100 381" width="100%" style="max-width:1100px;font-family:system-ui,sans-serif;font-size:11px">
+<text x="120" y="18" font-size="14" font-weight="600">One decode layer, tp2 (same run)</text>
+<line x1="120.0" y1="56" x2="120.0" y2="299" stroke="#ddd"/>
+<text x="120.0" y="313" text-anchor="middle" fill="#555">0</text>
+<line x1="257.5" y1="56" x2="257.5" y2="299" stroke="#ddd"/>
+<text x="257.5" y="313" text-anchor="middle" fill="#555">50</text>
+<line x1="395.0" y1="56" x2="395.0" y2="299" stroke="#ddd"/>
+<text x="395.0" y="313" text-anchor="middle" fill="#555">100</text>
+<line x1="532.4" y1="56" x2="532.4" y2="299" stroke="#ddd"/>
+<text x="532.4" y="313" text-anchor="middle" fill="#555">150</text>
+<line x1="669.9" y1="56" x2="669.9" y2="299" stroke="#ddd"/>
+<text x="669.9" y="313" text-anchor="middle" fill="#555">200</text>
+<line x1="807.4" y1="56" x2="807.4" y2="299" stroke="#ddd"/>
+<text x="807.4" y="313" text-anchor="middle" fill="#555">250</text>
+<line x1="944.9" y1="56" x2="944.9" y2="299" stroke="#ddd"/>
+<text x="944.9" y="313" text-anchor="middle" fill="#555">300</text>
+<text x="1070" y="329" text-anchor="end" fill="#555">wall-clock time, us from this layer's Save K start (durations to scale)</text>
+<text x="114" y="69" text-anchor="end" fill="#c0392b" font-weight="600">main thread (1)</text>
+<line x1="120" y1="65.5" x2="1070" y2="65.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="120.0" y="61" width="12.4" height="9" fill="#c0392b"><title>Save K 4.5 us</title></rect>
+<rect x="133.1" y="61" width="10.1" height="9" fill="#c0392b"><title>Save V 3.7 us</title></rect>
+<text x="114" y="80" text-anchor="end" fill="#41ab5d" font-weight="600">attention workers (20)</text>
+<line x1="120" y1="76.5" x2="1070" y2="76.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.4" y="72" width="88.8" height="9" fill="#41ab5d"><title>Attention Ready 32.3 us</title></rect>
+<rect x="212.1" y="72" width="287.7" height="9" fill="#41ab5d"><title>Attention Ready 104.6 us</title></rect>
+<rect x="501.4" y="72" width="17.2" height="9" fill="#006d2c"><title>Attention Pending 6.2 us</title></rect>
+<rect x="655.9" y="72" width="7.1" height="9" fill="#a1d99b"><title>attention: join 2.6 us</title></rect>
+<rect x="934.7" y="72" width="9.4" height="9" fill="#a1d99b"><title>attention: join 3.4 us</title></rect>
+<line x1="120" y1="87.5" x2="1070" y2="87.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.2" y="83" width="88.9" height="9" fill="#41ab5d"><title>Attention Ready 32.3 us</title></rect>
+<rect x="212.3" y="83" width="305.0" height="9" fill="#41ab5d"><title>Attention Ready 110.9 us</title></rect>
+<rect x="519.0" y="83" width="18.2" height="9" fill="#006d2c"><title>Attention Pending 6.6 us</title></rect>
+<rect x="677.2" y="83" width="10.3" height="9" fill="#a1d99b"><title>attention: join 3.8 us</title></rect>
+<rect x="880.7" y="83" width="8.6" height="9" fill="#a1d99b"><title>attention: join 3.1 us</title></rect>
+<line x1="120" y1="98.5" x2="1070" y2="98.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.0" y="94" width="810.4" height="9" fill="#41ab5d"><title>Attention Ready 294.7 us</title></rect>
+<rect x="935.5" y="94" width="10.3" height="9" fill="#a1d99b"><title>attention: join 3.8 us</title></rect>
+<line x1="120" y1="109.5" x2="1070" y2="109.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.6" y="105" width="555.1" height="9" fill="#41ab5d"><title>Attention Ready 201.9 us</title></rect>
+<rect x="683.6" y="105" width="23.5" height="9" fill="#a1d99b"><title>attention: join 8.5 us</title></rect>
+<line x1="120" y1="120.5" x2="1070" y2="120.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="121.7" y="116" width="553.7" height="9" fill="#41ab5d"><title>Attention Ready 201.4 us</title></rect>
+<rect x="677.8" y="116" width="9.6" height="9" fill="#a1d99b"><title>attention: join 3.5 us</title></rect>
+<line x1="120" y1="131.5" x2="1070" y2="131.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="121.9" y="127" width="532.5" height="9" fill="#41ab5d"><title>Attention Ready 193.7 us</title></rect>
+<rect x="656.0" y="127" width="7.9" height="9" fill="#a1d99b"><title>attention: join 2.9 us</title></rect>
+<line x1="120" y1="142.5" x2="1070" y2="142.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.2" y="138" width="344.0" height="9" fill="#41ab5d"><title>Attention Ready 125.1 us</title></rect>
+<rect x="468.1" y="138" width="17.7" height="9" fill="#006d2c"><title>Attention Pending 6.4 us</title></rect>
+<rect x="1023.3" y="138" width="10.2" height="9" fill="#a1d99b"><title>attention: join 3.7 us</title></rect>
+<line x1="120" y1="153.5" x2="1070" y2="153.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="121.6" y="149" width="322.2" height="9" fill="#41ab5d"><title>Attention Ready 117.2 us</title></rect>
+<rect x="444.7" y="149" width="29.1" height="9" fill="#41ab5d"><title>Attention Ready 10.6 us</title></rect>
+<rect x="475.1" y="149" width="17.1" height="9" fill="#006d2c"><title>Attention Pending 6.2 us</title></rect>
+<rect x="684.9" y="149" width="14.8" height="9" fill="#a1d99b"><title>attention: join 5.4 us</title></rect>
+<rect x="880.8" y="149" width="8.6" height="9" fill="#a1d99b"><title>attention: join 3.1 us</title></rect>
+<line x1="120" y1="164.5" x2="1070" y2="164.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="121.8" y="160" width="554.4" height="9" fill="#41ab5d"><title>Attention Ready 201.6 us</title></rect>
+<rect x="678.3" y="160" width="3.8" height="9" fill="#006d2c"><title>Attention Pending 1.4 us</title></rect>
+<rect x="683.6" y="160" width="13.7" height="9" fill="#a1d99b"><title>attention: join 5.0 us</title></rect>
+<rect x="697.9" y="160" width="16.6" height="9" fill="#a1d99b"><title>attention: join 6.0 us</title></rect>
+<line x1="120" y1="175.5" x2="1070" y2="175.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.0" y="171" width="497.1" height="9" fill="#41ab5d"><title>Attention Ready 180.8 us</title></rect>
+<rect x="685.0" y="171" width="12.7" height="9" fill="#a1d99b"><title>attention: join 4.6 us</title></rect>
+<line x1="120" y1="186.5" x2="1070" y2="186.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.5" y="182" width="898.5" height="9" fill="#41ab5d"><title>Attention Ready 326.8 us</title></rect>
+<rect x="1024.6" y="182" width="15.8" height="9" fill="#a1d99b"><title>attention: join 5.7 us</title></rect>
+<line x1="120" y1="197.5" x2="1070" y2="197.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.3" y="193" width="503.6" height="9" fill="#41ab5d"><title>Attention Ready 183.2 us</title></rect>
+<rect x="678.2" y="193" width="24.9" height="9" fill="#a1d99b"><title>attention: join 9.1 us</title></rect>
+<line x1="120" y1="208.5" x2="1070" y2="208.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.2" y="204" width="504.7" height="9" fill="#41ab5d"><title>Attention Ready 183.6 us</title></rect>
+<rect x="676.9" y="204" width="7.2" height="9" fill="#a1d99b"><title>attention: join 2.6 us</title></rect>
+<line x1="120" y1="219.5" x2="1070" y2="219.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="121.7" y="215" width="288.2" height="9" fill="#41ab5d"><title>Attention Ready 104.8 us</title></rect>
+<rect x="410.7" y="215" width="44.5" height="9" fill="#41ab5d"><title>Attention Ready 16.2 us</title></rect>
+<rect x="456.7" y="215" width="17.4" height="9" fill="#006d2c"><title>Attention Pending 6.3 us</title></rect>
+<rect x="677.3" y="215" width="16.3" height="9" fill="#a1d99b"><title>attention: join 5.9 us</title></rect>
+<rect x="934.7" y="215" width="5.6" height="9" fill="#a1d99b"><title>attention: join 2.0 us</title></rect>
+<line x1="120" y1="230.5" x2="1070" y2="230.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="121.9" y="226" width="756.5" height="9" fill="#41ab5d"><title>Attention Ready 275.1 us</title></rect>
+<rect x="881.2" y="226" width="11.2" height="9" fill="#a1d99b"><title>attention: join 4.1 us</title></rect>
+<line x1="120" y1="241.5" x2="1070" y2="241.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="121.2" y="237" width="125.4" height="9" fill="#41ab5d"><title>Attention Ready 45.6 us</title></rect>
+<rect x="247.4" y="237" width="253.7" height="9" fill="#41ab5d"><title>Attention Ready 92.3 us</title></rect>
+<rect x="502.7" y="237" width="16.6" height="9" fill="#006d2c"><title>Attention Pending 6.0 us</title></rect>
+<rect x="678.0" y="237" width="7.6" height="9" fill="#a1d99b"><title>attention: join 2.8 us</title></rect>
+<rect x="1023.3" y="237" width="10.2" height="9" fill="#a1d99b"><title>attention: join 3.7 us</title></rect>
+<line x1="120" y1="252.5" x2="1070" y2="252.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.3" y="248" width="108.3" height="9" fill="#41ab5d"><title>Attention Ready 39.4 us</title></rect>
+<rect x="231.4" y="248" width="270.3" height="9" fill="#41ab5d"><title>Attention Ready 98.3 us</title></rect>
+<rect x="503.6" y="248" width="18.4" height="9" fill="#006d2c"><title>Attention Pending 6.7 us</title></rect>
+<rect x="683.5" y="248" width="15.1" height="9" fill="#a1d99b"><title>attention: join 5.5 us</title></rect>
+<rect x="699.1" y="248" width="13.9" height="9" fill="#a1d99b"><title>attention: join 5.1 us</title></rect>
+<line x1="120" y1="263.5" x2="1070" y2="263.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="121.9" y="259" width="561.1" height="9" fill="#41ab5d"><title>Attention Ready 204.1 us</title></rect>
+<rect x="686.2" y="259" width="18.7" height="9" fill="#a1d99b"><title>attention: join 6.8 us</title></rect>
+<line x1="120" y1="274.5" x2="1070" y2="274.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="122.0" y="270" width="492.7" height="9" fill="#41ab5d"><title>Attention Ready 179.2 us</title></rect>
+<rect x="655.8" y="270" width="8.3" height="9" fill="#a1d99b"><title>attention: join 3.0 us</title></rect>
+<line x1="120" y1="285.5" x2="1070" y2="285.5" stroke="#bbb" stroke-dasharray="2 3"/>
+<rect x="121.9" y="281" width="345.1" height="9" fill="#41ab5d"><title>Attention Ready 125.5 us</title></rect>
+<rect x="468.5" y="281" width="15.5" height="9" fill="#006d2c"><title>Attention Pending 5.6 us</title></rect>
+<rect x="683.1" y="281" width="14.1" height="9" fill="#a1d99b"><title>attention: join 5.1 us</title></rect>
+<text x="120" y="347" fill="#222">Save K (4 us) and Save V (4 us) overlap the workers&#x27; Ready sections: nothing waits for them. Helpers idle for 227 us (66 %) of the 346 us layer while attention runs on the 20 workers (all 20 busy for 125 us, then a tail).</text>
+<text x="120" y="362" fill="#222">The four helper kernels (2 to 10 us each) run after attention. The two thread groups never work at the same time.</text>
+</svg>
+<p>Source: <code>exec/results/vnnik-trace-20260914/base-tp2.perfetto-trace.lanes.json</code>, pass 2 layer 10 (prefill) and one decode layer. Only spans of depth 0 and 1 are in the file. The main thread's FPGA fill, launch and channel waits are not traced, so empty stretches mean "no traced CPU work".</p>
+<h2>Main-thread serial work and the room it leaves</h2>
+<table><tr><th>Cell</th><th>Save K + Save V per layer</th><th>Share of the pass</th><th>Helpers busy during it</th><th>Gap from Save V end to first Pending start</th></tr>
+<tr><td>prefill tp2</td><td>274 + 295 us</td><td>5.2 %</td><td>0.00</td><td>286 us (Ready work still running: part of the save is hidden)</td></tr>
+<tr><td>prefill tp4</td><td>281 + 295 us</td><td>7.6 %</td><td>0.00</td><td>6.5 us (the save gates the layer)</td></tr>
+<tr><td>decode tp2</td><td>4.6 + 5.6 us</td><td>2.7 %</td><td>0.00</td><td>110 us (hidden behind Ready sections)</td></tr>
+<tr><td>decode tp4</td><td>5.8 + 7.1 us</td><td>4.3 %</td><td>0.00</td><td>34 us (hidden)</td></tr></table>
+<p>Means over 8 passes, <code>analysis.md</code> of the same record. The striping-only arm of 2026-09-15 (Save K shared, VNNI store, record <code>vnnik2-20260915</code>) turned 63 % of its removed store time into TTFT at tp2 and 107 % at tp4. Applied to main's 5.2 % and 7.6 %, with the striping ratio 858 to 175 us (tp2) and 863 to 110 us (tp4): est. 1.4 to 2.6 % at tp2 and about 6 % at tp4, K and V together. Base TTFT on 2026-10-12: 3.18 s at tp2, 2.21 s at tp4, so est. 45 to 80 ms and about 130 ms. The V half has no measurement.</p>
+<h2>PR 3 by line class (712 added lines)</h2>
+<table><tr><th>Class</th><th>Lines</th><th>Content</th></tr>
+<tr><td>Generic sharing</td><td>352 (49 %)</td><td>window struct, work-unit cut, claim loop, join and watchdog, worker index plumbing, code-generator helper call, generator test, three-thread test</td></tr>
+<tr><td>Layout-specific</td><td>277 (39 %)</td><td>16x16 register transpose, <code>store_block</code>, <code>page::set_k_block</code>, present masks, bit-identity test</td></tr>
+<tr><td>Mixed / comments</td><td>83 (12 %)</td><td>Note text that describes both</td></tr></table>
+<h2>PR 4</h2>
+<p>Every mechanism (row bits, forward-end conversion, hardware-attention policy, dotter over tail rows, page-reuse and copy bookkeeping) either restores a property main already has or manages the state a two-layout page needs. Its FPGA-attention gains against its parent (+2.5 % at tp2, +12.1 % at tp4) return the stack to main (+0.6 % and -0.3 % against main, inside the band). Ported alone to main, the only effect would be cost (two extra atomic loads per new token, a conversion with no consumer).</p>
+</body></html>
