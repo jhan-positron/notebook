@@ -1,0 +1,416 @@
+Base diagrams of the three PR 4424 source pages (text only; the SVGs are copied verbatim by the page builder).
+Line numbers cite PR 4424 head 9d5c7a389b, not the split PR heads.
+
+== k_vnni-b1: K_VNNI-B1. Data model: one K plane, its panels, pair rows and the index map
+INTRO: A plane is K for one KV head of one page: 64 tokens x 128 dimensions of bf16 = 16 KiB, the same bytes as the row-major plane. It is 16 panels of 1 KiB, indexed by dimension step s and token block c. A panel is 16 pair rows of 64 bytes. A pair row holds one dimension pair of 16 tokens. Every arrow says how many. The worked example (token 37, dimension 70) is traced through the index formula.
+CAPTION: B1, data model. The top band is the containment. A book holds n_pages pages. A page reaches n_kv_heads kv_blocks per storage slot, and keeps layout_t::n_slots + EAGLE_STORAGE_SLOTS_1 entries of its two state words k_rows_saved_ (one bit per page offset) and k_vnni_blocks_ (one bit per token block). A kv_block holds one K plane (k) and one V plane (v). A plane is K (the key matrix) for one KV head (key/value head) of one page (64 tokens of KV storage): 64 tokens x 128 dimensions of bf16 (16-bit floats) = 16 KiB, owned by k_vnni_tensor. It is 16 panels of 1 KiB, one per (dimension step s, token block c). A panel is 16 pair rows of 64 bytes, and a pair row holds one dimension pair for 16 tokens. The worked example traces token 37, dimension 70 through k_vnni::index to element 5226 (panel #10, pair row 3, dword 5). The orange frame on panel (1,2) #6 and the last line show where the same token lies while block 2 is still row-major.
+BOXES (14):
+  - book :: kv_cache.hpp:934-943, 1511
+  - page :: kv_cache.hpp:2484-2488
+  - detail::kv_block :: kv_cache.hpp:2982-3015
+  - k_rows_saved_ / k_vnni_blocks_ entry :: kv_cache.hpp:2616-2622
+  - page offset / token block c :: k_vnni.hpp:97-105; kv_cache.hpp:2509
+  - detail::kv_block::k :: kv_cache.hpp:2986-3001
+  - k_vnni_tensor<64, 128> :: k_vnni.hpp:201-236
+  - plane :: k_vnni.hpp:20-28
+  - token block c :: k_vnni.hpp:30-32, 443-445
+  - token i :: k_vnni.hpp:30-32, 344-348
+  - dimension step s, pair dp :: k_vnni.hpp:63-74
+  - panel (s, c) (new) :: k_vnni.hpp:29-30, 78-82
+  - pair row dp (new) :: k_vnni.hpp:66-67, 75-77
+  - k_vnni::index(token, dim) :: k_vnni.hpp:132-141
+
+== k_vnni-b1a: K_VNNI-B1A. The hierarchy travel: the K of one page -> plane -> token block and dimension step -> panel -> pair row -> pair
+INTRO: One chain of carve-outs, each level drawn from the one above: the K of one KV page for one storage slot is one plane per KV head; a plane is the 64 x 128 grid; a dimension step cuts its columns and a token block cuts its rows, so a panel is one cell of the 4 x 4 cut; inside a panel the 32 dimensions are 16 pairs; the VNNI form stores the panel as 16 pair rows; a dword of a pair row is one pair of one token. The worked example (token 37, dimension 70) is followed down every level and through the index formula. B1 above stays as the reference drawing.
+CAPTION: B1a, the hierarchy travel. Level 1: the K of one KV page for one storage slot is one plane per KV head. Level 2: a plane is the 64 x 128 grid of one KV head; a dimension step s cuts its columns into 4 bands of 32 dimensions, a token block c cuts its rows into 4 bands of 16 tokens, and a panel is one of the 16 cells. Level 3: inside a panel the 32 dimensions are 16 pairs. Level 4: the VNNI form stores the panel as 16 pair rows of 64 bytes, one per pair, 16 tokens across. Level 5: one dword of a pair row is one pair of one token. The worked example (token 37, dimension 70) is followed through every level and through the index formula.
+BOXES (11):
+  - kv_block(slot 5, kv_head 0, page 7).k :: kv_cache.hpp:2630-2634 (page::kv_block per slot and KV head); 2982-2983
+  - one plane = the [64 x 128] grid :: k_vnni.hpp:24-28 (64 tokens x 128 dimensions of bf16 = 16 KiB)
+  - dimension step s :: k_vnni.hpp:70-74 (STEP_DIMS_32, DIM_STEPS_4: s = dim / 32)
+  - token block c :: k_vnni.hpp:68-69 (BLOCK_TOKENS_16, TOKEN_BLOCKS_4: c = token / 16); 30-32
+  - panel (s,c) #4s+c :: k_vnni.hpp:29-30, 78-82 (one (s, c) is one 1 KiB panel, index s * 4 + c)
+  - pair dp :: k_vnni.hpp:63-64 (PAIR_2: the two values of one dimension pair share one 32-bit lane); 73 (STEP_PAIRS_16)
+  - pair row dp (VNNI form) :: k_vnni.hpp:66-67 (one 64-byte line holds one dimension pair of 16 consecutive tokens); 75-77; 29-30
+  - dword t (one token's pair) :: k_vnni.hpp:30-31 (token i owns column i % 16 in every panel); 65 (DWORD_BYTES_4)
+  - low half j = 0 / high half j = 1 :: k_vnni.hpp:63-65, 87-90 (PAIR_2, DWORD_BYTES_4; the even value in the low half of the dword, the odd value in the high half)
+  - the travel as the index formula :: k_vnni.hpp:27-28 (the formula in the header comment), 132-141 (k_vnni::index)
+  - the row-major form of a block :: Note [Row-major tail block] (k_vnni.hpp:437-456); row_major_row 462-472
+
+== k_vnni-b2: K_VNNI-B2. Type model: owner, views, the one access route, and the transfer rows
+INTRO: k_vnni_tensor owns the bytes. k_vnni_view is the only way to name a plane, and detail::k_vnni_access::plane the only way to get its address. The transfer rows const_k_row_view / k_row_view carry one token's 128 values in dimension order. The diagram shows what each type can and cannot do and who is a friend of whom.
+CAPTION: B2, type model. k_vnni_tensor owns the 16 KiB plane. Its as_view() is the only source of a k_vnni_view. A writable view converts to a read-only one, never back (grey text: a route the code does not provide). detail::k_vnni_access::plane is the one route from a view to the raw address, open to the typed operations of this file, the two score kernels and the test-only fill. The transfer rows const_k_row_view / k_row_view carry one token's 128 values in dimension order with the caller's alignment and DMA (direct memory access) flags.
+BOXES (15):
+  - detail::kv_block::k :: kv_cache.hpp:2986-3001
+  - k_vnni_tensor<Rows, Cols> :: k_vnni.hpp:201-236
+  - page::k_packed(slot, kv_head) :: kv_cache.hpp:2116-2124
+  - k_vnni_view<bf16, 64, 128> :: k_vnni.hpp:156-199; store_row_major 481
+  - k_vnni_view<const bf16, 64, 128> :: k_vnni.hpp:163-199 (T = const bf16); converting constructor 171-177
+  - friend struct (of k_vnni_view) :: k_vnni.hpp:189-192
+  - concept k_vnni_element<T> :: k_vnni.hpp:153-154
+  - detail::k_vnni_access::plane(view) :: k_vnni.hpp:238-247
+  - the typed operations in this header :: k_vnni.hpp:34, 344-472
+  - k_vnni::qk_group :: kernels/k_vnni.hpp:61, 85
+  - amx_attn_h128g4::qk_vnni_128x4 :: amx_attn.cpp:237, 244
+  - book::fill_storage_slot :: kv_cache.hpp:1830, 1835-1836
+  - const_k_row_view<Cols, Aligned, Dma> :: k_vnni.hpp:254-255, 262-277
+  - k_row_view<Cols, Aligned, Dma> :: k_vnni.hpp:257-258, 279-283
+  - Aligned, Dma flags :: k_vnni.hpp:249-253, 260-261
+
+== k_vnni-b3: K_VNNI-B3. Function model: every operation of the file, its callers and callees
+INTRO: The operations are grouped by purpose: index map and gate, views, one token's row, a whole block, the row-major form, the conversion, and the internal helpers. Every cell says in one line what the function does and cites its definition. Callers in other files of the PR sit at the left.
+CAPTION: B3, function model. Every operation of k_vnni.hpp as a cell: its name, one line on what it does, and the lines that define it. All are new in this PR. The grey box at the left of each group names the callers in other files with their call-site lines; its citation and the register give the lines that define those callers. The small text under a cell names what the cell calls, expands to, or who reads it. The page accessors of kv_cache.hpp (set_k_row, get_k_row, set_k_block, k_block_to_vnni_at, k_forget_row, copy_storage_slot) are the main callers.
+BOXES (59):
+  - note_k_row_saved (caller) :: kv_cache.hpp:2167
+  - k_forget_row (caller) :: kv_cache.hpp:2552
+  - kv_block::k_storage (caller) :: kv_cache.hpp:2993
+  - apply_page_tok (caller) :: self_attention.hpp:1856
+  - k_layout_dense (caller) :: self_attention.hpp:1924
+  - k_store_shared (caller) :: model.hpp:3192
+  - page_info::k_head_fn (caller) :: full.hpp:2747
+  - block_bit(c) :: k_vnni.hpp:97-100
+  - offset_bit(offset) :: k_vnni.hpp:101-105
+  - layout_on<head_size> :: k_vnni.hpp:119-130
+  - index(token, dim) :: k_vnni.hpp:132-141
+  - page::k_packed (caller) :: kv_cache.hpp:2120
+  - page::set_k_row (caller) :: kv_cache.hpp:2247
+  - page::set_k_block (caller) :: kv_cache.hpp:2277
+  - page::get_k_row (caller) :: kv_cache.hpp:2291
+  - page::k_row_if_row_major (caller) :: kv_cache.hpp:2341
+  - book::fill_storage_slot (caller) :: kv_cache.hpp:1830
+  - k_vnni::qk_group (caller) :: kernels/k_vnni.hpp:61
+  - amx_attn_h128g4::qk_vnni_128x4 (caller) :: amx_attn.cpp:237
+  - k_vnni_tensor::as_view :: k_vnni.hpp:214-227
+  - k_vnni_view::at :: k_vnni.hpp:179-186
+  - k_vnni_view(other) :: k_vnni.hpp:171-177
+  - k_vnni_access::plane :: k_vnni.hpp:239-246
+  - store_k_block (caller) :: model.hpp:3241
+  - page_info::k_head_fn (caller) :: full.hpp:2747
+  - k_source_row :: k_vnni.hpp:262-277
+  - k_destination_row :: k_vnni.hpp:279-283
+  - store_row (in-file caller) :: k_vnni.hpp:349-351
+  - load_row (in-file caller) :: k_vnni.hpp:367-369
+  - store_block (in-file caller) :: k_vnni.hpp:394-396
+  - pair_base :: k_vnni.hpp:290-301
+  - pair_row_offsets :: k_vnni.hpp:303-310
+  - transpose_16x16_epi32 :: k_vnni.hpp:314-341
+  - page::set_k_row (caller) :: kv_cache.hpp:2247
+  - page::get_k_row (caller) :: kv_cache.hpp:2291
+  - page::set_k_block (caller) :: kv_cache.hpp:2277
+  - store_k_block (caller of set_k_block) :: model.hpp:3241
+  - page::copy_storage_slot (caller) :: kv_cache.hpp:2691
+  - copy_token call of the layout test :: t_k_vnni_layout.cpp:197
+  - store_row :: k_vnni.hpp:349-362
+  - load_row :: k_vnni.hpp:367-380
+  - copy_token :: k_vnni.hpp:426-435
+  - store_block :: k_vnni.hpp:394-420
+  - page::k_row_if_row_major (caller) :: kv_cache.hpp:2341
+  - page::set_k_row (caller) :: kv_cache.hpp:2247
+  - page::get_k_row (caller) :: kv_cache.hpp:2291
+  - page_info::k_head_fn (caller of k_row_if_row_major) :: full.hpp:2747
+  - page::copy_storage_slot (caller) :: kv_cache.hpp:2691
+  - apply_page_tok (caller) :: self_attention.hpp:1856
+  - row_major_row :: k_vnni.hpp:462-472
+  - store_row_major :: k_vnni.hpp:476-482
+  - load_row_major :: k_vnni.hpp:486-492
+  - page::k_block_to_vnni_at (caller) :: kv_cache.hpp:2214
+  - convert_pending_k_blocks (caller of k_block_to_vnni_at) :: model.hpp:3173
+  - page::copy_storage_slot (caller) :: kv_cache.hpp:2691
+  - page::k_forget_row (caller) :: kv_cache.hpp:2552
+  - clear_kv_complete_at (caller of k_forget_row) :: kv_cache.hpp:2472
+  - block_to_vnni :: k_vnni.hpp:497-509
+  - block_to_rows :: k_vnni.hpp:512-524
+
+== k_vnni-b4: K_VNNI-B4. Sequencing model: the bytes of one block through the operations
+INTRO: One 16-token block of the worked example (block 2 of the plane of slot 5, KV head 0, page 7) passes through store_row_major, block_to_vnni, store_row and load_row, and back through block_to_rows. The diagram shows which operation touches which lines of the block's 4 KiB and in which form. A solid vermillion box is the conversion of a complete block (block_to_vnni here, convert_pending_k_blocks in B5, k_block_to_vnni_at in K9); the dashed vermillion chip of the legend is the complete block that waits for it.
+CAPTION: B4, sequencing model: the bytes of block 2 of the worked example through the operations. Each row shows the block's 4 panels (4 KiB) after one operation. store_row_major writes 4 whole lines per token into the row-major form. block_to_vnni rewrites all 64 lines as pair rows of the VNNI form (Vector Neural Network Instructions layout) at the forward end (the end of the forward pass). store_row and load_row then touch 4 bytes in every one of the 64 lines for one token. block_to_rows puts the row-major form back in place. Look at how many lines each operation touches: 4 per token in the row-major form, 64 per token in the VNNI form.
+BOXES (5):
+  - store_row_major(plane, 37, src) :: k_vnni.hpp:474-482
+  - block_to_vnni(plane, 2) :: k_vnni.hpp:497-509; 494-496
+  - store_row(plane, 37, src) :: k_vnni.hpp:349-362; 344-348
+  - load_row(plane, 37, dst) :: k_vnni.hpp:367-380; 364-366
+  - block_to_rows(plane, 2) :: k_vnni.hpp:512-524; 511
+
+== k_vnni-b5: K_VNNI-B5. Interaction model: who calls which operation from which thread
+INTRO: The operations of this file are called from kv_cache.hpp (page accessors), model.hpp (save_k, main thread and main helpers), self_attention.hpp (attention workers), full.hpp (FPGA staging) and the two score kernels. Threads are lanes. The diagram cites the comment that states each thread rule.
+CAPTION: B5, interaction model. One lane per kind of thread, left to right in the order of one forward pass (schematic, not to scale). Main and its helpers store rows inside the shared K store window (one shared save_k call). The thread that stores a whole 16-token block publishes its 16 row bits and its block bit at once (note_k_block_saved, any thread of the window). Only main records the row bits of the shorter runs, after the join. Only main converts the completed blocks at the forward end, after the staging gather (the copy of K/V rows for the FPGA) drained. The attention workers only read. The GOF staging gather (gof::populate) also only reads, and it has no thread of its own: idle attention workers run it through help_drain_gof, and main runs the rest through wait_for_coop_gof. The scheduler thread (the thread that runs the scheduler of full.hpp between forward passes) converts blocks back to row-major under the tree lock (the lock on the token tree). The two yellow blocks are that staging path, drawn in the hardware attention colour. R1 to R7 cite the comment that states each rule. R7 is the hardware-attention exception: the rows of a hardware-scored operation get no bits and no conversion.
+BOXES (15):
+  - save_k_impl, main: claims units -> store_k_block :: model.hpp:3352, 3380-3397
+  - save_k_impl, main: join :: model.hpp:3352, 3402-3416
+  - save_k_impl, main: note_k_row_saved -> pending_k_blocks_ :: model.hpp:3352, 3420-3456
+  - wait_for_coop_gof :: model.hpp:3583-3592
+  - convert_pending_k_blocks -> k_block_to_vnni_at -> block_to_vnni :: model.hpp:3171-3180
+  - save_k_impl, helper: waits for opened >= W :: model.hpp:3352, 3385-3390
+  - save_k_impl, helper: claims units -> store_k_block :: model.hpp:3352, 3391-3397
+  - save_k_impl, helper: finished += 1, returns :: model.hpp:3352, 3398-3401
+  - attention worker: waits for upstream_kvs_ready :: kv_cache.hpp:695-699
+  - apply_page_tok -> qk_vnni_128x4 | qk_group | row_major_row -> dotter :: self_attention.hpp:1856, 1906-2049
+  - gof::populate -> k_head_fn -> k_row_if_row_major | get_k_row [attention worker (help_drain_gof) or main (wait_for_coop_gof)] :: gof.cpp:188, full.hpp:2747-2772; model.hpp:1167-1168, 3570-3576, 3583-3592
+  - staging gather drained at the forward end :: model.hpp:1838-1847
+  - clear_kv_complete_at -> k_forget_row -> block_to_rows :: kv_cache.hpp:2472-2477
+  - copy_from -> copy_storage_slot :: kv_cache.hpp:2787, 2691-2763
+  - clear_kv_complete_at and copy_from: between forward passes, tree lock held :: kv_cache.hpp:701-704
+
+== kv_cache-b1: KV_CACHE-B1. Data model: book, page, kv_block, and the per-page K layout state
+INTRO: A book holds one storage slot per layer (plus one EAGLE storage), pages of 64 token offsets, and one kv_block per (slot, KV head, page). The PR types the K plane of a kv_block and adds two bit arrays to the page, one entry per logical slot plus one for the EAGLE storage. Every arrow says how many.
+CAPTION: B1, the data model. A book (the unit of KV memory allocation) holds one storage slot per layer plus one EAGLE storage (EAGLE is a speculation model with its own extra physical slot), and n_pages pages of 64 token offsets. One kv_block holds the K and V planes of one (storage slot, KV head, page). The PR types the K plane of a kv_block (k_storage). It also adds two atomic bit arrays to the page, with one entry per logical slot plus one for the EAGLE storage: k_rows_saved_ (one bit per offset) and k_vnni_blocks_ (one bit per 16-token block). Bit c of a k_vnni_blocks_ entry names the layout of block c in every KV head's plane of that slot. A set block bit implies the block's 16 row bits (2620), and D2 opens the two arrays to the bit level. The bottom band is the worked example reused on this page.
+BOXES (23):
+  - book :: Note [KV Memory Layout] (kv_cache.hpp:56-81); struct at kv_cache.hpp:940-941; changed: eagle_view_active added at 1082-1087
+  - storage slot (kv_storage_offset) :: common.hpp:239-249; count storage_slot_count_ = logical_slot_count() + has_eagle_storage() (kv_cache.hpp:1099, 1105)
+  - EAGLE storage :: kv_cache.hpp:1090-1092 (eagle_storage_offset = kv_storage_offset(logical_slot_count()))
+  - pages :: kv_cache.hpp:1511 (std::vector<page_t> pages); one page per index 0 .. n_pages-1 (kv_cache.hpp:1686-1687)
+  - book::eagle_view_active :: kv_cache.hpp:1082-1087
+  - kv_slot_id :: attention_ids.hpp:20-30 (struct kv_slot_id); Note [KV slot retention] (kv_cache.hpp:113-120)
+  - k_storage_ref :: kv_cache.hpp:2137-2148; k_storage_of at 2149-2155
+  - page :: kv_cache.hpp:1940-1942 (page_size = 64 at 1942)
+  - k_rows_saved_ :: kv_cache.hpp:2608-2617
+  - k_vnni_blocks_ :: kv_cache.hpp:2618-2622
+  - n_slots (entry layout_t::n_slots, the EAGLE storage) :: kv_cache.hpp:2486, 2491-2492 (EAGLE_STORAGE_SLOTS_1)
+  - EAGLE_STORAGE_SLOTS_1 :: kv_cache.hpp:2491-2492
+  - k_state_ix :: kv_cache.hpp:2499-2505
+  - page(page&&) :: kv_cache.hpp:1958-1974
+  - kv_saves_ :: kv_cache.hpp:2603-2606
+  - kv_block :: kv_cache.hpp:2982-2985 (detail::kv_block, 2984-2985); one per (storage slot, KV head, page): kv_cache.hpp:1797-1798
+  - k (k_storage) :: kv_cache.hpp:2986-3002 (std::conditional_t at 2993-2995; static_asserts 2996-3001)
+  - k_vnni_tensor :: tensor/k_vnni.hpp:201-236
+  - native_k_storage :: kv_cache.hpp:2990-2992
+  - v (v_vnni_tensor) :: kv_cache.hpp:3003-3015, unchanged context
+  - k_vnni_view (k.as_view()) :: tensor/k_vnni.hpp:156-199; as_view at 214-227
+  - k_vnni::layout_on :: tensor/k_vnni.hpp:119-130
+  - KV_BLOCK_PLANES_2 :: kv_cache.hpp:822-825
+
+== kv_cache-b2: KV_CACHE-B2. One 16-token block, two layouts in the same 4 KiB
+INTRO: The K plane of one (slot, KV head, page) is 16 panels of 1 KiB. A block owns four of them, 4 KiB apart. The PR lets those four panels hold either 16 row-major token rows or the VNNI form, converts between the two in place (k_vnni.hpp), and records which form a block holds in the page's block bit.
+CAPTION: B2, one 16-token block in its two layouts, drawn for the worked example (block 2 of the plane of slot 5, page 7). A plane (K for one KV head of one page, 16 KiB) is 16 panels of 1 KiB, and block c owns the four panels (s, c), 4 KiB apart. In the row-major form each panel holds four 256-byte token rows. In the VNNI form (Vector Neural Network Instructions, the AMX B-operand layout) each panel holds the 16 dimension pairs of one 32-dimension step for the block's 16 tokens. So dimension 70 of token 37 sits at element 3270 in the row-major form (row start 3200 + 70) and at element 5226 in the VNNI form.
+BOXES (12):
+  - K plane (16 panels) :: tensor/k_vnni.hpp:24-32 (plane layout); 16 KiB = N_PANELS_16 x PANEL_BYTES_1024 (tensor/k_vnni.hpp:61-117)
+  - panel (s, c) :: tensor/k_vnni.hpp:29-30
+  - block c = panels (s, c), s = 0..3 :: Note [Row-major tail block] (tensor/k_vnni.hpp:437-445)
+  - row-major form of block 2 (row_major_row) :: tensor/k_vnni.hpp:458-472; Note [Row-major tail block] 437-456
+  - store_row_major / load_row_major :: tensor/k_vnni.hpp:474-492
+  - k_vnni::index (the VNNI form of block 2) :: tensor/k_vnni.hpp:132-141, 24-32
+  - store_row / load_row :: tensor/k_vnni.hpp:344-381
+  - store_block :: tensor/k_vnni.hpp:382-420
+  - block_to_vnni :: tensor/k_vnni.hpp:494-509
+  - block_to_rows :: tensor/k_vnni.hpp:511-524
+  - k_vnni_blocks_ bit c (the block bit) :: kv_cache.hpp:2618-2622
+  - k_block_is_vnni :: kv_cache.hpp:2513-2518
+
+== kv_cache-b3: KV_CACHE-B3. Function model: callers, page and book API, k_vnni.hpp operations
+INTRO: Each row is one call path through kv_cache.hpp: the caller in another file, the page or book function it calls, and the typed operation of k_vnni.hpp that touches the bytes. Every function cell says in one line what the function does and cites its definition.
+CAPTION: B3, the function model. Each row is one call path: the caller in another file (with the thread in brackets), the page or book function of kv_cache.hpp it calls, and the typed operation of h/tron/tensor/k_vnni.hpp that touches the bytes. Each function cell says in one line what the function does, cites its definition and tags whether the PR adds (new) or changes it. The word on the arrow between two cells of a row is their call order: "calls" (the first calls the second), "then" (the caller calls the second after the first) or "and" (the caller calls both). In row 4 the arrow points left: the test-only k_block_to_vnni calls k_block_to_vnni_at, which the production caller reaches directly [kv_cache.hpp:2208-2211; model.hpp:3177]. The dashed band lists the new private helpers the rows share.
+BOXES (38):
+  - set_k_row :: kv_cache.hpp:2238-2263
+  - set_k_block :: kv_cache.hpp:2265-2284
+  - note_k_block_saved :: kv_cache.hpp:2192-2200
+  - note_k_row_saved :: kv_cache.hpp:2157-2190
+  - k_storage_of :: kv_cache.hpp:2149-2155
+  - k_block_to_vnni_at :: kv_cache.hpp:2213-2236
+  - k_block_to_vnni :: kv_cache.hpp:2202-2211
+  - k_vnni_blocks :: kv_cache.hpp:2126-2135
+  - k_packed :: kv_cache.hpp:2108-2124
+  - k_row_if_row_major :: kv_cache.hpp:2332-2349
+  - get_k_row :: kv_cache.hpp:2286-2307
+  - clear_kv_complete_at :: kv_cache.hpp:2470-2477
+  - k_forget_row :: kv_cache.hpp:2544-2586
+  - copy_from :: kv_cache.hpp:2786-2811
+  - copy_storage_slot :: kv_cache.hpp:2688-2784
+  - page::k :: kv_cache.hpp:2040-2106
+  - kv_block::k_view / k_at :: kv_cache.hpp:3017-3038
+  - store_k_block (caller) :: model.hpp:3232-3344
+  - save_k_impl (caller) :: model.hpp:3351-3457
+  - convert_pending_k_blocks (caller) :: model.hpp:3171-3180
+  - apply_page_tok / apply_dense_amx_page (callers) :: self_attention.hpp:1850-1872 (apply_page_tok), 1906-1937, 2019-2049; 1749-1787 (apply_dense_amx_page)
+  - k_head_fn (caller) :: full.hpp:2747-2770; gof.hpp:78
+  - create_child_at_location / extend_leaf_edge / invalidate_restored_book (callers) :: full.hpp:654 (create_child_at_location, call at 669), 801 (extend_leaf_edge, call at 818), 3329 (invalidate_restored_book, call at 3346)
+  - book::append (caller) :: kv_cache.hpp:1361-1395
+  - store_row_major / store_row :: tensor/k_vnni.hpp:474-482, 344-362
+  - store_block :: tensor/k_vnni.hpp:382-420
+  - offset_bit / block_bit :: tensor/k_vnni.hpp:97-105
+  - block_to_vnni :: tensor/k_vnni.hpp:494-509
+  - qk_vnni_128x4 :: amx_attn_iface.hpp:250-263
+  - qk_group :: kernels/k_vnni.hpp:59-65
+  - row_major_row / load_row :: tensor/k_vnni.hpp:458-472, 364-381
+  - block_to_rows :: tensor/k_vnni.hpp:511-524
+  - k_state_ix :: kv_cache.hpp:2499-2505
+  - k_block_bits :: kv_cache.hpp:2507-2511
+  - k_block_is_vnni :: kv_cache.hpp:2513-2518
+  - k_with_storage_geometry :: kv_cache.hpp:2520-2532
+  - k_storage_readable :: kv_cache.hpp:2534-2542
+  - book::eagle_view_active :: kv_cache.hpp:1082-1087
+
+== kv_cache-b4: KV_CACHE-B4. Sequencing model: the life of one 16-token block
+INTRO: A block of one storage slot moves through four states, plus a fifth state (records no row bits: stays row-major) under hardware attention. The upper path is the decode case (one row per step). The arc over the top is the prefill case (a whole block at once). The lower path is the hardware-attention policy, under which a block completed by short runs never converts. Clears and copies move a block back.
+CAPTION: B4, the sequencing model: the life of one 16-token block of one storage slot. Boxes are states (the colours of B1), arrows are the operations of this PR with the thread in brackets. The upper path is the decode case (one row per step). The arc over the top is the prefill case (a whole block at once). The lower path is the hardware-attention policy. Under it save_k records no row bit for the rows a short run stores, so a block completed that way never converts. A whole-block save under the same policy still stores the VNNI layout and sets its bits [kv_cache.hpp:731-735, 750-753; model.hpp:3340, 3426].
+BOXES (5):
+  - k_rows_saved_ bits all clear: the empty state :: kv_cache.hpp:2608-2617
+  - incomplete block: row-major rows (row-major tail block) :: kv_cache.hpp:677-686; model.hpp:3301; Note [Row-major tail block] (tensor/k_vnni.hpp:437-456)
+  - complete, may wait for its conversion (16 row bits, block bit clear) :: kv_cache.hpp:684-685
+  - k_vnni_blocks_ bit set: the converted (VNNI) state :: kv_cache.hpp:2618-2622
+  - records no row bits: stays row-major (hardware attention) :: Note [Row-major blocks under hardware attention] (kv_cache.hpp:731-735)
+
+== kv_cache-b5: KV_CACHE-B5. Interaction model: which thread touches the K state when
+INTRO: One forward pass and the tree work between passes, as lanes. The diagram shows why the conversion waits for the forward end and why the clear and copy paths need no bit synchronisation beyond the tree lock. Durations are not to scale. The order is what matters.
+CAPTION: B5, the interaction model: one forward pass of one layer and the tree work between passes, one lane per actor (the token tree lane is the scheduler's tree work under the tree lock, not a thread). Both minibatches of the worked example hold more than k_store_block = 16 items, so both open a shared window [model.hpp:3189-3200]. The tinted band marks why the conversion of a block completed row by row waits for the forward end. The cooperative GOF staging gather (the copy of K rows for the FPGA) of an earlier minibatch reads the block row-major while a later minibatch saves its last rows [kv_cache.hpp:693-700]. Clears and page copies run on the token tree between passes with the tree lock held, so they need no bit synchronisation beyond it.
+BOXES (14):
+  - save_k window (k_store_cut_units, opened, claim loop, join, finished) :: model.hpp:3380-3416; batch::k_store_window (common.hpp:1167-1193)
+  - note_k_row_saved loop, mark_k_complete, count_down :: model.hpp:3420-3457
+  - run() joins the workers :: model.hpp:1822-1836
+  - wait_for_coop_gof :: model.hpp:1838-1840, 3583-3592
+  - convert_pending_k_blocks -> k_block_to_vnni_at :: model.hpp:1842-1847, 3171-3180; kv_cache.hpp:2213-2236
+  - finished (helpers: wait for opened, claim loop, finished++) :: model.hpp:3385-3401
+  - the helpers are idle while main runs save_k (their next kernel waits for the attention output) :: Note [Shared block save] (model.hpp:3107-3109)
+  - attention jobs read k_vnni_blocks / k_packed after the latch :: self_attention.hpp:1924-1937, 2019-2049; kv_cache.hpp:697-699; common.hpp:1159-1162
+  - help_drain_gof (k_row_if_row_major / get_k_row) :: model.hpp:3570-3576; full.hpp:2762-2767; kv_cache.hpp:693-700
+  - run (the attention workers exit when run() joins them) :: model.hpp:1822-1836
+  - clear_kv_complete_at -> k_forget_row :: kv_cache.hpp:2472-2477, 2552-2586
+  - book::append -> copy_from -> copy_storage_slot :: kv_cache.hpp:1361-1395, 2688-2811
+  - tree work between passes under the tree lock :: kv_cache.hpp:2550-2551, 701-704
+  - a writer touches only its own token's bytes (store_row_major, store_row, store_block) :: kv_cache.hpp:2252-2258, 2282-2283; tensor/k_vnni.hpp:344-348, 474-482
+
+== model-b1: MODEL-B1. Data model: the minibatch, the K store window, the pending list, and the K buffer
+INTRO: A batch holds the items of one minibatch (token jobs), each at one page offset. The PR adds batch::k_store_window_t (in common.hpp: the claim counter, the open/finished counters, the unit table and the helpers' window counters) and state::pending_k_blocks_ (the blocks to convert at the forward end). Every arrow says how many. The worked example is a 40-item window with 3 workers (main and 2 main helpers).
+CAPTION: B1, data model. The left column is what save_k reads: the batch (one minibatch) with its items, the K buffer ks, and the state members of model.hpp. The middle column is batch::k_store_window_t, the window the PR adds in common.hpp, and the pending_k_block record of the deferred conversion list. The right column is the page with its two bit sets and the work unit, a run of consecutive items in one 16-token block, and the slot (the KV storage one attention operation writes). Every arrow says how many. The band at the bottom is the worked example: 40 items cut into three units, and the counters at the open of window W. The slot-5 example of the kv_cache.hpp and k_vnni.hpp pages (page 7, bits 0..40 set, block 1 complete and waiting) is a different history of page 7: its rows arrived through short runs, not through this window's two whole-block saves.
+BOXES (29):
+  - batch :: common.hpp:993 (struct batch); Note at common.hpp:958-964
+  - items :: common.hpp:1084-1085; 1 batch -> n_items items, at most max_minibatch_size: model.hpp:3207-3209, common.hpp:1189
+  - k_store_window :: common.hpp:1167-1169 (comment), 1193 (member)
+  - downstream_minibatches / upstream_kvs_ready :: common.hpp:1153, 1162; used at model.hpp:3455-3456
+  - ks (kv_buffer_t&) :: model.hpp:3354 (parameter), 3358 (width static_assert), 3443 (logged as 'WK roped')
+  - row_of :: model.hpp:3247-3250 (lambda in store_k_block: slice<head_size>()(ks[ix].as_view(), kv_head * head_size))
+  - state (model.hpp) :: model.hpp:1115 (struct state); the members cited on each row
+  - token_jobs, token_jobs_do_kv :: model.hpp:1159-1160
+  - k_store_block :: model.hpp:3153; tensor/k_vnni.hpp:68, 106
+  - pending_k_blocks_ :: model.hpp:3169; Note [K VNNI storage] (model.hpp:3155-3163)
+  - k_join_clock_spins, k_join_timeout_s :: model.hpp:3181-3187
+  - k_store_window_t :: common.hpp:1170-1193
+  - max_shared_workers :: common.hpp:1171-1173
+  - next_unit :: common.hpp:1174-1176
+  - opened :: common.hpp:1177-1178
+  - finished :: common.hpp:1179
+  - n_units :: common.hpp:1180
+  - unit_start :: common.hpp:1181-1189
+  - helper_windows :: common.hpp:1190-1192
+  - n_workers, n_helpers (threads of a shared window) :: TronCpp.hs:1388 (n_workers); model.hpp:3379 (n_helpers); model.hpp:3107-3116
+  - pending_k_block :: model.hpp:3164-3168; comment 3155-3163
+  - page :: kv_cache.hpp:1940-1942 (64 tokens per page); page_of at model.hpp:1773; offset_in_page at kv_cache.hpp:2031
+  - block 0 .. block 3 :: kv_cache.hpp:2196 (c < page_size / BLOCK_TOKENS_16); tensor/k_vnni.hpp:69
+  - k_rows_saved_ :: kv_cache.hpp:2608-2617
+  - k_vnni_blocks_ :: kv_cache.hpp:2618-2622
+  - k_storage_ref / k_storage_of :: kv_cache.hpp:2137-2155
+  - kv_block::k :: kv_cache.hpp:2982-3002; tensor/k_vnni.hpp:24-29
+  - slot (binding.kv_slot) :: model.hpp:3370 (slot = binding.kv_slot); kv_cache.hpp:171 (kv_slot_id selects persistent storage); kv_cache.hpp:2502-2504 (k_state_ix)
+  - work unit u :: common.hpp:1181-1188; model.hpp:3122-3124, 3395-3396
+
+== model-b2: MODEL-B2. Function model: save_k, its helpers, and what they call in the page
+INTRO: save_k (two overloads) calls save_k_impl. save_k_impl decides the sharing (k_store_shared), cuts the units (k_store_cut_units), stores the runs (store_k_block) and records the rows (note_k_row_saved). convert_pending_k_blocks runs at the forward end. The generated plugins call save_k from run() (worker 0) and run_main_help (the helpers). Every cell says in one line what the function does.
+CAPTION: B2, function model. Each cell is one function with a one-line description from its comment and the line that defines it. The two save_k overloads take a worker index and a worker count from the generated run() and run_main_help and forward them to save_k_impl. save_k_impl decides the sharing (k_store_shared) and cuts the units (k_store_cut_units, main only). store_k_block runs on any thread of the window. After every store, main records the rows and marks the tokens through the page functions at the right. convert_pending_k_blocks runs once per forward from run_forward, after wait_for_coop_gof.
+BOXES (22):
+  - saveKv: generated run() calls save_k(..., 0, n_workers) :: TronCpp.hs:2951-2958
+  - run_main_help (generated): save_k(..., worker_ix, n_workers) :: TronCpp.hs:1358-1360; 2888-2895
+  - save_k with the defaults (handwritten plugin, tests) :: t_llama_unit.cpp:3931; llama.hpp:1038
+  - forward() :: model.hpp:1711 (definition); 1769 (the run_forward call)
+  - save_k (two overloads) :: model.hpp:3459-3483
+  - save_k_impl :: model.hpp:3346-3457
+  - run_forward :: model.hpp:1782 (definition); 1840-1847 (the calls)
+  - k_store_shared :: model.hpp:3189-3200
+  - k_store_cut_units :: model.hpp:3202-3230
+  - store_k_block :: model.hpp:3232-3344; row_of at 3247-3250
+  - cached_operation_uses_hw :: model.hpp:1530-1533
+  - operation_is_hardware_candidate (has_hardware_slot) :: model.hpp:1491-1492 (definition); 3371-3373 (has_hardware_slot); 3450-3451 (the credit runs only then)
+  - wait_for_coop_gof :: model.hpp:3578-3592
+  - convert_pending_k_blocks :: model.hpp:3171-3180
+  - k_vnni::layout_on :: tensor/k_vnni.hpp:119-130
+  - page_of, offset_in_page :: model.hpp:1773; kv_cache.hpp:2031
+  - set_k_block, note_k_block_saved :: kv_cache.hpp:2265-2284; 2192-2200
+  - set_k_row :: kv_cache.hpp:2238-2262
+  - note_k_row_saved, k_storage_of :: kv_cache.hpp:2157-2167; 2137-2155
+  - mark_k_complete, credit_gof_save, upstream_kvs_ready.count_down (and log_intermediate 'WK roped' before them) :: kv_cache.hpp:2444-2450; model.hpp:3550-3552; 3455-3456; log_intermediate at model.hpp:3443 (definition 1279)
+  - page::k(slot, kv_head, j).set :: kv_cache.hpp:2088-2096
+  - k_block_to_vnni_at :: kv_cache.hpp:2214-2236
+
+== model-b3: MODEL-B3. Sequencing model: one shared save_k window, step by step
+INTRO: The ordered steps of one window, each citing the line that does it. Main cuts the units, resets the counters and opens the window (release on opened). Each helper waits for its window number (acquire on opened). Every thread claims units with fetch_add on next_unit and stores them. Each helper increments finished (release). Main joins (acquire on finished) under a watchdog. Main records the rows and queues the completed blocks. Main marks the tokens and credits the GOFs.
+CAPTION: B3, sequencing model: the steps of one shared save_k window, top to bottom, for the main thread (left) and one helper (right), with the window counters between them. Each arrow names its memory order: main publishes the unit table with a release on opened, a helper reads it with an acquire, every thread claims units with fetch_add (acq_rel), a helper leaves with a release on finished, and main's join reads finished with acquire. The worked example (40 items, 3 units, 3 workers) fills in the counters. After this window nothing is queued. Blocks 0 and 1 of page 7 were saved whole and are VNNI already. Block 2 of page 9 has 8 of its 16 rows and waits for a later minibatch (of this pass or a later one).
+BOXES (21):
+  - batch::k_store_window :: common.hpp:1167-1193
+  - save_k(ks, 0, n_workers) [step 0 main: generated run()] :: TronCpp.hs:2951-2958
+  - is_main, shared [step 1 main: the decision; unshared store] :: model.hpp:3361-3366; 3417-3419
+  - k_store_cut_units, opened.fetch_add [step 2 main: open the window] :: model.hpp:3380-3384
+  - next_unit.fetch_add, store_k_block [step 3 main: the claim loop] :: model.hpp:3391-3397
+  - finished.load, k_join_clock_spins [step 5 main: the join and its watchdog] :: model.hpp:3402-3416
+  - note_k_row_saved loop [step 6 main: the row-recording loop] :: model.hpp:3420-3439
+  - mark_k_complete, credit_gof_save [step 7 main: the per-token completion marks and GOF credits] :: model.hpp:3440-3453
+  - upstream_kvs_ready[slot].count_down [step 8 main: the downstream latches] :: model.hpp:3454-3456
+  - save_k(ks, worker_ix, n_workers) [step 0 helper: generated run_main_help] :: TronCpp.hs:2888-2895
+  - is_main, shared [step 1 helper: the decision, early return] :: model.hpp:3361-3366
+  - helper_windows, opened.load [step 2 helper: wait for window W] :: model.hpp:3385-3390
+  - next_unit.fetch_add, store_k_block [step 3 helper: the claim loop] :: model.hpp:3391-3397
+  - finished.fetch_add(1, release) [step 4 helper: leaves the window and returns] :: model.hpp:3398-3401
+  - helper after step 4: idle until the attention output :: model.hpp:3107-3109
+  - helper_windows[worker_ix] :: common.hpp:1192; model.hpp:3386
+  - unit_start, n_units (counters column) :: common.hpp:1180, 1189
+  - opened (counters column) :: common.hpp:1178
+  - next_unit (counters column) :: common.hpp:1176; model.hpp:3393-3394
+  - finished (counters column) :: common.hpp:1179; model.hpp:3383, 3399, 3404 (n_helpers at 3379)
+  - after the join (four things hold) :: model.hpp:3136-3141
+
+== model-b4: MODEL-B4. Interaction model: threads over one layer and the forward end (wall-clock lanes)
+INTRO: One lane per thread: main, the main helpers, the attention workers, and the forward end. Solid blocks are work, dashed outlines are waiting. The critical path (main's serial part) is marked with a thick frame. Durations are schematic. The order and the overlap are what the diagram shows. The one measurement quoted (0.86 ms per layer) comes from the comment of Note [Shared block save].
+CAPTION: B4, interaction model: one lane per thread over one layer and then the forward end, with the old layout (before PR 4424) as the red dashed lane on top. Solid blocks are work, dashed outlines are waiting. Main waits for the K channel (the roped K rows of every token, the startOperand wait of the generated run()) before save_k, and may idle there. The helpers reach their save_k call with nothing blocking after their rope kernel, wait for main to open the window, claim and store units beside main, and are idle again until the attention output. The attention workers' pending sections wait behind save_k. Durations are schematic. The only measurement quoted (0.86 ms per layer, with the VNNI K layout and the per-row store, before the two remedies of the Note) comes from the comment of Note [Shared block save] and sits on the old lane's save_k slice. The new split's time is unmeasured on this page (Insufficient data).
+BOXES (32):
+  - [main, before] (the old layout: the whole K store on main) :: model.hpp:3087-3094 (the measurement and 'the main thread's largest serial piece of work'); base model.hpp:3077-3105 (the store inside the marks loop, removed after head 3446)
+  - [main] :: model.hpp:3107-3116 (worker_ix 0 is main)
+  - [main helper 1], [main helper 2] :: model.hpp:3107-3116; TronCpp.hs:1358-1360 (run_main_help(q_batches, 1 + i, n_workers))
+  - [attention workers] :: model.hpp:2338-2345 (Note [Attention workers are the last pool workers]); 3093-3094
+  - save_k: the whole K store on main alone (before, removed): 0.86 ms per layer :: model.hpp:3087-3094 (the measurement: 0.86 ms per layer, 105 ns per (token, KV head) row, 2026-09-14 on delphi-3bda); base model.hpp:3098-3105 (the per-token store inside the marks loop)
+  - main: K/Q rope kernel (before the K channel wait) :: model.hpp:3146-3148
+  - startOperand [main: the K channel wait per item, before save_k] :: TronCpp.hs:2951; model.hpp:3144-3146
+  - k_store_cut_units, opened.fetch_add [main: open (cut units, reset the counters, opened++)] :: model.hpp:3380-3384
+  - next_unit.fetch_add, store_k_block [main: claim + store units] :: model.hpp:3391-3397
+  - finished.load, k_join_clock_spins [main: join (spin, watchdog)] :: model.hpp:3402-3416
+  - note_k_row_saved, mark_k_complete, credit_gof_save, count_down [main: after the join] :: model.hpp:3420-3456
+  - save_v [main: the rest of the schedule] :: TronCpp.hs:2959-2960
+  - helper 1: K/Q rope kernel (nothing blocks after it) :: model.hpp:3146-3148
+  - helper 1: wait for opened >= my_window :: model.hpp:3385-3390
+  - next_unit.fetch_add, store_k_block [helper 1: claim + store units] :: model.hpp:3391-3397
+  - finished.fetch_add(1, release) [helper 1: leaves the window] :: model.hpp:3398-3401
+  - helper 1: idle (the next kernel waits for the attention output) :: model.hpp:3107-3109
+  - helper 2: K/Q rope kernel (nothing blocks after it) :: model.hpp:3146-3148
+  - helper 2: wait for opened >= my_window :: model.hpp:3385-3390
+  - next_unit.fetch_add, store_k_block [helper 2: claim + store units] :: model.hpp:3391-3397
+  - finished.fetch_add(1, release) [helper 2: leaves the window] :: model.hpp:3398-3401
+  - helper 2: idle (the next kernel waits for the attention output) :: model.hpp:3107-3109
+  - attention workers: the pending section waits behind save_k; idle workers help_drain_gof :: model.hpp:3093-3094; 3455-3456; self_attention.hpp:761
+  - attention workers: the per-layer attention plan :: model.hpp:2340-2345
+  - main, forward end: run() joins the helpers and the attention workers :: model.hpp:1822-1830; 1836
+  - wait_for_coop_gof [main, forward end: drains the GOF tail backlog] :: model.hpp:1840; 3583
+  - convert_pending_k_blocks [main, forward end] :: model.hpp:1847; 3173-3180
+  - Launch logit delivery (comment) [main, forward end] :: model.hpp:1849-1850
+  - helper 1, forward end: exit (workers_done.count_down()) :: TronCpp.hs:1360-1361
+  - helper 2, forward end: exit (workers_done.count_down()) :: TronCpp.hs:1360-1361
+  - attention workers, forward end: exit; the GOF tail backlog is main's, in wait_for_coop_gof :: model.hpp:3580-3582; self_attention.hpp:761
+  - serial piece of work [critical path, thick red frame] :: model.hpp:3087-3094 (the measurement); 3380-3384, 3402-3456, 1847 (the serial pieces)
+
+== model-b5: MODEL-B5. Decision model: what one run of tokens becomes in the page
+INTRO: For each run of consecutive items in one 16-token block of one page, three cases. A run of 16 tokens is stored as one VNNI block (set_k_block, then note_k_block_saved). A shorter run is stored row by row (set_k_row), into the row-major form, or into the VNNI column when the block is converted already. In more detail: after the stores, main records the saved rows. A block that a short run completed is queued. The forward end converts the queued blocks (convert_pending_k_blocks). Under hardware attention main records no row and queues no block, and the block stays row-major. The diagram reuses the block colours of the kv_cache.hpp page.
+CAPTION: B5, decision model: what one run of consecutive tokens becomes in the page. A VNNI slot stores a run of 16 as one block (set_k_block, bits at once, never queued) and a shorter run row by row (set_k_row, into the row-major form or into the VNNI column of a block converted already). After every row is stored (the join of a shared save, or main's own store of an unshared save), main calls note_k_row_saved for every KV item of the minibatch. The rows of a whole-block run answer false, because their bits were set at the store. The row that completes a block through short runs queues it, and the forward end converts it. Under hardware attention main records no row and queues no block. The block colours are those of the kv_cache.hpp page. The worked example's three units are traced in the note at the left.
+BOXES (19):
+  - store_k_block: one run :: model.hpp:3241; 3280-3299
+  - VNNI slot? (k_vnni::layout_on) :: model.hpp:3251; tensor/k_vnni.hpp:119-130
+  - a run of 16? (n == k_store_block) :: model.hpp:3300; 3323-3324
+  - set_k_block per KV head, then note_k_block_saved :: model.hpp:3325-3340
+  - page::k(slot, kv_head, j).set (row-major slots, never shared) :: model.hpp:3252-3261; 3193-3194
+  - row-major slot (no bits; the recording loop is compiled out, so note_k_row_saved is never called) :: model.hpp:3420 (if constexpr layout_on); kv_cache.hpp:2157-2158
+  - set_k_row per token and KV head :: model.hpp:3304-3320
+  - one VNNI block (set_k_block): the whole-block save :: model.hpp:3234-3235 ('stored as one VNNI block (set_k_block)'); kv_cache.hpp:2265-2266 ('stored at once in the VNNI layout'); 2192-2200 (the bits); 2163 (never queued)
+  - k_block_is_vnni? (set_k_row decides) :: kv_cache.hpp:2252-2258; model.hpp:3301-3303
+  - a row saved again: the VNNI column :: kv_cache.hpp:2161-2163, 2252-2258
+  - row-major rows (Note [Row-major tail block]) :: tensor/k_vnni.hpp:437-445
+  - note_k_row_saved loop: after every row is stored [main only] :: model.hpp:3420-3439; 3417-3419 (the unshared store before it); 3142-3143
+  - hardware-scored? (cached_operation_uses_hw) :: model.hpp:3426; 1531-1533
+  - stays row-major (hardware attention) :: model.hpp:3423-3425; kv_cache.hpp:729-734
+  - note_k_row_saved per row :: model.hpp:3433; kv_cache.hpp:2157-2163
+  - note_k_row_saved false: an incomplete block (fewer than 16 rows) :: kv_cache.hpp:2157-2167; the phrase at model.hpp:3301
+  - pending_k_blocks_.push_back: complete, may wait :: kv_cache.hpp:2159-2161 and 2610 (the comments that define the state); model.hpp:3433-3436 (the push)
+  - convert_pending_k_blocks (forward end) :: model.hpp:1847; 3173-3180; kv_cache.hpp:2214-2236
+  - conv (bf16 conversion on the stack) :: model.hpp:3263-3269

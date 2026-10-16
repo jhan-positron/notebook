@@ -1,0 +1,1507 @@
+{
+ "pr": {
+  "number": 4868,
+  "ordinal": 1,
+  "title": "Add the VNNI K layout and its readers",
+  "branch": "jhan-vnnik-1-layout",
+  "base": "main",
+  "head": "82d05e94be",
+  "files": 23,
+  "added": 1911,
+  "removed": 167
+ },
+ "short_version": [
+  "PR-1 (#4868) stores the saved key vectors (K) of 128-dimension attention heads in the VNNI-packed layout, behind a typed owner and typed views, and adds no AMX instruction.",
+  "The page introduces four data models (the plane geometry with its index map, the typed owner with its views and one access route, the typed K plane inside the kv_block, and the transfer rows), three algorithms (the per-token store and load, the AVX-512 reader, and the per-token save_k store), and the policies and protocols around them (the layout gate, the page accessors, the FPGA staging gather, the temporary scoring gate and the kill switch).",
+  "Six core diagrams carry them (KV_CACHE-B1, K_VNNI-B1, K_VNNI-B1A, K_VNNI-B2, K_VNNI-B3 and KV_CACHE-B3), and the nine context diagrams and one uninvolved diagram mostly mark what lands in PR-2, PR-3 and PR-4."
+ ],
+ "words": [
+  {
+   "term": "Aligned, Dma flags / DMA",
+   "definition": "DMA is direct memory access, the engine that moves a staging buffer to the FPGA card. A row view carries two compile-time flags, Aligned (the row starts at a 64-byte boundary) and Dma (the row lives in DMA memory), and the K row operations do not require Aligned because they use unaligned vector instructions [h/tron/tensor/k_vnni.hpp:219-228]."
+  },
+  {
+   "term": "AMX",
+   "definition": "Advanced Matrix Extensions, the tile instruction set of the CPU, whose tile multiply TDPBF16PS reads its right operand (the B operand) in the VNNI layout. This PR adds no AMX instruction."
+  },
+  {
+   "term": "apply_page_tok",
+   "definition": "The per-page scoring function of h/tron/models/self_attention.hpp, which picks the dense AMX kernel or the software reader for one (query, page) pair. In this PR every page of a VNNI slot takes the software reader qk_group [h/tron/models/self_attention.hpp:1833-2019; the reader call at 1972-1981]."
+  },
+  {
+   "term": "attention workers",
+   "definition": "The threads that run the attention kernels of a layer, and that run the staging gather through help_drain_gof when idle. They read a page only after every minibatch that writes it counted its latch (upstream_kvs_ready) down."
+  },
+  {
+   "term": "AVX-512",
+   "definition": "Advanced Vector Extensions, the CPU's 512-bit vector instruction set: one register holds 16 lanes of 32 bits, and VDPBF16PS is its instruction that multiplies bf16 pairs and adds them in fp32. The reader qk_group, store_row and load_row are AVX-512 code."
+  },
+  {
+   "term": "bf16 / fp32 / fp16",
+   "definition": "bf16 is the 16-bit brain floating-point format of the stored K and V values, fp32 is the 32-bit float format in which the score kernels add (a bf16 shifted up by 16 bits is the exact fp32), and fp16 is the 16-bit IEEE half format. An fp16 query is widened to fp32 once by the reader [h/tron/kernels/k_vnni.hpp:10-12, 71-77]."
+  },
+  {
+   "term": "block (16-token block, token block c)",
+   "definition": "16 consecutive page offsets of a page (BLOCK_TOKENS_16), page offsets 16 c .. 16 c + 15, of which a page has TOKEN_BLOCKS_4 = 4. A block's bytes are its 4 panels, 4 KiB in all [h/tron/tensor/k_vnni.hpp:63-64, 74-75]."
+  },
+  {
+   "term": "block_to_vnni / block_to_rows",
+   "definition": "The in-place conversions of one 16-token block between its row-major form and its VNNI form. They land in PR-4 (#4901), not in this PR."
+  },
+  {
+   "term": "book",
+   "definition": "The unit of memory allocation of the KV cache. It owns the memory for a requested number of pages and hands out references to them [h/tron/models/kv_cache.hpp:833]."
+  },
+  {
+   "term": "cached_operation_uses_hw",
+   "definition": "model.hpp's per-operation answer, decided once per model, whether the FPGA scores the operation's K. PR-4 uses it in save_k to keep such blocks row-major, and this PR does not read it in save_k."
+  },
+  {
+   "term": "CI lane",
+   "definition": "The CMake job of .github/workflows/cmake-single-platform.yml. This PR adds -DTRON_K_VNNI=ON to its configure line, so the whole test suite runs on the VNNI layout there [.github/workflows/cmake-single-platform.yml:356]."
+  },
+  {
+   "term": "conv (on-stack bf16 conversion)",
+   "definition": "In save_k, a K buffer row whose activation type is not bf16 is converted to a 64-byte-aligned bf16 row on the stack (named row) before set_k_row stores it [h/tron/models/model.hpp:3116-3119]. PR-3 (#4898) moves that conversion into store_k_block, where the stack array is conv[k_store_block][head_size], one row per token of a run."
+  },
+  {
+   "term": "copy_from / book::append",
+   "definition": "book::append copies one book's tokens after another's, page by page through page::copy_from, which calls copy_storage_slot per storage slot. Both exist in main and are unchanged by this PR [h/tron/models/kv_cache.hpp:1247, 2322]."
+  },
+  {
+   "term": "copy_storage_slot / copy_token",
+   "definition": "page::copy_storage_slot copies count tokens of one storage slot from another page. For a VNNI slot this PR copies a whole page as one owner assignment (dst_block.k = src_block.k) and every other range token by token with copy_token (load_row then store_row through a local row) [h/tron/models/kv_cache.hpp:2286-2302; h/tron/tensor/k_vnni.hpp:331-339]."
+  },
+  {
+   "term": "decode / prefill",
+   "definition": "Prefill is prompt processing (many tokens per user per pass), and decode is generation (one token per user per step). PR-3's Note [Shared block save] measures the per-token store of this PR at 0.86 ms per layer in a prefill layer, and PR-3 (#4898) replaces it for runs of 16 tokens."
+  },
+  {
+   "term": "dense page / dense AMX path",
+   "definition": "A full 64-token page that the query sees whole, which main's AMX page kernel qk_rowmajor_128x4 processes in one call (apply_dense_amx_page). In this PR that path is compiled out for VNNI slots by the temporary gate."
+  },
+  {
+   "term": "dimension pair (dp) / dword",
+   "definition": "Dimensions 2 dp and 2 dp + 1 of one token, stored together in one 32-bit lane (a dword, DWORD_BYTES_4) [h/tron/tensor/k_vnni.hpp:58-60]. The even value is in the low half of the dword and the odd value in the high half [h/tron/tensor/k_vnni.hpp:80-81; h/tron/kernels/k_vnni.hpp:107-108]."
+  },
+  {
+   "term": "dimension step (s)",
+   "definition": "32 dimensions = 16 dimension pairs (STEP_DIMS_32, STEP_PAIRS_16). A 128-dimension head has DIM_STEPS_4 = 4 steps [h/tron/tensor/k_vnni.hpp:67-69]."
+  },
+  {
+   "term": "dotter",
+   "definition": "main's per-token dot-product routine for a row-major K row (struct dotter in h/tron/kernels/dotter.hpp), driven by the per-token loop of apply_page_tok. In this PR it is compiled only for row-major slots."
+  },
+  {
+   "term": "EAGLE",
+   "definition": "A speculation model whose KV storage is one extra physical slot of the book (eagle_storage_offset). This PR does not change it, and PR-4 (#4901) adds a K layout state entry for it."
+  },
+  {
+   "term": "fill_storage_slot / fill_random",
+   "definition": "book::fill_random is a test-only fill of every kv_block with random bf16 values, and fill_storage_slot is its body per storage slot. It is the one documented exception to the typed access rule: for a VNNI slot it takes the plane address through detail::k_vnni_access [h/tron/models/kv_cache.hpp:1291, 1716-1726]."
+  },
+  {
+   "term": "forward end",
+   "definition": "The end of one forward pass on the main thread, after the plugin's run() (the forward function of the generated model code) returned and wait_for_coop_gof drained the staging gather. PR-4 converts completed blocks there, and this PR converts nothing."
+  },
+  {
+   "term": "FPGA",
+   "definition": "Field-programmable gate array, the card that runs hardware attention and receives K and V rows by DMA."
+  },
+  {
+   "term": "GOF",
+   "definition": "A group of four consecutive tokens. The staging gather (gof::populate) copies their K and V rows into a buffer that DMA moves to the FPGA card."
+  },
+  {
+   "term": "hardware attention",
+   "definition": "Attention scored on the FPGA for an operation. PR-4 adds a policy that keeps short-run blocks row-major under it, and this PR has no such policy."
+  },
+  {
+   "term": "index map (k_vnni::index)",
+   "definition": "The constexpr function that gives the element index of K[token][dim] inside the plane: (((s * 4 + c) * 16 + dp) * 16 + t) * 2 + j [h/tron/tensor/k_vnni.hpp:105-112]. The worked example (token 37, dimension 70) gives element 5226."
+  },
+  {
+   "term": "k_head_fn / page_info / scratch",
+   "definition": "page_info is the per-token record the scheduler builds for the staging gather, and its k_head_fn callback returns a pointer to the token's K row for one slot and KV head. This PR adds a scratch argument: for a VNNI slot the callback gathers the row into the caller's 64-byte-aligned scratch (256 bytes per head) and returns the scratch [h/tron/gof.hpp:61-78; h/tron/scheduler/full.hpp:2747-2762]."
+  },
+  {
+   "term": "k_packed",
+   "definition": "page::k_packed, called with a slot and a KV head: the read-only typed view (k_vnni_view<const bf16, 64, 128>) of one page's K plane, VNNI slots only. It is the argument of the reader qk_group [h/tron/models/kv_cache.hpp:1993-2001]."
+  },
+  {
+   "term": "k_rows_saved_ / k_vnni_blocks_",
+   "definition": "The page's two atomic bit arrays per storage slot, one bit per page offset (saved rows) and one bit per 16-token block (converted blocks), which land in PR-4 (#4901). In this PR the page keeps no K layout state."
+  },
+  {
+   "term": "k_source_row / k_destination_row",
+   "definition": "Helpers that build a read-only row view from a bf16 pointer or from a rank-1 bf16 view that keeps its own flags (k_source_row), and a writable row view from a bf16 pointer (k_destination_row). They neither check alignment nor copy data [h/tron/tensor/k_vnni.hpp:232-253]."
+  },
+  {
+   "term": "k_storage / native_k_storage",
+   "definition": "Inside detail::kv_block, k_storage is a std::conditional_t that names k_vnni_tensor<page_size, head_size> when k_vnni::layout_on<head_size> holds and the bf16 array native_k_storage otherwise, and the member k has that type. Both hold page_size * head_size bf16 values [h/tron/models/kv_cache.hpp:2526-2536]."
+  },
+  {
+   "term": "k_vnni_access (detail::k_vnni_access::plane)",
+   "definition": "A friend helper with one static function, plane(view), that returns the view's raw pointer to the plane's first element. It is the only route from a view to a plane address, for the typed operations, the reader qk_group and the test-only fill [h/tron/tensor/k_vnni.hpp:209-216]."
+  },
+  {
+   "term": "kill switch (TRON_AMX_DISABLE)",
+   "definition": "TRON_AMX_DISABLE=1 in the environment prevents use of the AMX kernels at run time (AMX-on names a run without the switch, AMX-off a run with it). With the option on, the switch keeps the layout and the reader, so it changes no score and no visit path for 128-dimension heads in this PR [h/tron/models/kv_cache.hpp:707-713]."
+  },
+  {
+   "term": "KV head / kv_mul",
+   "definition": "One key/value head of grouped-query attention (GQA: several query heads share one key/value head), and kv_mul is the number of query heads per KV head: 4 for the models qwen3-4b and llama-3.1-8b, 3 for llama-3.2-3b, and 8 for qwen-3-30b-a3b. The reader scores a group of more than 16 heads in passes of 16."
+  },
+  {
+   "term": "KV page / page",
+   "definition": "A KV page is 64 consecutive tokens of KV storage allocated by the cache (page_size = 64). The page struct is a lightweight reference into a book [h/tron/models/kv_cache.hpp:1826-1828]."
+  },
+  {
+   "term": "kv_block",
+   "definition": "The struct that holds the K plane and the V plane of one (storage slot, KV head, page). This PR types its K plane [h/tron/models/kv_cache.hpp:2519-2536]."
+  },
+  {
+   "term": "kv_slot_id / slot / storage slot",
+   "definition": "kv_slot_id selects one persistent K/V storage region of the book, usually one per layer [h/tron/attention_ids.hpp:23]. A storage slot (kv_storage_offset) is the absolute physical slot offset in the book's allocation [h/tron/models/common.hpp:240]."
+  },
+  {
+   "term": "layer",
+   "definition": "One transformer layer of the model. Each layer stores its K and V into its own slot of the KV cache."
+  },
+  {
+   "term": "layout gate (k_vnni::layout_on)",
+   "definition": "k_vnni::layout_on<head_size> is true only for 128-dimension heads and only when the option TRON_K_VNNI is defined. It depends only on the storage geometry, so every reader and writer of a slot selects the same layout [h/tron/tensor/k_vnni.hpp:95-101]."
+  },
+  {
+   "term": "live mask",
+   "definition": "A 64-bit word with one bit per page offset. apply_page_tok sets the bit of every relevant token during its loop and hands the word to qk_group, which reads only those tokens [h/tron/models/self_attention.hpp:1933, 1962-1963, 1976-1979]."
+  },
+  {
+   "term": "main thread / main helpers",
+   "definition": "The main thread runs the generated run() of a plugin (the generated model code), including save_k, and the main helpers are its helper threads (run_main_help). In this PR save_k runs on main alone, and PR-3 (#4898) shares its K store with the helpers."
+  },
+  {
+   "term": "mark_k_complete / upstream_kvs_ready",
+   "definition": "mark_k_complete records in the page that a token's K is saved, and upstream_kvs_ready is the per-slot latch (a countdown object) that downstream minibatches wait on and that save_k counts down after its stores. Both exist in main and are unchanged here [h/tron/models/model.hpp:3126, 3134-3135]."
+  },
+  {
+   "term": "marks loop",
+   "definition": "The per-token loop of save_k_impl over the minibatch's items. For each token it stores the K rows of every KV head and then calls mark_k_complete (the mark) [h/tron/models/model.hpp:3091-3132]."
+  },
+  {
+   "term": "minibatch",
+   "definition": "One chunk of a forward pass's token jobs that the forward runs together. save_k stores the K rows of one minibatch, and downstream minibatches wait on its latch [h/tron/models/model.hpp:3133-3135]."
+  },
+  {
+   "term": "mutation check",
+   "definition": "A deliberate code change that a test must catch. The PR body reports one: removing the per-head scratch offset in gof::populate makes the populate case of t_phase1_integration fail."
+  },
+  {
+   "term": "Note [K VNNI storage]",
+   "definition": "The design comment in h/tron/models/kv_cache.hpp that says what the layout is, who writes it, who reads it, how each of the six consumers of a VNNI slot changes, and that the kill switch keeps the layout [h/tron/models/kv_cache.hpp:651-713]."
+  },
+  {
+   "term": "Note [Row-major tail block] / row-major tail block",
+   "definition": "A 16-token block of a VNNI plane whose rows stay row-major until all 16 rows are saved and are then converted in place, which lands in PR-4 (#4901). In this PR every row goes straight into the VNNI column."
+  },
+  {
+   "term": "Note [Shared block save] / shared block save / window",
+   "definition": "PR-3's design: a run of 16 tokens is stored as one whole block, the main helpers claim work units of the store through a window of counters, and main waits for every helper to finish its claims (the join) before it marks the tokens. None of it is in this PR."
+  },
+  {
+   "term": "note_k_row_saved / note_k_block_saved",
+   "definition": "The page functions that publish the saved-row bits and the block bit. They land in PR-4 (#4901)."
+  },
+  {
+   "term": "the option (TRON_K_VNNI)",
+   "definition": "The CMake option, default OFF, that selects VNNI-packed K storage for every 128-dimension head, off in every build preset until PR-4 [CMakeLists.txt:47]. Its compile definition is PUBLIC on the tron target and on the generated model objects, so every translation unit that touches a KV page sees the same layout [src/tron/CMakeLists.txt:232-234, 336-342]."
+  },
+  {
+   "term": "owner / view (k_vnni_tensor / k_vnni_view)",
+   "definition": "k_vnni_tensor<64, 128> owns one K plane as a 64-byte-aligned bf16 array, trivial to construct, copy and destroy, and k_vnni_view<T, 64, 128> refers to that plane, computes element addresses and reads one element through at(token, dim) without writing it. Views come only from an owner's as_view(), and a writable view converts to a read-only one, never back [h/tron/tensor/k_vnni.hpp:135-201]."
+  },
+  {
+   "term": "page offset",
+   "definition": "A token's position inside its 64-token page, 0 to 63. In the VNNI plane the offset decides the token's block (offset / 16) and its column (offset % 16)."
+  },
+  {
+   "term": "page::k / k_view / k_at (the row views)",
+   "definition": "The row-major K views: kv_block::k_view() is the plane as a [token][element] view, k_at(i_page) is one token's row, page::k(slot, kv_head) returns the kv_block's k_view, and page::k(slot, kv_head, j).set(row) writes one token's row. In this PR all of them exist only when layout_on is false [h/tron/models/kv_cache.hpp:1924-1986, 2554-2572]."
+  },
+  {
+   "term": "pair row",
+   "definition": "One 64-byte line of a panel: one dimension pair for 16 consecutive tokens, 32 bf16 = 16 dwords (ROW_ELEMS_32, ROW_DWORDS_16) [h/tron/tensor/k_vnni.hpp:61-62, 70-72]. The 16 pair rows of a panel are 64 bytes apart [h/tron/tensor/k_vnni.hpp:258-259, 272]."
+  },
+  {
+   "term": "pair_base / pair_row_offsets",
+   "definition": "The address arithmetic of store_row and load_row: pair_base gives the byte address of dimension pair 0 of step s for a token (its column in panel (s, c)), and pair_row_offsets lists the 16 pair rows of a panel, 16 dwords apart, as the index vector of the scatter and the gather [h/tron/tensor/k_vnni.hpp:261-280]."
+  },
+  {
+   "term": "panel",
+   "definition": "One (dimension step s, token block c) cell of the plane: 16 pair rows of 64 bytes = 1 KiB (PANEL_BYTES_1024). A plane has N_PANELS_16 = 16 panels, and a panel is exactly one AMX B tile [h/tron/tensor/k_vnni.hpp:26-27, 74-77]."
+  },
+  {
+   "term": "pending_k_blocks_ / convert_pending_k_blocks",
+   "definition": "The deferred conversion list of save_k and the forward-end function that drains it. They land in PR-4 (#4901)."
+  },
+  {
+   "term": "plane",
+   "definition": "K for one KV head of one page: 64 tokens x 128 dimensions of bf16 = 16 KiB, the same bytes as the row-major plane [h/tron/tensor/k_vnni.hpp:21-30]."
+  },
+  {
+   "term": "PR / PR 4424 / the stack",
+   "definition": "PR is a GitHub pull request of the tron repository. PR 4424 (branch jhan-amx-vnniK) is the original change that the four PRs of the stack replace: PR-1 #4868, PR-2 #4887, PR-3 #4898 and PR-4 #4901, each based on the previous one."
+  },
+  {
+   "term": "prompt 1024",
+   "definition": "A run with a prompt length of 1024 tokens (the --prompt-length flag of runtron, tron's command-line tool). The performance cells of the PR body use prompt 1024 and prompt 8192."
+  },
+  {
+   "term": "qk_group (the reader)",
+   "definition": "k_vnni::qk_group in h/tron/kernels/k_vnni.hpp: the AVX-512 routine that scores a query group against the live tokens of one VNNI-packed page, one token per vector lane. One 64-byte load supplies one dimension pair of 16 tokens, the query's pair is broadcast, and VDPBF16PS accumulates 16 scores at once with no per-token gather [h/tron/kernels/k_vnni.hpp:57-127]."
+  },
+  {
+   "term": "qk_rowmajor_128x4 / qk_vnni_128x4",
+   "definition": "qk_rowmajor_128x4 is main's AMX QK kernel for a row-major K page: it puts the K page on the left and transposes the score matrix after the multiply. qk_vnni_128x4 is the AMX kernel that reads the VNNI plane as its B operand and lands in PR-2 (#4887)."
+  },
+  {
+   "term": "query pack",
+   "definition": "The step that rearranges a token's query rows into the AMX operand format (pack_q_group_128x4 in main), which in this PR still runs once per token for a VNNI slot although no kernel consumes it. The kill switch skips it [h/tron/models/self_attention.hpp:1632-1634, 1688-1701]."
+  },
+  {
+   "term": "row view (const_k_row_view / k_row_view)",
+   "definition": "A typed view of one token's 128 K values in dimension order, read-only (const_k_row_view) or writable (k_row_view), carrying the caller's Aligned and Dma flags. It is the argument type of set_k_row, get_k_row, store_row and load_row [h/tron/tensor/k_vnni.hpp:224-228]."
+  },
+  {
+   "term": "row-major (native K)",
+   "definition": "One row of head_size bf16 values per token, indexed [token * head_size + dimension]. Every head size other than 128 keeps this layout, and so does a 128-dimension head when the option is off."
+  },
+  {
+   "term": "save_k / save_k_impl",
+   "definition": "The function of h/tron/models/model.hpp that stores the K rows of one minibatch into the KV cache, through two save_k overloads that forward to save_k_impl. In this PR save_k_impl stores each token's row with page::set_k_row for a VNNI slot and with page::k().set for a row-major slot [h/tron/models/model.hpp:3077-3152]."
+  },
+  {
+   "term": "scatter / gather",
+   "definition": "_mm512_i32scatter_epi32 writes the 16 dwords of one register to a base plus 16 offsets, and _mm512_i32gather_epi32 reads 16 dwords from such addresses. store_row issues 4 scatters per token (one per dimension step), and load_row is the inverse with 4 gathers."
+  },
+  {
+   "term": "scheduler (h/tron/scheduler/full.hpp)",
+   "definition": "The component that runs on its own thread between forward passes: it does the token-tree work (clears, appends, the book defrag) and defines the page_info callbacks of the staging gather, which other threads run."
+  },
+  {
+   "term": "set_k_block / store_block",
+   "definition": "The whole-block store of a run of 16 tokens: 16 rows transposed in registers and written as whole lines. Both land in PR-3 (#4898)."
+  },
+  {
+   "term": "set_k_row / get_k_row",
+   "definition": "The layout-agnostic page accessors that this PR adds: set_k_row writes one token's row (a const_k_row_view) into whichever layout the slot uses, store_row for a VNNI slot and memcpy for a row-major one. get_k_row is the inverse with load_row [h/tron/models/kv_cache.hpp:2010-2062]."
+  },
+  {
+   "term": "staging gather (gof::populate)",
+   "definition": "The copy of K and V rows of one GOF into the buffer that DMA moves to the FPGA, run on an idle attention worker (help_drain_gof) or on main (wait_for_coop_gof). This PR gives it a K scratch array beside the V scratch, with one row per KV head [src/tron/gof.cpp:203-213]."
+  },
+  {
+   "term": "store_row / load_row",
+   "definition": "store_row scatters one token's 128-dimension row into its column of the plane (4 scatters of 16 dwords, one per dimension step, touching only that token's 64 pair slots), and load_row gathers the row back. Both check the token index [h/tron/tensor/k_vnni.hpp:291-322]."
+  },
+  {
+   "term": "t_k_vnni_layout, t_llama_unit, t_phase1_integration, t_amx_dispatch_dtype",
+   "definition": "The four tests of this PR with new or changed cases: t_k_vnni_layout is new with four cases (the index anchors, the exact scrambled store and load, the reader against the dotter, and page rows through store, load and append), t_llama_unit gains the compile checks of the type model, a 32-head compile case and a save_k case, t_phase1_integration's populate case stages K rows through the scratch, and t_amx_dispatch_dtype expects no dense kernel call under the option. Two more test files, t_gof_dma and t_gof_staging_leaks, only give their k_head_fn lambdas the new scratch argument."
+  },
+  {
+   "term": "temporary gate",
+   "definition": "The term && !k_vnni::layout_on<operation_head_size> that this PR adds to the dense-page AMX predicate of apply_page_tok. It keeps the dense AMX path out of VNNI slots until PR-2 adds the AMX kernel, so every VNNI-packed page takes the reader [h/tron/models/self_attention.hpp:1885-1887]."
+  },
+  {
+   "term": "TPS",
+   "definition": "Decode throughput in tokens per second per user. The PR body measures a decode TPS loss of 6.4 % at prompt 1024 and 11.6 % at prompt 8192 against main, and attributes it to the temporary gate (the dense pages that main's AMX kernel serves go to the reader instead)."
+  },
+  {
+   "term": "transpose_16x16_epi32",
+   "definition": "The in-register 16 x 16 transpose that store_block uses. It lands in PR-3 (#4898)."
+  },
+  {
+   "term": "tree lock",
+   "definition": "The lock on the scheduler's token tree, held for the tree work between forward passes (clear_kv_complete_at, copy_from)."
+  },
+  {
+   "term": "tron",
+   "definition": "The inference program under test (the positron-ai/tron repository). Its C++ code lives in namespace tron."
+  },
+  {
+   "term": "VDPBF16PS / TDPBF16PS",
+   "definition": "VDPBF16PS is the AVX-512 instruction that multiplies bf16 pairs and adds them in fp32, and the reader uses it. TDPBF16PS is the AMX tile multiply that reads the same pair layout as its B operand, and no PR-1 code uses it."
+  },
+  {
+   "term": "VNNI layout / VNNI-packed",
+   "definition": "Vector Neural Network Instructions layout: two consecutive dimensions of one token are adjacent in memory, one 64-byte line holds that dimension pair for 16 consecutive tokens, and it is the B-operand format of the AMX tile multiply. VNNI-packed means stored in this layout."
+  },
+  {
+   "term": "wait_for_coop_gof / help_drain_gof",
+   "definition": "The two ends of the cooperative staging gather: idle attention workers run queued GOFs through help_drain_gof, and main drains the rest at the forward end through wait_for_coop_gof. Both exist in main and are unchanged here [h/tron/models/model.hpp:3239, 3252]."
+  },
+  {
+   "term": "WK roped",
+   "definition": "tron's record label for the K rows after rope (the rotary position embedding), logged by save_k_impl through log_intermediate [h/tron/models/model.hpp:3094]."
+  },
+  {
+   "term": "worked example",
+   "definition": "The example the three source pages trace through every diagram: the K plane of storage slot 5, KV head 0, page 7, and inside it token 37, dimension 70, which the index map places at element 5226 (panel #10, pair row 3, dword 5)."
+  },
+  {
+   "term": "AMX dispatch (TRON_AMX_DISPATCH)",
+   "definition": "The CMake option that compiles the AMX kernels. This PR does not require it: the option-on build passes its tests with AMX dispatch off [PR body, Builds and tests]."
+  }
+ ],
+ "what_lands": [
+  {
+   "concept": "The VNNI-packed K plane and its index map",
+   "kind": "data model",
+   "where": "h/tron/tensor/k_vnni.hpp:21-30 (the layout formula), 56-88 (the named constants and their static_asserts), 105-112 (k_vnni::index)",
+   "diagrams": [
+    "k_vnni-b1",
+    "k_vnni-b1a",
+    "kv_cache-b2"
+   ],
+   "note": "A plane is 64 tokens x 128 dimensions of bf16 = 16 KiB, the same bytes as the row-major plane, split into 16 panels of 1 KiB, each 16 pair rows of 64 bytes. k_vnni::index maps (token, dim) to its element, and the hand-computed anchors of that map are the first test case [t/t_k_vnni_layout.cpp:101-118]."
+  },
+  {
+   "concept": "The layout gate k_vnni::layout_on",
+   "kind": "policy",
+   "where": "h/tron/tensor/k_vnni.hpp:95-101",
+   "diagrams": [
+    "kv_cache-b1",
+    "k_vnni-b3",
+    "model-b2",
+    "model-b5"
+   ],
+   "note": "True only for 128-dimension heads and only when TRON_K_VNNI is defined. It depends on the storage geometry alone, so every reader and writer of a slot sees the same layout."
+  },
+  {
+   "concept": "The typed owner, the two views and the one access route",
+   "kind": "data model",
+   "where": "h/tron/tensor/k_vnni.hpp:116-217 (k_vnni_access forward declaration at 121, concept k_vnni_element 124-125, k_vnni_view 134-170, k_vnni_tensor 179-206, detail::k_vnni_access::plane 208-217); h/tron/tensor/kv_cache_fwd.hpp:39-49 (the forward declarations of k_vnni_tensor and k_vnni_view for headers that include no vector intrinsics)",
+   "diagrams": [
+    "k_vnni-b2"
+   ],
+   "note": "k_vnni_tensor owns the bytes, k_vnni_view reads through at(token, dim) and cannot write, and detail::k_vnni_access::plane is the only route to the raw address. The compile checks of these rules sit in t_llama_unit [t/t_llama_unit.cpp:421-429]."
+  },
+  {
+   "concept": "kv_block::k becomes k_storage, and the row views exist for row-major slots only",
+   "kind": "data model",
+   "where": "h/tron/models/kv_cache.hpp:2519-2573 (native_k_storage, k_storage, the two static_asserts, k_view and k_at with requires); 1924-1986 (the eight page::k overloads gain !k_vnni::layout_on)",
+   "diagrams": [
+    "kv_cache-b1",
+    "kv_cache-b3"
+   ],
+   "note": "A VNNI slot's K plane is a k_vnni_tensor inside the kv_block, and no row view of it exists. Tests that used page::k on 128-dimension slots now use set_k_row and get_k_row."
+  },
+  {
+   "concept": "Transfer rows: const_k_row_view, k_row_view, k_source_row, k_destination_row",
+   "kind": "data model",
+   "where": "h/tron/tensor/k_vnni.hpp:219-253",
+   "diagrams": [
+    "k_vnni-b2",
+    "k_vnni-b3"
+   ],
+   "note": "One token's 128 values in dimension order, with the caller's Aligned and Dma flags. They are the argument types of the page accessors and of store_row and load_row."
+  },
+  {
+   "concept": "store_row, load_row and copy_token with pair_base and pair_row_offsets",
+   "kind": "algorithm",
+   "where": "h/tron/tensor/k_vnni.hpp:258-339",
+   "diagrams": [
+    "k_vnni-b3",
+    "k_vnni-b4"
+   ],
+   "note": "store_row scatters a token's row into its column with 4 scatters of 16 dwords, touching 64 lines, and writes only that token's slots, so different tokens can be stored at the same time. load_row is the inverse with 4 gathers. copy_token moves one token between planes through a local row."
+  },
+  {
+   "concept": "The page accessors set_k_row, get_k_row, k_packed and the VNNI branch of copy_storage_slot",
+   "kind": "protocol",
+   "where": "h/tron/models/kv_cache.hpp:1988-2062 (k_packed, set_k_row, get_k_row and their uniform-geometry forms); 2280-2302 (copy_storage_slot: owner assignment for a whole page, copy_token otherwise)",
+   "diagrams": [
+    "kv_cache-b3"
+   ],
+   "note": "These are the only ways the model, the scheduler and the tests reach a VNNI plane. page::k_packed is the read-only view the reader takes."
+  },
+  {
+   "concept": "The AVX-512 reader qk_group",
+   "kind": "algorithm",
+   "where": "h/tron/kernels/k_vnni.hpp:30 (MAX_KV_MUL_16), 57-127 (qk_group)",
+   "diagrams": [
+    "k_vnni-b2",
+    "k_vnni-b3"
+   ],
+   "note": "Per token block it loads each pair row with a masked load, so dead tokens are never read. It broadcasts the query's pair and accumulates 16 scores with VDPBF16PS. For float and fp16 queries it widens K to fp32 and uses FMA (fused multiply-add). A group wider than 16 heads is scored in passes of 16. No base diagram draws its loop. The diagrams only name the function."
+  },
+  {
+   "concept": "Scoring-path selection in apply_page_tok with the temporary dense gate",
+   "kind": "policy",
+   "where": "h/tron/models/self_attention.hpp:1885-1887 (the gate), 1914-1981 (k_vnni_on, the live mask, the reader call after the loop)",
+   "diagrams": [
+    "k_vnni-b5",
+    "kv_cache-b3"
+   ],
+   "note": "The dense AMX predicate carries && !k_vnni::layout_on until PR-2, so every page of a VNNI slot takes the reader on every host. The loop records relevant tokens in a live mask and calls qk_group once after the loop. The dotters are compiled out for VNNI slots."
+  },
+  {
+   "concept": "save_k stores every token's row through set_k_row",
+   "kind": "algorithm",
+   "where": "h/tron/models/model.hpp:3103-3123 (inside save_k_impl)",
+   "diagrams": [
+    "model-b5",
+    "model-b2",
+    "k_vnni-b5"
+   ],
+   "note": "One set_k_row per token and KV head, inside the existing marks loop on the main thread. A bf16 K buffer row is read in place through k_source_row. Any other activation type (the number format of the model's activations: bf16, float or fp16) is converted to bf16 on the stack first."
+  },
+  {
+   "concept": "The FPGA staging gather reads K rows through the layout into a scratch row",
+   "kind": "protocol",
+   "where": "h/tron/gof.hpp:61-78 (k_head_fn gains a scratch argument); src/tron/gof.cpp:203-213 (k_scratch beside v_scratch, one row per KV head); h/tron/scheduler/full.hpp:2747-2762 (the callback gathers through get_k_row)",
+   "diagrams": [
+    "k_vnni-b5",
+    "kv_cache-b3"
+   ],
+   "note": "populate collects every head's pointer before it copies the rows, so each head needs its own scratch row. The populate case of t_phase1_integration compares every staged value through the K swizzle (the element transposition the FPGA expects) and catches a wrong per-head stride [t/t_phase1_integration.cpp:845-924]."
+  },
+  {
+   "concept": "The kill switch keeps the layout",
+   "kind": "policy",
+   "where": "h/tron/models/kv_cache.hpp:707-713 (the last paragraph of Note [K VNNI storage]); h/tron/kernels/k_vnni.hpp:1-8",
+   "diagrams": [],
+   "note": "With the option on, TRON_AMX_DISABLE=1 runs the AVX-512 reader, not the row-major dotter. In this PR the switch changes no score and no visit path for 128-dimension heads."
+  },
+  {
+   "concept": "Note [K VNNI storage]: the design record of the layout, its typed plane and its six consumers",
+   "kind": "policy",
+   "where": "h/tron/models/kv_cache.hpp:651-713 (the six consumer items at 678-706)",
+   "diagrams": [
+    "kv_cache-b3"
+   ],
+   "note": "The Note says what the layout is, that the plane is typed, and how each of the six consumers of a VNNI slot changes: save_k (set_k_row), the dense AMX path (not compiled for a VNNI slot), the software path (qk_group on k_packed), the FPGA staging (get_k_row into scratch), page copies (owner assignment or copy_token) and the row view page::k (absent). The six items match the call paths of KV_CACHE-B3 that this PR fills."
+  },
+  {
+   "concept": "The CMake option, the PUBLIC compile definition, the CI lane and the tests",
+   "kind": "build and test",
+   "where": "CMakeLists.txt:47; src/tron/CMakeLists.txt:232-234, 336-342; .github/workflows/cmake-single-platform.yml:356; README.ci.md:591-605; t/CMakeLists.txt:619; config/test-benchmarks.json:491; t/t_k_vnni_layout.cpp:101-474; t/t_llama_unit.cpp:103, 341-477 (the K checks at 410-439), 1166, 2732, 3701-3774, 3784-3964; t/t_phase1_integration.cpp:845-924; t/t_amx_dispatch_dtype.cpp:112, 170-171; t/t_gof_dma.cpp:347; t/t_gof_staging_leaks.cpp:137 (the test k_head_fn lambdas take the new scratch argument)",
+   "diagrams": [],
+   "note": "The option defaults to OFF and is off in every preset. The CI lane builds and tests with it on. The widened split-versus-unsplit tolerance of t_llama_unit (0.05 absolute on a weighted-V element, 1e-6 relative on the weight sum) applies under the option only [t/t_llama_unit.cpp:2732]. The k_head_fn lambdas of t_gof_dma and t_gof_staging_leaks take the scratch argument and ignore it, so the tests of the staging path compile against the new page_info signature."
+  }
+ ],
+ "diagrams": [
+  {
+   "id": "kv_cache-b1",
+   "role": "core",
+   "why": "The kv_block card is where this PR's typed plane lives: k becomes k_storage, which names k_vnni_tensor for a VNNI slot. The page's two bit arrays in the middle card (page 7) are PR-4, so jhan points at the kv_block card at the right and at its layout_on arrow only.",
+   "in_this_pr": [
+    "k (k_storage): a std::conditional_t that names k_vnni_tensor for a VNNI slot and native_k_storage otherwise, with the two static_asserts (trivial type, same byte count) [h/tron/models/kv_cache.hpp:2526-2536]",
+    "native_k_storage, the bf16 array of a row-major slot [h/tron/models/kv_cache.hpp:2526]",
+    "k_vnni_tensor, the owner [h/tron/tensor/k_vnni.hpp:180-201]",
+    "k_vnni_view (k.as_view()) [h/tron/tensor/k_vnni.hpp:135-170; as_view at 185-197]",
+    "k_vnni::layout_on, the arrow label that picks the owner [h/tron/tensor/k_vnni.hpp:95-101]"
+   ],
+   "already_there": [
+    {
+     "what": "book (the unit of KV memory allocation) and Note [KV Memory Layout] [h/tron/models/kv_cache.hpp:833; 56]",
+     "from": "main"
+    },
+    {
+     "what": "storage slot (kv_storage_offset) and storage_slot_count_ [h/tron/models/common.hpp:240; h/tron/models/kv_cache.hpp:1398]",
+     "from": "main"
+    },
+    {
+     "what": "EAGLE storage (eagle_storage_offset) [h/tron/models/kv_cache.hpp:976]",
+     "from": "main"
+    },
+    {
+     "what": "pages (std::vector<page_t>) [h/tron/models/kv_cache.hpp:1397]",
+     "from": "main"
+    },
+    {
+     "what": "kv_slot_id [h/tron/attention_ids.hpp:23]",
+     "from": "main"
+    },
+    {
+     "what": "page with page_size = 64, its move constructor page(page&&) and kv_saves_ [h/tron/models/kv_cache.hpp:1826-1828, 1846-1854, 2213]",
+     "from": "main"
+    },
+    {
+     "what": "kv_block, one per (storage slot, KV head, page) [h/tron/models/kv_cache.hpp:2519; kv_block_at_storage 1657]",
+     "from": "main"
+    },
+    {
+     "what": "v (v_vnni_tensor), the VNNI-packed V plane, unchanged [h/tron/models/kv_cache.hpp:2537-2546]",
+     "from": "main"
+    },
+    {
+     "what": "KV_BLOCK_PLANES_2 [h/tron/models/kv_cache.hpp:718]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "k_rows_saved_ and k_vnni_blocks_, the two atomic bit arrays of the page (one bit per page offset, one bit per 16-token block), and the move constructor's copy of them",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "n_slots entry (layout_t::n_slots, the EAGLE state entry), EAGLE_STORAGE_SLOTS_1 and k_state_ix",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "k_storage_ref (the pair of a storage offset and its state entry) and book::eagle_view_active",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, kv_cache.hpp hunk @@ -2330,9 +2517,23 @@: adds native_k_storage, k_storage, the static_asserts and the k member; hunk @@ -2347,30 +2548,28 @@: k_view and k_at gain requires(!k_vnni::layout_on<head_size>)",
+    "diff-4868.patch, new file h/tron/tensor/k_vnni.hpp: k_vnni_tensor, k_vnni_view, layout_on",
+    "hits.txt (the count of added diff lines per PR that contain the name): k_rows_saved_ main=0 PR-1=0 PR-2=0 PR-3=0 PR-4=15; k_vnni_blocks_ PR-4=16; k_state_ix PR-4=8; k_storage_ref PR-4=7; EAGLE_STORAGE_SLOTS_1 PR-4=3",
+    "diff-4901.patch:306 (+ bool eagle_view_active), :360 (+ struct k_storage_ref), :573 (+ EAGLE_STORAGE_SLOTS_1 = 1), :583 (+ k_state_ix)",
+    "blocks/kv_cache-b1.html (viewBox width 1000): the page-7 card and its k_rows_saved_ / k_vnni_blocks_ texts at x=352 and x=376, the kv_block card and its k: k_storage text at x=712 and x=720"
+   ]
+  },
+  {
+   "id": "k_vnni-b1",
+   "role": "core",
+   "why": "The plane geometry and the index map are the first data model of this PR. Every box of the plane (panel, pair row, dword, token column) is defined in h/tron/tensor/k_vnni.hpp at this PR head. Only the page's two state words and the row-major frame on panel (1,2) land in PR-4.",
+   "in_this_pr": [
+    "plane: 64 tokens x 128 dimensions of bf16 = 16 KiB, the header comment and its layout formula [h/tron/tensor/k_vnni.hpp:21-30]",
+    "k_vnni_tensor<64, 128>, the owner of one plane [h/tron/tensor/k_vnni.hpp:180-201]",
+    "detail::kv_block::k as k_storage, the typed plane inside the kv_block [h/tron/models/kv_cache.hpp:2526-2536]",
+    "token block c with BLOCK_TOKENS_16 and TOKEN_BLOCKS_4 [h/tron/tensor/k_vnni.hpp:63-64]",
+    "token i owns column i % 16 of block i / 16 in every panel [h/tron/tensor/k_vnni.hpp:27-29]",
+    "dimension step s and pair dp: PAIR_2, STEP_DIMS_32, STEP_PAIRS_16, DIM_STEPS_4 [h/tron/tensor/k_vnni.hpp:59, 67-69]",
+    "panel (s, c): PANEL_ELEMS_512, PANEL_BYTES_1024, N_PANELS_16 [h/tron/tensor/k_vnni.hpp:26-27, 74-77]",
+    "pair row dp: one 64-byte line, ROW_ELEMS_32, ROW_DWORDS_16 [h/tron/tensor/k_vnni.hpp:61-62, 70-72]",
+    "k_vnni::index(token, dim): the worked example token 37, dimension 70 gives element 5226 [h/tron/tensor/k_vnni.hpp:105-112]; its anchors are the first test case [t/t_k_vnni_layout.cpp:101-118]"
+   ],
+   "already_there": [
+    {
+     "what": "book [h/tron/models/kv_cache.hpp:833]",
+     "from": "main"
+    },
+    {
+     "what": "page with page_size = 64 [h/tron/models/kv_cache.hpp:1826-1828]",
+     "from": "main"
+    },
+    {
+     "what": "detail::kv_block, one K plane and one V plane [h/tron/models/kv_cache.hpp:2519]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "k_rows_saved_ / k_vnni_blocks_ entry: the page's two state words with layout_t::n_slots + EAGLE_STORAGE_SLOTS_1 entries",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "page offset / token block c as bit helpers: offset_bit, block_bit and k_block_bits",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "the orange frame on panel (1,2) #6 and the last line: where token 37 lies while block 2 is still row-major (Note [Row-major tail block], row_major_row)",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, new file h/tron/tensor/k_vnni.hpp (+340 lines): the header formula, the constants, index, k_vnni_view, k_vnni_tensor",
+    "diff-4868.patch, kv_cache.hpp hunk @@ -2330,9 +2517,23 @@: k_storage and the k member",
+    "hits.txt: block_bit PR-1=0 PR-4=13; offset_bit PR-4=5; row_major_row PR-4=20; k_rows_saved_ PR-4=15; k_vnni_blocks_ PR-4=16"
+   ]
+  },
+  {
+   "id": "k_vnni-b1a",
+   "role": "core",
+   "why": "The hierarchy travel is the teaching diagram for the plane: every level from the K of one page down to one dword is defined in this PR. Only the footnote about the row-major form of a block is PR-4.",
+   "in_this_pr": [
+    "level 1: one plane per KV head = the [64 x 128] grid of bf16 [h/tron/tensor/k_vnni.hpp:21-23]",
+    "level 2: dimension step s cuts the columns into 4 bands of 32 (STEP_DIMS_32, DIM_STEPS_4), token block c cuts the rows into 4 bands of 16 (BLOCK_TOKENS_16, TOKEN_BLOCKS_4), panel (s, c) is cell s * 4 + c [h/tron/tensor/k_vnni.hpp:63-69, 74-77; 105-112]",
+    "level 3: pair dp, the 16 pairs of a 32-dimension step (PAIR_2, STEP_PAIRS_16) [h/tron/tensor/k_vnni.hpp:59, 68]",
+    "level 4: pair row dp in the VNNI form, one 64-byte line per pair, 16 tokens across [h/tron/tensor/k_vnni.hpp:61-62, 70-72]",
+    "level 5: dword t, one token's pair, the even value in the low half (j = 0) and the odd value in the high half (j = 1) [h/tron/tensor/k_vnni.hpp:27-28, 58-60, 80-81; h/tron/kernels/k_vnni.hpp:107-108; the index formula 105-112]",
+    "the travel as the index formula: the header comment and k_vnni::index [h/tron/tensor/k_vnni.hpp:24-25, 105-112]"
+   ],
+   "already_there": [
+    {
+     "what": "kv_block(slot 5, kv_head 0, page 7): page::kv_block(slot, kv_head) selects the block per slot and KV head [h/tron/models/kv_cache.hpp:2221-2245]; its .k member is typed in this PR",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "the row-major form of a block (the footnote of level 1): Note [Row-major tail block] and row_major_row",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, new file h/tron/tensor/k_vnni.hpp lines 21-30 (formula), 56-81 (constants, the high-half constant), 105-112 (index)",
+    "hits.txt: row_major_row PR-1=0 PR-4=20; the words Row-major tail block appear in 12 added lines of diff-4901.patch and in none of diff-4868.patch"
+   ]
+  },
+  {
+   "id": "k_vnni-b2",
+   "role": "core",
+   "why": "The type model is the answer to Ben's 2026-09-21 request for typed access. Nearly all of it is in this PR: the owner, the two views, the one access route, the friends and the transfer rows. Three names on the figure are later: the AMX kernel qk_vnni_128x4 in the grey box (PR-2), store_block among the typed operations (PR-3) and store_row_major on the writable view (PR-4).",
+   "in_this_pr": [
+    "k_vnni_tensor<Rows, Cols>: owns the 16 KiB plane as one 64-byte-aligned bf16 array; as_view() on an lvalue only, deleted on a temporary [h/tron/tensor/k_vnni.hpp:180-201]",
+    "k_vnni_view<bf16, 64, 128> and k_vnni_view<const bf16, 64, 128>: bounds-checked at(token, dim), no element write, no public pointer constructor, no data(); the writable view converts to the read-only one, never back [h/tron/tensor/k_vnni.hpp:135-170; converting constructor 143-148]",
+    "concept k_vnni_element<T>: bf16 or const bf16 [h/tron/tensor/k_vnni.hpp:124-125]",
+    "friend struct: k_vnni_tensor, detail::k_vnni_access and the other k_vnni_view instantiations [h/tron/tensor/k_vnni.hpp:160-163]",
+    "detail::k_vnni_access::plane(view): the one route from a view to the plane address [h/tron/tensor/k_vnni.hpp:209-216]",
+    "detail::kv_block::k: the owner lives inside the kv_block [h/tron/models/kv_cache.hpp:2526-2536]",
+    "page::k_packed(slot, kv_head): the read-only view the reader takes [h/tron/models/kv_cache.hpp:1993-2001]",
+    "k_vnni::qk_group takes the plane address through k_vnni_access [h/tron/kernels/k_vnni.hpp:59-63, 83]",
+    "the typed operations of this header that use the route: store_row, load_row, copy_token [h/tron/tensor/k_vnni.hpp:291-339]",
+    "book::fill_storage_slot: the test-only fill takes the plane address for a VNNI slot [h/tron/models/kv_cache.hpp:1716, 1721-1726]",
+    "const_k_row_view and k_row_view, built by k_source_row and k_destination_row [h/tron/tensor/k_vnni.hpp:224-253]",
+    "Aligned, Dma flags of a row view [h/tron/tensor/k_vnni.hpp:219-228]",
+    "the compile checks of this model: the AMX kernels reject the view, no pointer constructor, one-way conversion, no view from a temporary owner, at() cannot write [t/t_llama_unit.cpp:421-429]"
+   ],
+   "already_there": [
+    {
+     "what": "book::fill_storage_slot as a function (the VNNI branch inside it is new) [h/tron/models/kv_cache.hpp:1716]",
+     "from": "main"
+    },
+    {
+     "what": "the flag defaults VIEW_ALIGNED_TRUE and VIEW_DMA_FALSE [h/tron/tensor/kv_cache_fwd.hpp:25-26]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "amx_attn_h128g4::qk_vnni_128x4, the second score kernel allowed to take the plane address",
+     "lands_in": "PR-2 (#4887)"
+    },
+    {
+     "what": "store_block as a writer of the plane (the base diagram's view box lists it; at this PR head the view comment names store_row, load_row and copy_token only [h/tron/tensor/k_vnni.hpp:127-133, 150-151], and PR-3 adds store_block to both lines)",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "store_row_major as a writer through the writable row view that row_major_row returns",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, new file h/tron/tensor/k_vnni.hpp lines 116-253 at the PR head: k_vnni_access, k_vnni_element, k_vnni_view, k_vnni_tensor, plane, the row views and their builders",
+    "diff-4868.patch, kv_cache.hpp hunk @@ -1648,8 +1718,16 @@: fill_storage_slot gains the detail::k_vnni_access::plane branch",
+    "diff-4887.patch:130 and :453: + void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> k_page",
+    "diff-4898.patch:577-594: hunks @@ -128,7 +134,7 @@ and @@ -150,7 +156,7 @@ add store_block to the two view comments",
+    "hits.txt: store_block PR-3=12, store_row_major PR-4=7; the hit matrix shows book::fill_storage_slot as 0 everywhere because the function is unchanged main code under a qualified name; git show origin/jhan-vnnik-1-layout:h/tron/models/kv_cache.hpp has it at line 1716",
+    "blocks/diagrams.txt k_vnni-b2 boxes: k_vnni_view<bf16, 64, 128> cites store_row_major 481, and the typed operations cite 344-472 (store_block among them)"
+   ]
+  },
+  {
+   "id": "k_vnni-b3",
+   "role": "core",
+   "why": "This is the list of every operation of the file and its callers. Groups 1 to 4 (gate and index map, views and access route, transfer rows and address helpers, the per-token row operations) land here. The block store is PR-3, and the row-major form and the conversions are PR-4. So about half of the 59 cells are later.",
+   "in_this_pr": [
+    "group 1: layout_on<head_size> [h/tron/tensor/k_vnni.hpp:95-101] and index(token, dim) [105-112]; their callers kv_block::k_storage [h/tron/models/kv_cache.hpp:2527], apply_page_tok [h/tron/models/self_attention.hpp:1885-1887, 1914] and page_info::k_head_fn [h/tron/scheduler/full.hpp:2751]",
+    "group 2: k_vnni_tensor::as_view [h/tron/tensor/k_vnni.hpp:185-197], k_vnni_view::at [153-157], k_vnni_view(other) [143-148], k_vnni_access::plane [209-216]; their callers page::k_packed [h/tron/models/kv_cache.hpp:1993-2001], page::set_k_row [2010-2021], page::get_k_row [2028-2039], book::fill_storage_slot [1716-1726] and k_vnni::qk_group [h/tron/kernels/k_vnni.hpp:57-63, 83]",
+    "group 3: k_source_row [h/tron/tensor/k_vnni.hpp:232-247], k_destination_row [249-253]; their callers page_info::k_head_fn [h/tron/scheduler/full.hpp:2759-2760] and save_k_impl [h/tron/models/model.hpp:3113-3119]; the in-file caller is copy_token [336-337], and store_row [293] and load_row [312] take the built rows as parameters (the diagram's \"in-file caller\" cells)",
+    "group 3 helpers: pair_base [h/tron/tensor/k_vnni.hpp:260-271] and pair_row_offsets [273-280]",
+    "group 4: store_row [h/tron/tensor/k_vnni.hpp:291-304], load_row [310-322], copy_token [331-339]; their callers page::set_k_row, page::get_k_row, page::copy_storage_slot [h/tron/models/kv_cache.hpp:2296-2302] and the copy_token case of the layout test [t/t_k_vnni_layout.cpp:184-201]"
+   ],
+   "already_there": [
+    {
+     "what": "apply_page_tok, page_info::k_head_fn, page::copy_storage_slot and clear_kv_complete_at as functions [h/tron/models/self_attention.hpp:1833; h/tron/scheduler/full.hpp:2747; h/tron/models/kv_cache.hpp:2280, 2185]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "store_block (the cell and the in-file caller), transpose_16x16_epi32, page::set_k_block, store_k_block (caller of k_source_row and of set_k_block), k_store_shared (caller of layout_on)",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "amx_attn_h128g4::qk_vnni_128x4 (caller of k_vnni_access::plane)",
+     "lands_in": "PR-2 (#4887)"
+    },
+    {
+     "what": "block_bit(c), offset_bit(offset) and their callers note_k_row_saved, k_forget_row and k_layout_dense",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "the row-major group: row_major_row, store_row_major, load_row_major, page::k_row_if_row_major, and the row-major calls of set_k_row, get_k_row, k_head_fn, copy_storage_slot and apply_page_tok (the dotter on tail rows)",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "the conversion group: block_to_vnni, block_to_rows and their callers page::k_block_to_vnni_at, convert_pending_k_blocks, page::k_forget_row (from clear_kv_complete_at) and the conversion calls of copy_storage_slot",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, new file h/tron/tensor/k_vnni.hpp: layout_on, index, the views, the row builders, pair_base, pair_row_offsets, store_row, load_row, copy_token (file lines 95-339 at the PR head); grep of k_source_row and k_destination_row in that file hits only the definitions (234, 244, 251) and copy_token (336-337)",
+    "diff-4898.patch:603 (+ void transpose_16x16_epi32), :122 (+ void set_k_block), :283 (+ void store_k_block), :235 (+ bool k_store_shared); store_block in 25 added lines",
+    "diff-4901.patch:382 (+ bool note_k_row_saved), :636 (+ void k_forget_row), :540 (+ k_row_if_row_major), :429 (+ bool k_block_to_vnni_at); hits.txt: row_major_row PR-4=20, block_to_vnni PR-4=10, block_to_rows PR-4=8, convert_pending_k_blocks PR-4=12, k_layout_dense PR-4=2",
+    "diff-4887.patch:130, :453: + void qk_vnni_128x4"
+   ]
+  },
+  {
+   "id": "kv_cache-b3",
+   "role": "core",
+   "why": "The call paths of this PR run through the page API: save_k -> set_k_row -> store_row, the staging callback -> get_k_row -> load_row, apply_page_tok -> k_packed -> qk_group, and copy_storage_slot's VNNI branch. The bit-writing rows, the conversion rows and the row-major rows land in PR-4.",
+   "in_this_pr": [
+    "row set_k_row: the typed row store, store_row for a VNNI slot and memcpy for a row-major one [h/tron/models/kv_cache.hpp:2010-2021; uniform form 2042-2051]; caller save_k_impl [h/tron/models/model.hpp:3113-3119]",
+    "row get_k_row: the inverse with load_row [h/tron/models/kv_cache.hpp:2028-2039; uniform form 2053-2062]; caller k_head_fn [h/tron/scheduler/full.hpp:2747-2762] from gof::populate [src/tron/gof.cpp:203-213]",
+    "row k_packed: the read-only plane view [h/tron/models/kv_cache.hpp:1993-2001] -> qk_group [h/tron/kernels/k_vnni.hpp:57-63]; caller apply_page_tok [h/tron/models/self_attention.hpp:1972-1981]",
+    "row copy_storage_slot: the VNNI branch, owner assignment for a whole page and copy_token per token otherwise [h/tron/models/kv_cache.hpp:2286-2302]",
+    "row page::k: the eight overloads require a row-major slot (!k_vnni::layout_on) [h/tron/models/kv_cache.hpp:1924-1986]; kv_block::k_view / k_at likewise [2554-2572]; apply_dense_amx_page keeps qk_rowmajor_128x4 on page::k [h/tron/models/self_attention.hpp:1763]",
+    "the dense gate && !k_vnni::layout_on<operation_head_size> in apply_page_tok [h/tron/models/self_attention.hpp:1885-1887]"
+   ],
+   "already_there": [
+    {
+     "what": "clear_kv_complete_at [h/tron/models/kv_cache.hpp:2185], copy_from [2322] and book::append [1247]",
+     "from": "main"
+    },
+    {
+     "what": "create_child_at_location, extend_leaf_edge and invalidate_restored_book, the scheduler's callers of clear_kv_complete_at [h/tron/scheduler/full.hpp:654 (call at 669), 801 (call at 818), 3323 (call at 3340)]; copy_from is reached through book::append [h/tron/models/kv_cache.hpp:1247], called from the scheduler's _defrag_books (the book-merging step, which appends one book to another) [h/tron/scheduler/full.hpp:1403, 1439]",
+     "from": "main"
+    },
+    {
+     "what": "apply_page_tok and apply_dense_amx_page as functions [h/tron/models/self_attention.hpp:1833, 1735]",
+     "from": "main"
+    },
+    {
+     "what": "k_head_fn as a page_info member and its definition in the scheduler [h/tron/gof.hpp:78; h/tron/scheduler/full.hpp:2747]",
+     "from": "main"
+    },
+    {
+     "what": "save_k_impl as a function [h/tron/models/model.hpp:3077]",
+     "from": "main"
+    },
+    {
+     "what": "page::k and kv_block::k_view / k_at as functions (constrained in this PR)",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "qk_vnni_128x4 and its call on k_packed",
+     "lands_in": "PR-2 (#4887)"
+    },
+    {
+     "what": "set_k_block, store_block and the caller store_k_block",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "note_k_block_saved, note_k_row_saved, k_storage_of, k_block_to_vnni_at, k_block_to_vnni, k_vnni_blocks, k_row_if_row_major, k_forget_row and the caller convert_pending_k_blocks",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "store_row_major, row_major_row, block_to_vnni, block_to_rows, offset_bit / block_bit",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "the private helpers of the dashed band: k_state_ix, k_block_bits, k_block_is_vnni, k_with_storage_geometry, k_storage_readable, book::eagle_view_active",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "copy_storage_slot's k_storage_ref argument and its bit-carrying copy, and the k_forget_row call inside clear_kv_complete_at",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, kv_cache.hpp hunks @@ -1839,17 +1917,24 @@ through @@ -1893,6 +1985,82 @@ (page::k constraints, k_packed, set_k_row, get_k_row) and @@ -2115,15 +2283,34 @@ (copy_storage_slot)",
+    "diff-4868.patch, self_attention.hpp hunk @@ -1876,8 +1878,13 @@ (the gate) and @@ -1894,23 +1901,46 @@, @@ -1929,10 +1959,24 @@ (live mask and qk_group call)",
+    "diff-4868.patch, full.hpp hunk @@ -2744,12 +2744,25 @@ and gof.cpp hunk @@ -200,6 +200,7 @@, @@ -209,7 +210,7 @@",
+    "PR-1 head h/tron/scheduler/full.hpp: clear_kv_complete_at calls at 669, 818, 3340; the only append call at 1439 inside _defrag_books (1403); no copy_from call in the file",
+    "diff-4887.patch:326: + amx_attn_h128g4::qk_vnni_128x4(pg.template k_packed<geometry.kv>(slot, kv_head)",
+    "diff-4898.patch:122-125: + void set_k_block( ... __mmask16 present; diff-4901.patch:348 (+ k_vnni_blocks), :365 (+ k_storage_of), :382, :410, :429, :540, :583-:623, :636"
+   ]
+  },
+  {
+   "id": "k_vnni-b4",
+   "role": "context",
+   "why": "Two of the five operations of this sequencing model (store_row and load_row, steps 3 and 4) land here. The row-major form, block_to_vnni and block_to_rows (rows 1, 2 and 5) land in PR-4. Show it only for the per-token cost of store_row: 4 bytes into each of 64 lines.",
+   "in_this_pr": [
+    "store_row(plane, 37, src): 4 scatters of 16 dwords, one per dimension step, into column 5 of the 4 panels (s, 2); only this token's 64 pair slots are written [h/tron/tensor/k_vnni.hpp:283-304]",
+    "load_row(plane, 37, dst): 4 gathers back into a row written with unaligned stores [h/tron/tensor/k_vnni.hpp:305-322]",
+    "the caption's cost line for the VNNI form: 64 lines touched per token [h/tron/tensor/k_vnni.hpp:283-285; Note [K VNNI storage] item 1, h/tron/models/kv_cache.hpp:679-683]"
+   ],
+   "already_there": [],
+   "not_yet": [
+    {
+     "what": "store_row_major(plane, 37, src): 4 whole lines per token into the row-major form",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "block_to_vnni(plane, 2): the in-place rewrite of all 64 lines as pair rows at the forward end",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "block_to_rows(plane, 2): the conversion back",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "the dashed vermillion chip of the legend (a complete block waiting for its conversion)",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, new file h/tron/tensor/k_vnni.hpp: store_row and load_row at file lines 283-322 of the PR head (the cost comment at 283-285)",
+    "hits.txt: store_row_major PR-1=0 PR-4=7; block_to_vnni PR-4=10; block_to_rows PR-4=8"
+   ]
+  },
+  {
+   "id": "k_vnni-b5",
+   "role": "context",
+   "why": "Three lanes of this interaction model carry PR-1 code: main stores rows through set_k_row, the attention workers score VNNI-packed pages with qk_group, and the staging gather reads get_k_row. The helper lanes and the join are PR-3, and the bits, the conversion and the rules R1 to R7 are PR-4.",
+   "in_this_pr": [
+    "main lane: save_k_impl stores every KV token's row through page::set_k_row -> store_row, one token at a time, inside the marks loop [h/tron/models/model.hpp:3091-3132]",
+    "attention worker lane: apply_page_tok -> qk_group for every page of a VNNI slot, because the dense AMX predicate carries the temporary gate; the dotter path stays for row-major slots [h/tron/models/self_attention.hpp:1885-1887, 1962-1981]",
+    "staging lane: gof::populate -> k_head_fn -> get_k_row into the caller's scratch, run by an attention worker (help_drain_gof) or by main (wait_for_coop_gof) [src/tron/gof.cpp:188-213; h/tron/scheduler/full.hpp:2747-2762]",
+    "copy_from -> copy_storage_slot: the VNNI branch [h/tron/models/kv_cache.hpp:2286-2302]"
+   ],
+   "already_there": [
+    {
+     "what": "wait_for_coop_gof and help_drain_gof [h/tron/models/model.hpp:3252, 3239]; gof::populate [src/tron/gof.cpp:188]",
+     "from": "main"
+    },
+    {
+     "what": "attention worker: waits for upstream_kvs_ready; save_k counts the latch down [h/tron/models/common.hpp:1160; h/tron/models/model.hpp:3134-3135]",
+     "from": "main"
+    },
+    {
+     "what": "staging gather drained at the forward end (run_forward calls wait_for_coop_gof) [h/tron/models/model.hpp:1780-1851]",
+     "from": "main"
+    },
+    {
+     "what": "clear_kv_complete_at [h/tron/models/kv_cache.hpp:2185]; copy_from -> copy_storage_slot [2322, 2280]; both run between forward passes from the scheduler [h/tron/scheduler/full.hpp:723, 1181, 3556], whose defrag path and restore path assert the tree lock before book::append and invalidate_restored_book [h/tron/scheduler/full.hpp:1404-1405, 1439; 3539-3540, 3556]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "attention lane: qk_vnni_128x4 for a dense page",
+     "lands_in": "PR-2 (#4887)"
+    },
+    {
+     "what": "main lane: claims units -> store_k_block, the join; helper lane: waits for opened >= W, claims units -> store_k_block, finished += 1",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "main lane: note_k_row_saved -> pending_k_blocks_; forward end: convert_pending_k_blocks -> k_block_to_vnni_at -> block_to_vnni",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "attention lane: row_major_row -> dotter for the rows of a row-major tail block; staging lane: k_row_if_row_major",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "clear_kv_complete_at -> k_forget_row -> block_to_rows; the thread rules R1 to R7 and the hardware-attention exception R7",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, model.hpp hunk @@ -3100,7 +3100,27 @@ (set_k_row inside save_k_impl); self_attention.hpp hunks at 1878-1979; full.hpp hunk @@ -2744,12 +2744,25 @@; gof.cpp hunks at 203 and 213",
+    "diff-4898.patch:387 (+ size_t worker_ix in save_k_impl), :418 (+ my_window = ++w.helper_windows[worker_ix]), :283 (+ void store_k_block)",
+    "diff-4901.patch:382 (+ bool note_k_row_saved), :636 (+ void k_forget_row), :540 (+ k_row_if_row_major); hits.txt: convert_pending_k_blocks PR-4=12, pending_k_blocks_ PR-4=7, row_major_row PR-4=20",
+    "diff-4887.patch:326: the qk_vnni_128x4 call in apply_dense_amx_page",
+    "PR-1 head h/tron/scheduler/full.hpp:1404-1405 (TRON_ASSERT tree_lock_held_by_this_thread in _defrag_books) and 3539-3540 (the same assert in commit_reclaimed_kv_restore, which calls invalidate_restored_book at 3556)"
+   ]
+  },
+  {
+   "id": "kv_cache-b2",
+   "role": "context",
+   "why": "In this PR a 16-token block has one form only, the VNNI form, written through store_row. The second layout (the row-major form), the two conversions and the block bit land in PR-4, and the whole-block store lands in PR-3. Show only the VNNI half of the figure.",
+   "in_this_pr": [
+    "K plane (16 panels) [h/tron/tensor/k_vnni.hpp:21-30, 56-77]",
+    "panel (s, c) [h/tron/tensor/k_vnni.hpp:26-27, 74-77]",
+    "block c = panels (s, c), s = 0..3, as geometry (BLOCK_TOKENS_16, TOKEN_BLOCKS_4 and the index formula) [h/tron/tensor/k_vnni.hpp:63-64, 105-112]",
+    "k_vnni::index (the VNNI form of block 2): token 37, dimension 70 at element 5226 [h/tron/tensor/k_vnni.hpp:105-112]",
+    "store_row / load_row [h/tron/tensor/k_vnni.hpp:291-322]"
+   ],
+   "already_there": [],
+   "not_yet": [
+    {
+     "what": "store_block, the whole-block store",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "the row-major form of block 2 (row_major_row: dimension 70 of token 37 at element 3270), store_row_major / load_row_major and Note [Row-major tail block] behind the block label",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "block_to_vnni and block_to_rows, the in-place conversions",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "k_vnni_blocks_ bit c (the block bit) and k_block_is_vnni",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, new file h/tron/tensor/k_vnni.hpp: no row_major_row, store_row_major, block_to_vnni or block_to_rows in its 340 lines",
+    "hits.txt: store_block PR-3=12; row_major_row PR-4=20; store_row_major PR-4=7; load_row_major PR-4=3; block_to_vnni PR-4=10; block_to_rows PR-4=8; k_block_is_vnni PR-4=4; k_vnni_blocks_ PR-4=16"
+   ]
+  },
+  {
+   "id": "kv_cache-b5",
+   "role": "context",
+   "why": "The diagram shows which thread touches the K state when. This PR adds no K state, but three of its lanes carry PR-1 code: the attention jobs read k_packed, the staging gather reads get_k_row, and the writer rule that store_row touches only its own token's bytes. The window and the bits land in PR-3 and PR-4.",
+   "in_this_pr": [
+    "attention jobs read k_packed after the latch [h/tron/models/self_attention.hpp:1972-1981]",
+    "help_drain_gof and wait_for_coop_gof run the staging gather, whose k_head_fn calls get_k_row [h/tron/scheduler/full.hpp:2747-2762; src/tron/gof.cpp:203-213]",
+    "book::append -> copy_from -> copy_storage_slot: the VNNI branch [h/tron/models/kv_cache.hpp:2286-2302]",
+    "a writer touches only its own token's bytes: store_row writes only the token's 64 pair slots, so tokens can be stored in any order [h/tron/tensor/k_vnni.hpp:27-29, 283-304; tested in scrambled order at t/t_k_vnni_layout.cpp:120-202]",
+    "save_k on main stores each row with set_k_row inside the marks loop [h/tron/models/model.hpp:3091-3132]"
+   ],
+   "already_there": [
+    {
+     "what": "mark_k_complete and count_down [h/tron/models/model.hpp:3126, 3134-3135]",
+     "from": "main"
+    },
+    {
+     "what": "run() joins the workers; the attention workers exit when run() joins them [h/tron/models/model.hpp:1780-1851; ingest/src/TronCpp.hs:1415]",
+     "from": "main"
+    },
+    {
+     "what": "wait_for_coop_gof and help_drain_gof [h/tron/models/model.hpp:3252, 3239]",
+     "from": "main"
+    },
+    {
+     "what": "attention jobs wait on the upstream_kvs_ready latch [h/tron/models/common.hpp:1160]",
+     "from": "main"
+    },
+    {
+     "what": "clear_kv_complete_at, book::append, copy_from [h/tron/models/kv_cache.hpp:2185, 1247, 2322]; tree work between passes from the scheduler [h/tron/scheduler/full.hpp:723, 1181, 3556], whose defrag path and restore path assert the tree lock [h/tron/scheduler/full.hpp:1404-1405, 3539-3540]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "save_k window (k_store_cut_units, opened, claim loop, join, finished), the helpers' lane (finished: wait for opened, claim loop, finished++), the note that the helpers are idle while main runs save_k, and store_block in the writer rule",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "note_k_row_saved loop; convert_pending_k_blocks -> k_block_to_vnni_at; k_vnni_blocks read by the attention jobs; k_row_if_row_major in help_drain_gof; k_forget_row; store_row_major in the writer rule",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch: self_attention.hpp hunk @@ -1929,10 +1959,24 @@ (k_packed), full.hpp hunk @@ -2744,12 +2744,25 @@ (get_k_row), kv_cache.hpp hunk @@ -2115,15 +2283,34 @@ (copy_storage_slot), new file h/tron/tensor/k_vnni.hpp (store_row)",
+    "diff-4898.patch:40 (+ struct k_store_window_t), :247 (+ void k_store_cut_units), :157 (Note [Shared block save])",
+    "diff-4901.patch:382 (+ bool note_k_row_saved), :348 (+ k_vnni_blocks), :540 (+ k_row_if_row_major), :636 (+ void k_forget_row)",
+    "PR-1 head h/tron/scheduler/full.hpp:1404-1405 and 3539-3540: the tree-lock asserts of _defrag_books and commit_reclaimed_kv_restore"
+   ]
+  },
+  {
+   "id": "model-b2",
+   "role": "context",
+   "why": "The save_k function model places this PR's one model.hpp change: save_k_impl stores each token's row with page::set_k_row instead of page::k().set. The sharing functions (k_store_shared, k_store_cut_units, store_k_block) are PR-3, and the recording and conversion functions are PR-4.",
+   "in_this_pr": [
+    "save_k_impl: the VNNI branch stores each token's row with page::set_k_row, through k_source_row in place for a bf16 K buffer or an on-stack bf16 row otherwise [h/tron/models/model.hpp:3103-3120]",
+    "k_vnni::layout_on as the branch test [h/tron/models/model.hpp:3103]",
+    "set_k_row [h/tron/models/kv_cache.hpp:2010-2021]",
+    "the save_k case of t_llama_unit calls the three-argument save_k (no worker arguments exist yet) and checks every stored row bit for bit [t/t_llama_unit.cpp:3784-3964; the call at 3962]"
+   ],
+   "already_there": [
+    {
+     "what": "saveKv: the generated run() calls save_k through the K channel wait, without worker arguments [ingest/src/TronCpp.hs:2919-2921]",
+     "from": "main"
+    },
+    {
+     "what": "run_main_help exists for the main helpers but calls no save_k [ingest/src/TronCpp.hs:1364, 1420]",
+     "from": "main"
+    },
+    {
+     "what": "save_k without worker arguments (handwritten plugin, tests) [h/tron/models/model.hpp:3139-3152], where the defaults worker_ix = 0 and n_workers = 1 of the diagram's box land in PR-3 (#4898); forward() [h/tron/models/model.hpp:1709]; run_forward [1780]",
+     "from": "main"
+    },
+    {
+     "what": "save_k (two overloads) [h/tron/models/model.hpp:3139-3152] and save_k_impl [3077-3136]",
+     "from": "main"
+    },
+    {
+     "what": "cached_operation_uses_hw [h/tron/models/model.hpp:1529]; operation_is_hardware_candidate and has_hardware_slot [1489; 3088-3090]",
+     "from": "main"
+    },
+    {
+     "what": "wait_for_coop_gof [h/tron/models/model.hpp:3252]; page_of and offset_in_page [1771; 3096-3097]",
+     "from": "main"
+    },
+    {
+     "what": "mark_k_complete, credit_gof_save, upstream_kvs_ready.count_down and log_intermediate 'WK roped' [h/tron/models/model.hpp:3126, 3130, 3134-3135, 3094]",
+     "from": "main"
+    },
+    {
+     "what": "page::k(slot, kv_head, j).set for row-major slots [h/tron/models/model.hpp:3122]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "the worker index and worker count of the two save_k overloads and of the generated calls (run() with 0 and n_workers, run_main_help with worker_ix), k_store_shared, k_store_cut_units, store_k_block, set_k_block",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "convert_pending_k_blocks, note_k_block_saved, note_k_row_saved, k_storage_of, k_block_to_vnni_at, and the use of cached_operation_uses_hw inside save_k",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, model.hpp hunk @@ -3100,7 +3100,27 @@: the only model.hpp hunk of this PR, inside save_k_impl",
+    "PR-1 head h/tron/models/model.hpp:3139 void save_k(batch* q_batch, kv_buffer_t& ks) and 3147-3149 void save_k(batch* q_batch, attention_operation_descriptor const& operation, kv_buffer_t& ks): no worker parameters; t/t_llama_unit.cpp:3962 state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts)",
+    "diff-4898.patch:504-505 and :518-519 (+ size_t worker_ix = 0, + size_t n_workers = 1 in the save_k overloads), :235 (+ bool k_store_shared), :247 (+ void k_store_cut_units), :283 (+ void store_k_block); TronCpp.hs and LoopyTronSpec.hs appear in files-4898.txt and not in files-4868.txt (the lists of files each PR diff touches)",
+    "diff-4901.patch:410 (+ void note_k_block_saved), :382 (+ bool note_k_row_saved), :365 (+ k_storage_of); hits.txt: convert_pending_k_blocks PR-4=12, cached_operation_uses_hw PR-4=3"
+   ]
+  },
+  {
+   "id": "model-b5",
+   "role": "context",
+   "why": "The decision tree has two nodes that this PR exercises: a VNNI slot stores each token through set_k_row and a row-major slot through page::k().set. Runs of 16 and the whole-block save are PR-3. The bits, the queue and the hardware-attention branch are PR-4.",
+   "in_this_pr": [
+    "VNNI slot? (k_vnni::layout_on) [h/tron/models/model.hpp:3103]",
+    "set_k_row per token and KV head [h/tron/models/model.hpp:3113-3119; h/tron/models/kv_cache.hpp:2010-2021]",
+    "the stack row `row` (the diagram's conv): a non-bf16 K buffer row is converted to bf16 on the stack before set_k_row [h/tron/models/model.hpp:3116-3119]"
+   ],
+   "already_there": [
+    {
+     "what": "page::k(slot, kv_head, j).set for row-major slots [h/tron/models/model.hpp:3122]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "store_k_block: one run; a run of 16? (n == k_store_block); set_k_block per KV head; one VNNI block (set_k_block): the whole-block save",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "note_k_block_saved; k_block_is_vnni? (set_k_row decides); a row saved again: the VNNI column; row-major rows (Note [Row-major tail block]); the cell 'row-major slot: no bits, the recording loop is compiled out' (in this PR no slot has bits)",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "note_k_row_saved loop (main only), hardware-scored? (cached_operation_uses_hw), stays row-major, note_k_row_saved per row, note_k_row_saved false, pending_k_blocks_.push_back, convert_pending_k_blocks",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, model.hpp hunk @@ -3100,7 +3100,27 @@: if constexpr (k_vnni::layout_on<geometry.kv.head_size>) with set_k_row and the stack row, else page::k().set; PR-1 head h/tron/models/model.hpp:3116 alignas(64) bf16 row[geometry.kv.head_size]",
+    "diff-4898.patch:283 (+ void store_k_block), :122 (+ void set_k_block), :311 (+ alignas(64) bf16 conv[k_store_block][geometry.kv.head_size]); hits.txt: k_store_block PR-3=13",
+    "diff-4901.patch:382, :410 (note_k_row_saved, note_k_block_saved), :595 (+ bool k_block_is_vnni); hits.txt: pending_k_blocks_ PR-4=7, convert_pending_k_blocks PR-4=12, cached_operation_uses_hw PR-4=3"
+   ]
+  },
+  {
+   "id": "model-b1",
+   "role": "context",
+   "why": "The left column (batch, items, ks, state, token_jobs) is main code that save_k reads, and it places this PR's save_k change. The middle column (the window) is PR-3, and the pending list is PR-4. Of the right column only kv_block::k is this PR.",
+   "in_this_pr": [
+    "kv_block::k, the typed owner [h/tron/models/kv_cache.hpp:2526-2536]",
+    "block 0 .. block 3 of a page as geometry: TOKEN_BLOCKS_4 [h/tron/tensor/k_vnni.hpp:64]"
+   ],
+   "already_there": [
+    {
+     "what": "batch [h/tron/models/common.hpp:991] and its items, which save_k_impl loops over [h/tron/models/model.hpp:3091]",
+     "from": "main"
+    },
+    {
+     "what": "downstream_minibatches and upstream_kvs_ready [h/tron/models/common.hpp:1151, 1160; used at h/tron/models/model.hpp:3134-3135]",
+     "from": "main"
+    },
+    {
+     "what": "ks (kv_buffer_t&): the parameter, its width static_assert and the 'WK roped' log [h/tron/models/model.hpp:3079, 3081, 3094]",
+     "from": "main"
+    },
+    {
+     "what": "the K buffer row kout = slice<head_size>()(ks[ix].as_view(), kv_head * head_size) [h/tron/models/model.hpp:3101-3102]; the row_of lambda that names it is PR-3",
+     "from": "main"
+    },
+    {
+     "what": "state [h/tron/models/model.hpp:1113]; token_jobs and token_jobs_do_kv [1157-1158; 3093, 3095]",
+     "from": "main"
+    },
+    {
+     "what": "page with page_of and offset_in_page [h/tron/models/kv_cache.hpp:1826; h/tron/models/model.hpp:1771, 3096-3097]; slot (binding.kv_slot) [h/tron/models/model.hpp:3087]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "k_store_window and k_store_window_t with max_shared_workers, next_unit, opened, finished, n_units, unit_start, helper_windows; k_store_block; k_join_clock_spins and k_join_timeout_s; n_workers and n_helpers; work unit u; row_of",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "pending_k_blocks_ and pending_k_block; k_rows_saved_ and k_vnni_blocks_; k_storage_ref and k_storage_of",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch: common.hpp is not in files-4868.txt; the model.hpp hunk @@ -3100,7 +3100,27 @@ adds no member; PR-1 head h/tron/models/model.hpp:3091 for (token_job_id ix : q_batch->items)",
+    "diff-4898.patch:40-62 (+ struct k_store_window_t ... helper_windows), :227 (+ k_join_clock_spins), :230 (+ k_join_timeout_s); hits.txt: row_of PR-3=6, n_units PR-3=18, unit_start PR-3=14",
+    "diff-4901.patch:360 (+ struct k_storage_ref); hits.txt: pending_k_block PR-4=3, pending_k_blocks_ PR-4=7"
+   ]
+  },
+  {
+   "id": "model-b4",
+   "role": "context",
+   "why": "The red dashed lane 'the whole K store on main' is the state after this PR: save_k stores every row on main inside the marks loop, and PR-3's Note quotes 0.86 ms per layer for that store. The helper lanes and the window are PR-3, and the forward-end conversion is PR-4.",
+   "in_this_pr": [
+    "[main, before] lane: the whole K store on main, one set_k_row per token and KV head inside the marks loop [h/tron/models/model.hpp:3091-3132]"
+   ],
+   "already_there": [
+    {
+     "what": "[attention workers] and their per-layer attention plan (Note [Attention workers are the last pool workers]) [h/tron/models/model.hpp:2329]",
+     "from": "main"
+    },
+    {
+     "what": "the K channel wait before save_k (startOperand at the PR's base; current main folds it into saveKv) and save_v after it [ingest/src/TronCpp.hs:2919-2930; h/tron/models/model.hpp:3204, 3212]",
+     "from": "main"
+    },
+    {
+     "what": "main and helper K/Q rope kernels (generated code)",
+     "from": "main"
+    },
+    {
+     "what": "the attention workers' pending section waits behind save_k; idle workers help_drain_gof [h/tron/models/model.hpp:3239]",
+     "from": "main"
+    },
+    {
+     "what": "main, forward end: run() joins the helpers and the attention workers, wait_for_coop_gof, Launch logit delivery [h/tron/models/model.hpp:1780-1851; 3252]",
+     "from": "main"
+    },
+    {
+     "what": "helper exits (workers_done.count_down()) and attention worker exits [ingest/src/TronCpp.hs:1361-1365, 1415]",
+     "from": "main"
+    },
+    {
+     "what": "mark_k_complete, credit_gof_save, count_down after the stores [h/tron/models/model.hpp:3126-3135]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "[main] as worker_ix 0 and the [main helper 1], [main helper 2] lanes; open (k_store_cut_units, opened.fetch_add); claim + store units (next_unit.fetch_add, store_k_block); join (finished.load, k_join_clock_spins); the helpers' wait for opened, finished.fetch_add and idle note; the 0.86 ms per layer measurement text of Note [Shared block save]; the critical-path frame",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "note_k_row_saved after the join; convert_pending_k_blocks at the forward end",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4868.patch, model.hpp hunk @@ -3100,7 +3100,27 @@: the store stays inside the per-token loop that also calls mark_k_complete (context lines at 3126-3135 of the PR head)",
+    "diff-4898.patch:157 (+ Note [Shared block save]), :387 (+ worker_ix), :418 (+ my_window), :227 (+ k_join_clock_spins); hits.txt: worker_ix PR-3=32, n_workers PR-3=39",
+    "hits.txt: convert_pending_k_blocks PR-4=12, note_k_row_saved PR-4=10"
+   ]
+  },
+  {
+   "id": "kv_cache-b4",
+   "role": "context",
+   "why": "The diagram draws the states of a block: empty, row-major tail, complete, converted, and row-major under hardware attention. The five states land in PR-4, but two arrows are this PR's code: the per-row store set_k_row -> store_row and the whole-page owner assignment of copy_storage_slot. In this PR every row goes straight into the VNNI column, and the page keeps no row or block bits. The whole-block arc's store lands in PR-3.",
+   "in_this_pr": [
+    "the arrow set_k_row -> store_row into the VNNI column: in this PR the path of every row of a VNNI slot, not only a row saved again [h/tron/models/kv_cache.hpp:2010-2021; h/tron/tensor/k_vnni.hpp:291-304]",
+    "the page-copy note: the whole-page owner assignment dst_block.k = src_block.k of copy_storage_slot [h/tron/models/kv_cache.hpp:2286-2302]"
+   ],
+   "already_there": [],
+   "not_yet": [
+    {
+     "what": "k_rows_saved_ bits all clear: the empty state; incomplete block: row-major rows (row-major tail block); complete, may wait for its conversion; k_vnni_blocks_ bit set: the converted state; records no row bits: stays row-major (hardware attention)",
+     "lands_in": "PR-4 (#4901)"
+    },
+    {
+     "what": "the arc over the top: the whole-block save through set_k_block (its bits land in PR-4)",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "note_k_row_saved on the arrows, the pending list push, the forward-end conversion, k_forget_row on the clear arrow and the bit-carrying page copy",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "blocks/kv_cache-b4.html labels: 'a row saved again: set_k_row -> store_row into the VNNI column; note_k_row_saved returns false' and 'page copies (copy_storage_slot): a whole page keeps every state (owner assignment, bits included)'",
+    "diff-4868.patch kv_cache.hpp hunks @@ -1893,6 +1985,82 @@ (set_k_row with store_row for a VNNI slot) and @@ -2115,15 +2283,34 @@ (the owner assignment dst_block.k = src_block.k)",
+    "hits.txt: k_rows_saved_ PR-1=0 PR-2=0 PR-3=0 PR-4=15; k_vnni_blocks_ PR-4=16",
+    "diff-4901.patch:177 (+ Note [Row-major blocks under hardware attention]); the words Row-major tail block appear in 12 added lines of diff-4901.patch",
+    "diff-4898.patch:122 (+ void set_k_block)"
+   ]
+  },
+  {
+   "id": "model-b3",
+   "role": "not involved",
+   "why": "Every step of the window (open, wait, claim, finish, join) and every counter is PR-3. The row-recording step is PR-4. In this PR save_k runs on main alone with no window, so the diagram has nothing to show for it.",
+   "in_this_pr": [],
+   "already_there": [
+    {
+     "what": "step 0 main: the generated run() calls save_k, without worker arguments [ingest/src/TronCpp.hs:2919-2921]",
+     "from": "main"
+    },
+    {
+     "what": "steps 7 and 8 main: mark_k_complete, credit_gof_save and upstream_kvs_ready[slot].count_down [h/tron/models/model.hpp:3126-3135]",
+     "from": "main"
+    }
+   ],
+   "not_yet": [
+    {
+     "what": "batch::k_store_window; step 1 (is_main, shared) on both lanes; step 2 main (k_store_cut_units, opened.fetch_add); step 2 helper (helper_windows, opened.load); step 3 (next_unit.fetch_add, store_k_block) on both lanes; step 4 helper (finished.fetch_add); step 5 main (finished.load, k_join_clock_spins); step 0 helper (run_main_help calls save_k with worker_ix); the counters column (unit_start, n_units, opened, next_unit, finished, helper_windows[worker_ix]); the helper idle note; after the join (four things hold)",
+     "lands_in": "PR-3 (#4898)"
+    },
+    {
+     "what": "step 6 main: the note_k_row_saved loop",
+     "lands_in": "PR-4 (#4901)"
+    }
+   ],
+   "never": [],
+   "evidence": [
+    "diff-4898.patch:40-62 (+ struct k_store_window_t), :235 (+ bool k_store_shared), :247 (+ void k_store_cut_units), :387 (+ size_t worker_ix), :418 (+ my_window = ++w.helper_windows[worker_ix]); TronCpp.hs is in files-4898.txt only",
+    "hits.txt: note_k_row_saved PR-1=0 PR-3=0 PR-4=10",
+    "diff-4868.patch: no hunk touches common.hpp or TronCpp.hs, and the model.hpp hunk adds no counter"
+   ]
+  }
+ ],
+ "change_sections": [
+  {
+   "id": "C0",
+   "source": "kv_cache",
+   "status": "partial",
+   "note": "Note [K VNNI storage] lands here in its PR-1 form (the layout, the typed plane, the six consumers and the kill switch, h/tron/models/kv_cache.hpp:651-713). PR-2 (#4887) rewrites its Why paragraph, consumer items 2 and 3 and the end of the kill-switch paragraph for the AMX kernel qk_vnni_128x4. PR-3 (#4898) adds store_block to the typed-operations list and rewrites consumer item 1 for set_k_block and the shared store. Its paragraphs on the bits and the row-major tail block, and Note [Row-major blocks under hardware attention], land in PR-4 (#4901)."
+  },
+  {
+   "id": "C1",
+   "source": "kv_cache",
+   "status": "full",
+   "note": "kv_block::k becomes k_storage (k_vnni_tensor for a VNNI slot, native_k_storage otherwise) with its static_asserts, and k_view / k_at require a row-major head size [h/tron/models/kv_cache.hpp:2519-2573]."
+  },
+  {
+   "id": "C2",
+   "source": "kv_cache",
+   "status": "none",
+   "note": "The two bit arrays k_rows_saved_ and k_vnni_blocks_, their constants and the move constructor's copy land in PR-4 (#4901)."
+  },
+  {
+   "id": "C3",
+   "source": "kv_cache",
+   "status": "none",
+   "note": "book::eagle_view_active, k_state_ix, k_storage_ref, k_storage_of and k_with_storage_geometry land in PR-4 (#4901)."
+  },
+  {
+   "id": "C4",
+   "source": "kv_cache",
+   "status": "partial",
+   "note": "The eight page::k overloads gain the !k_vnni::layout_on constraint and k_packed lands here [h/tron/models/kv_cache.hpp:1924-2001]; k_vnni_blocks lands in PR-4 (#4901)."
+  },
+  {
+   "id": "C5",
+   "source": "kv_cache",
+   "status": "none",
+   "note": "note_k_row_saved and note_k_block_saved land in PR-4 (#4901)."
+  },
+  {
+   "id": "C6",
+   "source": "kv_cache",
+   "status": "none",
+   "note": "k_block_to_vnni_at and k_block_to_vnni land in PR-4 (#4901)."
+  },
+  {
+   "id": "C7",
+   "source": "kv_cache",
+   "status": "partial",
+   "note": "set_k_row and get_k_row land here with one branch per layout (store_row or load_row for a VNNI slot, memcpy otherwise) [h/tron/models/kv_cache.hpp:2010-2062]; the k_block_is_vnni branch inside them and k_row_if_row_major land in PR-4 (#4901)."
+  },
+  {
+   "id": "C8",
+   "source": "kv_cache",
+   "status": "none",
+   "note": "set_k_block lands in PR-3 (#4898) with a 16-bit present mask, and PR-4 (#4901) removes the mask."
+  },
+  {
+   "id": "C9",
+   "source": "kv_cache",
+   "status": "none",
+   "note": "k_forget_row and its call from clear_kv_complete_at land in PR-4 (#4901)."
+  },
+  {
+   "id": "C10",
+   "source": "kv_cache",
+   "status": "partial",
+   "note": "copy_storage_slot's VNNI branch lands here: one owner assignment for a whole page and copy_token per token otherwise [h/tron/models/kv_cache.hpp:2286-2302]; the k_storage_ref argument and the bit-carrying three-step copy land in PR-4 (#4901)."
+  },
+  {
+   "id": "K0",
+   "source": "k_vnni",
+   "status": "partial",
+   "note": "The header comment lands here in its PR-1 form (the file's contents, the Words, the layout formula, who may compute a VNNI-packed address) [h/tron/tensor/k_vnni.hpp:1-37]; its mentions of store_block and of the row-major form land in PR-3 (#4898) and PR-4 (#4901)."
+  },
+  {
+   "id": "K1",
+   "source": "k_vnni",
+   "status": "partial",
+   "note": "The layout constants, their static_asserts and k_vnni::index land here [h/tron/tensor/k_vnni.hpp:56-88, 105-112]; FULL_BLOCK_0XFFFF and LANES_16 land in PR-3 (#4898), and block_bit, offset_bit, BLOCKS_PER_PAGE_MASK_0XF and PANEL_ROWS_4 land in PR-4 (#4901)."
+  },
+  {
+   "id": "K2",
+   "source": "k_vnni",
+   "status": "full",
+   "note": "layout_on<head_size> lands here [h/tron/tensor/k_vnni.hpp:95-101]. Its consumers in this PR are kv_block::k_storage, kv_block::k_view / k_at, page::k, k_packed, set_k_row / get_k_row, copy_storage_slot, fill_storage_slot, save_k_impl, apply_page_tok, k_head_fn and the tests. The later consumers of the section's table arrive with PR-3 and PR-4."
+  },
+  {
+   "id": "K3",
+   "source": "k_vnni",
+   "status": "full",
+   "note": "k_vnni_view, k_vnni_tensor, concept k_vnni_element and detail::k_vnni_access land here [h/tron/tensor/k_vnni.hpp:116-217]. PR-3 (#4898) edits two comment lines of the view to name store_block. No code line of this section changes later."
+  },
+  {
+   "id": "K4",
+   "source": "k_vnni",
+   "status": "full",
+   "note": "const_k_row_view, k_row_view, k_source_row and k_destination_row land here [h/tron/tensor/k_vnni.hpp:219-253]."
+  },
+  {
+   "id": "K5",
+   "source": "k_vnni",
+   "status": "partial",
+   "note": "pair_base and pair_row_offsets land here [h/tron/tensor/k_vnni.hpp:258-281]; transpose_16x16_epi32 lands in PR-3 (#4898)."
+  },
+  {
+   "id": "K6",
+   "source": "k_vnni",
+   "status": "full",
+   "note": "store_row, load_row and copy_token land here [h/tron/tensor/k_vnni.hpp:283-339]."
+  },
+  {
+   "id": "K7",
+   "source": "k_vnni",
+   "status": "none",
+   "note": "store_block lands in PR-3 (#4898)."
+  },
+  {
+   "id": "K8",
+   "source": "k_vnni",
+   "status": "none",
+   "note": "Note [Row-major tail block], row_major_row, store_row_major and load_row_major land in PR-4 (#4901)."
+  },
+  {
+   "id": "K9",
+   "source": "k_vnni",
+   "status": "none",
+   "note": "block_to_vnni and block_to_rows land in PR-4 (#4901)."
+  },
+  {
+   "id": "M0",
+   "source": "model",
+   "status": "none",
+   "note": "Note [Shared block save] lands in PR-3 (#4898)."
+  },
+  {
+   "id": "M1",
+   "source": "model",
+   "status": "none",
+   "note": "pending_k_block, pending_k_blocks_ and convert_pending_k_blocks land in PR-4 (#4901); the k_store_block constant lands in PR-3 (#4898)."
+  },
+  {
+   "id": "M2",
+   "source": "model",
+   "status": "none",
+   "note": "k_store_shared lands in PR-3 (#4898)."
+  },
+  {
+   "id": "M3",
+   "source": "model",
+   "status": "none",
+   "note": "k_store_cut_units lands in PR-3 (#4898)."
+  },
+  {
+   "id": "M4",
+   "source": "model",
+   "status": "partial",
+   "note": "The per-token VNNI store with k_source_row in place and the on-stack bf16 conversion lands here inside save_k_impl [h/tron/models/model.hpp:3103-3120]; store_k_block as a function with runs and set_k_block lands in PR-3 (#4898)."
+  },
+  {
+   "id": "M5",
+   "source": "model",
+   "status": "none",
+   "note": "The window protocol (open, claim, join) and the watchdog (the join's timeout check) of save_k_impl land in PR-3 (#4898)."
+  },
+  {
+   "id": "M6",
+   "source": "model",
+   "status": "none",
+   "note": "The row-recording loop after the join lands in PR-4 (#4901)."
+  },
+  {
+   "id": "M7",
+   "source": "model",
+   "status": "none",
+   "note": "The worker index and worker count of the save_k entry points land in PR-3 (#4898); in this PR the generated run() calls save_k without them [ingest/src/TronCpp.hs:2919-2921]."
+  }
+ ],
+ "walkthrough": [
+  {
+   "diagram": "none",
+   "say": "PR-1 is the first of the four PRs that split PR 4424. It stores K of 128-dimension heads in the VNNI-packed layout behind a typed owner and typed views, and adds no AMX instruction. Its two readers of the layout are the new AVX-512 reader qk_group and the existing FPGA staging gather, whose callback now gathers each row through get_k_row. The CMake option TRON_K_VNNI is off in every build preset [CMakeLists.txt:47]. With the option off, the five layout-independent tests pass [PR body, Builds and tests]. The compile definition is PUBLIC, so the generated model objects see the same layout as the tron library [src/tron/CMakeLists.txt:232-234, 336-342]."
+  },
+  {
+   "diagram": "kv_cache-b1",
+   "say": "Start at the kv_block card at the right. Its k member becomes k_storage, a std::conditional_t that names k_vnni_tensor (the owner type, introduced at K_VNNI-B2) for a VNNI slot and the bf16 array native_k_storage otherwise [h/tron/models/kv_cache.hpp:2526-2536]. Two static_asserts check that the type is trivial and has the same byte count. The arrow label is the layout gate k_vnni::layout_on, true only for 128-dimension heads and only with the option [h/tron/tensor/k_vnni.hpp:95-101]. The diagram draws no row view: say in passing that k_view and k_at exist only on the row-major branch [h/tron/models/kv_cache.hpp:2554-2572]. The page's two bit arrays in the middle card are PR-4, so skip them."
+  },
+  {
+   "diagram": "k_vnni-b1",
+   "say": "Point at the plane: 64 tokens x 128 dimensions of bf16 = 16 KiB, the same bytes as the row-major plane [h/tron/tensor/k_vnni.hpp:21-30]. Walk the containment. A plane is 16 panels of 1 KiB, one per (dimension step s, token block c). A panel is 16 pair rows of 64 bytes. A pair row is one dimension pair for 16 tokens [h/tron/tensor/k_vnni.hpp:56-77]. Then run the worked example through k_vnni::index: token 37, dimension 70 lands at element 5226 [h/tron/tensor/k_vnni.hpp:105-112]. The orange frame (block 2 still row-major) is PR-4."
+  },
+  {
+   "diagram": "k_vnni-b1a",
+   "say": "Use the five levels to say the same thing from the top. Level 1: the K of page 7 for slot 5 is one plane per KV head. Level 2: a dimension step cuts the columns and a token block cuts the rows, so a panel is one cell of the 4 x 4 cut. Level 3: a pair is two consecutive dimensions of one token. Level 4: a pair row holds one pair of 16 tokens. Level 5: a dword is one token's pair, with the even value in the low half [h/tron/tensor/k_vnni.hpp:24-29, 58-60, 80-81]. The hand-computed anchors of this map are the first test case [t/t_k_vnni_layout.cpp:101-118]. The last line, the row-major form of a block, is PR-4."
+  },
+  {
+   "diagram": "k_vnni-b2",
+   "say": "This is the answer to Ben's 2026-09-21 request for typed access. k_vnni_tensor owns the bytes. Its as_view() is the only source of a view, and as_view() on a temporary is deleted [h/tron/tensor/k_vnni.hpp:180-201]. k_vnni_view reads through at(token, dim) and has no element write, no public pointer constructor and no data() [h/tron/tensor/k_vnni.hpp:135-170]. detail::k_vnni_access::plane is the one route to the raw address, open to store_row, load_row, copy_token, the reader qk_group and the test-only fill_storage_slot [h/tron/tensor/k_vnni.hpp:209-216; h/tron/kernels/k_vnni.hpp:83; h/tron/models/kv_cache.hpp:1721-1722]. The transfer rows const_k_row_view and k_row_view carry one token's 128 values in dimension order [h/tron/tensor/k_vnni.hpp:224-253]. qk_vnni_128x4 in the grey box is PR-2."
+  },
+  {
+   "diagram": "k_vnni-b3",
+   "say": "Read the list group by group. Groups 1 to 4 are in this PR: the gate and the index map, the views and the access route, the transfer rows with pair_base and pair_row_offsets, and the per-token operations store_row (4 scatters of 16 dwords), load_row (4 gathers) and copy_token [h/tron/tensor/k_vnni.hpp:95-112, 135-216, 224-281, 291-339]. store_block and transpose_16x16_epi32 are PR-3. The row-major group (row_major_row, store_row_major, load_row_major) and the conversion group (block_to_vnni, block_to_rows) are PR-4."
+  },
+  {
+   "diagram": "kv_cache-b3",
+   "say": "Follow the four call paths of this PR. save_k_impl calls page::set_k_row, which calls store_row [h/tron/models/model.hpp:3113-3119; h/tron/models/kv_cache.hpp:2010-2021]. The staging callback k_head_fn calls page::get_k_row, which calls load_row into the caller's scratch [h/tron/scheduler/full.hpp:2747-2762; h/tron/models/kv_cache.hpp:2028-2039]. apply_page_tok takes page::k_packed and hands it to qk_group [h/tron/models/self_attention.hpp:1972-1981; h/tron/models/kv_cache.hpp:1993-2001]. copy_storage_slot assigns the owner for a whole page and uses copy_token otherwise [h/tron/models/kv_cache.hpp:2286-2302]. page::k keeps its eight overloads but requires a row-major slot [h/tron/models/kv_cache.hpp:1924-1986]."
+  },
+  {
+   "diagram": "k_vnni-b4",
+   "say": "Show only steps 3 and 4. store_row scatters one token's 64 dimension pairs into its column: 4 bytes into each of 64 lines, where the row-major store wrote 4 whole lines [h/tron/tensor/k_vnni.hpp:283-304]. That is the per-token cost named in the PR body, and PR-3 replaces it with a whole-block store for runs of 16 tokens. Rows 1, 2 and 5 (the row-major form, block_to_vnni, block_to_rows) are PR-4."
+  },
+  {
+   "diagram": "none",
+   "say": "Open the reader. No base diagram draws its loop [h/tron/kernels/k_vnni.hpp:57-127]. For each token block the 16 bits of the live mask for that block select the lanes. Each 64-byte pair row is loaded with that mask. So the storage of a dead token (a token whose live bit is clear) is never read. The query's dimension pair is broadcast, and VDPBF16PS accumulates 16 scores at once [h/tron/kernels/k_vnni.hpp:84-105]. A group wider than 16 heads is scored in passes of 16 [h/tron/kernels/k_vnni.hpp:65-70]. The reader is checked against the row-major dotter for 4, 20 and 32 heads, with live masks that have cleared bits [t/t_k_vnni_layout.cpp:206-343]."
+  },
+  {
+   "diagram": "k_vnni-b5",
+   "say": "Three lanes carry this PR. Main stores rows through set_k_row inside save_k's marks loop [h/tron/models/model.hpp:3091-3132]. The attention workers score every page of a VNNI slot with qk_group. The dense AMX predicate carries the temporary gate && !k_vnni::layout_on, so no page of a VNNI slot reaches the AMX kernel [h/tron/models/self_attention.hpp:1885-1887, 1962-1981]. The staging gather reads get_k_row on an attention worker or on main [src/tron/gof.cpp:203-213]. The helper lanes and the join are PR-3. The bits, the conversion and the rules R1 to R7 are PR-4."
+  },
+  {
+   "diagram": "model-b5",
+   "say": "The decision tree has two nodes that this PR exercises: a VNNI slot stores each token through set_k_row, and a row-major slot through page::k().set [h/tron/models/model.hpp:3103-3122]. A non-bf16 K buffer is converted to bf16 on the stack first, in the array the diagram calls conv and this PR calls row [h/tron/models/model.hpp:3116-3119]. Runs of 16, the bits and the hardware-attention branch are PR-3 and PR-4."
+  },
+  {
+   "diagram": "model-b4",
+   "say": "Point at the red dashed lane: after this PR save_k is the whole K store on main, one set_k_row per token and KV head, 4 scatters each [h/tron/models/model.hpp:3100-3119]. The Note that PR-3 adds quotes 0.86 ms per layer for that store (measured 2026-09-14 on the test server delphi-3bda with the model qwen3-4b, 8 users, prompt 1024). That cost is why PR-3 adds the helper lanes and the whole-block store."
+  },
+  {
+   "diagram": "none",
+   "say": "Close with what Ben should verify: the compile checks of the type model [t/t_llama_unit.cpp:421-429], the four cases of t_k_vnni_layout, the populate case with its mutation check [t/t_phase1_integration.cpp:845-924], the PUBLIC compile definition [src/tron/CMakeLists.txt:232-234, 336-342] and the CI lane that builds with the option on [.github/workflows/cmake-single-platform.yml:356]. The kill switch keeps the layout and the reader. So it changes no scoring path in this PR [h/tron/models/kv_cache.hpp:707-713]. The PR body measures a decode TPS loss of 6.4 % at prompt 1024 and 11.6 % at prompt 8192 against main. It attributes the loss to the temporary gate, and PR-2 removes the gate with the AMX kernel."
+  }
+ ],
+ "gaps": [
+  "The inner loop of the AVX-512 reader qk_group (the live mask per token block, the masked pair-row loads, the broadcast query pair, VDPBF16PS accumulation, the float and fp16 paths, and the passes of 16 heads) is drawn by no base diagram. K_VNNI-B2 and K_VNNI-B3 only name the function [h/tron/kernels/k_vnni.hpp:57-127].",
+  "The scoring-path selection of apply_page_tok is drawn only as the arrow apply_page_tok -> qk_group of K_VNNI-B5 and the apply_page_tok row of KV_CACHE-B3. Its PR-1 form (the temporary dense gate, the live mask collected in the token loop, the dotters compiled out, the one reader call after the loop) has no diagram [h/tron/models/self_attention.hpp:1885-1887, 1914-1981].",
+  "The staging scratch contract (k_head_fn's new scratch argument, gof::populate's k_scratch beside v_scratch with one 256-byte row per KV head, and the pointer collection before the copy) is named in K_VNNI-B5 but not drawn [h/tron/gof.hpp:61-78; src/tron/gof.cpp:203-213].",
+  "The tests of this PR (the four cases of t_k_vnni_layout, the compile checks and the save_k case of t_llama_unit, the populate case of t_phase1_integration, the t_amx_dispatch_dtype expectation) and the mutation check have no diagram.",
+  "The build side (the CMake option, its PUBLIC definition on the tron target and the generated model objects, the CI lane and README.ci.md) has no diagram.",
+  "The kill-switch policy (TRON_AMX_DISABLE keeps the layout and the reader, and no visit path changes in this PR) and the unconsumed query pack have no diagram [h/tron/models/kv_cache.hpp:707-713].",
+  "The widened split-versus-unsplit tolerance of t_llama_unit under the option (0.05 absolute on a weighted-V element, 1e-6 relative on the weight sum) has no diagram [t/t_llama_unit.cpp:2732]."
+ ]
+}

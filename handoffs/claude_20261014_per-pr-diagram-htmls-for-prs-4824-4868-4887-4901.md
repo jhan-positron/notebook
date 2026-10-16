@@ -49,9 +49,9 @@ The user's request: "I will need to walk through PR 4824, 4868, 4887 and 4901 wi
 - 19:25 Ultracode on.
 - 19:37 The user asked for the four pages. Claude listed the source pages, their headings, SVG counts and ids, read split-status.md and split-plan.md, and read the state of PRs 4424, 4824, 4868, 4887, 4898 and 4901 with `gh`.
 - 19:38 PR bodies, file lists and commit lists of 4868, 4887, 4898 and 4901 were saved to the scratchpad.
-- 19:39 to 19:41 dump_text.py was written (an SVG-free text dump of a source page). The source pages' heads were compared (identical stylesheet), the SVGs were checked for cross-SVG references (none) and scripts (none). The 16 base-diagram blocks were extracted byte for byte into blocks/<id>.html, with boxes.json, diagrams.txt and the identifier hit matrix hits.txt and hits.json.
+- 19:39 to 19:41 dump_text.py was written (an SVG-free text dump of a source page). The source pages' heads were compared (identical stylesheet), the SVGs were checked for cross-SVG references (none) and scripts (none). The 16 base-diagram blocks were extracted byte for byte into blocks/<id>.html, with boxes.json, diagrams.txt and the identifier hit matrix hits.txt and hits.json. (preserved: artifacts/intel-amx/exec/pr-diagram-pages-20261014/blocks/boxes.json)
 - 19:42 The four worktree heads were checked against GitHub.
-- 19:44 The inputs were prepared (changes.txt, split-plan-3.1.md excerpt).
+- 19:44 The inputs were prepared (changes.txt, split-plan-3.1.md excerpt). (preserved: artifacts/intel-amx/exec/pr-diagram-pages-20261014/src/changes.txt)
 - 19:45 The mapping workflow was launched: per PR one mapper, three adversarial verifiers (diff grounding, completeness, prose and facts), one reviser.
 - 19:47 to 19:48 build_pr_page.py was written and tested on a dummy spec. A nested `<code>` tag defect in the identifier wrapping was fixed.
 - 20:32 The mapping workflow finished: 20 agents, 0 errors, 4.7 M tokens, 47 min. Corrections: PR-1 68, PR-2 62, PR-3 60, PR-4 64 raised; 175 applied, 11 rejected with evidence.
@@ -87,7 +87,7 @@ The four pages, in claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs
 
 Each page holds, in order: a meta line and stack navigation, a table of contents, a three-sentence Short version, Words used here, "1. What this PR adds" (concept, kind, PR-head file:line, diagrams, note), "2. Walk-through order" (what to say at each diagram, boxes to point at, lines to open), "3. The base diagrams for this PR" (each block copied byte for byte under a "why" paragraph and a core or context badge, followed by four status boxes: in this PR, already there, lands in a later PR, not in the stack in this form), "4. Base diagrams not involved", "5. Code-change sections of the source pages that land in this PR" (links to ../merge-4737-2-4424/...html#c5 and so on), "6. What the diagrams do not show", "7. How this page was made". Light theme from the source CSS. The diagrams keep PR 4424's line numbers; the prose cites the split PR heads, and the header says so. Lineage of all four:
 
-- generator: /home/jhan/workspace/intel-AMX/exec/pr-diagram-pages-20261014/tools/build_pr_page.py (spec JSON to HTML; copies blocks/<id>.html verbatim)
+- generator: /home/jhan/workspace/intel-AMX/exec/pr-diagram-pages-20261014/tools/build_pr_page.py (spec JSON to HTML; copies blocks/<id>.html verbatim) (preserved: artifacts/intel-amx/exec/pr-diagram-pages-20261014/tools/build_pr_page.py)
 - input: /home/jhan/workspace/intel-AMX/exec/pr-diagram-pages-20261014/spec/pr<n>-<number>.json and blocks/<id>.html
 - input built by: the specs by the two workflows (mapping wf_c7ae91be-604, QA wf_ade7a369-5ec) from the PR bodies, diffs and heads; the blocks extracted from the three source pages on 2026-10-14
 - sources: the three source pages in merge-4737-2-4424, the PR bodies and file and commit lists in inputs/, split-plan-3.1.md, the code at the four PR heads in positron-ai/tron
@@ -95,20 +95,33 @@ Each page holds, in order: a meta line and stack navigation, a table of contents
 
 Record directory claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr-diagram-pages-20261014/ (50 files, 2,527,686 bytes):
 
-- README.md (1,878 bytes). The layout of the record and the rebuild command.
-- tools/build_pr_page.py (15,264 bytes), tools/check_pages.py (2,851 bytes), tools/dump_text.py (1,130 bytes), tools/pr-diagram-pages-map-wf_c7ae91be-604.js (19,624 bytes), tools/pr-diagram-pages-qa-wf_ade7a369-5ec.js (9,853 bytes).
+- README.md (1,878 bytes). The layout of the record and the rebuild command. (preserved: artifacts/intel-amx/exec/pr-diagram-pages-20261014/README.md)
+- tools/build_pr_page.py (15,264 bytes), tools/check_pages.py (2,851 bytes), tools/dump_text.py (1,130 bytes), tools/pr-diagram-pages-map-wf_c7ae91be-604.js (19,624 bytes), tools/pr-diagram-pages-qa-wf_ade7a369-5ec.js (9,853 bytes). (preserved: artifacts/intel-amx/exec/pr-diagram-pages-20261014/tools/pr-diagram-pages-map-wf_c7ae91be-604.js)
 - spec/pr1-4868.json (100,000 bytes), pr2-4887.json (83,498), pr3-4898.json (83,547), pr4-4901.json (75,570). The final specs. spec/pr<n>-<number>-full.json (213,775 to 263,103 bytes each). Spec v1, the three verifier reviews, the reviser's applied and rejected lists. spec/qa-results.json (235,779 bytes). The QA findings and fixer outcomes.
-- blocks/ (16 extracted diagram blocks, 19,588 to 60,790 bytes each) plus boxes.json, diagrams.txt, hits.txt, hits.json.
-- src/head-kv_cache.html (4,722 bytes, the shared stylesheet) and src/changes.txt (65,195 bytes, the change sections as text).
+- blocks/ (16 extracted diagram blocks, 19,588 to 60,790 bytes each) plus boxes.json, diagrams.txt, hits.txt, hits.json. (preserved: artifacts/intel-amx/exec/pr-diagram-pages-20261014/blocks/diagrams.txt)
+- src/head-kv_cache.html (4,722 bytes, the shared stylesheet) and src/changes.txt (65,195 bytes, the change sections as text). (preserved: artifacts/intel-amx/exec/pr-diagram-pages-20261014/src/head-kv_cache.html)
 - inputs/ (13 files): body-4868.md to body-4901.md, commits-*.txt, files-*.txt, split-plan-3.1.md.
 
 Other files:
 
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr-walkthrough-diagram-pages.md (2,522 bytes). Memory note. One index line appended to MEMORY.md in the same directory (MEMORY.md had been changed on disk by another session; the line was appended, not overwritten).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/05daa18d-ed3c-4a33-8e24-e3eab00ce2ea/workflows/scripts/pr-diagram-pages-map-wf_c7ae91be-604.js (19,624 bytes) and pr-diagram-pages-qa-wf_ade7a369-5ec.js (9,853 bytes). The workflow scripts (also copied into the record's tools/).
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr-walkthrough-diagram-pages.md (2,522 bytes). Memory note. One index line appended to MEMORY.md in the same directory (MEMORY.md had been changed on disk by another session; the line was appended, not overwritten). (preserved: artifacts/intel-amx/memory/split-4424/pr-walkthrough-diagram-pages.md)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/05daa18d-ed3c-4a33-8e24-e3eab00ce2ea/workflows/scripts/pr-diagram-pages-map-wf_c7ae91be-604.js (19,624 bytes) and pr-diagram-pages-qa-wf_ade7a369-5ec.js (9,853 bytes). The workflow scripts (also copied into the record's tools/). (preserved: artifacts/intel-amx/exec/pr-diagram-pages-20261014/tools/pr-diagram-pages-qa-wf_ade7a369-5ec.js)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/05daa18d-ed3c-4a33-8e24-e3eab00ce2ea/tasks/wwtld60gm.output (1,076,104 bytes) and wmi29v1nn.output (271,477 bytes). The raw workflow results. Scratchpad, may be cleaned up.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/05daa18d-ed3c-4a33-8e24-e3eab00ce2ea/scratchpad/ (out/, spec/, tools/, blocks/, pr/ with the PR diffs, the pr4-*.hpp head files, cite*/ and verify*/ agent work, fix-pr2-4887.py, fix-pr3-4898.py, the before-fix specs). Working copies of the record.
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/05daa18d-ed3c-4a33-8e24-e3eab00ce2ea/scratchpad/ (out/, spec/, tools/, blocks/, pr/ with the PR diffs, the pr4-*.hpp head files, cite*/ and verify*/ agent work, fix-pr2-4887.py, fix-pr3-4898.py, the before-fix specs). Working copies of the record. (preserved: artifacts/intel-amx/exec/scratch-relocated/05daa18d/fix-pr2-4887.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/05daa18d/fix-pr2-4887.py)
 - Code: nothing was changed in any git checkout. No commit, no push, no PR comment.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr-diagram-pages-20261014/blocks/` (18 files)
+- `artifacts/intel-amx/exec/pr-diagram-pages-20261014/inputs/` (13 files)
+- `artifacts/intel-amx/exec/pr-diagram-pages-20261014/spec/` (9 files)
+- `artifacts/intel-amx/exec/pr-diagram-pages-20261014/tools/` (2 files)
+- `artifacts/intel-amx/exec/scratch-relocated/05daa18d/` (1 files)
+- `artifacts/intel-amx/exec/scratch-relocated/05daa18d/out/` (4 files)
+- `artifacts/intel-amx/exec/scratch-relocated/05daa18d/pr/` (3 files)
+- `artifacts/intel-amx/exec/scratch-relocated/05daa18d/spec/` (5 files)
+- `artifacts/intel-amx/exec/scratch-relocated/05daa18d/tools/` (3 files)
+- `artifacts/intel-amx/pr3879/split-4424/` (4 files)
 
 ## Current state
 
