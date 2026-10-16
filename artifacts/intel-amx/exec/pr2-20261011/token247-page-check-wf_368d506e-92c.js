@@ -1,0 +1,35 @@
+export const meta = {
+  name: 'token247-page-check',
+  description: 'Check token-247-probe.html: plain-English rules, facts and citations against code and result files; refute each finding',
+  phases: [{ title: 'Check', detail: 'plain English, facts-vs-code, facts-vs-results, diagram consistency' }, { title: 'Verify', detail: 'two refuters per must-fix/should-fix finding' }],
+}
+const PAGE = '/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/token-247-probe.html'
+const W = '/home/jhan/workspace/ai-runs/tron-split-pr2'
+const RES = '/home/jhan/workspace/intel-AMX/exec/results/p247-20261011'
+const CTX = `Context: ${PAGE} is an explainer page for jhan (an engineer) about the token-247 probe of PR #4887 (PR-2 of the PR 4424 split, tree ${W} at 0ee8671d35). Read-only: modify nothing. Report findings only: each with the exact quoted phrase, severity (must-fix | should-fix | nit), the claim, the evidence (file:line or result file) and the corrected text. Rules of the plain-english skill apply to the page's prose (define terms at first use or in the Words list, one claim per sentence, numbers with units and a meaning, citations after a sentence in brackets, no idioms or metaphors, bullets for multi-point paragraphs, short sentences, no semicolons, a Short version of at most three sentences at the top).`
+const FINDINGS = { type: 'object', properties: { findings: { type: 'array', items: { type: 'object', properties: { phrase: { type: 'string' }, severity: { type: 'string', enum: ['must-fix', 'should-fix', 'nit'] }, claim: { type: 'string' }, evidence: { type: 'string' }, fix: { type: 'string' } }, required: ['phrase', 'severity', 'claim', 'evidence', 'fix'] } } }, required: ['findings'] }
+const VERDICT = { type: 'object', properties: { refuted: { type: 'boolean' }, reason: { type: 'string' } }, required: ['refuted', 'reason'] }
+const LENSES = [
+  { key: 'plain', prompt: `Load the skill "plain-english" with the Skill tool and run its Check mode over the prose of ${PAGE} (strip the HTML tags and the SVG; check the text of paragraphs, lists, tables and figure captions, and the text inside the SVG diagrams). Report each violation with the exact phrase and the corrected sentence; group identical violations only when the fix is the same text. ${CTX}` },
+  { key: 'facts-code', prompt: `Verify every source citation and code claim of the page against ${W}: the cited line numbers (h/tron/models/model.hpp:1155, :1195, :1224-1227, :3398, :3416, :3508, :3517, :3520-3534, :3537-3539; h/common/top_k_accum.hpp:84-88; src/tron/generation/stats.cpp:135-138; src/tron/generation/context.cpp:136-139; h/tron/kernels/amx_attn_iface.hpp:77-85), the claims that logits are bf16 (logits_t), that the top-k keeps 320 entries (max_top_k), that exact ties go to the lower id, that temperature 0 takes entry 0, that forced ids replace the sampler's choice while the scores are still computed and recorded, that the "Logits" record is written before patch_logits, that the final RMSNorm output is final_embedding, that the two documented differences are the PV-weight rounding (AVX truncates, AMX rounds to nearest even) and the add order, that the new kernel's scores are bit-identical to main's AMX QK kernel (t/t_amx_numerics.cpp identity case) and that the reader (h/tron/kernels/k_vnni.hpp qk_group) multiplies exact bf16 pairs in fp32 (VDPBF16PS). Report every statement the code does not support, with the correction. ${CTX}` },
+  { key: 'facts-results', prompt: `Verify every number of the page against the result files: ${RES}/verdict.txt, ${RES}/steps-new-vs-newoff.json (summary and the step-248 row; count steps with margin_off <= 0.25 and == 0), ${RES}/steps-new-vs-newforced.json, ${RES}/steps-newoff-vs-head.json, ${RES}/tokens.txt, ${RES}/runs.txt, /home/jhan/workspace/intel-AMX/exec/results/pr2-20261011/smoke/cpu-p1024/new.tokens and newoff.tokens (positions 240 to 255, 0-based), and the September study /home/jhan/workspace/intel-AMX/definitive-decode/token30-results.html (the claims: an exact tie at its flip step, the truncation build moved scores by 0.89 times and flipped the same steps, the core-count control with AMX off changed nearly every value of all 36 layers and flipped the same tie). Also check the chart's claims (17 steps with margin <= 2 notches, exact ties at steps 10 and 248, median margin 39 notches) and the identity-test numbers (6,669 assertions; mutation fails at token 16) against /home/jhan/workspace/intel-AMX/exec/results/pr2-20261011/tests-pr2.txt and mutation-result.txt. Report every mismatch. ${CTX}` },
+  { key: 'diagrams', prompt: `Read the three SVG diagrams and the chart in ${PAGE} as a reader would (the text labels, the arrows between boxes, the colour legend) and check: does diagram A's flow match the prose list in section 2 (and the code in ${W}: h/tron/models/model.hpp run_logits/fill_logits_buffer, h/common/top_k_accum.hpp, src/tron/generation/stats.cpp, src/tron/generation/context.cpp)? Does diagram B match the four runs and four comparisons of ${RES}/runs.txt and verdict.txt? Does diagram C's token rows match positions 240-255 of /home/jhan/workspace/intel-AMX/exec/results/pr2-20261011/smoke/cpu-p1024/new.tokens and newoff.tokens, and is the colouring (red = differ, orange = the shifted rejoin) correct? Are any labels misleading, overlapping in meaning, or undefined? Report findings with the exact label text and the correction. ${CTX}` },
+]
+const results = await pipeline(
+  LENSES,
+  l => agent(l.prompt, { label: `check:${l.key}`, phase: 'Check', schema: FINDINGS }),
+  (r, l) => { if (!r) { log(`lens ${l.key} returned nothing`); return [] } log(`lens ${l.key}: ${r.findings.length} findings`); return r.findings.map(f => ({ ...f, lens: l.key })) },
+  async (fs, l) => {
+    const out = []
+    for (const f of fs) {
+      if (f.severity === 'nit') { out.push({ ...f, kept: true, votes: 'unverified-nit' }); continue }
+      const votes = (await parallel(['truth (is the claim true, reading the code, the result files or the page yourself?)', 'rules (does the proposed fix obey the plain-English rules and keep the page accurate?)'].map(lens => () =>
+        agent(`Try to REFUTE this finding through the ${lens} lens; default to refuted=true if uncertain. Finding (lens ${l.key}): phrase "${f.phrase}", severity ${f.severity}. Claim: ${f.claim}. Evidence: ${f.evidence}. Proposed fix: ${f.fix}. ${CTX}`, { label: `verify:${l.key}:${f.phrase.slice(0, 30)}`, phase: 'Verify', schema: VERDICT })))).filter(Boolean)
+      out.push({ ...f, kept: votes.length > 0 && votes.every(v => !v.refuted), votes: votes.map(v => (v.refuted ? 'R: ' : 'K: ') + v.reason) })
+    }
+    return out
+  },
+)
+const all = results.flat().filter(Boolean)
+log(`total ${all.length}, kept ${all.filter(f => f.kept).length}`)
+return { kept: all.filter(f => f.kept), dropped: all.filter(f => !f.kept) }

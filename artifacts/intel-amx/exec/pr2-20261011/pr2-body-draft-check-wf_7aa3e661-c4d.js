@@ -1,0 +1,33 @@
+export const meta = {
+  name: 'pr2-body-draft-check',
+  description: 'Check the PR-2 body draft: facts against the code and the handoff, plain-English rules; refute each finding',
+  phases: [{ title: 'Check', detail: 'three lenses over exec/pr2-20261011/pr-body.md' }, { title: 'Verify', detail: 'two refuters per must-fix/should-fix finding' }],
+}
+const BODY = '/home/jhan/workspace/intel-AMX/exec/pr2-20261011/pr-body.md'
+const W = '/home/jhan/workspace/ai-runs/tron-split-pr2'
+const CTX = `Context: ${BODY} is the DRAFT description of PR-2 (branch jhan-vnnik-2-amx, worktree ${W}, diff = git -C ${W} diff jhan-vnnik-1-layout HEAD, 10 files). Placeholders of the form {{NAME}} are filled later from measurements; do not report them. The description rules (from the handoff PR2-handoff.md section 6, at /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR2-handoff.md): present tense, no change history or review narration, no "before/after"; measurements keep provenance only (commit id + date); comparators are main at 72308ec90c, PR-1's head 82d05e94be and its kill-switch run only; a pending measurement is its own subsection; no clock times, no paths into the author's workspace, no comparison with another head's assertion counts in Verification; every term defined at first use (the Words table), one claim per sentence, numbers with units, plain English, no idioms, no names of people (roles and links only); the PR-1 body (/home/jhan/workspace/intel-AMX/exec/pr1-20261010/pr-body.md) is the style reference and its stack table row for PR-2 must agree with this body. Read-only: do not modify any file. Report findings only: each with the exact quoted phrase, severity (must-fix | should-fix | nit), the claim, the evidence (file:line of code or handoff section), and the corrected text.`
+const FINDINGS = { type: 'object', properties: { findings: { type: 'array', items: { type: 'object', properties: { phrase: { type: 'string' }, severity: { type: 'string', enum: ['must-fix', 'should-fix', 'nit'] }, claim: { type: 'string' }, evidence: { type: 'string' }, fix: { type: 'string' } }, required: ['phrase', 'severity', 'claim', 'evidence', 'fix'] } } }, required: ['findings'] }
+const VERDICT = { type: 'object', properties: { refuted: { type: 'boolean' }, reason: { type: 'string' } }, required: ['refuted', 'reason'] }
+const LENSES = [
+  { key: 'facts-code', prompt: `Check every factual statement of the sections "Short version", "Background", "Words used here" and "The changes" of the draft against the code in ${W} (read src/tron/kernels/amx_attn.cpp, h/tron/kernels/amx_attn_iface.hpp, h/tron/models/self_attention.hpp, h/tron/models/kv_cache.hpp, h/tron/tensor/k_vnni.hpp, h/tron/kernels/k_vnni.hpp, t/t_amx_numerics.cpp, t/t_amx_dispatch_dtype.cpp, t/t_llama_unit.cpp, README.ci.md at HEAD and the diff). Examples of what to verify: tile numbers, buffer sizes (4 KiB s16 buffer? 16 rows x 64 floats x 4 bytes = 4096 bytes), the scramble constants (stride 37, offset 11), which tiles hold which operands, what the fakes count, the six STATIC_REQUIREs, the README sentence, the kill-switch paragraph wording, the claim "the dense predicate is unchanged", the claim that the row-major kernel's native K view rejects a packed plane. Report every statement that the code does not support, with the correction. ${CTX}` },
+  { key: 'facts-handoff', prompt: `Check the draft's sections "Measurements", "Verification", "CI coverage", "Open items" and "The stack" against the handoff PR2-handoff.md sections 1, 5.4, 5.5, 6 (items 5 to 8) and 0 (D8), and against the PR-1 body's stack table and Open items: are all required subsections present in the required order (Short version, Background, Words used here, The changes, Measurements with the five pairs as subsections, Verification with the CI coverage subsection, Open items with the six listed items, The stack, the attribution line)? Are the CI-coverage claims the one-claim sentences the handoff lists? Does any sentence carry a claim the handoff forbids (shared block save, tail block, deb preset, old-base numbers as comparators, "before/after", clock times, workspace paths, names)? Does the PR-1 numbers quoted (-6.4 %, -11.6 %, +26 %, +120 %, -0.5 %, +0.3 %, -65 ms, -425 ms) match the PR-1 body? Does the stack table agree with the PR-1 body's row for PR-2? Report each gap with the correction. ${CTX}` },
+  { key: 'plain', prompt: `Load the skill "plain-english" with the Skill tool and run its Check mode over ${BODY} (skip the {{PLACEHOLDER}} lines and the tables' numeric cells). Rules: define a term at first use (a Words table counts as a definition when the term appears there; a term used in the Short version or Background before the Words table needs an inline gloss or must be plain), one claim per sentence (split sentences with "because", "since", "which means", "so that", semicolons), numbers carry units and a meaning, citations follow a sentence in brackets, no idioms or metaphors, bullets for multi-point paragraphs, short sentences, no semicolons. Report the violations as findings with the exact phrase and the corrected sentence; group identical rule violations only when the fix is the same text. ${CTX}` },
+]
+const results = await pipeline(
+  LENSES,
+  l => agent(l.prompt, { label: `check:${l.key}`, phase: 'Check', schema: FINDINGS }),
+  (r, l) => { if (!r) { log(`lens ${l.key} returned nothing`); return [] } log(`lens ${l.key}: ${r.findings.length} findings`); return r.findings.map(f => ({ ...f, lens: l.key })) },
+  async (fs, l) => {
+    const out = []
+    for (const f of fs) {
+      if (f.severity === 'nit') { out.push({ ...f, kept: true, votes: 'unverified-nit' }); continue }
+      const votes = (await parallel(['truth (is the claim true, reading the code or the handoff yourself?)', 'rules (does the proposed fix obey the description rules and plain-English rules, and not add a forbidden claim?)'].map(lens => () =>
+        agent(`Try to REFUTE this finding through the ${lens} lens; default to refuted=true if uncertain. Finding (lens ${l.key}): phrase "${f.phrase}", severity ${f.severity}. Claim: ${f.claim}. Evidence: ${f.evidence}. Proposed fix: ${f.fix}. ${CTX}`, { label: `verify:${l.key}:${f.phrase.slice(0, 30)}`, phase: 'Verify', schema: VERDICT })))).filter(Boolean)
+      out.push({ ...f, kept: votes.filter(v => !v.refuted).length === votes.length && votes.length > 0, votes: votes.map(v => (v.refuted ? 'R: ' : 'K: ') + v.reason) })
+    }
+    return out
+  },
+)
+const all = results.flat().filter(Boolean)
+log(`total ${all.length}, kept ${all.filter(f => f.kept).length}`)
+return { kept: all.filter(f => f.kept), dropped: all.filter(f => !f.kept) }

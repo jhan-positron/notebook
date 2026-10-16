@@ -21,7 +21,7 @@ The user asked Claude to execute PR2-handoff.md, the instruction file for the se
 - **PR2-handoff.md**: the instruction file in the project folder (87,714 bytes) that this session executed, step 0 to step 7.
 - **VNNI layout**: the pair-interleaved K layout the AMX QK kernel reads as its B operand. **AMX**: Intel Advanced Matrix Extensions. **Kill switch**: TRON_AMX_DISABLE=1, which makes the binary run the AVX-512 reader for every page.
 - **base, head, new, newoff, headoff**: the five binaries of the measurements. base = main at 72308ec90c. head = PR-1's binary at 82d05e94be. new = PR-2's binary at 0ee8671d35. newoff and headoff = new and head with the kill switch.
-- **Chain**: the delphi-3bda script exec/pr2-20261011/chain.sh that builds, runs unit tests, a mutation check, the smokes, the performance cells and the host suite, then restores the machine.
+- **Chain**: the delphi-3bda script exec/pr2-20261011/chain.sh that builds, runs unit tests, a mutation check, the smokes, the performance cells and the host suite, then restores the machine. (preserved: artifacts/intel-amx/exec/pr2-20261011/chain.sh)
 - **Smoke**: a 1-user greedy run of 256 tokens whose generated tokens are compared between binaries. **Cell**: one performance configuration (prompt length, 8 users, 3 repetitions).
 - **TPS**: decode tokens per second per user. **TTFT**: time to first token. **Band**: the decision band, twice the larger standard deviation, at least 0.4 TPS or 0.15 s.
 - **Forced run**: runtron fed a fixed token list (`--force-feed-text-token-file`) so two binaries score the same context at every step. **bf16 step (ulp)**: the distance between two adjacent bf16 values at the top score's magnitude, 0.125 at 26.6.
@@ -49,11 +49,11 @@ The user asked Claude to execute PR2-handoff.md, the instruction file for the se
 
 - 18:38 The user asked about the base and target branches. Answer: head jhan-vnnik-2-amx, base jhan-vnnik-1-layout at 82d05e94be, opened as a draft with "Skip benchmarks" [PR2-handoff.md:102-125].
 - 18:42 The user ordered the execution. Step 0: PR 4868 OPEN at 82d05e94be, PR 4424 at 0a5334ccb6, the reusable binaries on delphi-3bda matched their records. The session started past the handoff's 23:00 UTC launch cutoff, so the machine run waited for the window after the nightly.
-- 18:48 to 18:56 Steps 1 to 3: the patch applied with the one documented diagram conflict, five comment reverts, two commits (10 files, +285/-72). Step 4: 22-cell and 38-cell syntax matrices with 0 warnings, clang-format 19.1.7, diff check, no cassert. Chain scripts written (chain.sh, launch.sh, wait-chain.sh, validate-smoke.py).
+- 18:48 to 18:56 Steps 1 to 3: the patch applied with the one documented diagram conflict, five comment reverts, two commits (10 files, +285/-72). Step 4: 22-cell and 38-cell syntax matrices with 0 warnings, clang-format 19.1.7, diff check, no cassert. Chain scripts written (chain.sh, launch.sh, wait-chain.sh, validate-smoke.py). (preserved: artifacts/intel-amx/exec/pr2-20261011/launch.sh)
 - 18:54 Pre-review workflow launched (pr2-prereview, 96 agents, six lenses, three refuters per finding). 19:04 the body-draft check launched.
-- 19:34 Pre-review applied through build-branch.sh: 29 should-fix items and 41 nits, no must-fix. Final diff 10 files, +362/-89, head 0ee8671d35. Step 4 re-run clean.
+- 19:34 Pre-review applied through build-branch.sh: 29 should-fix items and 41 nits, no must-fix. Final diff 10 files, +362/-89, head 0ee8671d35. Step 4 re-run clean. (preserved: artifacts/intel-amx/exec/pr2-20261011/build-branch.sh)
 - 19:38 Chain launched on delphi-3bda (pid 3392186) with a hold until 13:00 UTC and a wait for the nightly's lease.
-- 19:39 Checkpoint given. 20:42 the body draft with placeholders and fill-body.py were ready.
+- 19:39 Checkpoint given. 20:42 the body draft with placeholders and fill-body.py were ready. (preserved: artifacts/intel-amx/exec/pr2-20261011/fill-body.py)
 
 2026-10-11:
 
@@ -127,22 +127,34 @@ Near ties are common: 12 of 256 steps have a top-2 margin of at most 2 bf16 step
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/track-decode-regression-by-logits-token-ties-explained.html (89,819 bytes). The explainer page: the five answers, three diagrams, the per-step margin chart, the "why 13 under AMX and 624 under AVX" table. Four check rounds applied. First written as token-247-probe.html and renamed at 12:14.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/track-decode-regression-by-logits-token-ties-explained.html (89,819 bytes). The explainer page: the five answers, three diagrams, the per-step margin chart, the "why 13 under AMX and 624 under AVX" table. Four check rounds applied. First written as token-247-probe.html and renamed at 12:14. (preserved: artifacts/intel-amx/pr3879/split-4424/track-decode-regression-by-logits-token-ties-explained.html)
   - generator: an inline python script in the transcript (record 1292 at 12:07) that assembled the page from scratchpad chart.svg, then inline edit scripts
-  - input: exec/results/p247-20261011/ (steps-*.json, verdict.txt, tokens.txt)
-  - input built by: exec/pr2-20261011/probe247.sh on delphi-3bda
+  - input: exec/results/p247-20261011/ (steps-*.json, verdict.txt, tokens.txt) (preserved: artifacts/intel-amx/exec/results/p247-20261011/verdict.txt)
+  - input built by: exec/pr2-20261011/probe247.sh on delphi-3bda (preserved: artifacts/intel-amx/exec/pr2-20261011/probe247.sh)
   - sources: tron at 0ee8671d35 and 82d05e94be, the September token-30 investigation, the smoke results
   - regenerate: unavailable (the generator was not saved as a file)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/ (session scripts and logs): build-branch.sh (22,961 bytes), chain.sh (20,712), launch.sh (583), wait-chain.sh (1,399), wait-chain.log (5,899), validate-smoke.py (1,445), validator-test.log (249), probe247.sh (10,846), fill-body.py (15,496), pr-body-template.md (36,897), pr-body-posted.md (50,795, the body as first posted), pr-body.md (53,541, the body with the corrections), replies/pr-comment.md (2,868, the codex reply), msgs/a.txt (2,195) and msgs/b.txt (1,440, the two commit messages), matrix-pr2.log, matrix-pr2b.log, format-pr2.log, format-pr2b.log, control-a.log, control-b.log, pr2check-38.log, pr2check-38b.log, pr2check-out/, pr2check-out-b/ (the step-4 check outputs before and after the pre-review).
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr2-20261011/ (964,186 bytes, 47 entries, NFS, also visible on claude-agentsrv). The chain's results: build logs, tests-pr2*.out, mutation-*.txt, host-suite-pr2.txt, smoke/cpu-p1024, cpu-p8192, fpga-p1024, steps.txt, chain.done.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr2-E-cpu/ (1,527,894 bytes). The performance cells: rt-results.txt (109,019 bytes), summary.json (19,979), rt/.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/p247-20261011/ (763,452 bytes). The probe: runs.txt, tokens.txt, verdict.txt (2,156), steps-new-vs-newoff.json (173,267), steps-new-vs-head.json (173,263), steps-new-vs-newforced.json (157,912), steps-newoff-vs-head.json (157,910), their .txt forms, probe.done.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/ (session scripts and logs): build-branch.sh (22,961 bytes), chain.sh (20,712), launch.sh (583), wait-chain.sh (1,399), wait-chain.log (5,899), validate-smoke.py (1,445), validator-test.log (249), probe247.sh (10,846), fill-body.py (15,496), pr-body-template.md (36,897), pr-body-posted.md (50,795, the body as first posted), pr-body.md (53,541, the body with the corrections), replies/pr-comment.md (2,868, the codex reply), msgs/a.txt (2,195) and msgs/b.txt (1,440, the two commit messages), matrix-pr2.log, matrix-pr2b.log, format-pr2.log, format-pr2b.log, control-a.log, control-b.log, pr2check-38.log, pr2check-38b.log, pr2check-out/, pr2check-out-b/ (the step-4 check outputs before and after the pre-review). (preserved: artifacts/intel-amx/exec/pr2-20261011/wait-chain.sh)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr2-20261011/ (964,186 bytes, 47 entries, NFS, also visible on claude-agentsrv). The chain's results: build logs, tests-pr2*.out, mutation-*.txt, host-suite-pr2.txt, smoke/cpu-p1024, cpu-p8192, fpga-p1024, steps.txt, chain.done. (preserved: artifacts/intel-amx/exec/results/pr2-20261011/steps.txt)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr2-E-cpu/ (1,527,894 bytes). The performance cells: rt-results.txt (109,019 bytes), summary.json (19,979), rt/. (preserved: artifacts/intel-amx/exec/results/pr2-E-cpu/rt-results.txt)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/p247-20261011/ (763,452 bytes). The probe: runs.txt, tokens.txt, verdict.txt (2,156), steps-new-vs-newoff.json (173,267), steps-new-vs-head.json (173,263), steps-new-vs-newforced.json (157,912), steps-newoff-vs-head.json (157,910), their .txt forms, probe.done. (preserved: artifacts/intel-amx/exec/results/p247-20261011/runs.txt)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md (270,899 bytes today). About 21 PR-2 sections appended (step 0 through the probe and the codex round).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr2-split-execution.md (6,663 bytes today). New memory note, modified by later sessions.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr2-split-execution.md (6,663 bytes today). New memory note, modified by later sessions. (preserved: artifacts/intel-amx/memory/split-4424/pr2-split-execution.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md (10,006 bytes today). Index line added.
-- Workflow scripts (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/93888ee8-96f1-484e-b1b8-72a8beac9a6a/workflows/scripts/): pr2-prereview-wf_f2fd0e23-1dd.js (10,158 bytes), pr2-body-draft-check-wf_7aa3e661-c4d.js (6,679), pr2-body-final-check-wf_052a93fb-690.js (6,257), token247-page-check-wf_368d506e-92c.js (6,867), decode-regression-page-recheck-wf_eb15e029-0fe.js (6,163), decode-regression-page-final-wf_92b597ef-f7d.js (4,963), decode-regression-page-last-wf_0458dd34-359.js (4,889).
+- Workflow scripts (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/93888ee8-96f1-484e-b1b8-72a8beac9a6a/workflows/scripts/): pr2-prereview-wf_f2fd0e23-1dd.js (10,158 bytes), pr2-body-draft-check-wf_7aa3e661-c4d.js (6,679), pr2-body-final-check-wf_052a93fb-690.js (6,257), token247-page-check-wf_368d506e-92c.js (6,867), decode-regression-page-recheck-wf_eb15e029-0fe.js (6,163), decode-regression-page-final-wf_92b597ef-f7d.js (4,963), decode-regression-page-last-wf_0458dd34-359.js (4,889). (preserved: artifacts/intel-amx/exec/pr2-20261011/pr2-prereview-wf_f2fd0e23-1dd.js, relocated to /home/jhan/workspace/intel-AMX/exec/pr2-20261011/pr2-prereview-wf_f2fd0e23-1dd.js)
 - The session's /tmp task directory no longer exists (cleaned up).
 - Code: commits de39dc3de7 ("amx: the QK kernel on the VNNI plane") and 0ee8671d35 ("tests: bit identity and the typed-boundary probe for the VNNI kernel") on `jhan-vnnik-2-amx`, pushed. PR https://github.com/positron-ai/tron/pull/4887.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr2-20261011/` (20 files)
+- `artifacts/intel-amx/exec/pr2-20261011/msgs/` (2 files)
+- `artifacts/intel-amx/exec/pr2-20261011/replies/` (1 files)
+- `artifacts/intel-amx/exec/results/p247-20261011/` (9 files)
+- `artifacts/intel-amx/exec/results/pr2-20261011/` (13 files)
+- `artifacts/intel-amx/exec/results/pr2-20261011/smoke/cpu-p1024/` (2 files)
+- `artifacts/intel-amx/exec/results/pr2-20261011/smoke/cpu-p8192/` (2 files)
+- `artifacts/intel-amx/exec/results/pr2-20261011/smoke/fpga-p1024/` (2 files)
+- `artifacts/intel-amx/exec/results/pr2-E-cpu/` (1 files)
 
 ## Current state
 

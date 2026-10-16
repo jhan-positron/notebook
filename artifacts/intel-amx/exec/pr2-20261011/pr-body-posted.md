@@ -1,0 +1,409 @@
+## Short version
+
+This pull request adds the AMX QK kernel that reads the packed K plane of the layout PR (PR #4868) as the right operand of the tile multiply and computes `S = Q * K^T` directly, without the register transpose (a transpose done in AVX-512 vector registers) of the row-major kernel. This PR removes the layout PR's temporary gate: a dense page of a packed slot takes the AMX page path, and partial pages, the kill switch, hosts without AMX and 128-dimension heads with kv_mul other than 4 keep the AVX-512 reader. The CMake option that selects the layout stays off in every preset, and against `main` the measured decode TPS rises by 5.4 % at prompt length 1,024 tokens and by 9.5 % at 8,192 tokens.
+
+### Background
+
+AMX tile multiplication accepts a row-major matrix only as its left operand. Its right operand must use the VNNI layout.
+
+`main` stores K as one 128-value row per token. Its AMX QK kernel, added by PR #3879, therefore puts the K page (64 tokens x 128 dimensions) on the left. Packed queries go on the right. The resulting score matrix S is transposed. An AVX-512 register transpose then writes the 4 query columns as score rows. [PR #3879]
+
+With the option on, the layout PR stores the K rows of every 128-dimension head in the VNNI layout. That layout is pair-interleaved (two consecutive dimensions of one token sit next to each other in memory) and transposed. The stored data are therefore K^T in the form the right operand needs. The packed plane uses the same number of bytes as row-major K. The kernel of this PR computes `S = Q * K^T` directly.
+
+```text
+main:     S^T = K * Q^T
+            K page (64 tokens x 128 dimensions, row-major) is the left operand.
+            Packed Q^T is the right operand. S = transpose(S^T) in AVX-512 registers.
+this PR:  S = Q * K^T
+            The 4 query rows, padded to 16 rows, are the left operand.
+            The 16 K panels of the page are the right operand. No transpose.
+```
+
+- Heads of other sizes keep the row-major layout (for example the 64-dimension heads of the gpt-oss-120b model).
+- Dense pages (full 64-token pages) score bit for bit the same as under the row-major kernel, by unit test.
+- Partial pages go through the AVX-512 reader of the layout PR. So does every page when the AMX kernel does not run: under the kill switch `TRON_AMX_DISABLE=1`, on hosts without AMX, and for 128-dimension heads with kv_mul other than 4.
+
+## Words used here
+
+| Term | Meaning |
+|---|---|
+| PR, main, stack, the layout PR | PR means pull request. `main` is the target branch of the stack. The stack is the sequence of four dependent PRs replacing PR #4424 (the original single pull request for this work). This is the second PR. The layout PR is the first one, PR #4868, branch `jhan-vnnik-1-layout`. This PR is based on it. |
+| tron, runtron | tron (the inference program under test), runtron (its command-line tool). |
+| token, generated token, layer | A token is a unit of text processed by the model. A generated token is one output token. A layer is one stage of the model's computation. |
+| attention, head, Q, K, V | Attention combines saved token information using scores. A head is one attention computation channel. Q holds query vectors, K holds key vectors, and V holds value vectors. The KV cache stores K and V for past tokens. |
+| CPU, FPGA | CPU means central processing unit. FPGA means field-programmable gate array. Here it is the accelerator card that runs attention for the pages assigned to it. |
+| AMX, AVX-512, VNNI | AMX (Advanced Matrix Extensions) and AVX-512 (Advanced Vector Extensions, 512-bit vectors) are CPU instruction sets. AMX supports tile matrix multiplication. VNNI means Vector Neural Network Instructions. The VNNI layout is an operand format read by VNNI instructions and AMX tile multiplication. |
+| tile, A operand, B operand, C tiles, TDPBF16PS, tile region | A tile is a 2-dimensional AMX register of 16 rows by 64 bytes. TDPBF16PS is the tile instruction that multiplies two bf16 tiles and adds the products into an fp32 tile. Its left matrix is the A operand (row-major). Its right matrix is the B operand (VNNI layout). The C tiles are the accumulator tiles that hold the running sums. An AMX tile region is the code section between the tile configuration and the tile release. |
+| VNNI layout, packed | Two consecutive dimensions of one token are adjacent in memory. One 64-byte line holds that dimension pair for 16 consecutive tokens. This is the B-operand format of AMX tile multiplication. Packed means stored in the VNNI layout. Packed K, VNNI K and the layout mean the same thing in this PR. A packed slot or page is one whose K uses that layout. |
+| row-major K | The layout `main` uses: one contiguous row of values per token. For the heads changed by the layout PR, each row holds 128 values. |
+| plane, panel, token block, dimension step | A plane is the K or V storage of one page and one KV head. Unqualified, plane means the K plane here: 64 tokens x 128 dimensions x 2 bytes = 16 KiB (16 x 1,024 bytes). A dimension step is 32 dimensions. A 128-dimension head therefore has 4 steps. A token block is 16 consecutive tokens of a page. A page therefore has 4 blocks. A panel is the 1 KiB part of the plane for one dimension step and one token block: 16 dimension-pair rows of 64 bytes, exactly one B tile. The plane holds 4 steps x 4 blocks = 16 panels. |
+| the kernel, the row-major kernel, the packers | The kernel is `qk_vnni_128x4`, added here. It takes the padded Q rows as the A operand and the 16 K panels as the B operand. It writes `S[query][token]` (one score row per query head, one column per token). The row-major kernel is `qk_rowmajor_128x4` of `main` (PR #3879, the pull request that added the AMX attention kernels). It takes the K page as the A operand and the packed queries as the B operand. It stores the tiles into an internal buffer and transposes the 4 query rows out of that buffer into score rows. The packers prepare Q. `pack_q_rows_128x4` (this PR) copies the 4 query rows of one group as the A operand. `pack_q_group_128x4` (`main`) packs them as the B operand. `amx_attn_h128g4` is the namespace of these entry points (the functions that other code calls), named for head size 128 and kv_mul 4. |
+| padded Q rows, query-pack slot | The A operand of the kernel: 16 rows of 128 bf16 values (4,096 bytes). Rows 0 to 3 are the 4 query heads of one group. Rows 4 to 15 are zero padding. A query-pack slot is one 4,096-byte buffer per query token of an attention call. It holds that token's packed queries. It serves either packer. |
+| CMake, preset, option | CMake configures the build. A preset is a named build configuration. The option means `TRON_K_VNNI`, which defaults to OFF. When enabled, it selects VNNI K storage for every 128-dimension head. No preset enables it. |
+| AMX dispatch | `TRON_AMX_DISPATCH`, the CMake option that compiles the AMX kernels and the code that selects them. The kernel and its call sites sit inside that option. |
+| layout gate, dense page, partial page, dense predicate, AMX page path | The layout gate is `k_vnni::layout_on<head_size>`, a compile-time constant: true for 128-dimension heads when the option is on, false otherwise. It chooses the packer at the pack site (the code that packs one query group) and the kernel at the dense-page site (the code that scores one dense page). A dense page is a full 64-token page that the query sees whole and inside its sliding window. A partial page is any other page. The dense predicate, `is_dense_amx_page`, is the run-time check that a page is dense for the AMX page path. The AMX page path is the code that applies one dense page to one query with the AMX QK kernel and the AMX PV kernel. |
+| the temporary gate | The clause `&& !k_vnni::layout_on<operation_head_size>` that the layout PR places on the dense AMX page path. In that PR it sends every page of a packed slot to the reader. This PR removes it. |
+| kill switch, AMX-on, AMX-off | The kill switch is `TRON_AMX_DISABLE=1`. It makes `amx_attn_h128g4::available()` false at run time. Then no AMX kernel and no query pack (one packer call for one query token) runs. AMX-on allows those kernels when their other conditions hold. AMX-off disables them through this switch. |
+| KV page, block, slot, geometry | A KV page is a 64-token unit allocated by the cache (`page` in the code). A `kv_block` is that page's K plane and V plane for one KV head of one slot. In this PR, block alone means a 16-token token block. A slot is one persistent K/V storage region, usually one per layer or shared between layers. Geometry means the head counts and dimensions. A packed slot uses packed K storage. A row-major slot stores K as contiguous rows. |
+| KV head, kv_mul | A KV head is one key/value head. `kv_mul` means query heads per KV head. A query group is the kv_mul query heads that share one KV head. It is 4 heads for the qwen3-4b and llama-3.1-8b models, 3 heads for llama-3.2-3b, and 8 heads for qwen-3-30b-a3b. |
+| prefill, decode, pass | A pass is one forward computation of the model over its current input. Prefill processes prompt tokens, usually many tokens per pass. Decode generates one output token per user per pass. |
+| owner, view, k_vnni_access | `k_vnni_tensor` owns one 16 KiB K plane as a 64-byte-aligned array. `k_vnni_view` refers to that plane. Views come only from an owner. `detail::k_vnni_access` is the one route from a view to the plane address. Its callers are the typed row operations, the two layout-specific score kernels and the test-only `book::fill_random`, which fills a whole book (the cache object that owns a group of pages) with random values. |
+| reader, dotter | The reader is `k_vnni::qk_group` of the layout PR, the AVX-512 routine that scores a query group against one packed K page, one token per vector lane (element position). The dotter is `main`'s software loop that computes one dot product per token from row-major K. |
+| store_row, scatter store | `store_row` writes one token's K row into a packed plane with 4 AVX-512 scatters (vector stores to separate addresses) of 16 dwords (4-byte units). Together they write 4 bytes into each of the token's 64 memory lines (64-byte CPU cache lines). `save_k`, the routine that copies a pass's K rows into the cache, stores every token this way in the layout PR (the per-row scatter store). |
+| bf16, fp32, float | bf16 is the 16-bit brain floating-point format used for K and Q. fp32, called `float` here, is the 32-bit IEEE single format. IEEE is the standards organization specifying these formats. |
+| QK, PV, softmax | QK is the query-key score product. Softmax converts scores into attention weights using exponentials and normalization. PV multiplies those weights by V. |
+| identity case | The case "AMX QK from the VNNI K plane is bit-identical to AMX QK from row-major K" of `t_amx_numerics` (the AMX numerical-accuracy test binary). It stores the same K values row-major and, through `store_row`, into a packed owner. It packs the same queries both ways. It runs both kernels on real AMX. It compares the 4 x 64 fp32 scores (4 query rows by 64 tokens) bit for bit. It needs AMX hardware, and without it the case returns early with a warning. |
+| fakes, probe | Stand-in implementations of every `amx_attn_h128g4` entry point, including `available()`, that `t_amx_dispatch_dtype` (the dispatch test) defines in its own translation unit. The packer and kernel fakes count their calls into a probe (a record of the call counts and of the query values the packer received) instead of running AMX. The linker therefore never links the kernel's object file. |
+| Catch2, REQUIRE, STATIC_REQUIRE, SUCCEED, WARN | Catch2 is the C++ test framework of the unit tests. REQUIRE is its assertion macro. Each evaluation counts as one assertion. STATIC_REQUIRE is a compile-time check that also counts as one assertion, and STATIC_REQUIRE_FALSE is its negated form. SUCCEED records one passing assertion. A placeholder case (a test case that contains only SUCCEED, used when the tested code is not compiled in) passes through it. WARN prints a warning without failing the case. |
+| mutation check | A deliberate code change that a test must catch. The test's failure proves that the test can fail. |
+| tp2, slice | `tp2`, also written `-tp2` in a model name, splits the model across 2 devices. A slice is one FPGA with its share of the host's CPU cores and memory. |
+| TPS, TTFT | TPS is decode throughput in tokens per second per user. TTFT is time to first token. The measurement tables report the maximum TTFT over all 8 users. |
+| base, new, new2, newoff, head, headoff | `base` is `main` at commit `72308ec90c` (the layout PR's merge base, the `main` commit it is based on), built as runtron with row-major K and AMX dispatch on. `new` is this branch at commit `0ee8671d35`, built with the option and AMX dispatch on. `new2` is a second run of `new` (the A/A repeat). `head` is the layout PR at commit `82d05e94be`, built the same way as `new`. `newoff` and `headoff` run `new` and `head` with the kill switch. |
+| greedy run, A/A repeat | A greedy run uses temperature 0, a setting that chooses the highest-scoring token. `--pay-for-determinism` performs sums in a fixed order. An A/A repeat runs the same configuration twice as a control. |
+| cell, band, standard deviation, paired t | A cell is one model, prompt length, and attention configuration. Standard deviation measures variation between repetitions. The band is twice the larger of the two binaries' standard deviations. It is never smaller than 0.4 TPS for throughput or 0.15 s for TTFT. The paired t statistic expresses the mean paired difference relative to its uncertainty. It is dimensionless. |
+| CI, required CI, legacy CMake lane | CI means continuous integration, the automated build and test system. Required CI is the workflow `gcp-nix.yml`, plus `deb-smoke.yml`, an APT (Debian package manager) package check that builds no tron binary. The C++ test build of `gcp-nix.yml` uses `nix/cmake-tron-test-build.nix`. The legacy CMake lane is `.github/workflows/cmake-single-platform.yml`. It runs by manual dispatch and from `publish-deb.yml`, the package-publishing workflow. |
+| runner, Granite Rapids | A runner is a machine that executes CI jobs. The CI jobs named below ask for the runner labels `self-hosted`, `fpga`, `test` and `avx512`. Granite Rapids is the Intel CPU family of the Xeon 6962P test machine with AMX. The Granite Rapids machine below means that machine. Genoa is the AMD CPU family of the runners without AMX. |
+| slice check, cost data | `bin/slice bench --check` checks registered tests for timing records in `config/test-benchmarks.json`. These records are cost data: test durations at 1, 2, and 4 slices. |
+| worktree, translation unit | A worktree is a separate checkout used for one build. A translation unit is one source file after its included headers have been expanded. |
+
+## The changes
+
+The kernel file adds the packer and the kernel. [src/tron/kernels/amx_attn.cpp]
+
+- `pack_q_rows_128x4` copies the 4 query rows of one group as stored, 256 bytes each, into rows 0 to 3 of the padded Q rows. It writes nothing else. Rows 4 to 15 are zero padding that the caller keeps zero.
+- `qk_vnni_128x4` takes the padded Q rows as the A operand in tile 4. In each of the 4 dimension steps, it loads the K panels of the 4 token blocks as the B operand, into tiles 5 and 6 in turn. Each panel is multiplied into the accumulator tile of its token block (tiles 0 to 3). The result is `S[query][token]`, unscaled fp32 (not yet multiplied by the attention scale).
+- The tile stores write 16 rows (one per A row) into a 4 KiB buffer inside the kernel. Only the 4 query rows are copied out into the caller's score rows. The caller's buffer therefore needs 4 rows.
+- The plane address is taken once, through `detail::k_vnni_access::plane`. The kernel is one of the two layout-specific score kernels allowed to take it. The reader is the other.
+- Compile-time assertions tie the plane constants of `h/tron/tensor/k_vnni.hpp` (page tokens, head size, dimensions per step, tokens per block, pairs per step, line bytes, panel bytes) to the kernel constants (page tokens, head size, dimension step, tile rows, tile row bytes).
+
+The interface header declares the two entry points. The kernel's K argument is a typed view. [h/tron/kernels/amx_attn_iface.hpp]
+
+- `qk_vnni_128x4` takes the page's packed K plane as its read-only `k_vnni_view`. A native (row-major) K view, a packed V plane or a bare pointer therefore cannot be passed to it by mistake. The row-major kernel keeps its native K view. A packed K plane therefore cannot be passed to it.
+- Note [QK orientation] (a named comment block in the header) describes the flipped orientation. With the option on, the stored K plane is the B-operand layout. The kernel therefore takes the padded Q rows as the A operand and the K panels as the B operand. No transpose is needed. The extra work moves to the K store (the per-row scatter store) and to the reader for partial pages.
+- The dispatch diagram (the text diagram in the header that shows which routine serves each path) names the kernel beside the row-major kernel. Note [AMX attention dispatch] says that with the option the operand roles swap. The note on 16-row tile stores covers both QK kernels beside the PV kernel. The declaration of the kernel states the bit-identity contract with the row-major kernel, and names `t_amx_numerics` as its check.
+
+Software attention (attention computed on the CPU) selects the packer and the kernel at compile time. [h/tron/models/self_attention.hpp]
+
+- At the pack site, the layout gate chooses `pack_q_rows_128x4` for a packed slot and `pack_q_group_128x4` for a row-major slot. The query-pack slots are zero-filled when they are created (`resize()`). Each packer writes only its 4 data rows or columns (the ones that are not padding). The padding both packers rely on therefore stays zero across calls and slot reuse.
+- At the dense-page site, the layout gate chooses `qk_vnni_128x4` with `page::k_packed` (the read-only plane view) for a packed slot and `qk_rowmajor_128x4` with the native K view for a row-major slot. The kernel writes into the same 4 x 64 score array that the software loop fills.
+- The temporary gate is removed. The compile-time condition of the dense AMX page path is the eligibility predicate alone (`amx_attn_h128g4::eligible`, the compile-time check of head size, kv_mul and query type). The run-time condition is a packed query and a dense page. A dense page of a packed slot therefore takes the AMX page path, as a dense page of a row-major slot does on `main`.
+- The query-pack slot comment names both packers and their shared alignment contract. The pack-site comment defines the A and B operands before it uses them.
+
+Three headers update their comments. [h/tron/models/kv_cache.hpp, h/tron/tensor/k_vnni.hpp, h/tron/kernels/k_vnni.hpp]
+
+- Note [K VNNI storage] names the two layout-specific score kernels as the readers of the plane, and says that the dense AMX page path passes `page::k_packed` to the kernel. Its consumer list says that every other read of a packed slot uses the reader with the same view: partial pages, the kill switch, hosts without AMX, builds without AMX dispatch, and the shapes and query types outside the eligibility predicate. Its "Why" paragraph says that the kernel reads the plane directly as its B operand.
+- The kill-switch paragraph says that with `TRON_AMX_DISABLE=1` a packed binary (a binary built with the option on) runs the reader: an AMX-off run of the same layout, not a rollback to the row-major binary's numerical results.
+- The owner's header and the reader's header name the kernel as the second score kernel allowed to take the plane address. The reader's header lists the same set of pages the reader serves. Every pair row is one 64-byte line, and the kernel reads the plane in 64-byte tile rows. The owner's alignment comment says so, and the owner is therefore aligned to 64 bytes.
+
+Tests change as follows:
+
+- `t_amx_numerics`, the AMX numerical-accuracy test, gains the identity case.
+  - It fills a packed owner through `store_row` in scrambled token order (stride 37 tokens, offset 11 tokens). That order visits every token once.
+  - It packs the same queries both ways. It runs the row-major kernel and the kernel inside one AMX tile region on the same inputs. It compares the 4 x 64 fp32 scores bit for bit, for 2 seeds.
+  - Both kernels add the same four 32-dimension partial dot products in the same order inside TDPBF16PS. The scores must therefore match bit for bit. A wrong panel or a wrong dimension pair would not reproduce them.
+  - The two score arrays start with different fill patterns. An element a kernel fails to write therefore cannot match.
+  - The packer case gains a section for `pack_q_rows_128x4`. All 16 rows of the buffer start with a poison pattern (a fixed value, bf16 bit pattern 0x7f7f, that no correct write leaves behind). Rows 0 to 3 must then hold the query rows bit for bit, and rows 4 to 15 must keep the poison. That section runs on every host. [Verification below]
+- `t_amx_dispatch_dtype`, the test of dispatch for different activation types (the number formats of the model's intermediate values), adds fakes for the packer and the kernel of this PR beside the fakes of `main`'s packer, QK kernel and PV kernel.
+  - The fakes of both packers and of both QK kernels count into the same probe, and the fake of the VNNI packer counts a second time. So a full page expects one pack, one QK and one PV call under either layout, and a partial page expects one pack and no kernel call.
+  - The VNNI packer count checks that the dispatch picks the packer of the build's K layout. The two packers share one signature. The types therefore cannot enforce that choice. The kernel choice is enforced by its view type.
+  - The dense predicate of the test has no layout clause: it expects the kernels for every full page that packs.
+- `t_llama_unit`, the model and cache unit-test binary, adds six compile-time checks (two STATIC_REQUIRE and four STATIC_REQUIRE_FALSE) to the typed-boundary case (the test case that checks which argument types each kernel accepts): the kernel accepts the packed K view, read-only or writable, and rejects raw pointers, the native K view and the V view. The alignment comment names the AMX tile rows.
+- `README.ci.md` names the identity case among the tests that exercise the packed layout, and says that it executes AMX only on a Granite Rapids runner.
+
+## Measurements
+
+The measurements compare decode TPS and TTFT with the option on against `main`, and against the layout PR's binary. They also measure the kill switch inside this PR and two controls (comparison runs that each isolate one factor).
+
+Configurations:
+
+- `base`: `main` at `72308ec90c`, built as runtron with row-major K and AMX dispatch on.
+- `new`: this branch at `0ee8671d35`, with the option and AMX dispatch on.
+- `head`: the layout PR at `82d05e94be`, built the same way as `new`.
+- `newoff` and `headoff`: those two binaries with the kill switch.
+
+The experiment ran on 2026-10-11:
+
+- Model: qwen3-4b, tp2.
+- Load: 8 users and 256 generated tokens.
+- Attention: CPU, selected by `USE_HW_ATTN=0`.
+- Prompt lengths: 1,024 tokens and 8,192 tokens.
+- Repetitions: 3, with the binaries run in alternating order.
+- Allocation: the experiment's half of the Granite Rapids test machine.
+
+The decision band is twice the larger of the two binaries' standard deviations. It is never smaller than 0.4 TPS for throughput or 0.15 s for TTFT. Bands are shown rounded to 0.01 TPS and 0.01 s. A difference beyond that band counts as a change. Paired t uses the 3 repetitions.
+
+Each parenthesized value is the sample standard deviation over the 3 repetitions. TPS has units of tokens/s/user. Both TTFT and its standard deviation have units of seconds.
+
+| Prompt length (tokens) | Binary | TPS (tokens/s/user) | TTFT (s) |
+|---|---|---|---|
+| 1024 | base | 80.89 (0.26) | 3.173 (0.004) |
+| 1024 | new | 85.25 (0.30) | 3.274 (0.011) |
+| 1024 | newoff | 75.85 (0.20) | 3.948 (0.002) |
+| 1024 | head | 75.47 (0.22) | 4.002 (0.002) |
+| 1024 | headoff | 75.09 (0.33) | 3.942 (0.007) |
+| 8192 | base | 17.34 (0.00) | 52.475 (0.076) |
+| 8192 | new | 18.99 (0.02) | 51.951 (0.051) |
+| 8192 | newoff | 15.51 (0.03) | 116.854 (0.048) |
+| 8192 | head | 15.28 (0.02) | 117.291 (0.044) |
+| 8192 | headoff | 15.32 (0.02) | 116.906 (0.077) |
+
+"Inside" and "beyond" refer to the decision band. The paired t values are dimensionless.
+
+| Prompt length (tokens) | Pair | TPS difference (paired t) | TTFT difference (paired t) | Band (TPS / TTFT) |
+|---|---|---|---|---|
+| 1024 | new vs base | +5.4 % (+4.36 TPS, t +36.7), beyond | +100 ms (+3.2 %, t +12.3), inside | 0.60 TPS / 0.15 s |
+| 1024 | new vs head | +12.9 % (+9.77 TPS, t +34.0), beyond | -729 ms (-18.2 %, t -96.7), beyond | 0.60 TPS / 0.15 s |
+| 1024 | newoff vs new | -11.0 % (-9.39 TPS, t -33.2), beyond | +674 ms (+20.6 %, t +89.5), beyond | 0.60 TPS / 0.15 s |
+| 1024 | newoff vs headoff | +1.0 % (+0.77 TPS, t +6.6), beyond | +6 ms (+0.1 %, t +1.3), inside | 0.66 TPS / 0.15 s |
+| 1024 | head vs headoff | +0.5 % (+0.39 TPS, t +2.7), inside | +60 ms (+1.5 %, t +20.5), inside | 0.66 TPS / 0.15 s |
+| 8192 | new vs base | +9.5 % (+1.65 TPS, t +148.3), beyond | -523 ms (-1.0 %, t -12.9), beyond | 0.40 TPS / 0.15 s |
+| 8192 | new vs head | +24.3 % (+3.71 TPS, t +175.2), beyond | -65.3 s (-55.7 %, t -1640.1), beyond | 0.40 TPS / 0.15 s |
+| 8192 | newoff vs new | -18.3 % (-3.48 TPS, t -316.6), beyond | +64.9 s (+124.9 %, t +2011.5), beyond | 0.40 TPS / 0.15 s |
+| 8192 | newoff vs headoff | +1.3 % (+0.19 TPS, t +30.1), inside | -52 ms (-0.0 %, t -1.1), inside | 0.40 TPS / 0.15 s |
+| 8192 | head vs headoff | -0.3 % (-0.04 TPS, t -1.5), inside | +385 ms (+0.3 %, t +10.9), beyond | 0.40 TPS / 0.15 s |
+
+### This PR against `main` (new vs base)
+
+- TPS of `new` against `base`: +5.4 % (+4.36 TPS, beyond the 0.60 TPS band, paired t +36.7) at prompt length 1,024 tokens and +9.5 % (+1.65 TPS, beyond the 0.40 TPS band, paired t +148.3) at 8,192 tokens.
+- TTFT of `new` against `base`: +100 ms (+3.2 %), inside the 0.15 s band, paired t +12.3 at prompt length 1,024 tokens and -523 ms (-1.0 %), beyond the 0.15 s band, paired t -12.9 at 8,192 tokens.
+
+`new` gains decode throughput against `main` in both cells. At prompt length 1,024 tokens TTFT is 100 ms higher, inside the band. At 8,192 tokens TTFT is 523 ms lower, beyond the band. The per-row scatter store is the known prefill cost of the layout. This pair measures the net TTFT effect of the layout and the kernel together. [Open items below]
+
+### The recovery of the layout PR's loss (new vs head)
+
+The layout PR alone loses decode TPS against `main`: -6.4 % at prompt length 1,024 tokens and -11.6 % at 8,192 tokens. Its TTFT rises by 25.8 % and 119.6 % in the same cells. [PR #4868 at `82d05e94be`, measured 2026-10-10, same base and cells] Its description attributes the loss to the temporary gate. That gate sends every page of a packed slot to the reader. The description says that a measurement at this PR's head must establish the recovery.
+
+- TPS of `new` against `head`: +12.9 % (+9.77 TPS, beyond the 0.60 TPS band, paired t +34.0) at prompt length 1,024 tokens and +24.3 % (+3.71 TPS, beyond the 0.40 TPS band, paired t +175.2) at 8,192 tokens.
+- TTFT of `new` against `head`: -729 ms (-18.2 %), beyond the 0.15 s band, paired t -96.7 at prompt length 1,024 tokens and -65.3 s (-55.7 %), beyond the 0.15 s band, paired t -1640.1 at 8,192 tokens.
+
+The loss is recovered. `new` is above `base` in both cells (previous subsection), and `head` is below it. At prompt length 8,192 tokens TTFT is 52.0 s for `new` against 117.3 s for `head`, 0.5 s below `base`'s 52.5 s. At 1,024 tokens TTFT is 3.27 s for `new` against 4.00 s for `head`, 0.10 s above `base`'s 3.17 s.
+
+### The kill switch inside this PR (newoff vs new)
+
+With the kill switch, a packed binary packs no query and runs the reader for every page. Without it, a dense page takes the kernel. So this pair measures the cost of the reader against the kernel inside one binary.
+
+- TPS of `newoff` against `new`: -11.0 % (-9.39 TPS, beyond the 0.60 TPS band, paired t -33.2) at prompt length 1,024 tokens and -18.3 % (-3.48 TPS, beyond the 0.40 TPS band, paired t -316.6) at 8,192 tokens.
+- TTFT of `newoff` against `new`: +674 ms (+20.6 %), beyond the 0.15 s band, paired t +89.5 at prompt length 1,024 tokens and +64.9 s (+124.9 %), beyond the 0.15 s band, paired t +2011.5 at 8,192 tokens.
+
+In this PR the kill switch changes the scoring path of every dense page of a 128-dimension head, from the kernel to the reader. The decode cost of the reader is 11.0 % and 18.3 % of TPS in the two cells. The prefill cost is 674 ms and 64.9 s of TTFT. `newoff` is within 1.3 % of `headoff` in TPS and TTFT in both cells (next subsection). A `new` binary with the switch therefore behaves like the layout PR's binary.
+
+### Control: AMX off on both binaries (newoff vs headoff)
+
+Both `newoff` and `headoff` run the reader for every page and pack no query. A difference beyond the band would show that the two binaries differ in work outside the kernel.
+
+- TPS of `newoff` against `headoff`: +1.0 % (+0.77 TPS, beyond the 0.66 TPS band, paired t +6.6) at prompt length 1,024 tokens and +1.3 % (+0.19 TPS, inside the 0.40 TPS band, paired t +30.1) at 8,192 tokens.
+- TTFT of `newoff` against `headoff`: +6 ms (+0.1 %), inside the 0.15 s band, paired t +1.3 at prompt length 1,024 tokens and -52 ms (-0.0 %), inside the 0.15 s band, paired t -1.1 at 8,192 tokens.
+
+TTFT is inside the band in both cells. TPS is inside the band at prompt length 8,192 tokens. At 1,024 tokens the difference is +0.77 TPS, beyond the 0.66 TPS band (paired t +6.6). With the kill switch neither binary packs a query or enters the dense page path. The attention work executed differs only by the dense-page test `amx_q_packed != nullptr`, which `new` compiles for packed slots and evaluates once per (query, page) read and `head` does not compile. The two binaries also differ in code size and in the placement of functions in the binary. Whether that explains the 0.77 TPS is not measured. [Open items below]
+
+### Control: the kill switch inside the layout PR's binary (head vs headoff)
+
+`head` with AMX enabled allocates the query-pack slots, enters the AMX tile region and packs the queries for a path its temporary gate never takes. `headoff` skips that preparation. The layout PR's description reports this pair at `82d05e94be` on 2026-10-10 as `headoff` minus `head` (its `newoff` vs `new`): TPS -0.5 % and +0.3 %, and TTFT -65 ms and -425 ms, at prompt length 1,024 and 8,192 tokens. All four differences are inside the band. [PR #4868, Measurements]
+
+- TPS of `head` against `headoff`: +0.5 % (+0.39 TPS, inside the 0.66 TPS band, paired t +2.7) at prompt length 1,024 tokens and -0.3 % (-0.04 TPS, inside the 0.40 TPS band, paired t -1.5) at 8,192 tokens.
+- TTFT of `head` against `headoff`: +60 ms (+1.5 %), inside the 0.15 s band, paired t +20.5 at prompt length 1,024 tokens and +385 ms (+0.3 %), beyond the 0.15 s band, paired t +10.9 at 8,192 tokens.
+
+TPS is inside the band in both cells, as in the layout PR's run. TTFT at prompt length 8,192 tokens is 385 ms higher with AMX enabled, beyond this run's 0.15 s band. The layout PR's run measured the same direction, 425 ms, inside its wider 0.60 s band. Both runs put the difference under 1 % of TTFT. The known difference between the two arms is the query pack that no kernel consumes in `head`. Its cost is consistent with these two runs and is not measured on its own. [Open items below]
+
+## Verification
+
+Build provenance:
+
+- Machine and date: Granite Rapids, Intel Xeon 6962P with AMX, 2026-10-11.
+- Revision: `0ee8671d35`, based on the layout PR at `82d05e94be`, which includes `main` at `72308ec90c`.
+- Environment: `nix develop`, the project's pinned build shell.
+- Compiler: clang version 19.1.7.
+- Preset: `native` (Ninja, clang-19, ccache, lld, build type `RelWithDebInfo`). The AVX-512 flags are explicit in `src/tron/CMakeLists.txt` and do not depend on the preset or on the build host.
+- Build type: `RelWithDebInfo`, an optimized build with debug symbols.
+- Each of the 3 configurations used a separate worktree.
+
+`BUILD_INGEST_MODELS` controls compilation of the models produced by the ingest pipeline (the project's model conversion step).
+
+| Configuration | `TRON_K_VNNI` | `TRON_AMX_DISPATCH` | `BUILD_INGEST_MODELS` | Targets | Build time |
+|---|---|---|---|---|---|
+| option on | ON | ON | ON | runtron and the 6 tests below | 795 s |
+| option on, no AMX dispatch | ON | OFF | OFF | the same | 316 s |
+| option off | OFF | ON | OFF | the 6 tests below without `t_phase1_integration` | 364 s |
+
+`t_heterogeneous_scheduler` tests scheduling across different attention geometries. `t_k_vnni_layout` tests the packed layout, its row operations and the reader. `t_phase1_integration` tests staging (the copy of K and V into buffers read by the FPGA) and dispatch integration.
+
+The following unit-test binaries passed with a fake device (a simulated FPGA). `--skip-benchmarks` excluded their benchmark sections. Each result gives assertions / test cases.
+
+| Test | Option on | Option on, no AMX dispatch | Option off |
+|---|---|---|---|
+| `t_k_vnni_layout` | 1011432 / 4 | 1011432 / 4 | 1011432 / 4 |
+| `t_amx_dispatch_dtype` | 1618 / 1 | 1 / 1 (placeholder without dispatch) | 1618 / 1 |
+| `t_amx_numerics` | 6669 / 5 (AMX cases ran, no "AMX unavailable" line) | 1 / 1 (placeholder without dispatch) | 6669 / 5 (AMX cases ran) |
+| `t_llama_unit` | 266459 / 66 | 266459 / 66 | 266528 / 66 |
+| `t_heterogeneous_scheduler` | 2783 / 3 | 2783 / 3 | 2783 / 3 |
+| `t_phase1_integration` | 6220 / 64 | 6220 / 64 | not built |
+
+The identity case ran on real AMX in the option-on build and in the option-off build. The packed owner and the kernel are compiled whether the option is on or off. Neither `t_amx_numerics` run printed an "AMX unavailable" line.
+
+With the option off, the kernel compiles but no packed slot exists. The option-off build's tests support the claim that behaviour is unchanged there. Without AMX dispatch, `t_amx_numerics` and `t_amx_dispatch_dtype` are one-case placeholders.
+
+Kill-switch results in the option-on build:
+
+- `t_llama_unit`: 266459 assertions passed in 66 cases. This matches the AMX-on count.
+- `t_amx_numerics`: 4108 assertions passed in 5 cases. Its QK precision, identity and PV precision cases reported "AMX unavailable".
+
+A mutation check of the identity case ran in the option-on worktree. The second panel load of the kernel was changed to read token block 2 instead of block 1 (`(step * TOKEN_BLOCKS_4 + 1)` to `+ 2`). The identity case then fails. The run reports 1 of 1 test cases failed and 1 of 17 assertions failed, at the `REQUIRE` of `t/t_amx_numerics.cpp:275`, with seed 21, query row 0 and token 16 captured (16 earlier comparisons passed). With the file restored, the binary passes again with 6669 assertions in 5 cases.
+
+All of these checks pass at `0ee8671d35`:
+
+- clang-format version 19.1.7, the source formatter, with `--dry-run --Werror` on all 9 changed C++ files.
+- `git diff --check`, the whitespace check, against the layout PR's head.
+- A search for the prohibited `<cassert>` header in the diff.
+
+Syntax-only compilation used clang version 19 with the product's compile flags. It covered 38 configurations with 0 errors and 0 warnings:
+
+- All 4 combinations of AMX dispatch on/off and the option on/off for 9 translation units: `t_llama_unit`, `t_k_vnni_layout`, `t_amx_dispatch_dtype`, `t_amx_numerics`, `heterogeneous_scheduler_compile` (heterogeneous scheduling compilation), `scheduler/full.cpp` (the full scheduler), `gof.cpp` (staging), `t_gof_dma` (staging DMA, direct memory access transfers), and `t_kv_oom_subcases` (out-of-memory cases).
+- `kernels/amx_attn.cpp` (the AMX kernels, with the kernel of this PR) with dispatch on and the option on/off.
+
+The compiler flag is `-fsyntax-only`.
+
+### Host test suite and token identity (2026-10-11)
+
+The checks ask two questions. Does the host suite (the unit tests run by `make test-host` with a fake device) meet the exception rules listed under Acceptance rules below? Are the generated tokens identical across the selected configurations? `base` and `head` are the comparators defined in Measurements.
+
+Host-suite setup:
+
+- `make build-test-host` compiled the host tests.
+- `make test-host` ran them with a fake device in the option-on worktree.
+- The experiment used its half of the machine with production serving stopped.
+
+Token-identity setup:
+
+- runtron with qwen3-4b, tp2, and 1 user.
+- Temperature setting 0, `--pay-for-determinism`, random seed identifier 1, and 256 generated tokens.
+- CPU attention at prompt lengths 1,024 and 8,192 tokens.
+- FPGA attention at prompt length 1,024 tokens.
+- Binaries: `new`, `new2` (the A/A repeat), `newoff`, `head`, and `base`.
+
+Acceptance rules:
+
+- The host suite permits only the existing Python-environment exceptions. `t_proxy_lib`, a proxy-library test, may skip. `t_proxy_llama31`, a Llama proxy test, may fail. Both lack the virtual environment `t/proxy/.venv`, the isolated Python dependency directory.
+- Every binary exits with status 0 (success) and produces exactly 256 generated tokens.
+- `new2` must match `new` for all 256 generated tokens in each cell.
+- `newoff` must match `new` for those same tokens.
+- The comparison with `base` is informational. [Issue #4444] The comparison with `head` is expected to be identical when `newoff` matches `new`. The measured result is reported either way.
+
+Host-suite result:
+
+- All test targets compiled.
+- 93 tests passed.
+- 1 test skipped: `t_proxy_lib`. Its per-test log reports "SKIP: t/proxy/.venv missing".
+- 1 test failed: `t_proxy_llama31`, reporting "ERROR: t/proxy/.venv missing".
+- Total suite time: 112 s.
+- The CMake cache retained `TRON_K_VNNI=ON` throughout the make targets.
+
+| Cell | new vs new2 | newoff vs new | new vs head | new vs base | head vs base |
+|---|---|---|---|---|---|
+| CPU attention, prompt length 1024 tokens | identical, 256 of 256 tokens | first difference at generated token 247 | first difference at generated token 247 | first difference at generated token 83 | first difference at generated token 83 |
+| CPU attention, prompt length 8192 tokens | identical, 256 of 256 tokens | identical, 256 of 256 tokens | identical, 256 of 256 tokens | identical, 256 of 256 tokens | identical, 256 of 256 tokens |
+| FPGA attention, prompt length 1024 tokens | identical, 256 of 256 tokens | identical, 256 of 256 tokens | identical, 256 of 256 tokens | first difference at generated token 83 | first difference at generated token 83 |
+
+Outcome of the acceptance rules:
+
+- Every binary exited with status 0 and produced 256 tokens in every cell.
+- `new2` matched `new` in every cell.
+- `newoff` matched `new` at prompt length 8,192 tokens with CPU attention and at 1,024 tokens with FPGA attention. At prompt length 1,024 tokens with CPU attention, `newoff` first differs from `new` at generated token 247 of 256 (token id 624, the token's integer index in the model's vocabulary, under the kill switch and 13 without it). The rule for that pair is therefore not met in that cell. [Open items below]
+- `new` matches `head` wherever `newoff` matches `new`. In the CPU prompt-1024 cell `new` and `head` first differ at the same token 247, and `head` produces token id 624 there, as `newoff` does.
+- `new` first differs from `base` at generated token 83 in both prompt-1024 cells, with the same two token ids as `head` against `base`. At 8,192 tokens all 256 tokens match.
+
+### Forced-run check of the token-247 difference (pending)
+
+- Question: is the difference between `newoff` and `new` at generated token 247 of the CPU prompt-1,024 cell a near tie between two candidate tokens, flipped by the numerical difference between the AMX path and the AVX-512 path?
+- Comparator: `newoff` fed the 256-token sequence that `new` generated in that cell (a forced run: `--force-feed-text-token-file`), so that both binaries score the same context at every step. `head` fed the same sequence is the control: with the kill switch `newoff` runs the reader as `head` does, so their scores should be identical. `new` fed its own sequence checks that forcing changes no score.
+- Cell: CPU attention, prompt length 1,024 tokens, 1 user, greedy, 256 generated tokens, the token-identity setup above. Every step's vocabulary scores are logged.
+- Verdict rule: at the step that predicts token 247, the two highest scores of `new` are tokens 13 and 624 with a margin of a few bf16 steps (a bf16 step, or ulp, is the distance between two adjacent bf16 values at the magnitude of the top score). The two binaries' scores for that pair differ by at least that margin. The score differences at that step (mean and largest absolute difference over the vocabulary, fraction of changed entries) are no larger than at the other steps. The hypothesis holds when all three hold. It is rejected when the margin is large or the differences at that step stand out.
+- Status: running.
+
+| Comparison | Steps compared | Steps where the top token differs | Margin of `new` at token 247 | Difference of that pair at token 247 | Typical difference per step |
+|---|---|---|---|---|---|
+| pending | | | | | |
+
+### CI coverage
+
+Required CI builds with both CMake options off. Neither `TRON_AMX_DISPATCH` nor `TRON_K_VNNI` is enabled in its test build. [nix/cmake-tron-test-build.nix]
+
+- There, `t_amx_dispatch_dtype` runs its placeholder case, and `t_amx_numerics` runs its placeholder case. The fakes compile, but nothing calls them.
+- The identity case needs AMX hardware.
+- The legacy CMake lane compiles both options on. [.github/workflows/cmake-single-platform.yml]
+- The required test jobs and the legacy CMake lane's jobs ask for the same runner labels. That runner pool holds Granite Rapids hosts with AMX and Genoa hosts without it.
+- No job asks for a label that routes it to an AMX host.
+- The identity case therefore executes in the legacy lane only when its job is scheduled on a Granite Rapids runner. It also executes on the Granite Rapids test machine by hand, as reported above.
+- The author explicitly accepts this limitation for this PR. Issue #4865 tracks enabling both options in the required test build and an AMX runner for this case.
+
+## Open items
+
+**128-dimension heads with kv_mul other than 4 query heads.**
+
+- The kernel serves kv_mul 4 only. Other groups retain the packed layout and use the reader wherever `main` uses the dotter, as in the layout PR.
+- Decode TPS of those groups is not measured at `0ee8671d35`.
+- No AMD host is measured at this head either. On such a host the kernel never runs, and the reader serves every packed page, as in the layout PR.
+- The measurement that settles it: decode TPS of llama-3.2-3b (kv_mul 3) and qwen-3-30b-a3b (kv_mul 8) at this head against `main` at `72308ec90c`, 3 repetitions, the band rule of the Measurements section.
+
+Earlier measurements on the PR #4424 branch, whose reader is this PR's, give the expected direction:
+
+| Model and load | Prompt length | Decode TPS change | Repetitions and interpretation | Revisions and date |
+|---|---|---|---|---|
+| llama-3.2-3b, tp2, kv_mul 3 query heads, 32 users | 200 tokens per user plus an 800-token prompt prefix shared by all users | -1.4 % | Resolved in two independent pairs of benchmark passes with the nightly benchmark settings | `9d5c7a389b` vs `main` `be0d5565b3`, 2026-10-09 |
+| qwen-3-30b-a3b, kv_mul 8 query heads, 8 users, tp2 | 1024 tokens | +1.5 % | 6 repetitions, within reported measurement variation | `65a1c41d72` vs `main` `c7844ca2ce`, 2026-09-16 |
+| same | 2048 tokens | -4.1 % | 3 repetitions | same revisions and date |
+| same | 8192 tokens | +24.1 % | 3 repetitions | same revisions and date |
+
+"Resolved" is the earlier report's classification: a difference is resolved when the paired t statistic is at least 2.26 in magnitude (the two-sided 95 % threshold of the t distribution for that report's 10 rounds) and the difference is at least 1 %.
+
+**Kill switch and token divergence. Reviewers decide. [Issue #4444]**
+
+- With this PR, the kill switch gives an AMX-off run of the same binary through the reader. It does not reproduce the tokens of a clean binary, meaning a build with both options off.
+- At prompt length 1,024 tokens, `new` first differs from `main` at generated token 83 of 256 under both CPU and FPGA attention. At prompt length 8,192 tokens with CPU attention, all 256 generated tokens match. [Verification above]
+- `newoff` against `new`: identical for all 256 tokens at prompt length 8,192 tokens with CPU attention and at 1,024 tokens with FPGA attention. At prompt length 1,024 tokens with CPU attention the two first differ at generated token 247 of 256 (token id 624 under the kill switch, 13 without it). `head` produces token id 624 at that position too. [Verification above]
+- The AMX path and the AVX-512 path (the reader with the AVX PV product) differ in two documented ways: the bf16 rounding of the PV weights (the AVX path truncates, the AMX path rounds to nearest even) and the fp32 add order. [Note [AMX attention dispatch]] The kernel's own scores equal the row-major kernel's bit for bit (the identity case), and `new` first differs from `main` at the same token as the layout PR, with the same token ids. Hypothesis: a near tie between two candidate tokens at generated token 247, flipped by those two numerical differences. The measurement that would confirm or reject it: a forced run (a run that feeds a fixed token sequence instead of its own output, via `--force-feed-text-token-file`) of `newoff` and `new` with the `new` token sequence in that cell, comparing the two highest scores at token 247.
+- The rollback contract (the documented promise of what the kill switch restores) promises AMX off with the same AVX dotter and clean-binary numerical results. A packed binary with the switch runs the reader, not the dotter. [Item 4 of Note [AMX attention dispatch], h/tron/kernels/amx_attn_iface.hpp]
+- Issue #4444 records two choices:
+  1. Accept the narrower rollback contract. Add "with `TRON_K_VNNI` off" to item 4.
+  2. Keep a row-major binary as the deployment rollback artifact. Document that requirement.
+
+**The per-row scatter store's cost in TTFT.**
+
+- `save_k` of the layout PR stores each token's K row with 4 scatters that touch 64 memory lines. The row-major store writes 4 whole lines. Those extra line writes are a prefill cost.
+- The net TTFT effect of the layout and the kernel together, measured as `new` against `base`: +100 ms (+3.2 %, inside the band) at prompt length 1,024 tokens and -523 ms (-1.0 %, beyond the band) at 8,192 tokens. No pair in this run isolates the scatter store's own cost.
+- The third PR of the stack, the shared block save (a K save that transposes 16 tokens in registers and writes every line of a block whole), is intended to remove it.
+
+**Cost data of t_amx_numerics.**
+
+The identity case and the new packer section add run time to `t_amx_numerics`. Its Granite Rapids row in `config/test-benchmarks.json` is not refreshed here. The refresh is planned with the fourth PR's cost-row update. The slice check needs a timing row in at least one platform block, and `t_amx_numerics` has rows in two blocks. The check is therefore expected to pass. Not run at `0ee8671d35`.
+
+**Two control differences beyond the band.**
+
+- `newoff` against `headoff` at prompt length 1,024 tokens: +0.77 TPS, beyond the 0.66 TPS band. The measurement that would settle its cause: a per-function profile of `newoff` and `headoff` at that cell.
+- `head` against `headoff` at prompt length 8,192 tokens: +385 ms of TTFT with AMX enabled, beyond the 0.15 s band, in the same direction as the layout PR's run. The known difference is the query pack that no kernel consumes in `head`. The measurement that would settle it: the same profile on `head`, with the pack's share of a prefill pass.
+
+**Benchmark binary mismatch, inherited from PR #3879. Reviewers decide.**
+
+- The legacy CMake workflow's `build` job compiles runtron with `-DTRON_AMX_DISPATCH=ON -DTRON_K_VNNI=ON`. It transfers that binary to its `benchmark` job.
+- A successful transfer benchmarks the AMX kernels and packed K.
+- After a failed transfer, the benchmark job builds runtron through `make`. That build sets neither option. It benchmarks row-major K without AMX kernels.
+- PR #3879 introduced the mismatch for AMX dispatch. The layout PR added the layout option to the same configure line. This PR changes neither.
+- Required CI is unaffected. Its benchmark binary has neither option enabled.
+
+**CI coverage gap. [Issue #4865]**
+
+Required CI runs the placeholder cases of `t_amx_dispatch_dtype` and `t_amx_numerics` and never the identity case. The build and test evidence of this PR is the Granite Rapids run reported under Verification. [CI coverage above]
+
+## The stack
+
+PR #4424 uses branch `jhan-amx-vnniK` and adds 4,054 lines. Four dependent PRs replace it. Each is based on the preceding PR. PR #4424 remains open as a reference until all four are open.
+
+| Order | PR branch and base | What it adds | State |
+|---|---|---|---|
+| 1 | PR #4868, `jhan-vnnik-1-layout`, based on `main` | Packed K layout, owner and views, per-row store, reader, FPGA staging gather, the option disabled in presets, and tests | ready for review |
+| 2 | this PR, `jhan-vnnik-2-amx`, based on PR #4868 | The AMX QK kernel `qk_vnni_128x4` and query packer `pack_q_rows_128x4`. A bit-identity test compares with the row-major kernel. The temporary gate and comments are removed. | draft until PR #4868 merges |
+| 3 | `jhan-vnnik-3-shared-save`, based on this PR | Shared saves of 16-token blocks, transposed in registers and written as whole cache lines by the main thread and idle helper threads (worker threads with no work of their own at that moment). This provides PR #4424's TTFT improvement. | to follow as a draft |
+| 4 | `jhan-vnnik-4-tail-block`, based on PR 3 | A row-major tail block: a 16-token block with unsaved rows stays row-major. It converts to the packed layout when all 16 rows are saved. A row-major policy under hardware attention (FPGA attention) addresses issue #4500. The `deb` package-build preset enables the option in the released package. | to follow as a draft |
+
+The option stays off in every preset until PR 4. Intermediate states therefore do not enter production through those presets.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
