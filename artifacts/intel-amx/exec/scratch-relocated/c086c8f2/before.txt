@@ -1,0 +1,74 @@
+ 
+ TRON / concepts in context Interactive explanation · mock data 
+ Computation · visibility · storage · scheduling 
+ How the five concepts fit together. 
+ TRON is a hardware inference system. Inference runs a trained model to produce an output. This page follows token work through a large language model (LLM). 
+ Short version A minibatch groups token work for execution. Attention uses a visibility rule, such as a sliding window, to choose the keys and values (K/V) each query may use. KV cache pages store those keys and values across execution steps. 
+ Concept table Parent concepts Interactive example Execution order Check intuition Sources & prompt 
+ 01 / Keep the roles distinct Five concepts, five questions. 
+ Concept Question it answers Parent → concept How long it applies 
+ Attention How does this query combine information from allowed positions? Model → layer → attention operation Runs for the current queries at a layer. 
+ KV cache page Where is a block of saved K/V stored? Runtime memory management → KV cache → page Can survive many minibatches. 
+ Sliding window How far back may a query look directly? Attention → visibility policy → local attention → sliding window Rule reapplied at each query position. 
+ Visible K/V range Which token positions may this query use here? Attention → mask → allowed positions for one query Depends on query, layer, and mask. 
+ Minibatch Which token jobs are processed together? Runtime execution → batching → token-job minibatch Temporary group within a forward pass. Execution of different minibatches can overlap. 
+ Swipe the concept table horizontally to see all columns. 
+ Words used here 
+ Token: one model input unit. Request: one generation task. Layer: a repeated model stage. Query (Q): the vector asking for information at one token position. Mask: marks which query–key pairs may contribute. Token job: work for one token in a sequence. Forward pass: evaluates the model for selected token jobs. Scheduler: selects sequence work to run. 
+ TRON’s grouping and visibility objects support these distinctions. [T1] [T2] [T3] 
+ 02 / Parent and grandparent concepts They meet inside model execution. The hierarchy below separates the model’s attention rule from the runtime’s storage and work grouping. 
+ LLM inference in TRON 
+ MODEL COMPUTATION What information may contribute? Model → layer → attention ↓ attention visibility policy Causal attention: no future positions ↓ optional local restriction Sliding window: recent positions only ↓ evaluated for this query Visible K/V positions 
+ RUNTIME STORAGE Where does the K/V live? Memory management ↓ preserves computed keys and values KV cache ↓ subdivides storage KV cache pages ↓ locate data for logical positions Page references + offsets 
+ RUNTIME EXECUTION Which work runs together? Request scheduler ↓ selects work for a model forward pass Token jobs in this pass ↓ groups token jobs Minibatch ↓ carries query and cache metadata Attention work for these queries 
+ Minibatch Supplies the queries. → Visibility mask Selects allowed K/V positions. → Page references Locate their stored K/V. → Attention Combines the allowed values. 
+ All five concepts can apply to the same attention operation. Their different roles explain why they appear together in TRON code. 
+ The diagram is a conceptual hierarchy, not a C++ class hierarchy. Page addressing and masks meet in minibatch attention metadata. [T1] [T2] 
+ 03 / Change one thing and watch the relationships One minibatch. Several visibility ranges. Click a query row. Then change the window or page size. The matrix and storage view describe the same mock token sequence. All counts are computed 
+ Mock example: one request, one layer, ordinary causal attention, no shared prefixes. Positions start at zero. W is the maximum number of visible keys, including the current position. Small pages make boundaries visible. TRON’s software cache uses 64 token slots per page in the inspected source. [T3] 
+ Enable JavaScript for the interactive example. The default example has queries at positions 8–11, a 6-token window, and 4-token pages. Query 11 sees positions 6–11. The group needs positions 3–11 across three pages. 
+ Last query position Position 11 
+ Token jobs in this minibatch 1 token 4 tokens 
+ Visibility policy W = 6 tokens W = 4 tokens W = 8 tokens Full causal 
+ Page capacity (mock) 4 tokens 8 tokens 
+ ▶ Play minibatches Next minibatch → Reset example Animation shows work order, not elapsed runtime. 
+ A / Per-query attention mask Columns = K/V token positions · rows = query token positions 
+ Allowed for selected query Masked past position Future for that query Needed by at least one query 
+ Swipe the matrix horizontally to see later K/V positions. 
+ B / The same positions in KV cache pages Orange outline = page needed by the group · blue top edge = page needed by selected query 
+ Logical pages follow token order. Physical IDs are mock memory locations. An allowed position can sit beside a masked position in the same page. Storage does not grant attention access. [P1] 
+ Exact values for this state The rule behind the picture Sliding: max(0, q − W + 1) ≤ k ≤ q Full causal: 0 ≤ k ≤ q Logical page = floor(k / page_capacity) q is the query position. k is a K/V position. All displayed ranges include both endpoints. The group’s range is the union of its query ranges. Each query still applies its own mask. [T2] 
+ 01 · Why the group needs more Four queries, six visible keys each. Find the page needed only by the earliest query. 02 · Change storage only Keep the same queries and window. Double the mock page capacity. 03 · Watch the window move Use one query per minibatch. Play to advance through decode positions. 
+ Visibility, page access, and retention differ. This diagram keeps older K/V in place. Gray slots mean “not used by this query.” They do not mean “freed.” The group’s page coverage is a storage count, not a count of attention contributions or hardware bytes read. [T2] [T3] A window is local to an attention operation. A model can use different visibility policies at different layers. Earlier information can also affect later representations through intervening layers. The visible range here describes direct K/V access at the illustrated layer. [T4] [P2] 
+ 04 / Work grouping and execution order Work groups change. Cached K/V can stay. A minibatch is temporary execution work. The KV cache supplies state from earlier work. TRON can group tokens from different sequences in one minibatch. [T1] 
+ Minibatch size counts token jobs. 
+ Request A · prompt processing A:8 A:9 A:10 Three known prompt tokens. The grouping is illustrative. Request B · decode processing B:23 One known token from the preceding generation step. → One possible minibatch A:8 A:9 A:10 B:23 4 token jobs · 2 requests Queries from A use A’s sequence visibility. B’s query uses B’s sequence visibility. Grouping them does not make them attend to each other. 
+ TRON’s per-token query items carry their own visibility and KV cache references. Scheduler limits and token affinity (relatedness used for grouping) affect the actual grouping. This is not a measured scheduler trace. [T1] 
+ Prefill: process known prompt tokens. Several prompt tokens can be processed together. The causal mask still blocks later positions for each query. Long prompts can be split into chunks. [P2] Prompt chunk Several query rows → Next chunk Reuse earlier K/V Decode: process the next known token. In ordinary decode, each active sequence supplies one token per step. Processing position q produces scores for the token at q + 1. That next token gets its K/V when it is processed. [T5] Process token q Write K/V for q → Choose token q + 1 Process it next 
+ Step through work preparation and one layer. Dependency order · overlapping work simplified 
+ ▶ Play steps Next step → Start again 
+ Minibatch metadata Describes the current group of token jobs. Visibility rule Reapplied to new query positions. KV cache pages Can remain available across later minibatches. 
+ These strips describe lifetimes, not durations. Once Q is ready, TRON can process pages whose K/V is complete. Pending-page work waits for its new K and V. The partial results are then combined. [T6] 
+ Why group work into minibatches? Different resources can overlap. 
+ TRON uses minibatches to overlap accelerator work with central processing unit (CPU) attention. M0 and M1 below name two minibatches. The accelerator computes vectors for M1 while the CPU attends for M0. [T6] 
+ Swipe the timing diagram horizontally to see the full duration. 
+ M1 preparation overlaps M0 attention. Minibatching permits work to overlap while per-query visibility stays separate. 
+ Exact mock timings and simplifications Actor / work Start End Duration Accelerator · M0 0 ms 2 ms 2 ms Accelerator · M1 2 ms 4 ms 2 ms CPU · M0 2 ms 7 ms 5 ms CPU · M1 7 ms 12 ms 5 ms These are invented teaching durations, not measurements or performance estimates. Solid blocks are work. Dashed blocks are idle or waiting. The critical path is the dependency chain that determines completion time. This example combines vector computation and cache writes into one stage. It omits ready/pending-page overlap, other layer operations, and K/V dependencies between minibatches. 
+ 05 / Check your intuition Predict the change before revealing it. 
+ Make pages larger. Keep queries 8–11 and a 6-token window. Change page capacity from 4 to 8 tokens. Does query 11 see more K/V? Reveal answer No. Query 11 still sees positions 6–11: 6 keys. The group still needs positions 3–11: 9 keys. They now span 2 pages instead of 3 pages. The attention rule stayed fixed. 
+ Look at the group’s final query. In the default example, query 11 needs positions 6–11. Can the whole group discard positions 3–5 before attention? Reveal answer No. Earlier queries in the same group still need them. Query 8 needs position 3. The group must keep every position needed by any of its unfinished queries. 
+ Add another request. Put one token from request B beside three tokens from request A. Does B gain access to A’s K/V? Reveal answer No. The group has 4 token jobs from 2 requests. Sequence-specific visibility remains separate. Sharing an execution group does not add cross-request attention. 
+ Answers follow the mock arithmetic and TRON’s per-query visibility metadata. [T2] [T1] 
+ 06 / Evidence and scope Where the explanation comes from. The source references below pin the TRON definitions. Mock token counts, memory IDs, and animation steps are teaching examples. 
+ TRON checkout: /home/jhan/workspace/tron · inspected 2026-09-19 · revision 9b11a912baa0e5b191ea6f57230c95c224a9c556 . 
+ [T1] Token jobs, forward passes, and minibatch grouping h/tron/models/common.hpp:868–902 · h/tron/models/common.hpp:997–1010 · h/tron/models/model.hpp:166–240 · h/tron/models/model.hpp:1670–1696 A forward pass collects token jobs. The grouping permits tokens from different requests and processing phases. Each query item carries its own visibility and cache references. 
+ [T2] Per-query masks and the exact sliding-window test h/tron/models/ranged_mask.hpp:94–105 · h/tron/models/ranged_mask.hpp:155–159 · h/tron/models/self_attention.hpp:1405–1425 · h/tron/models/model.hpp:2393–2433 The kernel checks each query’s mask. With a sliding window of W positions, it also excludes keys when q_position − k_position ≥ W. Page filtering can conservatively retain extra pages. The mock shows pages containing eligible positions. 
+ [T3] Pages, 64-token capacity, and cache lifetime h/tron/models/kv_cache.hpp:54–96 · h/tron/models/kv_cache.hpp:1162–1165 · h/tron/scheduler/token_cache.hpp:76–118 Software cache pages contain up to 64 token entries. Allocation, validity, use in the current forward pass, and computed K/V are separate states. Cached entries can survive a completed request until later eviction. 
+ [T4] Per-operation attention configuration h/tron/models/kv_cache.hpp:111–139 · h/tron/models/kv_cache.hpp:196–218 · h/tron/models/model.hpp:634–677 · h/tron/models/model.hpp:1550–1563 Window size is bound to an attention operation. An absent window limit gives full causal attention. This revision routes windowed attention to the software path. 
+ [T5] Query-token work and generation h/tron/models/model.hpp:1670–1696 · h/tron/models/model.hpp:1695–1700 · src/tron/generation/context.cpp:136–158 · src/tron/generation/context.cpp:227–231 The forward pass records token jobs requiring K/V computation and/or output scores. The forward API states that query position q produces scores for q + 1. Generation samples a token and submits it for the next processing step. 
+ [T6] Ready pages, pending pages, and execution dependencies h/tron/models/common.hpp:868–925 · h/tron/models/model.hpp:1758–1778 · h/tron/models/model.hpp:1887–1923 · h/tron/models/model.hpp:1966–1981 · h/tron/models/self_attention.hpp:791–825 · h/tron/models/model.hpp:488–499 · h/tron/models/model.hpp:2845–2869 · h/tron/models/model.hpp:2913–2939 · h/tron/scheduler/full.hpp:1758–1764 Minibatching supports overlap between accelerator work and CPU attention. Attention on ready pages needs Q. Attention on pending pages also waits for the required new K/V. Dependencies can cross minibatch boundaries. 
+ [P1] PagedAttention paper Logical token blocks map to physical storage blocks. Paging organizes KV storage. Kwon et al., Efficient Memory Management for Large Language Model Serving with PagedAttention (2023) . 
+ [P2] Sliding windows, cache reuse, and prompt chunks The paper describes local visibility, information propagation across layers, rolling cache storage, and chunked prompt processing. Jiang et al., Mistral 7B, §2 (2023) . 
+ Scope and simplifications The interactive matrix shows one sequence and one attention operation at one layer. Logical page arithmetic assumes a contiguous sequence in this toy layout. TRON separates token IDs from sequence positions. The mock keeps old K/V resident. It does not simulate TRON’s allocation, eviction, prefix sharing, or hardware transfers. Each token slot represents the K/V associated with that token. Vector dimensions and the arrangement of attention heads are omitted. A mask can be more general than one continuous interval. The example uses ordinary causal visibility plus an optional sliding window. Full causal attention means all preceding positions plus the current one in the illustrated sequence. It does not mean unlimited model context. Decode examples assume one new token per active sequence per step. They omit speculative decoding and branching generation. Animation speed is chosen for reading. It is not measured TRON performance. 
+ Original prompt · input-2-ai/internalize-concepts.md 
+ TRON concepts · Codex · Standalone HTML · Light theme · No external scripts or fonts 

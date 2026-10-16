@@ -15,7 +15,7 @@ The user asked to apply the humanize-writing skill to the page ~/tmp/TRON-concep
 ## Words used here
 
 - **TRON**: Positron's inference program (GitHub repo positron-ai/tron). The page explains five of its concepts: attention, visibility, pages, minibatches and K/V caching.
-- **TRON-concepts-codex.html**: an HTML explainer page at /home/jhan/tmp/TRON-concepts-codex.html, written earlier by Codex (the OpenAI coding agent). It holds prose, inline SVG diagrams and a script block with animation strings.
+- **TRON-concepts-codex.html**: an HTML explainer page at /home/jhan/tmp/TRON-concepts-codex.html, written earlier by Codex (the OpenAI coding agent). It holds prose, inline SVG diagrams and a script block with animation strings. (preserved: artifacts/tron/home-tmp/TRON-concepts-codex.html)
 - **humanize-writing skill**: the user's skill at ~/.claude/skills/humanize-writing/ that removes the statistical fingerprints of model-written text listed by Wikipedia's "Signs of AI writing" page. Rewrite mode keeps quotes, numbers, citations and claims unchanged.
 - **AI-pattern linter**: the skill's script ai_pattern_lint.py, which counts flagged patterns per 1000 words. Threshold 5.
 - **"X, not Y"**: a construction the skill flags, where a claim is stated by denying its opposite.
@@ -39,7 +39,7 @@ The user asked: "use /humanize-writing to update ~/tmp/TRON-concepts-codex.html"
 - 17:34 The user gave the task. Claude loaded the humanize-writing skill and its patterns reference, then read the whole page (body prose lines 17 to 188, script strings lines 189 to 295).
 - 17:35 Searched the page for em dashes, straight quotes in prose and the skill's vocabulary list. Checked for a voice profile (none). Ran the AI-pattern linter on the body text: 0.4 hits per 1000 words.
 - 17:36 Backup copied to the scratchpad as TRON-concepts-codex.before.html.
-- 17:37 The 20 edits applied with one exact-match Python script (each old string had to occur once). The body text extracted before and after to before.txt and after.txt, the diff of prose lines reviewed, HTML tag balance checked with a parser, the script block strings extracted to page.js.
+- 17:37 The 20 edits applied with one exact-match Python script (each old string had to occur once). The body text extracted before and after to before.txt and after.txt, the diff of prose lines reviewed, HTML tag balance checked with a parser, the script block strings extracted to page.js. (preserved: artifacts/intel-amx/exec/scratch-relocated/c086c8f2/after.txt, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/c086c8f2/after.txt)
 - 17:37 Report to the user.
 
 ## Results
@@ -67,9 +67,9 @@ Kept on purpose: the "Short version" box and the "Words used here" list, which t
 ## Artifacts
 
 - claude-agentsrv:/home/jhan/tmp/TRON-concepts-codex.html (59,613 bytes). The page, edited in place. Not a report page with measured numbers, so no lineage block.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c086c8f2-95b3-4918-9deb-6815c387437d/scratchpad/TRON-concepts-codex.before.html (59,576 bytes). The original, before the edit. May be cleaned up.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c086c8f2-95b3-4918-9deb-6815c387437d/scratchpad/before.txt (15,035 bytes) and after.txt (15,095 bytes). The body prose extracted before and after, for the diff.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c086c8f2-95b3-4918-9deb-6815c387437d/scratchpad/page.js (10,114 bytes). The script block extracted for inspection.
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c086c8f2-95b3-4918-9deb-6815c387437d/scratchpad/TRON-concepts-codex.before.html (59,576 bytes). The original, before the edit. May be cleaned up. (preserved: artifacts/intel-amx/exec/scratch-relocated/c086c8f2/TRON-concepts-codex.before.html, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/c086c8f2/TRON-concepts-codex.before.html)
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c086c8f2-95b3-4918-9deb-6815c387437d/scratchpad/before.txt (15,035 bytes) and after.txt (15,095 bytes). The body prose extracted before and after, for the diff. (preserved: artifacts/intel-amx/exec/scratch-relocated/c086c8f2/before.txt, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/c086c8f2/before.txt)
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c086c8f2-95b3-4918-9deb-6815c387437d/scratchpad/page.js (10,114 bytes). The script block extracted for inspection. (preserved: artifacts/intel-amx/exec/scratch-relocated/c086c8f2/page.js, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/c086c8f2/page.js)
 - No memory note was written. No git repo was touched.
 
 ## Current state
