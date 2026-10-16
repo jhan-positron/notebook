@@ -58,7 +58,7 @@ Three follow-up requests came during the day (15:02, 15:35, 16:16). They are des
 - 08:53 The user set `/effort ultracode` and pasted the prompt. The workflow-authoring skill loaded.
 - 08:54 Claude read seven memory notes about PR 4424 and the PR 4737 page, scouted the cwd and the worktree, and ran `gh pr view 4424` (draft, mergeable, 28 files). The diff stat picked the three files by changed lines: kv_cache.hpp (749), k_vnni.hpp (526, new file), model.hpp (379). The runner-up self_attention.hpp (153) was not drawn.
 - 08:55 Head files and diffs of the target files were saved to the scratchpad `diffs/` folder.
-- 08:58 to 09:06 The generator was written: difflib_units.py, svg_helpers.py, page_common.py, units_draft.json (Claude's first unit partition), STYLE.md, check_page.py, render_one.py, spec_builder.py.
+- 08:58 to 09:06 The generator was written: difflib_units.py, svg_helpers.py, page_common.py, units_draft.json (Claude's first unit partition), STYLE.md, check_page.py, render_one.py, spec_builder.py. (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/STYLE.md)
 - 09:03 The facts workflow started (4 lenses per file, 2 refuters per claim, a judge).
 - 09:58 The facts workflow completed (51 agents, 55 min). 554 claims, 0 refuted, 111 corrected. It found 6 must-fix cuts in the kv_cache unit ranges (c3, c5, c6, c7, c8 cut functions in the middle). Claude applied them and the should-fix items to units_<key>.json.
 - 10:02 The drawing workflow started (per file: base agent, one agent per unit, builder, 3 reviewers, fixer, round 2 with a completeness critic, final build). The memory note pr4424-diagram-pages.md was written.
@@ -67,9 +67,9 @@ Three follow-up requests came during the day (15:02, 15:35, 16:16). They are des
 - 12:52 to 13:00 Claude looked at all 64 rendered figures. Two small defects were fixed (a legend chip in kv_cache B5, a tag that ran into a citation in k_vnni d6b). All three pages: check_page 0 problems.
 - 13:00 First summary given in chat. Memory note updated.
 - 15:02 Second request: repeat the "Colour and font scheme" at each section or diagram with only the styles used there, and cover figure-specific styles such as the white "token block c" box in k_vnni B1.
-- 15:03 to 15:07 Claude added a legend catalogue and a `legend=[...]` argument to the figure builder, wrote check_legend.py, added a code-excerpt scheme for sections 2 and 3, and appended the request line to the verbatim prompt block. The legend workflow started at 15:07.
+- 15:03 to 15:07 Claude added a legend catalogue and a `legend=[...]` argument to the figure builder, wrote check_legend.py, added a code-excerpt scheme for sections 2 and 3, and appended the request line to the verbatim prompt block. The legend workflow started at 15:07. (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/check_legend.py)
 - 15:35 Third request: add a hierarchy travel diagram (K page, plane, panel, pairs, with token block and dimension step marked) as a new sub-section, delete nothing, and suggest a short line for the verbatim prompt block.
-- 15:36 to 15:41 Claude wrote figs/base_k_vnni_b1a.py in its own module (the legend workflow was editing base_k_vnni.py at the time), rendered it, and moved one zoom arrow twice.
+- 15:36 to 15:41 Claude wrote figs/base_k_vnni_b1a.py in its own module (the legend workflow was editing base_k_vnni.py at the time), rendered it, and moved one zoom arrow twice. (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/figs/base_k_vnni_b1a.py)
 - 15:51 The legend workflow completed (44 agents, 44 min). 136 findings, 134 fixes applied, 6 skipped.
 - 15:52 to 15:55 All three pages rebuilt. One check_page problem (the b1a "low half / high half" box cited a range with prose in it) was fixed. Final: both checkers 0 problems on all three pages. Memory note updated at 15:55. Second summary given in chat.
 - 16:16 Fourth request: the hierarchy line in the verbatim block was too specific to this PR, make it generic for reuse.
@@ -126,42 +126,51 @@ All on claude-agentsrv. Sizes from `ls -l` on 2026-10-16.
 
 ### The three pages (cwd /home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/)
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/diagramming-code-changes-kv_cache.hpp.html (1,119,756 bytes). Page for h/tron/models/kv_cache.hpp, 26 figures.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/diagramming-code-changes-k_vnni.hpp.html (1,066,674 bytes). Page for h/tron/tensor/k_vnni.hpp, 24 figures.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/diagramming-code-changes-model.hpp.html (668,008 bytes). Page for h/tron/models/model.hpp, 15 figures.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/diagramming-code-changes-kv_cache.hpp.html (1,119,756 bytes). Page for h/tron/models/kv_cache.hpp, 26 figures. (preserved: artifacts/intel-amx/pr3879/merge-4737-2-4424/diagramming-code-changes-kv_cache.hpp.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/diagramming-code-changes-k_vnni.hpp.html (1,066,674 bytes). Page for h/tron/tensor/k_vnni.hpp, 24 figures. (preserved: artifacts/intel-amx/pr3879/merge-4737-2-4424/diagramming-code-changes-k_vnni.hpp.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/diagramming-code-changes-model.hpp.html (668,008 bytes). Page for h/tron/models/model.hpp, 15 figures. (preserved: artifacts/intel-amx/pr3879/merge-4737-2-4424/diagramming-code-changes-model.hpp.html)
 
 The five labels apply to all three pages (replace `<key>` with kv_cache, k_vnni or model):
-  - generator: /home/jhan/workspace/intel-AMX/exec/pr4424-diagrams-20261009/spec_builder.py (run as `python3 spec_builder.py <key>`, output path fixed inside the script)
-  - input: units_<key>.json (unit partition, glossary, intro text), figs/base_<key>.py and figs/d_<key>_<unit>.py (figure modules, plus figs/base_k_vnni_b1a.py for the k_vnni page), page_common.py (CSS, skeleton, the verbatim prompt), svg_helpers.py (palette, legend catalogue)
-  - input built by: units_draft.json hand-written by Claude, corrected into units_<key>.json from the unit issues of the facts workflow wf_3b54a6c7-ec4 (facts/<key>.json); figure modules written by the drawing workflow wf_da468e5c-c77, their legends by the legend workflow wf_e8254699-076, then hand edits by Claude
-  - sources: the git worktree /home/jhan/workspace/ai-runs/tron-vnnik-i4500m, `git diff -U3 be0d5565b3 9d5c7a389b -- <file>` read live by difflib_units.py (copies of the diffs in the scratchpad `diffs/` folder)
-  - regenerate: `cd /home/jhan/workspace/intel-AMX/exec/pr4424-diagrams-20261009 && python3 spec_builder.py <key> && python3 check_page.py <OUT> && python3 check_legend.py <OUT> && python3 render_check.py <OUT> png/page_<key>` (the worktree must still be at 9d5c7a389b)
+  - generator: /home/jhan/workspace/intel-AMX/exec/pr4424-diagrams-20261009/spec_builder.py (run as `python3 spec_builder.py <key>`, output path fixed inside the script) (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/spec_builder.py)
+  - input: units_<key>.json (unit partition, glossary, intro text), figs/base_<key>.py and figs/d_<key>_<unit>.py (figure modules, plus figs/base_k_vnni_b1a.py for the k_vnni page), page_common.py (CSS, skeleton, the verbatim prompt), svg_helpers.py (palette, legend catalogue) (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/page_common.py)
+  - input built by: units_draft.json hand-written by Claude, corrected into units_<key>.json from the unit issues of the facts workflow wf_3b54a6c7-ec4 (facts/<key>.json); figure modules written by the drawing workflow wf_da468e5c-c77, their legends by the legend workflow wf_e8254699-076, then hand edits by Claude (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/units_draft.json)
+  - sources: the git worktree /home/jhan/workspace/ai-runs/tron-vnnik-i4500m, `git diff -U3 be0d5565b3 9d5c7a389b -- <file>` read live by difflib_units.py (copies of the diffs in the scratchpad `diffs/` folder) (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/difflib_units.py)
+  - regenerate: `cd /home/jhan/workspace/intel-AMX/exec/pr4424-diagrams-20261009 && python3 spec_builder.py <key> && python3 check_page.py <OUT> && python3 check_legend.py <OUT> && python3 render_check.py <OUT> png/page_<key>` (the worktree must still be at 9d5c7a389b) (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/check_page.py)
 
 ### Generator /home/jhan/workspace/intel-AMX/exec/pr4424-diagrams-20261009/ (197 files, 2.4 MB without the PNG renders)
 
 - STYLE.md (10,002 bytes). Binding drawing conventions, the colour tokens, the legend forms, three worked examples.
-- svg_helpers.py (22,141 bytes). SVG primitives, the Okabe-Ito palette tokens, `figure(legend=[...])`, the legend catalogue (30 entries).
+- svg_helpers.py (22,141 bytes). SVG primitives, the Okabe-Ito palette tokens, `figure(legend=[...])`, the legend catalogue (30 entries). (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/svg_helpers.py)
 - difflib_units.py (6,981 bytes). Parses the git diff into per-unit code excerpts. Holds WT, BASE and HEAD.
 - page_common.py (23,672 bytes). CSS, page skeleton, the verbatim prompt block, the code-excerpt scheme.
 - spec_builder.py (2,616 bytes). Builds one page from units_<key>.json and the figure modules.
 - check_page.py (9,388 bytes) and check_legend.py (7,684 bytes). The two static checkers.
-- render_one.py (1,713 bytes) and render_check.py (961 bytes). Render one module or a whole page to PNG for inspection.
-- units_draft.json (20,453 bytes), units_kv_cache.json (41,664 bytes), units_k_vnni.json (45,651 bytes), units_model.json (35,252 bytes). The unit partitions, glossaries and intro texts.
-- facts/kv_cache.json (211,565 bytes), facts/k_vnni.json (199,225 bytes), facts/model.json (183,757 bytes). The verified claims of the facts workflow.
-- figs/ (33 Python modules, 1.7 MB): base_kv_cache.py, base_k_vnni.py, base_k_vnni_b1a.py, base_model.py, d_kv_cache_c0.py to d_kv_cache_c10.py, d_k_vnni_k0.py to d_k_vnni_k9.py, d_model_m0.py to d_model_m7.py. One module per base set or per logical unit. figs/hw (17 bytes) is a stray file left by an agent.
+- render_one.py (1,713 bytes) and render_check.py (961 bytes). Render one module or a whole page to PNG for inspection. (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/render_check.py)
+- units_draft.json (20,453 bytes), units_kv_cache.json (41,664 bytes), units_k_vnni.json (45,651 bytes), units_model.json (35,252 bytes). The unit partitions, glossaries and intro texts. (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/units_k_vnni.json)
+- facts/kv_cache.json (211,565 bytes), facts/k_vnni.json (199,225 bytes), facts/model.json (183,757 bytes). The verified claims of the facts workflow. (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/facts/k_vnni.json)
+- figs/ (33 Python modules, 1.7 MB): base_kv_cache.py, base_k_vnni.py, base_k_vnni_b1a.py, base_model.py, d_kv_cache_c0.py to d_kv_cache_c10.py, d_k_vnni_k0.py to d_k_vnni_k9.py, d_model_m0.py to d_model_m7.py. One module per base set or per logical unit. figs/hw (17 bytes) is a stray file left by an agent. (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/figs/base_model.py)
 - png/ (132 PNG files, 34 MB): page_kv_cache/ (26), page_k_vnni/ (24), page_model/ (15) hold the final renders. The 67 PNGs directly in png/ are per-module renders from render_one.py.
 
 ### Session store and memory
 
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4424-diagram-pages.md (6,014 bytes). The project memory note: request, files picked, generator layout, workflow results, traps, the second and third requests.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md. One index line added (line 144).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/workflows/scripts/pr4424-diagram-facts-wf_3b54a6c7-ec4.js (14,766 bytes). The facts workflow script.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/workflows/scripts/pr4424-diagram-pages-wf_da468e5c-c77.js (22,237 bytes). The drawing workflow script.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/workflows/scripts/pr4424-figure-legends-wf_e8254699-076.js (9,442 bytes). The legend workflow script.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/workflows/scripts/pr4424-diagram-facts-wf_3b54a6c7-ec4.js (14,766 bytes). The facts workflow script. (preserved: artifacts/intel-amx/exec/workflows/pr4424-diagram-facts-wf_3b54a6c7-ec4.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/pr4424-diagram-facts-wf_3b54a6c7-ec4.js)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/workflows/scripts/pr4424-diagram-pages-wf_da468e5c-c77.js (22,237 bytes). The drawing workflow script. (preserved: artifacts/intel-amx/exec/workflows/pr4424-diagram-pages-wf_da468e5c-c77.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/pr4424-diagram-pages-wf_da468e5c-c77.js)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/workflows/scripts/pr4424-figure-legends-wf_e8254699-076.js (9,442 bytes). The legend workflow script. (preserved: artifacts/intel-amx/exec/workflows/pr4424-figure-legends-wf_e8254699-076.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/pr4424-figure-legends-wf_e8254699-076.js)
 - Workflow journals under claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/subagents/workflows/: wf_3b54a6c7-ec4 (103 files, 36 MB), wf_da468e5c-c77 (125 files, 344 MB), wf_e8254699-076 (89 files, 69 MB). Each holds journal.jsonl (one result record per agent) and the agent transcripts. The sidecar lists the three journal.jsonl files, not the agent transcripts.
 - Task outputs claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/tasks/: wqwpc60h2.output (76,484 bytes, facts result), war8iln1f.output (171,111 bytes, drawing result), w25fkv6ip.output (115,156 bytes, legend result), and 7 small outputs of wait loops and rebuilds. Scratchpad, may be cleaned up.
-- Scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/scratchpad/ (402 files, 34 MB): diffs/ (head files and diffs of 13 PR files), c1.json to c10.json and c01.json to c10.json (facts chunks), review/ and critic/ (reviewer helpers and dumps), crops/, zoom/, zk/ and crop_*.png (PNG crops the reviewers looked at), *.bak and trial/ (figure module backups). May be cleaned up.
+- Scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4737-2-4424/daed4d8b-e695-45e4-a9c9-1635c10014f7/scratchpad/ (402 files, 34 MB): diffs/ (head files and diffs of 13 PR files), c1.json to c10.json and c01.json to c10.json (facts chunks), review/ and critic/ (reviewer helpers and dumps), crops/, zoom/, zk/ and crop_*.png (PNG crops the reviewers looked at), *.bak and trial/ (figure module backups). May be cleaned up. (preserved: artifacts/intel-amx/exec/scratch-relocated/daed4d8b/c01.json, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/daed4d8b/c01.json)
 - Code: no commits. PRs read: https://github.com/positron-ai/tron/pull/4424 and https://github.com/positron-ai/tron/pull/4737.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr4424-diagrams-20261009/` (3 files)
+- `artifacts/intel-amx/exec/pr4424-diagrams-20261009/facts/` (2 files)
+- `artifacts/intel-amx/exec/pr4424-diagrams-20261009/figs/` (31 files)
+- `artifacts/intel-amx/exec/scratch-relocated/daed4d8b/` (2 files)
+- `artifacts/intel-amx/exec/scratch-relocated/daed4d8b/old/` (1 files)
+- `artifacts/intel-amx/exec/scratch-relocated/daed4d8b/trial/figs/` (2 files)
 
 ## Current state
 
@@ -178,7 +187,7 @@ The five labels apply to all three pages (replace `<key>` with kv_cache, k_vnni 
 - self_attention.hpp (153 changed lines) has no page. The prompt asked for the top three files only.
 - The model page B4 lanes say the new split's duration is unmeasured. The 0.86 ms per layer figure shown there is the code comment's 2026-09-14 measurement, not a measurement by this session.
 - The 67 loose PNGs directly in png/ and the 34 MB of scratchpad crops are inspection leftovers. They can be deleted without affecting the pages.
-- figs/hw (17 bytes) is a stray agent file and can be deleted.
+- figs/hw (17 bytes) is a stray agent file and can be deleted. (preserved: artifacts/intel-amx/exec/pr4424-diagrams-20261009/figs/hw)
 
 ## Gotchas and decisions
 

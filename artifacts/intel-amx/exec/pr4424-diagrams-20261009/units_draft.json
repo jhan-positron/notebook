@@ -1,0 +1,598 @@
+{
+ "h/tron/models/kv_cache.hpp": {
+  "units": [
+   {
+    "id": "c0",
+    "title": "The design notes: Note [K VNNI storage] and Note [Row-major blocks under hardware attention]",
+    "kind": "comment only",
+    "ranges": [
+     [
+      651,
+      821
+     ]
+    ],
+    "lead": [
+     "Comment text only. It is the design record the code below follows, so it is listed first and shown in full.",
+     "Note [K VNNI storage]: with TRON_K_VNNI the K plane of every 128-dimension head holds the VNNI layout; the plane is typed (k_vnni_tensor); a block holds the VNNI layout only once complete and converted; the page records saved rows and converted blocks per storage slot.",
+     "Note [Row-major blocks under hardware attention]: when the FPGA scores an operation's K, save_k records no row bits and queues no block, so such blocks stay row-major.",
+     "The six consumer items say how each reader and writer of a VNNI slot changes; the last paragraph says the kill switch keeps the layout."
+    ]
+   },
+   {
+    "id": "c1",
+    "title": "kv_block::k becomes a typed owner for VNNI slots",
+    "kind": "changed data model",
+    "ranges": [
+     [
+      2986,
+      3002
+     ],
+     [
+      3017,
+      3038
+     ]
+    ],
+    "lead": [
+     "k_storage is k_vnni_tensor<page_size, head_size> when k_vnni::layout_on<head_size>, the native bf16 array otherwise. Both hold page_size * head_size bf16 (static_assert on sizeof).",
+     "The static_assert pins trivial construction, copy and destruction: the DMA allocation creates kv_blocks (Note [KV block lifetime]).",
+     "k_view / k_at now require a row-major head size: a packed plane has no contiguous rows and is reached through k.as_view()."
+    ]
+   },
+   {
+    "id": "c2",
+    "title": "The K layout state: two bit arrays per page and their constants",
+    "kind": "new data model",
+    "ranges": [
+     [
+      2608,
+      2623
+     ],
+     [
+      2483,
+      2499
+     ],
+     [
+      2508,
+      2520
+     ],
+     [
+      1968,
+      1973
+     ]
+    ],
+    "lead": [
+     "k_rows_saved_ holds one 64-bit word per state entry (one bit per page offset). k_vnni_blocks_ holds one byte per state entry (one bit per 16-token block). There are layout_t::n_slots + EAGLE_STORAGE_SLOTS_1 entries.",
+     "k_block_bits(c) is the 16-bit row mask of block c; k_block_is_vnni(state_ix, offset) reads the block bit of an offset's block with acquire order.",
+     "The move constructor copies both arrays, as it already did for kv_saves_.",
+     "Invariant: a set block bit implies the 16 row bits of its block."
+    ]
+   },
+   {
+    "id": "c3",
+    "title": "Which state entry and which storage slot a call means",
+    "kind": "new helpers",
+    "ranges": [
+     [
+      1082,
+      1088
+     ],
+     [
+      2500,
+      2507
+     ],
+     [
+      2127,
+      2146
+     ],
+     [
+      2521,
+      2534
+     ]
+    ],
+    "lead": [
+     "book::eagle_view_active says whether the EAGLE view maps logical slot 0 onto the extra physical slot.",
+     "k_state_ix picks the state entry of a logical slot: entry n_slots for slot 0 while the view is active, the slot's own index otherwise.",
+     "k_storage_ref pairs a physical storage offset with its state entry; k_storage_of builds it from a logical slot under the current view. The deferred conversion list of save_k keeps the resolved pair.",
+     "k_with_storage_geometry calls a template lambda with the geometry of a storage slot (the EAGLE storage uses the primary geometry)."
+    ]
+   },
+   {
+    "id": "c4",
+    "title": "Read views by layout: k() for row-major slots, k_packed and k_vnni_blocks for VNNI slots",
+    "kind": "changed + new",
+    "ranges": [
+     [
+      2040,
+      2106
+     ],
+     [
+      2108,
+      2126
+     ]
+    ],
+    "lead": [
+     "All eight k() overloads gain the constraint !k_vnni::layout_on: the row view exists for row-major slots only (consumer item 6).",
+     "k_packed returns the read-only k_vnni_view of one (slot, kv_head) plane: the argument of qk_vnni_128x4 and k_vnni::qk_group.",
+     "k_vnni_blocks returns the converted-block byte of a slot (acquire): the third gate of the dense AMX path and the software loop's block test in self_attention.hpp."
+    ]
+   },
+   {
+    "id": "c5",
+    "title": "Recording saved rows and whole-block saves",
+    "kind": "new writers of the state",
+    "ranges": [
+     [
+      2147,
+      2191
+     ]
+    ],
+    "lead": [
+     "note_k_row_saved sets the row's bit (relaxed load first, fetch_or only when clear) and returns true when the block's 16 bits are set and the block bit is clear; save_k then queues the block.",
+     "A row-major slot keeps no bits and returns BLOCK_COMPLETED_FALSE. The uniform-geometry overload forwards to the primary geometry.",
+     "note_k_block_saved publishes the 16 row bits (acq_rel) and the block bit (release) after a whole-block save; the caller runs it after the last KV head."
+    ]
+   },
+   {
+    "id": "c6",
+    "title": "The in-place conversion of one block",
+    "kind": "new",
+    "ranges": [
+     [
+      2192,
+      2227
+     ]
+    ],
+    "lead": [
+     "k_block_to_vnni_at checks both bit sets, converts block c of every KV head's plane with block_to_vnni (k_vnni.hpp), and sets the block bit with release order after the last head.",
+     "It returns CONVERTED_FALSE when there is nothing to do, so a repeated call is harmless. k_block_to_vnni resolves a logical slot first (C3).",
+     "Callers: convert_pending_k_blocks in model.hpp (main thread, forward end) and tests."
+    ]
+   },
+   {
+    "id": "c7",
+    "title": "Row accessors follow the block's layout: set_k_row, get_k_row, k_row_if_row_major",
+    "kind": "new",
+    "ranges": [
+     [
+      2228,
+      2254
+     ],
+     [
+      2276,
+      2350
+     ]
+    ],
+    "lead": [
+     "set_k_row and get_k_row take one token's row as a typed view (const_k_row_view / k_row_view) and branch on k_block_is_vnni: store_row / load_row into the VNNI column, or store_row_major / load_row_major into the row-major tail block. A row-major slot keeps the memcpy.",
+     "The uniform-geometry forms forward to the primary geometry.",
+     "k_row_if_row_major returns the token's row in place for a row-major block and an invalid k_row_view for a converted one (the FPGA staging in full.hpp uses it).",
+     "None of the three touches the bits; the saved-row bit is the caller's (C5)."
+    ]
+   },
+   {
+    "id": "c8",
+    "title": "set_k_block: a whole 16-token block stored in the VNNI layout",
+    "kind": "new",
+    "ranges": [
+     [
+      2255,
+      2275
+     ]
+    ],
+    "lead": [
+     "Stores the 16 rows of block c of one KV head with store_block and FULL_BLOCK_0XFFFF. Bit-identical to set_k_row per token of a complete block; the write pattern differs (64 full-line stores instead of 64 scatters).",
+     "The caller (store_k_block in model.hpp) uses it only for runs of 16 tokens and records the block with note_k_block_saved after the last KV head."
+    ]
+   },
+   {
+    "id": "c9",
+    "title": "Forgetting rows when a new token takes an offset",
+    "kind": "changed + new",
+    "ranges": [
+     [
+      2470,
+      2476
+     ],
+     [
+      2535,
+      2587
+     ]
+    ],
+    "lead": [
+     "clear_kv_complete_at now also calls k_forget_row.",
+     "k_forget_row drops, in every state entry, the row bits at and above the offset and the block bits of those blocks. When the offset's block is converted, keeps rows below the offset and the storage is readable (k_storage_readable), the block is converted back to row-major first (block_to_rows), so those rows stay readable.",
+     "A decode append with nothing at or above the offset costs two loads and no locked read-modify-write."
+    ]
+   },
+   {
+    "id": "c10",
+    "title": "Page copies carry the bits with the rows",
+    "kind": "changed",
+    "ranges": [
+     [
+      2688,
+      2783
+     ],
+     [
+      2790,
+      2804
+     ]
+    ],
+    "lead": [
+     "copy_storage_slot takes a k_storage_ref (C3) and computes the new bits once per slot. A whole-page copy is one owner assignment (dst_block.k = src_block.k) and copies the block bits.",
+     "Any other range: the destination blocks the range touches are converted to row-major; each row is gathered from a converted source block (load_row) or copied from a row-major one (store_row_major); destination blocks whose 16 row bits are set afterwards are converted to VNNI.",
+     "The bits are stored after the last KV head. copy_from builds the refs for every active slot and for the EAGLE storage."
+    ]
+   }
+  ],
+  "trivial": [
+   {
+    "id": "t1",
+    "title": "Include of the typed K plane header",
+    "ranges": [
+     [
+      31,
+      31
+     ]
+    ],
+    "what": "One include line: h/tron/tensor/k_vnni.hpp."
+   },
+   {
+    "id": "t2",
+    "title": "Comment of the uniform-storage paragraph",
+    "ranges": [
+     [
+      575,
+      576
+     ]
+    ],
+    "what": "Two comment lines name packed-K storage next to packed-V storage."
+   },
+   {
+    "id": "t3",
+    "title": "fill_random: the test-only whole-plane fill reaches a packed plane through detail::k_vnni_access",
+    "ranges": [
+     [
+      1400,
+      1403
+     ],
+     [
+      1640,
+      1645
+     ],
+     [
+      1835,
+      1844
+     ]
+    ],
+    "what": "Test-only code and its comments: book::fill_random fills the K plane through the access helper for a VNNI slot and the array for a row-major slot. Documented exception of Note [K VNNI storage]."
+   }
+  ]
+ },
+ "h/tron/tensor/k_vnni.hpp": {
+  "units": [
+   {
+    "id": "k0",
+    "title": "The header comment: what the file defines, the plane layout formula, who may compute a packed address",
+    "kind": "comment only",
+    "ranges": [
+     [
+      1,
+      42
+     ]
+    ],
+    "lead": [
+     "Comment text only: the file's contents, the Words used here, the index formula of the plane, and the rule that only the typed operations and the two score kernels compute packed addresses."
+    ]
+   },
+   {
+    "id": "k1",
+    "title": "The layout constants and the bit helpers",
+    "kind": "new",
+    "ranges": [
+     [
+      57,
+      118
+     ]
+    ],
+    "lead": [
+     "Every constant names its value: a page has 64 tokens in 4 blocks of 16; a head has 128 dimensions in 4 steps of 32 = 16 pairs; a pair row is one 64-byte line; a panel is 16 pair rows = 1 KiB; 16 panels per plane.",
+     "FULL_BLOCK_0XFFFF, BLOCKS_PER_PAGE_MASK_0XF, block_bit(c), offset_bit(o) are the masks the page state uses.",
+     "static_asserts pin the values and the relations (a plane is a permutation of the row-major plane)."
+    ]
+   },
+   {
+    "id": "k2",
+    "title": "The layout gate layout_on and the index map",
+    "kind": "new",
+    "ranges": [
+     [
+      119,
+      144
+     ]
+    ],
+    "lead": [
+     "layout_on<head_size> is true for 128-dimension heads when TRON_K_VNNI is defined, false otherwise: a property of the storage geometry.",
+     "index(token, dim) is the element index of K[token][dim] inside the plane: (s, c, dp, t, j) from the header formula."
+    ]
+   },
+   {
+    "id": "k3",
+    "title": "The typed owner, its views and the one access route",
+    "kind": "new data model",
+    "ranges": [
+     [
+      145,
+      248
+     ]
+    ],
+    "lead": [
+     "k_vnni_view<T, 64, 128> is a matrix view with a bounds-checked at(token, dim) and no element write, no public pointer constructor, no data(), no operator[].",
+     "k_vnni_tensor<64, 128> owns the 16 KiB plane (64-byte aligned, trivial to construct, copy and destroy); as_view() on a temporary is deleted.",
+     "detail::k_vnni_access::plane(view) is the only route to the plane address: for the typed operations below, the two score kernels and fill_random."
+    ]
+   },
+   {
+    "id": "k4",
+    "title": "Transfer rows: const_k_row_view, k_row_view and their builders",
+    "kind": "new",
+    "ranges": [
+     [
+      249,
+      284
+     ]
+    ],
+    "lead": [
+     "A transfer row is one token's 128 bf16 in dimension order with the caller's alignment and DMA flags (not packed storage).",
+     "k_source_row builds a read-only row from a pointer or from a rank-1 bf16 view; k_destination_row builds a writable row from a pointer."
+    ]
+   },
+   {
+    "id": "k5",
+    "title": "Address arithmetic and the 16 x 16 transpose",
+    "kind": "new internal helpers",
+    "ranges": [
+     [
+      285,
+      343
+     ]
+    ],
+    "lead": [
+     "pair_base gives the byte address of dimension pair 0 of step s for a token: panel (s, c) plus the token's dword column t.",
+     "pair_row_offsets lists the 16 pair rows of a panel, 64 bytes apart, for the scatter and gather.",
+     "transpose_16x16_epi32 transposes 16 registers of 16 dwords in place in four stages (64 shuffles)."
+    ]
+   },
+   {
+    "id": "k6",
+    "title": "One token's row into and out of the packed plane: store_row, load_row, copy_token",
+    "kind": "new",
+    "ranges": [
+     [
+      344,
+      381
+     ],
+     [
+      422,
+      436
+     ]
+    ],
+    "lead": [
+     "store_row scatters one token's row: 4 scatters of 16 dwords, one per dimension step, into the token's column of 4 panels. Only this token's 64 pair slots are written, so threads may store different tokens of one plane at the same time.",
+     "load_row is the inverse: 4 gathers of 16 dwords.",
+     "copy_token moves one token between planes through a 64-byte-aligned local row."
+    ]
+   },
+   {
+    "id": "k7",
+    "title": "store_block: 16 rows transposed in registers and written as whole lines",
+    "kind": "new",
+    "ranges": [
+     [
+      382,
+      421
+     ]
+    ],
+    "lead": [
+     "For each of the 4 dimension steps, the 16 rows' 16 dimension pairs (one 64-byte load per row) are transposed into the panel's 16 pair rows, each written as one 64-byte store (masked when the block is partial).",
+     "A full block issues 64 full-line stores instead of 64 scatters of 4 bytes into 16 lines. The same 4 KiB is written."
+    ]
+   },
+   {
+    "id": "k8",
+    "title": "Note [Row-major tail block] and the row-major form of a block: row_major_row, store_row_major, load_row_major",
+    "kind": "new",
+    "ranges": [
+     [
+      437,
+      493
+     ]
+    ],
+    "lead": [
+     "A block holds its rows row-major until all 16 rows are saved: token t of block c owns 256 contiguous bytes in panel (t / 4, c), row t % 4. A row-major block and a VNNI block occupy the same 4 KiB.",
+     "Why: in decode the row-major store writes 4 whole lines where the VNNI scatter writes 4 bytes into each of 64 lines; readers of an incomplete block read 4 lines per token instead of 64.",
+     "row_major_row returns the typed row view; store_row_major / load_row_major are one memcpy each."
+    ]
+   },
+   {
+    "id": "k9",
+    "title": "The in-place conversion of one block: block_to_vnni and block_to_rows",
+    "kind": "new",
+    "ranges": [
+     [
+      494,
+      526
+     ]
+    ],
+    "lead": [
+     "block_to_vnni copies the 16 row-major rows to the stack first, then store_block writes the 4 panels: store_block writes panel (s, c) while the rows of tokens 4 s .. 4 s + 3 still live there.",
+     "block_to_rows is the inverse: 16 load_row gathers to the stack, then 16 store_row_major copies."
+    ]
+   }
+  ],
+  "trivial": [
+   {
+    "id": "t1",
+    "title": "Includes",
+    "ranges": [
+     [
+      43,
+      56
+     ]
+    ],
+    "what": "The include lines of the header."
+   }
+  ]
+ },
+ "h/tron/models/model.hpp": {
+  "units": [
+   {
+    "id": "m0",
+    "title": "Note [Shared block save]: the design record of the K store window",
+    "kind": "comment only",
+    "ranges": [
+     [
+      3085,
+      3152
+     ]
+    ],
+    "lead": [
+     "Comment text only: why save_k is the main thread's largest serial piece of a prefill layer (0.86 ms per layer, 105 ns per row, measured 2026-09-14), the two remedies (block save, sharing with the main helpers), and the window protocol."
+    ]
+   },
+   {
+    "id": "m1",
+    "title": "The deferred conversion list and the forward-end conversion",
+    "kind": "new",
+    "ranges": [
+     [
+      1842,
+      1848
+     ],
+     [
+      3153,
+      3180
+     ]
+    ],
+    "lead": [
+     "pending_k_block records a page, its k_storage_ref and a block index; pending_k_blocks_ is the list save_k fills.",
+     "convert_pending_k_blocks converts every queued block (page::k_block_to_vnni_at) and clears the list. It runs on the main thread after wait_for_coop_gof, the first point where no reader of the pass is left.",
+     "k_store_block names the 16-token block size used throughout the file."
+    ]
+   },
+   {
+    "id": "m2",
+    "title": "The sharing decision: k_store_shared",
+    "kind": "new",
+    "ranges": [
+     [
+      3189,
+      3201
+     ]
+    ],
+    "lead": [
+     "The answer is the same on main and on every helper: VNNI slot, more than one worker, at most helper_windows.size() workers, and more than k_store_block items in the minibatch."
+    ]
+   },
+   {
+    "id": "m3",
+    "title": "Cutting the minibatch into work units: k_store_cut_units",
+    "kind": "new",
+    "ranges": [
+     [
+      3202,
+      3231
+     ]
+    ],
+    "lead": [
+     "A unit is a run of consecutive items in one 16-token block of one page with the same token_jobs_do_kv value. unit_start[u] .. unit_start[u+1] bounds unit u; there are n_units + 1 entries.",
+     "Only main calls this, before it opens the window."
+    ]
+   },
+   {
+    "id": "m4",
+    "title": "store_k_block: a run of 16 tokens as one VNNI block, a shorter run row by row",
+    "kind": "new",
+    "ranges": [
+     [
+      3232,
+      3345
+     ]
+    ],
+    "lead": [
+     "Row-major slots: one row store per token and KV head through page::k(...).set (the old per-token loop moved here).",
+     "VNNI slots: the run collects consecutive items of one block (tokens without KV work are skipped; the same offset twice ends the run). A run of 16 covers its block and is stored with set_k_block per KV head, then note_k_block_saved. A shorter run goes through set_k_row per token (row-major tail block, or the VNNI column when the block is converted already).",
+     "A non-bf16 K buffer is converted to bf16 on the stack first (conv)."
+    ]
+   },
+   {
+    "id": "m5",
+    "title": "save_k_impl: the window protocol (open, claim, join) and its watchdog",
+    "kind": "changed + new",
+    "ranges": [
+     [
+      3181,
+      3188
+     ],
+     [
+      3346,
+      3420
+     ]
+    ],
+    "lead": [
+     "save_k_impl gains worker_ix and n_workers. Worker 0 is main; an unshared store is main's alone (helpers return at once).",
+     "Shared: main cuts the units, zeroes next_unit and finished, and increments opened (release). A helper's W-th call waits for opened >= W (acquire). Every thread claims units with fetch_add on next_unit and stores them with store_k_block.",
+     "A helper increments finished (release) and returns. Main spins until finished == n_workers - 1 (acquire); the watchdog reads the clock every k_join_clock_spins pause loops and aborts after k_join_timeout_s seconds.",
+     "Unshared: main stores every item itself."
+    ]
+   },
+   {
+    "id": "m6",
+    "title": "After the stores: the row-recording loop, and the per-token store that moved out",
+    "kind": "new + removed",
+    "ranges": [
+     [
+      3421,
+      3449
+     ]
+    ],
+    "lead": [
+     "For a VNNI slot, unless the hardware attention scores the operation (cached_operation_uses_hw), every stored token's row bit is set with note_k_row_saved; a block completed that way is pushed onto pending_k_blocks_ with its resolved k_storage_ref.",
+     "The old per-token K store (page::k(...).set inside the marks loop) is removed: the stores happen before, in store_k_block. The marks and GOF credits stay on main after the join."
+    ]
+   },
+   {
+    "id": "m7",
+    "title": "The save_k entry points take a worker index and a worker count",
+    "kind": "changed signature",
+    "ranges": [
+     [
+      3459,
+      3483
+     ]
+    ],
+    "lead": [
+     "Both save_k overloads gain worker_ix = 0 and n_workers = 1 and pass them to save_k_impl. The defaults store every row on the calling thread (handwritten plugins, tests).",
+     "The generated plugins pass worker 0 from run() and the helper's worker_ix from run_main_help (TronCpp.hs)."
+    ]
+   }
+  ],
+  "trivial": [
+   {
+    "id": "t1",
+    "title": "Includes for the join watchdog and _mm_pause",
+    "ranges": [
+     [
+      10,
+      10
+     ],
+     [
+      15,
+      16
+     ]
+    ],
+    "what": "chrono and immintrin.h includes, one comment alignment change."
+   }
+  ]
+ }
+}
