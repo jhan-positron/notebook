@@ -62,14 +62,18 @@ Implementation `ea94e95a4e`, measured on 2026-10-12, 2026-10-13 and 2026-10-14. 
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr-body-v12.md (13,903 bytes). The posted body. Hand-edited from the live body by a Python replace of line 41, `generator: none`.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr-body-live-20261015b.md (14,589 bytes). The live body as fetched before the edit (the user's web edit, line endings normalized).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr-body-v12.md (13,903 bytes). The posted body. Hand-edited from the live body by a Python replace of line 41, `generator: none`. (preserved: artifacts/intel-amx/exec/pr4-20261012/pr-body-v12.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr-body-live-20261015b.md (14,589 bytes). The live body as fetched before the edit (the user's web edit, line endings normalized). (preserved: artifacts/intel-amx/exec/pr4-20261012/pr-body-live-20261015b.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/pr-body-v11.md (14,831 bytes). Read only, not modified.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md. One section appended: "PR-4 (#4901): body v12 posted, coding-style sentences cut from the Verification paragraph (2026-10-15 05:11 UTC)" (now line 897 of the file; the file has grown since, 270,899 bytes at 2026-10-15 16:02).
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr4-split-execution.md. One "UPDATE 2026-10-15 05:11 UTC" paragraph appended (the file was updated again by later sessions, 25,221 bytes at 2026-10-15 14:18).
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md. The PR-4 index line extended with the v12 note.
-- Scratchpad: claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/e0d31ef7-46b4-4421-9c84-a1e8e165351d/scratchpad/ holds live.md, live-lf.md, live2.md, diff.txt, diff2.txt (fetched bodies and diffs, may be cleaned up).
+- Scratchpad: claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/e0d31ef7-46b4-4421-9c84-a1e8e165351d/scratchpad/ holds live.md, live-lf.md, live2.md, diff.txt, diff2.txt (fetched bodies and diffs, may be cleaned up). (preserved: artifacts/intel-amx/exec/scratch-relocated/e0d31ef7/live.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/e0d31ef7/live.md)
 - GitHub: PR 4901 body edited once (v12). No commits, no code change.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/scratch-relocated/e0d31ef7/` (4 files)
 
 ## Current state
 
