@@ -1,0 +1,83 @@
+# PR 4824 file t/t_amx_numerics.cpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -15,6 +15,7 @@
+   15|  #include <cstring>
+   16|  #include <memory>
+   17|  #include <random>
+   18| +#include <utility>
+   19|  #include <vector>
+   20|  
+   21|  #include <catch2/catch_test_macros.hpp>
+     |@@ -26,6 +27,7 @@
+   27|  #include "tron/kernels/amx_attn_iface.hpp"
+   28|  #include "tron/kernels/dotter.hpp"
+   29|  #include "tron/models/common.hpp"
+   30| +#include "tron/tensor/k_vnni.hpp"
+   31|  #include "tron/tensor/kv_cache_fwd.hpp"
+   32|  #include "tron/tensor/seq.hpp"
+   33|  #include "tron/tensor/v_vnni.hpp"
+     |@@ -191,6 +193,64 @@ TEST_CASE("AMX QK does not digress from the AVX dotter", "[amx_numerics][kv_data
+  193|    }
+  194|  }
+  195|  
+  196| +TEST_CASE("AMX QK from the VNNI K plane is bit-identical to AMX QK from row-major K",
+  197| +    "[amx_numerics][kv_data]") {
+  198| +  // qk_vnni_128x4 reads K as the B operand and Q as the A operand.
+  199| +  // qk_rowmajor_128x4 reads K as the A operand and Q as the B operand
+  200| +  // (Note [QK orientation]). Both add the same four 32-dimension partial dots in
+  201| +  // the same order inside the tile multiply (the TDPBF16PS instruction, Note
+  202| +  // [QK orientation]). So the scores must agree to the bit. This is the check
+  203| +  // that the K store (store_row into a k_vnni_tensor) plus the kernel's panel
+  204| +  // addressing (a panel is one 16-token x 32-dimension block of the K plane,
+  205| +  // h/tron/tensor/k_vnni.hpp)
+  206| +  // reproduce the row-major kernel's scores. A wrong panel or dimension pair (two
+  207| +  // adjacent dimensions stored as one dword) would not reproduce them.
+  208| +  if (!tron::amx_attn_h128g4::available()) {
+  209| +    WARN("AMX unavailable on this host - VNNI QK identity check skipped");
+  210| +    return;
+  211| +  }
+  212| +  constexpr uint32_t SEED_A_21 = 21u;
+  213| +  constexpr uint32_t SEED_B_22 = 22u;
+  214| +  // Scrambled store order: tok = (i * stride + offset) % 64 visits every token
+  215| +  // exactly once. The stride is odd. So it is coprime with 64 (no common
+  216| +  // factor with 64 other than 1).
+  217| +  constexpr size_t SCRAMBLE_STRIDE_37 = 37;
+  218| +  constexpr size_t SCRAMBLE_OFFSET_11 = 11;
+  219| +  auto in = std::make_unique<qk_inputs>();
+  220| +  // The packed K owner, filled through the typed store like the cache does.
+  221| +  auto k_owner = std::make_unique<tron::k_vnni_tensor<PAGE_TOKENS_64, HEAD_SIZE_128>>();
+  222| +  for (uint32_t seed : {SEED_A_21, SEED_B_22}) {
+  223| +    fill_qk(*in, seed);
+  224| +    for (size_t i = 0; i < PAGE_TOKENS_64; ++i) {  // scrambled store order
+  225| +      const size_t tok = (i * SCRAMBLE_STRIDE_37 + SCRAMBLE_OFFSET_11) % PAGE_TOKENS_64;
+  226| +      tron::store_row(k_owner->as_view(), tok,
+  227| +          tron::k_source_row<HEAD_SIZE_128>(in->k + tok * HEAD_SIZE_128));
+  228| +    }
+  229| +    alignas(64) tron::bf16 q_packed[tron::amx_attn_h128g4::Q_PACK_ELEMS_2048] = {};
+  230| +    alignas(64) tron::bf16 q_rows[tron::amx_attn_h128g4::Q_PACK_ELEMS_2048] = {};
+  231| +    tron::amx_attn_h128g4::pack_q_group_128x4(in->q, q_packed);
+  232| +    tron::amx_attn_h128g4::pack_q_rows_128x4(in->q, q_rows);
+  233| +    alignas(64) float s_row[GROUP_HEADS_4][PAGE_TOKENS_64];
+  234| +    alignas(64) float s_vnni[GROUP_HEADS_4][PAGE_TOKENS_64];
+  235| +    tron::amx_attn_h128g4::begin_region();
+  236| +    tron::amx_attn_h128g4::qk_rowmajor_128x4(
+  237| +        tron::const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>{in->k}, q_packed,
+  238| +        &s_row[0][0], PAGE_TOKENS_64);
+  239| +    tron::amx_attn_h128g4::qk_vnni_128x4(
+  240| +        std::as_const(*k_owner).as_view(), q_rows, &s_vnni[0][0], PAGE_TOKENS_64);
+  241| +    tron::amx_attn_h128g4::end_region();
+  242| +    for (size_t qi = 0; qi < GROUP_HEADS_4; ++qi) {
+  243| +      for (size_t t = 0; t < PAGE_TOKENS_64; ++t) {
+  244| +        uint32_t a, b;
+  245| +        std::memcpy(&a, &s_row[qi][t], sizeof(a));
+  246| +        std::memcpy(&b, &s_vnni[qi][t], sizeof(b));
+  247| +        CAPTURE(seed, qi, t, s_row[qi][t], s_vnni[qi][t]);
+  248| +        REQUIRE(a == b);
+  249| +      }
+  250| +    }
+  251| +  }
+  252| +}
+  253| +
+  254|  TEST_CASE(
+  255|      "AMX PV stays inside the AVX weight-rounding envelope", "[amx_numerics][kv_data]") {
+  256|    if (!tron::amx_attn_h128g4::available()) {

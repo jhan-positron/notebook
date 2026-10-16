@@ -1,0 +1,238 @@
+# PR 4824 file h/tron/models/self_attention.hpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -23,6 +23,7 @@
+   23|  #include "tron/kernels/amx_attn_iface.hpp"  // intrinsics-free
+   24|  #include "tron/kernels/dotter.hpp"
+   25|  #include "tron/kernels/expr.hpp"
+   26| +#include "tron/kernels/k_vnni.hpp"  // qk_group, the AVX-512 reader of VNNI K
+   27|  #include "tron/kernels/page_share_counters.hpp"  // TRON_PAGE_SHARE_COUNTERS only
+   28|  #include "tron/models/attn_stats.hpp"
+   29|  #include "tron/models/common.hpp"
+     |@@ -253,7 +254,8 @@ struct self_attention {
+  254|  
+  255|  #ifdef TRON_AMX_DISPATCH
+  256|      // One packed query group for the AMX attention path (the output of
+     | -    // pack_q_group_128x4): 4096 bytes. alignas(64) meets the packer's 64-byte
+  257| +    // pack_q_group_128x4 for row-major K, or of pack_q_rows_128x4 for VNNI K):
+  258| +    // 4096 bytes. alignas(64) meets the packer's 64-byte
+  259|      // alignment contract; std::vector routes over-aligned elements through
+  260|      // the aligned operator new.
+  261|      struct alignas(64) amx_qpack_slot {
+     |@@ -1548,9 +1550,10 @@ struct self_attention {
+ 1550|        std::bitset<max_minibatch_size> amx_packed;
+ 1551|        if (amx_on) {
+ 1552|          TRON_ASSERT_LE(items.size(), max_minibatch_size);
+     | -        // resize() zero-fills new slots and the packer writes only the 4
+     | -        // live columns of each slot, so the padding it relies on stays zero
+     | -        // (see the pack contract in amx_attn_iface.hpp).
+ 1553| +        // resize() zero-fills new slots. The packer writes only the 4 live
+ 1554| +        // columns (pack_q_group_128x4, row-major K) or the 4 live rows
+ 1555| +        // (pack_q_rows_128x4, VNNI K) of each slot. So the padding both
+ 1556| +        // packers rely on stays zero (the pack contracts in amx_attn_iface.hpp).
+ 1557|          amx_qpack.resize(items.size());
+ 1558|          amx_attn_h128g4::begin_region();
+ 1559|        }
+     |@@ -1692,8 +1695,20 @@ struct self_attention {
+ 1695|        static_assert(amx_attn_h128g4::query_scalar_ok<typename model::activation_scalar>,
+ 1696|            "the AMX query packer reads q.data as bf16");
+ 1697|        if (!packed.test(batch_job_ix)) {
+     | -        amx_attn_h128g4::pack_q_group_128x4(
+     | -            q.data + kv_head * geometry.kv_mul() * geometry.kv.head_size, slot);
+ 1698| +        const bf16* group =
+ 1699| +            q.data + kv_head * geometry.kv_mul() * geometry.kv.head_size;
+ 1700| +        // The pack matches the slot's K layout (Note [K VNNI storage] in
+ 1701| +        // kv_cache.hpp). The VNNI plane (K in the Vector Neural Network
+ 1702| +        // Instructions layout, pair-interleaved) is the B operand of
+ 1703| +        // qk_vnni_128x4. A and B are the left and right matrices of the AMX
+ 1704| +        // (Advanced Matrix Extensions) tile multiply. So Q is packed as its A
+ 1705| +        // operand (rows). The row-major K page is the A operand of
+ 1706| +        // qk_rowmajor_128x4. So Q is packed as its B operand.
+ 1707| +        if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
+ 1708| +          amx_attn_h128g4::pack_q_rows_128x4(group, slot);
+ 1709| +        } else {
+ 1710| +          amx_attn_h128g4::pack_q_group_128x4(group, slot);
+ 1711| +        }
+ 1712|          packed.set(batch_job_ix);
+ 1713|        }
+ 1714|        return slot;
+     |@@ -1747,11 +1762,15 @@ struct self_attention {
+ 1762|            "the AMX kernels assume the KV page size");
+ 1763|        // QK for the whole page in one kernel call. The kernel writes the raw
+ 1764|        // scores, not yet multiplied by the attention scale, into
+     | -      // s_pages[head][token], the same array and layout the dotter loop fills.
+     | -      // It reads K straight from storage: the argument is this (slot, kv_head)'s
+     | -      // whole K plane, a const_native_k_view of 64 consecutive 128-dim rows.
+     | -      // This is the only place where the AMX path depends on K being stored as
+     | -      // consecutive rows, and the view type states that layout at the call.
+ 1765| +      // s_pages[head][token]. That is the same array and layout the software
+ 1766| +      // loop fills. It reads K straight from storage, in the slot's layout
+ 1767| +      // (Note [K VNNI storage] in kv_cache.hpp). In the VNNI layout the
+ 1768| +      // argument is the page's packed K plane, a k_vnni_view from page::k_packed,
+ 1769| +      // the B operand of qk_vnni_128x4. In the row-major layout the argument is
+ 1770| +      // this (slot, kv_head)'s whole K plane, a const_native_k_view of 64
+ 1771| +      // consecutive 128-dim rows, the A operand of qk_rowmajor_128x4. That call
+ 1772| +      // is the only place where the AMX path depends on K being stored as
+ 1773| +      // consecutive rows. The view types state the layout at the call.
+ 1774|        tensor<operation_kv_mul, page::page_size> s_pages;
+ 1775|        // Both kernels take &s_pages[0][0] with row stride page_size, so the 4
+ 1776|        // rows of 64 floats must be consecutive with no padding. The size check
+     |@@ -1759,8 +1778,13 @@ struct self_attention {
+ 1778|        static_assert(
+ 1779|            sizeof(s_pages) == operation_kv_mul * page::page_size * sizeof(float),
+ 1780|            "the AMX kernels read s_pages as one block: rows must be consecutive");
+     | -      amx_attn_h128g4::qk_rowmajor_128x4(pg.template k<geometry.kv>(slot, kv_head),
+     | -          q_packed, &s_pages[0][0], page::page_size);
+ 1781| +      if constexpr (k_vnni::layout_on<operation_head_size>) {
+ 1782| +        amx_attn_h128g4::qk_vnni_128x4(pg.template k_packed<geometry.kv>(slot, kv_head),
+ 1783| +            q_packed, &s_pages[0][0], page::page_size);
+ 1784| +      } else {
+ 1785| +        amx_attn_h128g4::qk_rowmajor_128x4(pg.template k<geometry.kv>(slot, kv_head),
+ 1786| +            q_packed, &s_pages[0][0], page::page_size);
+ 1787| +      }
+ 1788|        // Scale (or softcap), page max, exp and sum per head: the same math as
+ 1789|        // the dotter epilogue in apply_page_tok, on the AMX scores.
+ 1790|        float corr_arr[operation_kv_mul], m_new_arr[operation_kv_mul],
+     |@@ -1811,7 +1835,8 @@ struct self_attention {
+ 1835|  
+ 1836|      // What one apply_page_tok call did: how many K tokens were relevant, the
+ 1837|      // range hint to continue from, and which path served the visit (the AMX
+     | -    // kernel, the AVX dotter loop, or none: an empty visit).
+ 1838| +    // kernel; the AVX software reader, which is the dotter loop for row-major
+ 1839| +    // K and k_vnni::qk_group for VNNI K; or none: an empty visit).
+ 1840|      struct page_tok_result {
+ 1841|        const token_range* hint;
+ 1842|        int relevant_k_tokens;
+     |@@ -1878,9 +1903,36 @@ struct self_attention {
+ 1903|        // Note [AMX attention dispatch].
+ 1904|        if constexpr (amx_attn_h128g4::eligible<typename model::activation_scalar>(
+ 1905|                          operation_head_size, operation_kv_mul)) {
+ 1906| +        // The third gate of the dense AMX path, after amx_q_packed and
+ 1907| +        // is_dense_amx_page: the whole page must hold the VNNI layout, since
+ 1908| +        // the kernel reads the page as one B operand (Note [K VNNI storage]
+ 1909| +        // item 2). page::k_vnni_blocks returns one bit per 16-token block of
+ 1910| +        // the page, bit c set = block c holds the VNNI layout. A 64-token
+ 1911| +        // page has 4 blocks, so "every block is VNNI" is "all 4 bits set",
+ 1912| +        // and that is the mask BLOCKS_PER_PAGE_MASK_0XF (binary 1111). A clear bit is a
+ 1913| +        // row-major block, and the page takes the software loop instead:
+ 1914| +        //   - the block this forward pass completed through a run shorter
+ 1915| +        //     than a block (converted at the forward end, so the page is
+ 1916| +        //     dense from the next pass on);
+ 1917| +        //   - a block that stays row-major because the hardware attention
+ 1918| +        //     scores the operation (Note [Row-major blocks under hardware
+ 1919| +        //     attention] in kv_cache.hpp);
+ 1920| +        //   - a page filled by another writer than save_k.
+ 1921| +        // A row-major slot keeps no layout state: the gate is always open.
+ 1922| +        // Read after the dense predicate: a page nothing is relevant for is
+ 1923| +        // never asked for its state (a book may have no active KV slot).
+ 1924| +        const auto k_layout_dense = [&] {
+ 1925| +          if constexpr (k_vnni::layout_on<operation_head_size>) {
+ 1926| +            return page.template k_vnni_blocks<geometry.kv>(slot) ==
+ 1927| +                   k_vnni::BLOCKS_PER_PAGE_MASK_0XF;
+ 1928| +          } else {
+ 1929| +            return true;  // a row-major slot keeps no layout state
+ 1930| +          }
+ 1931| +        };
+ 1932|          if (amx_q_packed != nullptr &&
+ 1933|              is_dense_amx_page(page, begin, end, query_visible, *range_hint, q_position,
+     | -                k_position, sliding_window_size)) {
+ 1934| +                k_position, sliding_window_size) &&
+ 1935| +            k_layout_dense()) {
+ 1936|            apply_dense_amx_page<geometry>(
+ 1937|                was_valid, page, slot, operation_scale, kv_head, sp, amx_q_packed);
+ 1938|            // The hint is returned unchanged: is_dense_amx_page proved that the
+     |@@ -1894,11 +1946,20 @@ struct self_attention {
+ 1946|        tensor<operation_kv_mul, page::page_size> s_pages;
+ 1947|        int relevant_k_tokens = 0;
+ 1948|        {
+     | -        decltype(page.template k<geometry.kv>(slot, kv_head)) keys;
+ 1949|          // share the bf16 -> fp32 conversion across the page
+ 1950|          using scalar_t = typename btensor_t<operation_head_size>::element;
+ 1951|          for (size_t offset = 0; offset < operation_kv_mul; ++offset)
+ 1952|            s_pages[offset] = constant<page::page_size>(-1.0f / 0.0f);
+ 1953| +        // The slot's K layout (Note [K VNNI storage] in kv_cache.hpp) decides
+ 1954| +        // how the relevant tokens are scored. The row-major layout scores one
+ 1955| +        // token at a time with the dotters below. The VNNI layout records the
+ 1956| +        // relevant tokens of its VNNI blocks in `live`. It scores them after
+ 1957| +        // the loop with the AVX-512 (Advanced Vector Extensions, 512-bit
+ 1958| +        // vectors) reader k_vnni::qk_group, in passes of up to 16 heads over
+ 1959| +        // the plane. The tokens of a row-major tail block (Note [Row-major
+ 1960| +        // tail block] in h/tron/tensor/k_vnni.hpp) are scored with the
+ 1961| +        // dotters, through their typed row (row_major_row).
+ 1962| +        constexpr bool k_vnni_on = k_vnni::layout_on<operation_head_size>;
+ 1963|          // `dotter` binds to a view at construction and has no default
+ 1964|          // constructor, so we can't declare a std::array<dotter,...> and fill
+ 1965|          // it in a loop. Pack-expand `kv_mul` constructor calls inside the
+     |@@ -1911,6 +1972,32 @@ struct self_attention {
+ 1972|                    dotter<scalar_t, operation_head_size>(slice<operation_head_size>()(
+ 1973|                        q, (kv_head * operation_kv_mul + I) * operation_head_size))...};
+ 1974|              }(std::make_index_sequence<operation_kv_mul>{});
+ 1975| +        [[maybe_unused]] uint64_t live = 0;
+ 1976| +        // The VNNI slot: the blocks of the page that hold the VNNI layout, and
+ 1977| +        // the packed plane (page::k_packed) whose row-major tail rows the
+ 1978| +        // dotters read. Both are fetched at the first relevant token, like the
+ 1979| +        // row view below: a page nothing is relevant for is never asked (a
+ 1980| +        // book may have no active KV slot). A row-major slot has no packed
+ 1981| +        // plane, so `plane` is a placeholder there.
+ 1982| +        [[maybe_unused]] uint8_t vnni_blocks = 0;
+ 1983| +        [[maybe_unused]] auto plane = [&] {
+ 1984| +          if constexpr (k_vnni_on) {
+ 1985| +            return std::optional<decltype(page.template k_packed<geometry.kv>(
+ 1986| +                slot, kv_head))>{};
+ 1987| +          } else {
+ 1988| +            return 0;  // no packed plane: the row-major slot keeps rows
+ 1989| +          }
+ 1990| +        }();
+ 1991| +        // The row-major loop reads K through one checked page view, fetched on
+ 1992| +        // the first relevant token. A VNNI slot has no row view, so `keys` is
+ 1993| +        // a placeholder there.
+ 1994| +        [[maybe_unused]] auto keys = [&] {
+ 1995| +          if constexpr (k_vnni_on) {
+ 1996| +            return 0;  // no row view: the VNNI plane has no contiguous rows
+ 1997| +          } else {
+ 1998| +            return decltype(page.template k<geometry.kv>(slot, kv_head)){};
+ 1999| +          }
+ 2000| +        }();
+ 2001|          for (size_t i = begin; i < end; ++i) {
+ 2002|            // Advance range_hint when we move past the current range.
+ 2003|            token_id kv_idx = page.at_offset(i);
+     |@@ -1929,10 +2016,36 @@ struct self_attention {
+ 2016|              continue;
+ 2017|            }
+ 2018|            relevant_k_tokens++;
+     | -          if (!keys.valid()) keys = page.template k<geometry.kv>(slot, kv_head);
+     | -          const auto k = keys[i];
+     | -          for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
+     | -            s_pages[offset][i] = dot_q[offset](k);
+ 2019| +          if constexpr (k_vnni_on) {
+ 2020| +            if (!plane) {
+ 2021| +              vnni_blocks = page.template k_vnni_blocks<geometry.kv>(slot);
+ 2022| +              plane = page.template k_packed<geometry.kv>(slot, kv_head);
+ 2023| +            }
+ 2024| +            if ((vnni_blocks & k_vnni::block_bit(i / k_vnni::BLOCK_TOKENS_16)) != 0) {
+ 2025| +              live |= k_vnni::offset_bit(i);
+ 2026| +            } else {
+ 2027| +              // A row of the row-major tail block: 4 whole lines, the
+ 2028| +              // row-major dotter.
+ 2029| +              const auto k = row_major_row(*plane, i);
+ 2030| +              for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
+ 2031| +                s_pages[offset][i] = dot_q[offset](k);
+ 2032| +              }
+ 2033| +            }
+ 2034| +          } else {
+ 2035| +            if (!keys.valid()) keys = page.template k<geometry.kv>(slot, kv_head);
+ 2036| +            const auto k = keys[i];
+ 2037| +            for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
+ 2038| +              s_pages[offset][i] = dot_q[offset](k);
+ 2039| +            }
+ 2040| +          }
+ 2041| +        }
+ 2042| +        if constexpr (k_vnni_on) {
+ 2043| +          static_assert(page::page_size == k_vnni::PAGE_TOKENS_64,
+ 2044| +              "the live mask is one bit per token");
+ 2045| +          if (live != 0) {
+ 2046| +            k_vnni::qk_group<operation_kv_mul>(*plane,
+ 2047| +                q.data + kv_head * operation_kv_mul * operation_head_size, live,
+ 2048| +                &s_pages[0][0], page::page_size);
+ 2049|            }
+ 2050|          }
+ 2051|        }

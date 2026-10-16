@@ -1,0 +1,127 @@
+# PR 4824 file t/t_amx_dispatch_dtype.cpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -5,7 +5,11 @@
+    5|  // defines every amx_attn_h128g4 entry point as a CPU fake, so the linker never
+    6|  // pulls libtron's amx_attn.cpp object and no AMX instruction is linked or
+    7|  // executed; available() is the fake too, so the dispatch believes AMX is
+     | -// present.
+    8| +// present. The K layout of the build selects which packer and which QK kernel
+    9| +// the dispatch calls. The layouts are row-major, or under TRON_K_VNNI the VNNI
+   10| +// (Vector Neural Network Instructions) plane (Note [K VNNI storage] in
+   11| +// kv_cache.hpp). The fakes of both pairs count into the same probe. So the
+   12| +// expectations below hold for either layout.
+   13|  //   host_bf16, full page: the Q pack runs exactly once and sees the query
+   14|  //   values; the dense QK and PV kernels run once each.
+   15|  //   host_bf16, partial page (63 tokens): the Q pack still runs (it happens
+     |@@ -37,10 +41,12 @@
+   41|  #include "common/numerics.hpp"
+   42|  #include "common/types.hpp"
+   43|  #include "tron/kernels/amx_attn_iface.hpp"
+   44| +#include "tron/kernels/k_vnni.hpp"
+   45|  #include "tron/models/common.hpp"
+   46|  #include "tron/models/model.hpp"
+   47|  #include "tron/models/ranged_mask.hpp"
+   48|  #include "tron/plugins/llama.hpp"
+   49| +#include "tron/tensor/k_vnni.hpp"
+   50|  #include "tron/tensor/kv_cache_fwd.hpp"
+   51|  #include "tron/tensor/seq.hpp"
+   52|  #include "tron/tensor/v_vnni.hpp"
+     |@@ -63,12 +69,27 @@ amx_probe probe;
+   69|  // the kill switch (TRON_AMX_DISABLE=1) or a CPU without AMX.
+   70|  bool fake_amx_available = true;
+   71|  
+   72| +// exercise_page arguments: whether a second call is made, what the fake
+   73| +// available() answers, and whether the stored rows are recorded like save_k
+   74| +// records them.
+   75| +constexpr bool REPEAT_FALSE = false;
+   76| +constexpr bool AMX_AVAILABLE_TRUE = true;
+   77| +constexpr bool AMX_AVAILABLE_FALSE = false;
+   78| +constexpr bool RECORD_ROWS_TRUE = true;
+   79| +constexpr bool RECORD_ROWS_FALSE = false;
+   80| +
+   81|  // Runs apply_page_range over one page holding `n_tokens` tokens, with the
+   82|  // query at the last token, and records the fakes' calls in `probe`. With
+   83|  // `repeat` the call is made a second time with different query values.
+     | -// `amx_available` is what the fake available() answers during the call.
+   84| +// `amx_available` is what the fake available() answers during the call. With
+   85| +// `record_rows` the stored rows are recorded like save_k records them, so the
+   86| +// page's blocks hold the VNNI layout under TRON_K_VNNI; without it a full page
+   87| +// keeps row-major blocks and the dense gate must refuse the AMX path.
+   88|  template <typename executor_t>
+     | -void exercise_page(size_t n_tokens, bool repeat = false, bool amx_available = true) {
+   89| +void exercise_page(size_t n_tokens,
+   90| +    bool repeat = REPEAT_FALSE,
+   91| +    bool amx_available = AMX_AVAILABLE_TRUE,
+   92| +    bool record_rows = RECORD_ROWS_TRUE) {
+   93|    constexpr size_t head_size = 128;
+   94|    constexpr size_t n_heads = 4;
+   95|    constexpr size_t n_kv_heads = 1;
+     |@@ -102,7 +123,14 @@ void exercise_page(size_t n_tokens, bool repeat = false, bool amx_available = tr
+  123|    const kv_slot_id slot = book_t::kv_slot(model_layer_id(0));
+  124|    alignas(64) std::array<bf16, head_size> zero{};
+  125|    for (size_t token = 0; token < n_tokens; ++token) {
+     | -    std::copy(zero.begin(), zero.end(), page->k(slot, 0, token).data);
+  126| +    page->set_k_row(slot, 0, token, k_source_row<head_size>(zero.data()));
+  127| +    // What save_k and the forward end do after a row store: record the row,
+  128| +    // and convert the block to the VNNI layout when it is complete (Note [K
+  129| +    // VNNI storage]). The dense AMX path runs only for a page whose 4 blocks
+  130| +    // are VNNI.
+  131| +    if (record_rows && page->note_k_row_saved(slot, token)) {
+  132| +      page->k_block_to_vnni(slot, token / k_vnni::BLOCK_TOKENS_16);
+  133| +    }
+  134|      page->template set_v<geometry.kv>(
+  135|          slot, 0, token, v_source_row<head_size>(zero.data()));
+  136|      cache.increment_tokens_used();
+     |@@ -158,8 +186,10 @@ void exercise_page(size_t n_tokens, bool repeat = false, bool amx_available = tr
+  186|    // bf16 query buffer may reach the packer, which copies bf16 values and
+  187|    // converts nothing. With available() false nothing is packed either.
+  188|    const bool packs = std::is_same_v<query_scalar, bf16> && amx_available;
+     | -  // The dense predicate: the kernels run only for a full page.
+     | -  const bool dense = packs && n_tokens == book_t::page_size;
+  189| +  // The dense predicate: the kernels run only for a full page whose blocks
+  190| +  // hold the VNNI layout (a VNNI slot with unrecorded rows keeps them row-major).
+  191| +  const bool dense = packs && n_tokens == book_t::page_size &&
+  192| +                     (record_rows || !k_vnni::layout_on<head_size>);
+  193|    fake_amx_available = amx_available;
+  194|    for (int round = 0; round < (repeat ? 2 : 1); ++round) {
+  195|      if (round == 1) {
+     |@@ -246,6 +276,20 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>,
+  276|    ++probe.qk_calls;
+  277|    std::fill_n(output, GROUP_HEADS_4 * stride, 0.0f);
+  278|  }
+  279| +void pack_q_rows_128x4(const bf16* input, bf16* output) noexcept {
+  280| +  ++probe.pack_calls;
+  281| +  for (size_t i = 0; i < probe.q.size(); ++i) {
+  282| +    probe.q[i] = static_cast<float>(input[i]);
+  283| +  }
+  284| +  std::fill_n(output, Q_PACK_ELEMS_2048, bf16{});
+  285| +}
+  286| +void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>,
+  287| +    const bf16*,
+  288| +    float* output,
+  289| +    size_t stride) noexcept {
+  290| +  ++probe.qk_calls;
+  291| +  std::fill_n(output, GROUP_HEADS_4 * stride, 0.0f);
+  292| +}
+  293|  void weights_times_v_128x4(v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>,
+  294|      const float*,
+  295|      size_t,
+     |@@ -267,12 +311,17 @@ TEST_CASE("AMX dispatch rejects non-bf16 queries and partial pages",
+  311|    SECTION("host_bf16, partial page: one pack, no kernel call") {
+  312|      exercise_page<host_bf16>(page_size - 1);
+  313|    }
+  314| +  SECTION("host_bf16, full page with unrecorded rows: one pack, and under "
+  315| +          "TRON_K_VNNI no kernel call (the blocks are row-major)") {
+  316| +    exercise_page<host_bf16>(
+  317| +        page_size, REPEAT_FALSE, AMX_AVAILABLE_TRUE, RECORD_ROWS_FALSE);
+  318| +  }
+  319|    SECTION("host_bf16, full page, available() false: no pack, no kernel call, one "
+  320|            "AVX visit that scored the whole page") {
+  321|      // The kill-switch arm of the attention path stats: the visit lands on the
+  322|      // AVX path with the page's every token, and avx_full_page_visits counts it
+  323|      // as AMX-eligible volume that did not take AMX.
+     | -    exercise_page<host_bf16>(page_size, /*repeat=*/false, /*amx_available=*/false);
+  324| +    exercise_page<host_bf16>(page_size, REPEAT_FALSE, AMX_AVAILABLE_FALSE);
+  325|    }
+  326|    SECTION("host (float): no pack, no kernel call") {
+  327|      exercise_page<host>(page_size);

@@ -1,0 +1,45 @@
+# PR 4824 file h/tron/models/common.hpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -1,6 +1,8 @@
+    1|  #pragma once
+    2|  
+    3|  #include <algorithm>
+    4| +#include <array>
+    5| +#include <atomic>
+    6|  #include <compare>
+    7|  #include <cstdint>
+    8|  #include <span>
+     |@@ -1162,6 +1164,33 @@ struct batch : noncopyable<batch<model>> {
+ 1164|    // Knowing whether the main and helper threads are done with this layer
+ 1165|    latch_ref layer_done;
+ 1166|  
+ 1167| +  // The K store window of this minibatch, one per (layer, pass). The main
+ 1168| +  // thread opens it in save_k. The main helpers join it from the generated
+ 1169| +  // run_main_help. See Note [Shared block save] in model.hpp.
+ 1170| +  struct k_store_window_t {
+ 1171| +    // Worker counts above this take the unshared store (k_store_shared).
+ 1172| +    // This value is the array size of helper_windows below.
+ 1173| +    static constexpr size_t max_shared_workers = 128;
+ 1174| +    // The claim counter is on its own cache line. A claim must not
+ 1175| +    // invalidate the line the waiting threads poll.
+ 1176| +    alignas(cache_line_size) std::atomic<uint32_t> next_unit{0};
+ 1177| +    // Windows opened so far in this pass.
+ 1178| +    alignas(cache_line_size) std::atomic<uint32_t> opened{0};
+ 1179| +    std::atomic<uint32_t> finished{0};  // helpers done with the open window
+ 1180| +    uint32_t n_units = 0;               // work units of the open window
+ 1181| +    // Work unit u = items[unit_start[u], unit_start[u + 1]). A unit never
+ 1182| +    // crosses a page, a 16-token page block, or a change of
+ 1183| +    // token_jobs_do_kv. Items of one block that are not consecutive (a job
+ 1184| +    // without KV work between them, or a partner job moved to the end of a
+ 1185| +    // grain) fall into several units. Their writers touch disjoint token
+ 1186| +    // lanes (masked stores). So two threads may write one block without
+ 1187| +    // conflict. When a run fills the block, each pair row is written with
+ 1188| +    // one full-line store.
+ 1189| +    std::array<uint32_t, model::state::max_minibatch_size + 1> unit_start{};
+ 1190| +    // Windows a helper has entered, by worker_ix (the helper's own slot).
+ 1191| +    // The array size bounds the worker count of a shared store (k_store_shared).
+ 1192| +    std::array<uint32_t, max_shared_workers> helper_windows{};
+ 1193| +  } k_store_window;
+ 1194|    // Note [Matrix callback lifetime]
+ 1195|    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 1196|    // A matmul's completion callback runs on an RX thread and finishes this

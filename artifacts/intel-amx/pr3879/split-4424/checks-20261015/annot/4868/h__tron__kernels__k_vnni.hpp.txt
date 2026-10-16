@@ -1,0 +1,132 @@
+# PR 4868 file h/tron/kernels/k_vnni.hpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -0,0 +1,129 @@
+    1| +#pragma once
+    2| +// The AVX-512 (the CPU's 512-bit vector instruction set) QK score reader of the
+    3| +// K VNNI layout (h/tron/tensor/k_vnni.hpp). Until the VNNI AMX kernel is
+    4| +// merged it serves every page of a VNNI slot; after that, partial pages, hosts
+    5| +// without AMX (Advanced Matrix Extensions, the tile instruction set) and the
+    6| +// AMX kill switch (TRON_AMX_DISABLE=1). No AMX instruction runs here. So any
+    7| +// translation unit may include it. The layout itself, who writes it and who
+    8| +// reads it are described in Note [K VNNI storage] (in kv_cache.hpp).
+    9| +//
+   10| +// Words used here: bf16 is the 16-bit brain floating-point format. fp16 is the
+   11| +// 16-bit IEEE half format. fp32 is the 32-bit IEEE single format. VDPBF16PS is
+   12| +// the AVX-512 instruction that multiplies bf16 pairs and adds them in fp32.
+   13| +
+   14| +#include <cstddef>
+   15| +#include <cstdint>
+   16| +#include <cstring>
+   17| +#include <immintrin.h>
+   18| +#include <type_traits>
+   19| +
+   20| +#include "common/attributes.hpp"
+   21| +#include "common/numerics/bf16.hpp"
+   22| +#include "common/numerics/fp16.hpp"
+   23| +#include "tron/tensor/k_vnni.hpp"
+   24| +
+   25| +namespace tron::k_vnni {
+   26| +
+   27| +// Query heads scored per pass of qk_group: one accumulator register per head.
+   28| +// A wider group (more query heads sharing one K/V head) is scored in passes of
+   29| +// 16 heads.
+   30| +inline constexpr size_t MAX_KV_MUL_16 = 16;
+   31| +
+   32| +// qk_group is a template. It is instantiated only for VNNI slots. Its
+   33| +// qualified name stays declared for the discarded branch of
+   34| +// self_attention.hpp's layout `if constexpr`.
+   35| +
+   36| +// Scores of one query group against the live tokens of one page, read from
+   37| +// the VNNI plane with AVX-512. s[h * s_stride + t] = q_h . K_t (UNSCALED) for
+   38| +// every token t whose bit is set in `live`. The other entries of s are left
+   39| +// untouched (the caller keeps them at -inf). The K storage of a token whose
+   40| +// bit is clear is never read (masked loads). So unwritten tokens cannot
+   41| +// change the result. Token lanes: one 64-byte load supplies one dimension pair
+   42| +// of 16 tokens. The query's dimension pair is broadcast. VDPBF16PS accumulates 16
+   43| +// scores at once. So there is no horizontal reduction and no per-token gather.
+   44| +// k_page is the page's packed K plane as its typed view (page::k_packed). This
+   45| +// reader is the layout-specific reader allowed to take the plane address. q
+   46| +// points at kv_mul rows of 128 values (the group's heads, row stride 128).
+   47| +// kv_mul is any group size: a group of more than 16 heads is
+   48| +// scored 16 heads at a time. Every head's scores are its own accumulation.
+   49| +// So the split changes no head's add order.
+   50| +//   bf16 q: exact bf16 x bf16 products added in fp32 by VDPBF16PS. This is the
+   51| +//     same instruction the row-major dotter<bf16, 128> uses. Only the order of
+   52| +//     the fp32 adds differs (see Note [AMX attention dispatch]).
+   53| +//   float q: the stored bf16 K values are widened to fp32 exactly (a shift).
+   54| +//     They are then multiplied by the fp32 query with FMA (fused multiply-add),
+   55| +//     as dotter<float, 128> does.
+   56| +//   fp16 q: widened to fp32 once per call, then the float path.
+   57| +template <size_t kv_mul, typename q_scalar>
+   58| +TRON(inline)
+   59| +void qk_group(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+   60| +    const q_scalar* q,
+   61| +    uint64_t live,
+   62| +    float* s,
+   63| +    size_t s_stride) noexcept {
+   64| +  static_assert(kv_mul > 0, "a query group has at least one head");
+   65| +  if constexpr (kv_mul > MAX_KV_MUL_16) {
+   66| +    // The first 16 heads, then the rest (which may split again).
+   67| +    qk_group<MAX_KV_MUL_16, q_scalar>(k_page, q, live, s, s_stride);
+   68| +    qk_group<kv_mul - MAX_KV_MUL_16, q_scalar>(k_page,
+   69| +        q + MAX_KV_MUL_16 * HEAD_SIZE_128, live, s + MAX_KV_MUL_16 * s_stride,
+   70| +        s_stride);
+   71| +  } else if constexpr (std::is_same_v<q_scalar, fp16>) {
+   72| +    alignas(64) float qf[kv_mul * HEAD_SIZE_128];
+   73| +    for (size_t i = 0; i < kv_mul * HEAD_SIZE_128; ++i) {
+   74| +      qf[i] = float(q[i]);
+   75| +    }
+   76| +    qk_group<kv_mul, float>(k_page, qf, live, s, s_stride);
+   77| +    return;
+   78| +  } else {
+   79| +    static_assert(std::is_same_v<q_scalar, bf16> || std::is_same_v<q_scalar, float>,
+   80| +        "the VNNI-K reader serves bf16, float and fp16 queries");
+   81| +    // Inside namespace tron::k_vnni the name `detail` is tron::k_vnni::detail. So
+   82| +    // the access helper is named in full.
+   83| +    const bf16* const plane = tron::detail::k_vnni_access::plane(k_page);
+   84| +    for (size_t c = 0; c < TOKEN_BLOCKS_4; ++c) {
+   85| +      const __mmask16 mask = __mmask16(live >> (c * BLOCK_TOKENS_16));
+   86| +      if (mask == 0) continue;
+   87| +      __m512 acc[kv_mul];
+   88| +      for (size_t h = 0; h < kv_mul; ++h) {
+   89| +        acc[h] = _mm512_setzero_ps();
+   90| +      }
+   91| +      for (size_t step = 0; step < DIM_STEPS_4; ++step) {
+   92| +        const bf16* panel = plane + (step * TOKEN_BLOCKS_4 + c) * PANEL_ELEMS_512;
+   93| +        for (size_t dp = 0; dp < STEP_PAIRS_16; ++dp) {
+   94| +          // One dimension pair of the 16 tokens of this block. Lanes of dead tokens
+   95| +          // are never loaded. Those lanes are zero.
+   96| +          const __m512i k_pairs =
+   97| +              _mm512_maskz_loadu_epi32(mask, panel + dp * ROW_ELEMS_32);
+   98| +          const size_t d = step * STEP_DIMS_32 + PAIR_2 * dp;
+   99| +          if constexpr (std::is_same_v<q_scalar, bf16>) {
+  100| +            for (size_t h = 0; h < kv_mul; ++h) {
+  101| +              uint32_t q_pair;
+  102| +              std::memcpy(&q_pair, q + h * HEAD_SIZE_128 + d, sizeof(q_pair));
+  103| +              acc[h] = _mm512_dpbf16_ps(
+  104| +                  acc[h], (__m512bh)_mm512_set1_epi32(int(q_pair)), (__m512bh)k_pairs);
+  105| +            }
+  106| +          } else {
+  107| +            // Even dimensions are in the low halves of the dwords, odd dimensions
+  108| +            // in the high halves. Each becomes an exact fp32 with a shift or a mask.
+  109| +            const __m512 k_even =
+  110| +                _mm512_castsi512_ps(_mm512_slli_epi32(k_pairs, BF16_BITS_16));
+  111| +            const __m512 k_odd = _mm512_castsi512_ps(_mm512_and_si512(
+  112| +                k_pairs, _mm512_set1_epi32(int(HIGH_HALF_0XFFFF0000))));
+  113| +            for (size_t h = 0; h < kv_mul; ++h) {
+  114| +              acc[h] = _mm512_fmadd_ps(
+  115| +                  _mm512_set1_ps(q[h * HEAD_SIZE_128 + d]), k_even, acc[h]);
+  116| +              acc[h] = _mm512_fmadd_ps(
+  117| +                  _mm512_set1_ps(q[h * HEAD_SIZE_128 + d + 1]), k_odd, acc[h]);
+  118| +            }
+  119| +          }
+  120| +        }
+  121| +      }
+  122| +      for (size_t h = 0; h < kv_mul; ++h) {
+  123| +        _mm512_mask_storeu_ps(s + h * s_stride + c * BLOCK_TOKENS_16, mask, acc[h]);
+  124| +      }
+  125| +    }
+  126| +  }
+  127| +}
+  128| +
+  129| +}  // namespace tron::k_vnni

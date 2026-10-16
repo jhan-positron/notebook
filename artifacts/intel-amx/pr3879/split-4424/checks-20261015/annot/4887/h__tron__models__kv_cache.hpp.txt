@@ -1,0 +1,69 @@
+# PR 4887 file h/tron/models/kv_cache.hpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -666,14 +666,13 @@ struct kv_slot_offsets final {
+  666|  // operations of h/tron/tensor/k_vnni.hpp (store_row, load_row, copy_token).
+  667|  // No raw plane pointer leaves the cache. detail::k_vnni_access is
+  668|  // the one route from a view to the plane address, for those operations, the
+     | -// score reader k_vnni::qk_group and the test-only book::fill_random. That
+     | -// mirrors the packed V plane (Note [VNNI Packed V layout]).
+  669| +// two score kernels and the test-only book::fill_random. That mirrors the
+  670| +// packed V plane (Note [VNNI Packed V layout]).
+  671|  //
+     | -// Why: the VNNI plane is the B operand layout of the AMX tile multiply. An
+     | -// AMX QK kernel can read it directly and compute the scores S = Q . K^T in
+     | -// the orientation the softmax wants. The transposing store of the row-major
+     | -// kernel (Note [QK orientation] in amx_attn_iface.hpp) is then not needed.
+     | -// That kernel is not part of this change.
+  672| +// Why: the AMX QK kernel (qk_vnni_128x4) reads the VNNI plane directly as its
+  673| +// B operand. It computes the scores S = Q . K^T in the orientation the softmax
+  674| +// wants. So the transposing store of the row-major kernel
+  675| +// (Note [QK orientation] in amx_attn_iface.hpp) is not needed.
+  676|  //
+  677|  // Consumers of a VNNI slot, and how each one changes:
+  678|  //   1. save_k (model.hpp) stores every token's row with page::set_k_row. That
+     |@@ -681,13 +680,15 @@ struct kv_slot_offsets final {
+  680|  //      (store_row). It issues 4 AVX-512 scatters that together write 4 bytes
+  681|  //      into each of 64 64-byte pair rows. The row-major store was 4 64-byte
+  682|  //      stores per token. TRON_AMX_DISABLE leaves the store untouched.
+     | -//   2. the dense AMX page path (self_attention.hpp) is not compiled for a
+     | -//      VNNI slot. Its kernel reads row-major K. Every page of a VNNI slot
+     | -//      takes the software path (temporary until the VNNI AMX kernel lands).
+     | -//   3. the software path, for every page of a VNNI slot, uses k_vnni::qk_group
+     | -//      with page::k_packed, the read-only view of the plane. That reader is
+     | -//      AVX-512 code with one token per vector
+     | -//      lane. It needs no per-token gather and no horizontal reduction. The
+  683| +//   2. the dense AMX page path (self_attention.hpp) passes page::k_packed, the
+  684| +//      read-only view of the plane, to qk_vnni_128x4.
+  685| +//   3. every other visit of a VNNI slot uses k_vnni::qk_group with the same
+  686| +//      view: partial or partly visible pages, the kill switch
+  687| +//      (TRON_AMX_DISABLE=1), hosts without AMX, builds without
+  688| +//      TRON_AMX_DISPATCH, and the shapes and query types outside the AMX
+  689| +//      gate (Note [AMX attention dispatch]). That reader is AVX-512 code
+  690| +//      with one token per vector lane. It needs no per-token gather and no
+  691| +//      horizontal reduction. The
+  692|  //      row-major dotter loop (the per-token dot-product loop of
+  693|  //      self_attention.hpp) is
+  694|  //      compiled only for row-major slots.
+     |@@ -708,9 +709,7 @@ struct kv_slot_offsets final {
+  709|  // binary runs the AVX-512 VNNI reader, not the row-major dotter. So it is an
+  710|  // AMX-off run of the same layout, not a rollback to the row-major binary's
+  711|  // numerics. The fp32 (32-bit float) add order of the two readers differs (see
+     | -// the numerics contract in Note [AMX attention dispatch]). Until the VNNI AMX
+     | -// kernel is merged, TRON_AMX_DISABLE=1 changes no score and no visit path for
+     | -// 128-dimension heads. No AMX visit can occur for a VNNI slot.
+  712| +// the numerics contract in Note [AMX attention dispatch]).
+  713|  
+  714|  // A kv_block holds two planes, K and V. Each plane is
+  715|  // page_size tokens x head_size dims of bf16, so a block's size in bytes is
+     |@@ -1986,8 +1985,9 @@ struct alignas(64) page final {
+ 1985|    }
+ 1986|  
+ 1987|    // This page's packed K plane for one KV head of one slot, read-only: the
+     | -  // argument type of the layout-specific score reader (the AVX-512 reader
+     | -  // k_vnni::qk_group, one token per lane). VNNI slots only (Note [K VNNI
+ 1988| +  // argument type of the layout-specific score kernels (the AMX QK kernel
+ 1989| +  // qk_vnni_128x4 reads it in place as its B operand, and the AVX-512 reader
+ 1990| +  // k_vnni::qk_group reads it one token per lane). VNNI slots only (Note [K VNNI
+ 1991|    // storage]). Internal cache writes take writable views from the block owner
+ 1992|    // instead.
+ 1993|    template <kv_geometry geometry>

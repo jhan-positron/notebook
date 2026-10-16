@@ -1,0 +1,105 @@
+# PR 4887 file h/tron/models/self_attention.hpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -254,9 +254,10 @@ struct self_attention {
+  254|  
+  255|  #ifdef TRON_AMX_DISPATCH
+  256|      // One packed query group for the AMX attention path (the output of
+     | -    // pack_q_group_128x4): 4096 bytes. alignas(64) meets the packer's 64-byte
+     | -    // alignment contract; std::vector routes over-aligned elements through
+     | -    // the aligned operator new.
+  257| +    // pack_q_group_128x4 for row-major K, or of pack_q_rows_128x4 for VNNI K,
+  258| +    // Note [K VNNI storage] in kv_cache.hpp): 4096 bytes. alignas(64) meets
+  259| +    // both packers' 64-byte alignment contract; std::vector routes
+  260| +    // over-aligned elements through the aligned operator new.
+  261|      struct alignas(64) amx_qpack_slot {
+  262|        bf16 v[amx_attn_h128g4::Q_PACK_ELEMS_2048];
+  263|      };
+     |@@ -1549,9 +1550,10 @@ struct self_attention {
+ 1550|        std::bitset<max_minibatch_size> amx_packed;
+ 1551|        if (amx_on) {
+ 1552|          TRON_ASSERT_LE(items.size(), max_minibatch_size);
+     | -        // resize() zero-fills new slots and the packer writes only the 4
+     | -        // live columns of each slot, so the padding it relies on stays zero
+     | -        // (see the pack contract in amx_attn_iface.hpp).
+ 1553| +        // resize() zero-fills new slots. The packer writes only the 4 live
+ 1554| +        // columns (pack_q_group_128x4, row-major K) or the 4 live rows
+ 1555| +        // (pack_q_rows_128x4, VNNI K) of each slot. So the padding both
+ 1556| +        // packers rely on stays zero (the pack contracts in amx_attn_iface.hpp).
+ 1557|          amx_qpack.resize(items.size());
+ 1558|          amx_attn_h128g4::begin_region();
+ 1559|        }
+     |@@ -1693,8 +1695,20 @@ struct self_attention {
+ 1695|        static_assert(amx_attn_h128g4::query_scalar_ok<typename model::activation_scalar>,
+ 1696|            "the AMX query packer reads q.data as bf16");
+ 1697|        if (!packed.test(batch_job_ix)) {
+     | -        amx_attn_h128g4::pack_q_group_128x4(
+     | -            q.data + kv_head * geometry.kv_mul() * geometry.kv.head_size, slot);
+ 1698| +        const bf16* group =
+ 1699| +            q.data + kv_head * geometry.kv_mul() * geometry.kv.head_size;
+ 1700| +        // The pack matches the slot's K layout (Note [K VNNI storage] in
+ 1701| +        // kv_cache.hpp). A and B are the left and right matrices of the AMX
+ 1702| +        // (Advanced Matrix Extensions) tile multiply. The VNNI plane (K in the
+ 1703| +        // Vector Neural Network Instructions layout, pair-interleaved) is the B
+ 1704| +        // operand of qk_vnni_128x4. So Q is packed as its A operand (rows). The
+ 1705| +        // row-major K page is the A operand of qk_rowmajor_128x4. So Q is
+ 1706| +        // packed as its B operand (pair-interleaved columns).
+ 1707| +        if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
+ 1708| +          amx_attn_h128g4::pack_q_rows_128x4(group, slot);
+ 1709| +        } else {
+ 1710| +          amx_attn_h128g4::pack_q_group_128x4(group, slot);
+ 1711| +        }
+ 1712|          packed.set(batch_job_ix);
+ 1713|        }
+ 1714|        return slot;
+     |@@ -1748,11 +1762,15 @@ struct self_attention {
+ 1762|            "the AMX kernels assume the KV page size");
+ 1763|        // QK for the whole page in one kernel call. The kernel writes the raw
+ 1764|        // scores, not yet multiplied by the attention scale, into
+     | -      // s_pages[head][token], the same array and layout the dotter loop fills.
+     | -      // It reads K straight from storage: the argument is this (slot, kv_head)'s
+     | -      // whole K plane, a const_native_k_view of 64 consecutive 128-dim rows.
+     | -      // This is the only place where the AMX path depends on K being stored as
+     | -      // consecutive rows, and the view type states that layout at the call.
+ 1765| +      // s_pages[head][token]. That is the same array and layout the software
+ 1766| +      // loop fills. It reads K directly from storage, in the slot's layout
+ 1767| +      // (Note [K VNNI storage] in kv_cache.hpp). In the VNNI layout the
+ 1768| +      // argument is the page's packed K plane, a k_vnni_view from page::k_packed,
+ 1769| +      // the B operand of qk_vnni_128x4. In the row-major layout the argument is
+ 1770| +      // this (slot, kv_head)'s whole K plane, a const_native_k_view of 64
+ 1771| +      // consecutive 128-dim rows, the A operand of qk_rowmajor_128x4. That call
+ 1772| +      // is the only place where the AMX path depends on K being stored as
+ 1773| +      // consecutive rows. The view types state the layout at the call.
+ 1774|        tensor<operation_kv_mul, page::page_size> s_pages;
+ 1775|        // Both kernels take &s_pages[0][0] with row stride page_size, so the 4
+ 1776|        // rows of 64 floats must be consecutive with no padding. The size check
+     |@@ -1760,8 +1778,13 @@ struct self_attention {
+ 1778|        static_assert(
+ 1779|            sizeof(s_pages) == operation_kv_mul * page::page_size * sizeof(float),
+ 1780|            "the AMX kernels read s_pages as one block: rows must be consecutive");
+     | -      amx_attn_h128g4::qk_rowmajor_128x4(pg.template k<geometry.kv>(slot, kv_head),
+     | -          q_packed, &s_pages[0][0], page::page_size);
+ 1781| +      if constexpr (k_vnni::layout_on<operation_head_size>) {
+ 1782| +        amx_attn_h128g4::qk_vnni_128x4(pg.template k_packed<geometry.kv>(slot, kv_head),
+ 1783| +            q_packed, &s_pages[0][0], page::page_size);
+ 1784| +      } else {
+ 1785| +        amx_attn_h128g4::qk_rowmajor_128x4(pg.template k<geometry.kv>(slot, kv_head),
+ 1786| +            q_packed, &s_pages[0][0], page::page_size);
+ 1787| +      }
+ 1788|        // Scale (or softcap), page max, exp and sum per head: the same math as
+ 1789|        // the dotter epilogue in apply_page_tok, on the AMX scores.
+ 1790|        float corr_arr[operation_kv_mul], m_new_arr[operation_kv_mul],
+     |@@ -1878,13 +1901,8 @@ struct self_attention {
+ 1901|        // the dotter loop below. The `if constexpr` keeps the AMX code out of
+ 1902|        // every other geometry's and activation type's instantiation. See
+ 1903|        // Note [AMX attention dispatch].
+     | -      // A VNNI slot (Note [K VNNI storage] in kv_cache.hpp) has no row view
+     | -      // for qk_rowmajor_128x4 to read. So the dense AMX page path is discarded
+     | -      // for it, and every page of a VNNI slot takes the software loop below
+     | -      // (k_vnni::qk_group). Temporary until the VNNI AMX kernel lands.
+ 1904|        if constexpr (amx_attn_h128g4::eligible<typename model::activation_scalar>(
+     | -                        operation_head_size, operation_kv_mul) &&
+     | -                    !k_vnni::layout_on<operation_head_size>) {
+ 1905| +                        operation_head_size, operation_kv_mul)) {
+ 1906|          if (amx_q_packed != nullptr &&
+ 1907|              is_dense_amx_page(page, begin, end, query_visible, *range_hint, q_position,
+ 1908|                  k_position, sliding_window_size)) {

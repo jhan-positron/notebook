@@ -1,0 +1,1008 @@
+# PR 4824 file t/t_llama_unit.cpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -68,6 +68,7 @@
+   68|  #include "tron/models/ranged_mask.hpp"
+   69|  #include "tron/plugins/llama.hpp"
+   70|  #include "tron/simd.hpp"
+   71| +#include "tron/tensor/k_vnni.hpp"
+   72|  #include "tron/tensor/kv_cache_fwd.hpp"
+   73|  #include "tron/tensor/slice.hpp"
+   74|  #include "tron/tensor/tensor.hpp"
+     |@@ -97,6 +98,16 @@ constexpr bool amx_pv_accepts = requires(V v, const float* weights, float* out)
+   98|    amx_attn_h128g4::weights_times_v_128x4(v, weights, size_t{0}, out);
+   99|  };
+  100|  
+  101| +// The VNNI K kernel takes the packed K plane (page::k_packed) the same way.
+  102| +template <typename K>
+  103| +constexpr bool amx_qk_vnni_accepts = requires(K k, const bf16* q, float* s) {
+  104| +  amx_attn_h128g4::qk_vnni_128x4(k, q, s, size_t{0});
+  105| +};
+  106| +
+  107| +template <typename Page, kv_geometry geometry>
+  108| +constexpr bool page_k_packed_accepts_geometry =
+  109| +    requires(Page const& page) { page.template k_packed<geometry>(kv_slot_id(0), 0); };
+  110| +
+  111|  // Packed-V contract probes. Each is a template so that an invalid body makes
+  112|  // the probe false instead of a hard error.
+  113|  template <typename Owner>
+     |@@ -127,12 +138,14 @@ constexpr bool book_view_accepts_logical_slot =
+  138|  
+  139|  template <typename Page>
+  140|  constexpr bool page_supports_uniform_kv_access = requires(Page& page,
+  141| +    k_row_view<Page::layout_t::primary_geometry.head_size> k_output,
+  142|      view<bf16,
+  143|          VIEW_ALIGNED_TRUE,
+  144|          VIEW_DMA_FALSE,
+  145|          seq<Page::layout_t::primary_geometry.head_size>,
+  146|          sseq<1>> output) {
+     | -  page.k(kv_slot_id(0), 0, 0);
+  147| +  page.get_k_row(
+  148| +      kv_slot_id(0), 0, 0, k_output);  // both K layouts (Note [K VNNI storage])
+  149|    page.get_v(kv_slot_id(0), 0, 0, output);
+  150|  };
+  151|  
+     |@@ -381,8 +394,9 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+  394|    // Packed views come only from an owner; a bare pointer does not say
+  395|    // which layout it points at. The native K alias is the existing row-major
+  396|    // view and keeps its pointer constructor: it names the layout at the kernel
+     | -  // signature but does not enforce it. A distinct K type comes with the
+     | -  // packed-K change.
+  397| +  // signature but does not enforce it. The packed K view below is the distinct
+  398| +  // type for 128-dimension heads under TRON_K_VNNI; the native alias stays for
+  399| +  // the row-major geometries.
+  400|    STATIC_REQUIRE_FALSE(std::is_constructible_v<v_plane_mut_t, bf16*>);
+  401|    STATIC_REQUIRE_FALSE(std::is_constructible_v<v_plane_t, const bf16*>);
+  402|    STATIC_REQUIRE(std::is_constructible_v<k_plane_t, const bf16*>);
+     |@@ -398,6 +412,48 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+  412|    // plane, also for an owner that lives outside a kv_block.
+  413|    STATIC_REQUIRE(alignof(v_owner_t) == 64);
+  414|  
+  415| +  // The packed K plane (Note [K VNNI storage]) follows the same rules. The VNNI
+  416| +  // QK kernel takes its view and nothing else. The other two kernels reject it.
+  417| +  // Views come only from an owner. A writable view converts to a read-only one
+  418| +  // only.
+  419| +  constexpr kv_geometry one_head{1, amx_attn_h128g4::HEAD_SIZE_128};
+  420| +  using k_packed_t = k_vnni_view<const bf16, amx_attn_h128g4::PAGE_TOKENS_64,
+  421| +      amx_attn_h128g4::HEAD_SIZE_128>;
+  422| +  using k_packed_mut_t = k_vnni_view<bf16, amx_attn_h128g4::PAGE_TOKENS_64,
+  423| +      amx_attn_h128g4::HEAD_SIZE_128>;
+  424| +  using k_owner_t =
+  425| +      k_vnni_tensor<amx_attn_h128g4::PAGE_TOKENS_64, amx_attn_h128g4::HEAD_SIZE_128>;
+  426| +  STATIC_REQUIRE(amx_qk_vnni_accepts<k_packed_t>);
+  427| +  STATIC_REQUIRE(
+  428| +      amx_qk_vnni_accepts<k_packed_mut_t>);  // writable converts to read-only
+  429| +  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<const bf16*>);
+  430| +  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<bf16*>);
+  431| +  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<k_plane_t>);  // the native K view
+  432| +  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<v_plane_t>);
+  433| +  STATIC_REQUIRE_FALSE(amx_qk_accepts<k_packed_t>);
+  434| +  STATIC_REQUIRE_FALSE(amx_pv_accepts<k_packed_t>);
+  435| +  STATIC_REQUIRE_FALSE(std::is_constructible_v<k_packed_mut_t, bf16*>);
+  436| +  STATIC_REQUIRE_FALSE(std::is_constructible_v<k_packed_t, const bf16*>);
+  437| +  STATIC_REQUIRE(std::is_convertible_v<k_packed_mut_t, k_packed_t>);
+  438| +  STATIC_REQUIRE_FALSE(std::is_convertible_v<k_packed_t, k_packed_mut_t>);
+  439| +  STATIC_REQUIRE_FALSE(owner_views_temporary<k_owner_t>);
+  440| +  // No view writes an element. Rows enter through store_row, store_block and
+  441| +  // copy_token.
+  442| +  STATIC_REQUIRE_FALSE(matrix_at_writes<k_packed_mut_t>);
+  443| +  // The 64-byte pair rows and the AMX tile rows need a 64-byte-aligned plane.
+  444| +  STATIC_REQUIRE(alignof(k_owner_t) == 64);
+  445| +  // The page hands out the packed view only when the build option selects the
+  446| +  // packed storage for the geometry.
+  447| +#ifdef TRON_K_VNNI
+  448| +  STATIC_REQUIRE((page_k_packed_accepts_geometry<page_t, one_head>));
+  449| +  STATIC_REQUIRE(
+  450| +      std::is_same_v<decltype(std::declval<page_t const&>().template k_packed<one_head>(
+  451| +                         kv_slot_id(0), 0)),
+  452| +          k_vnni_view<const bf16, page_t::page_size, amx_attn_h128g4::HEAD_SIZE_128>>);
+  453| +#else
+  454| +  STATIC_REQUIRE_FALSE((page_k_packed_accepts_geometry<page_t, one_head>));
+  455| +#endif
+  456| +
+  457|    constexpr attention_binding distinct_binding{
+  458|        attention_op_id(7), model_layer_id(3), kv_slot_id(1)};
+  459|    STATIC_REQUIRE(distinct_binding.operation == attention_op_id(7));
+     |@@ -413,7 +469,20 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+  469|    page_t* page = cache.page_of(0);
+  470|    const kv_slot_id slot_0 = book_t::kv_slot(model_layer_id(0));
+  471|    const kv_slot_id slot_1 = book_t::kv_slot(model_layer_id(1));
+     | -  REQUIRE(page->k(slot_0, 0, 0).data != page->k(slot_1, 0, 0).data);
+  472| +  {
+  473| +    // The two slots are distinct storage. A row stored in one is not seen in
+  474| +    // the other (in the form that serves both K layouts, Note [K VNNI storage]).
+  475| +    constexpr size_t head_size = 128;  // the head size of book_t
+  476| +    alignas(64) std::array<bf16, head_size> ones, twos, got;
+  477| +    ones.fill(static_cast<bf16>(1.0f));
+  478| +    twos.fill(static_cast<bf16>(2.0f));
+  479| +    page->set_k_row(slot_0, 0, 0, k_source_row<head_size>(ones.data()));
+  480| +    page->set_k_row(slot_1, 0, 0, k_source_row<head_size>(twos.data()));
+  481| +    page->get_k_row(slot_0, 0, 0, k_destination_row<head_size>(got.data()));
+  482| +    REQUIRE(got == ones);
+  483| +    page->get_k_row(slot_1, 0, 0, k_destination_row<head_size>(got.data()));
+  484| +    REQUIRE(got == twos);
+  485| +  }
+  486|    REQUIRE_FALSE(page->is_kv_complete(slot_1, 0));
+  487|    REQUIRE_FALSE(page->mark_k_complete(slot_1, 0));
+  488|    REQUIRE(page->mark_v_complete(slot_1, 0));
+     |@@ -434,20 +503,26 @@ TEST_CASE("EAGLE shifts storage without shifting logical KV completion", "[kv_da
+  503|    REQUIRE(cache.storage_slot_count() == 2);
+  504|    REQUIRE(cache.eagle_storage_offset() == kv_storage_offset(1));
+  505|  
+     | -  page->k(slot, 0, 0)[0] = static_cast<bf16>(1.0f);
+  506| +  constexpr size_t head_size = 128;  // the head size of book_t
+  507| +  alignas(64) std::array<bf16, head_size> k_row{}, got{};
+  508| +  k_row[0] = static_cast<bf16>(1.0f);
+  509| +  page->set_k_row(slot, 0, 0, k_source_row<head_size>(k_row.data()));
+  510|    REQUIRE_FALSE(page->mark_k_complete(slot, 0));
+  511|    REQUIRE(page->mark_v_complete(slot, 0));
+  512|  
+  513|    cache.set_storage_view(cache.eagle_storage_offset());
+  514|    REQUIRE(page->is_kv_complete(slot, 0));
+     | -  page->k(slot, 0, 0)[0] = static_cast<bf16>(2.0f);
+  515| +  k_row[0] = static_cast<bf16>(2.0f);
+  516| +  page->set_k_row(slot, 0, 0, k_source_row<head_size>(k_row.data()));
+  517|  
+  518|    cache.reset_storage_view();
+     | -  REQUIRE(float(page->k(slot, 0, 0)[0]) == 1.0f);
+  519| +  page->get_k_row(slot, 0, 0, k_destination_row<head_size>(got.data()));
+  520| +  REQUIRE(float(got[0]) == 1.0f);
+  521|    REQUIRE(page->is_kv_complete(slot, 0));
+  522|  
+  523|    cache.set_storage_view(cache.eagle_storage_offset());
+     | -  REQUIRE(float(page->k(slot, 0, 0)[0]) == 2.0f);
+  524| +  page->get_k_row(slot, 0, 0, k_destination_row<head_size>(got.data()));
+  525| +  REQUIRE(float(got[0]) == 2.0f);
+  526|    REQUIRE(page->is_kv_complete(slot, 0));
+  527|  }
+  528|  
+     |@@ -614,7 +689,12 @@ TEST_CASE("mixed-retention books release and restore one grouped arena",
+  689|  
+  690|    auto* page = cache->page_of(0);
+  691|    page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0] = static_cast<bf16>(7.0f);
+     | -  page->template k<geometry_128>(kv_slot_id(1), 0, 0)[0] = static_cast<bf16>(9.0f);
+  692| +  // The 128-dimension slot goes through the layout-agnostic accessors: with
+  693| +  // TRON_K_VNNI it has no row view (Note [K VNNI storage]).
+  694| +  alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+  695| +  k_row[0] = static_cast<bf16>(9.0f);
+  696| +  page->template set_k_row<geometry_128>(
+  697| +      kv_slot_id(1), 0, 0, k_source_row<geometry_128.head_size>(k_row.data()));
+  698|    page->template k<geometry_256>(kv_slot_id(2), 0, 0)[0] = static_cast<bf16>(10.0f);
+  699|  
+  700|    int64_t const released = cache->free_reclaimable_kv_storage();
+     |@@ -635,12 +715,18 @@ TEST_CASE("mixed-retention books release and restore one grouped arena",
+  715|    REQUIRE(cache->restore_reclaimable_kv_storage(2) == released);
+  716|    REQUIRE_FALSE(cache->has_reclaimed_kv_storage());
+  717|    REQUIRE(assertion_signal([&] {
+     | -    page->template k<geometry_128>(kv_slot_id(1), 0, 0)[0] = static_cast<bf16>(11.0f);
+  718| +    k_row[0] = static_cast<bf16>(11.0f);
+  719| +    page->template set_k_row<geometry_128>(
+  720| +        kv_slot_id(1), 0, 0, k_source_row<geometry_128.head_size>(k_row.data()));
+  721|    }) == SIGABRT);
+  722|    cache->finish_reclaimable_kv_restore(2);
+     | -  page->template k<geometry_128>(kv_slot_id(1), 0, 0)[0] = static_cast<bf16>(11.0f);
+  723| +  k_row[0] = static_cast<bf16>(11.0f);
+  724| +  page->template set_k_row<geometry_128>(
+  725| +      kv_slot_id(1), 0, 0, k_source_row<geometry_128.head_size>(k_row.data()));
+  726|    page->template k<geometry_256>(kv_slot_id(2), 0, 0)[0] = static_cast<bf16>(12.0f);
+     | -  REQUIRE(float(page->template k<geometry_128>(kv_slot_id(1), 0, 0)[0]) == 11.0f);
+  727| +  page->template get_k_row<geometry_128>(
+  728| +      kv_slot_id(1), 0, 0, k_destination_row<geometry_128.head_size>(k_row.data()));
+  729| +  REQUIRE(float(k_row[0]) == 11.0f);
+  730|    REQUIRE(float(page->template k<geometry_256>(kv_slot_id(2), 0, 0)[0]) == 12.0f);
+  731|  
+  732|    size_t const separate_group_cap =
+     |@@ -696,18 +782,21 @@ TEST_CASE("Sliding KV chunks reserve and restore transactionally",
+  782|              static_cast<float>(1 + slot * 16 + head * 4 + token / chunk_tokens);
+  783|          alignas(64) std::array<bf16, geometry.head_size> values;
+  784|          values.fill(static_cast<bf16>(value));
+     | -        auto k = page->template k<geometry>(kv_slot_id(slot), head, row);
+  785| +        // set_k_row / get_k_row serve both K layouts (Note [K VNNI storage]).
+  786|          if (write) {
+     | -          for (size_t i = 0; i < geometry.head_size; ++i)
+     | -            k[i] = values[i];
+  787| +          page->template set_k_row<geometry>(kv_slot_id(slot), head, row,
+  788| +              k_source_row<geometry.head_size>(values.data()));
+  789|            if (row % 2 != 0)
+  790|              page->template set_v<geometry>(kv_slot_id(slot), head, row - 1,
+  791|                  v_source_row<geometry.head_size>(values.data()));
+  792|            page->template set_v<geometry>(kv_slot_id(slot), head, row,
+  793|                v_source_row<geometry.head_size>(values.data()));
+  794|          } else {
+     | -          for (size_t i = 0; i < geometry.head_size; ++i)
+     | -            REQUIRE(float(k[i]) == value);
+  795| +          alignas(64) std::array<bf16, geometry.head_size> k_row;
+  796| +          page->template get_k_row<geometry>(kv_slot_id(slot), head, row,
+  797| +              k_destination_row<geometry.head_size>(k_row.data()));
+  798| +          for (bf16 element : k_row)
+  799| +            REQUIRE(float(element) == value);
+  800|            page->template get_v<geometry>(kv_slot_id(slot), head, row,
+  801|                v_destination_row<geometry.head_size>(values.data()));
+  802|            for (bf16 element : values)
+     |@@ -997,30 +1086,37 @@ TEMPLATE_TEST_CASE("page K views preserve geometry and row addressing",
+ 1086|    cache_t cache(2);
+ 1087|    auto check_slot = [&]<size_t slot>() {
+ 1088|      constexpr auto geometry = cache_t::kv_slot_specs[slot].geometry;
+     | -    for (size_t pg = 0; pg < 2; ++pg) {
+     | -      auto* page = cache.page_of(pg * cache_t::page_size);
+     | -      for (size_t head = 0; head < geometry.n_kv_heads; ++head) {
+     | -        auto rows = page->template k<geometry>(kv_slot_id(slot), head);
+     | -        auto const_rows =
+     | -            std::as_const(*page).template k<geometry>(kv_slot_id(slot), head);
+     | -        STATIC_REQUIRE(std::is_same_v<typename decltype(rows)::dim,
+     | -            seq<cache_t::page_size, geometry.head_size>>);
+     | -        decltype(const_rows) lazy_rows;
+     | -        REQUIRE_FALSE(lazy_rows.valid());
+     | -        lazy_rows = const_rows;
+     | -        REQUIRE(lazy_rows.valid());
+     | -        if constexpr (cache_t::layout_t::uniform_geometry) {
+     | -          REQUIRE(page->k(kv_slot_id(slot), head).data == rows.data);
+     | -          REQUIRE(std::as_const(*page).k(kv_slot_id(slot), head).data == rows.data);
+     | -        }
+     | -        for (size_t row : {size_t{0}, cache_t::page_size - 1}) {
+     | -          REQUIRE(rows[row].data ==
+     | -                  page->template k<geometry>(kv_slot_id(slot), head, row).data);
+     | -          for (size_t element : {size_t{0}, geometry.head_size - 1}) {
+     | -            auto const value =
+     | -                static_cast<bf16>(slot * 20 + head * 4 + pg * 2 + row + element + 1);
+     | -            rows[row][element] = value;
+     | -            REQUIRE(float(lazy_rows[row][element]) == float(value));
+ 1089| +    if constexpr (k_vnni::layout_on<geometry.head_size>) {
+ 1090| +      // A VNNI slot (Note [K VNNI storage]) has no row view. Its
+ 1091| +      // layout-agnostic accessors are covered by t_k_vnni_layout.
+ 1092| +      STATIC_REQUIRE_FALSE(
+ 1093| +          (page_k_accepts_geometry<typename cache_t::page_t, geometry>));
+ 1094| +    } else {
+ 1095| +      for (size_t pg = 0; pg < 2; ++pg) {
+ 1096| +        auto* page = cache.page_of(pg * cache_t::page_size);
+ 1097| +        for (size_t head = 0; head < geometry.n_kv_heads; ++head) {
+ 1098| +          auto rows = page->template k<geometry>(kv_slot_id(slot), head);
+ 1099| +          auto const_rows =
+ 1100| +              std::as_const(*page).template k<geometry>(kv_slot_id(slot), head);
+ 1101| +          STATIC_REQUIRE(std::is_same_v<typename decltype(rows)::dim,
+ 1102| +              seq<cache_t::page_size, geometry.head_size>>);
+ 1103| +          decltype(const_rows) lazy_rows;
+ 1104| +          REQUIRE_FALSE(lazy_rows.valid());
+ 1105| +          lazy_rows = const_rows;
+ 1106| +          REQUIRE(lazy_rows.valid());
+ 1107| +          if constexpr (cache_t::layout_t::uniform_geometry) {
+ 1108| +            REQUIRE(page->k(kv_slot_id(slot), head).data == rows.data);
+ 1109| +            REQUIRE(std::as_const(*page).k(kv_slot_id(slot), head).data == rows.data);
+ 1110| +          }
+ 1111| +          for (size_t row : {size_t{0}, cache_t::page_size - 1}) {
+ 1112| +            REQUIRE(rows[row].data ==
+ 1113| +                    page->template k<geometry>(kv_slot_id(slot), head, row).data);
+ 1114| +            for (size_t element : {size_t{0}, geometry.head_size - 1}) {
+ 1115| +              auto const value =
+ 1116| +                  static_cast<bf16>(slot * 20 + head * 4 + pg * 2 + row + element + 1);
+ 1117| +              rows[row][element] = value;
+ 1118| +              REQUIRE(float(lazy_rows[row][element]) == float(value));
+ 1119| +            }
+ 1120|            }
+ 1121|          }
+ 1122|        }
+     |@@ -1076,7 +1172,14 @@ TEST_CASE("fixed KV layout addresses each slot geometry", "[kv_data][book append
+ 1172|    STATIC_REQUIRE(cache_t::logical_slot_count_for_layers(99) == 2);
+ 1173|    STATIC_REQUIRE(cache_t::storage_slot_count_for_layers(99, false) == 2);
+ 1174|    STATIC_REQUIRE((page_k_accepts_geometry<page_t, geometry_64>));
+ 1175| +#ifdef TRON_K_VNNI
+ 1176| +  // 128-dimension heads are stored as the VNNI (Vector Neural Network Instructions)
+ 1177| +  // plane. That plane has no contiguous row view (Note [K VNNI storage]).
+ 1178| +  // set_k_row / get_k_row serve the slot.
+ 1179| +  STATIC_REQUIRE_FALSE((page_k_accepts_geometry<page_t, geometry_128>));
+ 1180| +#else
+ 1181|    STATIC_REQUIRE((page_k_accepts_geometry<page_t, geometry_128>));
+ 1182| +#endif
+ 1183|    STATIC_REQUIRE_FALSE((page_k_accepts_geometry<page_t, undeclared_geometry>));
+ 1184|    STATIC_REQUIRE_FALSE(page_supports_uniform_kv_access<page_t>);
+ 1185|  
+     |@@ -1090,8 +1193,10 @@ TEST_CASE("fixed KV layout addresses each slot geometry", "[kv_data][book append
+ 1193|    page_t* source_page = source.page_of(target_token);
+ 1194|    source_page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0] =
+ 1195|        static_cast<bf16>(11.0f);
+     | -  source_page->template k<geometry_128>(kv_slot_id(1), 1, 0)[0] =
+     | -      static_cast<bf16>(22.0f);
+ 1196| +  alignas(64) std::array<bf16, geometry_128.head_size> source_k{};
+ 1197| +  source_k[0] = static_cast<bf16>(22.0f);
+ 1198| +  source_page->template set_k_row<geometry_128>(
+ 1199| +      kv_slot_id(1), 1, 0, k_source_row<geometry_128.head_size>(source_k.data()));
+ 1200|    alignas(64) std::array<bf16, geometry_128.head_size> source_v;
+ 1201|    source_v.fill(static_cast<bf16>(33.0f));
+ 1202|    source_page->template set_v<geometry_128>(
+     |@@ -1109,8 +1214,10 @@ TEST_CASE("fixed KV layout addresses each slot geometry", "[kv_data][book append
+ 1214|    page_t* destination_page = destination.page_of(target_token);
+ 1215|    REQUIRE(float(destination_page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0]) ==
+ 1216|            11.0f);
+     | -  REQUIRE(float(destination_page->template k<geometry_128>(kv_slot_id(1), 1, 0)[0]) ==
+     | -          22.0f);
+ 1217| +  alignas(64) std::array<bf16, geometry_128.head_size> destination_k{};
+ 1218| +  destination_page->template get_k_row<geometry_128>(kv_slot_id(1), 1, 0,
+ 1219| +      k_destination_row<geometry_128.head_size>(destination_k.data()));
+ 1220| +  REQUIRE(float(destination_k[0]) == 22.0f);
+ 1221|    REQUIRE(destination_page->is_kv_complete(kv_slot_id(1), 0));
+ 1222|    alignas(64) std::array<bf16, geometry_128.head_size> destination_v;
+ 1223|    destination_page->template get_v<geometry_128>(kv_slot_id(1), 1, 0,
+     |@@ -1721,8 +1828,10 @@ TEST_CASE("heterogeneous plugin cache uses value slot topology", "[kv_data]") {
+ 1828|    for (size_t token = 0; token < source.size(); ++token) {
+ 1829|      src_page->template k<geometry_64>(kv_slot_id(0), 0, token)[0] =
+ 1830|          static_cast<bf16>(10.0f + token);
+     | -    src_page->template k<geometry_128>(kv_slot_id(1), 1, token)[0] =
+     | -        static_cast<bf16>(20.0f + token);
+ 1831| +    alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+ 1832| +    k_row[0] = static_cast<bf16>(20.0f + token);
+ 1833| +    src_page->template set_k_row<geometry_128>(
+ 1834| +        kv_slot_id(1), 1, token, k_source_row<geometry_128.head_size>(k_row.data()));
+ 1835|      src_page->template k<geometry_256>(kv_slot_id(2), 0, token)[0] =
+ 1836|          static_cast<bf16>(30.0f + token);
+ 1837|    }
+     |@@ -1742,8 +1851,10 @@ TEST_CASE("heterogeneous plugin cache uses value slot topology", "[kv_data]") {
+ 1851|      size_t const destination_token = 2 + token;
+ 1852|      REQUIRE(float(dst_page->template k<geometry_64>(
+ 1853|                  kv_slot_id(0), 0, destination_token)[0]) == 10.0f + token);
+     | -    REQUIRE(float(dst_page->template k<geometry_128>(
+     | -                kv_slot_id(1), 1, destination_token)[0]) == 20.0f + token);
+ 1854| +    alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+ 1855| +    dst_page->template get_k_row<geometry_128>(kv_slot_id(1), 1, destination_token,
+ 1856| +        k_destination_row<geometry_128.head_size>(k_row.data()));
+ 1857| +    REQUIRE(float(k_row[0]) == 20.0f + token);
+ 1858|      REQUIRE(float(dst_page->template k<geometry_256>(
+ 1859|                  kv_slot_id(2), 0, destination_token)[0]) == 30.0f + token);
+ 1860|    }
+     |@@ -1838,8 +1949,10 @@ TEMPLATE_TEST_CASE("heterogeneous append preserves pages, V data, and completion
+ 1949|      size_t const offset = token % cache_t::page_size;
+ 1950|      page->template k<geometry_64>(kv_slot_id(0), 0, offset)[0] =
+ 1951|          static_cast<bf16>(token + 1);
+     | -    page->template k<geometry_128>(kv_slot_id(1), 1, offset)[0] =
+     | -        static_cast<bf16>(token + 51);
+ 1952| +    alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+ 1953| +    k_row[0] = static_cast<bf16>(token + 51);
+ 1954| +    page->template set_k_row<geometry_128>(
+ 1955| +        kv_slot_id(1), 1, offset, k_source_row<geometry_128.head_size>(k_row.data()));
+ 1956|      page->template k<geometry_256>(kv_slot_id(2), 0, offset)[0] =
+ 1957|          static_cast<bf16>(token + 101);
+ 1958|      REQUIRE_FALSE(page->mark_k_complete(kv_slot_id(0), offset));
+     |@@ -1859,8 +1972,10 @@ TEMPLATE_TEST_CASE("heterogeneous append preserves pages, V data, and completion
+ 1972|      size_t const offset = token % cache_t::page_size;
+ 1973|      REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, offset)[0]) ==
+ 1974|              source_token + 1);
+     | -    REQUIRE(float(page->template k<geometry_128>(kv_slot_id(1), 1, offset)[0]) ==
+     | -            source_token + 51);
+ 1975| +    alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+ 1976| +    page->template get_k_row<geometry_128>(kv_slot_id(1), 1, offset,
+ 1977| +        k_destination_row<geometry_128.head_size>(k_row.data()));
+ 1978| +    REQUIRE(float(k_row[0]) == source_token + 51);
+ 1979|      REQUIRE(float(page->template k<geometry_256>(kv_slot_id(2), 0, offset)[0]) ==
+ 1980|              source_token + 101);
+ 1981|      REQUIRE(page->is_kv_complete(kv_slot_id(0), offset));
+     |@@ -2381,6 +2496,57 @@ static void check_page_range_reductions(int sliding_window) {
+ 2496|      pages.back()->set_offset_bound(page_t::page_size);
+ 2497|    }
+ 2498|  
+ 2499| +#ifdef TRON_K_VNNI
+ 2500| +  // Give the VNNI build the K instance of the row-major build: the raw bytes
+ 2501| +  // fill_random wrote, read as consecutive 128-value rows (row i at element
+ 2502| +  // i * 128 of the plane; the packed view reaches element e through the
+ 2503| +  // inverse of the index map of Note [K VNNI storage]), stored through
+ 2504| +  // set_k_row. Then record the rows of
+ 2505| +  // layer 0 as save_k and the forward end would (Note [K VNNI storage]): page 0
+ 2506| +  // whole (4 VNNI blocks, the dense AMX shape), page 1 up to row 40 (blocks 0
+ 2507| +  // and 1 VNNI, block 2 a row-major tail of 9 rows, block 3 row-major and
+ 2508| +  // unrecorded). The reference below reads the rows through get_k_row, so the
+ 2509| +  // mixed page is scored against the same values, and against the same
+ 2510| +  // attention instance the row-major build scores.
+ 2511| +  {
+ 2512| +    constexpr size_t page_1_recorded_rows = 41;
+ 2513| +    // Element e of the plane as (token, dim) of the packed view.
+ 2514| +    auto element = [](auto const& plane, size_t e) {
+ 2515| +      using namespace k_vnni;
+ 2516| +      const size_t j = e % PAIR_2;
+ 2517| +      const size_t t = (e / PAIR_2) % BLOCK_TOKENS_16;
+ 2518| +      const size_t dp = (e / (PAIR_2 * BLOCK_TOKENS_16)) % STEP_PAIRS_16;
+ 2519| +      const size_t c = (e / PANEL_ELEMS_512) % TOKEN_BLOCKS_4;
+ 2520| +      const size_t s = e / (PANEL_ELEMS_512 * TOKEN_BLOCKS_4);
+ 2521| +      return plane.at(c * BLOCK_TOKENS_16 + t, s * STEP_DIMS_32 + PAIR_2 * dp + j);
+ 2522| +    };
+ 2523| +    const kv_slot_id slot_0 = test_kv_slot<book_t>(0);
+ 2524| +    auto rows =
+ 2525| +        std::make_unique<std::array<std::array<bf16, head_size>, page_t::page_size>>();
+ 2526| +    for (size_t pg = 0; pg < num_pages; ++pg) {
+ 2527| +      page_t* page = bk.page_of(pg * page_t::page_size);
+ 2528| +      for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
+ 2529| +        const auto plane = page->template k_packed<geometry.kv>(slot_0, kv_head);
+ 2530| +        for (size_t tok = 0; tok < page_t::page_size; ++tok) {
+ 2531| +          for (size_t d = 0; d < head_size; ++d) {
+ 2532| +            (*rows)[tok][d] = element(plane, tok * head_size + d);
+ 2533| +          }
+ 2534| +        }
+ 2535| +        for (size_t tok = 0; tok < page_t::page_size; ++tok) {
+ 2536| +          page->set_k_row(
+ 2537| +              slot_0, kv_head, tok, k_source_row<head_size>((*rows)[tok].data()));
+ 2538| +        }
+ 2539| +      }
+ 2540| +      const size_t recorded = pg == 0 ? page_t::page_size : page_1_recorded_rows;
+ 2541| +      for (size_t tok = 0; tok < recorded; ++tok) {
+ 2542| +        if (page->note_k_row_saved(slot_0, tok)) {
+ 2543| +          page->k_block_to_vnni(slot_0, tok / k_vnni::BLOCK_TOKENS_16);
+ 2544| +        }
+ 2545| +      }
+ 2546| +    }
+ 2547| +  }
+ 2548| +#endif
+ 2549| +
+ 2550|    // Copy out layer 0 for emulation::compute_attention
+ 2551|    random_ks.resize(num_kv_tokens, std::vector<float>(n_kv_heads * head_size));
+ 2552|    random_vs.resize(num_kv_tokens, std::vector<float>(n_kv_heads * head_size));
+     |@@ -2388,9 +2554,11 @@ static void check_page_range_reductions(int sliding_window) {
+ 2554|      page_t* page = bk.page_of(kv_token);
+ 2555|      int offset = page->offset_in_page(token_id(kv_token));
+ 2556|      for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
+ 2557| +      alignas(64) std::array<bf16, head_size> k_row;
+ 2558| +      page->get_k_row(test_kv_slot<book_t>(0), kv_head, offset,
+ 2559| +          k_destination_row<head_size>(k_row.data()));
+ 2560|        for (size_t elt = 0; elt < head_size; ++elt) {
+     | -        random_ks[kv_token][kv_head * head_size + elt] =
+     | -            page->k(test_kv_slot<book_t>(0), kv_head, offset)[elt];
+ 2561| +        random_ks[kv_token][kv_head * head_size + elt] = k_row[elt];
+ 2562|        }
+ 2563|        alignas(64) float temp[head_size];
+ 2564|        page->get_v(
+     |@@ -2613,18 +2781,26 @@ static void check_page_range_reductions(int sliding_window) {
+ 2781|    }
+ 2782|  
+ 2783|    // 12. Check that the results for kv head 0 are the same up to a floating-point
+     | -  // tolerance
+ 2784| +  // tolerance. The two runs reach a token's page with a different running
+ 2785| +  // maximum m. So each softmax weight exp(s - m) is converted to bf16 for the
+ 2786| +  // PV product (truncated on the AVX path, rounded to nearest even on the AMX
+ 2787| +  // path; Note [AMX attention dispatch] in amx_attn_iface.hpp) at a different
+ 2788| +  // scale. One conversion step is up to 2^-7 of the weight (truncation). With a
+ 2789| +  // 32-token window that moves one element of the weighted V sum by up to
+ 2790| +  // about 0.02 (measured 0.018 with row-major K and 0.022 with VNNI K, whose
+ 2791| +  // scores differ in the last bits). s_star adds the fp32 weights and differs
+ 2792| +  // by a few ulp only.
+ 2793|    auto check_kv_head_0_against_saved = [&] {
+ 2794|      for (size_t tok = 0; tok < q_batch.items.size(); ++tok) {
+ 2795|        for (size_t head = 0; head < kv_mul; ++head) {
+ 2796|          REQUIRE_THAT(state.self_attn_state.attn[0].s_stars[tok][head],
+     | -            Catch::Matchers::WithinAbs((*s_stars_saved)[tok][head], 2e-6f));
+ 2797| +            Catch::Matchers::WithinRel((*s_stars_saved)[tok][head], 1e-6f));
+ 2798|          REQUIRE_THAT(state.self_attn_state.attn[0].m_stars[tok][head],
+ 2799|              Catch::Matchers::WithinRel((*m_stars_saved)[tok][head], 1e-6f));
+ 2800|        }
+ 2801|        assert_allclose(slice<kv_mul * head_size>()(
+ 2802|                            state.self_attn_state.attn[0].v_stars[tok].as_view(), 0),
+     | -          slice<kv_mul * head_size>()((*v_stars_saved)[tok].as_view(), 0), 2e-2);
+ 2803| +          slice<kv_mul * head_size>()((*v_stars_saved)[tok].as_view(), 0), 5e-2);
+ 2804|      }
+ 2805|    };
+ 2806|    check_kv_head_0_against_saved();
+     |@@ -2754,9 +2930,10 @@ static void check_page_range_reductions(int sliding_window) {
+ 2930|              CHECK_THAT(state.self_attn_state.attn[0].m_stars[q][head],
+ 2931|                  Catch::Matchers::WithinRel((*m_stars_saved)[job][head], 1e-6f));
+ 2932|            }
+ 2933| +          // The bound of step 12: the bf16 truncation of the PV weights.
+ 2934|            assert_allclose(slice<kv_mul * head_size>()(
+ 2935|                                state.self_attn_state.attn[0].v_stars[q].as_view(), 0),
+     | -              slice<kv_mul * head_size>()((*v_stars_saved)[job].as_view(), 0), 2e-2);
+ 2936| +              slice<kv_mul * head_size>()((*v_stars_saved)[job].as_view(), 0), 5e-2);
+ 2937|          }
+ 2938|        }
+ 2939|  
+     |@@ -3113,13 +3290,14 @@ TEST_CASE("book.append()", "[book append]") {
+ 3290|        auto& expected_page = *expected_book.page_of(tok);
+ 3291|        for (size_t layer = 0; layer < n_layers; ++layer) {
+ 3292|          for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
+     | -          // Fill k data
+     | -          auto dst_k =
+     | -              dst_page.k(test_kv_slot<book_t>(layer), kv_head, tok % page_t::page_size);
+     | -          auto expected_k = expected_page.k(
+     | -              test_kv_slot<book_t>(layer), kv_head, tok % page_t::page_size);
+ 3293| +          // Fill k data (set_k_row serves both K layouts, Note [K VNNI storage])
+ 3294| +          alignas(64) std::array<bf16, head_size> k_row;
+ 3295|            for (size_t i = 0; i < head_size; ++i)
+     | -            expected_k[i] = dst_k[i] = random_bf16();
+ 3296| +            k_row[i] = random_bf16();
+ 3297| +          dst_page.set_k_row(test_kv_slot<book_t>(layer), kv_head,
+ 3298| +              tok % page_t::page_size, k_source_row<head_size>(k_row.data()));
+ 3299| +          expected_page.set_k_row(test_kv_slot<book_t>(layer), kv_head,
+ 3300| +              tok % page_t::page_size, k_source_row<head_size>(k_row.data()));
+ 3301|            // Fill v data
+ 3302|            tensor<head_size> v;
+ 3303|            for (size_t i = 0; i < head_size; ++i)
+     |@@ -3149,12 +3327,14 @@ TEST_CASE("book.append()", "[book append]") {
+ 3327|        for (size_t layer = 0; layer < n_layers; ++layer) {
+ 3328|          kv_slot_id const slot = test_kv_slot<book_t>(layer);
+ 3329|          for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
+     | -          // Fill k data
+     | -          auto src_k = src_page.k(slot, kv_head, tok % page_t::page_size);
+     | -          auto expected_k =
+     | -              expected_page.k(slot, kv_head, (dst_tokens + tok) % page_t::page_size);
+ 3330| +          // Fill k data (set_k_row serves both K layouts, Note [K VNNI storage])
+ 3331| +          alignas(64) std::array<bf16, head_size> k_row;
+ 3332|            for (size_t i = 0; i < head_size; ++i)
+     | -            expected_k[i] = src_k[i] = random_bf16();
+ 3333| +            k_row[i] = random_bf16();
+ 3334| +          src_page.set_k_row(slot, kv_head, tok % page_t::page_size,
+ 3335| +              k_source_row<head_size>(k_row.data()));
+ 3336| +          expected_page.set_k_row(slot, kv_head, (dst_tokens + tok) % page_t::page_size,
+ 3337| +              k_source_row<head_size>(k_row.data()));
+ 3338|            // Fill v data
+ 3339|            tensor<head_size> v;
+ 3340|            for (size_t i = 0; i < head_size; ++i)
+     |@@ -3199,10 +3379,11 @@ TEST_CASE("book.append()", "[book append]") {
+ 3379|      for (size_t layer = 0; layer < n_layers; ++layer) {
+ 3380|        for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
+ 3381|          for (size_t tok = 0; tok < expected_book.size(); ++tok) {
+     | -          auto actual_k = dst_book.page_of(tok)->k(
+     | -              test_kv_slot<book_t>(layer), kv_head, tok % page_t::page_size);
+     | -          auto expected_k = expected_book.page_of(tok)->k(
+     | -              test_kv_slot<book_t>(layer), kv_head, tok % page_t::page_size);
+ 3382| +          alignas(64) std::array<bf16, head_size> actual_k, expected_k;
+ 3383| +          dst_book.page_of(tok)->get_k_row(test_kv_slot<book_t>(layer), kv_head,
+ 3384| +              tok % page_t::page_size, k_destination_row<head_size>(actual_k.data()));
+ 3385| +          expected_book.page_of(tok)->get_k_row(test_kv_slot<book_t>(layer), kv_head,
+ 3386| +              tok % page_t::page_size, k_destination_row<head_size>(expected_k.data()));
+ 3387|            for (size_t i = 0; i < head_size; ++i) {
+ 3388|              if (actual_k[i] != expected_k[i])
+ 3389|                spdlog::error("Mismatch at layer={}, kv_head={}, tok={}, i={}: "
+     |@@ -3278,10 +3459,11 @@ TEST_CASE("scaled_v padding NaN", "[kv_data]") {
+ 3459|        auto& dst_page = *dst_book.page_of(tok);
+ 3460|        for (size_t layer = 0; layer < n_layers; ++layer) {
+ 3461|          for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
+     | -          auto dst_k =
+     | -              dst_page.k(test_kv_slot<book_t>(layer), kv_head, tok % page_t::page_size);
+ 3462| +          alignas(64) std::array<bf16, head_size> dst_k;
+ 3463|            for (size_t i = 0; i < head_size; ++i)
+ 3464|              dst_k[i] = random_bf16();
+ 3465| +          dst_page.set_k_row(test_kv_slot<book_t>(layer), kv_head,
+ 3466| +              tok % page_t::page_size, k_source_row<head_size>(dst_k.data()));
+ 3467|            tensor<head_size> v;
+ 3468|            for (size_t i = 0; i < head_size; ++i)
+ 3469|              v[i] = random_bf16();
+     |@@ -3313,10 +3495,11 @@ TEST_CASE("scaled_v padding NaN", "[kv_data]") {
+ 3495|        auto& src_page = *src_book.page_of(tok);
+ 3496|        for (size_t layer = 0; layer < n_layers; ++layer) {
+ 3497|          for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
+     | -          auto src_k =
+     | -              src_page.k(test_kv_slot<book_t>(layer), kv_head, tok % page_t::page_size);
+ 3498| +          alignas(64) std::array<bf16, head_size> src_k;
+ 3499|            for (size_t i = 0; i < head_size; ++i)
+ 3500|              src_k[i] = random_bf16();
+ 3501| +          src_page.set_k_row(test_kv_slot<book_t>(layer), kv_head,
+ 3502| +              tok % page_t::page_size, k_source_row<head_size>(src_k.data()));
+ 3503|            tensor<head_size> v;
+ 3504|            for (size_t i = 0; i < head_size; ++i)
+ 3505|              v[i] = random_bf16();
+     |@@ -3439,6 +3622,433 @@ TEST_CASE("scaled_v padding NaN", "[kv_data]") {
+ 3622|    }
+ 3623|  }
+ 3624|  
+ 3625| +// Software attention must stay available for every accepted geometry, also
+ 3626| +// with TRON_K_VNNI. A 128-dimension K/V head shared by 32 query heads is such
+ 3627| +// a geometry: the AMX kernel does not take it (its group is 4 heads), and the
+ 3628| +// VNNI reader scores it in passes of 16 heads (k_vnni::qk_group). This case
+ 3629| +// instantiates apply_page_tok for that shape in both builds and runs it on a
+ 3630| +// page whose query mask excludes every token (query 0 is hardware-visible and
+ 3631| +// not software-required, so the call scores nothing). It is a compile check
+ 3632| +// first. The reader's numbers for wide groups are checked in t_k_vnni_layout.
+ 3633| +TEST_CASE(
+ 3634| +    "software attention compiles for 32 query heads on one 128-dimension K/V head",
+ 3635| +    "[kv_data][k_vnni]") {
+ 3636| +  constexpr size_t head_size = 128;
+ 3637| +  constexpr size_t n_heads = 32;
+ 3638| +  constexpr size_t n_kv_heads = 1;
+ 3639| +  constexpr float attention_scale = 0x1.6a09e6p-4f;  // 1 / sqrt(128)
+ 3640| +  constexpr attention_geometry geometry{n_heads, kv_geometry{n_kv_heads, head_size}};
+ 3641| +  static_assert(geometry.kv_mul() == n_heads, "32 query heads share the K/V head");
+ 3642| +  constexpr llm_configuration llm_config{.type = model_type::llama,
+ 3643| +      .dim = n_heads * head_size,
+ 3644| +      .hidden_dim = 1024,
+ 3645| +      .n_layers = 1,
+ 3646| +      .n_heads = n_heads,
+ 3647| +      .n_kv_heads = n_kv_heads,
+ 3648| +      .vocab_size = 32000,
+ 3649| +      .head_size = head_size,
+ 3650| +      .attention_scale = attention_scale,
+ 3651| +      .n_experts = 1,
+ 3652| +      .n_shared_experts = 1,
+ 3653| +      .n_routed_experts_chosen = 0,
+ 3654| +      .rope_scaling_strategy = rope_scaling::simple};
+ 3655| +  using model_t =
+ 3656| +      model<llm<llm_config, make_llm_executor<false, tensor, tensor, tensor>>>;
+ 3657| +  using state_t = model_t::state;
+ 3658| +  using book_t = model_t::book;
+ 3659| +  using page_t = model_t::page;
+ 3660| +
+ 3661| +  std::unique_ptr<model_t> model =
+ 3662| +      std::make_unique<model_t>(std::filesystem::path{}, json(json::value_t::object));
+ 3663| +  state_t state(*model, model_config{.max_layers = 1});
+ 3664| +  state.resize(1);  // one query token
+ 3665| +  book_t cache(1, 1);
+ 3666| +  page_t* page = cache.page_of(0);
+ 3667| +  page->set_lo(0, 0);
+ 3668| +  for (size_t i = 0; i < page_t::page_size; ++i) {
+ 3669| +    cache.increment_tokens_used();
+ 3670| +  }
+ 3671| +  page->set_offset_bound(page_t::page_size);
+ 3672| +  // The page's tokens plus the query token (position page_size), as the
+ 3673| +  // sliding-window check reads token positions.
+ 3674| +  std::array<page_t*, 1> pages{page};
+ 3675| +  state.pages.items = std::span<page_t* const>(pages);
+ 3676| +  std::vector<uint32_t> positions(page_t::page_size + 1);
+ 3677| +  for (size_t i = 0; i < positions.size(); ++i) {
+ 3678| +    positions[i] = static_cast<uint32_t>(i);
+ 3679| +  }
+ 3680| +  state.token_positions.items = std::span<const uint32_t>(positions);
+ 3681| +  indexed_vector<token_job_id, token_id> token_jobs;
+ 3682| +  token_jobs.push_back(token_id(page_t::page_size));
+ 3683| +  state.token_jobs = token_jobs;
+ 3684| +  const attention_operation_descriptor operation{
+ 3685| +      {attention_op_id(0), model_layer_id(0), kv_slot_id(0)}, attention_kernel_id(0),
+ 3686| +      attention_hardware_capability::software_only, true,
+ 3687| +      attention_operation_config{std::nullopt, std::nullopt, attention_scale}};
+ 3688| +  // Query 0 is hardware-visible and not software-required for every token of
+ 3689| +  // the page. So the software call skips every token and returns 0 relevant
+ 3690| +  // tokens, in both K layouts.
+ 3691| +  ranged_mask mask;
+ 3692| +  mask_t<ranged_mask_capacity> hw_visible{};
+ 3693| +  hw_visible.insert(0);
+ 3694| +  mask.add_range(token_id(0), token_id(page_t::page_size),
+ 3695| +      mask_t<ranged_mask_capacity>{}, hw_visible);
+ 3696| +  state.query_mask = &mask;
+ 3697| +  auto scratch = state.self_attn_state.token_scratchpad_ref_at<geometry>(0, 0);
+ 3698| +  auto const q = state.plugin_state.qs_roped[token_job_id(0)].as_view();
+ 3699| +  // Arguments as in check_page_range_reductions: not was_valid, sliding
+ 3700| +  // window 1024, not run_visible_in_software.
+ 3701| +  auto const result = state.self_attn_state.apply_page_tok<geometry>(false, *page,
+ 3702| +      operation, attention_scale, 0, q, token_id(page_t::page_size), scratch,
+ 3703| +      token_job_id(0), &mask.find_range(token_id(0)), 1024, false, nullptr);
+ 3704| +  REQUIRE(result.relevant_k_tokens == 0);
+ 3705| +  REQUIRE(result.served == tron::attn_stats::visit_path::empty);
+ 3706| +}
+ 3707| +
+ 3708| +// The K store of save_k (Note [Shared block save] in model.hpp): the grouping
+ 3709| +// of a minibatch's tokens into page blocks, and the window that shares the
+ 3710| +// store with helper threads. The shapes a pass can present are all here: a
+ 3711| +// run that starts in the middle of a 16-token block, a run that crosses a
+ 3712| +// block boundary and one that crosses a page boundary, a whole block, a
+ 3713| +// token alone in its block, and jobs without KV work inside and after a run.
+ 3714| +// Every stored row must equal its source row bit for bit. Every other row of
+ 3715| +// the book must be untouched. With TRON_K_VNNI off the same test runs the
+ 3716| +// row-major store. No window opens then.
+ 3717| +TEST_CASE("save_k stores every token's K row once, grouped by page block, alone or "
+ 3718| +          "with helper threads",
+ 3719| +    "[kv_data][k_vnni]") {
+ 3720| +  constexpr size_t head_size = 128;
+ 3721| +  constexpr size_t n_heads = 16;
+ 3722| +  constexpr size_t n_layers = 2;
+ 3723| +  constexpr size_t n_kv_heads = 8;
+ 3724| +  constexpr attention_geometry geometry{n_heads, kv_geometry{n_kv_heads, head_size}};
+ 3725| +  constexpr llm_configuration llm_config{.type = model_type::llama,
+ 3726| +      .dim = head_size * n_heads,
+ 3727| +      .hidden_dim = 1024,
+ 3728| +      .n_layers = n_layers,
+ 3729| +      .n_heads = n_heads,
+ 3730| +      .n_kv_heads = n_kv_heads,
+ 3731| +      .vocab_size = 32000,
+ 3732| +      .head_size = head_size,
+ 3733| +      .attention_scale = 0x1.6a09e6p-4f,  // 1 / sqrt(128)
+ 3734| +      .n_experts = 1,
+ 3735| +      .n_shared_experts = 1,
+ 3736| +      .n_routed_experts_chosen = 0,
+ 3737| +      .rope_scaling_strategy = rope_scaling::simple};
+ 3738| +  using model_t =
+ 3739| +      model<llm<llm_config, make_llm_executor<false, tensor, tensor, tensor>>>;
+ 3740| +  using state_t = model_t::state;
+ 3741| +  using book_t = model_t::book;
+ 3742| +  using page_t = model_t::page;
+ 3743| +  using batch = model_t::batch;
+ 3744| +
+ 3745| +  std::unique_ptr<model_t> model =
+ 3746| +      std::make_unique<model_t>(std::filesystem::path{}, json(json::value_t::object));
+ 3747| +  constexpr size_t num_pages = 3;
+ 3748| +  constexpr size_t num_kv_tokens = num_pages * page_t::page_size;
+ 3749| +  std::mt19937 gen(23);
+ 3750| +  book_t bk(num_pages, n_layers);
+ 3751| +  std::vector<page_t*> pages;
+ 3752| +  std::vector<page_t*> token_pages(num_kv_tokens);
+ 3753| +  for (size_t i = 0; i < num_pages; ++i) {
+ 3754| +    pages.push_back(bk.page_of(i * page_t::page_size));
+ 3755| +    pages.back()->set_lo(0, i * page_t::page_size);
+ 3756| +    for (size_t tok = 0; tok < page_t::page_size; ++tok) {
+ 3757| +      bk.increment_tokens_used();
+ 3758| +    }
+ 3759| +    pages.back()->set_offset_bound(page_t::page_size);
+ 3760| +  }
+ 3761| +  for (size_t tok = 0; tok < num_kv_tokens; ++tok) {
+ 3762| +    token_pages[tok] = bk.page_of(tok);
+ 3763| +  }
+ 3764| +
+ 3765| +  // The token jobs of the pass (token ids are the positions in the book).
+ 3766| +  std::vector<token_id> job_tokens;
+ 3767| +  std::vector<uint8_t> do_kv;
+ 3768| +  auto add = [&](size_t tok, bool kv) {
+ 3769| +    job_tokens.push_back(token_id(tok));
+ 3770| +    do_kv.push_back(kv ? 1 : 0);
+ 3771| +  };
+ 3772| +  // The token runs of the pass (a page holds 64 tokens, a block 16 tokens).
+ 3773| +  constexpr size_t kv_jobs = 46;  // 48 jobs minus the two without KV work
+ 3774| +  // Tokens 5..20: starts mid-block, crosses blocks 0/1 of page 0. The job of
+ 3775| +  // token 8 has no KV work.
+ 3776| +  for (size_t tok = 5; tok < 21; ++tok) {
+ 3777| +    add(tok, tok != 8);
+ 3778| +  }
+ 3779| +  // Tokens 48..63: one whole block (block 3 of page 0).
+ 3780| +  for (size_t tok = 48; tok < 64; ++tok) {
+ 3781| +    add(tok, true);
+ 3782| +  }
+ 3783| +  // Tokens 64..71: page crossing 63 -> 64, partial block 0 of page 1.
+ 3784| +  for (size_t tok = 64; tok < 72; ++tok) {
+ 3785| +    add(tok, true);
+ 3786| +  }
+ 3787| +  // Token 100: alone in block 2 of page 1. This case takes the per-token
+ 3788| +  // scatter path.
+ 3789| +  add(100, true);
+ 3790| +  // Tokens 130..135: page 2.
+ 3791| +  for (size_t tok = 130; tok < 136; ++tok) {
+ 3792| +    add(tok, true);
+ 3793| +  }
+ 3794| +  add(21, false);  // a trailing job without KV work
+ 3795| +  const size_t n_items = job_tokens.size();
+ 3796| +  REQUIRE(n_items == 48);  // more than 16. So the window can open.
+ 3797| +
+ 3798| +  state_t state(*model, model_config{.max_layers = n_layers});
+ 3799| +  state.resize(n_items);
+ 3800| +  state.pages.items = std::span<page_t* const>(pages);
+ 3801| +  state.token_pages.items = std::span<page_t* const>(token_pages);
+ 3802| +  indexed_vector<token_job_id, token_id> jobs;
+ 3803| +  for (token_id t : job_tokens) {
+ 3804| +    jobs.push_back(t);
+ 3805| +  }
+ 3806| +  state.token_jobs = jobs;
+ 3807| +  state.token_jobs_do_kv.items = std::span<const uint8_t>(do_kv);
+ 3808| +  // Finite bf16 patterns per (job, element). No two rows share a pattern. A row
+ 3809| +  // stored at the wrong token position or in the wrong slot is then detected.
+ 3810| +  // The bits are 0x3800 + (0..0x07ff): exponent field 0x70..0x7f, never 0xff.
+ 3811| +  // The strides 4099 and 17 spread the (job, element) pairs over that span.
+ 3812| +  auto source_bits = [](size_t job, size_t elt) {
+ 3813| +    const size_t mix = job * 4099 + elt * 17;
+ 3814| +    return static_cast<uint16_t>(0x3800u + mix % 0x0800u);
+ 3815| +  };
+ 3816| +  for (size_t job = 0; job < n_items; ++job) {
+ 3817| +    for (size_t elt = 0; elt < n_kv_heads * head_size; ++elt) {
+ 3818| +      state.plugin_state.kouts[token_job_id(job)][elt] =
+ 3819| +          bf16::from_bits(source_bits(job, elt));
+ 3820| +    }
+ 3821| +  }
+ 3822| +
+ 3823| +  latch_arena latches;
+ 3824| +  with_latch_arena latch_guard(latches);
+ 3825| +  std::vector<token_job_id> items;
+ 3826| +  for (size_t i = 0; i < n_items; ++i) {
+ 3827| +    items.push_back(token_job_id(i));
+ 3828| +  }
+ 3829| +  batch q_batch(state, std::move(items), latches, 0);
+ 3830| +  q_batch.reset_channels(0, 0);
+ 3831| +  // The active operation 0 of layer 0 (validate_operation compares the
+ 3832| +  // descriptor with it).
+ 3833| +  const attention_operation_descriptor operation = state.active_attention_operations[0];
+ 3834| +  REQUIRE(operation.writes_kv);
+ 3835| +  const kv_slot_id slot = operation.binding.kv_slot;
+ 3836| +
+ 3837| +  // Snapshot of every K row of the slot, to prove the untouched rows stay.
+ 3838| +  auto snapshot = [&] {
+ 3839| +    std::vector<std::array<uint16_t, head_size>> rows(num_kv_tokens * n_kv_heads);
+ 3840| +    alignas(64) std::array<bf16, head_size> row;
+ 3841| +    for (size_t tok = 0; tok < num_kv_tokens; ++tok) {
+ 3842| +      page_t* page = bk.page_of(tok);
+ 3843| +      const int offset = page->offset_in_page(token_id(tok));
+ 3844| +      for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
+ 3845| +        page->get_k_row(
+ 3846| +            slot, kv_head, offset, k_destination_row<head_size>(row.data()));
+ 3847| +        for (size_t d = 0; d < head_size; ++d) {
+ 3848| +          rows[tok * n_kv_heads + kv_head][d] = row[d].to_bits();
+ 3849| +        }
+ 3850| +      }
+ 3851| +    }
+ 3852| +    return rows;
+ 3853| +  };
+ 3854| +  auto check = [&](std::vector<std::array<uint16_t, head_size>> const& before) {
+ 3855| +    std::vector<int> job_of_token(num_kv_tokens, -1);  // -1: no job stores it
+ 3856| +    for (size_t job = 0; job < n_items; ++job) {
+ 3857| +      if (do_kv[job]) job_of_token[job_tokens[job].i] = static_cast<int>(job);
+ 3858| +    }
+ 3859| +    const auto after = snapshot();
+ 3860| +    size_t stored = 0, kept = 0;
+ 3861| +    for (size_t tok = 0; tok < num_kv_tokens; ++tok) {
+ 3862| +      for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
+ 3863| +        auto const& got = after[tok * n_kv_heads + kv_head];
+ 3864| +        if (job_of_token[tok] < 0) {
+ 3865| +          REQUIRE(got == before[tok * n_kv_heads + kv_head]);
+ 3866| +          ++kept;
+ 3867| +          continue;
+ 3868| +        }
+ 3869| +        const size_t job = static_cast<size_t>(job_of_token[tok]);
+ 3870| +        for (size_t d = 0; d < head_size; ++d) {
+ 3871| +          const uint16_t want = source_bits(job, kv_head * head_size + d);
+ 3872| +          if (got[d] != want) {
+ 3873| +            FAIL("token " << tok << " kv_head " << kv_head << " dim " << d
+ 3874| +                          << ": stored 0x" << std::hex << got[d] << " expected 0x"
+ 3875| +                          << want);
+ 3876| +          }
+ 3877| +        }
+ 3878| +        ++stored;
+ 3879| +      }
+ 3880| +    }
+ 3881| +    REQUIRE(stored == kv_jobs * n_kv_heads);
+ 3882| +    REQUIRE(kept == (num_kv_tokens - kv_jobs) * n_kv_heads);
+ 3883| +  };
+ 3884| +  // The marks: save_k marks K of every job with KV work exactly once. The
+ 3885| +  // helpers leave before the mark loop. K alone does not complete a token.
+ 3886| +  // The second mark completes it (mark_k_complete returns true only when
+ 3887| +  // the count was 1). A job without KV work has no mark (count 0). Once per
+ 3888| +  // section: the second mark completes the token, so the row check after the
+ 3889| +  // forward-end conversion does not repeat it.
+ 3890| +  auto check_marks = [&] {
+ 3891| +    for (size_t job = 0; job < n_items; ++job) {
+ 3892| +      page_t* page = token_pages[job_tokens[job].i];
+ 3893| +      const size_t offset = static_cast<size_t>(page->offset_in_page(job_tokens[job]));
+ 3894| +      REQUIRE_FALSE(page->is_kv_complete(slot, offset));
+ 3895| +      REQUIRE(page->mark_k_complete(slot, offset) == (do_kv[job] != 0));
+ 3896| +    }
+ 3897| +  };
+ 3898| +
+ 3899| +  // Rows 0..4 and 8 of page 0 are saved before the pass, so the pass's run
+ 3900| +  // 5..15 (minus the job of token 8, which has no KV work) completes block 0
+ 3901| +  // of page 0 through save_k: the block is queued and converted at the forward
+ 3902| +  // end (convert_pending_k_blocks, Note [K VNNI storage]). Block 3 of page 0 is
+ 3903| +  // a whole run and is converted by the block save itself.
+ 3904| +  constexpr size_t pre_saved_rows = 5;
+ 3905| +  constexpr size_t no_kv_token = 8;  // its job has no KV work: add(8, false)
+ 3906| +  auto pre_save = [&] {
+ 3907| +    for (size_t tok = 0; tok <= no_kv_token; ++tok) {
+ 3908| +      if (tok >= pre_saved_rows && tok != no_kv_token) continue;
+ 3909| +      REQUIRE_FALSE(pages[0]->note_k_row_saved(slot, tok));
+ 3910| +    }
+ 3911| +  };
+ 3912| +  auto check_blocks = [&](bool converted) {
+ 3913| +#ifdef TRON_K_VNNI
+ 3914| +    constexpr uint8_t blocks_0_and_3 = 0x9;
+ 3915| +    constexpr uint8_t block_3_only = 0x8;
+ 3916| +    constexpr uint8_t no_block = 0x0;
+ 3917| +    const uint8_t page0 = converted ? blocks_0_and_3 : block_3_only;
+ 3918| +    REQUIRE(pages[0]->template k_vnni_blocks<geometry.kv>(slot) == page0);
+ 3919| +    // The pages the pass does not complete a block of.
+ 3920| +    REQUIRE(pages[1]->template k_vnni_blocks<geometry.kv>(slot) == no_block);
+ 3921| +    REQUIRE(pages[2]->template k_vnni_blocks<geometry.kv>(slot) == no_block);
+ 3922| +#else
+ 3923| +    (void)converted;
+ 3924| +#endif
+ 3925| +  };
+ 3926| +
+ 3927| +  SECTION("one thread: the grouping stores every row and touches nothing else") {
+ 3928| +    bk.fill_random(gen);
+ 3929| +    pre_save();
+ 3930| +    const auto before = snapshot();
+ 3931| +    state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
+ 3932| +    check(before);
+ 3933| +    check_marks();
+ 3934| +    check_blocks(/*converted=*/false);
+ 3935| +    state.convert_pending_k_blocks();
+ 3936| +    check_blocks(/*converted=*/true);
+ 3937| +    check(before);
+ 3938| +    REQUIRE(q_batch.k_store_window.opened.load() == 0);
+ 3939| +  }
+ 3940| +
+ 3941| +  // Note [Row-major blocks under hardware attention] in kv_cache.hpp: the rows
+ 3942| +  // land the same way; only the row bits and the forward-end conversion of the
+ 3943| +  // hardware-scored operation are skipped. Catch2 builds a fresh state for
+ 3944| +  // every SECTION, so the flag needs no reset.
+ 3945| +  constexpr uint8_t operation_uses_hw = 1;
+ 3946| +  SECTION("hardware attention scores the operation: the completed block stays "
+ 3947| +          "row-major, the whole-block save is still VNNI") {
+ 3948| +    bk.fill_random(gen);
+ 3949| +    pre_save();
+ 3950| +    state.attention_operation_uses_hw[operation.binding.operation.i] =
+ 3951| +        operation_uses_hw;
+ 3952| +    const auto before = snapshot();
+ 3953| +    state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
+ 3954| +    check(before);
+ 3955| +    check_marks();
+ 3956| +    check_blocks(/*converted=*/false);
+ 3957| +    state.convert_pending_k_blocks();
+ 3958| +    check_blocks(/*converted=*/false);
+ 3959| +    check(before);
+ 3960| +  }
+ 3961| +
+ 3962| +  SECTION("hardware attention scores another operation: this one still converts") {
+ 3963| +    // The flag is read for the saving operation, not for another id space
+ 3964| +    // (operation 0 is also layer 0 and KV slot 0; operation 1 is not).
+ 3965| +    bk.fill_random(gen);
+ 3966| +    pre_save();
+ 3967| +    constexpr size_t other_operation = 1;
+ 3968| +    const attention_op_id other =
+ 3969| +        state.active_attention_operations[other_operation].binding.operation;
+ 3970| +    REQUIRE(other != operation.binding.operation);
+ 3971| +    state.attention_operation_uses_hw[other.i] = operation_uses_hw;
+ 3972| +    const auto before = snapshot();
+ 3973| +    state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
+ 3974| +    check(before);
+ 3975| +    check_marks();
+ 3976| +    check_blocks(/*converted=*/false);
+ 3977| +    state.convert_pending_k_blocks();
+ 3978| +    check_blocks(/*converted=*/true);
+ 3979| +    check(before);
+ 3980| +  }
+ 3981| +
+ 3982| +  SECTION("three threads: the helpers share the window and every row lands once") {
+ 3983| +    bk.fill_random(gen);
+ 3984| +    pre_save();
+ 3985| +    const auto before = snapshot();
+ 3986| +    constexpr size_t n_workers = 3;
+ 3987| +    constexpr size_t main_worker_ix = 0;
+ 3988| +    // Every worker calls the same save_k with its own index (Note [Shared
+ 3989| +    // block save] in model.hpp).
+ 3990| +    std::vector<std::thread> helpers;
+ 3991| +    for (size_t worker_ix = 1; worker_ix < n_workers; ++worker_ix) {
+ 3992| +      helpers.emplace_back([&, worker_ix] {
+ 3993| +        state.template save_k<geometry>(
+ 3994| +            &q_batch, operation, state.plugin_state.kouts, worker_ix, n_workers);
+ 3995| +      });
+ 3996| +    }
+ 3997| +    state.template save_k<geometry>(
+ 3998| +        &q_batch, operation, state.plugin_state.kouts, main_worker_ix, n_workers);
+ 3999| +    for (auto& h : helpers) {
+ 4000| +      h.join();
+ 4001| +    }
+ 4002| +    check(before);
+ 4003| +    check_marks();
+ 4004| +    check_blocks(/*converted=*/false);
+ 4005| +    state.convert_pending_k_blocks();
+ 4006| +    check_blocks(/*converted=*/true);
+ 4007| +    check(before);
+ 4008| +    if constexpr (k_vnni::layout_on<head_size>) {
+ 4009| +      auto const& w = q_batch.k_store_window;
+ 4010| +      REQUIRE(w.opened.load() == 1);
+ 4011| +      REQUIRE(w.finished.load() == n_workers - 1);
+ 4012| +      // The work units cover the items in order, and every unit was claimed.
+ 4013| +      // The exact cut is not a contract: the writers only need that a unit
+ 4014| +      // never crosses a page, a 16-token page block or a change of
+ 4015| +      // token_jobs_do_kv (batch::k_store_window), so that two units never
+ 4016| +      // write the same token lanes and a unit that fills its block may use
+ 4017| +      // whole-line stores.
+ 4018| +      REQUIRE(w.n_units >= 1);
+ 4019| +      REQUIRE(w.unit_start[0] == 0);
+ 4020| +      REQUIRE(w.unit_start[w.n_units] == n_items);
+ 4021| +      REQUIRE(w.next_unit.load() >= w.n_units);
+ 4022| +      for (size_t u = 0; u < w.n_units; ++u) {
+ 4023| +        const size_t begin = w.unit_start[u];
+ 4024| +        const size_t end = w.unit_start[u + 1];
+ 4025| +        CAPTURE(u, begin, end);
+ 4026| +        REQUIRE(begin < end);
+ 4027| +        // The job's token position, its page and its 16-token block.
+ 4028| +        auto token_of = [&](size_t item) {
+ 4029| +          return job_tokens[q_batch.items[item].i].i;
+ 4030| +        };
+ 4031| +        auto block_of = [&](size_t tok) {
+ 4032| +          return (tok % page_t::page_size) / k_vnni::BLOCK_TOKENS_16;
+ 4033| +        };
+ 4034| +        const bool unit_kv = do_kv[q_batch.items[begin].i] != 0;
+ 4035| +        const page_t* unit_page = unit_kv ? token_pages[token_of(begin)] : nullptr;
+ 4036| +        const size_t unit_block = unit_kv ? block_of(token_of(begin)) : 0;
+ 4037| +        for (size_t t = begin; t < end; ++t) {
+ 4038| +          CAPTURE(t);
+ 4039| +          REQUIRE((do_kv[q_batch.items[t].i] != 0) == unit_kv);
+ 4040| +          if (unit_kv) {
+ 4041| +            REQUIRE(token_pages[token_of(t)] == unit_page);
+ 4042| +            REQUIRE(block_of(token_of(t)) == unit_block);
+ 4043| +          }
+ 4044| +        }
+ 4045| +      }
+ 4046| +    } else {
+ 4047| +      REQUIRE(q_batch.k_store_window.opened.load() == 0);
+ 4048| +    }
+ 4049| +  }
+ 4050| +}
+ 4051| +
+ 4052|  // The typed packed-V operations (h/tron/tensor/v_vnni.hpp) carry the bodies
+ 4053|  // that used to live in page::set_v / page::get_v, and page::v_packed exposes
+ 4054|  // the plane as a typed view. This case pins the contracts a move can

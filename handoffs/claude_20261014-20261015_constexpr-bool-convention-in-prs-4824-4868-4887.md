@@ -24,7 +24,7 @@ The user asked for two checks on three PRs, posted as inline review comments: th
 - **Comment check (checker B)**: the skill ~/.claude/skills/simplify-cpp-comments in Check mode, Rules 1 to 6, on comments the diff adds or changes only (Rule 0).
 - **Workflow**: the multi-agent verification tool. Finders produce findings, refuters try to disprove each finding, the surviving ones are posted. The tool has a cap of 1,000 agents per run.
 - **Thread**: one inline review comment on GitHub with its replies. **Resolved**: marked done on GitHub.
-- **38-cell syntax matrix**: the script step4-pr1.sh, which compiles the PR's translation units under the build-flag combinations (VNNI on and off, AMX dispatch on and off) and compares warnings against a reference summary.
+- **38-cell syntax matrix**: the script step4-pr1.sh, which compiles the PR's translation units under the build-flag combinations (VNNI on and off, AMX dispatch on and off) and compares warnings against a reference summary. (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/step4-pr1.sh)
 - **lefthook**: tron's git pre-commit hook. On claude-agentsrv the hook fails and `--no-verify` is blocked, so commits are made over ssh on delphi-3bda in the same NFS-shared worktree.
 - **delphi-3bda**: the Granite Rapids CI machine. **claude-agentsrv**: the podman container this Claude Code ran in (host `agentsrv`).
 
@@ -35,7 +35,7 @@ The user asked for two checks on three PRs, posted as inline review comments: th
 
 ## Environment
 
-- Host: claude-agentsrv for all analysis, posting and file edits. ssh to delphi-3bda for the two commits only (commit-on-3bda.sh, commit-followup-on-3bda.sh) and a lefthook presence check.
+- Host: claude-agentsrv for all analysis, posting and file edits. ssh to delphi-3bda for the two commits only (commit-on-3bda.sh, commit-followup-on-3bda.sh) and a lefthook presence check. (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/commit-on-3bda.sh)
 - cwd: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424.
 - Diffs fetched with `gh pr diff` into the scratchpad. Code read in /home/jhan/workspace/tron (main checkout, fetch only) and edited in the worktree /home/jhan/workspace/ai-runs/tron-split-pr1 (branch jhan-vnnik-1-layout).
 - Ultracode mode was on (`/effort ultracode`), so every substantive task ran as a workflow.
@@ -46,14 +46,14 @@ The user asked for two checks on three PRs, posted as inline review comments: th
 ## Timeline (2026-10-14 and 2026-10-15, Pacific)
 
 - 2026-10-14 20:17 `/effort ultracode`. 20:18 The user gave the named-bool rule (first wording) and, mid-turn, asked for the simplify-cpp-comments check as well.
-- 20:19 to 20:24 The three PR diffs were fetched, split into per-file annotated diffs with new-file line numbers (split_diff.py), and the named-bool conventions on origin/main counted.
+- 20:19 to 20:24 The three PR diffs were fetched, split into per-file annotated diffs with new-file line numbers (split_diff.py), and the named-bool conventions on origin/main counted. (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015/tools/split_diff.py)
 - 20:27 Workflow `pr-two-checkers` (wf_a5efbc70-452) launched: 46 file units, two comment finders and one named-bool finder per file, two or three refuters per finding.
-- 20:28 The comment builder (build_comments.py) and the posting tool written while the workflow ran.
+- 20:28 The comment builder (build_comments.py) and the posting tool written while the workflow ran. (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015/tools/build_comments.py)
 - 21:43 The user updated the rule (template arguments in, default arguments out). 21:44 to 21:45 Commit d0e6f816dd on PR 4901 read as precedent. The workflow script was edited for a resume (backup .v1.bak). Memory note named-bool-rule.md written.
 - 21:48 Run 1 finished at the 1,000-agent cap: two PR 4868 test files (t_k_vnni_layout.cpp, t_llama_unit.cpp) and some refuter groups unfinished.
-- 21:49 to 21:50 Run 2 script written (pr-two-checkers-run2.js) and launched: the two missing units, one re-verification, and the named-bool check under the new rule on all three PRs.
+- 21:49 to 21:50 Run 2 script written (pr-two-checkers-run2.js) and launched: the two missing units, one re-verification, and the named-bool check under the new rule on all three PRs. (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/pr-two-checkers-run2.js, relocated to /home/jhan/workspace/intel-AMX/exec/pr1-20261010/review-20261015/pr-two-checkers-run2.js)
 - 21:51 to 21:52 Dry runs clean. The first PR 4824 comment review (60 comments) returned HTTP 502 but had been created. The next POST hit a secondary rate limit.
-- 21:53 to 21:54 post_checker2.py written: parts of at most 25 comments, 90 s apart. A background chain posted PR 4824 parts 2 to 7 and the PR 4887 comment review.
+- 21:53 to 21:54 post_checker2.py written: parts of at most 25 comments, 90 s apart. A background chain posted PR 4824 parts 2 to 7 and the PR 4887 comment review. (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015/tools/post_checker2.py)
 - 22:07 Run 2 finished with no agent errors. 22:08 to 22:11 Results merged, every named-bool finding inspected, the remaining chain (PR 4868 comment review in four parts, the three named-bool reviews, a patch of the part-1 body) launched.
 - 22:12 The record folder checks-20261015/ created. 22:13 gen_page.py written.
 - 22:23 The chain finished. 22:24 Every review verified on GitHub by inline-comment counts. The page generated. Memory note checks-20261015.md written. 22:25 A section appended to split-status.md. Report given in chat.
@@ -61,12 +61,12 @@ The user asked for two checks on three PRs, posted as inline review comments: th
 - 10:18 to 10:19 The 118 threads of PR 4868 fetched by GraphQL, the 113 from the checks classified by reply.
 - 10:23 The user's side question on a clean, no-history look answered with options A to D.
 - 10:27 Workflow of 111 edit-writing agents launched (wf_2e80ed2f-944), one per accepted thread, each returning exact whole-line edits. The `(void)dest` question tested by compiling full.cpp with the cast removed: 0 warnings.
-- 10:31 All 111 agents returned. The dry run found every old text exactly once. The 117 edits applied to the worktree (apply_edits.py). clang-format run on the changed files.
+- 10:31 All 111 agents returned. The dry run found every old text exactly once. The 117 edits applied to the worktree (apply_edits.py). clang-format run on the changed files. (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/tools/apply_edits.py)
 - 10:33 Workflow of 123 verifier agents launched (wf_d1d9cc79-fd0, one per thread and one per file). step4-pr1.sh q1: the 38-cell matrix identical to the reference, 0 warnings.
 - 10:44 Verifiers done. Commit dbcb28387f made over ssh on delphi-3bda (12 files, +149/-338). The hook printed "Can't find lefthook in PATH" and let the commit through, so its three checks were run by hand. 10:45 Pushed. 111 threads resolved, PR comment 6198511376 posted, reply 4286355661 on the `(void)dest` thread.
 - 10:49 Tools and data copied to exec/pr1-20261010/review-20261015/. split-status.md and the memory note updated. 10:50 Report given in chat with the options table.
 - 11:27 The user: the "Words used here" paragraph should go, obey Rule 0 (reject the page_tok_result rewrite), delete the whole `(void)dest;` statement.
-- 11:28 A `git blame` Rule 0 check over every removed line of the first commit (rule0_blame.py): the page_tok_result line was the only pre-PR line touched. The three edits applied. 11:29 step4-pr1.sh q2: 0 warnings in every cell.
+- 11:28 A `git blame` Rule 0 check over every removed line of the first commit (rule0_blame.py): the page_tok_result line was the only pre-PR line touched. The three edits applied. 11:29 step4-pr1.sh q2: 0 warnings in every cell. (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/tools/rule0_blame.py)
 - 11:31 Commit 7ce378934f made over ssh on delphi-3bda (3 files, +3/-6) and pushed. PR comment 6199420340 posted. All 113 threads resolved.
 - 11:33 No GitHub Actions run appeared for either new head. PR 4868 is CONFLICTING with main (mergeStateStatus DIRTY): main has moved 101 commits since the merge base, and config/test-benchmarks.json conflicts. `git merge-tree` showed PR 4887 now conflicts with its base in 9 hunks of 6 files. 11:35 split-status.md and memory updated. Report given in chat.
 - 12:30 The context was summarized. No further records in this transcript.
@@ -105,38 +105,38 @@ Checks before each commit: the 38-cell syntax matrix identical to the reference 
 
 Report page:
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/checks-20261015.html (20,423 bytes). Summary of the two checks: counts per PR, rule and checker, the review list, the dropped findings.
-  - generator: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/checks-20261015/tools/gen_page.py (12,409 bytes). It takes the scratchpad folder and the output path as arguments
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/checks-20261015.html (20,423 bytes). Summary of the two checks: counts per PR, rule and checker, the review list, the dropped findings. (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015.html)
+  - generator: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/checks-20261015/tools/gen_page.py (12,409 bytes). It takes the scratchpad folder and the output path as arguments (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015/tools/gen_page.py)
   - input: the findings JSON files (out1/, out2/ in the scratchpad, copied to checks-20261015/findings/) and the posting logs (post/log-*.txt, copied to checks-20261015/reviews/)
-  - input built by: build_comments.py and merge_results.py from the two workflow results (wf_a5efbc70-452 run 1, run 2), and post_checker.py / post_checker2.py logs
+  - input built by: build_comments.py and merge_results.py from the two workflow results (wf_a5efbc70-452 run 1, run 2), and post_checker.py / post_checker2.py logs (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015/tools/merge_results.py)
   - sources: the three PR diffs at heads 9d5c7a389b, 82d05e94be, 0ee8671d35 (checks-20261015/annot/pr*.diff), and the GitHub reviews listed above
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/checks-20261015/tools/gen_page.py <scratchpad dir> <OUT>`. Unavailable as-is once the scratchpad is cleaned, because the script reads the out1/, out2/ and post/ subfolders of the scratchpad (the record folder holds copies under findings/ and reviews/)
 
 Record folder claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/checks-20261015/ (1,859,549 bytes in all):
 
-- tools/: split_diff.py (2,753 bytes), build_comments.py (4,951), merge_results.py (1,098), post_review.py (2,329), post_checker.py (3,481), post_checker2.py (5,731), gen_page.py (12,409), workflow-run1.js (19,428), workflow-run2.js (19,553).
-- findings/: 4824-A.json (23,921 bytes), 4824-B.json (209,030), 4868-A.json (10,913), 4868-B.json (106,717), 4887-B.json (34,726), dropped.json (3,927), merged-with-votes.json.gz (259,521, every refuter vote), summary.md (995).
-- reviews/: the 15 review bodies body-<pr>-<A|B>-<part>.md, the two templates, log-4824-B.txt, log-4887-B.txt, log-chain2.txt, payload-4887-A-1.json.
-- annot/: pr4824.diff (267,290 bytes), pr4868.diff (141,961), pr4887.diff (45,626) and per-file annotated diffs with new-file line numbers under 4824/, 4868/, 4887/.
+- tools/: split_diff.py (2,753 bytes), build_comments.py (4,951), merge_results.py (1,098), post_review.py (2,329), post_checker.py (3,481), post_checker2.py (5,731), gen_page.py (12,409), workflow-run1.js (19,428), workflow-run2.js (19,553). (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015/tools/post_review.py)
+- findings/: 4824-A.json (23,921 bytes), 4824-B.json (209,030), 4868-A.json (10,913), 4868-B.json (106,717), 4887-B.json (34,726), dropped.json (3,927), merged-with-votes.json.gz (259,521, every refuter vote), summary.md (995). (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015/findings/4824-A.json)
+- reviews/: the 15 review bodies body-<pr>-<A|B>-<part>.md, the two templates, log-4824-B.txt, log-4887-B.txt, log-chain2.txt, payload-4887-A-1.json. (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015/reviews/log-4824-B.txt)
+- annot/: pr4824.diff (267,290 bytes), pr4868.diff (141,961), pr4887.diff (45,626) and per-file annotated diffs with new-file line numbers under 4824/, 4868/, 4887/. (preserved: artifacts/intel-amx/pr3879/split-4424/checks-20261015/annot/pr4824.diff)
 
 Apply record claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/review-20261015/ (1,016,727 bytes in all):
 
-- comment-threads-v1.patch (67,246 bytes), comment-threads-v2.patch (67,254, after clang-format), commit-threads.patch (67,254, the commit as made), followup-v1.patch and commit-followup.patch (1,909 each).
-- msg-comments.txt (1,577 bytes) and msg-followup.txt (773): the two commit messages. commit-on-3bda.sh (1,070) and commit-followup-on-3bda.sh (853): the ssh commit scripts.
-- step4-pr1.sh (2,396 bytes), step4-q1.out (1,296), step4-q2.out (752), matrix-q1.log and matrix-q2.log (2,383 each), format-q1.log and format-q2.log (empty), pr1check-out-q1/ and pr1check-out-q2/ (the per-cell compile logs, all empty, and summary.txt).
-- data/: threads.json (166,546 bytes), decisions.json (116,983), work.json (104,988), wf1-result.json (128,856), wf2-result.json (124,720), applied-ids.txt (555), pr-comment.md (1,160), reply-void.md (885), void-test.out (329), items/ (one JSON per finding).
-- tools/: threads.py, classify.py, decide.py, apply_edits.py, rule0_blame.py and the GitHub action scripts (copied at 10:49 and 11:33).
+- comment-threads-v1.patch (67,246 bytes), comment-threads-v2.patch (67,254, after clang-format), commit-threads.patch (67,254, the commit as made), followup-v1.patch and commit-followup.patch (1,909 each). (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/comment-threads-v1.patch)
+- msg-comments.txt (1,577 bytes) and msg-followup.txt (773): the two commit messages. commit-on-3bda.sh (1,070) and commit-followup-on-3bda.sh (853): the ssh commit scripts. (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/msg-comments.txt)
+- step4-pr1.sh (2,396 bytes), step4-q1.out (1,296), step4-q2.out (752), matrix-q1.log and matrix-q2.log (2,383 each), format-q1.log and format-q2.log (empty), pr1check-out-q1/ and pr1check-out-q2/ (the per-cell compile logs, all empty, and summary.txt). (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/matrix-q1.log)
+- data/: threads.json (166,546 bytes), decisions.json (116,983), work.json (104,988), wf1-result.json (128,856), wf2-result.json (124,720), applied-ids.txt (555), pr-comment.md (1,160), reply-void.md (885), void-test.out (329), items/ (one JSON per finding). (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/data/pr-comment.md)
+- tools/: threads.py, classify.py, decide.py, apply_edits.py, rule0_blame.py and the GitHub action scripts (copied at 10:49 and 11:33). (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/tools/decide.py)
 
 Status and memory:
 
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md (270,899 bytes at 2026-10-15 16:02). Three sections appended by this session: "Checks on #4824, #4868, #4887 ... (2026-10-15 05:24 UTC)" (line 943), "PR-1 (#4868) review threads ... applied: commit dbcb28387f pushed (2026-10-15 17:5x UTC)" (line 981), "PR-1 (#4868) follow-up commit 7ce378934f ... (2026-10-15 18:4x UTC)" (line 1035, with the CI-conflict bullets).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/checks-20261015.md (4,327 bytes). The review ids, the record layout, the two traps, and two UPDATE paragraphs for the apply work. Hand-written, `generator: none`.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/named-bool-rule.md (1,926 bytes). The rule text, why, and how to apply it when checking a diff.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/checks-20261015.md (4,327 bytes). The review ids, the record layout, the two traps, and two UPDATE paragraphs for the apply work. Hand-written, `generator: none`. (preserved: artifacts/intel-amx/memory/split-4424/checks-20261015.md)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/named-bool-rule.md (1,926 bytes). The rule text, why, and how to apply it when checking a diff. (preserved: artifacts/intel-amx/memory/split-4424/named-bool-rule.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md (10,006 bytes). Two index lines added.
 
 Workflow scripts (session store):
 
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/529be9bf-943d-4be8-8266-aff7c422c30e/workflows/scripts/pr-two-checkers-wf_a5efbc70-452.js (19,428 bytes), its backup pr-two-checkers-wf_a5efbc70-452.js.v1.bak (18,563 bytes, before the rule edit), and pr-two-checkers-run2.js (19,553 bytes). The 10-15 edit and verify workflows (wf_2e80ed2f-944, wf_d1d9cc79-fd0) were written inline in the scratchpad (act4868/wf2.js) and copied into the apply record's tools/.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/529be9bf-943d-4be8-8266-aff7c422c30e/workflows/scripts/pr-two-checkers-wf_a5efbc70-452.js (19,428 bytes), its backup pr-two-checkers-wf_a5efbc70-452.js.v1.bak (18,563 bytes, before the rule edit), and pr-two-checkers-run2.js (19,553 bytes). The 10-15 edit and verify workflows (wf_2e80ed2f-944, wf_d1d9cc79-fd0) were written inline in the scratchpad (act4868/wf2.js) and copied into the apply record's tools/. (preserved: artifacts/intel-amx/exec/pr1-20261010/review-20261015/tools/wf2.js)
 
 Scratchpad (may be cleaned up): claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/529be9bf-943d-4be8-8266-aff7c422c30e/scratchpad/ (17,118,577 bytes): diffs/, annot/, tools/, bodies/, post/, out1/, out2/, act4868/, result1.json and the task outputs.
 
@@ -145,6 +145,22 @@ Code:
 - Commit dbcb28387f60bf713256d00bd5134ed08597dfb3 positron-ai/tron jhan-vnnik-1-layout ("comments: apply the 2026-10-15 review threads of the two style checks", 2026-10-15 17:44 UTC), pushed.
 - Commit 7ce378934fcee1d242148fd3bdc730562199a0aa positron-ai/tron jhan-vnnik-1-layout ("comments: three follow-ups of the 2026-10-15 review threads", 2026-10-15 18:31 UTC), pushed.
 - Worktree claude-agentsrv:/home/jhan/workspace/ai-runs/tron-split-pr1 (NFS-shared with delphi-3bda, where the commits were made).
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr1-20261010/review-20261015/` (9 files)
+- `artifacts/intel-amx/exec/pr1-20261010/review-20261015/data/` (7 files)
+- `artifacts/intel-amx/exec/pr1-20261010/review-20261015/data/items/` (111 files)
+- `artifacts/intel-amx/exec/pr1-20261010/review-20261015/pr1check-out-q1/` (2 files)
+- `artifacts/intel-amx/exec/pr1-20261010/review-20261015/pr1check-out-q2/` (2 files)
+- `artifacts/intel-amx/exec/pr1-20261010/review-20261015/tools/` (4 files)
+- `artifacts/intel-amx/pr3879/split-4424/checks-20261015/annot/` (2 files)
+- `artifacts/intel-amx/pr3879/split-4424/checks-20261015/annot/4824/` (29 files)
+- `artifacts/intel-amx/pr3879/split-4424/checks-20261015/annot/4868/` (24 files)
+- `artifacts/intel-amx/pr3879/split-4424/checks-20261015/annot/4887/` (11 files)
+- `artifacts/intel-amx/pr3879/split-4424/checks-20261015/findings/` (7 files)
+- `artifacts/intel-amx/pr3879/split-4424/checks-20261015/reviews/` (19 files)
+- `artifacts/intel-amx/pr3879/split-4424/checks-20261015/tools/` (3 files)
 
 ## Current state
 

@@ -1,0 +1,404 @@
+# PR 4868 file h/tron/models/kv_cache.hpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -28,6 +28,7 @@
+   28|  #include "tron/simd/auto.hpp"
+   29|  #include "tron/simd/fp32.hpp"
+   30|  #include "tron/simd/types.hpp"
+   31| +#include "tron/tensor/k_vnni.hpp"
+   32|  #include "tron/tensor/slice.hpp"  // IWYU pragma: keep
+   33|  #include "tron/tensor/tensor.hpp"
+   34|  #include "tron/tensor/v_vnni.hpp"
+     |@@ -571,7 +572,8 @@ void log_kv_footprint(int64_t delta_bytes, int64_t delta_books) {
+  572|  // per-arena prefix byte offsets, and whether a model-layer prefix may select
+  573|  // fewer logical slots. Allocation, physical addressing, page completion, append,
+  574|  // packed-V storage (through the typed operations of h/tron/tensor/v_vnni.hpp,
+     | -// see Note [VNNI Packed V layout]), and EAGLE views therefore have one implementation.
+  575| +// see Note [VNNI Packed V layout]), packed-K storage (h/tron/tensor/k_vnni.hpp,
+  576| +// see Note [K VNNI storage]), and EAGLE views therefore have one implementation.
+  577|  //
+  578|  // Uniform storage retains its [slot][head][page] ordering. A value-described
+  579|  // layout replaces the constant slot stride with retention-group prefix byte
+     |@@ -646,6 +648,70 @@ struct kv_slot_offsets final {
+  648|    bool valid = true;
+  649|  };
+  650|  
+  651| +// Note [K VNNI storage]
+  652| +// ~~~~~~~~~~~~~~~~~~~~~
+  653| +// With TRON_K_VNNI (CMake option, default OFF) the K plane of every
+  654| +// 128-dimension head holds the VNNI pair-interleaved layout of
+  655| +// h/tron/tensor/k_vnni.hpp instead of one row per token. The bytes and the
+  656| +// page capacity are the same. Only the order of the values changes. The gate
+  657| +// is k_vnni::layout_on<head_size>, a property of the storage geometry. So
+  658| +// every reader and writer of a slot sees the same layout, whatever the query
+  659| +// type and whether AMX (Intel Advanced Matrix Extensions) is available at run
+  660| +// time. V is unchanged. Its pair-interleaved layout is already the AMX B
+  661| +// operand (the second matrix of the tile multiply).
+  662| +//
+  663| +// The plane is typed. kv_block::k is a k_vnni_tensor (the owner of the 16 KiB
+  664| +// plane) for a VNNI slot and a bf16 array for a row-major slot. The plane is
+  665| +// reached only through the owner's views (k_vnni_view) and the typed
+  666| +// operations of h/tron/tensor/k_vnni.hpp (store_row, load_row, copy_token).
+  667| +// No raw plane pointer leaves the cache. detail::k_vnni_access is
+  668| +// the one route from a view to the plane address, for those operations, the
+  669| +// score reader k_vnni::qk_group and the test-only book::fill_random. That
+  670| +// mirrors the packed V plane (Note [VNNI Packed V layout]).
+  671| +//
+  672| +// Why: the VNNI plane is the B operand layout of the AMX tile multiply. An
+  673| +// AMX QK kernel can read it directly and compute the scores S = Q . K^T in
+  674| +// the orientation the softmax wants. The transposing store of the row-major
+  675| +// kernel (Note [QK orientation] in amx_attn_iface.hpp) is then not needed.
+  676| +// That kernel is not part of this change.
+  677| +//
+  678| +// Consumers of a VNNI slot, and how each one changes:
+  679| +//   1. save_k (model.hpp) stores every token's row with page::set_k_row. That
+  680| +//      store scatters the 64 dimension pairs into the token's column
+  681| +//      (store_row). It issues 4 AVX-512 scatters that together write 4 bytes
+  682| +//      into each of 64 64-byte pair rows. The row-major store was 4 64-byte
+  683| +//      stores per token. TRON_AMX_DISABLE leaves the store untouched.
+  684| +//   2. the dense AMX page path (self_attention.hpp) is not compiled for a
+  685| +//      VNNI slot. Its kernel reads row-major K. Every page of a VNNI slot
+  686| +//      takes the software path (temporary until the VNNI AMX kernel lands).
+  687| +//   3. the software path, for every page of a VNNI slot, uses k_vnni::qk_group
+  688| +//      with page::k_packed, the read-only view of the plane. That reader is
+  689| +//      AVX-512 code with one token per vector
+  690| +//      lane. It needs no per-token gather and no horizontal reduction. The
+  691| +//      row-major dotter loop (the per-token dot-product loop of
+  692| +//      self_attention.hpp) is
+  693| +//      compiled only for row-major slots.
+  694| +//   4. the FPGA (field-programmable gate array) staging path (gof::populate ->
+  695| +//      shuffle_k_entry) needs one row per token. So page_info::k_head_fn
+  696| +//      materializes it with page::get_k_row into caller-owned scratch.
+  697| +//      v_head_fn already does the same for V. The staging bytes and the HBM
+  698| +//      (High Bandwidth Memory, the FPGA device memory) layout are unchanged.
+  699| +//   5. page copies (copy_storage_slot: append and defrag) copy a whole page
+  700| +//      as one owner assignment (dst_block.k = src_block.k) when the range
+  701| +//      covers the page. A token's position inside the page decides its column.
+  702| +//      So every other range moves token by token (copy_token).
+  703| +//   6. the row view page::k() does not exist for VNNI slots. A token's values
+  704| +//      are not contiguous there. The layout-agnostic set_k_row / get_k_row
+  705| +//      accessors exist for every slot. They take one token's row as a typed
+  706| +//      view (const_k_row_view / k_row_view).
+  707| +// The kill switch keeps the layout. With TRON_AMX_DISABLE=1 a TRON_K_VNNI
+  708| +// binary runs the AVX-512 VNNI reader, not the row-major dotter. So it is an
+  709| +// AMX-off run of the same layout, not a rollback to the row-major binary's
+  710| +// numerics. The fp32 (32-bit float) add order of the two readers differs (see
+  711| +// the numerics contract in Note [AMX attention dispatch]). Until the VNNI AMX
+  712| +// kernel is merged, TRON_AMX_DISABLE=1 changes no score and no visit path for
+  713| +// 128-dimension heads. No AMX visit can occur for a VNNI slot.
+  714| +
+  715|  // A kv_block holds two planes, K and V. Each plane is
+  716|  // page_size tokens x head_size dims of bf16, so a block's size in bytes is
+  717|  // KV_BLOCK_PLANES_2 * page_size * head_size * sizeof(bf16).
+     |@@ -1217,9 +1283,10 @@ struct alignas(64) book final
+ 1283|    // Fill all kv_block data with random values from the given generator.
+ 1284|    // For testing only.  Writes raw bf16 data that bypasses the zero-init
+ 1285|    // V slot invariant (see Note [Zero-Initialized V Slots]). This whole-block
+     | -  // fill is the one documented exception to the typed packed-V access rule
+     | -  // (see Note [VNNI Packed V layout] in h/tron/tensor/v_vnni.hpp): it interprets no
+     | -  // coordinates and marks no token complete.
+ 1286| +  // fill is the one documented exception to the typed packed-V and packed-K
+ 1287| +  // access rules (Note [VNNI Packed V layout] in h/tron/tensor/v_vnni.hpp, Note
+ 1288| +  // [K VNNI storage] above): it interprets no coordinates and marks no token
+ 1289| +  // complete.
+ 1290|    template <typename Gen>
+ 1291|    void fill_random(Gen& gen) noexcept {
+ 1292|      std::normal_distribution<> dis(0.0, 1.0);
+     |@@ -1456,9 +1523,12 @@ struct alignas(64) book final
+ 1523|    // with std::launder. A plain cast would still point at the byte, not at the
+ 1524|    // kv_block that lives there ([expr.static.cast], [basic.life], [ptr.launder]).
+ 1525|    //
+     | -  // K and V are separate bf16 arrays. Fill each array separately, and compute
+     | -  // SIMD load addresses within V with bf16 pointers. SIMD operations still use
+     | -  // compiler intrinsics, but do not require vector objects in the stored plane.
+ 1526| +  // K and V are separate members: a bf16 array, or a trivially copyable owner
+ 1527| +  // (k_vnni_tensor for packed K, v_vnni_tensor for packed V). Fill each member
+ 1528| +  // separately. SIMD load addresses inside a packed plane come from the plane's
+ 1529| +  // access helper (detail::k_vnni_access, detail::v_vnni_access). SIMD
+ 1530| +  // operations still use compiler intrinsics, but do not require vector
+ 1531| +  // objects in the stored plane.
+ 1532|  
+ 1533|    void clear_kv_storage() noexcept {
+ 1534|      retained_data.reset();
+     |@@ -1648,8 +1718,16 @@ struct alignas(64) book final
+ 1718|      for (size_t kv_head = 0; kv_head < geometry.n_kv_heads; ++kv_head)
+ 1719|        for (size_t pg = 0; pg < n_pages; ++pg) {
+ 1720|          auto& block = kv_block_at_storage<geometry>(offset, kv_head, pg);
+     | -        for (auto& value : block.k)
+     | -          value = static_cast<bf16>(distribution(gen));
+ 1721| +        if constexpr (k_vnni::layout_on<geometry.head_size>) {
+ 1722| +          bf16* k = detail::k_vnni_access::plane(block.k.as_view());
+ 1723| +          for (size_t i = 0; i < page_size * geometry.head_size; ++i) {
+ 1724| +            k[i] = static_cast<bf16>(distribution(gen));
+ 1725| +          }
+ 1726| +        } else {
+ 1727| +          for (auto& value : block.k) {
+ 1728| +            value = static_cast<bf16>(distribution(gen));
+ 1729| +          }
+ 1730| +        }
+ 1731|          bf16* v = detail::v_vnni_access::plane(block.v.as_view());
+ 1732|          for (size_t i = 0; i < page_size * geometry.head_size; ++i)
+ 1733|            v[i] = static_cast<bf16>(distribution(gen));
+     |@@ -1839,17 +1917,24 @@ struct alignas(64) page final {
+ 1917|      spdlog::info("KV page {} with {} tokens starting at {}", ix, count(), lo);
+ 1918|    }
+ 1919|  
+     | -  // K data indexed by [token][head element].
+ 1920| +  // K data indexed by [token][head element]: one contiguous row per token.
+ 1921| +  // Not available for VNNI slots (see Note [K VNNI storage]). set_k_row /
+ 1922| +  // get_k_row below serve both layouts.
+ 1923|    TRON(nodiscard, inline, pure)
+ 1924|    auto k(kv_slot_id slot, size_t kv_head) noexcept TRON(this_lifetimebound)
+     | -  requires(layout_t::uniform_geometry) { return kv_block(slot, kv_head).k_view(); }
+ 1925| +  requires(layout_t::uniform_geometry && !k_vnni::layout_on<head_size>) {
+ 1926| +    return kv_block(slot, kv_head).k_view();
+ 1927| +  }
+ 1928|  
+ 1929|    TRON(nodiscard, inline, pure)
+ 1930|    auto k(kv_slot_id slot, size_t kv_head) const noexcept TRON(this_lifetimebound)
+     | -  requires(layout_t::uniform_geometry) { return kv_block(slot, kv_head).k_view(); }
+ 1931| +  requires(layout_t::uniform_geometry && !k_vnni::layout_on<head_size>) {
+ 1932| +    return kv_block(slot, kv_head).k_view();
+ 1933| +  }
+ 1934|  
+ 1935|    template <kv_geometry geometry>
+     | -    requires(book_t::template declares_geometry<geometry>())
+ 1936| +    requires(book_t::template declares_geometry<geometry>() &&
+ 1937| +             !k_vnni::layout_on<geometry.head_size>)
+ 1938|    TRON(nodiscard, inline, pure)
+ 1939|    auto k(kv_slot_id slot, size_t kv_head) noexcept TRON(this_lifetimebound)
+ 1940|    {
+     |@@ -1857,7 +1942,8 @@ struct alignas(64) page final {
+ 1942|    }
+ 1943|  
+ 1944|    template <kv_geometry geometry>
+     | -    requires(book_t::template declares_geometry<geometry>())
+ 1945| +    requires(book_t::template declares_geometry<geometry>() &&
+ 1946| +             !k_vnni::layout_on<geometry.head_size>)
+ 1947|    TRON(nodiscard, inline, pure)
+ 1948|    auto k(kv_slot_id slot, size_t kv_head) const noexcept TRON(this_lifetimebound)
+ 1949|    {
+     |@@ -1868,15 +1954,20 @@ struct alignas(64) page final {
+ 1954|    TRON(nodiscard, inline, pure)
+ 1955|    auto k(kv_slot_id slot, size_t kv_head, size_t i_page) noexcept
+ 1956|        TRON(this_lifetimebound)
+     | -  requires(layout_t::uniform_geometry) { return k(slot, kv_head)[i_page]; }
+ 1957| +  requires(layout_t::uniform_geometry && !k_vnni::layout_on<head_size>) {
+ 1958| +    return k(slot, kv_head)[i_page];
+ 1959| +  }
+ 1960|  
+ 1961|    TRON(nodiscard, inline, pure)
+ 1962|    auto k(kv_slot_id slot, size_t kv_head, size_t i_page) const noexcept
+ 1963|        TRON(this_lifetimebound)
+     | -  requires(layout_t::uniform_geometry) { return k(slot, kv_head)[i_page]; }
+ 1964| +  requires(layout_t::uniform_geometry && !k_vnni::layout_on<head_size>) {
+ 1965| +    return k(slot, kv_head)[i_page];
+ 1966| +  }
+ 1967|  
+ 1968|    template <kv_geometry geometry>
+     | -    requires(book_t::template declares_geometry<geometry>())
+ 1969| +    requires(book_t::template declares_geometry<geometry>() &&
+ 1970| +             !k_vnni::layout_on<geometry.head_size>)
+ 1971|    TRON(nodiscard, inline, pure)
+ 1972|    auto k(kv_slot_id slot, size_t kv_head, size_t i_page) noexcept
+ 1973|        TRON(this_lifetimebound)
+     |@@ -1885,7 +1976,8 @@ struct alignas(64) page final {
+ 1976|    }
+ 1977|  
+ 1978|    template <kv_geometry geometry>
+     | -    requires(book_t::template declares_geometry<geometry>())
+ 1979| +    requires(book_t::template declares_geometry<geometry>() &&
+ 1980| +             !k_vnni::layout_on<geometry.head_size>)
+ 1981|    TRON(nodiscard, inline, pure)
+ 1982|    auto k(kv_slot_id slot, size_t kv_head, size_t i_page) const noexcept
+ 1983|        TRON(this_lifetimebound)
+     |@@ -1893,6 +1985,82 @@ struct alignas(64) page final {
+ 1985|      return k<geometry>(slot, kv_head)[i_page];
+ 1986|    }
+ 1987|  
+ 1988| +  // This page's packed K plane for one KV head of one slot, read-only: the
+ 1989| +  // argument type of the layout-specific score reader (the AVX-512 reader
+ 1990| +  // k_vnni::qk_group, one token per lane). VNNI slots only (Note [K VNNI
+ 1991| +  // storage]). Internal cache writes take writable views from the block owner
+ 1992| +  // instead.
+ 1993| +  template <kv_geometry geometry>
+ 1994| +    requires(book_t::template declares_geometry<geometry>() &&
+ 1995| +             k_vnni::layout_on<geometry.head_size>)
+ 1996| +  TRON(nodiscard, inline, pure)
+ 1997| +  k_vnni_view<const bf16, page_size, geometry.head_size> k_packed(
+ 1998| +      kv_slot_id slot, size_t kv_head) const noexcept TRON(this_lifetimebound)
+ 1999| +  {
+ 2000| +    return kv_block<geometry>(slot, kv_head).k.as_view();
+ 2001| +  }
+ 2002| +
+ 2003| +  // Layout-agnostic K row store: writes the token's head_size bf16 values (one
+ 2004| +  // contiguous row, as a read-only typed view) into whichever layout the slot
+ 2005| +  // uses (Note [K VNNI storage]). The row's `aligned` and `dma` flags are the
+ 2006| +  // caller's. The packed store reads the row with unaligned loads.
+ 2007| +  template <kv_geometry geometry, bool Aligned, bool Dma>
+ 2008| +    requires(book_t::template declares_geometry<geometry>())
+ 2009| +  TRON(inline)
+ 2010| +  void set_k_row(kv_slot_id slot,
+ 2011| +      size_t kv_head,
+ 2012| +      size_t i_page,
+ 2013| +      const_k_row_view<geometry.head_size, Aligned, Dma> row) noexcept {
+ 2014| +    TRON_ASSERT_LT(i_page, page_size);
+ 2015| +    if constexpr (k_vnni::layout_on<geometry.head_size>) {
+ 2016| +      store_row(kv_block<geometry>(slot, kv_head).k.as_view(), i_page, row);
+ 2017| +    } else {
+ 2018| +      std::memcpy(kv_block<geometry>(slot, kv_head).k_at(i_page).data, row.data,
+ 2019| +          geometry.head_size * sizeof(bf16));
+ 2020| +    }
+ 2021| +  }
+ 2022| +
+ 2023| +  // Layout-agnostic K row load: the inverse of set_k_row. The destination row
+ 2024| +  // is a writable typed view. The packed load writes it with unaligned stores.
+ 2025| +  template <kv_geometry geometry, bool Aligned, bool Dma>
+ 2026| +    requires(book_t::template declares_geometry<geometry>())
+ 2027| +  TRON(inline)
+ 2028| +  void get_k_row(kv_slot_id slot,
+ 2029| +      size_t kv_head,
+ 2030| +      size_t i_page,
+ 2031| +      k_row_view<geometry.head_size, Aligned, Dma> row) const noexcept {
+ 2032| +    TRON_ASSERT_LT(i_page, page_size);
+ 2033| +    if constexpr (k_vnni::layout_on<geometry.head_size>) {
+ 2034| +      load_row(kv_block<geometry>(slot, kv_head).k.as_view(), i_page, row);
+ 2035| +    } else {
+ 2036| +      std::memcpy(row.data, kv_block<geometry>(slot, kv_head).k_at(i_page).data,
+ 2037| +          geometry.head_size * sizeof(bf16));
+ 2038| +    }
+ 2039| +  }
+ 2040| +
+ 2041| +  // The uniform-geometry forms of set_k_row / get_k_row.
+ 2042| +  template <bool Aligned, bool Dma>
+ 2043| +  TRON(inline)
+ 2044| +  void set_k_row(kv_slot_id slot,
+ 2045| +      size_t kv_head,
+ 2046| +      size_t i_page,
+ 2047| +      const_k_row_view<head_size, Aligned, Dma> row) noexcept
+ 2048| +    requires(layout_t::uniform_geometry)
+ 2049| +  {
+ 2050| +    set_k_row<layout_t::primary_geometry>(slot, kv_head, i_page, row);
+ 2051| +  }
+ 2052| +
+ 2053| +  template <bool Aligned, bool Dma>
+ 2054| +  TRON(inline)
+ 2055| +  void get_k_row(kv_slot_id slot,
+ 2056| +      size_t kv_head,
+ 2057| +      size_t i_page,
+ 2058| +      k_row_view<head_size, Aligned, Dma> row) const noexcept
+ 2059| +    requires(layout_t::uniform_geometry)
+ 2060| +  {
+ 2061| +    get_k_row<layout_t::primary_geometry>(slot, kv_head, i_page, row);
+ 2062| +  }
+ 2063| +
+ 2064|    // The actual V data for a token in this page.
+ 2065|    // Packed V: the plane is a v_vnni_tensor (see Note [VNNI Packed V layout] in
+ 2066|    // h/tron/tensor/v_vnni.hpp), pair-interleaved for the SIMD dot products, so
+     |@@ -2115,15 +2283,34 @@ struct alignas(64) page final {
+ 2283|        size_t dst_begin,
+ 2284|        size_t count) noexcept {
+ 2285|      for (size_t kv_head = 0; kv_head < geometry.n_kv_heads; ++kv_head) {
+     | -      // The .k data is contiguous, so we can simply memcpy each head.
+     | -      constexpr size_t k_size = geometry.head_size * sizeof(bf16);
+     | -      const bf16* src =
+     | -          src_page->template kv_block_at_storage<geometry>(storage_offset, kv_head)
+     | -              .k_at(src_begin)
+     | -              .data;
+     | -      bf16* dst =
+     | -          kv_block_at_storage<geometry>(storage_offset, kv_head).k_at(dst_begin).data;
+     | -      memcpy(dst, src, count * k_size);
+ 2286| +      if constexpr (k_vnni::layout_on<geometry.head_size>) {
+ 2287| +        // VNNI plane (Note [K VNNI storage]): a token's column depends on its
+ 2288| +        // offset in the page. So a whole-page copy copies the owner (the
+ 2289| +        // defaulted assignment of the trivially copyable k_vnni_tensor). Every
+ 2290| +        // other range moves token by token (copy_token in
+ 2291| +        // h/tron/tensor/k_vnni.hpp).
+ 2292| +        auto const& src_block =
+ 2293| +            src_page->template kv_block_at_storage<geometry>(storage_offset, kv_head);
+ 2294| +        auto& dst_block = kv_block_at_storage<geometry>(storage_offset, kv_head);
+ 2295| +        if (src_begin == 0 && dst_begin == 0 && count == page_size) {
+ 2296| +          dst_block.k = src_block.k;
+ 2297| +        } else {
+ 2298| +          for (size_t i = 0; i < count; ++i) {
+ 2299| +            copy_token(dst_block.k.as_view(), dst_begin + i, src_block.k.as_view(),
+ 2300| +                src_begin + i);
+ 2301| +          }
+ 2302| +        }
+ 2303| +      } else {
+ 2304| +        // The .k data is contiguous, so we can simply memcpy each head.
+ 2305| +        constexpr size_t k_size = geometry.head_size * sizeof(bf16);
+ 2306| +        const bf16* src =
+ 2307| +            src_page->template kv_block_at_storage<geometry>(storage_offset, kv_head)
+ 2308| +                .k_at(src_begin)
+ 2309| +                .data;
+ 2310| +        bf16* dst =
+ 2311| +            kv_block_at_storage<geometry>(storage_offset, kv_head).k_at(dst_begin).data;
+ 2312| +        memcpy(dst, src, count * k_size);
+ 2313| +      }
+ 2314|        // The .v data is interleaved in token pairs, so we copy individual tokens.
+ 2315|        for (size_t i = 0; i < count; ++i)
+ 2316|          append_v<geometry>(
+     |@@ -2330,9 +2517,23 @@ static const size_t kv_block_alignment = std::max<size_t>(64, chunk_alignment);
+ 2517|  // One kv_block is the KV cache for one KV head in one KV slot.
+ 2518|  template <size_t page_size, size_t head_size>
+ 2519|  struct alignas(kv_block_alignment) kv_block {
+     | -  // Letting p index the token within a page and i index into head_size: k is
+     | -  // indexed as [p * head_size + i], one row of head_size bf16 values per token.
+     | -  alignas(kv_block_alignment) bf16 k[page_size * head_size];
+ 2520| +  // Native K: letting p index the token within a page and i index into
+ 2521| +  // head_size, k is indexed as [p * head_size + i], one row of head_size bf16
+ 2522| +  // values per token. Packed K (TRON_K_VNNI, 128-dimension heads): k is the
+ 2523| +  // typed owner k_vnni_tensor of Note [K VNNI storage]. Both hold
+ 2524| +  // page_size * head_size bf16 values. std::conditional_t only names the
+ 2525| +  // unselected type, so a row-major geometry never instantiates the owner.
+ 2526| +  using native_k_storage = bf16[page_size * head_size];
+ 2527| +  using k_storage = std::conditional_t<k_vnni::layout_on<head_size>,
+ 2528| +      k_vnni_tensor<page_size, head_size>,
+ 2529| +      native_k_storage>;
+ 2530| +  static_assert(std::is_trivially_default_constructible_v<k_storage> &&
+ 2531| +                    std::is_trivially_copyable_v<k_storage> &&
+ 2532| +                    std::is_trivially_destructible_v<k_storage>,
+ 2533| +      "the DMA allocation creates kv_blocks; see Note [KV block lifetime]");
+ 2534| +  static_assert(sizeof(k_storage) == page_size * head_size * sizeof(bf16),
+ 2535| +      "packed K holds the same bytes as native K");
+ 2536| +  alignas(kv_block_alignment) k_storage k;
+ 2537|    // and v is the packed plane (the typed owner v_vnni_tensor): element (p, i)
+ 2538|    // sits at bf16 index (p/2) * 2 * head_size + 2 * i + p%2. Layout: see
+ 2539|    // Note [VNNI Packed V layout] in h/tron/tensor/v_vnni.hpp; pair invariant: see
+     |@@ -2347,30 +2548,28 @@ struct alignas(kv_block_alignment) kv_block {
+ 2548|    // of the hardware prefetcher.
+ 2549|    static_assert(sizeof(k) == sizeof(v));
+ 2550|  
+ 2551| +  // The row-major K views: native K only. A packed plane has no contiguous
+ 2552| +  // rows. It is reached through k.as_view() (Note [K VNNI storage]).
+ 2553|    TRON(nodiscard, inline, pure)
+ 2554|    auto k_view() noexcept TRON(this_lifetimebound)
+     | -  {
+ 2555| +  requires(!k_vnni::layout_on<head_size>) {
+ 2556|      return view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE, seq<page_size, head_size>>{k};
+ 2557|    }
+ 2558|  
+ 2559|    TRON(nodiscard, inline, pure)
+ 2560|    auto k_view() const noexcept TRON(this_lifetimebound)
+     | -  {
+ 2561| +  requires(!k_vnni::layout_on<head_size>) {
+ 2562|      return const_view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE,
+ 2563|          seq<page_size, head_size>>{k};
+ 2564|    }
+ 2565|  
+ 2566|    TRON(nodiscard, inline, pure)
+ 2567|    auto k_at(size_t i_page) noexcept TRON(this_lifetimebound)
+     | -  {
+     | -    return k_view()[i_page];
+     | -  }
+ 2568| +  requires(!k_vnni::layout_on<head_size>) { return k_view()[i_page]; }
+ 2569|  
+ 2570|    TRON(nodiscard, inline, pure)
+ 2571|    auto k_at(size_t i_page) const noexcept TRON(this_lifetimebound)
+     | -  {
+     | -    return k_view()[i_page];
+     | -  }
+ 2572| +  requires(!k_vnni::layout_on<head_size>) { return k_view()[i_page]; }
+ 2573|  };
+ 2574|  
+ 2575|  }  // namespace detail

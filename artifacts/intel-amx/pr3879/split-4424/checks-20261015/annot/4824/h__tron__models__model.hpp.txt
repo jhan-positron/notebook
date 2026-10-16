@@ -1,0 +1,444 @@
+# PR 4824 file h/tron/models/model.hpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -7,11 +7,13 @@
+    7|  #include <atomic>  // For gof_coop_outstanding_
+    8|  #include <cerrno>
+    9|  #include <charconv>
+   10| +#include <chrono>    // For the join watchdog (Note [Shared block save])
+   11|  #include <concepts>  // For std::convertible_to
+   12|  #include <cstdio>    // For std::remove
+   13|  #include <cstdlib>
+   14|  #include <fstream>
+     | -#include <functional>  // For std::function (kv_save_observer_t)
+   15| +#include <functional>   // For std::function (kv_save_observer_t)
+   16| +#include <immintrin.h>  // For _mm_pause (Note [Shared block save])
+   17|  #include <iomanip>
+   18|  #include <limits>
+   19|  #include <mutex>
+     |@@ -1837,6 +1839,13 @@ struct model : noncopyable<model<plugin_type>> {
+ 1839|        // (gof_rodeo_impl dereferences gof_jobs_span). No-op when the queue is empty.
+ 1840|        wait_for_coop_gof();
+ 1841|  
+ 1842| +      // The K blocks this pass completed go to the VNNI layout now: run()
+ 1843| +      // joined its workers and the staging drained, so no reader is left
+ 1844| +      // (Note [K VNNI storage] in kv_cache.hpp). Blocks of a hardware-scored
+ 1845| +      // operation were never queued (Note [Row-major blocks under hardware
+ 1846| +      // attention] there).
+ 1847| +      convert_pending_k_blocks();
+ 1848| +
+ 1849|        // Launch logit delivery
+ 1850|        thread_pool& tp = app_pool();
+ 1851|        for (size_t i = 0; i < logits_chunk_size; ++i)
+     |@@ -3073,14 +3082,288 @@ struct model : noncopyable<model<plugin_type>> {
+ 3082|        }
+ 3083|      }
+ 3084|  
+ 3085| +    // Note [Shared block save]
+ 3086| +    // ~~~~~~~~~~~~~~~~~~~~~~~~
+ 3087| +    // save_k stores the K rows of every token of the minibatch once per
+ 3088| +    // (layer, pass). With the VNNI K layout (VNNI = Vector Neural Network
+ 3089| +    // Instructions, Note [K VNNI storage] in kv_cache.hpp) that store is the
+ 3090| +    // main thread's largest serial piece of work in a prefill layer. The
+ 3091| +    // measurement of 2026-09-14 on delphi-3bda (qwen3-4b, 8 users, prompt
+ 3092| +    // 1024, 128 tokens of each user per pass) gave 0.86 ms per layer, 105 ns
+ 3093| +    // per (token, KV head) row. The attention workers' pending sections wait
+ 3094| +    // behind it. Two things shorten it:
+ 3095| +    //   1. Block save (store_block in h/tron/tensor/k_vnni.hpp, page::set_k_block):
+ 3096| +    //      a run of the pass's tokens that fills one whole 16-token block of a
+ 3097| +    //      page is transposed in registers. It is then written as whole 64-byte
+ 3098| +    //      lines, instead of one 4-byte scatter per (token, dimension pair, line).
+ 3099| +    //      Chosen per run in store_k_block. A shorter run is stored row by
+ 3100| +    //      row into the block's row-major form (Note [Row-major tail block]
+ 3101| +    //      in h/tron/tensor/k_vnni.hpp), also whole lines. A block completed that
+ 3102| +    //      way is queued after the join below and converted to the VNNI layout at
+ 3103| +    //      the forward end (convert_pending_k_blocks, Note [K VNNI storage]
+ 3104| +    //      in kv_cache.hpp), unless the hardware attention scores the
+ 3105| +    //      operation's K (Note [Row-major blocks under hardware attention]
+ 3106| +    //      there: the block stays row-major).
+ 3107| +    //   2. Sharing with the main helpers: in generated plugins the helpers
+ 3108| +    //      are idle while main runs save_k. Their next kernel waits for the
+ 3109| +    //      attention output. So the generated run_main_help calls save_k at
+ 3110| +    //      the same statement position, with the helper's worker_ix. One
+ 3111| +    //      function serves both sides: worker_ix 0 is main, 1 .. n_workers - 1
+ 3112| +    //      are the helpers. Every thread then claims work units (runs of
+ 3113| +    //      consecutive items inside one 16-token block, see the protocol
+ 3114| +    //      below) until none is left. n_workers == 1 never shares (the
+ 3115| +    //      handwritten plugins, and the unit tests except the shared-save case
+ 3116| +    //      of t_llama_unit).
+ 3117| +    // The window protocol (fields in batch::k_store_window, common.hpp):
+ 3118| +    //   - both sides decide with k_store_shared(). A window exists only
+ 3119| +    //     when it says yes. So a helper never waits for a window main does
+ 3120| +    //     not open. (A pass with at most 16 items, such as a decode step, or
+ 3121| +    //     more than 128 workers is not shared.)
+ 3122| +    //   - main cuts the item list into work units (unit_start[]). A unit is a
+ 3123| +    //     run of consecutive items in one 16-token block of one page with the
+ 3124| +    //     same token_jobs_do_kv value. Items of one block that are not
+ 3125| +    //     consecutive fall into several units. Their writers use masked
+ 3126| +    //     stores on disjoint token lanes. So two threads may write one block
+ 3127| +    //     without conflict. When a run fills the block, the block gets one
+ 3128| +    //     full-line store per pair row. Main then zeroes the claim counter
+ 3129| +    //     and `finished`. Next it increments `opened` (release). A helper's
+ 3130| +    //     W-th call waits for `opened` >= W
+ 3131| +    //     (acquire). So window W of a pass is the W-th shared save_k of that
+ 3132| +    //     pass on both sides.
+ 3133| +    //   - every thread claims units with fetch_add on `next_unit`. It stores
+ 3134| +    //     the rows of each unit it claims. A unit index is assigned once. So
+ 3135| +    //     a thread that leaves the claim loop has stored every unit it took.
+ 3136| +    //   - a helper increments `finished` (release) when its claim loop ends.
+ 3137| +    //     Main returns only when `finished` == n_workers - 1 (acquire). Four
+ 3138| +    //     things follow once main returns. Every unit is stored. No helper is
+ 3139| +    //     inside a window main has left. The counters are main's to reset.
+ 3140| +    //     Every row store happens-before the downstream latch count_down
+ 3141| +    //     below.
+ 3142| +    //   - the per-token completion marks and GOF credits stay on main, after
+ 3143| +    //     the join, in q_batch->items order, one token at a time.
+ 3144| +    // The rows a helper reads (ks) are ready for two reasons. Main waited for
+ 3145| +    // every token's K channel before calling save_k (the generated code). The
+ 3146| +    // channel phase cannot advance while main is inside save_k. A helper can
+ 3147| +    // reach its save_k call without main's help. Nothing blocks between its
+ 3148| +    // K/Q rope kernel and this statement. So main's join cannot deadlock. A
+ 3149| +    // join that does not complete within about two minutes
+ 3150| +    // (k_join_timeout_s after the first clock read) aborts with the
+ 3151| +    // counters in the message.
+ 3152| +
+ 3153| +    static constexpr size_t k_store_block = k_vnni::BLOCK_TOKENS_16;
+ 3154| +
+ 3155| +    // Note [K VNNI storage]: the 16-token blocks that this forward pass
+ 3156| +    // completed through runs shorter than a block, for the operations the
+ 3157| +    // hardware attention does not score (Note [Row-major blocks under
+ 3158| +    // hardware attention] in kv_cache.hpp). save_k queues them (main
+ 3159| +    // thread) and convert_pending_k_blocks converts them at the forward end,
+ 3160| +    // after wait_for_coop_gof: the cooperative GOF staging gather of an
+ 3161| +    // earlier minibatch is the reader that can still hold the block's rows
+ 3162| +    // row-major. The storage reference is taken at the save, so a storage
+ 3163| +    // view change cannot redirect the conversion.
+ 3164| +    struct pending_k_block {
+ 3165| +      page* pg;
+ 3166| +      typename page::k_storage_ref storage;
+ 3167| +      uint32_t block;
+ 3168| +    };
+ 3169| +    std::vector<pending_k_block> pending_k_blocks_;
+ 3170| +
+ 3171| +    // Convert the queued blocks (Note [K VNNI storage]). Main thread, after
+ 3172| +    // the plugin's run() returned and the cooperative GOF staging drained.
+ 3173| +    void convert_pending_k_blocks() noexcept {
+ 3174| +      if (pending_k_blocks_.empty()) return;
+ 3175| +      TRACE_EVENT("model", "convert_k_blocks", "blocks", pending_k_blocks_.size());
+ 3176| +      for (pending_k_block const& b : pending_k_blocks_) {
+ 3177| +        b.pg->k_block_to_vnni_at(b.storage, b.block);
+ 3178| +      }
+ 3179| +      pending_k_blocks_.clear();
+ 3180| +    }
+ 3181| +    // The join watchdog of Note [Shared block save]: main reads the clock once
+ 3182| +    // every k_join_clock_spins pause loops. It aborts k_join_timeout_s seconds
+ 3183| +    // after the first clock read.
+ 3184| +    static constexpr uint64_t k_join_clock_spins = 1048576;  // 2^20
+ 3185| +    static_assert((k_join_clock_spins & (k_join_clock_spins - 1)) == 0,
+ 3186| +        "the spin count is a power of two: the check below masks with it");
+ 3187| +    static constexpr int k_join_timeout_s = 120;
+ 3188| +
+ 3189| +    // Whether the K store of this minibatch is shared with the helpers. The
+ 3190| +    // answer is the same on the main thread and on every helper.
+ 3191| +    template <attention_geometry geometry>
+ 3192| +    bool k_store_shared(batch* q_batch, size_t n_workers) const noexcept {
+ 3193| +      if constexpr (!k_vnni::layout_on<geometry.kv.head_size>) {
+ 3194| +        return false;
+ 3195| +      } else {
+ 3196| +        return n_workers > 1 &&
+ 3197| +               n_workers <= q_batch->k_store_window.helper_windows.size() &&
+ 3198| +               q_batch->items.size() > k_store_block;
+ 3199| +      }
+ 3200| +    }
+ 3201| +
+ 3202| +    // Cut the minibatch's items into the work units of Note [Shared block save].
+ 3203| +    // Only main calls this, before it opens the window.
+ 3204| +    void k_store_cut_units(batch* q_batch) noexcept {
+ 3205| +      auto& w = q_batch->k_store_window;
+ 3206| +      auto const& self = *this;
+ 3207| +      const size_t n_items = q_batch->items.size();
+ 3208| +      TRON_ASSERT(n_items + 1 <= w.unit_start.size(),
+ 3209| +          "save_k: {} items exceed the K store window's unit table", n_items);
+ 3210| +      uint32_t n_units = 0;
+ 3211| +      const page* run_page = nullptr;
+ 3212| +      size_t run_block = 0;
+ 3213| +      bool run_kv = false;
+ 3214| +      for (size_t t = 0; t < n_items; ++t) {
+ 3215| +        const token_job_id ix = q_batch->items[t];
+ 3216| +        const bool kv = self.token_jobs_do_kv[ix] != 0;
+ 3217| +        const page* pg = kv ? &page_of(token_jobs[ix]) : nullptr;
+ 3218| +        const size_t block =
+ 3219| +            kv ? static_cast<size_t>(pg->offset_in_page(token_jobs[ix])) / k_store_block
+ 3220| +               : 0;
+ 3221| +        if (t == 0 || kv != run_kv || pg != run_page || block != run_block) {
+ 3222| +          w.unit_start[n_units++] = static_cast<uint32_t>(t);
+ 3223| +          run_kv = kv;
+ 3224| +          run_page = pg;
+ 3225| +          run_block = block;
+ 3226| +        }
+ 3227| +      }
+ 3228| +      w.unit_start[n_units] = static_cast<uint32_t>(n_items);
+ 3229| +      w.n_units = n_units;
+ 3230| +    }
+ 3231| +
+ 3232| +    // Store the K rows (every KV head) of the tokens items[task_begin,
+ 3233| +    // task_end) of q_batch into slot `slot`. VNNI slots: consecutive items
+ 3234| +    // that fill one whole 16-token block of one page are stored as one VNNI
+ 3235| +    // block (set_k_block). A shorter run is stored row by row (set_k_row)
+ 3236| +    // into the block's row-major form. Row-major slots: one row store per
+ 3237| +    // token and KV head (page::k(...).set). Marks, saved-row bits of partial
+ 3238| +    // runs and credits are not touched here. save_k_impl does them after
+ 3239| +    // every store is done.
+ 3240| +    template <attention_geometry geometry, typename kv_buffer_t>
+ 3241| +    void store_k_block(batch* q_batch,
+ 3242| +        kv_slot_id slot,
+ 3243| +        kv_buffer_t& ks,
+ 3244| +        size_t task_begin,
+ 3245| +        size_t task_end) noexcept {
+ 3246| +      auto const& self = *this;
+ 3247| +      auto row_of = [&](token_job_id ix, size_t kv_head) {
+ 3248| +        return slice<geometry.kv.head_size>()(
+ 3249| +            ks[ix].as_view(), kv_head * geometry.kv.head_size);
+ 3250| +      };
+ 3251| +      if constexpr (!k_vnni::layout_on<geometry.kv.head_size>) {
+ 3252| +        for (size_t t = task_begin; t < task_end; ++t) {
+ 3253| +          token_job_id ix = q_batch->items[t];
+ 3254| +          if (!self.token_jobs_do_kv[ix]) continue;
+ 3255| +          token_id tok_ix = token_jobs[ix];
+ 3256| +          page& pg = page_of(tok_ix);
+ 3257| +          int j = pg.offset_in_page(tok_ix);
+ 3258| +          for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+ 3259| +            pg.template k<geometry.kv>(slot, kv_head, j).set(row_of(ix, kv_head));
+ 3260| +          }
+ 3261| +        }
+ 3262| +      } else {
+ 3263| +        using kv_elem_t = std::remove_cv_t<
+ 3264| +            std::remove_pointer_t<decltype(row_of(token_job_id{0}, 0).data)>>;
+ 3265| +        constexpr bool rows_are_bf16 = std::is_same_v<kv_elem_t, bf16>;
+ 3266| +        // A bf16 K buffer is read in place. Any other activation type is
+ 3267| +        // converted to bf16 on the stack first, as the row-major store does
+ 3268| +        // in place.
+ 3269| +        alignas(64) bf16 conv[k_store_block][geometry.kv.head_size];
+ 3270| +        size_t t = task_begin;
+ 3271| +        while (t < task_end) {
+ 3272| +          const token_job_id ix0 = q_batch->items[t];
+ 3273| +          if (!self.token_jobs_do_kv[ix0]) {
+ 3274| +            ++t;
+ 3275| +            continue;
+ 3276| +          }
+ 3277| +          page& pg = page_of(token_jobs[ix0]);
+ 3278| +          const size_t c =
+ 3279| +              static_cast<size_t>(pg.offset_in_page(token_jobs[ix0])) / k_store_block;
+ 3280| +          // The run: consecutive items in block c of this page (tokens
+ 3281| +          // without KV work in between are skipped and do not end the run).
+ 3282| +          token_job_id run_ix[k_store_block];
+ 3283| +          uint8_t run_t[k_store_block];
+ 3284| +          size_t n = 0;
+ 3285| +          __mmask16 present = 0;
+ 3286| +          for (; t < task_end && n < k_store_block; ++t) {
+ 3287| +            const token_job_id ix = q_batch->items[t];
+ 3288| +            if (!self.token_jobs_do_kv[ix]) continue;
+ 3289| +            const token_id tok_ix = token_jobs[ix];
+ 3290| +            if (&page_of(tok_ix) != &pg) break;
+ 3291| +            const size_t j = static_cast<size_t>(pg.offset_in_page(tok_ix));
+ 3292| +            if (j / k_store_block != c) break;
+ 3293| +            const __mmask16 bit = __mmask16(1u << (j % k_store_block));
+ 3294| +            if (present & bit) break;  // the same offset twice: not a run
+ 3295| +            run_ix[n] = ix;
+ 3296| +            run_t[n] = static_cast<uint8_t>(j % k_store_block);
+ 3297| +            present |= bit;
+ 3298| +            ++n;
+ 3299| +          }
+ 3300| +          if (n < k_store_block) {
+ 3301| +            // An incomplete block: row-major rows (Note [Row-major tail block]
+ 3302| +            // in h/tron/tensor/k_vnni.hpp), or the VNNI column when the block
+ 3303| +            // is complete already (a row saved again). set_k_row decides.
+ 3304| +            for (size_t i = 0; i < n; ++i) {
+ 3305| +              const size_t j = c * k_store_block + run_t[i];
+ 3306| +              for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+ 3307| +                auto kout = row_of(run_ix[i], kv_head);
+ 3308| +                if constexpr (rows_are_bf16) {
+ 3309| +                  // The row view keeps the K buffer's alignment and DMA flags.
+ 3310| +                  pg.template set_k_row<geometry.kv>(
+ 3311| +                      slot, kv_head, j, k_source_row(kout));
+ 3312| +                } else {
+ 3313| +                  view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE,
+ 3314| +                      seq<geometry.kv.head_size>>{conv[0]}
+ 3315| +                      .set(kout);
+ 3316| +                  pg.template set_k_row<geometry.kv>(
+ 3317| +                      slot, kv_head, j, k_source_row<geometry.kv.head_size>(conv[0]));
+ 3318| +                }
+ 3319| +              }
+ 3320| +            }
+ 3321| +          } else {
+ 3322| +            // The whole block: the VNNI block save, then its 16 saved-row bits.
+ 3323| +            TRON_ASSERT(present == k_vnni::FULL_BLOCK_0XFFFF,
+ 3324| +                "store_k_block: a run of 16 tokens must cover its block");
+ 3325| +            for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+ 3326| +              const bf16* rows[k_store_block] = {};
+ 3327| +              for (size_t i = 0; i < n; ++i) {
+ 3328| +                auto kout = row_of(run_ix[i], kv_head);
+ 3329| +                if constexpr (rows_are_bf16) {
+ 3330| +                  rows[run_t[i]] = kout.data;
+ 3331| +                } else {
+ 3332| +                  view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE,
+ 3333| +                      seq<geometry.kv.head_size>>{conv[i]}
+ 3334| +                      .set(kout);
+ 3335| +                  rows[run_t[i]] = conv[i];
+ 3336| +                }
+ 3337| +              }
+ 3338| +              pg.template set_k_block<geometry.kv>(slot, kv_head, c, rows);
+ 3339| +            }
+ 3340| +            pg.note_k_block_saved(slot, c);
+ 3341| +          }
+ 3342| +        }
+ 3343| +      }
+ 3344| +    }
+ 3345| +
+ 3346| +    // Every worker of the store calls this (Note [Shared block save]).
+ 3347| +    // Worker 0 is main. It opens the window, stores its share, joins the
+ 3348| +    // helpers, then marks the tokens.
+ 3349| +    // Workers 1 .. n_workers - 1 are main helpers. Each waits for its
+ 3350| +    // window, stores its share and returns.
+ 3351|      template <attention_geometry geometry, typename kv_buffer_t>
+ 3352|      void save_k_impl(batch* q_batch,
+ 3353|          attention_operation_descriptor const& operation,
+     | -        kv_buffer_t& ks) noexcept {
+ 3354| +        kv_buffer_t& ks,
+ 3355| +        size_t worker_ix,
+ 3356| +        size_t n_workers) noexcept {
+ 3357|        static_assert(geometry.valid());
+ 3358|        static_assert(attention_buffer_width<kv_buffer_t> == geometry.kv_width());
+ 3359|        TRON_ASSERT(operation.writes_kv, "attention operation {} does not write KV",
+ 3360|            operation.binding.operation);
+ 3361| +      TRON_ASSERT(worker_ix < n_workers, "save_k: worker_ix {} outside 0..{}",
+ 3362| +          worker_ix, n_workers - 1);
+ 3363| +      const bool is_main = worker_ix == 0;
+ 3364| +      const bool shared = k_store_shared<geometry>(q_batch, n_workers);
+ 3365| +      // An unshared store is main's alone.
+ 3366| +      if (!is_main && !shared) return;
+ 3367|        const attention_binding binding = operation.binding;
+ 3368|        TRACE_EVENT("model", "Save K");
+ 3369|        const model_layer_id layer = binding.model_layer;
+     |@@ -3088,6 +3371,72 @@ struct model : noncopyable<model<plugin_type>> {
+ 3371|        tron_maybe_unused const bool has_hardware_slot =
+ 3372|            geometry == self_attn_t::hardware_geometry &&
+ 3373|            operation_is_hardware_candidate(operation);
+ 3374| +      const size_t n_items = q_batch->items.size();
+ 3375| +      // Update the pages first. That way HW sees the latest K values.
+ 3376| +      if (shared) {
+ 3377| +        // See Note [Shared block save].
+ 3378| +        auto& w = q_batch->k_store_window;
+ 3379| +        const uint32_t n_helpers = static_cast<uint32_t>(n_workers - 1);
+ 3380| +        if (is_main) {
+ 3381| +          k_store_cut_units(q_batch);
+ 3382| +          w.next_unit.store(0, std::memory_order_relaxed);
+ 3383| +          w.finished.store(0, std::memory_order_relaxed);
+ 3384| +          w.opened.fetch_add(1, std::memory_order_release);
+ 3385| +        } else {
+ 3386| +          const uint32_t my_window = ++w.helper_windows[worker_ix];
+ 3387| +          while (w.opened.load(std::memory_order_acquire) < my_window) {
+ 3388| +            _mm_pause();
+ 3389| +          }
+ 3390| +        }
+ 3391| +        const uint32_t n_units = w.n_units;
+ 3392| +        for (;;) {
+ 3393| +          const uint32_t u = w.next_unit.fetch_add(1, std::memory_order_acq_rel);
+ 3394| +          if (u >= n_units) break;
+ 3395| +          store_k_block<geometry>(
+ 3396| +              q_batch, slot, ks, w.unit_start[u], w.unit_start[u + 1]);
+ 3397| +        }
+ 3398| +        if (!is_main) {
+ 3399| +          w.finished.fetch_add(1, std::memory_order_release);
+ 3400| +          return;
+ 3401| +        }
+ 3402| +        uint64_t spins = 0;
+ 3403| +        std::chrono::steady_clock::time_point t0{};
+ 3404| +        while (w.finished.load(std::memory_order_acquire) < n_helpers) {
+ 3405| +          _mm_pause();
+ 3406| +          if ((++spins & (k_join_clock_spins - 1)) == 0) {
+ 3407| +            const auto now = std::chrono::steady_clock::now();
+ 3408| +            if (t0 == std::chrono::steady_clock::time_point{}) t0 = now;
+ 3409| +            TRON_ASSERT(now - t0 < std::chrono::seconds(k_join_timeout_s),
+ 3410| +                "save_k: the K store window did not close in {} s ({} of {} helpers "
+ 3411| +                "finished, {} of {} units claimed); the helpers' save_k calls do not "
+ 3412| +                "match this one",
+ 3413| +                k_join_timeout_s, w.finished.load(), n_helpers,
+ 3414| +                std::min<uint32_t>(w.next_unit.load(), n_units), n_units);
+ 3415| +          }
+ 3416| +        }
+ 3417| +      } else {
+ 3418| +        store_k_block<geometry>(q_batch, slot, ks, 0, n_items);
+ 3419| +      }
+ 3420| +      if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
+ 3421| +        // Note [K VNNI storage]: record this pass's rows. A block whose 16th
+ 3422| +        // row this pass saved is queued for the conversion at the forward end.
+ 3423| +        // Not when the hardware attention scores this operation's K: then no
+ 3424| +        // row is recorded and the block stays row-major (Note [Row-major
+ 3425| +        // blocks under hardware attention] in kv_cache.hpp).
+ 3426| +        if (!cached_operation_uses_hw(binding.operation)) {
+ 3427| +          for (token_job_id ix : q_batch->items) {
+ 3428| +            auto const& self = *this;
+ 3429| +            if (!self.token_jobs_do_kv[ix]) continue;
+ 3430| +            const token_id tok_ix = token_jobs[ix];
+ 3431| +            page& pg = page_of(tok_ix);
+ 3432| +            const size_t j = static_cast<size_t>(pg.offset_in_page(tok_ix));
+ 3433| +            if (pg.template note_k_row_saved<geometry.kv>(slot, j)) {
+ 3434| +              pending_k_blocks_.push_back({&pg, pg.k_storage_of(slot),
+ 3435| +                  static_cast<uint32_t>(j / k_store_block)});
+ 3436| +            }
+ 3437| +          }
+ 3438| +        }
+ 3439| +      }
+ 3440|        for (token_job_id ix : q_batch->items) {
+ 3441|          auto const& self = *this;
+ 3442|          if (!self.token_jobs_do_kv[ix]) continue;
+     |@@ -3095,14 +3444,6 @@ struct model : noncopyable<model<plugin_type>> {
+ 3444|          token_id tok_ix = token_jobs[ix];
+ 3445|          page& pg = page_of(tok_ix);
+ 3446|          int j = pg.offset_in_page(tok_ix);
+     | -
+     | -        // Update the page first so HW sees the latest K values.
+     | -        for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+     | -          auto kout = slice<geometry.kv.head_size>()(
+     | -              ks[ix].as_view(), kv_head * geometry.kv.head_size);
+     | -          pg.template k<geometry.kv>(slot, kv_head, j).set(kout);
+     | -        }
+     | -
+ 3447|          pg.mark_k_complete(slot, static_cast<size_t>(j));
+ 3448|          // Drive the per-GOF dispatch counter. See Note [GOF dispatch
+ 3449|          // synchronization].
+     |@@ -3115,20 +3456,30 @@ struct model : noncopyable<model<plugin_type>> {
+ 3456|          batch_2->upstream_kvs_ready[slot].count_down();
+ 3457|      }
+ 3458|  
+ 3459| +    // Store the K rows of the minibatch. Main (worker_ix 0) and the main
+ 3460| +    // helpers (worker_ix 1 .. n_workers - 1) call this with the same
+ 3461| +    // operation at the same point of the schedule (the generated plugins
+ 3462| +    // pass their run() split). See Note [Shared block save]. The defaults
+ 3463| +    // store every row on the calling thread.
+ 3464|      template <attention_geometry geometry, size_t operation_ix, typename kv_buffer_t>
+     | -    void save_k(batch* q_batch, kv_buffer_t& ks) noexcept {
+ 3465| +    void save_k(batch* q_batch,
+ 3466| +        kv_buffer_t& ks,
+ 3467| +        size_t worker_ix = 0,
+ 3468| +        size_t n_workers = 1) noexcept {
+ 3469|        constexpr auto const& operation =
+ 3470|            generated_attention_operation<geometry, operation_ix>();
+ 3471|        static_assert(operation.writes_kv);
+     | -      save_k_impl<geometry>(q_batch, operation, ks);
+ 3472| +      save_k_impl<geometry>(q_batch, operation, ks, worker_ix, n_workers);
+ 3473|      }
+ 3474|  
+ 3475|      template <attention_geometry geometry, typename kv_buffer_t>
+ 3476|      void save_k(batch* q_batch,
+ 3477|          attention_operation_descriptor const& operation,
+     | -        kv_buffer_t& ks) noexcept {
+ 3478| +        kv_buffer_t& ks,
+ 3479| +        size_t worker_ix = 0,
+ 3480| +        size_t n_workers = 1) noexcept {
+ 3481|        self_attn_state.template validate_operation<geometry>(operation);
+     | -      save_k_impl<geometry>(q_batch, operation, ks);
+ 3482| +      save_k_impl<geometry>(q_batch, operation, ks, worker_ix, n_workers);
+ 3483|      }
+ 3484|  
+ 3485|      template <attention_geometry geometry, typename kv_buffer_t>

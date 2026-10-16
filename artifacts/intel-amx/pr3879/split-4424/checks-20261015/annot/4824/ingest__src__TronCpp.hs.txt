@@ -1,0 +1,45 @@
+# PR 4824 file ingest/src/TronCpp.hs
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -2874,7 +2874,25 @@ runHelperStatement env blendNames stmt = case stmt of
+ 2874|          finishWriting (Var "worker_ix") name
+ 2875|    PrepareForLogitsStmt -> []
+ 2876|    PrepareAttentionStmt _ -> []
+     | -  AttentionStmt _ -> []
+ 2877| +  -- The helpers take part in the K store of a KV-writing operation. The main
+ 2878| +  -- thread's save_k opens a window over the pass's tokens. The helpers are
+ 2879| +  -- idle at this point of the schedule. Their next kernel waits for the
+ 2880| +  -- attention output. The idle helpers claim work units of the window (runs
+ 2881| +  -- of consecutive tokens inside one 16-token page block).
+ 2882| +  -- Both sides call save_k, main with worker index 0 (submitAttentionOperation)
+ 2883| +  -- and the helpers with their own worker_ix, at the same position of the
+ 2884| +  -- statement list. So the N-th window a helper enters in a pass is the N-th
+ 2885| +  -- window main opens in that pass.
+ 2886| +  -- See Note [Shared block save] in model.hpp. Operations without a KV write
+ 2887| +  -- emit nothing here.
+ 2888| +  AttentionStmt attention -> case attentionKvWrite attention of
+ 2889| +    Nothing -> []
+ 2890| +    Just kvWrite ->
+ 2891| +      withTrace stmt $
+ 2892| +        attentionRuntimeCall
+ 2893| +          "save_k"
+ 2894| +          attention
+ 2895| +          [Var $ asCpp $ attentionKey kvWrite, ExprLit "worker_ix", ExprLit "n_workers"]
+ 2896|    MoeRouteStmt{} -> []
+ 2897|    MoeMatmulPrepareAndLaunchStmt{} -> []
+ 2898|    MoeBlendStmt r w o i b lanes _ ->
+     |@@ -2931,10 +2949,13 @@ submitAttentionOperation env stmt =
+ 2949|        ]
+ 2950|    saveKv kvWrite =
+ 2951|      [ startOperand $ attentionChannel env $ attentionKey kvWrite
+     | -    , attentionRuntimeCall
+ 2952| +    , -- Main is worker 0, as in kernelCall. n_workers (main + main helpers) is
+ 2953| +      -- in scope in run(). It lets save_k share the K store with the helpers'
+ 2954| +      -- save_k calls (runHelperStatement).
+ 2955| +      attentionRuntimeCall
+ 2956|          "save_k"
+ 2957|          stmt
+     | -        [Var $ asCpp $ attentionKey kvWrite]
+ 2958| +        [Var $ asCpp $ attentionKey kvWrite, LiteralExpr (IntLit 0), ExprLit "n_workers"]
+ 2959|      , startOperand $ attentionChannel env $ attentionValue kvWrite
+ 2960|      , attentionRuntimeCall
+ 2961|          "save_v"

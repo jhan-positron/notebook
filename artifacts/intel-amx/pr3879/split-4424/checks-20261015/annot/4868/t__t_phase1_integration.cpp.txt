@@ -1,0 +1,118 @@
+# PR 4868 file t/t_phase1_integration.cpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -36,6 +36,7 @@
+   36|  #include "tron/models/ranged_mask.hpp"
+   37|  #include "tron/scheduler/token_tree.hpp"
+   38|  #include "tron/shard.hpp"
+   39| +#include "tron/tensor/k_vnni.hpp"
+   40|  
+   41|  using namespace tron;
+   42|  using namespace tron::hardware;
+     |@@ -834,30 +835,60 @@ struct fake_device_guard {
+  835|    fake_device_guard& operator=(fake_device_guard const&) = delete;
+  836|  };
+  837|  
+  838| +// The K callbacks of this case return the scratch row that populate supplies,
+  839| +// as the scheduler's callback does for a K plane in the VNNI layout (Note [K
+  840| +// VNNI storage] in kv_cache.hpp): each head's row is gathered out of a packed
+  841| +// plane into the scratch. populate collects every head's pointer before
+  842| +// set_position copies the rows, so each head needs its own scratch row until
+  843| +// then. The staged bytes are compared per token, head and dimension through the
+  844| +// K swizzle. A wrong per-head scratch stride in populate fails the comparison.
+  845|  TEST_CASE("gof populate pulls KV data from page_info lambdas", "[phase1]") {
+  846|    constexpr size_t HS = 128;
+  847|    constexpr size_t NKV = 8;
+  848|    constexpr size_t NLAYERS = 1;
+  849| +  static_assert(gof_tokens <= k_vnni::PAGE_TOKENS_64,
+  850| +      "one packed K plane holds every staged token");
+  851|  
+  852|    gof_guard gg(NKV, 32, HS, 1.0f, NLAYERS);
+  853|    fake_device_guard fdg;
+  854|  
+     | -  // Allocate per-token K and V buffers with known patterns.
+     | -  // Each token gets NKV heads of HS bf16s.
+     | -  std::vector<std::vector<bf16>> k_data(gof_tokens, std::vector<bf16>(NKV * HS));
+  855| +  // Per-token K and V rows with known patterns: NKV heads of HS bf16s per token.
+  856| +  // The K tag (token, head, element) is unique per cell, as in t_gof_dma, and
+  857| +  // finite (the largest, 0x37ff, is below the inf/NaN range). The K rows are
+  858| +  // 64-byte aligned (the typed source row states that alignment).
+  859| +  struct alignas(64) k_row_t {
+  860| +    bf16 v[HS];
+  861| +  };
+  862| +  std::vector<std::array<k_row_t, NKV>> k_data(gof_tokens);
+  863|    std::vector<std::vector<bf16>> v_data(gof_tokens, std::vector<bf16>(NKV * HS));
+  864|    for (uint32_t t = 0; t < gof_tokens; ++t) {
+  865| +    for (size_t h = 0; h < NKV; ++h) {
+  866| +      for (size_t e = 0; e < HS; ++e) {
+  867| +        k_data[t][h].v[e] =
+  868| +            bf16::from_bits(static_cast<uint16_t>((t << 12) | (h << 8) | e));
+  869| +      }
+  870| +    }
+  871|      for (size_t i = 0; i < NKV * HS; ++i) {
+     | -      k_data[t][i] = bf16::from_bits(static_cast<uint16_t>(0x3C00 + t * 100 + i));
+  872|        v_data[t][i] = bf16::from_bits(static_cast<uint16_t>(0x4000 + t * 100 + i));
+  873|      }
+  874|    }
+  875| +  // One packed K plane per head, holding the rows of the gof_tokens tokens.
+  876| +  using k_plane_t = k_vnni_tensor<k_vnni::PAGE_TOKENS_64, HS>;
+  877| +  auto planes = std::make_unique<k_plane_t[]>(NKV);
+  878| +  for (uint32_t t = 0; t < gof_tokens; ++t) {
+  879| +    for (size_t h = 0; h < NKV; ++h) {
+  880| +      store_row(planes[h].as_view(), t, k_source_row<HS>(k_data[t][h].v));
+  881| +    }
+  882| +  }
+  883|  
+     | -  // Build page_info with lambdas that return pointers into our buffers.
+  884| +  // page_info with the K callback gathering the head's row into the scratch and
+  885| +  // the V callback returning a pointer into our buffers.
+  886|    auto make_page_info = [&](uint32_t tok) -> page_info {
+  887|      return page_info{
+     | -        [&k_data, tok](kv_slot_id, size_t kv_head) -> bf16* {
+     | -          return k_data[tok].data() + kv_head * HS;
+  888| +        [&planes, tok](kv_slot_id, size_t kv_head, bf16* scratch) -> bf16* {
+  889| +          load_row(std::as_const(planes[kv_head]).as_view(), tok,
+  890| +              k_destination_row<HS>(scratch));
+  891| +          return scratch;
+  892|          },
+  893|          [&v_data, tok](kv_slot_id, size_t kv_head, bf16*) -> bf16* {
+  894|            return v_data[tok].data() + kv_head * HS;
+     |@@ -875,6 +906,21 @@ TEST_CASE("gof populate pulls KV data from page_info lambdas", "[phase1]") {
+  906|    CHECK_FALSE(g.populated);
+  907|    g.populate(NKV, HS, kv_slot_id(0), fdg.dev, pages);
+  908|    CHECK(g.populated);
+  909| +
+  910| +  // Every staged K value sits where the K swizzle puts it: input element e of a
+  911| +  // head is at hw offset (e % nwords) * hbm_word_width + e / nwords (the same
+  912| +  // transposition t_gof_dma checks on set_position directly).
+  913| +  constexpr size_t nwords = HS / hbm_word_width;
+  914| +  for (uint32_t t = 0; t < gof_tokens; ++t) {
+  915| +    for (size_t h = 0; h < NKV; ++h) {
+  916| +      const bf16* staged = g.k.position_ptr(t, h);
+  917| +      for (size_t e = 0; e < HS; ++e) {
+  918| +        const size_t hw_off = (e % nwords) * hbm_word_width + (e / nwords);
+  919| +        INFO("t=" << t << " h=" << h << " e=" << e);
+  920| +        REQUIRE(staged[hw_off].to_bits() == k_data[t][h].v[e].to_bits());
+  921| +      }
+  922| +    }
+  923| +  }
+  924|  }
+  925|  
+  926|  TEST_CASE("concurrent GOF populate isolates V staging by caller", "[phase1]") {
+     |@@ -889,7 +935,7 @@ TEST_CASE("concurrent GOF populate isolates V staging by caller", "[phase1]") {
+  935|    page_info pages[gof_tokens];
+  936|    for (uint32_t pos = 0; pos < gof_tokens; ++pos) {
+  937|      pages[pos].position = pos;
+     | -    pages[pos].k_head_fn = [&k_data, &rendezvous](kv_slot_id, size_t) {
+  938| +    pages[pos].k_head_fn = [&k_data, &rendezvous](kv_slot_id, size_t, bf16*) {
+  939|        rendezvous.arrive_and_wait();
+  940|        return k_data.data();
+  941|      };
+     |@@ -942,7 +988,7 @@ TEST_CASE("gof rodeo populates and xfers to shard", "[phase1]") {
+  988|  
+  989|    auto make_page_info = [&](uint32_t tok) -> page_info {
+  990|      return page_info{
+     | -        [&k_data, tok](kv_slot_id, size_t kv_head) -> bf16* {
+  991| +        [&k_data, tok](kv_slot_id, size_t kv_head, bf16*) -> bf16* {
+  992|            return k_data[tok].data() + kv_head * HS;
+  993|          },
+  994|          [&v_data, tok](kv_slot_id, size_t kv_head, bf16*) -> bf16* {

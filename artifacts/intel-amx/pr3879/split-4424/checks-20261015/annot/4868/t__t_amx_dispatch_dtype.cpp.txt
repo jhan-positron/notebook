@@ -1,0 +1,61 @@
+# PR 4868 file t/t_amx_dispatch_dtype.cpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -5,9 +5,15 @@
+    5|  // defines every amx_attn_h128g4 entry point as a CPU fake, so the linker never
+    6|  // pulls libtron's amx_attn.cpp object and no AMX instruction is linked or
+    7|  // executed; available() is the fake too, so the dispatch believes AMX is
+     | -// present.
+    8| +// present. Under TRON_K_VNNI the K plane of this 128-dim model is the VNNI
+    9| +// (Vector Neural Network Instructions) plane (Note [K VNNI storage] in
+   10| +// kv_cache.hpp). The dense AMX page path is not compiled for a VNNI slot
+   11| +// (temporary until the VNNI AMX kernel lands, see apply_page_tok). So the Q
+   12| +// pack still runs there, and no kernel runs: the full page takes the AVX
+   13| +// reader, like a partial page. The expectations below say "row-major K" where
+   14| +// the two layouts differ.
+   15|  //   host_bf16, full page: the Q pack runs exactly once and sees the query
+     | -//   values; the dense QK and PV kernels run once each.
+   16| +//   values; for row-major K the dense QK and PV kernels run once each.
+   17|  //   host_bf16, partial page (63 tokens): the Q pack still runs (it happens
+   18|  //   once per token, after the outer visibility and window checks but before
+   19|  //   the page's dense predicate) and neither kernel runs - the page is not
+     |@@ -41,6 +47,7 @@
+   47|  #include "tron/models/model.hpp"
+   48|  #include "tron/models/ranged_mask.hpp"
+   49|  #include "tron/plugins/llama.hpp"
+   50| +#include "tron/tensor/k_vnni.hpp"
+   51|  #include "tron/tensor/kv_cache_fwd.hpp"
+   52|  #include "tron/tensor/seq.hpp"
+   53|  #include "tron/tensor/v_vnni.hpp"
+     |@@ -102,7 +109,7 @@ void exercise_page(size_t n_tokens, bool repeat = false, bool amx_available = tr
+  109|    const kv_slot_id slot = book_t::kv_slot(model_layer_id(0));
+  110|    alignas(64) std::array<bf16, head_size> zero{};
+  111|    for (size_t token = 0; token < n_tokens; ++token) {
+     | -    std::copy(zero.begin(), zero.end(), page->k(slot, 0, token).data);
+  112| +    page->set_k_row(slot, 0, token, k_source_row<head_size>(zero.data()));
+  113|      page->template set_v<geometry.kv>(
+  114|          slot, 0, token, v_source_row<head_size>(zero.data()));
+  115|      cache.increment_tokens_used();
+     |@@ -158,8 +165,10 @@ void exercise_page(size_t n_tokens, bool repeat = false, bool amx_available = tr
+  165|    // bf16 query buffer may reach the packer, which copies bf16 values and
+  166|    // converts nothing. With available() false nothing is packed either.
+  167|    const bool packs = std::is_same_v<query_scalar, bf16> && amx_available;
+     | -  // The dense predicate: the kernels run only for a full page.
+     | -  const bool dense = packs && n_tokens == book_t::page_size;
+  168| +  // The dense predicate: the kernels run only for a full page of a row-major
+  169| +  // slot (a VNNI slot takes the software loop, see the file header).
+  170| +  const bool dense =
+  171| +      packs && n_tokens == book_t::page_size && !k_vnni::layout_on<head_size>;
+  172|    fake_amx_available = amx_available;
+  173|    for (int round = 0; round < (repeat ? 2 : 1); ++round) {
+  174|      if (round == 1) {
+     |@@ -260,8 +269,8 @@ void weights_times_v_128x4(v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128
+  269|  TEST_CASE("AMX dispatch rejects non-bf16 queries and partial pages",
+  270|      "[amx_numerics][attention]") {
+  271|    constexpr size_t page_size = amx_attn_h128g4::PAGE_TOKENS_64;
+     | -  SECTION("host_bf16, full page: one pack, one QK, one PV; a second call with "
+     | -          "new queries packs again") {
+  272| +  SECTION("host_bf16, full page: one pack, and for row-major K one QK, one PV; a "
+  273| +          "second call with new queries packs again") {
+  274|      exercise_page<host_bf16>(page_size, /*repeat=*/true);
+  275|    }
+  276|    SECTION("host_bf16, partial page: one pack, no kernel call") {

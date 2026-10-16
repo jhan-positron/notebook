@@ -1,0 +1,68 @@
+# PR 4824 file h/tron/kernels/amx_attn_iface.hpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -58,6 +58,7 @@
+   58|  //      |
+   59|  //   QK kernel   ->  s_pages[4][64] fp32, raw q.k (UNSCALED)
+   60|  //      |            AVX: dotter<bf16,128> per token | AMX: qk_rowmajor_128x4 per page
+   61| +//      |                 (VNNI K: k_vnni::qk_group)  |      (VNNI K: qk_vnni_128x4)
+   62|  //   caller      ->  s *= scale (or tanh softcap); m_page = max(s, m*)
+   63|  //                   P = exp(s - m_page) fp32; sum(P)
+   64|  //
+     |@@ -212,18 +213,55 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+  213|  // - Store, then transpose. The four tiles are stored into an internal 64 x 16
+  214|  //   buffer; an AVX-512 register transpose then writes columns 0..3 as rows
+  215|  //   into s[head][token], the same 4 x 64 layout the AVX dotter loop fills.
+  216| +//
+  217| +// With TRON_K_VNNI (Note [K VNNI storage] in kv_cache.hpp) the stored K plane
+  218| +// IS the VNNI B-operand layout. The orientation therefore flips. qk_vnni_128x4
+  219| +// takes the 4 query rows, padded to 16 rows, as the A operand. The 16 K panels
+  220| +// of the page are the B operand. The tiles come out as S[query][token]. No
+  221| +// transpose is needed. The cost moves to the K save. A run of 16 consecutive
+  222| +// tokens that fills one 16-token block uses the block save (page::set_k_block,
+  223| +// a register transpose and whole-line stores). A shorter run (decode: one
+  224| +// token per user per step) is stored row-major into the block's own bytes,
+  225| +// and the block is transposed in place at the end of the forward pass that
+  226| +// saved its 16th row (Note [Row-major tail block] in h/tron/tensor/k_vnni.hpp). The
+  227| +// software reader for the VNNI blocks of partial pages runs k_vnni::qk_group; the
+  228| +// row-major tail block keeps the row-major dotter.
+  229|  
+  230|  // Dense QK for one page: computes S^T = K_page . Q^T in tiles and transposes
+  231|  // on the way out (see Note [QK orientation]); writes s[4][s_stride_floats]
+  232|  // fp32, all 64 token columns, UNSCALED. k_page = the page's whole native K
+  233|  // plane, 64 tokens x 128 dims bf16 row-major (the kv_block K storage), passed
+     | -// as its typed view so that a packed V plane or a bare pointer cannot be handed
+     | -// in by mistake; q_packed = the pack_q_group_128x4 output.
+  234| +// as its typed view so that a packed K or V plane or a bare pointer cannot be
+  235| +// handed in by mistake; q_packed = the pack_q_group_128x4 output.
+  236|  void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+  237|      const bf16* q_packed,
+  238|      float* s,
+  239|      size_t s_stride_floats) noexcept;
+  240|  
+  241| +// Pack one query group as the A operand of qk_vnni_128x4. Rows 0..3 are the
+  242| +// 4 heads' 128-dimension bf16 rows copied as stored (256 bytes each). Rows 4..15
+  243| +// are zero padding the caller keeps zero. This call writes rows 0..3 only. A
+  244| +// buffer zeroed once at allocation therefore stays valid for every pack.
+  245| +// `padded` holds Q_PACK_ELEMS_2048 bf16 (4096 bytes), aligned to 64 bytes.
+  246| +// That is the same buffer size as pack_q_group_128x4's output. One slot
+  247| +// therefore serves either layout.
+  248| +void pack_q_rows_128x4(const bf16* q_group, bf16* padded) noexcept;
+  249| +
+  250| +// Dense QK for one page whose K is stored in the VNNI layout (Note [K VNNI
+  251| +// storage] in kv_cache.hpp). Computes S = Q . K^T. The padded Q rows are the
+  252| +// A operand. The page's 16 K panels are the B operand. There is no
+  253| +// transpose. Writes s[4][s_stride_floats] fp32, all 64 token columns,
+  254| +// UNSCALED. The 16-row tile stores write to a buffer inside the kernel. Only
+  255| +// the 4 query rows are copied out. `s` therefore needs 4 rows (Note [Tile
+  256| +// stores write 16 rows]). k_page = the page's packed K plane (64 tokens x 128
+  257| +// dims, 16 KiB, layout in h/tron/tensor/k_vnni.hpp) as its typed view, so that
+  258| +// a native K view, a packed V plane or a bare pointer cannot be handed in by
+  259| +// mistake. q_rows = the pack_q_rows_128x4 output.
+  260| +void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+  261| +    const bf16* q_rows,
+  262| +    float* s,
+  263| +    size_t s_stride_floats) noexcept;
+  264| +
+  265|  // Weights-times-values for one page: O = P[4][64] . V_page, where P (the
+  266|  // exponentiated scores, i.e. the unnormalized softmax weights) comes from the
+  267|  // caller's fp32 exp rows (converted to bf16 inside) and v_page is the page's

@@ -1,0 +1,119 @@
+# PR 4887 file h/tron/kernels/amx_attn_iface.hpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -24,7 +24,9 @@
+   24|  // that shape is 4 query heads x 128 dims = 512 bf16 = 1024 bytes. Packed as
+   25|  // the B operand, it occupies 4096 bytes: four panels of 16 columns, 4 of them
+   26|  // the query heads and 12 zero padding; the K operand fills its tiles
+     | -// completely (64 tokens = 4 tiles of 16 rows). Everything else, incomplete
+   27| +// completely (64 tokens = 4 tiles of 16 rows). With TRON_K_VNNI the roles
+   28| +// swap: Q is the A operand (16 rows, 4 of them live) and the stored K plane
+   29| +// is the B operand (Note [QK orientation]). Everything else, incomplete
+   30|  // or partially visible pages, pages outside the sliding window, other
+   31|  // geometries, other activation types, runs the existing AVX-512 dotter loop
+   32|  // unchanged. The unit of the decision is the (query, page) pair, not the
+     |@@ -58,8 +60,7 @@
+   60|  //      |
+   61|  //   QK kernel   ->  s_pages[4][64] fp32, raw q.k (UNSCALED)
+   62|  //      |            AVX: dotter<bf16,128> per token | AMX: qk_rowmajor_128x4 per page
+     | -//      |                 (VNNI K: k_vnni::qk_group)  |      (VNNI K: not taken until
+     | -//      |                                              |      the VNNI AMX kernel lands)
+   63| +//      |                 (VNNI K: k_vnni::qk_group)  |      (VNNI K: qk_vnni_128x4)
+   64|  //   caller      ->  s *= scale (or tanh softcap); m_page = max(s, m*)
+   65|  //                   P = exp(s - m_page) fp32; sum(P)
+   66|  //
+     |@@ -103,9 +104,10 @@
+  104|  // the products of the kernel's zero padding rows of P (output row i of a tile
+  105|  // multiply comes from row i of the A operand); callers read rows 0..3 and
+  106|  // ignore the rest.
+     | -// qk_rowmajor_128x4 stores its result tiles into a buffer inside the kernel
+     | -// (s_transposed), and the transpose that reads that buffer writes only the 4
+     | -// query rows into the caller's `s`, so `s` needs only 4 rows
+  107| +// Both QK kernels store their result tiles into a buffer inside the kernel
+  108| +// (s_transposed in qk_rowmajor_128x4, s16 in qk_vnni_128x4). The transpose
+  109| +// that reads s_transposed, and the row copy that reads s16, write only the
+  110| +// 4 query rows into the caller's `s`, so `s` needs only 4 rows
+  111|  // (s[4][s_stride_floats]).
+  112|  
+  113|  #include <cstddef>
+     |@@ -140,8 +142,9 @@ inline constexpr size_t PAGE_TOKENS_64 = 64;
+  142|  inline constexpr size_t HEAD_SIZE_128 = 128;
+  143|  inline constexpr size_t GROUP_HEADS_4 = 4;
+  144|  
+     | -// One packed Q group (the pack_q_group_128x4 output buffer): 4 panels x 16
+     | -// dim-pair rows x 16 columns x 2 = 2048 bf16 = 4096 bytes, padding included.
+  145| +// One packed Q group, the output buffer of either packer, padding included:
+  146| +// pack_q_group_128x4 fills 4 panels x 16 dim-pair rows x 16 columns x 2, and
+  147| +// pack_q_rows_128x4 fills 16 rows x 128 dims. Both are 2048 bf16 = 4096 bytes.
+  148|  inline constexpr size_t Q_PACK_ELEMS_2048 = TILE_ROWS_16 * HEAD_SIZE_128;
+  149|  static_assert(Q_PACK_ELEMS_2048 == 2048, "the constant's name states its value");
+  150|  
+     |@@ -152,8 +155,9 @@ constexpr bool shape_ok(size_t model_head_size, size_t model_kv_mul) noexcept {
+  155|    return model_head_size == HEAD_SIZE_128 && model_kv_mul == GROUP_HEADS_4;
+  156|  }
+  157|  
+     | -// The scalar half of the gate: pack_q_group_128x4 takes `const bf16*` and
+     | -// copies the values without conversion, so the executor's activation scalar
+  158| +// The scalar half of the gate: both query packers (pack_q_group_128x4 and
+  159| +// pack_q_rows_128x4) take `const bf16*` and copy the values without
+  160| +// conversion, so the executor's activation scalar
+  161|  // (btensor_t<N>::element, the type of the Q buffer) must be bf16.
+  162|  // tp*/perm_tp*/host_bf16 store bf16; host stores float and host_fp16 stores
+  163|  // fp16 (common.hpp). Those executors keep the AVX dotter path, which reads Q
+     |@@ -214,18 +218,55 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+  218|  // - Store, then transpose. The four tiles are stored into an internal 64 x 16
+  219|  //   buffer; an AVX-512 register transpose then writes columns 0..3 as rows
+  220|  //   into s[head][token], the same 4 x 64 layout the AVX dotter loop fills.
+  221| +//
+  222| +// With TRON_K_VNNI (Note [K VNNI storage] in kv_cache.hpp) the stored K plane
+  223| +// IS the VNNI B-operand layout. The orientation therefore flips. qk_vnni_128x4
+  224| +// takes the 4 query rows, padded to 16 rows, as the A operand. The 16 K panels
+  225| +// of the page (a panel is 16 dimension-pair rows x 16 tokens, one B tile;
+  226| +// h/tron/tensor/k_vnni.hpp) are the B operand. The tiles come out as
+  227| +// S[query][token]. No transpose is needed. The extra work moves to the K store
+  228| +// (a scatter of 64 dimension pairs per token, in save_k) and to the software
+  229| +// reader k_vnni::qk_group for partial pages.
+  230|  
+  231|  // Dense QK for one page: computes S^T = K_page . Q^T in tiles and transposes
+  232|  // on the way out (see Note [QK orientation]); writes s[4][s_stride_floats]
+  233|  // fp32, all 64 token columns, UNSCALED. k_page = the page's whole native K
+  234|  // plane, 64 tokens x 128 dims bf16 row-major (the kv_block K storage), passed
+     | -// as its typed view so that a packed V plane or a bare pointer cannot be handed
+     | -// in by mistake; q_packed = the pack_q_group_128x4 output.
+  235| +// as its typed view so that a packed K or V plane or a bare pointer cannot be
+  236| +// handed in by mistake; q_packed = the pack_q_group_128x4 output.
+  237|  void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+  238|      const bf16* q_packed,
+  239|      float* s,
+  240|      size_t s_stride_floats) noexcept;
+  241|  
+  242| +// Pack one query group as the A operand of qk_vnni_128x4. Rows 0..3 are the
+  243| +// 4 heads' 128-dimension bf16 rows copied as stored (256 bytes each). Rows 4..15
+  244| +// are zero padding the caller keeps zero. This call writes rows 0..3 only. A
+  245| +// buffer zeroed once at allocation therefore stays valid for every pack.
+  246| +// `padded` holds Q_PACK_ELEMS_2048 bf16 (4096 bytes), aligned to 64 bytes.
+  247| +// That is the same buffer size as pack_q_group_128x4's output. One query-pack
+  248| +// slot (amx_qpack_slot in self_attention.hpp) therefore serves either layout.
+  249| +// The build's K layout picks one packer and one kernel (k_vnni::layout_on).
+  250| +void pack_q_rows_128x4(const bf16* q_group, bf16* padded) noexcept;
+  251| +
+  252| +// Dense QK for one page whose K is stored in the VNNI layout (Note [K VNNI
+  253| +// storage] in kv_cache.hpp). Computes S = Q . K^T. The padded Q rows are the
+  254| +// A operand. The page's 16 K panels are the B operand. There is no
+  255| +// transpose. Writes s[4][s_stride_floats] fp32, all 64 token columns,
+  256| +// UNSCALED. The 16-row tile stores write to a buffer inside the kernel. Only
+  257| +// the 4 query rows are copied out. `s` therefore needs 4 rows (Note [Tile
+  258| +// stores write 16 rows]). k_page = the page's packed K plane (64 tokens x 128
+  259| +// dims, 16 KiB, layout in h/tron/tensor/k_vnni.hpp) as its typed view, so that
+  260| +// a native K view, a packed V plane or a bare pointer cannot be handed in by
+  261| +// mistake. q_rows = the pack_q_rows_128x4 output. For the same K and Q the
+  262| +// scores are bit-identical to qk_rowmajor_128x4's: both kernels add the same
+  263| +// four 32-dimension partial dot products in the same order inside TDPBF16PS
+  264| +// (t_amx_numerics checks the identity).
+  265| +void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+  266| +    const bf16* q_rows,
+  267| +    float* s,
+  268| +    size_t s_stride_floats) noexcept;
+  269| +
+  270|  // Weights-times-values for one page: O = P[4][64] . V_page, where P (the
+  271|  // exponentiated scores, i.e. the unnormalized softmax weights) comes from the
+  272|  // caller's fp32 exp rows (converted to bf16 inside) and v_page is the page's

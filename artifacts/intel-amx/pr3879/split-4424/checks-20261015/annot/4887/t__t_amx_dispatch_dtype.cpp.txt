@@ -1,0 +1,90 @@
+# PR 4887 file t/t_amx_dispatch_dtype.cpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -5,15 +5,16 @@
+    5|  // defines every amx_attn_h128g4 entry point as a CPU fake, so the linker never
+    6|  // pulls libtron's amx_attn.cpp object and no AMX instruction is linked or
+    7|  // executed; available() is the fake too, so the dispatch believes AMX is
+     | -// present. Under TRON_K_VNNI the K plane of this 128-dim model is the VNNI
+     | -// (Vector Neural Network Instructions) plane (Note [K VNNI storage] in
+     | -// kv_cache.hpp). The dense AMX page path is not compiled for a VNNI slot
+     | -// (temporary until the VNNI AMX kernel lands, see apply_page_tok). So the Q
+     | -// pack still runs there, and no kernel runs: the full page takes the AVX
+     | -// reader, like a partial page. The expectations below say "row-major K" where
+     | -// the two layouts differ.
+    8| +// present. The K layout of the build selects which packer and which QK kernel
+    9| +// the dispatch calls. The layout is row-major, or under TRON_K_VNNI the VNNI
+   10| +// (Vector Neural Network Instructions) layout (Note [K VNNI storage] in
+   11| +// kv_cache.hpp). The fakes of both packers and both QK kernels count into the
+   12| +// same probe, and the fake of the VNNI packer counts a second time. So the
+   13| +// expectations below hold for either layout, and the VNNI packer count checks
+   14| +// that the dispatch picks the packer of the build's layout (the two packers
+   15| +// share one signature; the kernel is pinned by its view type).
+   16|  //   host_bf16, full page: the Q pack runs exactly once and sees the query
+     | -//   values; for row-major K the dense QK and PV kernels run once each.
+   17| +//   values. The dense QK and PV kernels run once each.
+   18|  //   host_bf16, partial page (63 tokens): the Q pack still runs (it happens
+   19|  //   once per token, after the outer visibility and window checks but before
+   20|  //   the page's dense predicate) and neither kernel runs - the page is not
+     |@@ -59,6 +60,7 @@ namespace {
+   60|  
+   61|  struct amx_probe {
+   62|    size_t pack_calls = 0;
+   63| +  size_t rows_pack_calls = 0;  // pack_q_rows_128x4 only: the packers share a signature
+   64|    size_t qk_calls = 0;
+   65|    size_t pv_calls = 0;
+   66|    std::array<float, amx_attn_h128g4::GROUP_HEADS_4 * amx_attn_h128g4::HEAD_SIZE_128>
+     |@@ -165,10 +167,8 @@ void exercise_page(size_t n_tokens, bool repeat = false, bool amx_available = tr
+  167|    // bf16 query buffer may reach the packer, which copies bf16 values and
+  168|    // converts nothing. With available() false nothing is packed either.
+  169|    const bool packs = std::is_same_v<query_scalar, bf16> && amx_available;
+     | -  // The dense predicate: the kernels run only for a full page of a row-major
+     | -  // slot (a VNNI slot takes the software loop, see the file header).
+     | -  const bool dense =
+     | -      packs && n_tokens == book_t::page_size && !k_vnni::layout_on<head_size>;
+  170| +  // The dense predicate: the kernels run only for a full page.
+  171| +  const bool dense = packs && n_tokens == book_t::page_size;
+  172|    fake_amx_available = amx_available;
+  173|    for (int round = 0; round < (repeat ? 2 : 1); ++round) {
+  174|      if (round == 1) {
+     |@@ -192,6 +192,8 @@ void exercise_page(size_t n_tokens, bool repeat = false, bool amx_available = tr
+  192|      }
+  193|      CAPTURE(round);
+  194|      REQUIRE(probe.pack_calls == (packs ? 1 : 0));
+  195| +    // The packer of the build's K layout ran, never the other one.
+  196| +    REQUIRE(probe.rows_pack_calls == (packs && k_vnni::layout_on<head_size> ? 1 : 0));
+  197|      REQUIRE(probe.qk_calls == (dense ? 1 : 0));
+  198|      REQUIRE(probe.pv_calls == (dense ? 1 : 0));
+  199|      // The path tallies are cumulative over the rounds: one visit per call, on
+     |@@ -255,6 +257,21 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>,
+  257|    ++probe.qk_calls;
+  258|    std::fill_n(output, GROUP_HEADS_4 * stride, 0.0f);
+  259|  }
+  260| +void pack_q_rows_128x4(const bf16* input, bf16* output) noexcept {
+  261| +  ++probe.pack_calls;
+  262| +  ++probe.rows_pack_calls;
+  263| +  for (size_t i = 0; i < probe.q.size(); ++i) {
+  264| +    probe.q[i] = static_cast<float>(input[i]);
+  265| +  }
+  266| +  std::fill_n(output, Q_PACK_ELEMS_2048, bf16{});
+  267| +}
+  268| +void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>,
+  269| +    const bf16*,
+  270| +    float* output,
+  271| +    size_t stride) noexcept {
+  272| +  ++probe.qk_calls;
+  273| +  std::fill_n(output, GROUP_HEADS_4 * stride, 0.0f);
+  274| +}
+  275|  void weights_times_v_128x4(v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>,
+  276|      const float*,
+  277|      size_t,
+     |@@ -269,8 +286,8 @@ void weights_times_v_128x4(v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128
+  286|  TEST_CASE("AMX dispatch rejects non-bf16 queries and partial pages",
+  287|      "[amx_numerics][attention]") {
+  288|    constexpr size_t page_size = amx_attn_h128g4::PAGE_TOKENS_64;
+     | -  SECTION("host_bf16, full page: one pack, and for row-major K one QK, one PV; a "
+     | -          "second call with new queries packs again") {
+  289| +  SECTION("host_bf16, full page: one pack, one QK, one PV; a second call with "
+  290| +          "new queries packs again") {
+  291|      exercise_page<host_bf16>(page_size, /*repeat=*/true);
+  292|    }
+  293|    SECTION("host_bf16, partial page: one pack, no kernel call") {

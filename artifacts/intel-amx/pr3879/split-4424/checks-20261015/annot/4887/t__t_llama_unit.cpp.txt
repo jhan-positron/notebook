@@ -1,0 +1,50 @@
+# PR 4887 file t/t_llama_unit.cpp
+# format: <new-file line>| <+ added | ' ' context | - removed><text>
+     |@@ -99,6 +99,12 @@ constexpr bool amx_pv_accepts = requires(V v, const float* weights, float* out)
+   99|    amx_attn_h128g4::weights_times_v_128x4(v, weights, size_t{0}, out);
+  100|  };
+  101|  
+  102| +// The VNNI K kernel takes the packed K plane (page::k_packed) the same way.
+  103| +template <typename K>
+  104| +constexpr bool amx_qk_vnni_accepts = requires(K k, const bf16* q, float* s) {
+  105| +  amx_attn_h128g4::qk_vnni_128x4(k, q, s, size_t{0});
+  106| +};
+  107| +
+  108|  template <typename Page, kv_geometry geometry>
+  109|  constexpr bool page_k_packed_accepts_geometry =
+  110|      requires(Page const& page) { page.template k_packed<geometry>(kv_slot_id(0), 0); };
+     |@@ -407,8 +413,9 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+  413|    // plane, also for an owner that lives outside a kv_block.
+  414|    STATIC_REQUIRE(alignof(v_owner_t) == 64);
+  415|  
+     | -  // The packed K plane (Note [K VNNI storage]) follows the same rules. The AMX
+     | -  // kernels reject its view (the AVX-512 reader k_vnni::qk_group takes it).
+  416| +  // The packed K plane (Note [K VNNI storage]) follows the same rules. The VNNI
+  417| +  // QK kernel accepts the view, and no other type, as its K argument. The other
+  418| +  // two kernels reject it.
+  419|    // Views come only from an owner. A writable view converts to a read-only one
+  420|    // only.
+  421|    constexpr kv_geometry one_head{1, amx_attn_h128g4::HEAD_SIZE_128};
+     |@@ -418,6 +425,13 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+  425|        amx_attn_h128g4::HEAD_SIZE_128>;
+  426|    using k_owner_t =
+  427|        k_vnni_tensor<amx_attn_h128g4::PAGE_TOKENS_64, amx_attn_h128g4::HEAD_SIZE_128>;
+  428| +  STATIC_REQUIRE(amx_qk_vnni_accepts<k_packed_t>);
+  429| +  STATIC_REQUIRE(
+  430| +      amx_qk_vnni_accepts<k_packed_mut_t>);  // writable converts to read-only
+  431| +  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<const bf16*>);
+  432| +  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<bf16*>);
+  433| +  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<k_plane_t>);  // the native K view
+  434| +  STATIC_REQUIRE_FALSE(amx_qk_vnni_accepts<v_plane_t>);
+  435|    STATIC_REQUIRE_FALSE(amx_qk_accepts<k_packed_t>);
+  436|    STATIC_REQUIRE_FALSE(amx_pv_accepts<k_packed_t>);
+  437|    STATIC_REQUIRE_FALSE(std::is_constructible_v<k_packed_mut_t, bf16*>);
+     |@@ -427,7 +441,7 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+  441|    STATIC_REQUIRE_FALSE(owner_views_temporary<k_owner_t>);
+  442|    // No view writes an element. Rows enter through store_row and copy_token.
+  443|    STATIC_REQUIRE_FALSE(matrix_at_writes<k_packed_mut_t>);
+     | -  // The 64-byte pair rows need a 64-byte-aligned plane.
+  444| +  // The 64-byte pair rows and the AMX tile rows need a 64-byte-aligned plane.
+  445|    STATIC_REQUIRE(alignof(k_owner_t) == 64);
+  446|    // The page hands out the packed view only when the build option selects the
+  447|    // packed storage for the geometry.
