@@ -57,13 +57,17 @@ The four panes opened before the reload (w5:p1, w5:p2, w3:p1, w4:p1) still run d
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/.config/herdr/config.toml (231 bytes). `[terminal] default_shell = "/bin/bash"` appended with a two-line comment. On the shared NFS home, so it covers every host. Backup: claude-agentsrv:/home/jhan/.config/herdr/config.toml.bak-20261004 (45 bytes, the original).
-- claude-agentsrv:/home/jhan/agentsrv-setup.sh (2,015 bytes). `-e SHELL=/bin/bash` added to the `podman exec` entry line with a three-line comment. Backup: claude-agentsrv:/home/jhan/agentsrv-setup.sh.bak-20261004 (1,770 bytes).
-- claude-agentsrv:/home/jhan/claude-container/claude-box (12,543 bytes). `-e SHELL=/bin/bash` added to the `podman run` line and to the `enter` `podman exec` line, with a four-line comment. Backup: claude-agentsrv:/home/jhan/claude-container/claude-box.bak-shell-env-20261004T183916Z (12,228 bytes).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/herdr-pane-shell-dash-fix-2026-10-04.md (2,659 bytes). Root cause, the three fixes, and how to diagnose it again. Hand-written, `generator: none`.
+- claude-agentsrv:/home/jhan/.config/herdr/config.toml (231 bytes). `[terminal] default_shell = "/bin/bash"` appended with a two-line comment. On the shared NFS home, so it covers every host. Backup: claude-agentsrv:/home/jhan/.config/herdr/config.toml.bak-20261004 (45 bytes, the original). (preserved: artifacts/dev-machines/herdr-config/config.toml)
+- claude-agentsrv:/home/jhan/agentsrv-setup.sh (2,015 bytes). `-e SHELL=/bin/bash` added to the `podman exec` entry line with a three-line comment. Backup: claude-agentsrv:/home/jhan/agentsrv-setup.sh.bak-20261004 (1,770 bytes). (preserved: artifacts/dev-machines/agentsrv-setup.sh.bak-20261004)
+- claude-agentsrv:/home/jhan/claude-container/claude-box (12,543 bytes). `-e SHELL=/bin/bash` added to the `podman run` line and to the `enter` `podman exec` line, with a four-line comment. Backup: claude-agentsrv:/home/jhan/claude-container/claude-box.bak-shell-env-20261004T183916Z (12,228 bytes). (preserved: artifacts/dev-machines/claude-box.bak-shell-env-20261004T183916Z)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/herdr-pane-shell-dash-fix-2026-10-04.md (2,659 bytes). Root cause, the three fixes, and how to diagnose it again. Hand-written, `generator: none`. (preserved: artifacts/tron/memory/herdr-pane-shell-dash-fix-2026-10-04.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/MEMORY.md (4,408 bytes). One index line added.
 - The throwaway session `zz-shelltest` and its scratchpad output file were deleted in the session. The scratchpad directory is empty.
 - Code: no git repository was touched. No commits.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/dev-machines/herdr-config/` (1 files)
 
 ## Current state
 
