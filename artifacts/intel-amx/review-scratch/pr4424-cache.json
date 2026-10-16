@@ -1,0 +1,2718 @@
+{
+  "file": "h/tron/models/kv_cache.hpp",
+  "title": "KV cache: typed K storage, per-block layout state, and layout-aware copies",
+  "summary": [
+    "PR4424 gives each eligible K plane a typed packed owner while retaining row-major storage inside unfinished 16-token blocks.",
+    "The page now tracks saved rows separately from converted blocks. Stores, readers, invalidation, and page copies use that state.",
+    "The diagrams separate token offsets, physical slots, KV heads, and EAGLE metadata so each transition can be checked against the cited code."
+  ],
+  "terms": [
+    {
+      "name": "K / V / KV",
+      "meaning": "Key vectors, value vectors, and their combined attention cache."
+    },
+    {
+      "name": "bf16",
+      "meaning": "The 16-bit floating-point element type stored in the cache."
+    },
+    {
+      "name": "VNNI",
+      "meaning": "The code’s dimension-pair-interleaved K representation for matrix multiplication."
+    },
+    {
+      "name": "AMX",
+      "meaning": "Intel Advanced Matrix Extensions, used by the dense attention score kernel."
+    },
+    {
+      "name": "FPGA",
+      "meaning": "Field-programmable gate array, the hardware attention device."
+    },
+    {
+      "name": "DMA",
+      "meaning": "Direct memory access, used to move staged values to the device."
+    },
+    {
+      "name": "GOF",
+      "meaning": "A group of four consecutive tokens copied into a hardware staging buffer."
+    },
+    {
+      "name": "EAGLE",
+      "meaning": "The speculative model’s alternate logical slot-zero storage view."
+    },
+    {
+      "name": "page_size",
+      "meaning": "64 token offsets per page."
+    },
+    {
+      "name": "kv_block",
+      "meaning": "K and V planes for one physical storage slot, one KV head, and one page."
+    },
+    {
+      "name": "k_vnni_tensor / k_vnni_view",
+      "meaning": "The owning K plane and a borrowed typed view of that plane."
+    },
+    {
+      "name": "k_rows_saved_ / k_vnni_blocks_",
+      "meaning": "Saved-row masks and converted-block masks, indexed by storage-state entry."
+    },
+    {
+      "name": "k_storage_ref",
+      "meaning": "A physical storage offset paired with the corresponding layout-state index."
+    },
+    {
+      "name": "logical_slot_count() / layout_t::n_slots",
+      "meaning": "The active logical slot count and the declared maximum slot count; a layer prefix can make them differ."
+    },
+    {
+      "name": "row-major",
+      "meaning": "Values of one token row are contiguous in dimension order."
+    },
+    {
+      "name": "acquire / release",
+      "meaning": "Atomic ordering that makes earlier stores visible after a reader observes their published state."
+    }
+  ],
+  "base_diagrams": [
+    {
+      "title": "Storage dimensions: book → page → kv_block",
+      "caption": "A page contains token offsets, not one token entry per slot. Each token offset has values in every active slot and head.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "book",
+              "kind": "cache",
+              "description": "Owns the storage and page descriptors for one cache book.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 940
+            },
+            {
+              "name": "page",
+              "kind": "cache",
+              "description": "Describes one page of page_size token offsets.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 1940
+            }
+          ],
+          "edges": [
+            "1 book contains n_pages page objects"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "page",
+              "kind": "cache",
+              "description": "Describes one page of page_size token offsets.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 1940
+            },
+            {
+              "name": "kv_block",
+              "kind": "cache",
+              "description": "Holds K and V for one slot, one KV head, and one page.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2983
+            }
+          ],
+          "edges": [
+            "1 page addresses storage_slot_count() slots; each slot has geometry.n_kv_heads kv_block objects"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "kv_block",
+              "kind": "cache",
+              "description": "Holds K and V for one slot, one KV head, and one page.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2983
+            },
+            {
+              "name": "k_vnni_tensor",
+              "kind": "k",
+              "description": "Owns page_size × head_size bf16 values in one K plane.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 210
+            }
+          ],
+          "edges": [
+            "layout_on<head_size>: 1 kv_block owns 1 packed K plane of page_size × head_size values"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "kv_block",
+              "kind": "cache",
+              "description": "Holds K and V for one slot, one KV head, and one page.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2983
+            },
+            {
+              "name": "v_storage",
+              "kind": "cache",
+              "description": "The existing v_vnni_tensor owner for the V plane.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 3007
+            }
+          ],
+          "edges": [
+            "1 kv_block owns 1 packed V plane of page_size × head_size bf16 values"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Page state: live tokens, completed K/V, saved K, converted K",
+      "caption": "These counters and masks answer different questions. A complete K block can still be row-major until conversion.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "page",
+              "kind": "cache",
+              "description": "Describes one page of page_size token offsets.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 1940
+            },
+            {
+              "name": "offset_bound",
+              "kind": "cache",
+              "description": "The number of page offsets participating in this forward pass.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2596
+            }
+          ],
+          "edges": [
+            "1 page has 1 exclusive live-token bound"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "page",
+              "kind": "cache",
+              "description": "Describes one page of page_size token offsets.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 1940
+            },
+            {
+              "name": "kv_saves_",
+              "kind": "cache",
+              "description": "Per-token, per-slot counter: neither, one, or both of K and V saved.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2603
+            }
+          ],
+          "edges": [
+            "1 page has page_size × layout_t::n_slots K/V save counters"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "page",
+              "kind": "cache",
+              "description": "Describes one page of page_size token offsets.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 1940
+            },
+            {
+              "name": "k_rows_saved_",
+              "kind": "cache",
+              "description": "One saved-row bit per page offset and storage-state entry.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2616
+            }
+          ],
+          "edges": [
+            "1 page has layout_t::n_slots + EAGLE_STORAGE_SLOTS_1 saved-row masks"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "page",
+              "kind": "cache",
+              "description": "Describes one page of page_size token offsets.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 1940
+            },
+            {
+              "name": "k_vnni_blocks_",
+              "kind": "cache",
+              "description": "One converted-block bit per 16-token block and storage-state entry.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2621
+            }
+          ],
+          "edges": [
+            "1 page has layout_t::n_slots + EAGLE_STORAGE_SLOTS_1 converted-block masks"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "k_rows_saved_",
+              "kind": "cache",
+              "description": "One saved-row bit per page offset and storage-state entry.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2616
+            },
+            {
+              "name": "k_vnni_blocks_",
+              "kind": "cache",
+              "description": "One converted-block bit per 16-token block and storage-state entry.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2621
+            }
+          ],
+          "edges": [
+            "16 saved-row bits describe 1 token block; 1 converted bit requires all 16 saved bits"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "K writes and publication",
+      "caption": "Rows and whole blocks take different paths. Publication happens after the required KV heads have been written.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "set_k_row",
+              "kind": "function",
+              "description": "Stores one token row using the block’s current layout.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2247
+            },
+            {
+              "name": "note_k_row_saved",
+              "kind": "function",
+              "description": "Records one row and reports a complete, unconverted block.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2167
+            }
+          ],
+          "edges": [
+            "writes the row before the caller records it"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "note_k_row_saved",
+              "kind": "function",
+              "description": "Records one row and reports a complete, unconverted block.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2167
+            },
+            {
+              "name": "k_block_to_vnni_at",
+              "kind": "function",
+              "description": "Converts a complete physical block across every KV head.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2214
+            }
+          ],
+          "edges": [
+            "true result queues conversion after readers finish"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "set_k_block",
+              "kind": "function",
+              "description": "Stores all 16 rows of one KV head directly in packed layout.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2277
+            },
+            {
+              "name": "note_k_block_saved",
+              "kind": "function",
+              "description": "Publishes all 16 row bits and the converted-block bit.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2195
+            }
+          ],
+          "edges": [
+            "caller repeats for geometry.n_kv_heads heads, then publishes"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Read operations take their layout from the block mask",
+      "caption": "The packed owner can hold both converted blocks and row-major tail blocks at the same time.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "k_packed",
+              "kind": "function",
+              "description": "Returns a read-only view of one slot/head K plane.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2120
+            },
+            {
+              "name": "qk_group",
+              "kind": "function",
+              "description": "Scores selected packed K tokens against query heads.",
+              "file": "h/tron/kernels/k_vnni.hpp",
+              "line": 61
+            }
+          ],
+          "edges": [
+            "passes a typed plane view to packed score kernels"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "k_row_if_row_major",
+              "kind": "function",
+              "description": "Returns an in-place row only for an unconverted block.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2341
+            },
+            {
+              "name": "get_k_row",
+              "kind": "function",
+              "description": "Copies one token row out of either K layout.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2291
+            }
+          ],
+          "edges": [
+            "converted block returns an invalid view; caller gathers with"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "k_vnni_blocks",
+              "kind": "function",
+              "description": "Reads the converted-block mask for a logical slot.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2133
+            },
+            {
+              "name": "qk_vnni_128x4",
+              "kind": "function",
+              "description": "Computes attention scores directly from the packed K plane.",
+              "file": "h/tron/kernels/amx_attn_iface.hpp",
+              "line": 260
+            }
+          ],
+          "edges": [
+            "all page blocks must be converted before dense packed scoring"
+          ]
+        }
+      ]
+    }
+  ],
+  "units": [
+    {
+      "id": "typed-k-storage",
+      "title": "Choose the K owner from storage geometry",
+      "explanation": [
+        "Before this change, kv_block::k was always a bf16 array with one contiguous row per token. The new k_storage alias chooses k_vnni_tensor when k_vnni::layout_on<head_size> is true.",
+        "The packed owner keeps the same byte count as native K. Compile-time checks preserve the trivial lifetime properties required by the DMA allocation.",
+        "TRON_K_VNNI selects the storage layout for 128-dimension heads. Runtime AMX availability does not change stored bytes."
+      ],
+      "ranges": [
+        [
+          651,
+          676
+        ],
+        [
+          1640,
+          1645
+        ],
+        [
+          2982,
+          3002
+        ]
+      ],
+      "old_ranges": [
+        [
+          1457,
+          1463
+        ],
+        [
+          2330,
+          2341
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "One member, two storage types",
+          "caption": "The byte count stays page_size × head_size × sizeof(bf16). Only the owner type and value order change.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_storage",
+                  "kind": "k",
+                  "description": "Selects one physical K storage type at compile time.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2993
+                },
+                {
+                  "name": "k_vnni_tensor",
+                  "kind": "k",
+                  "description": "Owns page_size × head_size bf16 values in one K plane.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 210
+                }
+              ],
+              "edges": [
+                "1 k_storage becomes 1 k_vnni_tensor when layout_on<head_size> is true"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_storage",
+                  "kind": "k",
+                  "description": "Selects one physical K storage type at compile time.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2993
+                },
+                {
+                  "name": "native_k_storage",
+                  "kind": "k",
+                  "description": "Stores page_size contiguous rows of head_size bf16 values.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2992
+                }
+              ],
+              "edges": [
+                "1 k_storage becomes 1 native_k_storage array otherwise"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "native-row-access",
+      "title": "Restrict contiguous K views to native storage",
+      "explanation": [
+        "page::k, kv_block::k_view, and kv_block::k_at now require a native K layout. The restriction covers const and writable overloads, whole planes, and individual rows.",
+        "A packed token does not have one contiguous row after conversion. Callers must use typed packed views or the layout-aware row operations."
+      ],
+      "ranges": [
+        [
+          811,
+          815
+        ],
+        [
+          2040,
+          2106
+        ],
+        [
+          3017,
+          3038
+        ]
+      ],
+      "old_ranges": [
+        [
+          1840,
+          1896
+        ],
+        [
+          2347,
+          2376
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Compile-time access boundary",
+          "caption": "A packed slot cannot accidentally use the old contiguous-row interface.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "!k_vnni::layout_on<head_size>",
+                  "kind": "value",
+                  "description": "The storage geometry uses the native K layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2045
+                },
+                {
+                  "name": "k",
+                  "kind": "function",
+                  "description": "Returns a native K plane or a row within it.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2044
+                }
+              ],
+              "edges": [
+                "required before exposing contiguous rows"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_view",
+                  "kind": "function",
+                  "description": "Returns the native page_size × head_size view.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 3020
+                },
+                {
+                  "name": "k_at",
+                  "kind": "function",
+                  "description": "Returns the native K row at i_page.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 3033
+                }
+              ],
+              "edges": [
+                "indexes one token with"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "layout-state",
+      "title": "Track saved K rows separately from converted K blocks",
+      "explanation": [
+        "k_rows_saved_ records which token rows have been published. k_vnni_blocks_ records which 16-token blocks currently hold packed values.",
+        "Each array reserves one entry beyond the declared logical slots for EAGLE storage. The arrays start at zero.",
+        "A set converted bit implies 16 saved row bits. The reverse does not hold while conversion is pending."
+      ],
+      "ranges": [
+        [
+          677,
+          686
+        ],
+        [
+          2483,
+          2497
+        ],
+        [
+          2608,
+          2622
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Two masks for two facts",
+          "caption": "The masks belong to the storage slot and page. Every KV head shares them.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "page",
+                  "kind": "cache",
+                  "description": "Describes one page of page_size token offsets.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 1940
+                },
+                {
+                  "name": "k_rows_saved_",
+                  "kind": "cache",
+                  "description": "One saved-row bit per page offset and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2616
+                }
+              ],
+              "edges": [
+                "1 page contains layout_t::n_slots + 1 masks, each with page_size saved-row bits"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "page",
+                  "kind": "cache",
+                  "description": "Describes one page of page_size token offsets.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 1940
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "1 page contains layout_t::n_slots + 1 masks, each using page_size / 16 converted-block bits"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_rows_saved_",
+                  "kind": "cache",
+                  "description": "One saved-row bit per page offset and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2616
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "16 saved-row bits permit 1 converted-block bit after every head is converted"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "move-layout-state",
+      "title": "Preserve K layout masks when page descriptors move",
+      "explanation": [
+        "The existing explicit move constructor already copied atomic K/V completion counters. It now also copies the saved-row and converted-block masks.",
+        "The move happens during single-threaded vector construction. The constructor uses relaxed atomic loads and stores for that reason."
+      ],
+      "ranges": [
+        [
+          1958,
+          1974
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Move the descriptor state",
+          "caption": "Moving a page descriptor does not convert or copy its K plane.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "page(page&& other)",
+                  "kind": "function",
+                  "description": "Copies page metadata during single-threaded vector construction.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 1960
+                },
+                {
+                  "name": "k_rows_saved_",
+                  "kind": "cache",
+                  "description": "One saved-row bit per page offset and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2616
+                }
+              ],
+              "edges": [
+                "copies all k_rows_saved_.size() saved-row masks"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "page(page&& other)",
+                  "kind": "function",
+                  "description": "Copies page metadata during single-threaded vector construction.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 1960
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "copies all k_rows_saved_.size() converted-block masks"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "eagle-state-selection",
+      "title": "Map an active EAGLE view to its dedicated state entry",
+      "explanation": [
+        "book::eagle_view_active reports whether the storage view is shifted. k_state_ix uses that result when logical slot zero is selected.",
+        "In the EAGLE view, slot zero uses state index layout_t::n_slots. Other logical slots keep their own indices.",
+        "The physical EAGLE slot offset is logical_slot_count(). Its metadata index is layout_t::n_slots. These values need not be equal when a layer prefix is active."
+      ],
+      "ranges": [
+        [
+          1082,
+          1087
+        ],
+        [
+          2499,
+          2505
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Logical view and state index",
+          "caption": "The extra state entry stays separate from logical slot zero’s normal state.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "eagle_view_active",
+                  "kind": "function",
+                  "description": "Reports whether storage_view_offset_ selects the EAGLE view.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 1085
+                },
+                {
+                  "name": "k_state_ix",
+                  "kind": "function",
+                  "description": "Resolves a logical slot to its K layout-state index.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2502
+                }
+              ],
+              "edges": [
+                "active view and slot.i == 0 select the extra state entry"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_state_ix",
+                  "kind": "function",
+                  "description": "Resolves a logical slot to its K layout-state index.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2502
+                },
+                {
+                  "name": "layout_t::n_slots",
+                  "kind": "value",
+                  "description": "The index reserved for EAGLE state, after all declared slots.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2486
+                }
+              ],
+              "edges": [
+                "returns layout_t::n_slots for EAGLE slot zero; otherwise slot.i"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stable-storage-reference",
+      "title": "Keep physical storage and layout state together",
+      "explanation": [
+        "k_storage_ref holds a physical storage offset and the matching state index. k_storage_of resolves this pair under the active view.",
+        "The pending conversion list saves this pair when K is written. A later view change cannot redirect conversion to another physical slot.",
+        "Page copying builds this pair from physical slots instead of the active logical view."
+      ],
+      "ranges": [
+        [
+          2137,
+          2155
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Resolve once, use after a view change",
+          "caption": "The pair identifies the same physical slot at save time and at conversion time.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_storage_of",
+                  "kind": "function",
+                  "description": "Resolves the active logical slot to a physical offset and state index.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2150
+                },
+                {
+                  "name": "k_storage_ref",
+                  "kind": "cache",
+                  "description": "Keeps a physical storage offset and its K-state index together.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2145
+                }
+              ],
+              "edges": [
+                "returns the resolved pair"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_storage_ref",
+                  "kind": "cache",
+                  "description": "Keeps a physical storage offset and its K-state index together.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2145
+                },
+                {
+                  "name": "pending_k_block",
+                  "kind": "work",
+                  "description": "Remembers a page, a physical storage reference, and a block index.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3164
+                }
+              ],
+              "edges": [
+                "1 pending_k_block stores 1 k_storage_ref"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "pending_k_block",
+                  "kind": "work",
+                  "description": "Remembers a page, a physical storage reference, and a block index.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3164
+                },
+                {
+                  "name": "k_block_to_vnni_at",
+                  "kind": "function",
+                  "description": "Converts a complete physical block across every KV head.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2214
+                }
+              ],
+              "edges": [
+                "supplies the saved storage pair at forward end"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "layout-mask-queries",
+      "title": "Read converted-block state and compute the matching row mask",
+      "explanation": [
+        "k_vnni_blocks exposes the slot’s converted-block mask with an acquire load. k_block_is_vnni tests the bit for one token’s block.",
+        "k_block_bits produces the 16 saved-row bits belonging to block c. A compile-time check ties the mask to 64-token pages."
+      ],
+      "ranges": [
+        [
+          2126,
+          2135
+        ],
+        [
+          2507,
+          2518
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "A token offset selects one block bit",
+          "caption": "Row completeness uses a 16-bit region in the saved-row mask. Layout uses one bit in the converted-block mask.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_block_is_vnni",
+                  "kind": "function",
+                  "description": "Tests whether a token’s 16-token block is converted.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2514
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "uses offset / BLOCK_TOKENS_16 to select a bit in"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_block_bits",
+                  "kind": "function",
+                  "description": "Builds the 16 saved-row bits belonging to block c.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2508
+                },
+                {
+                  "name": "k_vnni::FULL_BLOCK_0XFFFF",
+                  "kind": "value",
+                  "description": "All 16 row bits of one token block before shifting.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2510
+                }
+              ],
+              "edges": [
+                "returns FULL_BLOCK_0XFFFF shifted by c × BLOCK_TOKENS_16"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni_blocks",
+                  "kind": "function",
+                  "description": "Reads the converted-block mask for a logical slot.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2133
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "loads the selected state entry with acquire ordering"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "storage-geometry",
+      "title": "Dispatch physical storage to its declared geometry",
+      "explanation": [
+        "k_with_storage_geometry runs a templated callback for the selected physical slot. Logical slots use their own declared KV geometry.",
+        "The extra EAGLE slot uses layout_t::primary_geometry. The same helper serves conversion and invalidation."
+      ],
+      "ranges": [
+        [
+          2520,
+          2532
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Physical offset determines conversion shape",
+          "caption": "The callback receives the number of KV heads and the head dimension of the selected storage slot.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_with_storage_geometry",
+                  "kind": "function",
+                  "description": "Calls the callback with the physical slot’s KV geometry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2524
+                },
+                {
+                  "name": "for_each_active_slot",
+                  "kind": "function",
+                  "description": "Visits active logical slots with their declared geometry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 1698
+                }
+              ],
+              "edges": [
+                "storage_offset.i < logical_slot_count(): find the matching active slot"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_with_storage_geometry",
+                  "kind": "function",
+                  "description": "Calls the callback with the physical slot’s KV geometry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2524
+                },
+                {
+                  "name": "layout_t::primary_geometry",
+                  "kind": "value",
+                  "description": "The geometry used by EAGLE storage.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2530
+                }
+              ],
+              "edges": [
+                "extra physical slot: invoke the callback with"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-publication",
+      "title": "Publish individual saved rows and identify blocks ready to convert",
+      "explanation": [
+        "note_k_row_saved sets the bit for a saved row. It returns true when that block has all 16 rows and has not been converted.",
+        "An already-set row avoids the atomic read-modify-write. A complete block can return true again while conversion is pending.",
+        "The caller skips this publication for short runs scored by hardware attention. Those rows stay readable in row-major form, but they do not trigger deferred conversion.",
+        "The hardware-policy comment explains the accepted arithmetic difference between software readers. It does not establish a measured speedup."
+      ],
+      "ranges": [
+        [
+          687,
+          704
+        ],
+        [
+          729,
+          765
+        ],
+        [
+          2157,
+          2190
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "A saved row can complete a block",
+          "caption": "Writing bytes and recording completeness are separate operations.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "note_k_row_saved",
+                  "kind": "function",
+                  "description": "Publishes one saved row and reports an eligible block.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2167
+                },
+                {
+                  "name": "k_rows_saved_",
+                  "kind": "cache",
+                  "description": "One saved-row bit per page offset and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2616
+                }
+              ],
+              "edges": [
+                "sets one offset bit; preserves bits published by other writers"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_rows_saved_",
+                  "kind": "cache",
+                  "description": "One saved-row bit per page offset and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2616
+                },
+                {
+                  "name": "(after & k_block_bits(c)) == k_block_bits(c)",
+                  "kind": "value",
+                  "description": "All rows of the block have been published.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2180
+                }
+              ],
+              "edges": [
+                "16 saved rows and 0 converted bits for this block yield 1 true completion result"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "cached_operation_uses_hw",
+                  "kind": "function",
+                  "description": "Reads whether this operation uses hardware attention.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 1531
+                },
+                {
+                  "name": "save_k_impl",
+                  "kind": "function",
+                  "description": "Saves this operation’s K rows and publishes their completion state.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3352
+                }
+              ],
+              "edges": [
+                "true: save_k_impl skips per-row publication and conversion queuing"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "block-publication",
+      "title": "Publish whole-block storage after all KV heads are written",
+      "explanation": [
+        "note_k_block_saved sets all 16 saved-row bits before releasing the converted-block bit.",
+        "The caller invokes it after set_k_block has stored every KV head. The state is shared by all heads in the slot.",
+        "Atomic fetch_or preserves bits from other blocks stored by helpers."
+      ],
+      "ranges": [
+        [
+          705,
+          711
+        ],
+        [
+          2192,
+          2200
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Publication follows all head writes",
+          "caption": "A reader must not observe a packed-block bit while another head still contains row-major values.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "set_k_block",
+                  "kind": "function",
+                  "description": "Stores one full block of one KV head in packed layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2277
+                },
+                {
+                  "name": "note_k_block_saved",
+                  "kind": "function",
+                  "description": "Publishes all 16 row bits and the converted-block bit.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2195
+                }
+              ],
+              "edges": [
+                "caller completes geometry.n_kv_heads stores, then calls"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "note_k_block_saved",
+                  "kind": "function",
+                  "description": "Publishes all 16 row bits and the converted-block bit.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2195
+                },
+                {
+                  "name": "k_rows_saved_",
+                  "kind": "cache",
+                  "description": "One saved-row bit per page offset and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2616
+                }
+              ],
+              "edges": [
+                "fetch_or publishes 16 row bits before the block bit"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "note_k_block_saved",
+                  "kind": "function",
+                  "description": "Publishes all 16 row bits and the converted-block bit.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2195
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "release fetch_or publishes the converted layout"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deferred-conversion",
+      "title": "Convert only complete blocks after readers finish",
+      "explanation": [
+        "k_block_to_vnni resolves a logical slot and forwards to k_block_to_vnni_at. The physical form rejects incomplete or already-converted blocks.",
+        "The helper converts every KV head before publishing the converted-block bit. Repeated queued entries therefore do not convert twice.",
+        "The documented caller contract requires the main thread to run this after all readers finish. The surrounding model code waits for cooperative staging before it drains the pending list."
+      ],
+      "ranges": [
+        [
+          720,
+          728
+        ],
+        [
+          2202,
+          2236
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Guard → convert every head → publish",
+          "caption": "This is a sequencing diagram, not a measured timing chart.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_block_to_vnni_at",
+                  "kind": "function",
+                  "description": "Converts a complete physical block across every KV head.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2214
+                },
+                {
+                  "name": "CONVERTED_FALSE",
+                  "kind": "value",
+                  "description": "No conversion happened.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2496
+                }
+              ],
+              "edges": [
+                "incomplete saved mask or existing converted bit: return CONVERTED_FALSE"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_block_to_vnni_at",
+                  "kind": "function",
+                  "description": "Converts a complete physical block across every KV head.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2214
+                },
+                {
+                  "name": "block_to_vnni",
+                  "kind": "function",
+                  "description": "Converts one head’s 16-token block to packed layout in place.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 499
+                }
+              ],
+              "edges": [
+                "complete and unconverted: call once per geometry.n_kv_heads"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "block_to_vnni",
+                  "kind": "function",
+                  "description": "Converts one head’s 16-token block to packed layout in place.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 499
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "after every head finishes, release-publish one block bit"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-store",
+      "title": "Store one K row according to its current block layout",
+      "explanation": [
+        "set_k_row accepts a typed contiguous source row. Packed storage uses store_row for converted blocks and store_row_major for unconverted blocks.",
+        "Native storage keeps the existing memcpy behavior. This function does not set the saved-row bit."
+      ],
+      "ranges": [
+        [
+          766,
+          778
+        ],
+        [
+          2238,
+          2263
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "One row interface, three storage cases",
+          "caption": "The block mask selects the packed or row-major operation within a packed owner.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "set_k_row",
+                  "kind": "function",
+                  "description": "Stores one token row using the block’s current layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2247
+                },
+                {
+                  "name": "store_row",
+                  "kind": "function",
+                  "description": "Scatters one token’s values into packed dimension-pair positions.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 351
+                }
+              ],
+              "edges": [
+                "packed storage, converted block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "set_k_row",
+                  "kind": "function",
+                  "description": "Stores one token row using the block’s current layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2247
+                },
+                {
+                  "name": "store_row_major",
+                  "kind": "function",
+                  "description": "Copies one token row into the block’s contiguous row storage.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 478
+                }
+              ],
+              "edges": [
+                "packed storage, unconverted block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "set_k_row",
+                  "kind": "function",
+                  "description": "Stores one token row using the block’s current layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2247
+                },
+                {
+                  "name": "k_at",
+                  "kind": "function",
+                  "description": "Returns the native K row at i_page.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 3033
+                }
+              ],
+              "edges": [
+                "native storage: memcpy geometry.head_size bf16 values"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "block-store",
+      "title": "Store a complete 16-token K block directly in packed form",
+      "explanation": [
+        "set_k_block forwards 16 native row pointers to store_block with every presence bit set.",
+        "This operation stores one KV head. Its caller publishes the shared block state only after the last head.",
+        "The full-block path avoids a later in-place conversion."
+      ],
+      "ranges": [
+        [
+          2265,
+          2284
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Full-block input",
+          "caption": "The input rows remain native contiguous rows. The output is the packed block of one head.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "rows[k_vnni::BLOCK_TOKENS_16]",
+                  "kind": "k",
+                  "description": "The 16 pointers to native 128-dimension source rows.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2280
+                },
+                {
+                  "name": "k_vnni_tensor",
+                  "kind": "k",
+                  "description": "Owns page_size × head_size bf16 values in one K plane.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 210
+                }
+              ],
+              "edges": [
+                "1 array of 16 rows updates 1 of page_size / 16 blocks in 1 K owner"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "set_k_block",
+                  "kind": "function",
+                  "description": "Stores all 16 rows of one head directly in packed layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2277
+                },
+                {
+                  "name": "store_block",
+                  "kind": "function",
+                  "description": "Transposes selected source rows and stores packed block panels.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 396
+                }
+              ],
+              "edges": [
+                "passes FULL_BLOCK_0XFFFF and the source row pointers"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-load",
+      "title": "Load one K row from either layout",
+      "explanation": [
+        "get_k_row writes a typed contiguous destination row. Packed storage uses load_row for converted blocks and load_row_major for unconverted blocks.",
+        "Native storage copies from k_at. The caller receives the same logical head_size values through each path."
+      ],
+      "ranges": [
+        [
+          2286,
+          2307
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Read selection mirrors write selection",
+          "caption": "The destination row is contiguous even when stored values are packed.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "get_k_row",
+                  "kind": "function",
+                  "description": "Copies one token row from its current storage layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2291
+                },
+                {
+                  "name": "load_row",
+                  "kind": "function",
+                  "description": "Gathers one token’s packed values into a contiguous destination row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 369
+                }
+              ],
+              "edges": [
+                "packed storage, converted block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "get_k_row",
+                  "kind": "function",
+                  "description": "Copies one token row from its current storage layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2291
+                },
+                {
+                  "name": "load_row_major",
+                  "kind": "function",
+                  "description": "Copies one contiguous row out of an unconverted block.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 488
+                }
+              ],
+              "edges": [
+                "packed storage, unconverted block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "get_k_row",
+                  "kind": "function",
+                  "description": "Copies one token row from its current storage layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2291
+                },
+                {
+                  "name": "k_at",
+                  "kind": "function",
+                  "description": "Returns the native K row at i_page.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 3037
+                }
+              ],
+              "edges": [
+                "native storage: memcpy geometry.head_size bf16 values from"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "uniform-row-overloads",
+      "title": "Route uniform row operations through the primary geometry",
+      "explanation": [
+        "The uniform-geometry overloads preserve simple set_k_row and get_k_row calls. Each forwards to the geometry-specific implementation.",
+        "The requires clause prevents these overloads from hiding geometry differences in mixed-layout caches."
+      ],
+      "ranges": [
+        [
+          2309,
+          2330
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Uniform callers reuse the same layout-aware implementation",
+          "caption": "No separate copy algorithm is introduced.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "set_k_row",
+                  "kind": "function",
+                  "description": "Forwards a uniform slot row store to the primary geometry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2312
+                },
+                {
+                  "name": "set_k_row",
+                  "kind": "function",
+                  "description": "Stores one token row using the block’s current layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2247
+                }
+              ],
+              "edges": [
+                "instantiates layout_t::primary_geometry"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "get_k_row",
+                  "kind": "function",
+                  "description": "Forwards a uniform slot row load to the primary geometry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2323
+                },
+                {
+                  "name": "get_k_row",
+                  "kind": "function",
+                  "description": "Copies one token row from its current storage layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2291
+                }
+              ],
+              "edges": [
+                "instantiates layout_t::primary_geometry"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "packed-plane-view",
+      "title": "Expose a typed read-only K plane to score kernels",
+      "explanation": [
+        "k_packed returns a read-only k_vnni_view for one slot and one KV head.",
+        "The view does not mean every block is converted. Readers also use k_vnni_blocks to identify valid packed blocks.",
+        "The dense AMX path requires all page blocks to be packed. The software packed reader can score selected converted blocks."
+      ],
+      "ranges": [
+        [
+          779,
+          792
+        ],
+        [
+          816,
+          820
+        ],
+        [
+          2108,
+          2124
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Typed plane plus explicit layout state",
+          "caption": "The read-only view prevents external cache writes through the score-kernel interface.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_packed",
+                  "kind": "function",
+                  "description": "Returns a read-only view of one slot/head K plane.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2120
+                },
+                {
+                  "name": "k_vnni_view",
+                  "kind": "k",
+                  "description": "Borrows one K plane; the page mask supplies each block’s current layout.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 164
+                }
+              ],
+              "edges": [
+                "returns the owner’s read-only view"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni_view",
+                  "kind": "k",
+                  "description": "Borrows one K plane; the page mask supplies each block’s current layout.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 164
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "1 plane has page_size / BLOCK_TOKENS_16 block-layout bits in its slot’s 1 mask"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni_blocks",
+                  "kind": "function",
+                  "description": "Reads the converted-block mask for a logical slot.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2133
+                },
+                {
+                  "name": "qk_vnni_128x4",
+                  "kind": "function",
+                  "description": "Computes attention scores directly from the packed K plane.",
+                  "file": "h/tron/kernels/amx_attn_iface.hpp",
+                  "line": 260
+                }
+              ],
+              "edges": [
+                "all bits set permits the packed dense path"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "in-place-row-view",
+      "title": "Reuse a row-major K row directly during staging",
+      "explanation": [
+        "k_row_if_row_major returns an in-place typed row view when the token’s block is unconverted.",
+        "For a converted block it returns an invalid view. The caller then uses get_k_row to gather into its own scratch row.",
+        "The returned in-place row stays valid only while no writer changes that block."
+      ],
+      "ranges": [
+        [
+          793,
+          802
+        ],
+        [
+          2332,
+          2349
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Direct row or explicit gather",
+          "caption": "The layout state prevents staging from treating packed values as a contiguous row.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_row_if_row_major",
+                  "kind": "function",
+                  "description": "Returns an in-place row only for an unconverted block.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2341
+                },
+                {
+                  "name": "row_major_row",
+                  "kind": "function",
+                  "description": "Locates one contiguous row inside an unconverted block.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 464
+                }
+              ],
+              "edges": [
+                "unconverted block: return the typed contiguous row"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_row_if_row_major",
+                  "kind": "function",
+                  "description": "Returns an in-place row only for an unconverted block.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2341
+                },
+                {
+                  "name": "get_k_row",
+                  "kind": "function",
+                  "description": "Copies one token row from its current storage layout.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2291
+                }
+              ],
+              "edges": [
+                "converted block: return invalid k_row_view; caller falls back to"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "clear-completion-hook",
+      "title": "Invalidate K layout state when a page offset is reassigned",
+      "explanation": [
+        "clear_kv_complete_at already reset the K/V save counters for the assigned offset. It now also calls k_forget_row.",
+        "The K layout invalidation extends from that offset to the page end. The append model makes all higher offsets free."
+      ],
+      "ranges": [
+        [
+          2470,
+          2477
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Token reassignment reaches both state systems",
+          "caption": "The completion counters and K-layout masks are independent.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "clear_kv_complete_at",
+                  "kind": "function",
+                  "description": "Clears completion state when a new token takes an offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2472
+                },
+                {
+                  "name": "kv_saves_",
+                  "kind": "cache",
+                  "description": "Per-token, per-slot K/V save counters.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2603
+                }
+              ],
+              "edges": [
+                "resets the assigned offset’s counter in each logical slot"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "clear_kv_complete_at",
+                  "kind": "function",
+                  "description": "Clears completion state when a new token takes an offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2472
+                },
+                {
+                  "name": "k_forget_row",
+                  "kind": "function",
+                  "description": "Drops stale K state and preserves any live rows below the offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2552
+                }
+              ],
+              "edges": [
+                "also invalidates K state at and above the assigned offset"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "readable-storage",
+      "title": "Check storage ownership before rewriting old block bytes",
+      "explanation": [
+        "k_storage_readable requires both published restore state and an allocated slot arena.",
+        "Invalidation can happen before or after a KV restore is committed. Unpublished or reclaimed bytes must not be converted back to rows."
+      ],
+      "ranges": [
+        [
+          2534,
+          2542
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Both conditions must allow byte access",
+          "caption": "Layout bits may still be cleared when bytes cannot be read.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_storage_readable",
+                  "kind": "function",
+                  "description": "Checks that restored storage is published and the slot arena exists.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2539
+                },
+                {
+                  "name": "k_forget_row",
+                  "kind": "function",
+                  "description": "Drops stale K state and preserves any live rows below the offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2552
+                }
+              ],
+              "edges": [
+                "requires reclaimable_kv_restore_attempt_ == 0 and slot_base != nullptr"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "forget-range",
+      "title": "Compute invalidated K ranges and skip empty state",
+      "explanation": [
+        "k_forget_row computes the row bits below the new offset and block bits below its block.",
+        "The loop visits active physical slots and the optional EAGLE slot. Inactive logical entries are skipped.",
+        "If no saved or converted bit exists at or above the offset, the loop continues without atomic read-modify-write operations."
+      ],
+      "ranges": [
+        [
+          2544,
+          2570
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Build the preserved prefix",
+          "caption": "The assigned offset itself is excluded from rows_below. Its whole block is excluded from blocks_below.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_forget_row",
+                  "kind": "function",
+                  "description": "Drops stale K state and preserves any live rows below the offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2552
+                },
+                {
+                  "name": "rows_below",
+                  "kind": "value",
+                  "description": "offset_bit(offset) - 1 selects the row prefix.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2554
+                }
+              ],
+              "edges": [
+                "keeps bits strictly below the new token offset"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_forget_row",
+                  "kind": "function",
+                  "description": "Drops stale K state and preserves any live rows below the offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2552
+                },
+                {
+                  "name": "blocks_below",
+                  "kind": "value",
+                  "description": "block_bit(c) - 1 selects the complete block prefix.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2555
+                }
+              ],
+              "edges": [
+                "keeps only blocks strictly below the affected block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_forget_row",
+                  "kind": "function",
+                  "description": "Drops stale K state and preserves any live rows below the offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2552
+                },
+                {
+                  "name": "(converted & ~blocks_below) == 0",
+                  "kind": "value",
+                  "description": "First half of the empty-invalidated-range check.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2567
+                }
+              ],
+              "edges": [
+                "no row or block bits to drop: continue with no state writes"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "forget-preserve-rows",
+      "title": "Convert a partly retained block back to rows before clearing bits",
+      "explanation": [
+        "When the affected block is converted and keeps rows below the offset, k_forget_row restores row-major bytes for every KV head.",
+        "This byte conversion happens only when k_storage_readable permits access. Blocks above the offset keep no live rows and need no byte conversion.",
+        "After preserving the prefix, the code clears converted bits for the affected block and higher blocks. It also clears saved-row bits at and above the assigned offset.",
+        "The comment requires the token tree lock and no concurrent forward readers."
+      ],
+      "ranges": [
+        [
+          712,
+          718
+        ],
+        [
+          2571,
+          2586
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Preserve bytes before changing their interpretation",
+          "caption": "The retained rows remain readable after their block bit becomes clear.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_forget_row",
+                  "kind": "function",
+                  "description": "Drops stale K state and preserves any live rows below the offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2552
+                },
+                {
+                  "name": "block_to_rows",
+                  "kind": "function",
+                  "description": "Converts one packed block back to contiguous token rows.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 514
+                }
+              ],
+              "edges": [
+                "partly retained + converted + readable: convert each KV head"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "block_to_rows",
+                  "kind": "function",
+                  "description": "Converts one packed block back to contiguous token rows.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 514
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "after all heads are restored, clear affected and higher block bits"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_forget_row",
+                  "kind": "function",
+                  "description": "Drops stale K state and preserves any live rows below the offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2552
+                },
+                {
+                  "name": "k_rows_saved_",
+                  "kind": "cache",
+                  "description": "One saved-row bit per page offset and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2616
+                }
+              ],
+              "edges": [
+                "release fetch_and keeps only rows_below"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "copy-layout-masks",
+      "title": "Compute destination saved-row state from the copied range",
+      "explanation": [
+        "copy_storage_slot now receives k_storage_ref. This keeps the physical slot and K-state entry aligned.",
+        "For packed storage, the function snapshots both source and destination masks. It replaces only the destination range’s saved bits with the shifted source bits.",
+        "A full-page range uses an all-ones mask. This avoids shifting a 64-bit value by the page size.",
+        "The calculation happens once per slot before copying its KV heads. Publication happens after the head loop."
+      ],
+      "ranges": [
+        [
+          719,
+          719
+        ],
+        [
+          2687,
+          2720
+        ]
+      ],
+      "old_ranges": [
+        [
+          2108,
+          2117
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Saved bits move with token positions",
+          "caption": "Uncopied destination offsets keep their existing saved-row state.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "src_saved",
+                  "kind": "cache",
+                  "description": "Snapshot of the source slot’s saved-row mask.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2708
+                },
+                {
+                  "name": "new_saved",
+                  "kind": "cache",
+                  "description": "Merged saved-row mask for the destination slot.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2716
+                }
+              ],
+              "edges": [
+                "count source bits shift from src_begin to dst_begin"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "dst_saved",
+                  "kind": "cache",
+                  "description": "Snapshot of the destination slot’s saved-row mask.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2710
+                },
+                {
+                  "name": "new_saved",
+                  "kind": "cache",
+                  "description": "Merged saved-row mask for the destination slot.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2716
+                }
+              ],
+              "edges": [
+                "page_size - count destination bits outside range are preserved"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "copy-whole-page",
+      "title": "Copy an entire packed K owner without changing positions",
+      "explanation": [
+        "If both ranges start at zero and count equals page_size, copy_storage_slot assigns the K owner directly.",
+        "Token positions do not change in this case. The destination converted-block mask can therefore match the source mask.",
+        "V still follows its existing per-token copy path."
+      ],
+      "ranges": [
+        [
+          803,
+          810
+        ],
+        [
+          2721,
+          2735
+        ]
+      ],
+      "old_ranges": [
+        [
+          2116,
+          2126
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Whole-page copy preserves the layout",
+          "caption": "The owner assignment copies all stored bytes, including any row-major tail blocks.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "src_block.k",
+                  "kind": "k",
+                  "description": "The source head’s complete K owner.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2733
+                },
+                {
+                  "name": "dst_block.k",
+                  "kind": "k",
+                  "description": "The destination head’s complete K owner.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2733
+                }
+              ],
+              "edges": [
+                "1 source K owner copies page_size × geometry.head_size bf16 values into 1 destination owner"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "src_blocks",
+                  "kind": "cache",
+                  "description": "Snapshot of the source slot’s converted-block mask.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2709
+                },
+                {
+                  "name": "new_blocks",
+                  "kind": "cache",
+                  "description": "The converted-block mask to publish after all head copies.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2717
+                }
+              ],
+              "edges": [
+                "1 complete-page copy carries all page_size / 16 block bits into 1 destination mask"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "copy-unpack-destination",
+      "title": "Make touched destination blocks row-major before a partial copy",
+      "explanation": [
+        "A partial copy can move a token to a different packed column. The function first makes every touched converted destination block row-major.",
+        "It clears those blocks in new_blocks. Blocks outside the copied range are unchanged."
+      ],
+      "ranges": [
+        [
+          2736,
+          2746
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Normalize the destination block before moving rows",
+          "caption": "The touched interval is [dst_begin, dst_begin + count).",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "copy_storage_slot",
+                  "kind": "function",
+                  "description": "Copies one physical slot’s K/V rows and layout state.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2691
+                },
+                {
+                  "name": "block_to_rows",
+                  "kind": "function",
+                  "description": "Converts one packed block back to contiguous token rows.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 514
+                }
+              ],
+              "edges": [
+                "for each touched destination block whose old converted bit is set"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "block_to_rows",
+                  "kind": "function",
+                  "description": "Converts one packed block back to contiguous token rows.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 514
+                },
+                {
+                  "name": "new_blocks",
+                  "kind": "cache",
+                  "description": "The converted-block mask to publish after all head copies.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2717
+                }
+              ],
+              "edges": [
+                "clear that block’s bit in the pending destination mask"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "copy-token-rows",
+      "title": "Copy each token using the source block’s layout",
+      "explanation": [
+        "The copy loop chooses the source operation from src_blocks. A converted source row is gathered with load_row.",
+        "An unconverted source row is copied with store_row_major. Both branches write a row-major destination row at its new token offset.",
+        "Native K keeps a contiguous memcpy fallback. V keeps append_v for each copied token."
+      ],
+      "ranges": [
+        [
+          2747,
+          2756
+        ],
+        [
+          2763,
+          2779
+        ]
+      ],
+      "old_ranges": [
+        [
+          2116,
+          2133
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Move logical rows, not packed columns",
+          "caption": "The source and destination token offsets can differ.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "copy_storage_slot",
+                  "kind": "function",
+                  "description": "Copies one physical slot’s K/V rows and layout state.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2691
+                },
+                {
+                  "name": "load_row",
+                  "kind": "function",
+                  "description": "Gathers one token’s packed values into a contiguous destination row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 369
+                }
+              ],
+              "edges": [
+                "source block converted: gather into the new destination row"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "copy_storage_slot",
+                  "kind": "function",
+                  "description": "Copies one physical slot’s K/V rows and layout state.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2691
+                },
+                {
+                  "name": "store_row_major",
+                  "kind": "function",
+                  "description": "Copies one token row into the block’s contiguous row storage.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 478
+                }
+              ],
+              "edges": [
+                "source block unconverted: copy its contiguous source row"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "src_begin + i",
+                  "kind": "value",
+                  "description": "One source token offset in the copied range.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2748
+                },
+                {
+                  "name": "dst_begin + i",
+                  "kind": "value",
+                  "description": "The matching destination token offset.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2751
+                }
+              ],
+              "edges": [
+                "1 source row maps to 1 destination row for each i < count"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "copy-reconvert",
+      "title": "Convert copied destination blocks only when all rows are saved",
+      "explanation": [
+        "After the row copies, each touched destination block is checked against new_saved.",
+        "A block with all 16 row bits is converted to packed layout. A block missing any row remains row-major.",
+        "The conversion updates new_blocks. It does not publish the page mask yet."
+      ],
+      "ranges": [
+        [
+          2757,
+          2762
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Destination completeness controls the final layout",
+          "caption": "Hardware-scored short rows have no saved bits, so copying them does not itself make their block eligible.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "(new_saved & k_block_bits(c)) == k_block_bits(c)",
+                  "kind": "value",
+                  "description": "All 16 destination row bits are present.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2758
+                },
+                {
+                  "name": "block_to_vnni",
+                  "kind": "function",
+                  "description": "Converts one head’s 16-token block to packed layout in place.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 499
+                }
+              ],
+              "edges": [
+                "true: convert the completed destination block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "block_to_vnni",
+                  "kind": "function",
+                  "description": "Converts one head’s 16-token block to packed layout in place.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 499
+                },
+                {
+                  "name": "new_blocks",
+                  "kind": "cache",
+                  "description": "The converted-block mask to publish after all head copies.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2717
+                }
+              ],
+              "edges": [
+                "records the resulting layout in the pending mask"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "copy-publish",
+      "title": "Publish copied layout state after the last KV head",
+      "explanation": [
+        "The function stores new_saved and new_blocks after finishing every KV head’s K and V copy.",
+        "Both stores use release ordering. Readers acquire the published converted-block state before choosing a layout-specific read."
+      ],
+      "ranges": [
+        [
+          2780,
+          2784
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Publish once per copied slot",
+          "caption": "The state masks describe all heads, so publication follows the entire head loop.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "copy_storage_slot",
+                  "kind": "function",
+                  "description": "Copies one physical slot’s K/V rows and layout state.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2691
+                },
+                {
+                  "name": "k_rows_saved_",
+                  "kind": "cache",
+                  "description": "One saved-row bit per page offset and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2616
+                }
+              ],
+              "edges": [
+                "after geometry.n_kv_heads copies: release-store new_saved"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "copy_storage_slot",
+                  "kind": "function",
+                  "description": "Copies one physical slot’s K/V rows and layout state.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2691
+                },
+                {
+                  "name": "k_vnni_blocks_",
+                  "kind": "cache",
+                  "description": "One converted-block bit per 16-token block and storage-state entry.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2621
+                }
+              ],
+              "edges": [
+                "then release-store new_blocks"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "copy-physical-slots",
+      "title": "Copy every active physical slot with its matching state entry",
+      "explanation": [
+        "copy_from supplies each logical slot’s physical offset and state index explicitly.",
+        "The optional EAGLE copy supplies eagle_storage_offset() with metadata index layout_t::n_slots.",
+        "Page copying covers physical storage independently of the currently selected logical view."
+      ],
+      "ranges": [
+        [
+          2786,
+          2803
+        ]
+      ],
+      "old_ranges": [
+        [
+          2135,
+          2152
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Physical traversal keeps EAGLE separate",
+          "caption": "Normal slots and the extra EAGLE slot use the same copy function with different references.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "copy_from",
+                  "kind": "function",
+                  "description": "Copies a token range across every active physical K/V slot.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2787
+                },
+                {
+                  "name": "copy_storage_slot",
+                  "kind": "function",
+                  "description": "Copies one physical slot’s K/V rows and layout state.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2691
+                }
+              ],
+              "edges": [
+                "each normal slot supplies {kv_storage_offset(slot), slot}"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "copy_from",
+                  "kind": "function",
+                  "description": "Copies a token range across every active physical K/V slot.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2787
+                },
+                {
+                  "name": "k_storage_ref",
+                  "kind": "cache",
+                  "description": "Keeps a physical storage offset and its K-state index together.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2145
+                }
+              ],
+              "edges": [
+                "EAGLE storage supplies {eagle_storage_offset(), layout_t::n_slots}"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "random-fill",
+      "title": "Fill the packed K owner through its internal access helper",
+      "explanation": [
+        "The test-only fill_storage_slot path cannot iterate k_vnni_tensor as an array. It obtains the plane address through detail::k_vnni_access instead.",
+        "Native K retains its array loop. Both branches fill page_size × geometry.head_size bf16 values.",
+        "The comment limits this raw fill to testing. It does not interpret token coordinates or mark tokens complete."
+      ],
+      "ranges": [
+        [
+          1397,
+          1412
+        ],
+        [
+          1829,
+          1849
+        ]
+      ],
+      "old_ranges": [
+        [
+          1218,
+          1225
+        ],
+        [
+          1645,
+          1661
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Test fill has a documented raw-access exception",
+          "caption": "The public production interfaces still expose typed rows or views.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "fill_storage_slot",
+                  "kind": "function",
+                  "description": "Fills one slot’s K/V data with generated test values.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 1830
+                },
+                {
+                  "name": "detail::k_vnni_access::plane",
+                  "kind": "function",
+                  "description": "Returns the internal address of a typed packed K view.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 243
+                }
+              ],
+              "edges": [
+                "packed K: obtain the owner plane address through"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "fill_storage_slot",
+                  "kind": "function",
+                  "description": "Fills one slot’s K/V data with generated test values.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 1830
+                },
+                {
+                  "name": "k_vnni_tensor",
+                  "kind": "k",
+                  "description": "Owns page_size × head_size bf16 values in one K plane.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 210
+                }
+              ],
+              "edges": [
+                "writes page_size × geometry.head_size values per page and KV head"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trivial": [
+    {
+      "description": "Include tron/tensor/k_vnni.hpp so this header can use the typed K owner and row/block operations.",
+      "ranges": [
+        [
+          31,
+          31
+        ]
+      ]
+    },
+    {
+      "description": "Extend the shared-cache overview comment to include packed K storage.",
+      "ranges": [
+        [
+          570,
+          585
+        ]
+      ],
+      "old_ranges": [
+        [
+          570,
+          583
+        ]
+      ]
+    }
+  ],
+  "coverage_notes": [
+    "All source excerpts use PR4424 head 9d5c7a389b23078398028bce0d1fe1a6c5c64e31. Before excerpts use base be0d5565b355a90b6018529d3310565c3f5909cb.",
+    "The long Note [K VNNI storage] comment is split among the code units it explains. Its hardware-policy and arithmetic-order caveats remain next to row publication and packed reads.",
+    "The diagrams show code contracts and control flow. They do not claim benchmark results or measured timings.",
+    "Existing live-token bounds, K/V completion counters, V copy semantics, and physical slot topology are shown only where they explain the new K state."
+  ]
+}

@@ -1,0 +1,35 @@
+Short version: One non-blocking readability recommendation in the separate Ben-review pass. No correctness claim. Reviewed head a711aeee831c7c4da24ce3737d93dd0c76df1149 against base 72308ec90c80318403c4575dd9ce4a3bc9af5033.
+
+Finding B1 — Reuse the K transfer-row helper for the conversion buffer (P3, optional readability)
+Location: h/tron/models/model.hpp:3117-3119.
+
+Proposed inline comment:
+Could this use k_destination_row<geometry.kv.head_size>(row).set(kout)? The new helper already names the contiguous bf16 K transfer row. This spelling makes the reader decode its element type, alignment, DMA flag, and shape again before recognizing the same row passed to set_k_row below. The helper's defaults preserve this stack buffer's current flags.
+
+Evidence and smallest remedy:
+- Current expression: view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE, seq<geometry.kv.head_size>>{row}.set(kout).
+- h/tron/tensor/k_vnni.hpp:227-228 defines k_row_view with the same bf16 element type and contiguous stride.
+- h/tron/tensor/k_vnni.hpp:249-253 defines k_destination_row, with Aligned=VIEW_ALIGNED_TRUE and Dma=VIEW_DMA_FALSE.
+- The local row is alignas(64) at model.hpp:3116. The replacement therefore retains its actual alignment and memory flags.
+- set() is the same rank-1 view method (h/tron/tensor/view.hpp:188-203). Conversion behavior is unchanged.
+- The separate bf16 source branch must keep k_source_row(kout), which preserves the model buffer's own alignment and DMA flags. Do not force the local-buffer defaults onto that branch.
+- No new alias, struct, or shared utility is needed. This is one expression using the helper introduced in the same change.
+
+Inspected scope:
+- New tensor/k_vnni.hpp owner, views, row aliases, construction helpers, store/load/copy operations and their call sites.
+- New kernels/k_vnni.hpp qk_group declaration, recursive group splitting and fp16 adapter.
+- models/kv_cache.hpp page accessors, constrained row-major accessors, copy_storage_slot and geometry dispatch.
+- models/model.hpp save_k conversion and direct bf16 paths.
+- models/self_attention.hpp packed-score call and row-major placeholder initialization.
+- scheduler/full.hpp and gof.hpp/gof.cpp row callbacks and their scratch buffers.
+- Test transfer rows, query views, reader calls, and type-boundary checks in t_k_vnni_layout.cpp and changed t_llama_unit.cpp sections.
+- Existing v_vnni transfer-row vocabulary and amx_attn_iface.hpp kernel declarations for baseline conventions.
+
+Parameter-count and duplication candidates not reported:
+- qk_group adds five runtime parameters: K plane, query pointer, live mask, score pointer, score stride. Pointer plus stride describes one output matrix, but the adjacent existing qk_rowmajor_128x4 API uses the same output convention. There is one new production call. A wrapper solely to reach four arguments would add machinery without an established shared concept at multiple production boundaries. Do not expand this PR to redesign unchanged AMX kernel interfaces.
+- copy_storage_slot's five parameters and apply_page_tok's longer interface predate this change. The review does not request unrelated migration.
+- New store/load templates have four type/value parameters, deduced at normal call sites. Their shape, constness, alignment, and DMA distinctions are meaningful.
+- Repeated low-level query views in the numeric test are not K transfer rows. Reusing const_k_row_view there would misname their role. No test-only helper promotion is justified.
+- K and V packed owners look similar but their physical layouts and token write contracts differ. They should not be merged solely for syntactic similarity.
+
+No source edits, builds, tests, or GitHub writes were performed in this pass.

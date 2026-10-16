@@ -1,0 +1,117 @@
+Short version: The separate Wade review found two test-coverage concerns and two inaccurate descriptions at PR #4868 head a711aeee831c7c4da24ce3737d93dd0c76df1149. No reachable production correctness defect was established. All 35 check numbers were assessed, including 3A and 3B; incomplete evidence is identified below.
+
+Words used here:
+- HEAD is the reviewed commit. BASE is its merge base with the PR target.
+- CI is the automated build/test system. GCP Nix is the required workflow. The legacy CMake lane is the separate CMake and CTest workflow.
+- K is the saved attention-key vector. VNNI is its pair-interleaved storage format. AMX is Intel's matrix instruction set. AVX-512 is the vector instruction set used by this reader.
+- GOF is the group of token rows staged for the FPGA accelerator. DMA is the later device memory transfer.
+- Oracle means the independent expected result of a test. A masked instruction processes only the selected vector elements.
+
+Revision and evidence:
+- PR: https://github.com/positron-ai/tron/pull/4868
+- Author: jhan-positron. Branch: jhan-vnnik-1-layout. State: OPEN, ready for review.
+- HEAD: a711aeee831c7c4da24ce3737d93dd0c76df1149
+- Target: main. BASE/baseRefOid: 72308ec90c80318403c4575dd9ce4a3bc9af5033
+- Refreshed metadata: wade-pr.json. Its body matches body.txt. GitHub reports no description edit history and no human discussion.
+- Complete paginated endpoints: wade-reviews.json, wade-inline-comments.json, wade-issue-comments.json. Each has one page and one bot item. Thread pagination in wade-threads-edits.json has no remaining page.
+- Required status at final check: Build Tron IN_PROGRESS; Generate model plugins, Test ingest, Build model traces, Build ingest, CI machinery tests, Fresh Cabal plan, Lint, and Debian smoke pass. This is not a completed CI run. Evidence: wade-required-checks.json.
+- Read the Wade SKILL.md and procedures.md in chunks; read root AGENTS.md, t/AGENTS.md, .github/AGENTS.md, and the plain-English/C++ guides.
+- All 23 touched files received full-file symbol/pattern scans; manifest: wade-full-file-manifest.json. Manually read the new layout/reader/test files, the complete staging header/source, changed hunks, enclosing functions and relevant callers/callees. The large pre-existing headers and test files were NOT all read line by line. This limits any claim of exhaustive full-file review.
+- Added-line scan: wade-added-lines.txt. Prose extraction: wade-prose.txt. Markdown width script found no candidate. The optional dictionary checker was unavailable because pyspellchecker is not installed; no package was installed.
+- No source/history/PR changes, test executions, sanitizer runs, or hardware workloads occurred. No comments were posted.
+
+Concrete findings:
+
+F1 — Coverage: exercise the packed-K staging scratch in a value assertion.
+Checks: 3A, 33. Suggested priority: P2.
+Location: src/tron/gof.cpp:213; nearest changed test t/t_phase1_integration.cpp:859.
+The new call passes a different scratch slice to each K head. Every changed test callback ignores that argument and returns a pre-existing contiguous row instead:
+  t/t_phase1_integration.cpp:859-860 and :892-895
+  t/t_gof_dma.cpp:347
+  t/t_gof_staging_leaks.cpp:137
+The first fake-device populate case checks only the populated flag (:875-877). The concurrent test decodes V only (:918-924). The DMA test checks final K bytes (:359-368), but through the old direct-pointer callback. The heterogeneous scheduler fixture's forward method runs no attention job (t/heterogeneous_scheduler_compile.cpp:216-224); its hardware cases inject plans/results and do not check staged K bytes.
+A change from k_scratch.data() + h * HW_BAKED_HEAD_SIZE to k_scratch.data() would therefore pass these tests. It would make each head pointer refer to the final gathered head when the production callback uses scratch.
+Please extend the existing fake-device populate case to gather distinct token/head/dimension values from packed cache pages into the supplied scratch and verify the final staged K values. Use the real callback or a shared callback helper if feasible. The assertion should fail when the per-head scratch stride is removed.
+Policy: AGENTS.md:39-45 says not to use weak proxies when the real contract is more specific. AGENTS.md:53-56 prefers the closest existing test.
+This is a new integration gap. It is separate from D8's accepted option-on required-CI exception. The FPGA token smoke is useful end-to-end evidence but does not isolate this byte contract.
+
+F2 — Coverage: preserve existing numerical limits when TRON_K_VNNI is off.
+Checks: supplementary repository test-policy audit; related to 3A's observation question and 10's scope trace. This is not presented as a demonstrated Wade habit about tolerance choice.
+Locations: t/t_llama_unit.cpp:2733, :2739, :2872.
+The weighted-V comparison changes from absolute 0.02 to 0.05 unconditionally. The weight-sum comparison at :2733 changes from absolute 2e-6 to relative 1e-6 unconditionally. The test helper's third parameter is an absolute tolerance (t/testutil.hpp:52-66).
+With TRON_K_VNNI off, production attention retains the original dotter and AMX decisions (h/tron/models/self_attention.hpp:1884 and :1964-1969). The old comparison was intended to catch split/join discrepancies on that path. A weighted-V discrepancy between 0.02 and 0.05 now passes on the unchanged path.
+The PR body openly describes the change and reports that the row-major result remained inside the old limits. That disclosure clears a hidden-behavior/scope accusation; it does not establish why the off configuration needs weaker assertions.
+Please retain the original row-major limits and apply any justified VNNI-specific envelope only to the option-on case.
+Policy: t/AGENTS.md:21 says "Do not delete, skip, or weaken existing assertions." AGENTS.md:118-120 also says to preserve behavior and never weaken a failing test.
+No run was performed to claim the narrower VNNI bound would pass. The finding is specifically the unnecessary weakening of the option-off contract.
+
+F3 — Description: distinguish packed low-level checks from row-major integration and placeholders.
+Check: 7. Suggested priority: P3.
+Location: PR description, CI coverage paragraph (body.txt:173).
+The paragraph says the three listed binaries "run the row-major path" in required CI. The first three t_k_vnni_layout cases always exercise the packed index map, operations and reader (t/t_k_vnni_layout.cpp:101-343). Only its book integration changes layout with the option (:388-395). With AMX dispatch off, t_amx_dispatch_dtype executes only SUCCEED (:294-295).
+Suggested correction: "GCP Nix leaves both options off. It still runs the packed-layout and reader tests in t_k_vnni_layout, while that binary's cache integration and t_llama_unit use row-major storage. t_amx_dispatch_dtype runs only its placeholder. The option-on production integration is covered by the documented local runs and the legacy CMake lane; issue #4865 tracks required-CI coverage."
+The lane selection itself is accurately identified by the glossary and nix configure path. D8/issue #4865 remains accepted.
+
+F4 — Description: the poison test proves score isolation, not absence of reads.
+Checks: 3A, 17. Suggested priority: P3.
+Location: t/t_k_vnni_layout.cpp:219-220, also :232.
+The comment says "A stray load would spread it into the scores." Each token occupies its own accumulator lane in qk_group. The final store uses the live mask (h/tron/kernels/k_vnni.hpp:123). Replacing the masked load at :97 with an unmasked load would keep inactive NaNs in inactive lanes, and the masked store would discard them. The assertions at t/t_k_vnni_layout.cpp:299-302 and :316-321 would still pass.
+The production instruction currently is masked, so no production defect is claimed. Narrow the comment to what the test proves: inactive-token contents do not affect live scores, and inactive score slots retain their preset. A separate read-observation test would be needed to establish the stronger no-read property dynamically.
+This counterexample is established by the vector dataflow, not by an executed mutation test.
+
+Optional low-priority observations; do not turn them into correctness blockers:
+- Check 2: t/t_llama_unit.cpp:431 repeats the alignment assertion already in h/tron/tensor/k_vnni.hpp:202-206. The temporary-view probe at :427 repeats the deleted overloads at tensor/k_vnni.hpp:196-197; the no-element-write probe at :429 repeats at() returning const bf16& (:153). Wade's structural-test rule would remove these while retaining the kernel/layout boundary probes at :421-426 and :435-441. The memcpy-size check at t/t_k_vnni_layout.cpp:67 is also already enforced by the owner header; it explains the test's byte-copy assumption.
+- Check 13: the new shared tensor header uses value-suffixed constants (h/tron/tensor/k_vnni.hpp:56-81). The newer Wade/jhan shared-header naming guidance takes precedence over the generic C++ guide. This is at most a naming preference; the role and derivation of each constant are clear. Do not promote suffix spelling into a functional defect.
+
+Check-by-check matrix:
+ID | Applicability/result | Evidence or limit
+1 | Applicable; no new finding | Hand-derived physical anchors protect the layout read by the score reader and staging gather. Source patterns distinguish tokens and dimensions. No new NaN-to-finite contract, opaque hash, or unread hardware fixture field was found.
+2 | Applicable; optional redundancy | Keep AMX rejection, private-pointer and page-layout boundary probes. Alignment/temporary-view/const-at probes repeat owner declarations; details above.
+3A | Applicable; F1/F4 | Packed low-level assertions are ungated and have independent address/numerical oracles. Fake-device staging assertions bypass scratch. Poison cannot detect an extra inactive-lane read. Required option-on absence is accepted D8; no completed GCP Nix C++ result yet.
+3B | Applicable; satisfied by named local evidence | body.txt:124-169 names current head, machine, compiler, three configurations, unit binaries and CPU/FPGA smokes. Saved logs show execution. No fresh run in this review. Current required Build Tron remains pending.
+4 | Applicable; no actionable duplicate established | Raw-byte layout checks, numerical reader checks, save_k placement/completion, and book append exercise distinct calls/contracts. The new binary also contains book integration already broadly exercised in t_llama_unit, but different token/value sets and independent low-level reader coverage prevent a same-experiment finding. Existing API-only rewrites are excluded.
+5 | Applicable; no finding beyond F4 wording | Reader name uses a tolerance rather than equality but does not assert opposite behavior. The 32-head test explicitly says compilation and deliberately returns an empty visit. Updated dispatch section names distinguish row-major kernel calls.
+6 | Applicable; no new finding | Packed views have private pointer construction and const element access; page row views are constrained off. The publicly named detail accessor is the documented internal escape path, not an advertised security boundary. Default-off and the temporary AMX gate are stated. Known rollback mismatch is issue #4444.
+7 | Applicable; F3; CI completion limited | GCP Nix triggers on PR/push/merge_group and omits both flags in nix/cmake-tron-test-build.nix:79-101. CMake and CTest has dispatch/call only (:5-16), sets both at :355-356, and publish-deb calls it for tags/feature branches (:64-70). Coverage is manual and omits both. Required job set is provisional while Build Tron runs.
+8 | Applicable; no stale-head finding | Refreshed head/base/body unchanged. Current results identify a711aeee83 and base 72308ec90c. Older non-4-group measurements are explicitly labeled as PR #4424 measurements with their own revisions. No body edits after commits, no human suggestions. GitHub reports MERGEABLE; BLOCKED is not a merge conflict.
+9 | Applicable; no finding | Verification has outcome counts and durations, no machine-local log paths or clock-time narration. The 69-assertion difference compares two current-head configurations and explains the gate. New Note documents storage mechanisms and consumers. No added review-round label or tracker citation in production comments.
+10 | Applicable; no unrelated hunk | The feature, accessors, staging signature, tests, cost rows and build flag map to body claims. Numerical relaxation is explicitly disclosed; its option-off weakness is F2, not an unrelated hidden change. Final merge has no combined-diff conflict resolution.
+11 | Applicable; no cluster | Eight commits: seven non-merge and one merge. Six topical units plus the AMX-dispatch requirement removal. The last non-merge changes configure behavior, so it is not a no-behavior FIXUP. No unrelated commit or two-fixup cluster. Full log: wade-log-full.txt.
+12 | Trigger absent | No new global-namespace definition outside namespace tron, and no changed non-comment code in h/system, h/pos, h/common or h/tron/hardware. No untestable-guarantee claim. No owner approval was requested.
+13 | Applicable; optional naming only | Layout dimensions, strides and masks have roles/derivations. SIMD lane literals are excluded by the rule. New shared-header value suffixes noted above; no unexplained removed production constant.
+14 | Applicable; no finding | Added owner/view/accessor/row helpers, constants, includes and compile definitions have consumers. Forward declarations serve intrinsics-free headers. No dead debug state or unconsumed callback parameter in production; test callbacks intentionally ignore scratch, covered by F1.
+15 | Applicable; partial automated check | Read new prose and identifier references; no verified typo. Skill prose/width scripts ran; width had no candidate. Insufficient data for dictionary-script output: pyspellchecker absent. No install was attempted.
+16 | Trigger absent | No debug define, dump, print, or trace promotion added to production. TRON_K_VNNI remains a default-off build feature with its legacy configure override disclosed.
+17 | Applicable; F4 | Callback arity, layouts and temporary dispatch gate match code. The test's stray-load claim does not match its observation. Other changed labels match their consumers.
+18 | Applicable; no finding | Existing packed V uses different interleaving and cannot replace K operations. K store/load address arithmetic and the scalar index map serve different vector/scalar roles. No duplicate option reader, wait primitive or ownership-handoff sequence added.
+19 | Applicable; no finding | Sizes use size_t; signed page offset is checked at page access. Scratch and owners are intentionally uninitialized until writes. New literals are constexpr. No new mutable global or partly initialized published struct.
+20 | Applicable; no finding | New names identify packed K, row transfer and layout gate. No repository label change or mismatched flag spelling. Naming preference is covered by 13, not duplicated.
+21 | Applicable; no finding | New owner/view, callback scratch contract, layout gate, score reader, row operations and tests have declaration comments. No unexplained new getenv/default or hidden test-only production helper.
+22 | Applicable; no material redundancy | Placeholder branches prevent invalid row-major instantiations; mutable/const overloads preserve types. Their removal would change compilation. Casts bridge page offsets and typed APIs. Structural assertion preferences are grouped under 2.
+23 | Trigger absent | No added #if 0 block or commented-out executable production statement. Compile-time feature branches have active configurations.
+24 | Applicable; no finding | New layout primitives live in tensor/k_vnni.hpp and score computation in kernels/k_vnni.hpp. Existing files carry only integration. No misplaced declaration or third-party quoted include introduced.
+25 | Applicable; disclosed differences | VNNI arithmetic order, software-only packed dispatch, per-row scatter cost, and legacy build override are disclosed. No hidden removed NaN check, wait or assert. The tolerance change is disclosed but still weakens option-off coverage (F2).
+26 | Applicable; no production defect | page set/get assert token bounds (:2014/:2032); copy_from bounds source/destination ranges (:2324-2325). Live bits cover 64 tokens; groups over 16 split query and score pointers consistently. GOF head/size counts are asserted before scratch indexing.
+27 | Applicable; no fallback defect | Empty live blocks and empty visits are legitimate filters. No new clamp, unbounded spin, or silently ignored invalid index. The bot's unchecked low-level API is discussed separately below.
+28 | Applicable; no race found | No new parallelism, shared mutable scratch, lock placement, atomic/plain writer mixture, or narrowed readiness predicate. Token stores target disjoint 32-bit pairs. Existing completion ordering remains after stores.
+29 | Applicable; static trace passes | Caller-local scratch has 64-byte alignment and 256-byte head strides. populate consumes it synchronously through set_position/shuffle_k_entry before reuse. DMA reads persistent staging with existing ownership/credit guards. Insufficient data for dynamic sanitizer evidence: review was read-only and no UBSan run was authorized by parent scope.
+30 | Applicable; costs disclosed | Scatter/gather work is intrinsic to this PR1 layout. Existing AMX query packing can remain unused because dense packed dispatch is off; body.txt:122 identifies it as an unmeasured hypothesis. Later kernel consumes it. No extra undisclosed heap allocation/sort/zero on a hot path.
+31 | Applicable; no ownership defect | Save completion/latch ownership is unchanged. Visit counters retain existing worker keys and forward lifetime. Packed nonempty visits return AVX; no new counter writer or unguarded subsystem call.
+32 | Applicable; no new finding | Build option is documented, compile-time by design. Existing AVX visit counters expose the chosen software path. Body supplies before/after measurements. No new runtime launcher option or unpublished counter requires wiring.
+33 | Applicable; F1 | save_k is entered by a placement/completion test; packed reader is entered numerically; mixed cache access and append are exercised. The new scheduler gather→scratch→staged K contract has no direct value assertion.
+34 | Applicable; no unidentified workaround | The temporary AMX gate has a named cause and next-PR exit. Issue #4444 tracks the accepted token/rollback limitation. No new NaN scrub or unknown-cause workaround requiring a ticket.
+35 | Applicable; bot claim narrowed | One live bot thread 4238076829 at tensor/k_vnni.hpp:259-271. Low-level helpers lack bounds checks, but every current production route establishes bounds before them. See the deciding lines below. Do not repeat it as a reachable corruption bug.
+
+Bot disposition:
+- Thread: https://github.com/positron-ai/tron/pull/4868#discussion_r4238076829
+- Fact confirmed: store_row/load_row do not assert token<Rows at tensor/k_vnni.hpp:288-317. pair_base has unchecked address arithmetic at :261-270. Packed V does assert at v_vnni.hpp:177.
+- Reachability finding not established: page::set_k_row and get_k_row execute TRON_ASSERT_LT(i_page,page_size) at kv_cache.hpp:2014/:2032. Private copy_storage_slot is reached from copy_from after both range checks at :2324-2325.
+- Optional hardening would place a bounds assertion in the typed low-level operations. No production caller bypassing these established bounds was found. The bot already owns this suggestion; no duplicate comment is recommended.
+
+Validation limitations:
+- Existing local unit logs corroborate reported assertion totals and configuration choices. Dispatch-off AMX binaries contain one passing placeholder each. The kill-switch numerical log explicitly skips QK/PV precision cases.
+- host-suite-pr1.log preserves the option-on CMake cache and 93 passed/1 skipped/1 failed summary. The failure identifies missing t/proxy/.venv. The saved output does not preserve the skipped test's own line; t_proxy_lib attribution comes from Claude's status and the PR body. Insufficient data for independent confirmation of that specific skipped-test identity.
+- D8/issue #4865 is an explicitly accepted CI exception. This review does not ask for a new approval or present it as a newly discovered unauthorized gap.
+- Issue #4444 and PR1's temporary dense-AMX exclusion are accepted scope, not new blockers.
+- A finished required-CI run, sanitizer evidence, and line-by-line reading of every unchanged line in all large files remain outside the evidence collected. The matrix reports analysis completed with those limits; it does not claim tests passed in this review.
+

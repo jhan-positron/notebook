@@ -1,0 +1,1925 @@
+{
+  "file": "h/tron/models/model.hpp",
+  "title": "model.hpp — share K stores and defer completed-block conversion",
+  "summary": [
+    "The K save now groups token rows into 16-token block work and can share that work with main helpers. Main joins all helpers before publishing token completion. [h/tron/models/model.hpp:3085–3143]",
+    "Full blocks write the VNNI layout directly. Blocks completed through shorter runs convert after the forward readers finish; hardware-scored operations skip this deferred conversion. [h/tron/models/model.hpp:3300–3340; h/tron/models/model.hpp:3420–3439; h/tron/models/model.hpp:1842–1847]"
+  ],
+  "terms": [
+    {
+      "name": "tron",
+      "meaning": "The inference program under test."
+    },
+    {
+      "name": "K / KV",
+      "meaning": "Attention keys / attention keys and values. A KV head supplies one key row per token."
+    },
+    {
+      "name": "token",
+      "meaning": "One model input or generated position represented by a token job."
+    },
+    {
+      "name": "batch / minibatch",
+      "meaning": "A group of token jobs processed together through model layers."
+    },
+    {
+      "name": "layer / pass",
+      "meaning": "A model computation stage / one execution of the forward schedule."
+    },
+    {
+      "name": "page",
+      "meaning": "A KV page (64-token block) in the cache. Its K storage is divided into 16-token blocks."
+    },
+    {
+      "name": "VNNI",
+      "meaning": "Vector Neural Network Instructions. Here the name denotes the K layout that arranges dimension pairs across token positions."
+    },
+    {
+      "name": "row-major",
+      "meaning": "A layout that stores the values of each token/head row consecutively."
+    },
+    {
+      "name": "bf16",
+      "meaning": "A 16-bit floating-point scalar format used for cached K values."
+    },
+    {
+      "name": "DMA",
+      "meaning": "Direct memory access, used to transfer data between host storage and hardware."
+    },
+    {
+      "name": "GOF",
+      "meaning": "The code name for a group of four tokens whose completed K/V data can be submitted together."
+    },
+    {
+      "name": "ks / row_of",
+      "meaning": "The input K buffer / the local function that extracts one token/head row from it."
+    },
+    {
+      "name": "slot / geometry",
+      "meaning": "A logical cache destination / the attention head count and head width used to access it."
+    },
+    {
+      "name": "k_store_window / unit_start",
+      "meaning": "The shared-save coordination state / the item-index boundaries that define its work units."
+    },
+    {
+      "name": "worker_ix / n_workers",
+      "meaning": "The participating worker index / the total count including main worker 0."
+    },
+    {
+      "name": "pending_k_blocks_ / page::k_storage_ref",
+      "meaning": "Deferred conversion records / a captured physical storage offset and layout-state index."
+    },
+    {
+      "name": "release / acquire",
+      "meaning": "Atomic memory-order operations that publish prior writes and make those writes visible to a matching reader."
+    },
+    {
+      "name": "latch / count_down",
+      "meaning": "A completion counter used by waiting work / the operation that removes one outstanding contribution."
+    },
+    {
+      "name": "WK roped",
+      "meaning": "The diagnostic record label for K values after positional rotation."
+    }
+  ],
+  "base_diagrams": [
+    {
+      "title": "batch owns one reusable k_store_window",
+      "caption": "Data relationships at this PR head. Each work unit is an item interval, not an allocation or a separate buffer.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "batch",
+              "kind": "work",
+              "description": "A minibatch carries token jobs and their execution state.",
+              "file": "h/tron/models/common.hpp",
+              "line": 993
+            },
+            {
+              "name": "k_store_window",
+              "kind": "work",
+              "description": "Coordinates one shared K save at a time.",
+              "file": "h/tron/models/common.hpp",
+              "line": 1193
+            }
+          ],
+          "edges": [
+            "1 batch contains 1 k_store_window"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "k_store_window",
+              "kind": "work",
+              "description": "Coordinates one shared K save at a time.",
+              "file": "h/tron/models/common.hpp",
+              "line": 1193
+            },
+            {
+              "name": "unit_start",
+              "kind": "work",
+              "description": "Stores the boundaries of the current work units.",
+              "file": "h/tron/models/common.hpp",
+              "line": 1189
+            }
+          ],
+          "edges": [
+            "1 window contains n_units + 1 used boundaries; capacity is max_minibatch_size + 1"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "unit_start",
+              "kind": "work",
+              "description": "Stores the boundaries of the current work units.",
+              "file": "h/tron/models/common.hpp",
+              "line": 1189
+            },
+            {
+              "name": "items[unit_start[u], unit_start[u + 1])",
+              "kind": "work",
+              "description": "One work unit names a contiguous range of token-job entries.",
+              "file": "h/tron/models/common.hpp",
+              "line": 1181
+            }
+          ],
+          "edges": [
+            "2 adjacent boundaries identify 1 interval containing unit_start[u + 1] - unit_start[u] items"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "k_store_window",
+              "kind": "work",
+              "description": "Coordinates one shared K save at a time.",
+              "file": "h/tron/models/common.hpp",
+              "line": 1193
+            },
+            {
+              "name": "helper_windows",
+              "kind": "work",
+              "description": "Counts the windows each helper has entered.",
+              "file": "h/tron/models/common.hpp",
+              "line": 1192
+            }
+          ],
+          "edges": [
+            "1 window contains max_shared_workers counters; n_workers - 1 helper counters are active"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "items[unit_start[u], unit_start[u + 1])",
+              "kind": "work",
+              "description": "One work unit names a contiguous range of token-job entries.",
+              "file": "h/tron/models/common.hpp",
+              "line": 1181
+            },
+            {
+              "name": "page",
+              "kind": "cache",
+              "description": "Describes the destination cache page for a KV-writing token.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3217
+            }
+          ],
+          "edges": [
+            "1 KV-writing unit targets 1 page and 1 block; a no-KV unit targets 0 pages"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Generated main and helper calls meet at save_k",
+      "caption": "Source-based interaction model. Main and helpers reach the same attention statement. This is ordering only; no timing or measured duration is implied.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "submitAttentionOperation",
+              "kind": "function",
+              "description": "Generates the main-thread attention submission sequence.",
+              "file": "ingest/src/TronCpp.hs",
+              "line": 2920
+            },
+            {
+              "name": "save_k",
+              "kind": "function",
+              "description": "Resolves the operation and forwards the worker identity.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3465
+            }
+          ],
+          "edges": [
+            "Generates a call with worker_ix = 0 and n_workers after K channel reads begin"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "run_main_help",
+              "kind": "function",
+              "description": "Executes the generated helper statement list.",
+              "file": "ingest/src/TronCpp.hs",
+              "line": 1416
+            },
+            {
+              "name": "save_k",
+              "kind": "function",
+              "description": "Resolves the operation and forwards the worker identity.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3465
+            }
+          ],
+          "edges": [
+            "Each of n_workers - 1 helpers calls at the matching statement with its worker_ix"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "save_k",
+              "kind": "function",
+              "description": "Resolves the operation and forwards the worker identity.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3465
+            },
+            {
+              "name": "save_k_impl",
+              "kind": "function",
+              "description": "Coordinates writes and publishes completion from main.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3352
+            }
+          ],
+          "edges": [
+            "Passes the same operation, K buffer, worker_ix, and n_workers"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "save_k_impl",
+              "kind": "function",
+              "description": "Coordinates writes and publishes completion from main.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3352
+            },
+            {
+              "name": "store_k_block",
+              "kind": "function",
+              "description": "Writes one interval using whole-block or row stores.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3241
+            }
+          ],
+          "edges": [
+            "Each claimed unit supplies one [task_begin, task_end) interval"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Writes precede completion and deferred conversion",
+      "caption": "Source-based sequence, not a wall-clock timing chart. The helper join orders memory writes before main publishes token completion.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "store_k_block",
+              "kind": "function",
+              "description": "Writes one interval using whole-block or row stores.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3241
+            },
+            {
+              "name": "w.finished",
+              "kind": "value",
+              "description": "Counts helpers that finished their claim loops.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3399
+            }
+          ],
+          "edges": [
+            "Each helper releases its completion only after its claimed writes finish"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "w.finished",
+              "kind": "value",
+              "description": "Counts helpers that finished their claim loops.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3399
+            },
+            {
+              "name": "pg.mark_k_complete",
+              "kind": "function",
+              "description": "Publishes the token K completion mark for its slot.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3447
+            }
+          ],
+          "edges": [
+            "Main acquires all n_workers - 1 helper completions before marking tokens"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "wait_for_coop_gof",
+              "kind": "function",
+              "description": "Drains queued grouped token transfers and waits for outstanding submissions.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3583
+            },
+            {
+              "name": "convert_pending_k_blocks",
+              "kind": "function",
+              "description": "Converts queued completed blocks and clears the queue.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3173
+            }
+          ],
+          "edges": [
+            "run_forward calls conversion only after plugin workers and cooperative staging readers finish"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Each queued conversion captures physical storage",
+      "caption": "The queue records where the rows were saved. A later change of the active storage view does not change that destination.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "pending_k_blocks_",
+              "kind": "work",
+              "description": "Holds deferred block-conversion entries for the current forward pass.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3169
+            },
+            {
+              "name": "pending_k_block",
+              "kind": "work",
+              "description": "Records one page, storage reference, and block index.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3164
+            }
+          ],
+          "edges": [
+            "1 queue contains pending_k_blocks_.size() entries; entries may repeat a completed block"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "pending_k_block",
+              "kind": "work",
+              "description": "Records one page, storage reference, and block index.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3164
+            },
+            {
+              "name": "page::k_storage_ref",
+              "kind": "cache",
+              "description": "Pairs a physical storage offset with the layout-state index.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2145
+            }
+          ],
+          "edges": [
+            "1 pending entry captures 1 storage reference for 1 page block"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "pending_k_block",
+              "kind": "work",
+              "description": "Records one page, storage reference, and block index.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3164
+            },
+            {
+              "name": "block",
+              "kind": "value",
+              "description": "Identifies one 16-token block in the captured page storage.",
+              "file": "h/tron/models/model.hpp",
+              "line": 3167
+            }
+          ],
+          "edges": [
+            "1 pending_k_block includes 1 block index; that block covers 16 token offsets across geometry.n_kv_heads heads"
+          ]
+        }
+      ]
+    }
+  ],
+  "units": [
+    {
+      "id": "forward-end-conversion",
+      "title": "Convert completed blocks after the forward readers finish",
+      "explanation": [
+        "run_forward adds conversion after plugin_state.run and wait_for_coop_gof. These calls finish the worker work and the cooperative staging reads before rows change layout. [h/tron/models/model.hpp:1822–1847]",
+        "The new comment says blocks belonging to a hardware-scored operation are never queued. [h/tron/models/model.hpp:1842–1846]"
+      ],
+      "ranges": [
+        [
+          1836,
+          1848
+        ]
+      ],
+      "old_ranges": [
+        [
+          1834,
+          1841
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Forward-end ordering",
+          "caption": "The order is taken from run_forward. Durations are unavailable; no relative timing is shown.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "plugin_state.run",
+                  "kind": "function",
+                  "description": "Runs the plugin schedule and joins its spawned workers.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 1836
+                },
+                {
+                  "name": "wait_for_coop_gof",
+                  "kind": "function",
+                  "description": "Drains queued grouped token transfers and waits for outstanding submissions.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3583
+                }
+              ],
+              "edges": [
+                "Returns after workers join; run_forward next drains cooperative staging"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "wait_for_coop_gof",
+                  "kind": "function",
+                  "description": "Drains queued grouped token transfers and waits for outstanding submissions.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3583
+                },
+                {
+                  "name": "convert_pending_k_blocks",
+                  "kind": "function",
+                  "description": "Converts queued completed blocks and clears the queue.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3173
+                }
+              ],
+              "edges": [
+                "Returns after outstanding staging work finishes; run_forward then converts"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shared-contract",
+      "title": "Define the shared block-save contract and block size",
+      "explanation": [
+        "The new note defines two changes: whole-block writes and work sharing with main helpers. The constant k_store_block names the 16-token block size. [h/tron/models/model.hpp:3085–3153]",
+        "The note also defines window matching, exclusive unit claims, helper completion, and main-only token publication. The full comment remains attached to the source excerpt. [h/tron/models/model.hpp:3117–3151]",
+        "The latency figures are historical measurements quoted by the source comment. This document does not claim that a new benchmark was run. [h/tron/models/model.hpp:3091–3093]"
+      ],
+      "ranges": [
+        [
+          3085,
+          3153
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "One store interface, two worker roles",
+          "caption": "The main thread and helpers execute the same write routine. Only main publishes per-token completion and GOF credits after the join. A full-block writer publishes its block-layout bits inside store_k_block.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "worker_ix == 0",
+                  "kind": "value",
+                  "description": "Selects the main-thread role.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3363
+                },
+                {
+                  "name": "save_k_impl",
+                  "kind": "function",
+                  "description": "Opens the window, writes units, joins helpers, then marks tokens.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3352
+                }
+              ],
+              "edges": [
+                "Main opens one window per shared save call"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "worker_ix",
+                  "kind": "value",
+                  "description": "Identifies a main helper when its value is in 1 .. n_workers - 1.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3355
+                },
+                {
+                  "name": "save_k_impl",
+                  "kind": "function",
+                  "description": "Waits for the matching window and writes claimed units.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3352
+                }
+              ],
+              "edges": [
+                "Each helper joins its matching shared save call"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_store_block",
+                  "kind": "value",
+                  "description": "Sets the work block width to BLOCK_TOKENS_16.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3153
+                },
+                {
+                  "name": "k_vnni::BLOCK_TOKENS_16",
+                  "kind": "value",
+                  "description": "Defines the 16-token K block width.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3153
+                }
+              ],
+              "edges": [
+                "1 k_store_block equals 16 token positions"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pending-record",
+      "title": "Record the page, physical storage, and block for later conversion",
+      "explanation": [
+        "pending_k_block adds a page pointer, a page::k_storage_ref, and a block index. pending_k_blocks_ owns the sequence of records. [h/tron/models/model.hpp:3155–3169]",
+        "Capturing the resolved storage reference prevents a storage-view change from redirecting deferred conversion. [h/tron/models/model.hpp:3160–3163]"
+      ],
+      "ranges": [
+        [
+          3155,
+          3169
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Each queued conversion captures physical storage",
+          "caption": "The queue records where the rows were saved. A later change of the active storage view does not change that destination.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "pending_k_blocks_",
+                  "kind": "work",
+                  "description": "Holds deferred block-conversion entries for the current forward pass.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3169
+                },
+                {
+                  "name": "pending_k_block",
+                  "kind": "work",
+                  "description": "Records one page, storage reference, and block index.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3164
+                }
+              ],
+              "edges": [
+                "1 queue contains pending_k_blocks_.size() entries; entries may repeat a completed block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "pending_k_block",
+                  "kind": "work",
+                  "description": "Records one page, storage reference, and block index.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3164
+                },
+                {
+                  "name": "page::k_storage_ref",
+                  "kind": "cache",
+                  "description": "Pairs a physical storage offset with the layout-state index.",
+                  "file": "h/tron/models/kv_cache.hpp",
+                  "line": 2145
+                }
+              ],
+              "edges": [
+                "1 pending entry captures 1 storage reference for 1 page block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "pending_k_block",
+                  "kind": "work",
+                  "description": "Records one page, storage reference, and block index.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3164
+                },
+                {
+                  "name": "block",
+                  "kind": "value",
+                  "description": "Identifies one 16-token block in the captured page storage.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3167
+                }
+              ],
+              "edges": [
+                "1 pending_k_block includes 1 block index; that block covers 16 token offsets across geometry.n_kv_heads heads"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pending-converter",
+      "title": "Convert the queued blocks and clear the queue",
+      "explanation": [
+        "convert_pending_k_blocks returns immediately for an empty queue. Otherwise it visits every recorded block and then clears the queue. [h/tron/models/model.hpp:3171–3180]",
+        "k_block_to_vnni_at converts every K head of a completed, unconverted block. Its guard also makes repeated queue entries harmless. [h/tron/models/kv_cache.hpp:2214–2235]"
+      ],
+      "ranges": [
+        [
+          3171,
+          3180
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Consume the captured destinations",
+          "caption": "The conversion uses b.storage rather than resolving the current logical slot again.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "pending_k_blocks_",
+                  "kind": "work",
+                  "description": "Holds deferred block-conversion entries for the current forward pass.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3169
+                },
+                {
+                  "name": "convert_pending_k_blocks",
+                  "kind": "function",
+                  "description": "Converts each queued entry and clears the queue.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3173
+                }
+              ],
+              "edges": [
+                "Reads every recorded entry; returns immediately when the entry count is 0"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "convert_pending_k_blocks",
+                  "kind": "function",
+                  "description": "Converts each queued entry and clears the queue.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3173
+                },
+                {
+                  "name": "b.pg->k_block_to_vnni_at",
+                  "kind": "function",
+                  "description": "Converts the captured page block if it is ready and unconverted.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3177
+                }
+              ],
+              "edges": [
+                "Passes b.storage and b.block for each entry"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shared-eligibility",
+      "title": "Use the same sharing decision on main and helpers",
+      "explanation": [
+        "k_store_shared rejects geometry without the VNNI K layout. It also rejects a single worker, too many workers for helper_windows, and minibatches with at most 16 items. [h/tron/models/model.hpp:3189–3200]",
+        "The fixed helper table permits at most 128 workers. These conditions keep every worker in agreement about whether a window will open. [h/tron/models/common.hpp:1170–1192; h/tron/models/model.hpp:3117–3121]"
+      ],
+      "ranges": [
+        [
+          3189,
+          3200
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The shared-store gate",
+          "caption": "All conditions must hold. An unshared helper returns without waiting for a window.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni::layout_on<geometry.kv.head_size>",
+                  "kind": "value",
+                  "description": "States whether this geometry supports the K block layout.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3193
+                },
+                {
+                  "name": "k_store_shared",
+                  "kind": "function",
+                  "description": "Decides whether the minibatch K store uses helpers.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3192
+                }
+              ],
+              "edges": [
+                "False returns false at compile time"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "n_workers > 1",
+                  "kind": "value",
+                  "description": "Requires main plus at least one helper.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3196
+                },
+                {
+                  "name": "k_store_shared",
+                  "kind": "function",
+                  "description": "Decides whether the minibatch K store uses helpers.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3192
+                }
+              ],
+              "edges": [
+                "Also requires n_workers <= helper_windows.size() and items.size() > k_store_block"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "unit-boundaries",
+      "title": "Build unit boundaries from page, block, and KV-work changes",
+      "explanation": [
+        "k_store_cut_units first checks that the fixed boundary table has room for every item plus an end sentinel. It does not allocate storage or fall back after allocation failure. [h/tron/models/model.hpp:3202–3209]",
+        "A new unit starts at the first item or when the KV-work flag, page, or 16-token block changes. The final boundary equals n_items. [h/tron/models/model.hpp:3210–3229]",
+        "The unit can contain many items, but it cannot cross those boundaries. A unit containing jobs without KV work produces no row writes. [h/tron/models/model.hpp:3216–3225; h/tron/models/model.hpp:3272–3276]"
+      ],
+      "ranges": [
+        [
+          3202,
+          3230
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Cut items into bounded intervals",
+          "caption": "unit_start contains indices into q_batch->items. Its elements are not page pointers or token offsets.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "q_batch->items",
+                  "kind": "work",
+                  "description": "Lists the token-job IDs assigned to this minibatch.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3207
+                },
+                {
+                  "name": "k_store_cut_units",
+                  "kind": "function",
+                  "description": "Builds consecutive work intervals with one page, block, and KV-work value.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3204
+                }
+              ],
+              "edges": [
+                "Scans n_items entries once after checking n_items + 1 boundary capacity"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_store_cut_units",
+                  "kind": "function",
+                  "description": "Builds consecutive work intervals with one page, block, and KV-work value.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3204
+                },
+                {
+                  "name": "w.unit_start",
+                  "kind": "work",
+                  "description": "Stores each work-unit start plus the final n_items sentinel.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3222
+                }
+              ],
+              "edges": [
+                "Writes n_units + 1 boundary entries"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "w.unit_start",
+                  "kind": "work",
+                  "description": "Stores each work-unit start plus the final n_items sentinel.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3222
+                },
+                {
+                  "name": "items[unit_start[u], unit_start[u + 1])",
+                  "kind": "work",
+                  "description": "One unit is the interval between adjacent boundaries.",
+                  "file": "h/tron/models/common.hpp",
+                  "line": 1181
+                }
+              ],
+              "edges": [
+                "2 adjacent boundary entries define 1 unit"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "store-interface-row-major",
+      "title": "Move row writes into store_k_block and retain the row-major path",
+      "explanation": [
+        "store_k_block takes an item interval and writes every KV head of each selected token. row_of extracts the head-sized input slice from ks. [h/tron/models/model.hpp:3232–3250]",
+        "For geometry without the VNNI K layout, it keeps the existing per-token, per-head page::k(...).set write. Tokens without KV work are skipped. [h/tron/models/model.hpp:3251–3262]",
+        "The helper does not publish token marks or downstream credits. save_k_impl performs that work after every store finishes. [h/tron/models/model.hpp:3236–3239]"
+      ],
+      "ranges": [
+        [
+          3232,
+          3262
+        ]
+      ],
+      "old_ranges": [
+        [
+          3099,
+          3104
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Extract one source row, then use the existing destination view",
+          "caption": "This branch applies when layout_on is false.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "ks[ix]",
+                  "kind": "k",
+                  "description": "Holds the K values for one token job.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3249
+                },
+                {
+                  "name": "row_of",
+                  "kind": "function",
+                  "description": "Returns one head-sized slice of a token K buffer.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3247
+                }
+              ],
+              "edges": [
+                "Selects 1 of geometry.kv.n_kv_heads head slices"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "row_of",
+                  "kind": "function",
+                  "description": "Returns one head-sized slice of a token K buffer.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3247
+                },
+                {
+                  "name": "pg.template k<geometry.kv>(slot, kv_head, j).set",
+                  "kind": "function",
+                  "description": "Writes one token/head row into row-major cache storage.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3259
+                }
+              ],
+              "edges": [
+                "Copies geometry.kv.head_size values for each selected token/head row"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "source-conversion",
+      "title": "Prepare bf16 rows without copying native bf16 input",
+      "explanation": [
+        "store_k_block derives the input scalar type from row_of. Native bf16 rows are read directly. Other input types use the aligned conv array for conversion. [h/tron/models/model.hpp:3263–3269]",
+        "The temporary buffer can hold k_store_block rows of geometry.kv.head_size values. Partial writes reuse its first row. Whole-block writes can use every row. [h/tron/models/model.hpp:3269; h/tron/models/model.hpp:3313–3317; h/tron/models/model.hpp:3332–3335]"
+      ],
+      "ranges": [
+        [
+          3263,
+          3270
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Choose direct input or temporary bf16 rows",
+          "caption": "bf16 is the 16-bit floating-point type stored in K cache rows.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "rows_are_bf16",
+                  "kind": "value",
+                  "description": "Records whether the source scalar type is bf16.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3265
+                },
+                {
+                  "name": "conv",
+                  "kind": "k",
+                  "description": "Provides aligned temporary bf16 rows for other input types.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3269
+                }
+              ],
+              "edges": [
+                "False selects conversion of up to k_store_block rows; true uses 0 converted rows"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "conv",
+                  "kind": "k",
+                  "description": "Provides aligned temporary bf16 rows for other input types.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3269
+                },
+                {
+                  "name": "conv[0]",
+                  "kind": "k",
+                  "description": "Supplies the reusable temporary row for a partial write.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3314
+                }
+              ],
+              "edges": [
+                "1 conv array contains k_store_block rows; each row has geometry.kv.head_size bf16 values"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gather-run",
+      "title": "Gather distinct token offsets from one page block",
+      "explanation": [
+        "The run builder skips tokens without KV work. It stops when the page changes, the block changes, a token offset repeats, the task interval ends, or 16 rows have been gathered. [h/tron/models/model.hpp:3271–3299]",
+        "run_ix preserves the source token-job ID for each gathered row. run_t preserves its destination offset inside the block. present records which offsets are occupied. [h/tron/models/model.hpp:3282–3298]"
+      ],
+      "ranges": [
+        [
+          3271,
+          3299
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Track source rows and their destination lanes",
+          "caption": "Repeated offsets end this run before a duplicate row is appended.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "q_batch->items",
+                  "kind": "work",
+                  "description": "Supplies the token-job IDs in the claimed interval.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3287
+                },
+                {
+                  "name": "run_ix",
+                  "kind": "work",
+                  "description": "Stores the source job IDs gathered for this run.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3282
+                }
+              ],
+              "edges": [
+                "1 run gathers n entries, where 0 < n <= k_store_block, from 1 page block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "run_ix",
+                  "kind": "work",
+                  "description": "Stores the source job IDs gathered for this run.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3282
+                },
+                {
+                  "name": "run_t",
+                  "kind": "work",
+                  "description": "Stores each gathered row destination within the block.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3283
+                }
+              ],
+              "edges": [
+                "Each of n run_ix entries has exactly 1 matching run_t entry"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "run_t",
+                  "kind": "work",
+                  "description": "Stores each gathered row destination within the block.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3283
+                },
+                {
+                  "name": "present",
+                  "kind": "value",
+                  "description": "Records which token positions are already present in the run.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3285
+                }
+              ],
+              "edges": [
+                "Each of n distinct run_t offsets sets 1 of 16 bits"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "partial-run",
+      "title": "Store incomplete runs through the layout-aware row API",
+      "explanation": [
+        "A run shorter than k_store_block uses set_k_row once for each gathered token and KV head. That API selects row-major storage for an unconverted block or the existing VNNI column for a rewritten row. [h/tron/models/model.hpp:3300–3321; h/tron/models/kv_cache.hpp:2247–2262]",
+        "Native bf16 input keeps the source view alignment and direct-memory-access flags. Other types are converted into conv[0] before the same row-store call. [h/tron/models/model.hpp:3308–3317]"
+      ],
+      "ranges": [
+        [
+          3300,
+          3321
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Write a short run row by row",
+          "caption": "The layout decision belongs to page::set_k_row. This loop does not set the saved-row bits.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "n < k_store_block",
+                  "kind": "value",
+                  "description": "Selects a run that does not fill all 16 token positions.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3300
+                },
+                {
+                  "name": "pg.template set_k_row<geometry.kv>",
+                  "kind": "function",
+                  "description": "Writes one token/head row using the destination block current layout.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3310
+                }
+              ],
+              "edges": [
+                "Calls once for each of n rows and geometry.kv.n_kv_heads heads"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "kout",
+                  "kind": "k",
+                  "description": "Names the current token/head input row.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3307
+                },
+                {
+                  "name": "pg.template set_k_row<geometry.kv>",
+                  "kind": "function",
+                  "description": "Writes one token/head row using the destination block current layout.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3310
+                }
+              ],
+              "edges": [
+                "Native bf16 uses k_source_row(kout); other scalars first convert through conv[0]"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "whole-run",
+      "title": "Write a full block in destination order and then mark it saved",
+      "explanation": [
+        "The full-run branch asserts that all 16 token offsets are present. It places each source row pointer at rows[run_t[i]] before calling set_k_block for each KV head. [h/tron/models/model.hpp:3322–3338]",
+        "note_k_block_saved runs only after the final head write. It records all saved rows and the converted-layout bit for this block. [h/tron/models/model.hpp:3339–3340; h/tron/models/kv_cache.hpp:2192–2199]"
+      ],
+      "ranges": [
+        [
+          3322,
+          3344
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Gather in any item order; store in token-offset order",
+          "caption": "The whole-block store receives rows indexed by the destination offset.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "run_t",
+                  "kind": "work",
+                  "description": "Names the destination offset for each gathered source row.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3283
+                },
+                {
+                  "name": "rows",
+                  "kind": "k",
+                  "description": "Contains the source-row pointers in destination token order.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3326
+                }
+              ],
+              "edges": [
+                "Each of 16 run_t offsets selects exactly 1 of 16 rows pointers"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "rows",
+                  "kind": "k",
+                  "description": "Contains the source-row pointers in destination token order.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3326
+                },
+                {
+                  "name": "pg.template set_k_block<geometry.kv>",
+                  "kind": "function",
+                  "description": "Stores all 16 token rows of one KV head directly in VNNI layout.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3338
+                }
+              ],
+              "edges": [
+                "Supplies 16 bf16 row pointers per KV head"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "pg.template set_k_block<geometry.kv>",
+                  "kind": "function",
+                  "description": "Stores all 16 token rows of one KV head directly in VNNI layout.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3338
+                },
+                {
+                  "name": "pg.note_k_block_saved",
+                  "kind": "function",
+                  "description": "Records the block saved-row and converted-layout bits.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3340
+                }
+              ],
+              "edges": [
+                "After all geometry.kv.n_kv_heads writes, records the block once"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "worker-entry",
+      "title": "Add worker identity and return immediately for an unshared helper",
+      "explanation": [
+        "save_k_impl now accepts worker_ix and n_workers. It validates the worker index before selecting the main role and the shared-store decision. [h/tron/models/model.hpp:3346–3364]",
+        "A helper returns immediately when sharing is disabled. Main continues with the existing operation binding, layer, slot, and hardware-candidate information. [h/tron/models/model.hpp:3365–3379]"
+      ],
+      "ranges": [
+        [
+          3346,
+          3379
+        ]
+      ],
+      "old_ranges": [
+        [
+          3076,
+          3090
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Separate the main role from helper participation",
+          "caption": "The return prevents helpers from waiting on a window that main will never open.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "worker_ix < n_workers",
+                  "kind": "value",
+                  "description": "Requires a valid worker identity for this save call.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3361
+                },
+                {
+                  "name": "save_k_impl",
+                  "kind": "function",
+                  "description": "Coordinates the selected workers and main-only completion.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3352
+                }
+              ],
+              "edges": [
+                "Asserts before any sharing decision"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "!is_main && !shared",
+                  "kind": "value",
+                  "description": "Identifies a helper excluded from this save.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3366
+                },
+                {
+                  "name": "save_k_impl",
+                  "kind": "function",
+                  "description": "Coordinates the selected workers and main-only completion.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3352
+                }
+              ],
+              "edges": [
+                "True returns immediately; false continues toward storing rows"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "publish-window",
+      "title": "Publish the unit table before helpers enter their matching window",
+      "explanation": [
+        "Main builds the unit table, resets next_unit and finished, and increments opened with release ordering. [h/tron/models/model.hpp:3380–3384]",
+        "Each helper increments only its own helper_windows entry. It waits until an acquire read of opened reaches that call count. This pairs matching shared-save calls without publishing another window prematurely. [h/tron/models/model.hpp:3385–3390; h/tron/models/model.hpp:3128–3132]"
+      ],
+      "ranges": [
+        [
+          3380,
+          3390
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Window publication and helper admission",
+          "caption": "The release/acquire pair makes the freshly built unit table visible to helpers.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_store_cut_units",
+                  "kind": "function",
+                  "description": "Builds the unit boundaries for this minibatch.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3204
+                },
+                {
+                  "name": "w.opened",
+                  "kind": "value",
+                  "description": "Counts the shared windows main has published.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3384
+                }
+              ],
+              "edges": [
+                "Main resets next_unit and finished, then increments opened with release ordering"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "my_window",
+                  "kind": "value",
+                  "description": "Records this helper next shared-save call number.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3386
+                },
+                {
+                  "name": "w.opened",
+                  "kind": "value",
+                  "description": "Counts the shared windows main has published.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3384
+                }
+              ],
+              "edges": [
+                "1 helper call waits for 1 matching count: opened >= my_window via acquire reads"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "claim-work",
+      "title": "Assign each unit index to one writer",
+      "explanation": [
+        "Every participating worker claims an index by atomically incrementing next_unit. Indices below n_units select a unit interval for store_k_block. [h/tron/models/model.hpp:3391–3397]",
+        "A worker exits after claiming an index outside the table. The atomic counter may exceed n_units as workers discover that no work remains. [h/tron/models/model.hpp:3392–3394]"
+      ],
+      "ranges": [
+        [
+          3391,
+          3397
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "One successful claim selects one interval",
+          "caption": "The claim index can overshoot the count at loop exit. Only indices below n_units access unit_start.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "w.next_unit",
+                  "kind": "value",
+                  "description": "Atomically allocates the next work-unit index.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3393
+                },
+                {
+                  "name": "u",
+                  "kind": "value",
+                  "description": "Holds this worker claimed unit index.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3393
+                }
+              ],
+              "edges": [
+                "1 fetch_add assigns 1 distinct index to 1 worker"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "u",
+                  "kind": "value",
+                  "description": "Holds this worker claimed unit index.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3393
+                },
+                {
+                  "name": "store_k_block<geometry>",
+                  "kind": "function",
+                  "description": "Writes the claimed item interval across its KV heads.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3395
+                }
+              ],
+              "edges": [
+                "For u < n_units, passes unit_start[u] and unit_start[u + 1]"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "join-helpers",
+      "title": "Join all helper writers before main continues",
+      "explanation": [
+        "A helper increments finished with release ordering after its claim loop ends. It then returns without performing token marks or credits. [h/tron/models/model.hpp:3398–3401]",
+        "Main waits with acquire reads until finished reaches n_workers - 1. The following row bookkeeping and downstream notification run after every helper write. [h/tron/models/model.hpp:3402–3405; h/tron/models/model.hpp:3136–3143]"
+      ],
+      "ranges": [
+        [
+          3398,
+          3405
+        ],
+        [
+          3415,
+          3416
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Release completed writes; acquire all helpers",
+          "caption": "This is synchronization order, not a wall-clock timing diagram. Main and helpers may claim different numbers of units.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "store_k_block",
+                  "kind": "function",
+                  "description": "Finishes every row write in the current claimed interval.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3241
+                },
+                {
+                  "name": "w.finished",
+                  "kind": "value",
+                  "description": "Counts helpers that have left their claim loops.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3399
+                }
+              ],
+              "edges": [
+                "Each helper releases 1 completion after all its own claimed intervals are stored"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "w.finished",
+                  "kind": "value",
+                  "description": "Counts helpers that have left their claim loops.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3399
+                },
+                {
+                  "name": "n_helpers",
+                  "kind": "value",
+                  "description": "Sets the required helper-completion count.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3379
+                }
+              ],
+              "edges": [
+                "1 shared call waits for n_workers - 1 completions via acquire reads"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "join-watchdog",
+      "title": "Abort an overlong helper join",
+      "explanation": [
+        "The join watchdog reads steady_clock once per 1,048,576 pause-loop iterations. A static assertion checks that the interval is a power of two for the mask test. [h/tron/models/model.hpp:3181–3187; h/tron/models/model.hpp:3406–3408]",
+        "The first clock read starts the 120-second timeout. A later timeout assertion reports completed helpers and the claimed-unit count, clamped to n_units. [h/tron/models/model.hpp:3408–3414]",
+        "This timeout checks main waiting for helper completion. It does not bound a helper waiting for opened. [h/tron/models/model.hpp:3387–3389; h/tron/models/model.hpp:3404–3414]"
+      ],
+      "ranges": [
+        [
+          3181,
+          3187
+        ],
+        [
+          3406,
+          3414
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Check elapsed time periodically during main join",
+          "caption": "The 120-second limit starts at the first sampled clock read, not at entry to save_k_impl.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_join_clock_spins",
+                  "kind": "value",
+                  "description": "Sets the clock sampling interval to 1,048,576 pause loops.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3184
+                },
+                {
+                  "name": "std::chrono::steady_clock::now",
+                  "kind": "function",
+                  "description": "Reads the monotonic time for the join watchdog.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3407
+                }
+              ],
+              "edges": [
+                "Reads once each time the masked spin counter reaches the interval"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "now - t0",
+                  "kind": "value",
+                  "description": "Measures elapsed time since the first sampled clock read.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3409
+                },
+                {
+                  "name": "k_join_timeout_s",
+                  "kind": "value",
+                  "description": "Sets the watchdog limit to 120 seconds.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3187
+                }
+              ],
+              "edges": [
+                "1 sampled elapsed duration must remain below the 120-second limit"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "single-worker-store",
+      "title": "Use one full item interval when sharing is disabled",
+      "explanation": [
+        "Main calls store_k_block over [0, n_items) when the shared-store gate is false. [h/tron/models/model.hpp:3417–3419]",
+        "This path still selects whole-block writes when the geometry and gathered run permit them. Disabling worker sharing does not disable the block-write algorithm. [h/tron/models/model.hpp:3251–3262; h/tron/models/model.hpp:3300–3338]"
+      ],
+      "ranges": [
+        [
+          3417,
+          3419
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Unshared execution reuses the same writer",
+          "caption": "A single writer still benefits from the whole-block path when a run fills a block.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "shared",
+                  "kind": "value",
+                  "description": "Records whether this call uses main helpers.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3364
+                },
+                {
+                  "name": "store_k_block<geometry>",
+                  "kind": "function",
+                  "description": "Writes all items in the supplied interval.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3418
+                }
+              ],
+              "edges": [
+                "False: main supplies the single interval [0, n_items)"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "queue-completed-rows",
+      "title": "After the join, record saved rows and queue completed software-scored blocks",
+      "explanation": [
+        "For VNNI geometry, main visits every KV-writing item when cached_operation_uses_hw is false. Whole-block rows already have saved and layout bits, so they do not queue conversion. Short-run blocks for hardware-scored operations skip this row recording and remain row-major. [h/tron/models/model.hpp:3420–3438; h/tron/models/kv_cache.hpp:2178–2182]",
+        "note_k_row_saved returns true when all 16 rows of that block are saved and conversion is still pending. Main then captures the page, resolved storage reference, and block number. [h/tron/models/model.hpp:3427–3438; h/tron/models/kv_cache.hpp:2157–2182]",
+        "Rewriting an already completed but unconverted block can append another record. Conversion safely ignores a block that has already converted. [h/tron/models/kv_cache.hpp:2161–2163; h/tron/models/kv_cache.hpp:2219–2222]"
+      ],
+      "ranges": [
+        [
+          3420,
+          3439
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Queue conversion only after all writers finish",
+          "caption": "Whole-block writes already mark their layout. Partial runs become eligible once their saved-row bits cover the block.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "cached_operation_uses_hw",
+                  "kind": "function",
+                  "description": "Returns the cached hardware-use decision for the operation.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 1531
+                },
+                {
+                  "name": "pg.template note_k_row_saved<geometry.kv>",
+                  "kind": "function",
+                  "description": "Records one token offset and reports an unconverted completed block.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3433
+                }
+              ],
+              "edges": [
+                "False: visit each KV-writing item and record its saved row"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "pg.template note_k_row_saved<geometry.kv>",
+                  "kind": "function",
+                  "description": "Records one token offset and reports an unconverted completed block.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3433
+                },
+                {
+                  "name": "pending_k_blocks_",
+                  "kind": "work",
+                  "description": "Holds the captured destinations for later conversion.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3169
+                }
+              ],
+              "edges": [
+                "True: append 1 record with page, k_storage_of(slot), and j / k_store_block"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "publish-completion",
+      "title": "Keep completion marks, credits, and downstream notification on main",
+      "explanation": [
+        "The old loop performed each row write immediately before the token completion mark. The row writes move into store_k_block before this final loop. [base h/tron/models/model.hpp:3091–3115; head h/tron/models/model.hpp:3375–3456]",
+        "Main still visits q_batch->items in order. It logs K values, marks the token K complete, and credits eligible grouped token transfers. [h/tron/models/model.hpp:3440–3452]",
+        "Main then decrements each downstream minibatch slot latch. Helpers cannot reach this loop after their shared-store return. [h/tron/models/model.hpp:3398–3401; h/tron/models/model.hpp:3454–3456]"
+      ],
+      "ranges": [
+        [
+          3440,
+          3457
+        ]
+      ],
+      "old_ranges": [
+        [
+          3091,
+          3116
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "Publish rows after the writer join",
+          "caption": "The publication calls already existed. Their position now follows all K stores and the helper join.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "pg.mark_k_complete",
+                  "kind": "function",
+                  "description": "Publishes one token K completion mark in its cache slot.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3447
+                },
+                {
+                  "name": "credit_gof_save",
+                  "kind": "function",
+                  "description": "Credits a grouped transfer and queues it when ready.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3550
+                }
+              ],
+              "edges": [
+                "For each eligible token, marks completion before crediting hardware work"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "credit_gof_save",
+                  "kind": "function",
+                  "description": "Credits a grouped transfer and queues it when ready.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3550
+                },
+                {
+                  "name": "batch_2->upstream_kvs_ready[slot].count_down",
+                  "kind": "function",
+                  "description": "Releases this minibatch contribution to a downstream slot latch.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3456
+                }
+              ],
+              "edges": [
+                "After the entire ordered token loop, notifies each downstream minibatch"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "generated-wrapper",
+      "title": "Forward worker identity through the generated-operation save_k overload",
+      "explanation": [
+        "The operation-index overload adds worker_ix and n_workers, with defaults of main worker 0 and one worker. It forwards both values to save_k_impl. [h/tron/models/model.hpp:3459–3473]",
+        "Generated callers can share the write by supplying their worker split. Existing callers that omit these arguments keep single-threaded writes. [h/tron/models/model.hpp:3462–3472; ingest/src/TronCpp.hs:2891–2895; ingest/src/TronCpp.hs:2952–2958]"
+      ],
+      "ranges": [
+        [
+          3459,
+          3473
+        ]
+      ],
+      "old_ranges": [
+        [
+          3118,
+          3124
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "The generated-operation wrapper selects the descriptor",
+          "caption": "Geometry and operation_ix still identify the compile-time operation.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "save_k",
+                  "kind": "function",
+                  "description": "Selects a generated operation and forwards the requested worker split.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3465
+                },
+                {
+                  "name": "generated_attention_operation<geometry, operation_ix>",
+                  "kind": "function",
+                  "description": "Retrieves the compile-time attention operation descriptor.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3470
+                }
+              ],
+              "edges": [
+                "Resolves the descriptor and asserts that it writes KV"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "save_k",
+                  "kind": "function",
+                  "description": "Selects a generated operation and forwards the requested worker split.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3465
+                },
+                {
+                  "name": "save_k_impl<geometry>",
+                  "kind": "function",
+                  "description": "Executes the store using the supplied worker identity and count.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3472
+                }
+              ],
+              "edges": [
+                "Passes worker_ix and n_workers; defaults are 0 and 1 worker"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "descriptor-wrapper",
+      "title": "Forward worker identity through the runtime-descriptor save_k overload",
+      "explanation": [
+        "The explicit-descriptor overload adds the same defaulted worker arguments. It validates the supplied operation before forwarding the worker identity to save_k_impl. [h/tron/models/model.hpp:3475–3483]"
+      ],
+      "ranges": [
+        [
+          3475,
+          3483
+        ]
+      ],
+      "old_ranges": [
+        [
+          3126,
+          3132
+        ]
+      ],
+      "diagrams": [
+        {
+          "title": "The runtime-descriptor wrapper keeps validation",
+          "caption": "This overload accepts an operation descriptor from its caller instead of selecting operation_ix.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "self_attn_state.template validate_operation<geometry>",
+                  "kind": "function",
+                  "description": "Checks the supplied operation against this attention geometry.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3481
+                },
+                {
+                  "name": "save_k_impl<geometry>",
+                  "kind": "function",
+                  "description": "Executes the store using the supplied descriptor and worker split.",
+                  "file": "h/tron/models/model.hpp",
+                  "line": 3482
+                }
+              ],
+              "edges": [
+                "Validation completes before forwarding operation, ks, worker_ix, and n_workers"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trivial": [
+    {
+      "description": "Add <chrono> for the join watchdog and <immintrin.h> for the pause instruction. Adjust spacing on the <functional> comment.",
+      "ranges": [
+        [
+          10,
+          18
+        ]
+      ],
+      "old_ranges": [
+        [
+          10,
+          16
+        ]
+      ]
+    }
+  ],
+  "coverage_notes": [
+    "All nonblank added and removed lines in model.hpp are included in a logical-unit excerpt or the trivial-change list. Unchanged context is retained where it explains the changed ordering.",
+    "The full Note [Shared block save] stays attached to its code. Shorter comments remain in the excerpts that contain their implementation.",
+    "common.hpp and TronCpp.hs provide cited context for the window fields and generated callers. Their own changes are outside this file-specific change inventory.",
+    "This exact PR head uses a fixed unit_start table. There is no dynamic reservation/count/build allocation protocol or allocation-failure fallback in model.hpp.",
+    "No runtime tests or performance experiments were run for this document. Historical timing values appear only in the preserved source comment.",
+    "Sequence diagrams show source order and synchronization only. Insufficient data for wall-clock lanes with durations: a trace measuring main/helper stores, waits, and downstream execution would be required."
+  ]
+}

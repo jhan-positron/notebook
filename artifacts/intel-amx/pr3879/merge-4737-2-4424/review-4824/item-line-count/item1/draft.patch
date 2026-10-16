@@ -1,0 +1,86 @@
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -3230,36 +3230,23 @@
+     }
+ 
+     // Store the K rows (every KV head) of the tokens items[task_begin,
+-    // task_end) of q_batch into slot `slot`. VNNI slots: consecutive items
+-    // that fill one whole 16-token block of one page are stored as one VNNI
+-    // block (set_k_block). A shorter run is stored row by row (set_k_row)
+-    // into the block's row-major form. Row-major slots: one row store per
+-    // token and KV head (page::k(...).set). Marks, saved-row bits of partial
+-    // runs and credits are not touched here. save_k_impl does them after
+-    // every store is done.
++    // task_end) of q_batch into a VNNI-enabled slot. Consecutive items that
++    // fill one whole 16-token block of one page are stored as one VNNI block
++    // (set_k_block). A shorter run is stored row by row (set_k_row) into the
++    // block's row-major form. Marks, saved-row bits of partial runs and credits
++    // are not touched here. save_k_impl does them after every store is done.
+     template <attention_geometry geometry, typename kv_buffer_t>
+     void store_k_block(batch* q_batch,
+         kv_slot_id slot,
+         kv_buffer_t& ks,
+         size_t task_begin,
+         size_t task_end) noexcept {
+-      auto const& self = *this;
+-      auto row_of = [&](token_job_id ix, size_t kv_head) {
+-        return slice<geometry.kv.head_size>()(
+-            ks[ix].as_view(), kv_head * geometry.kv.head_size);
+-      };
+-      if constexpr (!k_vnni::layout_on<geometry.kv.head_size>) {
+-        for (size_t t = task_begin; t < task_end; ++t) {
+-          token_job_id ix = q_batch->items[t];
+-          if (!self.token_jobs_do_kv[ix]) continue;
+-          token_id tok_ix = token_jobs[ix];
+-          page& pg = page_of(tok_ix);
+-          int j = pg.offset_in_page(tok_ix);
+-          for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+-            pg.template k<geometry.kv>(slot, kv_head, j).set(row_of(ix, kv_head));
+-          }
+-        }
+-      } else {
++      if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
++        auto const& self = *this;
++        auto row_of = [&](token_job_id ix, size_t kv_head) {
++          return slice<geometry.kv.head_size>()(
++              ks[ix].as_view(), kv_head * geometry.kv.head_size);
++        };
+         using kv_elem_t = std::remove_cv_t<
+             std::remove_pointer_t<decltype(row_of(token_job_id{0}, 0).data)>>;
+         constexpr bool rows_are_bf16 = std::is_same_v<kv_elem_t, bf16>;
+@@ -3371,8 +3358,7 @@
+       tron_maybe_unused const bool has_hardware_slot =
+           geometry == self_attn_t::hardware_geometry &&
+           operation_is_hardware_candidate(operation);
+-      const size_t n_items = q_batch->items.size();
+-      // Update the pages first. That way HW sees the latest K values.
++      // Finish packed-layout stores before publishing completion marks.
+       if (shared) {
+         // See Note [Shared block save].
+         auto& w = q_batch->k_store_window;
+@@ -3414,8 +3400,8 @@
+                 std::min<uint32_t>(w.next_unit.load(), n_units), n_units);
+           }
+         }
+-      } else {
+-        store_k_block<geometry>(q_batch, slot, ks, 0, n_items);
++      } else if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
++        store_k_block<geometry>(q_batch, slot, ks, 0, q_batch->items.size());
+       }
+       if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
+         // Note [K VNNI storage]: record this pass's rows. A block whose 16th
+@@ -3444,6 +3430,14 @@
+         token_id tok_ix = token_jobs[ix];
+         page& pg = page_of(tok_ix);
+         int j = pg.offset_in_page(tok_ix);
++        if constexpr (!k_vnni::layout_on<geometry.kv.head_size>) {
++          // Update the page first so HW sees the latest K values.
++          for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
++            auto kout = slice<geometry.kv.head_size>()(
++                ks[ix].as_view(), kv_head * geometry.kv.head_size);
++            pg.template k<geometry.kv>(slot, kv_head, j).set(kout);
++          }
++        }
+         pg.mark_k_complete(slot, static_cast<size_t>(j));
+         // Drive the per-GOF dispatch counter. See Note [GOF dispatch
+         // synchronization].

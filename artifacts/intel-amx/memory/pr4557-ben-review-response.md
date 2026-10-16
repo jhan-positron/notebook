@@ -90,3 +90,23 @@ of Ben's review (gh pr edit 4557 --add-reviewer bgamari-positron) left to jhan. 
 244524/44 both trees (252720 - 8196 removed test-only checks), others unchanged. Step D runtron token identity DONE 19:51-19:56 UTC (exec/results/i4557final-20261001/smoke): cpu p1024 base/head/head2/baseoff/headoff + fpga p1024 base/head = one identical 256-token file; added to the PR body Status (final-pr-body-2.md). Page section 0 records the outcome.
 
 HOUSEKEEPING DONE 2026-10-01: /var/tmp/jhan/tron-issue4525-ben (13 GB) removed on 3bda; worktrees tron-issue4525-ben and -ben-r2 removed and branches jhan-kv-typed-tensors-ben-r1/-r2 deleted. Only ~/workspace/ai-runs/tron-issue4525 (the real branch) remains. runtron.final stays in /var/tmp/jhan/tron-i4525rt2/gen (worktree checked out at c12df586b6).
+
+MERGE OF MAIN 2026-10-05 (jhan: "resolve the conflicts at branch for PR4557"): PR was CONFLICTING vs main e5fa372c19
+(main's bbc702251e / PR #4726 removed every 8-wide chunk-size branch; TRON_CHUNK_SIZE is now unconditionally 16 in
+simd/auto.hpp). Resolved by MERGE (not rebase): commit 96a6220ab6 = PR HEAD (parents c12df586b6 + e5fa372c19), pushed
+19:4x UTC, GitHub now MERGEABLE/BLOCKED (review + CI). Resolution rule in all 6 conflicting files: keep the PR's typed V
+code, drop every `#if TRON_CHUNK_SIZE == 16` guard with its 8-lane #else branch (kv_cache.hpp x5 incl. kv_block members,
+model.hpp, t_llama_unit.cpp x3, v_vnni.hpp guard + 8-lane comment paragraph), drop the #error guard in self_attention.hpp
+(main removed it), t_amx_dispatch_dtype keeps main's attn_stats::forward_scope block with our batch_queries comment inside,
+hetero test keeps shard.hpp + seq.hpp + view.hpp. Merged tree vs main = exactly the PR's 14 files. 3bda (FREE, our half):
+lint-notes 0, gen all targets (only t_rinzler fails = main's BUILD_INGEST_MODELS=OFF defect, file untouched by the PR),
+gen-amxoff 4 tests; t_llama_unit 255274/61 both trees (main added cases), t_amx_numerics 12301 AMX / 2060 kill switch,
+t_amx_dispatch_dtype 1612, t_heterogeneous_scheduler 2783/3, packed-bits 20755, sliding 53593. Script
+/var/tmp/jhan/tron-issue4525-merge-20261005.sh, logs ...-merge-20261005.log (+ .attempt1.log = the nix failure). PR body
+patched live (Words rows 16-lane only, Status 2026-10-05 merge row, unit-test rows at 96a6220ab6). Not re-run: Step D/E
+runtron (production code unchanged except dead-branch removal). TRAPS: (1) nix develop in the 3bda worktree refuses to
+evaluate when a rsynced NEW file under nix/ is untracked ("Path 'nix/perfetto-config-schema.nix' ... not tracked by Git")
+-> the whole chain silently ran stale binaries; fix = `git add -A .` in /var/tmp/jhan/tron-issue4525 (then
+`git rm -r --cached gen-amxoff gen-avx2 gen-debug`, which -A also picked up); check for a BUILD-* EXIT line before
+trusting test lines. (2) the packed-bits Catch2 case is now named "...set_v\, get_v and at()" (renamed in c12df586b6);
+the old filter exits 2 with empty output.

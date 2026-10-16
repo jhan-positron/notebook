@@ -1,0 +1,1689 @@
+diff --git a/h/tron/kernels/amx_attn_iface.hpp b/h/tron/kernels/amx_attn_iface.hpp
+index 84712695e2..08500ebf9e 100644
+--- a/h/tron/kernels/amx_attn_iface.hpp
++++ b/h/tron/kernels/amx_attn_iface.hpp
+@@ -24,7 +24,9 @@
+ // that shape is 4 query heads x 128 dims = 512 bf16 = 1024 bytes. Packed as
+ // the B operand, it occupies 4096 bytes: four panels of 16 columns, 4 of them
+ // the query heads and 12 zero padding; the K operand fills its tiles
+-// completely (64 tokens = 4 tiles of 16 rows). Everything else, incomplete
++// completely (64 tokens = 4 tiles of 16 rows). With TRON_K_VNNI the roles
++// swap: Q is the A operand (16 rows, 4 of them live) and the stored K plane
++// is the B operand (Note [QK orientation]). Everything else, incomplete
+ // or partially visible pages, pages outside the sliding window, other
+ // geometries, other activation types, runs the existing AVX-512 dotter loop
+ // unchanged. The unit of the decision is the (query, page) pair, not the
+@@ -102,9 +104,10 @@
+ // the products of the kernel's zero padding rows of P (output row i of a tile
+ // multiply comes from row i of the A operand); callers read rows 0..3 and
+ // ignore the rest.
+-// qk_rowmajor_128x4 stores its result tiles into a buffer inside the kernel
+-// (s_transposed), and the transpose that reads that buffer writes only the 4
+-// query rows into the caller's `s`, so `s` needs only 4 rows
++// Both QK kernels store their result tiles into a buffer inside the kernel
++// (s_transposed in qk_rowmajor_128x4, s16 in qk_vnni_128x4). The transpose
++// that reads s_transposed, and the row copy that reads s16, write only the
++// 4 query rows into the caller's `s`, so `s` needs only 4 rows
+ // (s[4][s_stride_floats]).
+ 
+ #include <cstddef>
+@@ -139,8 +142,9 @@ inline constexpr size_t PAGE_TOKENS_64 = 64;
+ inline constexpr size_t HEAD_SIZE_128 = 128;
+ inline constexpr size_t GROUP_HEADS_4 = 4;
+ 
+-// One packed Q group (the pack_q_group_128x4 output buffer): 4 panels x 16
+-// dim-pair rows x 16 columns x 2 = 2048 bf16 = 4096 bytes, padding included.
++// One packed Q group, the output buffer of either packer, padding included:
++// pack_q_group_128x4 fills 4 panels x 16 dim-pair rows x 16 columns x 2, and
++// pack_q_rows_128x4 fills 16 rows x 128 dims. Both are 2048 bf16 = 4096 bytes.
+ inline constexpr size_t Q_PACK_ELEMS_2048 = TILE_ROWS_16 * HEAD_SIZE_128;
+ static_assert(Q_PACK_ELEMS_2048 == 2048, "the constant's name states its value");
+ 
+@@ -151,8 +155,9 @@ constexpr bool shape_ok(size_t model_head_size, size_t model_kv_mul) noexcept {
+   return model_head_size == HEAD_SIZE_128 && model_kv_mul == GROUP_HEADS_4;
+ }
+ 
+-// The scalar half of the gate: pack_q_group_128x4 takes `const bf16*` and
+-// copies the values without conversion, so the executor's activation scalar
++// The scalar half of the gate: both query packers (pack_q_group_128x4 and
++// pack_q_rows_128x4) take `const bf16*` and copy the values without
++// conversion, so the executor's activation scalar
+ // (btensor_t<N>::element, the type of the Q buffer) must be bf16.
+ // tp*/perm_tp*/host_bf16 store bf16; host stores float and host_fp16 stores
+ // fp16 (common.hpp). Those executors keep the AVX dotter path, which reads Q
+@@ -217,12 +222,13 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+ // With TRON_K_VNNI (Note [K VNNI storage] in kv_cache.hpp) the stored K plane
+ // IS the VNNI B-operand layout. The orientation therefore flips. qk_vnni_128x4
+ // takes the 4 query rows, padded to 16 rows, as the A operand. The 16 K panels
+-// of the page are the B operand. The tiles come out as S[query][token]. No
+-// transpose is needed. The cost moves to two places. The K store scatters 64
+-// dimension pairs per token when the token's run has one token (save_k,
+-// page::set_k_row). A run of two or more consecutive tokens of one block uses
+-// the block save (page::set_k_block). The software reader for partial pages
+-// runs k_vnni::qk_group instead of the row-major dotter.
++// of the page (a panel is 16 dimension-pair rows x 16 tokens, one B tile;
++// h/tron/tensor/k_vnni.hpp) are the B operand. The tiles come out as
++// S[query][token]. No transpose is needed. The extra work moves to two places.
++// The K store scatters 64 dimension pairs per token when the token's run has
++// one token (save_k, page::set_k_row). A run of two or more consecutive tokens
++// of one block uses the block save (page::set_k_block). The software reader for
++// partial pages runs k_vnni::qk_group instead of the row-major dotter.
+ 
+ // Dense QK for one page: computes S^T = K_page . Q^T in tiles and transposes
+ // on the way out (see Note [QK orientation]); writes s[4][s_stride_floats]
+@@ -240,8 +246,9 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+ // are zero padding the caller keeps zero. This call writes rows 0..3 only. A
+ // buffer zeroed once at allocation therefore stays valid for every pack.
+ // `padded` holds Q_PACK_ELEMS_2048 bf16 (4096 bytes), aligned to 64 bytes.
+-// That is the same buffer size as pack_q_group_128x4's output. One slot
+-// therefore serves either layout.
++// That is the same buffer size as pack_q_group_128x4's output. One query-pack
++// slot (amx_qpack_slot in self_attention.hpp) therefore serves either layout.
++// The build's K layout picks one packer and one kernel (k_vnni::layout_on).
+ void pack_q_rows_128x4(const bf16* q_group, bf16* padded) noexcept;
+ 
+ // Dense QK for one page whose K is stored in the VNNI layout (Note [K VNNI
+@@ -253,7 +260,10 @@ void pack_q_rows_128x4(const bf16* q_group, bf16* padded) noexcept;
+ // stores write 16 rows]). k_page = the page's packed K plane (64 tokens x 128
+ // dims, 16 KiB, layout in h/tron/tensor/k_vnni.hpp) as its typed view, so that
+ // a native K view, a packed V plane or a bare pointer cannot be handed in by
+-// mistake. q_rows = the pack_q_rows_128x4 output.
++// mistake. q_rows = the pack_q_rows_128x4 output. For the same K and Q the
++// scores are bit-identical to qk_rowmajor_128x4's: both kernels add the same
++// four 32-dimension partial dot products in the same order inside TDPBF16PS
++// (t_amx_numerics checks the identity).
+ void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+     const bf16* q_rows,
+     float* s,
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index 4b31f83423..8391e5764d 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -650,8 +650,8 @@ struct kv_slot_offsets final {
+ 
+ // Note [K VNNI storage]
+ // ~~~~~~~~~~~~~~~~~~~~~
+-// With TRON_K_VNNI (CMake option, default OFF, requires TRON_AMX_DISPATCH) the
+-// K plane of every 128-dimension head holds the VNNI pair-interleaved layout of
++// With TRON_K_VNNI (CMake option, default OFF) the K plane of every
++// 128-dimension head holds the VNNI pair-interleaved layout of
+ // h/tron/tensor/k_vnni.hpp instead of one row per token. The bytes and the
+ // page capacity are the same. Only the order of the values changes. The gate
+ // is k_vnni::layout_on<head_size>, a property of the storage geometry. So
+@@ -669,9 +669,9 @@ struct kv_slot_offsets final {
+ // two score kernels and the test-only book::fill_random. That mirrors the
+ // packed V plane (Note [VNNI Packed V layout]).
+ //
+-// Why: the AMX QK kernel reads the VNNI plane directly as its B operand. It
+-// computes the scores S = Q . K^T in the orientation the softmax wants
+-// (qk_vnni_128x4). So the transposing store of the row-major kernel
++// Why: the AMX QK kernel (qk_vnni_128x4) reads the VNNI plane directly as its
++// B operand. It computes the scores S = Q . K^T in the orientation the softmax
++// wants. So the transposing store of the row-major kernel
+ // (Note [QK orientation] in amx_attn_iface.hpp) is not needed.
+ //
+ // Consumers of a VNNI slot, and how each one changes:
+@@ -690,10 +690,13 @@ struct kv_slot_offsets final {
+ //      store paths untouched.
+ //   2. the dense AMX page path (self_attention.hpp) passes page::k_packed, the
+ //      read-only view of the plane, to qk_vnni_128x4.
+-//   3. the software path for partial pages, the kill switch
+-//      (TRON_AMX_DISABLE=1) and hosts without AMX use k_vnni::qk_group with
+-//      the same view. That reader is AVX-512 code with one token per vector
+-//      lane. It needs no per-token gather and no horizontal reduction. The
++//   3. every other visit of a VNNI slot uses k_vnni::qk_group with the same
++//      view: partial or partly visible pages, the kill switch
++//      (TRON_AMX_DISABLE=1), hosts without AMX, builds without
++//      TRON_AMX_DISPATCH, and the shapes and query types outside the AMX
++//      gate (Note [AMX attention dispatch]). That reader is AVX-512 code
++//      with one token per vector lane. It needs no per-token gather and no
++//      horizontal reduction. The
+ //      row-major dotter loop (the per-token dot-product loop of
+ //      self_attention.hpp) is
+ //      compiled only for row-major slots.
+@@ -1991,8 +1994,8 @@ struct alignas(64) page final {
+ 
+   // This page's packed K plane for one KV head of one slot, read-only: the
+   // argument type of the layout-specific score kernels (the AMX QK kernel
+-  // qk_vnni_128x4 reads it in place as its B operand, the AVX-512 reader
+-  // k_vnni::qk_group one token per lane). VNNI slots only (Note [K VNNI
++  // qk_vnni_128x4 reads it in place as its B operand, and the AVX-512 reader
++  // k_vnni::qk_group reads it one token per lane). VNNI slots only (Note [K VNNI
+   // storage]). Internal cache writes take writable views from the block owner
+   // instead.
+   template <kv_geometry geometry>
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index 9000972c5d..a195d82ed0 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -3267,9 +3267,7 @@ public:
+                   pg.template set_k_row<geometry.kv>(
+                       slot, kv_head, j, k_source_row(kout));
+                 } else {
+-                  view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE,
+-                      seq<geometry.kv.head_size>>{conv[0]}
+-                      .set(kout);
++                  k_destination_row<geometry.kv.head_size>(conv[0]).set(kout);
+                   pg.template set_k_row<geometry.kv>(
+                       slot, kv_head, j, k_source_row<geometry.kv.head_size>(conv[0]));
+                 }
+@@ -3283,9 +3281,7 @@ public:
+                 if constexpr (rows_are_bf16) {
+                   rows[run_t[i]] = kout.data;
+                 } else {
+-                  view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE,
+-                      seq<geometry.kv.head_size>>{conv[i]}
+-                      .set(kout);
++                  k_destination_row<geometry.kv.head_size>(conv[i]).set(kout);
+                   rows[run_t[i]] = conv[i];
+                 }
+               }
+diff --git a/h/tron/tensor/k_vnni.hpp b/h/tron/tensor/k_vnni.hpp
+index 103b056ea8..79a51c1b2c 100644
+--- a/h/tron/tensor/k_vnni.hpp
++++ b/h/tron/tensor/k_vnni.hpp
+@@ -4,7 +4,8 @@
+ // that knows the address formula (k_vnni_view), the index map and its
+ // constants (namespace k_vnni), and the vector operations that move whole token
+ // rows in and out (store_row, load_row, store_block, copy_token). The AVX-512
+-// score reader of this layout is in h/tron/kernels/k_vnni.hpp. Who writes and
++// score reader of this layout is in h/tron/kernels/k_vnni.hpp and the AMX QK
++// kernel in h/tron/kernels/amx_attn_iface.hpp. Who writes and
+ // reads the layout is described in Note [K VNNI storage] (kv_cache.hpp).
+ //
+ // Words used here: AMX (Advanced Matrix Extensions) is the tile instruction
+@@ -323,12 +324,15 @@ void transpose_16x16_epi32(__m512i (&r)[LANES_16]) noexcept {
+ // scatters of 16 dwords (one dimension pair each), one per dimension step. Only
+ // this token's 64 pair slots are written. So several threads may store
+ // different tokens of one plane at the same time (Note [Shared block save] in
+-// model.hpp). The row is read with unaligned loads.
++// model.hpp). The row is read with unaligned loads. The token index is checked
++// here, as the packed-V operations check theirs: an index at or above Rows
++// would scatter into other tokens' slots and past the end of the plane.
+ template <size_t Rows, size_t Cols, bool Aligned, bool Dma>
+ TRON(inline)
+ void store_row(k_vnni_view<bf16, Rows, Cols> dst,
+     size_t token,
+     const_k_row_view<Cols, Aligned, Dma> src) noexcept {
++  TRON_ASSERT_LT(token, Rows);
+   bf16* const plane = detail::k_vnni_access::plane(dst);
+   const bf16* const row = src.data;
+   const __m512i offsets = k_vnni::detail::pair_row_offsets();
+@@ -341,12 +345,13 @@ void store_row(k_vnni_view<bf16, Rows, Cols> dst,
+ 
+ // Load one token's 128-dimension K row out of a packed plane (the inverse of
+ // store_row). This takes 4 gathers of 16 dwords. The row is written with
+-// unaligned stores.
++// unaligned stores. The token index is checked as in store_row.
+ template <size_t Rows, size_t Cols, bool Aligned, bool Dma>
+ TRON(inline)
+ void load_row(k_vnni_view<const bf16, Rows, Cols> src,
+     size_t token,
+     k_row_view<Cols, Aligned, Dma> dst) noexcept {
++  TRON_ASSERT_LT(token, Rows);
+   const bf16* const plane = detail::k_vnni_access::plane(src);
+   bf16* const row = dst.data;
+   const __m512i offsets = k_vnni::detail::pair_row_offsets();
+@@ -400,7 +405,8 @@ void store_block(k_vnni_view<bf16, Rows, Cols> dst,
+ // Copy one token between packed K planes (or within one plane): the token's
+ // row is gathered into a 64-byte-aligned local row (load_row) and scattered
+ // into its destination column (store_row). Tokens own disjoint slots, so no
+-// other token of the destination is touched.
++// other token of the destination is touched. Both token indices are checked by
++// those two operations.
+ template <size_t Rows, size_t Cols>
+ TRON(inline)
+ void copy_token(k_vnni_view<bf16, Rows, Cols> dst,
+diff --git a/ingest/src/TronCpp.hs b/ingest/src/TronCpp.hs
+index f328f5291d..ed3d87f06d 100644
+--- a/ingest/src/TronCpp.hs
++++ b/ingest/src/TronCpp.hs
+@@ -112,7 +112,7 @@ import Utils (expectJust, panic)
+ --               (Index (Var "q_batches") (LiteralExpr (IntLit 0)))
+ --               "plugin_batch"))
+ --
+---    Good: LitStmt "plugin_batch* q_batch = &(q_batches[0]->plugin_batch);"
++--    Good: LitStmt "plugin_batch* q_batch = &q_batches[0]->plugin_batch;"
+ 
+ -- | Create a derived C++ name by appending a suffix to an existing name.
+ derivedCppName :: Name k -> String -> Name Cpp
+@@ -171,9 +171,9 @@ process name target m =
+         , [IncludeD $ IncludeLocal "tron/tensor/itensor.hpp"]
+         , hostMatrixIncludes
+         , [IncludeD $ IncludeLocal "common/perfetto.hpp"]
+-        , alignedLaneIncludes
+         ,
+           [ IncludeD $ IncludeLocal "tron/models/common.hpp"
++          , IncludeD $ IncludeLocal "tron/models/kernel_strategy.hpp"
+           , IncludeD $ IncludeLocal "tron/models/mixture_of_experts.hpp"
+           , IncludeD $ IncludeLocal "tron/models/model.hpp"
+           , IncludeD $ IncludeLocal "tron/models/self_attention.hpp"
+@@ -210,10 +210,6 @@ process name target m =
+     | hasHostMatrixTensors m =
+         [IncludeD $ IncludeLocal "tron/tensor/weight_matrix.hpp"]
+     | otherwise = []
+-  alignedLaneIncludes
+-    | hasAlignedLanes m =
+-        [IncludeD $ IncludeLocal "tron/models/kernel_strategy.hpp"]
+-    | otherwise = []
+   cacheIncludes = case attentionCacheTopology m of
+     UniformAttentionCache{} -> []
+     HeterogeneousAttentionCache _ ->
+@@ -239,11 +235,11 @@ modelStruct name target m@Module{modDecls = env, mainKernel = run, inputTokenRem
+       ++ map FieldDef (configFields m)
+       ++ cacheComponents m
+       ++ [ LiteralDef
+-             "inline static const bool is_host = std::is_same_v<dtensor_t<dim, dim>, tensor<dim, dim>>;"
+-         , LiteralDef "inline static const bool wcls_is_compensated = !is_host;"
+-         , LiteralDef "inline static const bool attn_softcapping = false;"
+-         , LiteralDef "inline static const bool is_eagle = false;"
+-         , LiteralDef "inline static constexpr bool force_hw_attn = true;"
++             "static constexpr bool is_host = std::is_same_v<dtensor_t<dim, dim>, tensor<dim, dim>>;"
++         , LiteralDef "static constexpr bool wcls_is_compensated = !is_host;"
++         , LiteralDef "static constexpr bool attn_softcapping = false;"
++         , LiteralDef "static constexpr bool is_eagle = false;"
++         , LiteralDef "static constexpr bool force_hw_attn = true;"
+          , -- Declare the MoE shape so the framework can size its
+            -- routing state and the codegen-emitted
+            -- `expert_stats_.record_router(...)` call compiles. See
+@@ -528,24 +524,26 @@ attentionOperationDescriptorsField run =
+ -- resident. A shared slot also remains resident when any consumer uses
+ -- full-history attention; otherwise its widest sliding window is sufficient
+ -- for every consumer.
++attentionSlotRetention :: [AttentionOperation] -> KvSlotId -> AttentionType
++attentionSlotRetention operations slot =
++  case map (attentionType . attentionConfig) consumers of
++    [] -> FullCausal
++    first : rest -> List.foldl' widestRetention first rest
++ where
++  consumers = filter ((== slot) . attentionKvSlot) operations
++  widestRetention FullCausal _ = FullCausal
++  widestRetention (SlidingWindow _) FullCausal = FullCausal
++  widestRetention (SlidingWindow left) (SlidingWindow right) =
++    SlidingWindow $ max left right
++
+ attentionSlotRetentionExpr :: [AttentionOperation] -> KvSlotId -> Cpp.Expr
+ attentionSlotRetentionExpr operations slot =
+-  case retention of
++  case attentionSlotRetention operations slot of
+     FullCausal -> FunCall "tron::kv_slot_retention::full_history" []
+     SlidingWindow window ->
+       FunCall
+         "tron::kv_slot_retention::sliding_window"
+         [LiteralExpr $ IntLit window]
+- where
+-  consumers = filter ((== slot) . attentionKvSlot) operations
+-  retention =
+-    case map (attentionType . attentionConfig) consumers of
+-      [] -> FullCausal
+-      first : rest -> List.foldl' widestRetention first rest
+-  widestRetention FullCausal _ = FullCausal
+-  widestRetention (SlidingWindow _) FullCausal = FullCausal
+-  widestRetention (SlidingWindow left) (SlidingWindow right) =
+-    SlidingWindow $ max left right
+ 
+ attentionUsesSlidingWindow :: AttentionOperation -> Bool
+ attentionUsesSlidingWindow operation =
+@@ -687,6 +685,7 @@ cacheComponents m = case attentionCacheTopology m of
+                            )
+                            (attentionSlotRetentionExpr operations slot)
+                        | slot <- uniformSlots
++                       , attentionSlotRetention operations slot /= FullCausal
+                        ]
+                     ++ [ReturnStmt $ Just "retentions"]
+             )
+@@ -1109,7 +1108,7 @@ stateStruct implName m@Module{modDecls = env, mainKernel = run, logitsMunge} =
+       ++ routingSyncFields env
+       ++ concatMap (map FieldDef . expertViewFields) (getExpertViews env)
+       ++ [ ConstructorDef $ stateConstructor implName m
+-         , MethodDef $ resizeMethod env
++         , MethodDef $ resizeMethod m
+          , LiteralDef "void make_latches(latch_arena&) noexcept { }" -- No latches in the state itself
+          , MethodDef $ runMethod m
+          , MethodDef $ runHelpMethod m
+@@ -1257,16 +1256,21 @@ runtimeLayerTruncationAssert maxLayers =
+       , ", n_layers);"
+       ]
+ 
+-resizeMethod :: Decls -> Method
+-resizeMethod env =
++resizeMethod :: Module -> Method
++resizeMethod mod =
+   Method "void" "resize" [Param "size_t" "max_tokens"] [] $
+     Block $
+-      map resizeStatement (getBuffers env)
++      mapMaybe (resizeStatement mod) (getBuffers env)
+         ++ concatMap moeRoutingResizeStatements (getMoeRoutings env)
++ where
++  env = modDecls mod
+ 
+-resizeStatement :: (Name ('Tron 'Buffer), BufferInfo) -> Cpp.Statement
+-resizeStatement (name, bufInfo) =
+-  ExprStmt $ MethodCall (Var $ asCpp name) "resize" [resizeArg]
++resizeStatement :: Module -> (Name ('Tron 'Buffer), BufferInfo) -> Maybe Cpp.Statement
++resizeStatement mod (name, bufInfo) = case referenceBuffer mod name of
++  -- A reference buffer aliases storage of outer_state (the framework's
++  -- tron::model<...>::state), which resizes it after the plugin state.
++  Just _ -> Nothing
++  Nothing -> Just $ ExprStmt $ MethodCall (Var $ asCpp name) "resize" [resizeArg]
+  where
+   resizeArg = case bufferIterSpace bufInfo of
+     QBatchItems -> Var "max_tokens"
+@@ -1308,7 +1312,7 @@ runMethod Module{modDecls = env, mainKernel = run} =
+           "TRON_ASSERT(q_batches.size() == 1, \
+           \\"Ingested models require --max-minibatches 1; \
+           \see Note [Ingested Model Mini-batching] in TronCpp.hs\");"
+-      , LitStmt "plugin_batch* q_batch = &(q_batches[0]->plugin_batch);"
++      , LitStmt "plugin_batch* q_batch = &q_batches[0]->plugin_batch;"
+       ]
+         ++ runLaunchWorkers operations
+         ++ concatMap
+@@ -1419,7 +1423,7 @@ runHelpMethod Module{modDecls = env, mainKernel = run} =
+           "TRON_ASSERT(q_batches.size() == 1, \
+           \\"Ingested models require --max-minibatches 1; \
+           \see Note [Ingested Model Mini-batching] in TronCpp.hs\");"
+-      , LitStmt "plugin_batch* q_batch = &(q_batches[0]->plugin_batch);"
++      , LitStmt "plugin_batch* q_batch = &q_batches[0]->plugin_batch;"
+       ]
+         ++ concatMap (runHelperStatement env (moeBlendNames run)) run
+  where
+@@ -1476,7 +1480,7 @@ runAttentionWorkerMethods m@(Module env _ run _ _ _ _)
+             "TRON_ASSERT(q_batches.size() == 1, \
+             \\"Ingested models require --max-minibatches 1; \
+             \see Note [Ingested Model Mini-batching] in TronCpp.hs\");"
+-        , LitStmt "plugin_batch* q_batch = &(q_batches[0]->plugin_batch);"
++        , LitStmt "plugin_batch* q_batch = &q_batches[0]->plugin_batch;"
+         , Declare "uint64_t" "attn_elapsed" (Just $ LiteralExpr $ IntLit 0)
+         ]
+           ++ prologue
+@@ -1571,11 +1575,11 @@ laneWindows env run = map (fmap (concatMap laneSteps)) $ attentionWindows run
+   laneCall name router =
+     LaneCall $
+       IfStmt
+-        (Var "active")
++        (Var "lane")
+         ( Block
+             [ ExprStmt $
+                 FunCall (NamedFun $ laneMethodName name) $
+-                  [Var "q_batch", Var "lane", Var "n_lanes"]
++                  [Var "q_batch", ExprLit "*lane"]
+                     ++ [LiteralExpr (BoolLit False) | router]
+             ]
+         )
+@@ -1606,34 +1610,30 @@ laneWindowName Nothing = "attention_prologue"
+ laneWindowName (Just (AttentionOpId k)) = fromString $ "attention_window_" ++ show k
+ 
+ -- | The method that attention worker @attn_ix@ runs for one attention window.
+--- The worker is lane @n_helpers + attn_ix@ of the aligned lane domain. On
+--- each lane channel it synchronizes, it is participant @n_workers + attn_ix@,
+--- offset by the matrix count on a mixed consumer. It takes part in every
+--- lane-channel phase in the window, whether or not its lane has a token.
+--- It calls the lane method of a kernel or blend only when @active@ holds: the
+--- pass has helpers, the pass's lanes include the attention workers, and this
+--- lane has a token.
++-- The worker takes its lane of the aligned stripe from
++-- @tron::aligned_stripe_attention_lane@. On each lane channel it
++-- synchronizes, it is participant @n_workers + attn_ix@, offset by the matrix
++-- count on a mixed consumer. It takes part in every lane-channel phase in the
++-- window, whether or not its lane has a token. It calls the lane method of a
++-- kernel or blend only when it has a lane: the pass is large, and this lane
++-- has a token.
+ laneWindowMethod :: Name Cpp -> [LaneStep] -> Method
+ laneWindowMethod name steps =
+   Method "void" name params [] $
+     Block $
+-      [ LitStmt "const size_t n_helpers = app_pool().num_workers() - n_attn_workers;"
+-      , LitStmt "const size_t n_workers = n_helpers + 1;"
+-      ]
+-        ++ [LitStmt "const size_t part = n_workers + attn_ix;" | not $ null syncs]
+-        ++ ( if null calls
+-               then []
+-               else
+-                 [ LitStmt "const size_t n = q_batch->items.size();"
+-                 , LitStmt $
+-                     "const size_t n_lanes = tron::aligned_lanes(n, n_workers, "
+-                       ++ "app_pool().num_workers());"
+-                 , LitStmt "const size_t lane = n_helpers + attn_ix;"
+-                 , LitStmt $
+-                     "const bool active = n_workers > 1 && lane < n_lanes && "
+-                       ++ "lane < n;"
+-                 ]
+-           )
++      ( if null syncs
++          then []
++          else
++            [ LitStmt "const size_t n_helpers = app_pool().num_workers() - n_attn_workers;"
++            , LitStmt "const size_t n_workers = n_helpers + 1;"
++            , LitStmt "const size_t part = n_workers + attn_ix;"
++            ]
++      )
++        ++ [ LitStmt $
++               "const std::optional<tron::lane> lane = tron::aligned_stripe_attention_lane(attn_ix, "
++                 ++ "n_attn_workers, q_batch->items.size(), app_pool().num_workers());"
++           | not $ null calls
++           ]
+         ++ map stepStatement steps
+  where
+   params =
+@@ -1754,7 +1754,7 @@ insert (Locals m) var expr = Locals $ M.insert var expr m
+ --
+ -- Lane rule. A pass has n tokens. n_workers counts main and the H helpers, so
+ -- H = n_workers - 1. A is the number of attention workers, and run() asserts
+--- A >= 1. tron::aligned_lanes gives the number of lanes L(n):
++-- A >= 1. tron::aligned_stripe_num_lanes gives the number of lanes L(n):
+ --
+ --   L(n) = 1       if H = 0 (main runs the one lane)
+ --   L(n) = H       if H >= 1 and n <= 2H
+@@ -1762,29 +1762,31 @@ insert (Locals m) var expr = Locals $ M.insert var expr m
+ --
+ -- Lane l owns tokens l, l + L(n), l + 2 L(n), ... When H >= 1, main is not a
+ -- lane. The helper with worker_ix h (1 <= h <= H) is lane h - 1, and
+--- attention worker j (0 <= j < A) is lane H + j. With n <= 2H an attention
+--- worker would own at most one token, so attention workers join the domain
+--- only in larger passes.
++-- attention worker j (0 <= j < A) is lane H + j;
++-- tron::aligned_stripe_worker_lane and tron::aligned_stripe_attention_lane
++-- give these lanes. With n <= 2H an attention worker would own at most one
++-- token, so attention workers join the domain only in larger passes.
+ --
+ -- Joining the domain. J is true in a pass whose lanes include the attention
+ -- workers, that is, when H >= 1 and n > 2H. reset_channels computes J once
+--- per pass with tron::attention_lanes_join, from n = items.size(), n_workers
+--- and the pool size. reset_channels runs on main before main enqueues any
++-- per pass with tron::is_large_pass, from n = items.size() and n_workers.
++-- reset_channels runs on main before main enqueues any
+ -- worker. It stores A if J holds, and 0 otherwise, in
+ -- plugin_batch::n_attention_lanes. Enqueuing a worker publishes the value
+ -- to it. Attention workers only read it, and main writes it again only
+ -- after workers_done.wait(). The helpers take their stripe from
+--- tron::aligned_lanes, and tron::attention_lanes_join calls
+--- tron::aligned_lanes with the same inputs, so J and the helpers' stripe
+--- cannot disagree.
++-- tron::aligned_stripe_worker_lane, which decides with tron::is_large_pass on
++-- the same inputs, so J and the helpers' stripe cannot disagree.
+ --
+ -- Pool split. When the attention workers join the domain,
+--- tron::aligned_lanes returns the pool size as the lane count H + A. Each
+--- attention worker computes H as the pool size minus A. Both assume that the
+--- helpers and the attention workers together fill the application pool, as
+--- Note [Attention workers are the last pool workers] in model.hpp requires.
+--- reset_channels asserts this split every pass. The aligned program also
+--- asserts that its A equals the n_attention_lanes that reset_channels stored.
++-- tron::aligned_stripe_num_lanes returns the pool size as the lane count
++-- H + A. tron::aligned_stripe_attention_lane computes H as the pool size minus
++-- A. Both assume
++-- that the helpers and the attention workers together fill the application
++-- pool, as Note [Attention workers are the last pool workers] in model.hpp
++-- requires. reset_channels asserts this split every pass. The aligned
++-- program also asserts that its A equals the n_attention_lanes that
++-- reset_channels stored.
+ --
+ -- Lane channels. A lane channel is a channel with a LaneP producer or an
+ -- aligned-lane reader, that is, a LaneConsumer domain in its consumer. Each
+@@ -1856,14 +1858,9 @@ kernelMethods env (name, ki) = case kernelLanes ki of
+           (kernelEntryReadBuffers ki)
+           (kernelWriteBuffers ki)
+           (Var "lane")
+-          (Var "n_lanes")
+-          ( resolveIterationSpace
+-              env
+-              (kernelVar ki)
+-              (kernelIterSpace ki)
+-              (\locals' -> kernelBodyStmts env locals' (kernelBody ki))
+-              (Locals M.empty)
+-          )
++          (kernelIterSpace ki)
++          (kernelVar ki)
++          (\locals' -> kernelBodyStmts env locals' (kernelBody ki))
+  where
+   weights = kernelMatVecWeights (kernelBody ki)
+ 
+@@ -1877,35 +1874,31 @@ kernelParams =
+   ]
+ 
+ -- | The two methods of an aligned-lane kernel or blend: an entry point for
+--- main and the helpers, and a lane method with the given body. In the entry
+--- point, main returns at once when helpers exist. The helper with @worker_ix@
+--- h runs lane h - 1, and main without helpers runs the one lane. For a router
+--- kernel, the entry point passes the @touch@ flag of Note [MoE router warm-up].
+--- Attention workers call the lane method from their window methods.
++-- main and the helpers, and a lane method with the given body. The entry
++-- point takes the caller's lane of the aligned stripe from
++-- @tron::aligned_stripe_worker_lane@, which is empty for main when helpers
++-- exist, and passes it to the lane method. For a router kernel, the entry
++-- point also passes the @touch@ flag of Note [MoE router warm-up]. Attention
++-- workers call the lane method from their window methods.
+ alignedLaneMethods :: Name Cpp -> Bool -> [Cpp.Statement] -> [Method]
+ alignedLaneMethods name router laneBody =
+   [ Method "void" name kernelParams [] $
+-      Block $
+-        [LitStmt "if (n_workers > 1 && worker_ix == 0) { return; }"]
+-          ++ [ LitStmt "const size_t n_helpers = (n_workers == 1) ? 1 : n_workers - 1;"
+-             | router
+-             ]
+-          ++ [ LitStmt "const size_t lane = (n_workers == 1) ? 0 : worker_ix - 1;"
+-             , LitStmt $
+-                 "const size_t n_lanes = tron::aligned_lanes(q_batch->items.size(), "
+-                   ++ "n_workers, app_pool().num_workers());"
+-             , ExprStmt $
+-                 FunCall (NamedFun $ laneMethodName name) $
+-                   [Var "q_batch", Var "lane", Var "n_lanes"]
+-                     ++ [ExprLit "q_batch->items.size() <= n_helpers" | router]
+-             ]
++      Block
++        [ LitStmt $
++            "const std::optional<tron::lane> lane = tron::aligned_stripe_worker_lane(worker_ix, n_workers, "
++              ++ "q_batch->items.size(), app_pool().num_workers());"
++        , LitStmt "if (!lane) { return; }"
++        , ExprStmt $
++            FunCall (NamedFun $ laneMethodName name) $
++              [Var "q_batch", ExprLit "*lane"]
++                ++ [ExprLit "tron::should_warm_router_weights(q_batch->items.size(), n_workers)" | router]
++        ]
+   , Method "void" (laneMethodName name) laneParams [] $ Block laneBody
+   ]
+  where
+   laneParams =
+     [ Param "plugin_batch*" "q_batch"
+-    , Param "size_t" "lane"
+-    , Param "size_t" "n_lanes"
++    , Param "tron::lane" "lane"
+     ]
+       ++ [Param "bool" "touch" | router]
+ 
+@@ -1932,15 +1925,15 @@ kernelMethod env (name, ki) = Method "void" (asCpp name) kernelParams [] body
+                   kernelBodyStmts env locals' (kernelBody ki)
+               )
+           _ ->
+-            staticStrategy env name buffers_read buffers_written warmUp $
+-              resolveIterationSpace
+-                env
+-                (kernelVar ki)
+-                (kernelIterSpace ki)
+-                ( \locals' ->
+-                    kernelBodyStmts env locals' (kernelBody ki)
+-                )
+-                (Locals M.empty)
++            staticStrategy
++              env
++              name
++              buffers_read
++              buffers_written
++              warmUp
++              (kernelIterSpace ki)
++              (kernelVar ki)
++              (\locals' -> kernelBodyStmts env locals' (kernelBody ki))
+       ]
+   -- See Note [Fused kernel entry reads] in Loopy/KernelAccess.hs.
+   buffers_read = kernelEntryReadBuffers ki
+@@ -1956,11 +1949,10 @@ kernelMethod env (name, ki) = Method "void" (asCpp name) kernelParams [] body
+ --   add_n[ix]  = embedding[ix] + linear_n[ix]
+ --   mul_n[ix]  = tron::rmsnorm(w, add_n[ix], eps)
+ --
+--- The first statement truncates the fp32 sum to bf16 in `add_n`. The
++-- The first statement rounds the fp32 sum to bf16 in `add_n`. The
+ -- unfused rmsnorm then reads `add_n` back from bf16 and so accumulates
+--- its sum-of-squares from a bf16 source -- losing ~30 000x in per-step
+--- rel_l2 vs accumulating from the fp32 sum before truncation. See
+--- issue #2155.
++-- its sum-of-squares from a bf16 source instead of the fp32 sum, which
++-- loses precision. See issue #2155.
+ --
+ -- This pattern matcher recognises the fused body and emits a single call to
+ -- `tron::residual_and_rmsnorm(x_in, y, x_out, z, w, eps)` (the SSA overload
+@@ -1968,7 +1960,7 @@ kernelMethod env (name, ki) = Method "void" (asCpp name) kernelParams [] body
+ -- trailing static weight offset: `residual_and_rmsnorm(..., eps, 1.0f)`.
+ -- The bf16 store to `add_n` is preserved (subsequent layers' residual adds
+ -- read it), but both passes of the rmsnorm operate on x_in + y in fp32 -- pass 1
+--- accumulates the sum-of-squares from the fp32 sum before truncation,
++-- accumulates the sum-of-squares from the fp32 sum before rounding,
+ -- and pass 2 redoes the addition in fp32 instead of reading `add_n`
+ -- back from bf16.
+ --
+@@ -2434,14 +2426,13 @@ kernelBodyExpr env locals (KernelSliceExpr base off len) =
+     [kernelBodyExpr env locals base, off]
+ kernelBodyExpr _ _ (KernelLiteral lit) = lit
+ 
+--- | A C++ iteration (space and body) in a form that's convenient for
+--- | manipulating how the iteration is done (e.g., by a work-to-thread allocation strategy).
++-- | A serial loop over an iteration space in C++: a loop variable ranging over
++-- @[0, limit)@ and the body for one value of it ('serialStrategy'). Striped
++-- kernels deal their items through 'stripedItems' instead.
+ data CppIter = CppIter
+   { cppLoopvarType :: Type
+   , cppLoopvar :: Name Cpp
+-  , cppLoopvarInit :: Expr
+   , cppLoopvarLimit :: Expr
+-  , cppLoopvarInc :: Expr
+   , cppIterBody :: [Cpp.Statement]
+   }
+ 
+@@ -2466,9 +2457,7 @@ resolveIterationSpace env loopvar (Fin size) body locals = header body'
+     CppIter
+       (LiteralType "size_t")
+       cppLoopvar
+-      (LiteralExpr (IntLit 0))
+       (sizeToCppWith (kernelBodyExpr env locals) size)
+-      (LiteralExpr (IntLit 1))
+   locals' = insert locals loopvar (Var cppLoopvar)
+   body' = body locals'
+ resolveIterationSpace _ loopvar (QBatchItemsExpertPairs _ n_chosen) body locals =
+@@ -2491,45 +2480,35 @@ fieldBasedHeader q_batch_field = (header, access)
+     CppIter
+       (LiteralType "size_t")
+       "task"
+-      (LiteralExpr (IntLit 0))
+       (MethodCall q_batch_field "size" [])
+-      (LiteralExpr (IntLit 1))
+   access = Index q_batch_field "task"
+ 
+ serialStrategy :: CppIter -> Cpp.Statement
+ serialStrategy iter = ForStmt init cond inc $ Block $ cppIterBody iter
+  where
+   var = cppLoopvar iter
+-  init = Cpp.Declare (cppLoopvarType iter) var (Just $ cppLoopvarInit iter)
++  init = Cpp.Declare (cppLoopvarType iter) var (Just $ LiteralExpr (IntLit 0))
+   cond = Cpp.BinOp Lt (Var var) (cppLoopvarLimit iter)
+-  inc = Cpp.IncAssignment (Var var) Add (cppLoopvarInc iter)
+-
+--- Note [Main Thread Skips Helper Kernels]
+--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--- When @n_workers > 1@, worker 0 (the main thread) is excluded from helper
+--- kernel work: it is busy preparing and dispatching matmuls in @run()@.
+--- The remaining @n_workers - 1@ helpers stripe across the iteration space
+--- as @actual_worker_ix@ ∈ [0, n_actual_workers), so the full space is
+--- covered with no gaps. With a single worker there are no helpers and
+--- @n_actual_workers == 1@, @actual_worker_ix == 0@: worker 0 does the
+--- full iteration itself.
+-skipMainThreadSetup :: [Cpp.Statement]
+-skipMainThreadSetup =
+-  [ LitStmt "if (n_workers > 1 && worker_ix == 0) { return; }"
+-  , LitStmt "size_t n_actual_workers = (n_workers == 1) ? 1 : n_workers - 1;"
+-  , LitStmt "size_t actual_worker_ix = (n_workers == 1) ? 0 : worker_ix - 1;"
++  inc = Cpp.IncAssignment (Var var) Add (LiteralExpr (IntLit 1))
++
++-- | Bind @lane@ to the calling thread's lane of the helper stripe, returning
++-- at once on main when helpers exist. See Note [Threads, stripes and lanes].
++helperLaneSetup :: [Cpp.Statement]
++helperLaneSetup =
++  [ LitStmt
++      "const std::optional<tron::lane> lane = tron::helper_stripe_lane(worker_ix, n_workers);"
++  , LitStmt "if (!lane) { return; }"
+   ]
+ 
+ -- Note [MoE router warm-up]
+ -- ~~~~~~~~~~~~~~~~~~~~~~~~~
+--- In a small pass, a helper loads a router kernel's host weights into its
+--- cache before its first row arrives. A pass is small when it has no more
+--- tokens than helpers: n <= H, for n tokens and H helpers. The helper warms
+--- only if it owns a token. Before its first row wait, it calls
+--- 'weight_matrix::touch', which reads one 8-byte word from each 64-byte cache
+--- line.
++-- In a pass where each lane of the helper stripe owns at most one token, a
++-- thread whose lane owns a token loads a router kernel's host weights into its
++-- cache before its first row arrives (tron::should_warm_router_weights).
++-- Before its first row wait, it calls 'weight_matrix::touch', which reads one
++-- 8-byte word from each 64-byte cache line.
+ --
+--- In a small pass each helper runs at most one router matvec for the kernel.
++-- In such a pass each helper runs at most one router matvec for the kernel.
+ -- Without the warm-up, that matvec takes the weights' cache misses after the
+ -- helper's o_proj row arrives, on the critical path. With it, the loads
+ -- overlap the wait. A larger pass amortizes the misses over several rows, so
+@@ -2548,8 +2527,8 @@ moeRouterWarmUp body = case kernelMatVecWeights body of
+     [ Cpp.Comment "See Note [MoE router warm-up] in ingest/src/TronCpp.hs."
+     , IfStmt
+         ( ExprLit $
+-            "actual_worker_ix < q_batch->items.size() && "
+-              ++ "q_batch->items.size() <= n_actual_workers"
++            "lane->ix < q_batch->items.size() && "
++              ++ "tron::should_warm_router_weights(q_batch->items.size(), n_workers)"
+         )
+         (Block $ map touchWeights weights)
+         Nothing
+@@ -2562,7 +2541,7 @@ laneWarmUp [] = []
+ laneWarmUp weights =
+   [ Cpp.Comment "See Note [MoE router warm-up] in ingest/src/TronCpp.hs."
+   , IfStmt
+-      (ExprLit "lane < q_batch->items.size() && touch")
++      (ExprLit "lane.ix < q_batch->items.size() && touch")
+       (Block $ map touchWeights weights)
+       Nothing
+   ]
+@@ -2586,24 +2565,30 @@ staticStrategy
+   -- ^ Buffers written by the kernel (for channel finish_writing_at).
+   -> [Cpp.Statement]
+   -- ^ Statements each helper runs before its first wait.
+-  -> CppIter
++  -> IterationSpace
++  -> KernelVariable
++  -- ^ Kernel loop variable, bound to each item.
++  -> (Locals -> [Cpp.Statement])
++  -- ^ Body generator.
+   -> Cpp.Statement
+-staticStrategy env name buffers_read buffers_written entry iter =
++staticStrategy env name buffers_read buffers_written entry iterSpace loopvar bodyGen =
+   Block $
+-    skipMainThreadSetup
++    helperLaneSetup
+       ++ entry
+       ++ stripedLoop
+         env
+         name
+         buffers_read
+         buffers_written
+-        (Var "actual_worker_ix")
+-        (Var "n_actual_workers")
+-        iter
++        (ExprLit "*lane")
++        iterSpace
++        loopvar
++        bodyGen
+ 
+--- | The loop of the thread that runs lane @lane@ of @nLanes@ over a
+--- token-striped iteration space. It runs items @lane@, @lane + nLanes@, and so
+--- on. For each item it waits for the entry reads and publishes the writes.
++-- | The loop of the thread that runs lane @lane@ over the items of a
++-- striped iteration space, with @tron::striped_loop@. For each item it waits
++-- for the entry reads, runs the body with @loopvar@ bound to the item, and
++-- publishes the writes.
+ stripedLoop
+   :: Decls
+   -> Name ('Tron 'Kernel)
+@@ -2612,53 +2597,51 @@ stripedLoop
+   -> [Name ('Tron 'Buffer)]
+   -- ^ Buffers written by the kernel (for channel finish_writing_at).
+   -> Expr
+-  -- ^ This thread's lane.
+-  -> Expr
+-  -- ^ The number of lanes.
+-  -> CppIter
++  -- ^ This thread's @tron::lane@.
++  -> IterationSpace
++  -> KernelVariable
++  -- ^ Kernel loop variable, bound to each item.
++  -> (Locals -> [Cpp.Statement])
++  -- ^ Body generator.
+   -> [Cpp.Statement]
+-stripedLoop env name buffers_read buffers_written lane nLanes iter =
+-  preWait ++ [Block [traceEvent, loop]]
+- where
+-  var = cppLoopvar iter
+-  channels = mapMaybe (channelName env) buffers_read
+-  written_channels = mapMaybe (channelName env) buffers_written
+-  firstIx = cppLoopvarInit iter `plus` lane
+-
+-  -- Wait for this worker's first element outside of the Perfetto slice so the
+-  -- slice reflects work, not arrival latency. The loop's own
+-  -- start_reading_at for the same element is a satisfied no-op.
+-  preWait
+-    | null channels = []
+-    | otherwise =
+-        [ IfStmt
+-            (BinOp Lt firstIx (cppLoopvarLimit iter))
+-            (Block (map (startReadingAt firstIx) channels))
+-            Nothing
+-        ]
+-  traceEvent =
+-    ExprStmt $
++stripedLoop env name buffers_read buffers_written lane iterSpace loopvar bodyGen =
++  [ ExprStmt $
+       FunCall
+-        "TRACE_EVENT"
+-        [LiteralExpr (StringLit "model"), LiteralExpr (StringLit (show name))]
+-
+-  loop =
+-    serialStrategy $
+-      CppIter
+-        (cppLoopvarType iter)
+-        var
+-        (cppLoopvarInit iter `plus` lane)
+-        (cppLoopvarLimit iter)
+-        (cppLoopvarInc iter `times` nLanes)
+-        ( map (startReadingAt (Var var)) channels
+-            ++ cppIterBody iter
+-            ++ map (finishWritingAt (Var var)) written_channels
+-        )
++        "tron::striped_loop"
++        [ LiteralExpr (StringLit (show name))
++        , lane
++        , items
++        , channels buffers_read
++        , channels buffers_written
++        , Lambda
++            [RefCaptureAll]
++            [Param itemType cppLoopvar]
++            (Block $ bodyGen $ insert (Locals M.empty) loopvar (Var cppLoopvar))
++        ]
++  ]
++ where
++  cppLoopvar = asCpp loopvar
++  (items, itemType) = stripedItems iterSpace
++  channels bufs =
++    FunCall
++      "std::tie"
++      [MemberAccess "q_batch" (asCpp ch) | ch <- mapMaybe (channelName env) bufs]
++
++-- | The items that a striped kernel over an iteration space deals out, in
++-- order, and the C++ type of one item. A token kernel deals the batch's
++-- tokens. See Note [Threads, stripes and lanes].
++stripedItems :: IterationSpace -> (Expr, Type)
++stripedItems = \case
++  QBatchItems -> (MemberAccess "q_batch" "items", LiteralType "token_job_id")
++  QBatchItemsExpertPairs{} -> error "stripedItems: QBatchItemsExpertPairs not supported"
++  Fin _ -> error "stripedItems: Fin not supported"
++  MoeEntries _ -> error "stripedItems: MoeEntries not yet supported"
++  Singleton -> error "stripedItems: Singleton is a sync point, not iterable"
+ 
+ -- | Strategy for MoE body kernels: stripe the flat expert-major row sequence
+ -- across helpers without restarting worker assignment at expert boundaries.
+ -- Rows are grouped by ascending expert ID; matmul dispatch and completion may
+--- follow a different order. See Note [Main Thread Skips Helper Kernels].
++-- follow a different order. See Note [Threads, stripes and lanes].
+ expertMajorStrategy
+   :: Decls
+   -> Name ('Tron 'Kernel)
+@@ -2678,7 +2661,7 @@ expertMajorStrategy
+   -> Cpp.Statement
+ expertMajorStrategy env name routingName n_chosen buffers_read buffers_written loopvar bodyGen =
+   Block $
+-    skipMainThreadSetup ++ [Block [traceEvent, loop]]
++    helperLaneSetup ++ [Block [traceEvent, loop]]
+  where
+   routingCpp = asCpp routingName
+   cppLoopvar = asCpp loopvar
+@@ -2695,9 +2678,9 @@ expertMajorStrategy env name routingName n_chosen buffers_read buffers_written l
+ 
+   loop =
+     ForStmt
+-      (Declare (LiteralType "size_t") "row_ix" (Just (Var "actual_worker_ix")))
++      (Declare (LiteralType "size_t") "row_ix" (Just (ExprLit "lane->ix")))
+       (BinOp Lt (Var "row_ix") (MethodCall expertMajor "size" []))
+-      (IncAssignment (Var "row_ix") Add (Var "n_actual_workers"))
++      (IncAssignment (Var "row_ix") Add (ExprLit "lane->n"))
+       $ Block
+         ( [tsDecl]
+             ++ map readChannel channels
+@@ -2764,12 +2747,16 @@ channelName env buf = bufferGuardChannel $ readDecl buf env
+ -- | Wrap a C++ statement with an optional trace comment derived
+ -- from the Tron statement's provenance.
+ withTrace :: Tron.Statement -> Cpp.Statement -> [Cpp.Statement]
+-withTrace tronStmt cppStmt =
++withTrace tronStmt cppStmt = withTraceStatements tronStmt [cppStmt]
++
++-- | Prefix a statement sequence without introducing a C++ scope.
++withTraceStatements :: Tron.Statement -> [Cpp.Statement] -> [Cpp.Statement]
++withTraceStatements tronStmt cppStmts =
+   let prov = stmtProvenance tronStmt
+       comment = traceComment prov
+    in if null comment
+-        then [cppStmt]
+-        else [Cpp.Comment (drop 4 comment), cppStmt]
++        then cppStmts
++        else Cpp.Comment (drop 4 comment) : cppStmts
+ 
+ -- drop 4 removes leading " // " since Comment adds "//"
+ 
+@@ -2821,12 +2808,12 @@ runStatement env routers blendNames attentionById stmt = case stmt of
+           "TronCpp: no attention operation for preparation "
+             ++ show (prepareAttentionOpId preparation)
+       Just operation -> withTrace stmt $ prepareAttentionOperation operation
+-  AttentionStmt attention -> withTrace stmt $ submitAttentionOperation env attention
++  AttentionStmt attention -> withTraceStatements stmt $ submitAttentionOperation env attention
+   MoeRouteStmt routingName indicesBuf routerId _ ->
+     case M.lookup routerId routers of
+       Nothing -> error $ "TronCpp: no MoE router " ++ show routerId
+       Just router ->
+-        withTrace stmt $
++        withTraceStatements stmt $
+           moeRoute env routingName indicesBuf routerId (routerMatmuls router)
+   MoeMatmulPrepareAndLaunchStmt operation ->
+     case M.lookup (moeMatmulRouterId operation) routers of
+@@ -2836,7 +2823,7 @@ runStatement env routers blendNames attentionById stmt = case stmt of
+         withTrace stmt $ moeMatmulPrepareAndLaunch env (routerRouting router) operation
+   MoeBlendStmt r w o i b lanes _ ->
+     -- Dispatched through a lifted method so the early return in
+-    -- 'skipMainThreadSetup' exits the blend body, not @run()@.
++    -- 'helperLaneSetup' exits the blend body, not @run()@.
+     -- See Note [MoeBlend Method Lifting].
+     withTrace stmt $
+       ExprStmt $
+@@ -2917,12 +2904,11 @@ prepareAttentionOperation stmt =
+ -- batches. For small batches, prepare and launch after the saves. The runtime
+ -- wrappers own the batch-size heuristic, keeping policy out of the Tron IR. See
+ -- Note [Early and late hardware attention launch] in model.hpp.
+-submitAttentionOperation :: Decls -> AttentionOperation -> Cpp.Statement
++submitAttentionOperation :: Decls -> AttentionOperation -> [Cpp.Statement]
+ submitAttentionOperation env stmt =
+-  Block $
+-    [earlyLaunch]
+-      ++ maybe [] saveKv (attentionKvWrite stmt)
+-      ++ [latePrepare, lateLaunch]
++  [earlyLaunch]
++    ++ maybe [] saveKv (attentionKvWrite stmt)
++    ++ [latePrepare, lateLaunch]
+  where
+   earlyLaunch =
+     attentionRuntimeCall
+@@ -3065,48 +3051,47 @@ moeRoute
+   -> Name ('Tron 'Buffer)
+   -> MoeRouterId
+   -> [MoeMatmulOperation]
+-  -> Cpp.Statement
++  -> [Cpp.Statement]
+ moeRoute env routingName indicesBuf routerId matmuls =
+   case channelName env indicesBuf of
+     Just ch ->
+-      Block $
+-        [ ForStmt
+-            "size_t task_ix = 0"
+-            "task_ix < q_batch->items.size()"
+-            "task_ix++"
+-            $ Block [startReadingAt "task_ix" ch]
+-        , ExprStmt $
+-            TemplateFunCall
+-              "build_moe_routing_from_indices"
+-              [ ExprType (LiteralExpr (IntLit $ fromIntegral n))
+-              , ExprType (LiteralExpr (IntLit $ fromIntegral k))
+-              ]
+-              [ Var $ asCpp indicesBuf
+-              , Var $ derivedCppName routingName "per_token"
+-              , MemberAccess "q_batch" "items"
+-              , FunCall
+-                  "expert_routing_override_for"
+-                  [ routingOverride
+-                  , moeRouterIdExpr routerId
+-                  ]
+-              , Var $ asCpp routingName
+-              ]
+-        , Assignment
+-            (Var $ moeScheduleName routerId)
+-            ( FunCall
+-                "make_expert_matmul_schedule"
+-                ( Var (asCpp routingName)
+-                    : map (FieldRef "model" . asCpp . moeMatmulTensor) matmuls
+-                )
+-            )
+-        , ExprStmt $
+-            MethodCall
+-              (FieldRef (FieldRef (Var "outer_state") "model_ref") "expert_stats_")
+-              "record_router"
+-              [ moeRouterIdExpr routerId
+-              , Var $ asCpp routingName
+-              ]
+-        ]
++      [ ForStmt
++          "size_t task_ix = 0"
++          "task_ix < q_batch->items.size()"
++          "task_ix++"
++          $ Block [startReadingAt "task_ix" ch]
++      , ExprStmt $
++          TemplateFunCall
++            "build_moe_routing_from_indices"
++            [ ExprType (LiteralExpr (IntLit $ fromIntegral n))
++            , ExprType (LiteralExpr (IntLit $ fromIntegral k))
++            ]
++            [ Var $ asCpp indicesBuf
++            , Var $ derivedCppName routingName "per_token"
++            , MemberAccess "q_batch" "items"
++            , FunCall
++                "expert_routing_override_for"
++                [ routingOverride
++                , moeRouterIdExpr routerId
++                ]
++            , Var $ asCpp routingName
++            ]
++      , Assignment
++          (Var $ moeScheduleName routerId)
++          ( FunCall
++              "make_expert_matmul_schedule"
++              ( Var (asCpp routingName)
++                  : map (FieldRef "model" . asCpp . moeMatmulTensor) matmuls
++              )
++          )
++      , ExprStmt $
++          MethodCall
++            (FieldRef (FieldRef (Var "outer_state") "model_ref") "expert_stats_")
++            "record_router"
++            [ moeRouterIdExpr routerId
++            , Var $ asCpp routingName
++            ]
++      ]
+     Nothing ->
+       error $ "MoeRouteStmt: no channel for indices: " ++ show indicesBuf
+  where
+@@ -3230,8 +3215,9 @@ moeMatmulPrepareAndLaunch env routingName operation =
+ -- Note [MoeBlend Method Lifting]
+ -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ -- MoeBlendStmt is lifted into a dedicated method on @state@, mirroring how
+--- HostStmt dispatches into kernel methods. The reason is the early return
+--- from Note [Main Thread Skips Helper Kernels]: if a body from
++-- HostStmt dispatches into kernel methods. The reason is the early return on
++-- a thread with no lane of the blend's stripe ('helperLaneSetup' and
++-- 'alignedLaneMethods'; see Note [Threads, stripes and lanes]): if a body from
+ -- 'moeBlendMethods' is inlined into @run()@ or @run_main_help()@ directly, the
+ -- @return@ exits the enclosing forward-pass method instead of just the blend
+ -- body, dropping every subsequent layer.
+@@ -3286,45 +3272,39 @@ moeBlendMethods :: Decls -> (MoeBlendKey, Name Cpp) -> [Method]
+ moeBlendMethods env (MoeBlendKey r w o i b lanes, name) = case lanes of
+   HelperStripe ->
+     [ Method "void" name kernelParams [] $
+-        Cpp.block [staticStrategy env "moe_blend" [w] [o] [] iter]
++        Cpp.block [staticStrategy env "moe_blend" [w] [o] [] QBatchItems "tok" body]
+     ]
+   AlignedLanes ->
+     alignedLaneMethods name False $
+-      stripedLoop env "moe_blend" [w] [o] (Var "lane") (Var "n_lanes") iter
++      stripedLoop env "moe_blend" [w] [o] (Var "lane") QBatchItems "tok" body
+  where
+-  iter = moeBlendIter env r w o i b
++  body = moeBlendBody env r w o i b
+ 
+--- | The token loop of a MoeBlendStmt, which blends per-expert results. When
+--- 'mBias' is Just, it emits the fused 'blend_with_bias_expr', which folds a
+--- per-expert bias add into the weighted accumulation. See
++-- | The body of a MoeBlendStmt for token @tok@, which blends per-expert
++-- results. When 'mBias' is Just, it emits the fused 'blend_with_bias_expr',
++-- which folds a per-expert bias add into the weighted accumulation. See
+ -- Note [MoeRouter Bias Lifting] in h/tron/models/mixture_of_experts.hpp.
+-moeBlendIter
++moeBlendBody
+   :: Decls
+   -> Name ('Tron 'MoeRouting)
+   -> Name ('Tron 'Buffer)
+   -> Name ('Tron 'Buffer)
+   -> Name ('Tron 'Buffer)
+   -> Maybe (Name ('Tron 'ExpertView))
+-  -> CppIter
+-moeBlendIter env routingName blendWeightsBuf outBuf inBuf mBias =
+-  resolveIterationSpace
+-    env
+-    "tok"
+-    QBatchItems
+-    ( \_ ->
+-        perSlotSync
+-          ++
+-          -- output[tok] = blend[_with_bias]_expr<...>(tok, weights[tok], input[, bias])
+-          [ Assignment
+-              (Index (Var $ asCpp outBuf) (Var "tok"))
+-              ( TemplateFunCall
+-                  blendFun
+-                  blendTemplateArgs
+-                  blendCallArgs
+-              )
+-          ]
+-    )
+-    (Locals M.empty)
++  -> Locals
++  -> [Cpp.Statement]
++moeBlendBody env routingName blendWeightsBuf outBuf inBuf mBias _ =
++  perSlotSync
++    ++
++    -- output[tok] = blend[_with_bias]_expr<...>(tok, weights[tok], input[, bias])
++    [ Assignment
++        (Index (Var $ asCpp outBuf) (Var "tok"))
++        ( TemplateFunCall
++            blendFun
++            blendTemplateArgs
++            blendCallArgs
++        )
++    ]
+  where
+   ri = readDecl routingName env
+   k = moeRoutingTopK ri
+@@ -3342,18 +3322,10 @@ moeBlendIter env routingName blendWeightsBuf outBuf inBuf mBias =
+   (blendFun, blendTemplateArgs, blendCallArgs) = case mBias of
+     Nothing -> ("blend_expr", baseTemplateArgs, baseCallArgs)
+     Just evName ->
+-      let evi = readDecl evName env
+-          evType =
+-            TemplateType
+-              "expert_slot_view"
+-              [ ExprType (LiteralExpr (IntLit $ fromIntegral (evNumExperts evi)))
+-              , ExprType (LiteralExpr (IntLit $ fromIntegral (evTopK evi)))
+-              , DecltypeType (FieldRef "model" (asCpp (evTensorName evi)))
+-              ]
+-       in ( "blend_with_bias_expr"
+-          , baseTemplateArgs ++ [evType]
+-          , baseCallArgs ++ [Var $ asCpp evName]
+-          )
++      ( "blend_with_bias_expr"
++      , baseTemplateArgs ++ [DecltypeType (Var $ asCpp evName)]
++      , baseCallArgs ++ [Var $ asCpp evName]
++      )
+   -- Per-slot channel sync by typed token_slot_id.
+   -- With bias fusion, we read from the unbiased matmul output's channel
+   -- (inBuf is the matmul output) and the bias source needs no per-slot
+@@ -3506,8 +3478,8 @@ resetChannelsMethod lanes env = Method "void" "reset_channels" params [] body
+               , "    \"see Note [Attention workers are the last pool workers]\");"
+               ]
+         , LitStmt $
+-            "n_attention_lanes = tron::attention_lanes_join(items.size(), n_workers, "
+-              ++ "app_pool().num_workers()) ? n_attn_workers : 0;"
++            "n_attention_lanes = tron::is_large_pass(items.size(), n_workers) "
++              ++ "? n_attn_workers : 0;"
+         ]
+     | otherwise = []
+ 
+@@ -3547,11 +3519,11 @@ generateResetCall (name, ChannelInfo{channelProducer = producer, channelConsumer
+     WorkerConsumer AttentionWorkers -> Var "n_attn_workers"
+     MoeRoutingConsumer -> Var "n_workers" -- All workers block at start_reading until routing is rebuilt
+ 
+--- Helper functions for reference buffer/channel handling
++-- Helper functions for reference buffer handling
+ 
+ -- Determine if a buffer should be a reference and what it should reference
+-referenceBuffer :: Module -> Name ('Tron 'Buffer) -> BufferInfo -> Maybe Expr
+-referenceBuffer Module{result = resultBuf} bufferName _bufInfo
++referenceBuffer :: Module -> Name ('Tron 'Buffer) -> Maybe Expr
++referenceBuffer Module{result = resultBuf} bufferName
+   | bufferName == resultBuf = Just $ FieldRef (Var "outer_state") "final_embedding"
+   | otherwise = Nothing
+ 
+@@ -3622,7 +3594,7 @@ bufferField :: Module -> (Name ('Tron 'Buffer), BufferInfo) -> Field
+ bufferField mod (name, bufInfo) = Field fieldType (asCpp name)
+  where
+   baseType = bufferType (bufferScalarType bufInfo) (bufferIterSpace bufInfo) (bufferWidth bufInfo)
+-  fieldType = case referenceBuffer mod name bufInfo of
++  fieldType = case referenceBuffer mod name of
+     Just _ -> ReferenceType baseType
+     Nothing -> baseType
+ 
+@@ -3660,8 +3632,8 @@ channelField (name, channelInfo) = Field baseType $ asCpp name
+ -- Generate reference initializers for buffers
+ referenceBufferInitializer
+   :: Module -> (Name ('Tron 'Buffer), BufferInfo) -> Maybe Initializer
+-referenceBufferInitializer mod (bufName, bufInfo) =
+-  case referenceBuffer mod bufName bufInfo of
++referenceBufferInitializer mod (bufName, _) =
++  case referenceBuffer mod bufName of
+     Just ref_expr -> Just $ Initializer (asCpp bufName) [ref_expr]
+     Nothing -> Nothing
+ 
+@@ -3670,12 +3642,13 @@ referenceBufferInitializer mod (bufName, bufInfo) =
+ -- The channel constructor receives an "items" argument that maps
+ -- iteration-space indices to latch positions. For QBatchItems, this
+ -- is the batch items vector (q_batch->items), and the channel
+--- internally repeats the task→token_job_id mapping when a kernel
+--- calls start_reading_at(task). This is the same mapping that
+--- resolveIterationSpace performs when remapping the loop variable.
+--- These two sites must agree; if new iteration spaces are added,
++-- internally repeats the task→token_job_id mapping when generated code
++-- calls start_reading_at(task) with a task position. This is the same
++-- mapping that resolveIterationSpace performs when remapping the loop
++-- variable. These two sites must agree; if new iteration spaces are added,
+ -- both the channel initialization and resolveIterationSpace need
+--- corresponding updates.
++-- corresponding updates. Striped kernels pass the item itself
++-- ('stripedItems').
+ --
+ -- For QBatchItemsExpertPairs(K), the items vector is a
+ -- std::vector<token_slot_id<K>> built by expand_expert_pairs<K>
+diff --git a/ingest/test/LoopyTronSpec.hs b/ingest/test/LoopyTronSpec.hs
+index 581cd7f31f..8ae1402a2f 100644
+--- a/ingest/test/LoopyTronSpec.hs
++++ b/ingest/test/LoopyTronSpec.hs
+@@ -2197,17 +2197,17 @@ spec =
+             LoopyTron.process orderedKernelAccessModule
+           cpp = renderCpp tron
+           matrixChannels =
+-            [ (inputChannel, outputChannel)
+-            | T.MatmulLaunchStmt _ outputChannel (inputChannel, _) _ <- T.mainKernel tron
++            [ inputChannel
++            | T.MatmulLaunchStmt _ _ (inputChannel, _) _ <- T.mainKernel tron
+             ]
+           stridedKernels =
+             [ info
+             | (_, info) <- T.getKernels decls
+             , any containsStridedCopy $ T.kernelBody info
+             ]
+-      (inputChannel, outputChannel) <- case matrixChannels of
+-        [channels] -> pure channels
+-        other -> expectationFailure $ "expected one matrix channel pair, got " ++ show other
++      inputChannel <- case matrixChannels of
++        [channel] -> pure channel
++        other -> expectationFailure $ "expected one matrix input channel, got " ++ show other
+       inputChannelInfo <- case lookup inputChannel $ T.getChannels decls of
+         Just info -> pure info
+         Nothing -> expectationFailure $ "missing matrix input channel " ++ show inputChannel
+@@ -2228,9 +2228,6 @@ spec =
+       T.kernelWriteBuffers zeroWorkKernel `shouldBe` []
+       map fst (T.getBuffers decls) `shouldContain` ["storage_only"]
+       let channel = Txt.pack $ show inputChannel
+-      context "does not make the producer wait on its own channel" $
+-        (Txt.concat ["q_batch->", channel, ".start_reading_at"] `Txt.isInfixOf` cpp)
+-          `shouldBe` False
+       context "retains the matrix consumer synchronization" $ do
+         appearsInOrder
+           [ "kernel_prepare_x(q_batch, 0, n_workers);"
+@@ -2240,14 +2237,6 @@ spec =
+           `shouldBe` True
+         (Txt.concat ["q_batch->", channel, ".finish_reading(0)"] `Txt.isInfixOf` cpp)
+           `shouldBe` True
+-      context "waits for the matrix result before the return kernel reads it" $
+-        Txt.count
+-          (Txt.concat ["q_batch->", Txt.pack $ show outputChannel, ".start_reading_at"])
+-          cpp
+-          `shouldBe` 2
+-      context "does not publish a write from the zero-work kernel" $
+-        Txt.count (Txt.concat ["q_batch->", channel, ".finish_writing_at"]) cpp
+-          `shouldBe` 1
+     it "rejects a self-produced entry read" $ do
+       let fallbackModule =
+             selfProducedEntryReadModuleWith $
+@@ -2608,7 +2597,6 @@ spec =
+       call ".start_reading(1);" `shouldSatisfy` (`Txt.isInfixOf` cpp)
+       call ".start_reading(2);" `shouldSatisfy` (`Txt.isInfixOf` cpp)
+       call ".start_reading((2 + worker_ix));" `shouldSatisfy` (`Txt.isInfixOf` cpp)
+-      call ".start_reading_at(" `shouldSatisfy` (`Txt.isInfixOf` cpp)
+     it "moeExample lowers to expected Tron" $ do
+       let actual = TronTron.canonicalize $ LoopyTron.process L.moeExample
+           expected = TronTron.canonicalize T.moeExample
+@@ -2676,8 +2664,8 @@ spec =
+     it "stripes flat expert-major rows across MoE body workers" $ do
+       let cpp = renderCpp $ LoopyTron.process L.moeExample
+       appearsInOrder
+-        [ "for (size_t row_ix = actual_worker_ix; "
+-            <> "row_ix < routing.rows_in_expert_order().size(); row_ix += n_actual_workers)"
++        [ "for (size_t row_ix = lane->ix; "
++            <> "row_ix < routing.rows_in_expert_order().size(); row_ix += lane->n)"
+         , "token_slot_id<2> ix = routing.rows_in_expert_order()[row_ix];"
+         ]
+         cpp
+@@ -3894,7 +3882,7 @@ spec =
+         )
+           `shouldBe` True
+     it "carries Gemma-4 remapping and partial RoPE into one C++ artifact" $ do
+-      let parameters = Rope.RopeParameters 1000000 Rope.RopeScalingSimple
++      let parameters = Rope.ropeParameters 1000000 Rope.RopeScalingSimple
+           remappings =
+             [ InputTokenRemapping 258880 0
+             , InputTokenRemapping 258881 0
+@@ -3930,9 +3918,22 @@ spec =
+       -- L.moeExample carries no logits munge; it must not appear in Tron.
+       T.logitsMunge (LoopyTron.process L.moeExample) `shouldBe` Nothing
+     describe "typed RoPE configuration" $ do
++      it "rejects query scaling until C++ emission supports it" $ do
++        let query =
++              either error id $
++                Rope.ministral3QueryParameters
++                  (Rope.Ministral3Beta 0.5)
++                  (Rope.Ministral3OriginalContextLength 8192)
++            parameters =
++              (Rope.ropeParameters 10000 Rope.RopeScalingSimple)
++                { Rope.ropeQueryScaling = Rope.RopeQueryScalingMinistral3 query
++                }
++        assertRenderFails "LoopyTron: Ministral-3 query scaling is not implemented" $
++          LoopyTron.process $
++            ropeConfigModule Nothing [(parameters, 128, 128)]
+       it "emits complete Llama3 constructor arguments" $ do
+         let parameters =
+-              Rope.RopeParameters 500000 $
++              Rope.ropeParameters 500000 $
+                 Rope.RopeScalingLlama3 $
+                   Rope.Llama3RopeParameters 8 1 4 8192
+             cpp =
+@@ -3948,7 +3949,7 @@ spec =
+           `shouldBe` True
+         initializer `Txt.isInfixOf` cpp `shouldBe` True
+       it "accepts repeated parameters with distinct rotary dimensions" $ do
+-        let parameters = Rope.RopeParameters 10000 Rope.RopeScalingSimple
++        let parameters = Rope.ropeParameters 10000 Rope.RopeScalingSimple
+             configs =
+               T.getConfigs $
+                 T.modDecls $
+@@ -3968,7 +3969,7 @@ spec =
+                 "rope_cfg<rope_layout::huggingface, 128, rope_scaling::simple>"
+             )
+       it "emits a distinct active rotary template argument" $ do
+-        let parameters = Rope.RopeParameters 1000000 Rope.RopeScalingSimple
++        let parameters = Rope.ropeParameters 1000000 Rope.RopeScalingSimple
+             configs =
+               T.getConfigs $
+                 T.modDecls $
+@@ -3981,11 +3982,11 @@ spec =
+             )
+       it "emits independent heterogeneous configurations" $ do
+         let llama theta factor =
+-              Rope.RopeParameters theta $
++              Rope.ropeParameters theta $
+                 Rope.RopeScalingLlama3 $
+                   Rope.Llama3RopeParameters factor 1 4 8192
+             linear =
+-              Rope.RopeParameters 10000 $ Rope.RopeScalingLinear 8
++              Rope.ropeParameters 10000 $ Rope.RopeScalingLinear 8
+             cpp =
+               renderCpp $
+                 LoopyTron.process $
+@@ -3999,7 +4000,7 @@ spec =
+           `Txt.isInfixOf` cpp
+           `shouldBe` True
+       it "does not require a model-wide theta configuration" $ do
+-        let parameters = Rope.RopeParameters 10000 Rope.RopeScalingSimple
++        let parameters = Rope.ropeParameters 10000 Rope.RopeScalingSimple
+             cpp =
+               renderCpp $
+                 LoopyTron.process $
+@@ -4007,7 +4008,7 @@ spec =
+         "rope_config_0(10000.0f)" `Txt.isInfixOf` cpp `shouldBe` True
+       it "emits complete YaRN constructor arguments" $ do
+         let parameters =
+-              Rope.RopeParameters 1000000 $
++              Rope.ropeParameters 1000000 $
+                 Rope.RopeScalingYarn $
+                   Rope.YarnRopeParameters 4 1.2 32 1 32768 True
+             cpp =
+@@ -4613,13 +4614,13 @@ spec =
+         let touch = "model." <> Txt.pack (show gate) <> ".touch();"
+         appearsInOrder
+           [ "void kernel_matvec("
+-          , "size_t actual_worker_ix = (n_workers == 1) ? 0 : worker_ix - 1;"
++          , "tron::helper_stripe_lane(worker_ix, n_workers);"
+           , "// See Note [MoE router warm-up] in ingest/src/TronCpp.hs."
+-          , "if (actual_worker_ix < q_batch->items.size() && "
+-              <> "q_batch->items.size() <= n_actual_workers) {"
++          , "if (lane->ix < q_batch->items.size() && "
++              <> "tron::should_warm_router_weights(q_batch->items.size(), n_workers)) {"
+           , touch
+-          , "q_batch->ins_channel.start_reading_at(actual_worker_ix);"
+-          , "TRACE_EVENT(\"model\", \"kernel_matvec\");"
++          , "tron::striped_loop(\"kernel_matvec\", "
++          , "q_batch->items, std::tie(q_batch->ins_channel)"
+           , "void kernel_topk_softmax("
+           ]
+           cpp
+@@ -4775,8 +4776,8 @@ spec =
+           , "// See Note [Aligned lane domain] in ingest/src/TronCpp.hs."
+           , "TRON_ASSERT(n_workers - 1 + n_attn_workers =="
+           , "app_pool().num_workers(),"
+-          , "n_attention_lanes = tron::attention_lanes_join(items.size(), n_workers, "
+-              <> "app_pool().num_workers()) ? n_attn_workers : 0;"
++          , "n_attention_lanes = tron::is_large_pass(items.size(), n_workers) "
++              <> "? n_attn_workers : 0;"
+           , ".reset("
+           ]
+           cpp
+@@ -4850,34 +4851,30 @@ spec =
+             steps =
+               [ Txt.strip line
+               | line <- Txt.lines window
+-              , laneSync line || "_lane(q_batch, lane, n_lanes" `Txt.isInfixOf` line
++              , laneSync line || "_lane(q_batch, *lane" `Txt.isInfixOf` line
+               ]
+         map (Txt.takeWhile (/= '(')) (filter (Txt.isInfixOf "_lane(") steps)
+           `shouldBe` ["kernel_router_0_lane", "moe_blend_0_lane", "kernel_next_0_lane"]
+         length (filter laneSync steps) `shouldBe` 10
+         window
+           `shouldSatisfy` Txt.isInfixOf
+-            "kernel_router_0_lane(q_batch, lane, n_lanes, false);"
++            "kernel_router_0_lane(q_batch, *lane, false);"
+         methodText "attention_prologue" cpp
+-          `shouldSatisfy` Txt.isInfixOf "kernel_embed_lane(q_batch, lane, n_lanes);"
++          `shouldSatisfy` Txt.isInfixOf "kernel_embed_lane(q_batch, *lane);"
+       it "splits each domain kernel into a helper entry point and a lane method" $ do
+         appearsInOrder
+           [ "void kernel_router_0("
+-          , "const size_t n_helpers = (n_workers == 1) ? 1 : n_workers - 1;"
+-          , "const size_t n_lanes = tron::aligned_lanes("
+-              <> "q_batch->items.size(), n_workers, app_pool().num_workers());"
+-          , "kernel_router_0_lane(q_batch, lane, n_lanes, "
+-              <> "q_batch->items.size() <= n_helpers);"
++          , "tron::aligned_stripe_worker_lane(worker_ix, n_workers, "
++              <> "q_batch->items.size(), app_pool().num_workers());"
++          , "kernel_router_0_lane(q_batch, *lane, "
++              <> "tron::should_warm_router_weights(q_batch->items.size(), n_workers));"
+           , "void kernel_router_0_lane("
+-          , "if (lane < q_batch->items.size() && touch) {"
++          , "if (lane.ix < q_batch->items.size() && touch) {"
+           , ".touch();"
+-          , ".start_reading_at(lane);"
+-          , "for (size_t task = lane; task < q_batch->items.size(); task += n_lanes) {"
++          , "tron::striped_loop(\"kernel_router_0\", lane, q_batch->items, "
+           ]
+           cpp
+           `shouldBe` True
+-        methodText "kernel_attn_in_0" cpp
+-          `shouldSatisfy` Txt.isInfixOf "task += n_actual_workers"
+       it "waits for guarded blend weights on either stripe" $ do
+         -- The fixtures' blend weights have no guard channel, so add one
+         -- produced by a matmul.
+@@ -4904,18 +4901,18 @@ spec =
+                       T.redeclare weights info{T.bufferGuardChannel = Just channel} $
+                         T.declare channel channelInfo decls
+                   }
+-            waits = Txt.isInfixOf "q_batch->blend_weights_channel.start_reading_at("
++            waits = Txt.isInfixOf "std::tie(q_batch->blend_weights_channel)"
+         aligned <- guardWeights (T.LaneC QBatchItems) tron
+         methodText "moe_blend_0_lane" (renderCpp aligned) `shouldSatisfy` waits
+         striped <- guardWeights (T.ParC QBatchItems) helpers
+         methodText "moe_blend_0" (renderCpp striped) `shouldSatisfy` waits
+-      it "includes the lane rule only with aligned lanes" $ do
+-        cpp `shouldSatisfy` Txt.isInfixOf "#include \"tron/models/kernel_strategy.hpp\""
++      it "uses the aligned stripe only with aligned lanes" $ do
++        cpp `shouldSatisfy` Txt.isInfixOf "tron::aligned_stripe_worker_lane("
+         mapM_
+           ( \other ->
+               renderCpp (LoopyTron.process other)
+                 `shouldSatisfy` ( \c ->
+-                                    not (Txt.isInfixOf "aligned_lanes" c)
++                                    not (Txt.isInfixOf "aligned_stripe" c)
+                                       && not (Txt.isInfixOf "n_attention_lanes" c)
+                                 )
+           )
+diff --git a/t/t_k_vnni_layout.cpp b/t/t_k_vnni_layout.cpp
+index 89d39c71b7..c93febc6f3 100644
+--- a/t/t_k_vnni_layout.cpp
++++ b/t/t_k_vnni_layout.cpp
+@@ -306,8 +306,8 @@ void check_reader_against_dotter() {
+   // half) query is widened to fp32 once by the reader. So it is checked
+   // against the dotter on the widened query. Envelope: 1e-4 of the
+   // absolute-product mass plus 1e-6. Tokens outside the live mask keep their
+-  // preset value. Their storage holds NaN (not a number) poison. A stray load
+-  // would spread it into the scores.
++  // preset value. Their storage holds NaN (not a number) poison. The check is
++  // that dead-token values do not reach live scores.
+   constexpr uint32_t SEED_31 = 31;
+   // Queries and keys are drawn from [-1, 1).
+   constexpr float VALUE_RANGE_1 = 1.f;
+@@ -319,7 +319,7 @@ void check_reader_against_dotter() {
+   constexpr size_t BLOCK_1_FIRST_TOKEN_16 = 16;
+   // A quiet NaN (the NaN kind that raises no exception): the storage of dead tokens.
+   constexpr uint16_t NAN_POISON_0X7FC1 = 0x7fc1;
+-  // Dead tokens keep this preset. A stray load would overwrite it.
++  // Dead-token score slots must retain this preset.
+   constexpr float PRESET_NEG_INF = -std::numeric_limits<float>::infinity();
+   constexpr double REL_TOL_1E_MINUS_4 = 1e-4;
+   constexpr double ABS_TOL_1E_MINUS_6 = 1e-6;
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index 522acb4792..c0084f8001 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -13,6 +13,7 @@
+ #include <cmath>
+ #include <condition_variable>
+ #include <cstddef>
++#include <cstdint>
+ #include <cstring>
+ #include <filesystem>
+ #include <immintrin.h>
+@@ -413,7 +414,8 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+   STATIC_REQUIRE(alignof(v_owner_t) == 64);
+ 
+   // The packed K plane (Note [K VNNI storage]) follows the same rules. The VNNI
+-  // QK kernel takes its view and nothing else. The other two kernels reject it.
++  // QK kernel accepts the view, and no other type, as its K argument. The other
++  // two kernels reject it.
+   // Views come only from an owner. A writable view converts to a read-only one
+   // only.
+   constexpr kv_geometry one_head{1, amx_attn_h128g4::HEAD_SIZE_128};
+@@ -2738,18 +2740,28 @@ static void check_page_range_reductions(int sliding_window) {
+   // 32-token window that moves one element of the weighted V sum by up to
+   // about 0.02 (measured 0.018 with row-major K and 0.022 with VNNI K, whose
+   // scores differ in the last bits). s_star adds the fp32 weights and differs
+-  // by a few ulp only.
++  // by a few ulp only. The bounds follow the K layout. Row-major K: 0.02 on an
++  // element of the weighted V sum and an absolute 2e-6 on s_star. The VNNI
++  // layout (Note [K VNNI storage] in kv_cache.hpp): 0.05 and a relative 1e-6,
++  // a few ulp of s_star at any magnitude.
++  constexpr double v_star_tolerance = k_vnni::layout_on<head_size> ? 5e-2 : 2e-2;
+   auto check_kv_head_0_against_saved = [&] {
+     for (size_t tok = 0; tok < q_batch.items.size(); ++tok) {
+       for (size_t head = 0; head < kv_mul; ++head) {
+-        REQUIRE_THAT(state.self_attn_state.attn[0].s_stars[tok][head],
+-            Catch::Matchers::WithinRel((*s_stars_saved)[tok][head], 1e-6f));
++        if constexpr (k_vnni::layout_on<head_size>) {
++          REQUIRE_THAT(state.self_attn_state.attn[0].s_stars[tok][head],
++              Catch::Matchers::WithinRel((*s_stars_saved)[tok][head], 1e-6f));
++        } else {
++          REQUIRE_THAT(state.self_attn_state.attn[0].s_stars[tok][head],
++              Catch::Matchers::WithinAbs((*s_stars_saved)[tok][head], 2e-6f));
++        }
+         REQUIRE_THAT(state.self_attn_state.attn[0].m_stars[tok][head],
+             Catch::Matchers::WithinRel((*m_stars_saved)[tok][head], 1e-6f));
+       }
+       assert_allclose(slice<kv_mul * head_size>()(
+                           state.self_attn_state.attn[0].v_stars[tok].as_view(), 0),
+-          slice<kv_mul * head_size>()((*v_stars_saved)[tok].as_view(), 0), 5e-2);
++          slice<kv_mul * head_size>()((*v_stars_saved)[tok].as_view(), 0),
++          v_star_tolerance);
+     }
+   };
+   check_kv_head_0_against_saved();
+@@ -2882,7 +2894,8 @@ static void check_page_range_reductions(int sliding_window) {
+           // The bound of step 12: the bf16 truncation of the PV weights.
+           assert_allclose(slice<kv_mul * head_size>()(
+                               state.self_attn_state.attn[0].v_stars[q].as_view(), 0),
+-              slice<kv_mul * head_size>()((*v_stars_saved)[job].as_view(), 0), 5e-2);
++              slice<kv_mul * head_size>()((*v_stars_saved)[job].as_view(), 0),
++              v_star_tolerance);
+         }
+       }
+ 
+@@ -3372,6 +3385,127 @@ TEST_CASE("book.append()", "[book append]") {
+   }
+ }
+ 
++namespace {
++
++// FP32 bits of FP16-exact inputs (set_input checks the round trip) and their BF16
++// bits. FP32 bits 12..0 are zero, so the discarded bits step by 0x2000: 0x6000 is
++// just below a tie and 0xa000 just above. FP16 subnormals such as 0x33800000 are
++// FP32 normals, so they are not flushed; the largest, 0x387fc000, and FP16's largest
++// finite value 0x477fe000 round up into the next binade. In the quiet NaN 0x7fc02000,
++// bit 13 is a payload bit that FP16 keeps and BF16 drops.
++constexpr std::array<bf16_rounding_case, 32> fp16_v_cases{{
++    {0x00000000, 0x0000},
++    {0x80000000, 0x8000},
++    {0x3f806000, 0x3f80},
++    {0x3f808000, 0x3f80},
++    {0x3f80a000, 0x3f81},
++    {0x3f816000, 0x3f81},
++    {0x3f818000, 0x3f82},
++    {0x3f81a000, 0x3f82},
++    {0xbf806000, 0xbf80},
++    {0xbf808000, 0xbf80},
++    {0xbf80a000, 0xbf81},
++    {0xbf816000, 0xbf81},
++    {0xbf818000, 0xbf82},
++    {0xbf81a000, 0xbf82},
++    {0x3f810000, 0x3f81},
++    {0xbf810000, 0xbf81},
++    {0x3fffe000, 0x4000},
++    {0xbfffe000, 0xc000},
++    {0x477fe000, 0x4780},
++    {0xc77fe000, 0xc780},
++    {0x38800000, 0x3880},
++    {0xb8800000, 0xb880},
++    {0x33800000, 0x3380},
++    {0xb3800000, 0xb380},
++    {0x387fc000, 0x3880},
++    {0xb87fc000, 0xb880},
++    {0x7f800000, 0x7f80},
++    {0xff800000, 0xff80},
++    {0x7fc00000, 0x7fc0},
++    {0xffc00000, 0xffc0},
++    {0x7fc02000, 0x7fc0},
++    {0xffc02000, 0xffc0},
++}};
++
++template <typename input_type>
++void check_v_stores(std::span<const bf16_rounding_case> cases) {
++  constexpr size_t head_size = 128;
++  constexpr kv_geometry geometry{2, head_size};
++  uniform_kv_cache<1, geometry, 0> cache(/*n_pages=*/1);
++  cache.increment_tokens_used(4);
++  auto* page = cache.page_of(0);
++  page->set_offset_bound(4);
++
++  std::array<std::array<std::array<uint16_t, head_size>, 4>, 2> expected{};
++  alignas(64) std::array<float, head_size> readback{};
++  alignas(64) std::array<input_type, head_size> input{};
++  auto set_input = [&](size_t lane, uint32_t bits) {
++    input[lane] = std::bit_cast<float>(bits);
++    if constexpr (std::is_same_v<input_type, fp16>) {
++      CAPTURE(lane);
++      REQUIRE(std::bit_cast<uint32_t>(float(input[lane])) == bits);
++    }
++  };
++
++  for (size_t head = 0; head < 2; ++head) {
++    for (size_t token = 0; token < 4; ++token) {
++      for (size_t lane = 0; lane < head_size; ++lane) {
++        const uint16_t bits = uint16_t(0x3e00 + head * 0x400 + token * 0x80 + lane);
++        expected[head][token][lane] = bits;
++        set_input(lane, uint32_t(bits) << 16);
++      }
++      page->template set_v<geometry>(
++          kv_slot_id(0), head, token, v_source_row<head_size>(input.data()));
++    }
++  }
++
++  auto check_all = [&]() {
++    for (size_t head = 0; head < 2; ++head) {
++      for (size_t token = 0; token < 4; ++token) {
++        page->template get_v<geometry>(
++            kv_slot_id(0), head, token, v_destination_row<head_size>(readback.data()));
++        for (size_t lane = 0; lane < head_size; ++lane) {
++          CAPTURE(head, token, lane);
++          REQUIRE(std::bit_cast<uint32_t>(readback[lane]) ==
++                  (uint32_t(expected[head][token][lane]) << 16));
++        }
++      }
++    }
++  };
++  check_all();
++
++  auto write = [&](size_t token, size_t rotation) {
++    for (size_t lane = 0; lane < head_size; ++lane) {
++      const auto& test = cases[(lane + rotation + 3 * (lane / 16)) % cases.size()];
++      set_input(lane, test.input);
++      expected[0][token][lane] = test.expected;
++    }
++    if (token % 2 == 0) expected[0][token + 1].fill(0);
++    page->template set_v<geometry>(
++        kv_slot_id(0), 0, token, v_source_row<head_size>(input.data()));
++    check_all();
++  };
++
++  // Even writes clear the odd partner; odd writes preserve the even token.
++  write(0, 0);
++  write(1, 5);
++  write(1, 9);
++  write(2, 3);
++  write(3, 11);
++  write(0, 7);
++}
++
++}  // namespace
++
++TEST_CASE("float V stores round to BF16", "[kv_data][v-store]") {
++  check_v_stores<float>(bf16_rounding_cases);
++}
++
++TEST_CASE("FP16 V stores round to BF16", "[kv_data][v-store]") {
++  check_v_stores<fp16>(fp16_v_cases);
++}
++
+ // See Note [Zero-Initialized V Slots]
+ //
+ // Regression tests for the zero-init V slot invariant.

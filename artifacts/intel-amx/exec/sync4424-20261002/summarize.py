@@ -110,7 +110,7 @@ def main():
             order.append(ck)
         cells.setdefault((r["cell"], r["attn"], r["arm"]), []).append(r)
     out = {"cells": [], "deltas": [], "paired": []}
-    lines = ["# sync4424-20261002 summary (base = PR #4557 head c12df586b6, head = PR #4424 head 30c4ac82cb, new = the synced branch (PR #4746); <arm>off = the same binary with TRON_AMX_DISABLE=1; attn = cpu or fpga)", "",
+    lines = [os.environ.get("SUMMARY_TITLE", "# sync4424-20261002 summary (base = PR #4557 head c12df586b6, head = PR #4424 head 30c4ac82cb, new = the synced branch (PR #4746); <arm>off = the same binary with TRON_AMX_DISABLE=1; attn = cpu or fpga)"), "",
              "Per cell: mean over repetitions (sample sd), n = repetitions. TPS = decode tok/s per user; TTFT = prefill s (max over the users).", "",
              "| cell | attn | model | tp | users | arm | n | TPS/user | sd | TTFT s | sd | early-stop runs | HBM-exhaustion warnings per run (mean) | binary versions |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     stats = {}

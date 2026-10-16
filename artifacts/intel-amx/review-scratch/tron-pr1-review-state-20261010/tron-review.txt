@@ -1,0 +1,65 @@
+Short version: The separate tron-code-review pass found one concrete test-coverage gap and one unnecessary weakening of coverage for the option-off path. No reachable production defect was established in the changed code. This pass used source inspection only.
+
+Revision: PR #4868, HEAD a711aeee831c7c4da24ce3737d93dd0c76df1149, BASE 72308ec90c80318403c4575dd9ce4a3bc9af5033.
+Skill: /home/jhan/.codex/skills/tron-code-review/SKILL.md.
+Checkout: /tmp/tron-pr1-review-20261010.
+
+Words used here:
+- K and V are the saved key and value vectors used by attention.
+- VNNI is the new pair-interleaved K storage layout.
+- FPGA is the programmable hardware accelerator.
+- GOF is a four-token group staged for transfer to the FPGA.
+- DMA is a memory transfer that can finish after submission.
+- TRON_K_VNNI is the build option selecting packed K for 128-dimension heads.
+- AVX-512 is the CPU vector instruction set used by the new reader.
+- AMX is the CPU tile instruction set used by the existing dense-page kernels.
+
+Finding 1 — Coverage: exercise the new K scratch contract through populate.
+Changed location: src/tron/gof.cpp:213, or t/t_phase1_integration.cpp:859.
+Trigger: TRON_K_VNNI=ON, a hardware-eligible 128-dimension geometry, and two or more K/V heads. The scheduler gathers each head into the supplied scratch and returns it [h/tron/scheduler/full.hpp:2751-2761]. populate collects all head pointers before consuming them [src/tron/gof.cpp:212-219].
+Consequence: each returned pointer must refer to a distinct head-sized row until k.set_position copies the complete token. Removing '+ h * HW_BAKED_HEAD_SIZE' would make every pointer refer to the final gathered head. The implementation currently uses the correct stride.
+Evidence: the changed test callbacks ignore the scratch parameter [t/t_phase1_integration.cpp:859, 892, 945; t/t_gof_dma.cpp:347; t/t_gof_staging_leaks.cpp:137]. The closest fake-device populate test only asserts g.populated [t/t_phase1_integration.cpp:875-877]. The concurrent case reads V alone [t/t_phase1_integration.cpp:918-928]. The hardware test checks K bytes, but its K callback returns the old direct buffer [t/t_gof_dma.cpp:347, 359-370]. Thus the stride-removal mutation has no effect on these callbacks or their assertions.
+Evidence strength: direct source proof of a missing observation, not an observed production failure. I did not execute a mutation.
+Smallest remedy: extend the existing fake-device populate case. Make its K callback copy distinct per-token, per-head, per-dimension data into the supplied scratch and return that scratch. After populate, check every K value using the existing inverse hardware-layout reader. The callback can use the typed packed-row load to also exercise packed K gathering without hardware.
+Discriminating check: remove the head stride at gof.cpp:213. The extended test must fail for earlier heads. This needs no new binary or FPGA workload; t_phase1_integration already links pos_fake [t/CMakeLists.txt:245].
+
+Finding 2 — Coverage: preserve the old numerical limits when the option is off.
+Changed locations: t/t_llama_unit.cpp:2733, 2739, 2872.
+Trigger: run 'apply and join page ranges' with TRON_K_VNNI=OFF.
+Consequence: the original row-major implementation is unchanged, but its comparison now permits absolute differences up to 0.05 weighted-sum units instead of 0.02 units. The helper's third parameter is the absolute limit [t/testutil.hpp:52-66]. This admits discrepancies that the pre-change test rejected. The sum comparison also changes from an absolute to a relative limit for both layouts.
+Evidence: the production off branch still calls the original row-major K store [h/tron/models/model.hpp:3123-3124]. The software reader retains its original dotters when the layout gate is false [h/tron/models/self_attention.hpp:1925-1930, 1965-1968]. The new explanation ties the larger discrepancy to the changed packed-K scores [t/t_llama_unit.cpp:2719-2728], while neither changed assertion is conditional.
+Evidence strength: verified weakening of an unchanged path's assertions. No numerical failure was reproduced in this pass.
+Smallest remedy: retain the previous assertions for the row-major layout. If the new layout needs different bounds, make that choice conditional on its layout gate and keep the independent reference comparison.
+Discriminating check: an injected 0.03-unit difference at a zero-difference weighted-sum comparison fails the old absolute limit and passes the new limit. Verify the option-off path retains the former rejection.
+
+Production-path and ownership inspection:
+- Software, option on: apply_page_tok records exactly the formerly selected token offsets. Its visibility, software-required, sliding-window, and EAGLE exclusions still run before setting the live bit [self_attention.hpp:1846-1979].
+- Software, option off / non-128 dimensions: the original row-major dotter path remains selected. The packed reader is discarded at compile time [self_attention.hpp:1914-1981].
+- Empty/singleton/full/partial page: an empty selection returns the empty path before V work. One bit through 64 bits use the same masked reader. Page size is asserted as 64 for the mask [self_attention.hpp:1973-1986; kernels/k_vnni.hpp:84-123].
+- Shapes/types: the packed layout is gated on exactly 128 dimensions. Other dimensions retain row-major storage. The reader supports bf16, float and fp16 queries. Groups wider than 16 heads recurse with corresponding query and score offsets [tensor/k_vnni.hpp:97-107; kernels/k_vnni.hpp:64-80]. Unsupported scalar types reject at compile time.
+- AMX enabled/disabled: the dense-page path is excluded for packed slots. The existing outer query pack remains possible, as documented by the PR. Packed visits return AVX classification [self_attention.hpp:1885-1897, 2018].
+- Stats enabled/disabled: no counter or forward lifecycle implementation changes. Packed visits feed the existing visit tally, pool-worker row, layer, and token-path bits once. Full packed pages increment the existing full-page AVX counter [self_attention.hpp:1638-1646, 1673-1677; attn_stats.hpp:209-216].
+- Pure/mixed forward classes: the unchanged forward scope establishes class before either software or FPGA work. It records wall time and folds token-path bits on destruction [model.hpp:1738-1767; attn_stats.hpp:872-882]. No new bypass caller is introduced.
+- K publication: save_k writes all heads before marking K complete and crediting GOF readiness. The readiness increment uses acquire/release ordering [model.hpp:3091-3133; gof.hpp:363-364].
+- FPGA initial staging and rebuild: the new stack scratch belongs to one populate invocation. Its head rows are disjoint and 64-byte aligned. k.set_position synchronously copies their values into owned staging [gof.cpp:203-219; pos/hwattention.hpp:391-394, 772-803].
+- DMA lifetime: prepare_for_dma serializes staging allocation/rebuild and reserves a credit before submission [gof.hpp:229-248]. Both gof_rodeo_impl and backfill_shard keep a shared owner until the tracker receives it [model.hpp:3327-3374; gof.cpp:251-281]. Completion releases the credit and may release staging only after isdone [pos/dma_tracker.cpp:108-123]. The new scratch is never submitted to DMA.
+- Cancellation: reservation/credit rollback before submission and the existing abandon path were inspected. This PR changes neither. No new claim about their global correctness is made.
+- Page relocation: the existing common page-info factory rebuilds the callback after a backing book moves [scheduler/full.hpp:1505-1520, 2738-2766].
+
+Inspection versus execution:
+Condition | Source inspected | Tests executed in this pass
+Software option on/off | yes | none
+FPGA staging option on/off | yes | none
+Pure/mixed forward classes | unchanged lifecycle inspected | none
+Empty/singleton/full/partial page masks | yes | none
+bf16/float/fp16 queries | yes | none
+128/non-128 dimensions and wide query groups | yes | none
+Stats on/off and software/FPGA classifications | yes | none
+Staging allocation/submission/completion/cancellation | yes | none
+
+Limits:
+- No binaries, sanitizer jobs, or hardware workloads ran in this pass.
+- Insufficient data for independent runtime confirmation: current-head test logs and a run through the actual scheduler's packed-K hardware callback with observed staged values.
+- Existing source tests and author-reported measurements were inspected as evidence of intended coverage. They were not independently reproduced.
+- This pass does not reclassify the documented numerical add-order difference or temporary AMX exclusion as defects.
+

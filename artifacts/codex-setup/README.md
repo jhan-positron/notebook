@@ -91,3 +91,30 @@ Root mapping additions: `skills/grilling/` and `skills/domain-modeling/` mirror 
 - `skills/domain-modeling/agents/openai.yaml` — installed skill dependency.
   - Canonical: `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/skills/domain-modeling/agents/openai.yaml`
   - Related handoffs: handoffs/codex_20260920_grill-with-docs-performance-vocabulary.md
+
+## 2026-10-16 Codex handoff preservation
+
+This batch preserves the current canonical copies listed below. The related handoffs describe the historical chat results. A later change to a canonical document does not change those historical results. File sizes are bytes.
+
+Standalone report generators with fixed output paths were not executed. Their entries record the reason. Existing reports whose input or generator changed were regenerated in scratch using preserved copies. The four checks matched the proposed or existing report bytes.
+
+Files left behind are enumerated in `logs/codex-handoff-20261016-artifacts.json`. They include source checkouts, binaries, rebuildable caches, review screenshots, scheduler process files, and syntax logs summarized by retained results. The two historical humanize-writing install directories are missing. No mirror is deleted.
+
+- Canonical root mapping: `claude-agentsrv:/home/jhan/.codex/skills/` -> `artifacts/codex-setup/skills/`.
+
+### Files
+
+- `skills/wade-code-review/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/SKILL.md` (79222 bytes). NEW. Groups: installed-wade-skill.
+- `skills/wade-code-review/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/agents/openai.yaml` (313 bytes). NEW. Groups: installed-wade-skill.
+- `skills/wade-code-review/references/check15/prose.py` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/references/check15/prose.py` (1262 bytes). NEW. Groups: installed-wade-skill.
+- `skills/wade-code-review/references/check15/spell.py` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/references/check15/spell.py` (1609 bytes). NEW. Groups: installed-wade-skill.
+- `skills/wade-code-review/references/check15/step5.py` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/references/check15/step5.py` (1861 bytes). NEW. Groups: installed-wade-skill.
+- `skills/wade-code-review/references/check15/width.py` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/references/check15/width.py` (1238 bytes). NEW. Groups: installed-wade-skill.
+- `skills/wade-code-review/references/pr4557-misses.md` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/references/pr4557-misses.md` (13822 bytes). NEW. Groups: installed-wade-skill.
+- `skills/wade-code-review/references/procedures.md` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/references/procedures.md` (105059 bytes). NEW. Groups: installed-wade-skill.
+- `skills/wade-code-review/references/wade-corpus.md` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/references/wade-corpus.md` (5684 bytes). NEW. Groups: installed-wade-skill.
+- `skills/wade-code-review/references/wade-style.md` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/references/wade-style.md` (27917 bytes). NEW. Groups: installed-wade-skill.
+
+### Related handoffs by file group
+
+- installed-wade-skill: [codex_20261005_analyze-pr4557-review-misses.md](../../handoffs/codex_20261005_analyze-pr4557-review-misses.md), [codex_20261006_update-wade-code-review-skill.md](../../handoffs/codex_20261006_update-wade-code-review-skill.md).

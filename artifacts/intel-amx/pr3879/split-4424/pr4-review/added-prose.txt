@@ -1,0 +1,574 @@
+README.ci.md:593	M	of the AMX tile multiply). The `deb` preset also sets the option ON, next to
+README.ci.md:594	M	`TRON_AMX_DISPATCH`. The released package then stores K in that layout on
+README.ci.md:595	M	every host. The layout does not depend on AMX. Only the reader does: the AMX
+README.ci.md:596	M	kernel on hosts with AMX, the AVX-512 reader of the layout elsewhere. Every
+README.ci.md:597	M	other preset leaves it at its default OFF.
+h/tron/kernels/amx_attn_iface.hpp:227	C	 S[query][token]. No transpose is needed. The extra work moves to the K save.
+h/tron/kernels/amx_attn_iface.hpp:228	C	 A run of 16 consecutive tokens that fills one 16-token block uses the block
+h/tron/kernels/amx_attn_iface.hpp:229	C	 save (page::set_k_block, a register transpose and whole-line stores). A
+h/tron/kernels/amx_attn_iface.hpp:230	C	 shorter run (decode: one token per user per step) is stored row-major into
+h/tron/kernels/amx_attn_iface.hpp:231	C	 the block's own bytes, and the block is transposed in place at the end of the
+h/tron/kernels/amx_attn_iface.hpp:232	C	 forward pass that saved its 16th row (Note [Row-major tail block] in
+h/tron/kernels/amx_attn_iface.hpp:233	C	 h/tron/tensor/k_vnni.hpp). The software reader for the VNNI blocks of partial
+h/tron/kernels/amx_attn_iface.hpp:234	C	 pages runs k_vnni::qk_group; the row-major tail block keeps the row-major
+h/tron/kernels/amx_attn_iface.hpp:235	C	 dotter.
+h/tron/kernels/k_vnni.hpp:43	C	 change the result. Every token block with a live bit must hold the VNNI
+h/tron/kernels/k_vnni.hpp:44	C	 layout (Note [Row-major tail block] in h/tron/tensor/k_vnni.hpp): the
+h/tron/kernels/k_vnni.hpp:45	C	 caller scores the tokens of a row-major block with the row-major dotter
+h/tron/kernels/k_vnni.hpp:46	C	 and keeps their bits clear here. Token lanes: one 64-byte load supplies
+h/tron/kernels/k_vnni.hpp:47	C	 one dimension pair of 16 tokens. The query's dimension pair is broadcast.
+h/tron/kernels/k_vnni.hpp:48	C	 VDPBF16PS accumulates 16 scores at once. So there is no horizontal
+h/tron/kernels/k_vnni.hpp:49	C	 reduction and no per-token gather. k_page is the page's packed K plane as
+h/tron/kernels/k_vnni.hpp:50	C	 its typed view (page::k_packed). This reader is one of the two
+h/tron/kernels/k_vnni.hpp:51	C	 layout-specific score kernels allowed to take the plane address (the other
+h/tron/kernels/k_vnni.hpp:52	C	 is amx_attn_h128g4::qk_vnni_128x4). q points at kv_mul rows of 128 values
+h/tron/kernels/k_vnni.hpp:53	C	 (the group's heads, row stride 128). kv_mul is any group size: a group of
+h/tron/kernels/k_vnni.hpp:54	C	 more than 16 heads is scored 16 heads at a time. Every head's scores are
+h/tron/kernels/k_vnni.hpp:55	C	 its own accumulation. So the split changes no head's add order.
+h/tron/models/kv_cache.hpp:677	C	 A block holds the VNNI layout only once it is complete and converted. A
+h/tron/models/kv_cache.hpp:678	C	 16-token block of the plane (page offsets 16 c .. 16 c + 15) holds its rows
+h/tron/models/kv_cache.hpp:679	C	 row-major inside the same 4 KiB (Note [Row-major tail block] in
+h/tron/models/kv_cache.hpp:680	C	 h/tron/tensor/k_vnni.hpp)
+h/tron/models/kv_cache.hpp:681	C	 until all 16 of its K rows are saved and the block has been converted in
+h/tron/models/kv_cache.hpp:682	C	 place. The page records two things per storage slot: the saved rows
+h/tron/models/kv_cache.hpp:683	C	 (k_rows_saved_, one bit per offset) and the converted blocks
+h/tron/models/kv_cache.hpp:684	C	 (k_vnni_blocks_, one bit per block). A converted block always has its 16
+h/tron/models/kv_cache.hpp:685	C	 rows saved; a complete block may wait for its conversion. Every reader and
+h/tron/models/kv_cache.hpp:686	C	 writer of a row takes the layout from the converted-block bit.
+h/tron/models/kv_cache.hpp:687	C	   - save_k (model.hpp) sets a row's bit after the row is stored, on the main
+h/tron/models/kv_cache.hpp:688	C	     thread. A block completed that way is queued (state::pending_k_blocks_)
+h/tron/models/kv_cache.hpp:689	C	     and converted at the forward end (convert_pending_k_blocks, after the
+h/tron/models/kv_cache.hpp:690	C	     plugin joined its workers and the cooperative GOF staging drained),
+h/tron/models/kv_cache.hpp:691	C	     unless the hardware attention scores the operation's K (Note [Row-major
+h/tron/models/kv_cache.hpp:692	C	     blocks under hardware attention] below: no bit, no conversion). Why
+h/tron/models/kv_cache.hpp:693	C	     not in save_k: a block may be split across two minibatches of one pass
+h/tron/models/kv_cache.hpp:694	C	     (grains of 8 tokens), and the cooperative GOF staging gather of the
+h/tron/models/kv_cache.hpp:695	C	     earlier minibatch's tokens (help_drain_gof on the attention workers,
+h/tron/models/kv_cache.hpp:696	C	     wait_for_coop_gof on main) reads the block's rows row-major while the
+h/tron/models/kv_cache.hpp:697	C	     later minibatch saves the block's last rows. The attention workers
+h/tron/models/kv_cache.hpp:698	C	     themselves are not that reader: a pending page is read only after every
+h/tron/models/kv_cache.hpp:699	C	     minibatch that writes it counted its latch down. The forward end, after
+h/tron/models/kv_cache.hpp:700	C	     wait_for_coop_gof, is the first point where no reader of this pass is
+h/tron/models/kv_cache.hpp:701	C	     left. The in-place transposes of clear_kv_complete_at and copy_from rely
+h/tron/models/kv_cache.hpp:702	C	     on the same rule as the rest of the tree work: no forward pass reads the
+h/tron/models/kv_cache.hpp:703	C	     book meanwhile (the tree lock is held; the OOM rescue's append shares
+h/tron/models/kv_cache.hpp:704	C	     this reliance with the book relocation it already does).
+h/tron/models/kv_cache.hpp:705	C	   - a full-block save (page::set_k_block) writes the VNNI layout directly
+h/tron/models/kv_cache.hpp:706	C	     and sets no bit. The caller (store_k_block in model.hpp) stores every
+h/tron/models/kv_cache.hpp:707	C	     KV head first and then publishes the 16 row bits and the block bit with
+h/tron/models/kv_cache.hpp:708	C	     note_k_block_saved. The bits are per slot, not per KV head, so a reader
+h/tron/models/kv_cache.hpp:709	C	     must not see the block bit before every head holds the layout. Any
+h/tron/models/kv_cache.hpp:710	C	     thread of a shared window may do this save (Note [Shared block save]
+h/tron/models/kv_cache.hpp:711	C	     in model.hpp): every row of that block belongs to that one run.
+h/tron/models/kv_cache.hpp:712	C	   - clear_kv_complete_at (a new token takes a page offset) drops the row bits
+h/tron/models/kv_cache.hpp:713	C	     of that offset and of every offset above it (KV entries are appended, so
+h/tron/models/kv_cache.hpp:714	C	     the offsets above a newly assigned one are free) and the block bits of
+h/tron/models/kv_cache.hpp:715	C	     those blocks. A converted block that keeps live rows below the offset is
+h/tron/models/kv_cache.hpp:716	C	     converted back to row-major first, so those rows stay readable. When the
+h/tron/models/kv_cache.hpp:717	C	     book's storage is not readable (a KV restore not yet published, or
+h/tron/models/kv_cache.hpp:718	C	     reclaimed storage) only the bits change: the bytes are not valid anyway.
+h/tron/models/kv_cache.hpp:719	C	   - page copies (copy_from) carry both bit sets with the rows.
+h/tron/models/kv_cache.hpp:720	C	 Why the transition is at 16 saved rows: in decode every step saves one token
+h/tron/models/kv_cache.hpp:721	C	 per user, and the tail block of every user is read again on every step. The
+h/tron/models/kv_cache.hpp:722	C	 row-major tail block costs 4 whole lines per token to store, to score and to
+h/tron/models/kv_cache.hpp:723	C	 stage for the FPGA, where a VNNI column costs 64 lines each (issue #4500).
+h/tron/models/kv_cache.hpp:724	C	 The VNNI blocks are what the AMX kernel needs. A page is dense for that
+h/tron/models/kv_cache.hpp:725	C	 kernel only when all its 64 rows are saved; it is VNNI from the forward end
+h/tron/models/kv_cache.hpp:726	C	 of the pass that completed its last block (at once when that block was a
+h/tron/models/kv_cache.hpp:727	C	 whole-block save), and takes the software loop until then.
+h/tron/models/kv_cache.hpp:728	C	
+h/tron/models/kv_cache.hpp:729	C	 Note [Row-major blocks under hardware attention]
+h/tron/models/kv_cache.hpp:730	C	 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+h/tron/models/kv_cache.hpp:731	C	 When the hardware attention scores an operation's K (the operation's
+h/tron/models/kv_cache.hpp:732	C	 cached_operation_uses_hw in model.hpp, decided once per model), save_k
+h/tron/models/kv_cache.hpp:733	C	 records no row bits for the rows a short run stores and queues no block
+h/tron/models/kv_cache.hpp:734	C	 for the forward-end conversion. Such a block stays row-major: no bit is
+h/tron/models/kv_cache.hpp:735	C	 ever set for it, so a page copy (copy_from) does not convert it either.
+h/tron/models/kv_cache.hpp:736	C	 Why: once the sequence has passed the engagement point
+h/tron/models/kv_cache.hpp:737	C	 (hw_attn_engagement_point in model.hpp, 127 by default) the FPGA holds
+h/tron/models/kv_cache.hpp:738	C	 the K/V of every DMA-complete GOF (a group of four consecutive tokens
+h/tron/models/kv_cache.hpp:739	C	 whose rows the staging, gof::populate, copies into a buffer that DMA,
+h/tron/models/kv_cache.hpp:740	C	 direct memory access, moves to the card), and the CPU scores only the
+h/tron/models/kv_cache.hpp:741	C	 tail above them: a page the hardware covers takes the software loop with
+h/tron/models/kv_cache.hpp:742	C	 no K bytes read, and a tail token is scored row by row when it lies in a
+h/tron/models/kv_cache.hpp:743	C	 row-major block (by the VNNI reader qk_group when it lies in a
+h/tron/models/kv_cache.hpp:744	C	 whole-block-saved or converted block). So the AMX kernel never reads a
+h/tron/models/kv_cache.hpp:745	C	 block that decode completes there. What the conversion would cost is a
+h/tron/models/kv_cache.hpp:746	C	 serial main-thread copy of every completed block of every layer and KV
+h/tron/models/kv_cache.hpp:747	C	 head at the forward end (8 KiB of plane traffic plus an 8 KiB stack round
+h/tron/models/kv_cache.hpp:748	C	 trip per block and KV head, every 16th step for every user) and a 64-line
+h/tron/models/kv_cache.hpp:749	C	 gather per row whenever the staging copies a converted block.
+h/tron/models/kv_cache.hpp:750	C	 Whole-block saves (prefill) still store the VNNI layout at once: a page
+h/tron/models/kv_cache.hpp:751	C	 the hardware does not cover yet (before the engagement point, in the
+h/tron/models/kv_cache.hpp:752	C	 first forwards of a prompt, or when the DMA is behind by a page) is
+h/tron/models/kv_cache.hpp:753	C	 dense for the AMX kernel only through them.
+h/tron/models/kv_cache.hpp:754	C	 The cost accepted: a range that the software scores although the
+h/tron/models/kv_cache.hpp:755	C	 operation is a hardware one (before the engagement point, a prompt
+h/tron/models/kv_cache.hpp:756	C	 shorter than 128 tokens, a shard without HBM, USE_HW_ATTN=N raising the
+h/tron/models/kv_cache.hpp:757	C	 engagement point) scores the blocks decode completed with the row-major
+h/tron/models/kv_cache.hpp:758	C	 dotter, where the conversion would have let the AMX kernel score a page
+h/tron/models/kv_cache.hpp:759	C	 of them. Every reader takes its layout from the block bit, and no stored
+h/tron/models/kv_cache.hpp:760	C	 token is missed. Both layouts hold the same K values. The fp32 (32-bit
+h/tron/models/kv_cache.hpp:761	C	 float) add order of the row-major dotter and of k_vnni::qk_group differs
+h/tron/models/kv_cache.hpp:762	C	 (the numerics contract in Note [AMX attention dispatch] in
+h/tron/models/kv_cache.hpp:763	C	 amx_attn_iface.hpp). A score can differ by that add order alone, and so
+h/tron/models/kv_cache.hpp:764	C	 can a generated token.
+h/tron/models/kv_cache.hpp:765	C	
+h/tron/models/kv_cache.hpp:768	C	      pass's tokens fills one whole 16-token block of a page. The 16 rows are
+h/tron/models/kv_cache.hpp:769	C	      transposed in registers. Every 64-byte pair row of the four panels (a
+h/tron/models/kv_cache.hpp:770	C	      panel: the 16 pair rows of one 32-dimension step for one 16-token
+h/tron/models/kv_cache.hpp:771	C	      block, 1 KiB) is written whole (store_block). Any shorter run
+h/tron/models/kv_cache.hpp:772	C	      (decode: one token per user per step; the last block of a prompt) is
+h/tron/models/kv_cache.hpp:773	C	      stored row by row with page::set_k_row: 4 whole 64-byte lines per
+h/tron/models/kv_cache.hpp:774	C	      token into the row-major tail block (store_row_major), the same store
+h/tron/models/kv_cache.hpp:775	C	      the row-major layout makes. When a pass holds more than 16 tokens the
+h/tron/models/kv_cache.hpp:776	C	      store may be shared with the idle main helpers (Note [Shared block
+h/tron/models/kv_cache.hpp:777	C	      save] in model.hpp). TRON_AMX_DISABLE leaves both store paths
+h/tron/models/kv_cache.hpp:778	C	      untouched.
+h/tron/models/kv_cache.hpp:780	C	      read-only view of the plane, to qk_vnni_128x4 when page::k_vnni_blocks
+h/tron/models/kv_cache.hpp:781	C	      says every block of the page is converted. A page whose last block
+h/tron/models/kv_cache.hpp:782	C	      waits for the forward end, a page with a block that stays row-major
+h/tron/models/kv_cache.hpp:783	C	      under hardware attention, or a page filled by another writer than
+h/tron/models/kv_cache.hpp:784	C	      save_k, takes the software loop.
+h/tron/models/kv_cache.hpp:785	C	   3. every other visit of a VNNI slot reads the VNNI blocks with
+h/tron/models/kv_cache.hpp:786	C	      k_vnni::qk_group, with the same view: partial or partly visible
+h/tron/models/kv_cache.hpp:787	C	      pages, the kill switch (TRON_AMX_DISABLE=1), hosts without AMX,
+h/tron/models/kv_cache.hpp:788	C	      builds without TRON_AMX_DISPATCH, and the shapes and query types
+h/tron/models/kv_cache.hpp:789	C	      outside the AMX gate (Note [AMX attention dispatch]). That reader is
+h/tron/models/kv_cache.hpp:790	C	      AVX-512 code with one token per vector lane. It needs no per-token
+h/tron/models/kv_cache.hpp:791	C	      gather and no horizontal reduction. The tokens of the row-major tail
+h/tron/models/kv_cache.hpp:792	C	      block are scored with the row-major dotter (the per-token dot-product
+h/tron/models/kv_cache.hpp:793	C	      loop of self_attention.hpp) through their typed row (row_major_row),
+h/tron/models/kv_cache.hpp:794	C	      4 lines per token.
+h/tron/models/kv_cache.hpp:796	C	      shuffle_k_entry) needs one row per token. For a row-major block (the
+h/tron/models/kv_cache.hpp:797	C	      usual case under hardware attention, Note [Row-major blocks under
+h/tron/models/kv_cache.hpp:798	C	      hardware attention]) page_info::k_head_fn returns the row pointer from
+h/tron/models/kv_cache.hpp:799	C	      page::k_row_if_row_major. No copy is made. For a converted block it
+h/tron/models/kv_cache.hpp:800	C	      gathers the row into caller-owned scratch with page::get_k_row.
+h/tron/models/kv_cache.hpp:801	C	      v_head_fn always copies the V row into caller-owned scratch
+h/tron/models/kv_cache.hpp:802	C	      (page::get_v -> load_row unpacks the packed V row into it). The
+h/tron/models/kv_cache.hpp:803	C	      staging bytes and the HBM (High Bandwidth Memory, the FPGA device
+h/tron/models/kv_cache.hpp:804	C	      memory) layout do not depend on the K layout.
+h/tron/models/kv_cache.hpp:807	C	      covers the page, bits included. A token's position inside the page
+h/tron/models/kv_cache.hpp:808	C	      decides its column. So every other range moves token by token: the
+h/tron/models/kv_cache.hpp:809	C	      converted destination blocks the range touches are made row-major
+h/tron/models/kv_cache.hpp:810	C	      first (block_to_rows), the rows are copied row-major, and a block
+h/tron/models/kv_cache.hpp:811	C	      whose 16 rows are saved after the copy is converted to VNNI
+h/tron/models/kv_cache.hpp:812	C	      (block_to_vnni).
+h/tron/models/kv_cache.hpp:816	C	      view (const_k_row_view / k_row_view) and follow the block's recorded
+h/tron/models/kv_cache.hpp:817	C	      layout.
+h/tron/models/kv_cache.hpp:1084	C	 Whether the EAGLE storage view is selected (set_storage_view). Logical
+h/tron/models/kv_cache.hpp:1085	C	 slot zero then addresses the extra physical slot.
+h/tron/models/kv_cache.hpp:2115	C	 instead. Only the blocks named by k_vnni_blocks hold the VNNI layout; the
+h/tron/models/kv_cache.hpp:2116	C	 others hold row-major rows (Note [Row-major tail block] in
+h/tron/models/kv_cache.hpp:2117	C	 h/tron/tensor/k_vnni.hpp, read through row_major_row).
+h/tron/models/kv_cache.hpp:2128	C	 The 16-token blocks of this page that hold the VNNI layout for `slot`, one
+h/tron/models/kv_cache.hpp:2129	C	 bit per block (bit c = page offsets 16 c .. 16 c + 15): the converted
+h/tron/models/kv_cache.hpp:2130	C	 blocks of Note [K VNNI storage].
+h/tron/models/kv_cache.hpp:2139	C	 A storage slot and the index of its K layout state (Note [K VNNI
+h/tron/models/kv_cache.hpp:2140	C	 storage]): the EAGLE entry for the EAGLE storage, the slot's own entry
+h/tron/models/kv_cache.hpp:2141	C	 otherwise. k_storage_of resolves a logical slot under the current view.
+h/tron/models/kv_cache.hpp:2142	C	 copy_from builds the pair from the physical slot instead, because a page
+h/tron/models/kv_cache.hpp:2143	C	 copy moves every physical slot. The deferred conversion list of save_k
+h/tron/models/kv_cache.hpp:2144	C	 keeps the resolved pair, so that a view change between the save and the
+h/tron/models/kv_cache.hpp:2145	C	 forward end cannot redirect the conversion. The block conversion and the
+h/tron/models/kv_cache.hpp:2146	C	 page copy take the pair as one argument.
+h/tron/models/kv_cache.hpp:2159	C	 Record that the K row of page offset `offset` is saved for `slot` (VNNI
+h/tron/models/kv_cache.hpp:2160	C	 slots; a row-major slot keeps no bits and returns false). Returns true when
+h/tron/models/kv_cache.hpp:2161	C	 the row's 16-token block now has all 16 rows saved and is not converted
+h/tron/models/kv_cache.hpp:2162	C	 yet: the main thread of save_k then queues the block for k_block_to_vnni
+h/tron/models/kv_cache.hpp:2163	C	 at the forward end. A row saved again into a block that waits for its
+h/tron/models/kv_cache.hpp:2164	C	 conversion returns true again (the conversion is idempotent); a row of a
+h/tron/models/kv_cache.hpp:2165	C	 converted block returns false (set_k_row wrote it into the VNNI column).
+h/tron/models/kv_cache.hpp:2194	C	 Record that block c was stored whole in the VNNI layout (set_k_block): its
+h/tron/models/kv_cache.hpp:2195	C	 16 rows are saved and the block is converted.
+h/tron/models/kv_cache.hpp:2204	C	 Convert block c of every KV head of `slot` from row-major to the VNNI
+h/tron/models/kv_cache.hpp:2205	C	 layout in place (Note [Row-major tail block] in h/tron/tensor/k_vnni.hpp)
+h/tron/models/kv_cache.hpp:2206	C	 when its 16 rows are saved and it is not converted yet. Returns whether it
+h/tron/models/kv_cache.hpp:2207	C	 converted.
+h/tron/models/kv_cache.hpp:2208	C	 Main thread only, at a point where no reader of the block runs (the
+h/tron/models/kv_cache.hpp:2209	C	 forward end). A row-major slot never converts.
+h/tron/models/kv_cache.hpp:2241	C	 contiguous row, as a read-only typed view) into whichever layout the slot,
+h/tron/models/kv_cache.hpp:2242	C	 and for a VNNI slot the token's block, uses (Note [K VNNI storage]). The
+h/tron/models/kv_cache.hpp:2243	C	 row's `aligned` and `dma` flags are the caller's. The packed store reads
+h/tron/models/kv_cache.hpp:2244	C	 the row with unaligned loads. The row's saved bit is the caller's
+h/tron/models/kv_cache.hpp:2245	C	 (note_k_row_saved).
+h/tron/models/kv_cache.hpp:2267	C	 K rows of the 16 tokens of one 16-token block of this page, stored at
+h/tron/models/kv_cache.hpp:2268	C	 once in the VNNI layout (VNNI slots only, Note [K VNNI storage] item 1).
+h/tron/models/kv_cache.hpp:2269	C	 Block c holds the page offsets c * 16 .. c * 16 + 15; rows[t] (128 bf16)
+h/tron/models/kv_cache.hpp:2270	C	 is the row of offset c * 16 + t. The result is bit-identical to set_k_row
+h/tron/models/kv_cache.hpp:2271	C	 per token of a complete block (store_block). The difference is the write
+h/tron/models/kv_cache.hpp:2272	C	 pattern. The 16 row pointers are native source rows in dimension order,
+h/tron/models/kv_cache.hpp:2273	C	 not packed storage. The caller records the block with note_k_block_saved
+h/tron/models/kv_cache.hpp:2274	C	 after the last KV head.
+h/tron/models/kv_cache.hpp:2334	C	 The token's K row in place when its block is row-major (Note [Row-major
+h/tron/models/kv_cache.hpp:2335	C	 blocks under hardware attention]): a typed row view of head_size
+h/tron/models/kv_cache.hpp:2336	C	 contiguous bf16 inside the block's own panels, valid as long as no writer
+h/tron/models/kv_cache.hpp:2337	C	 touches the block (the same rule as get_k_row's read). An invalid view
+h/tron/models/kv_cache.hpp:2338	C	 for a converted block: the caller gathers that one with get_k_row.
+h/tron/models/kv_cache.hpp:2485	C	 ---------------------------------------------------------------------------
+h/tron/models/kv_cache.hpp:2486	C	 The K layout state of Note [K VNNI storage]: k_rows_saved_ holds one bit
+h/tron/models/kv_cache.hpp:2487	C	 per page offset and storage slot, k_vnni_blocks_ one bit per 16-token
+h/tron/models/kv_cache.hpp:2488	C	 block and storage slot. Entry layout_t::n_slots is the EAGLE storage. The
+h/tron/models/kv_cache.hpp:2489	C	 bits are kept for every slot; only a VNNI slot's readers and writers take
+h/tron/models/kv_cache.hpp:2490	C	 their layout from them.
+h/tron/models/kv_cache.hpp:2491	C	 ---------------------------------------------------------------------------
+h/tron/models/kv_cache.hpp:2493	C	 One state entry beyond the logical slots: the EAGLE storage.
+h/tron/models/kv_cache.hpp:2495	C	 note_k_row_saved: the row did not complete its block.
+h/tron/models/kv_cache.hpp:2497	C	 k_block_to_vnni_at: whether the block was converted.
+h/tron/models/kv_cache.hpp:2501	C	 The state entry of a logical slot: the EAGLE entry while the EAGLE view
+h/tron/models/kv_cache.hpp:2502	C	 maps slot zero onto the EAGLE storage.
+h/tron/models/kv_cache.hpp:2509	C	 The 16 bits of block c.
+h/tron/models/kv_cache.hpp:2511	S	one bit per page offset
+h/tron/models/kv_cache.hpp:2522	C	 Call f.template operator()<geometry>() with the geometry of the storage
+h/tron/models/kv_cache.hpp:2523	C	 slot at `storage_offset`: the logical slot's declared geometry, or the
+h/tron/models/kv_cache.hpp:2524	C	 primary geometry for the EAGLE storage.
+h/tron/models/kv_cache.hpp:2536	C	 Whether the bytes of this page's storage slot may be read and written
+h/tron/models/kv_cache.hpp:2537	C	 now: the book's storage is published (no private KV restore in flight)
+h/tron/models/kv_cache.hpp:2538	C	 and the page's storage is resident. A sliding-window slot keeps its pages
+h/tron/models/kv_cache.hpp:2539	C	 in chunks that are reclaimed one by one (free_reclaimable_kv_chunk), so
+h/tron/models/kv_cache.hpp:2540	C	 the page's own chunk decides, not the slot's first chunk.
+h/tron/models/kv_cache.hpp:2541	C	 clear_kv_complete_at runs on both sides of a KV restore commit (full.hpp
+h/tron/models/kv_cache.hpp:2542	C	 invalidate_restored_book).
+h/tron/models/kv_cache.hpp:2549	C	 A new token takes page offset `offset` (clear_kv_complete_at): drop the
+h/tron/models/kv_cache.hpp:2550	C	 saved-row bits of that offset and of every offset above it, and the
+h/tron/models/kv_cache.hpp:2551	C	 converted-block bits of those blocks, in every storage slot. The offset's
+h/tron/models/kv_cache.hpp:2552	C	 own block keeps rows below the offset; when it was converted, its bytes go
+h/tron/models/kv_cache.hpp:2553	C	 back to row-major first (when the storage is readable), so those rows stay
+h/tron/models/kv_cache.hpp:2554	C	 readable. Blocks above hold no live row: their bits are dropped and their
+h/tron/models/kv_cache.hpp:2555	C	 bytes are left alone. Called with the token tree locked, between forward
+h/tron/models/kv_cache.hpp:2556	C	 passes: no reader runs meanwhile. Note [K VNNI storage].
+h/tron/models/kv_cache.hpp:2570	C	 Nothing at or above the offset: no bit to drop (the common case of a
+h/tron/models/kv_cache.hpp:2571	C	 decode append; two loads instead of two locked read-modify-writes).
+h/tron/models/kv_cache.hpp:2613	C	 K rows saved, one bit per page offset, per storage slot (entry
+h/tron/models/kv_cache.hpp:2614	C	 layout_t::n_slots = the EAGLE storage), VNNI slots only (Note [K VNNI
+h/tron/models/kv_cache.hpp:2615	C	 storage]). A block whose 16 bits are set is complete and is queued for its
+h/tron/models/kv_cache.hpp:2616	C	 conversion; the layout itself is recorded in k_vnni_blocks_ below. Bits
+h/tron/models/kv_cache.hpp:2617	C	 are set by save_k (main thread; not for the rows of a hardware-scored
+h/tron/models/kv_cache.hpp:2618	C	 operation, Note [Row-major blocks under hardware attention]) and by the
+h/tron/models/kv_cache.hpp:2619	C	 full-block save (any thread of a shared window, fetch_or), dropped by
+h/tron/models/kv_cache.hpp:2620	C	 clear_kv_complete_at, carried by page copies.
+h/tron/models/kv_cache.hpp:2623	C	 Converted 16-token blocks, one bit per block, per storage slot (the same
+h/tron/models/kv_cache.hpp:2624	C	 entries). Set by the forward-end conversion and the full-block save,
+h/tron/models/kv_cache.hpp:2625	C	 dropped by clear_kv_complete_at; a set bit implies the block's 16 row bits.
+h/tron/models/kv_cache.hpp:2693	C	 storage = the storage slot copied and its K layout state entry (Note [K
+h/tron/models/kv_cache.hpp:2694	C	 VNNI storage]); the K bits of the copied offsets follow the rows.
+h/tron/models/kv_cache.hpp:2703	C	 The K bits: the saved-row bits of the destination range are replaced by
+h/tron/models/kv_cache.hpp:2704	C	 the source range's; the converted-block bits follow the conversions
+h/tron/models/kv_cache.hpp:2705	C	 below. Computed once per slot, applied after the last KV head.
+h/tron/models/kv_cache.hpp:2711	S	one bit per page offset
+h/tron/models/kv_cache.hpp:2712	S	copy_storage_slot: empty range
+h/tron/models/kv_cache.hpp:2726	C	 VNNI plane (Note [K VNNI storage] item 5): a token's column depends
+h/tron/models/kv_cache.hpp:2727	C	 on its offset in the page. So a whole-page copy copies the owner
+h/tron/models/kv_cache.hpp:2728	C	 (the defaulted assignment of the trivially copyable k_vnni_tensor),
+h/tron/models/kv_cache.hpp:2729	C	 bits included. Every other range moves token by token, through
+h/tron/models/kv_cache.hpp:2730	C	 row-major rows: the destination blocks the range touches are made
+h/tron/models/kv_cache.hpp:2731	C	 row-major first, and those complete after the copy are converted to
+h/tron/models/kv_cache.hpp:2732	C	 VNNI at the end (block_to_rows / block_to_vnni in
+h/tron/models/kv_cache.hpp:2743	C	 The blocks the range [dst_begin, dst_begin + count) touches.
+h/tron/models/model.hpp:1842	C	 The K blocks this pass completed go to the VNNI layout now: run()
+h/tron/models/model.hpp:1843	C	 joined its workers and the staging drained, so no reader is left
+h/tron/models/model.hpp:1844	C	 (Note [K VNNI storage] in kv_cache.hpp). Blocks of a hardware-scored
+h/tron/models/model.hpp:1845	C	 operation were never queued (Note [Row-major blocks under hardware
+h/tron/models/model.hpp:1846	C	 attention] there).
+h/tron/models/model.hpp:3098	C	      a run of the pass's tokens that fills one whole 16-token block of a
+h/tron/models/model.hpp:3099	C	      page is transposed in registers. It is then written as whole 64-byte
+h/tron/models/model.hpp:3101	C	      Chosen per run in store_k_block. A shorter run is stored row by
+h/tron/models/model.hpp:3102	C	      row into the block's row-major form (Note [Row-major tail block]
+h/tron/models/model.hpp:3103	C	      in h/tron/tensor/k_vnni.hpp), also whole lines. A block completed that
+h/tron/models/model.hpp:3104	C	      way is queued after the join below and converted to the VNNI layout at
+h/tron/models/model.hpp:3105	C	      the forward end (convert_pending_k_blocks, Note [K VNNI storage]
+h/tron/models/model.hpp:3106	C	      in kv_cache.hpp), unless the hardware attention scores the
+h/tron/models/model.hpp:3107	C	      operation's K (Note [Row-major blocks under hardware attention]
+h/tron/models/model.hpp:3108	C	      there: the block stays row-major).
+h/tron/models/model.hpp:3158	C	 Note [K VNNI storage]: the 16-token blocks that this forward pass
+h/tron/models/model.hpp:3159	C	 completed through runs shorter than a block, for the operations the
+h/tron/models/model.hpp:3160	C	 hardware attention does not score (Note [Row-major blocks under
+h/tron/models/model.hpp:3161	C	 hardware attention] in kv_cache.hpp). save_k queues them (main
+h/tron/models/model.hpp:3162	C	 thread) and convert_pending_k_blocks converts them at the forward end,
+h/tron/models/model.hpp:3163	C	 after wait_for_coop_gof: the cooperative GOF staging gather of an
+h/tron/models/model.hpp:3164	C	 earlier minibatch is the reader that can still hold the block's rows
+h/tron/models/model.hpp:3165	C	 row-major. The storage reference is taken at the save, so a storage
+h/tron/models/model.hpp:3166	C	 view change cannot redirect the conversion.
+h/tron/models/model.hpp:3174	C	 Convert the queued blocks (Note [K VNNI storage]). Main thread, after
+h/tron/models/model.hpp:3175	C	 the plugin's run() returned and the cooperative GOF staging drained.
+h/tron/models/model.hpp:3178	S	model convert_k_blocks blocks
+h/tron/models/model.hpp:3237	C	 that fill one whole 16-token block of one page are stored as one VNNI
+h/tron/models/model.hpp:3238	C	 block (set_k_block). A shorter run is stored row by row (set_k_row)
+h/tron/models/model.hpp:3239	C	 into the block's row-major form. Row-major slots: one row store per
+h/tron/models/model.hpp:3240	C	 token and KV head (page::k(...).set). Marks, saved-row bits of partial
+h/tron/models/model.hpp:3241	C	 runs and credits are not touched here. save_k_impl does them after
+h/tron/models/model.hpp:3242	C	 every store is done.
+h/tron/models/model.hpp:3304	C	 An incomplete block: row-major rows (Note [Row-major tail block]
+h/tron/models/model.hpp:3305	C	 in h/tron/tensor/k_vnni.hpp), or the VNNI column when the block
+h/tron/models/model.hpp:3306	C	 is complete already (a row saved again). set_k_row decides.
+h/tron/models/model.hpp:3323	C	 The whole block: the VNNI block save, then its 16 saved-row bits.
+h/tron/models/model.hpp:3325	S	store_k_block: a run of 16 tokens must cover its block
+h/tron/models/model.hpp:3420	C	 Note [K VNNI storage]: record this pass's rows. A block whose 16th
+h/tron/models/model.hpp:3421	C	 row this pass saved is queued for the conversion at the forward end.
+h/tron/models/model.hpp:3422	C	 Not when the hardware attention scores this operation's K: then no
+h/tron/models/model.hpp:3423	C	 row is recorded and the block stays row-major (Note [Row-major
+h/tron/models/model.hpp:3424	C	 blocks under hardware attention] in kv_cache.hpp).
+h/tron/models/self_attention.hpp:1906	C	 The third gate of the dense AMX path, after amx_q_packed and
+h/tron/models/self_attention.hpp:1907	C	 is_dense_amx_page: the whole page must hold the VNNI layout, since
+h/tron/models/self_attention.hpp:1908	C	 the kernel reads the page as one B operand (Note [K VNNI storage]
+h/tron/models/self_attention.hpp:1909	C	 item 2). page::k_vnni_blocks returns one bit per 16-token block of
+h/tron/models/self_attention.hpp:1910	C	 the page, bit c set = block c holds the VNNI layout. A 64-token
+h/tron/models/self_attention.hpp:1911	C	 page has 4 blocks, so "every block is VNNI" is "all 4 bits set",
+h/tron/models/self_attention.hpp:1912	C	 and that is the mask BLOCKS_PER_PAGE_MASK_0XF (binary 1111). A clear bit is a
+h/tron/models/self_attention.hpp:1913	C	 row-major block, and the page takes the software loop instead:
+h/tron/models/self_attention.hpp:1914	C	   - the block this forward pass completed through a run shorter
+h/tron/models/self_attention.hpp:1915	C	     than a block (converted at the forward end, so the page is
+h/tron/models/self_attention.hpp:1916	C	     dense from the next pass on);
+h/tron/models/self_attention.hpp:1917	C	   - a block that stays row-major because the hardware attention
+h/tron/models/self_attention.hpp:1918	C	     scores the operation (Note [Row-major blocks under hardware
+h/tron/models/self_attention.hpp:1919	C	     attention] in kv_cache.hpp);
+h/tron/models/self_attention.hpp:1920	C	   - a page filled by another writer than save_k.
+h/tron/models/self_attention.hpp:1921	C	 A row-major slot keeps no layout state: the gate is always open.
+h/tron/models/self_attention.hpp:1922	C	 Read after the dense predicate: a page nothing is relevant for is
+h/tron/models/self_attention.hpp:1923	C	 never asked for its state (a book may have no active KV slot).
+h/tron/models/self_attention.hpp:1929	C	 a row-major slot keeps no layout state
+h/tron/models/self_attention.hpp:1956	C	 relevant tokens of its VNNI blocks in `live`. It scores them after
+h/tron/models/self_attention.hpp:1957	C	 the loop with the AVX-512 (Advanced Vector Extensions, 512-bit
+h/tron/models/self_attention.hpp:1958	C	 vectors) reader k_vnni::qk_group, in passes of up to 16 heads over
+h/tron/models/self_attention.hpp:1959	C	 the plane. The tokens of a row-major tail block (Note [Row-major
+h/tron/models/self_attention.hpp:1960	C	 tail block] in h/tron/tensor/k_vnni.hpp) are scored with the
+h/tron/models/self_attention.hpp:1961	C	 dotters, through their typed row (row_major_row).
+h/tron/models/self_attention.hpp:1976	C	 The VNNI slot: the blocks of the page that hold the VNNI layout, and
+h/tron/models/self_attention.hpp:1977	C	 the packed plane (page::k_packed) whose row-major tail rows the
+h/tron/models/self_attention.hpp:1978	C	 dotters read. Both are fetched at the first relevant token, like the
+h/tron/models/self_attention.hpp:1979	C	 row view below: a page nothing is relevant for is never asked (a
+h/tron/models/self_attention.hpp:1980	C	 book may have no active KV slot). A row-major slot has no packed
+h/tron/models/self_attention.hpp:1981	C	 plane, so `plane` is a placeholder there.
+h/tron/models/self_attention.hpp:1988	C	 no packed plane: the row-major slot keeps rows
+h/tron/models/self_attention.hpp:1992	C	 the first relevant token. A VNNI slot has no row view, so `keys` is
+h/tron/models/self_attention.hpp:1993	C	 a placeholder there.
+h/tron/models/self_attention.hpp:2027	C	 A row of the row-major tail block: 4 whole lines, the
+h/tron/models/self_attention.hpp:2028	C	 row-major dotter.
+h/tron/scheduler/full.hpp:2755	C	 kv_cache.hpp describes the layout. A row of a row-major
+h/tron/scheduler/full.hpp:2756	C	 block (the usual case under hardware attention, Note
+h/tron/scheduler/full.hpp:2757	C	 [Row-major blocks under hardware attention] there) is
+h/tron/scheduler/full.hpp:2758	C	 read in place; a row of a converted block is gathered
+h/tron/scheduler/full.hpp:2761	C	 callback below always unpacks into the scratch.
+h/tron/tensor/k_vnni.hpp:6	C	 rows in and out (store_row, load_row, store_block, copy_token), and the
+h/tron/tensor/k_vnni.hpp:7	C	 in-place conversion of one 16-token block between its row-major and its VNNI
+h/tron/tensor/k_vnni.hpp:8	C	 form (block_to_vnni, block_to_rows, Note [Row-major tail block] below). The
+h/tron/tensor/k_vnni.hpp:9	C	 AVX-512 score reader of this layout is in h/tron/kernels/k_vnni.hpp and the
+h/tron/tensor/k_vnni.hpp:10	C	 AMX QK kernel in h/tron/kernels/amx_attn_iface.hpp. Who writes and reads the
+h/tron/tensor/k_vnni.hpp:11	C	 layout is described in Note [K VNNI storage] (kv_cache.hpp).
+h/tron/tensor/k_vnni.hpp:91	C	 A row-major block (Note [Row-major tail block] below) keeps 4 token rows of
+h/tron/tensor/k_vnni.hpp:92	C	 256 bytes in each of its 4 panels.
+h/tron/tensor/k_vnni.hpp:94	C	 The 4 token blocks of a page, one bit each (page::k_vnni_blocks). A block
+h/tron/tensor/k_vnni.hpp:95	C	 mask equal to it has every block of the page set.
+h/tron/tensor/k_vnni.hpp:97	C	 Bit c of a block mask (page::k_vnni_blocks): token block c of the page.
+h/tron/tensor/k_vnni.hpp:101	C	 Bit `offset` of a page-offset mask (the saved rows of a page): the row at
+h/tron/tensor/k_vnni.hpp:102	C	 that page offset.
+h/tron/tensor/k_vnni.hpp:113	S	one bit per token block
+h/tron/tensor/k_vnni.hpp:445	C	 Note [Row-major tail block]
+h/tron/tensor/k_vnni.hpp:446	C	 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+h/tron/tensor/k_vnni.hpp:447	C	 A 16-token block of the plane holds the VNNI layout above only once all 16
+h/tron/tensor/k_vnni.hpp:448	C	 of its K rows are saved. Until then the block holds its rows row-major:
+h/tron/tensor/k_vnni.hpp:449	C	 token t of block c owns 256 contiguous bytes (its 128 bf16 values in
+h/tron/tensor/k_vnni.hpp:450	C	 dimension order) at row_major_row(). Those bytes are the block's own 4
+h/tron/tensor/k_vnni.hpp:451	C	 panels: panel (t / 4, c) holds the rows of tokens 4 (t / 4) .. 4 (t / 4) + 3,
+h/tron/tensor/k_vnni.hpp:452	C	 256 bytes each. So a row-major block and a VNNI block occupy the same 4 KiB,
+h/tron/tensor/k_vnni.hpp:453	C	 and no other block is touched by either layout.
+h/tron/tensor/k_vnni.hpp:454	C	 Why: in decode every step saves one token per user. The VNNI scatter of one
+h/tron/tensor/k_vnni.hpp:455	C	 row writes 4 bytes into each of 64 lines; the row-major store writes 4 whole
+h/tron/tensor/k_vnni.hpp:456	C	 lines. The readers of an incomplete block (the AVX-512 tail scoring through
+h/tron/tensor/k_vnni.hpp:457	C	 the row-major dotter, and the FPGA staging gather) read 4 lines per token
+h/tron/tensor/k_vnni.hpp:458	C	 instead of 64 as well. At the forward end of the pass that saved the 16th
+h/tron/tensor/k_vnni.hpp:459	C	 row, block_to_vnni() transposes the block in place (4 KiB read, 4 KiB
+h/tron/tensor/k_vnni.hpp:460	C	 written). A whole-block save writes the VNNI form at once (store_block).
+h/tron/tensor/k_vnni.hpp:461	C	 The AMX kernel reads the page as its B operand once every block of the
+h/tron/tensor/k_vnni.hpp:462	C	 page is VNNI. Which layout a block holds is recorded per (page, slot) by
+h/tron/tensor/k_vnni.hpp:463	C	 the page
+h/tron/tensor/k_vnni.hpp:464	C	 (its converted-block bit, Note [K VNNI storage] in kv_cache.hpp). The
+h/tron/tensor/k_vnni.hpp:465	C	 operations here take the layout from the caller.
+h/tron/tensor/k_vnni.hpp:467	C	 The token's row inside a row-major block, as a typed row view: Cols
+h/tron/tensor/k_vnni.hpp:468	C	 contiguous bf16 in dimension order, on a 64-byte line, not DMA memory. The
+h/tron/tensor/k_vnni.hpp:469	C	 caller knows from the page's state (page::k_vnni_blocks) that the block is
+h/tron/tensor/k_vnni.hpp:470	C	 row-major; the view does not say so.
+h/tron/tensor/k_vnni.hpp:483	C	 Store one token's row into its row-major block: 4 whole 64-byte lines, the
+h/tron/tensor/k_vnni.hpp:484	C	 same lines the row-major layout's store writes.
+h/tron/tensor/k_vnni.hpp:493	C	 Load one token's row out of its row-major block (the inverse of
+h/tron/tensor/k_vnni.hpp:494	C	 store_row_major).
+h/tron/tensor/k_vnni.hpp:503	C	 Convert block c from row-major (Note [Row-major tail block]) to the VNNI
+h/tron/tensor/k_vnni.hpp:504	C	 layout, in place. The 16 rows are copied to the stack first: store_block
+h/tron/tensor/k_vnni.hpp:505	C	 writes panel (s, c) while the rows of tokens 4 s .. 4 s + 3 still live there.
+h/tron/tensor/k_vnni.hpp:520	C	 The inverse: block c from the VNNI layout back to row-major, in place.
+t/t_amx_dispatch_dtype.cpp:75	C	 exercise_page arguments: whether a second call is made, what the fake
+t/t_amx_dispatch_dtype.cpp:76	C	 available() answers, and whether the stored rows are recorded like save_k
+t/t_amx_dispatch_dtype.cpp:77	C	 records them.
+t/t_amx_dispatch_dtype.cpp:87	C	 `amx_available` is what the fake available() answers during the call. With
+t/t_amx_dispatch_dtype.cpp:88	C	 `record_rows` the stored rows are recorded like save_k records them, so the
+t/t_amx_dispatch_dtype.cpp:89	C	 page's blocks hold the VNNI layout under TRON_K_VNNI; without it a full page
+t/t_amx_dispatch_dtype.cpp:90	C	 keeps row-major blocks and the dense gate must refuse the AMX path.
+t/t_amx_dispatch_dtype.cpp:130	C	 What save_k and the forward end do after a row store: record the row,
+t/t_amx_dispatch_dtype.cpp:131	C	 and convert the block to the VNNI layout when it is complete (Note [K
+t/t_amx_dispatch_dtype.cpp:132	C	 VNNI storage]). The dense AMX path runs only for a page whose 4 blocks
+t/t_amx_dispatch_dtype.cpp:133	C	 are VNNI.
+t/t_amx_dispatch_dtype.cpp:192	C	 The dense predicate: the kernels run only for a full page whose blocks
+t/t_amx_dispatch_dtype.cpp:193	C	 hold the VNNI layout (a VNNI slot with unrecorded rows keeps them row-major).
+t/t_amx_dispatch_dtype.cpp:320	S	host_bf16, full page with unrecorded rows: one pack, and under 
+t/t_amx_dispatch_dtype.cpp:321	S	TRON_K_VNNI no kernel call (the blocks are row-major)
+t/t_k_vnni_layout.cpp:4	C	 per-token store / load operations are exact. The in-place conversion of a
+t/t_k_vnni_layout.cpp:5	C	 16-token block between its row-major and its VNNI form (Note [Row-major tail
+t/t_k_vnni_layout.cpp:6	C	 block] in h/tron/tensor/k_vnni.hpp) is exact. The AVX-512 (the
+t/t_k_vnni_layout.cpp:9	C	 move tokens correctly, and the page's per-block layout state follows the
+t/t_k_vnni_layout.cpp:10	C	 saved rows.
+t/t_k_vnni_layout.cpp:268	S	row-major tail block converts to the VNNI layout and back, bit for bit
+t/t_k_vnni_layout.cpp:269	S	[kv_data][k_vnni]
+t/t_k_vnni_layout.cpp:270	C	 Note [Row-major tail block] in h/tron/tensor/k_vnni.hpp: before its 16th
+t/t_k_vnni_layout.cpp:271	C	 row is saved a block holds contiguous 256-byte rows (row_major_row) inside
+t/t_k_vnni_layout.cpp:272	C	 its own 4 panels. block_to_vnni must produce the same bytes as store_row
+t/t_k_vnni_layout.cpp:273	C	 per token, touch no other block, and block_to_rows must invert it.
+t/t_k_vnni_layout.cpp:277	S	the constant's name states its value
+t/t_k_vnni_layout.cpp:285	S	row_major_row rows are distinct, 64-byte aligned, and inside the block's 
+t/t_k_vnni_layout.cpp:286	S	panels
+t/t_k_vnni_layout.cpp:287	C	 The owner is the plane (static_assert above): offsets are taken from it.
+t/t_k_vnni_layout.cpp:297	C	 Inside panel (s, c) for some dimension step s: those are the block's bytes.
+t/t_k_vnni_layout.cpp:308	S	block_to_vnni equals store_row per token and touches no other block
+t/t_k_vnni_layout.cpp:328	C	 The other blocks' bytes are still poison after both conversions.
+t/t_k_vnni_layout.cpp:617	C	 No block of the page holds the VNNI layout.
+t/t_k_vnni_layout.cpp:619	C	 The rows 0 .. tok are tok + NEXT_ROW_1 rows.
+t/t_k_vnni_layout.cpp:621	C	 A book that carries the EAGLE storage slot.
+t/t_k_vnni_layout.cpp:623	C	 A second slot for the multi-slot case below.
+t/t_k_vnni_layout.cpp:629	C	 What save_k plus the forward end do per row (Note [K VNNI storage]): record
+t/t_k_vnni_layout.cpp:630	C	 the row; when it completes its 16-token block, convert the block to the VNNI
+t/t_k_vnni_layout.cpp:631	C	 layout. Returns whether the block was completed by this row (always false in
+t/t_k_vnni_layout.cpp:632	C	 the row-major build: a row-major slot keeps no bits).
+t/t_k_vnni_layout.cpp:640	C	 The page's VNNI blocks; 0 in the row-major build (no block is ever VNNI).
+t/t_k_vnni_layout.cpp:652	C	 namespace
+t/t_k_vnni_layout.cpp:654	S	page K blocks turn VNNI at the 16th saved row and back when a row is 
+t/t_k_vnni_layout.cpp:655	S	forgotten
+t/t_k_vnni_layout.cpp:656	S	[kv_data][k_vnni]
+t/t_k_vnni_layout.cpp:657	C	 Note [K VNNI storage]: a block holds the VNNI layout once its 16 rows are
+t/t_k_vnni_layout.cpp:658	C	 saved and it is converted (save_row_state converts at once here). Every row
+t/t_k_vnni_layout.cpp:659	C	 stays readable through get_k_row across the transitions, and the raw plane
+t/t_k_vnni_layout.cpp:660	C	 holds the documented bytes on both sides.
+t/t_k_vnni_layout.cpp:662	C	 row 15 saved again with other values
+t/t_k_vnni_layout.cpp:663	C	 block 0 complete, block 1 with 5 rows
+t/t_k_vnni_layout.cpp:666	C	 a row of the row-major block 1
+t/t_k_vnni_layout.cpp:667	C	 the first row of block 1
+t/t_k_vnni_layout.cpp:673	S	every constant's name states its value
+t/t_k_vnni_layout.cpp:676	C	n_pages=*/N_PAGES_1);
+t/t_k_vnni_layout.cpp:702	C	 The plane: block 0 holds the VNNI columns of rows 0..15 (the elements
+t/t_k_vnni_layout.cpp:703	C	 store_row would write, read back through at()); block 1 holds rows 16..20
+t/t_k_vnni_layout.cpp:704	C	 row-major (row_major_row).
+t/t_k_vnni_layout.cpp:718	C	 The in-place row the FPGA staging reads (page::k_row_if_row_major,
+t/t_k_vnni_layout.cpp:719	C	 Note [Row-major blocks under hardware attention] in kv_cache.hpp): valid
+t/t_k_vnni_layout.cpp:720	C	 for a row of the row-major block 1, at the bytes of row_major_row;
+t/t_k_vnni_layout.cpp:721	C	 invalid for a row of the converted block 0 (gathered with get_k_row).
+t/t_k_vnni_layout.cpp:733	C	 A new token takes offset 3: the rows at and above 3 are forgotten, the
+t/t_k_vnni_layout.cpp:734	C	 block goes back to row-major, and rows 0..2 stay readable.
+t/t_k_vnni_layout.cpp:738	C	 Saving rows 3..20 again completes block 0 at row 15 again.
+t/t_k_vnni_layout.cpp:748	C	 A row saved again into a converted block keeps the block VNNI, and its
+t/t_k_vnni_layout.cpp:749	C	 new values are stored in the row's own VNNI column: the other rows keep
+t/t_k_vnni_layout.cpp:750	C	 theirs.
+t/t_k_vnni_layout.cpp:760	C	 Row 15 back to its SALT_5 values: the checks below read every row with
+t/t_k_vnni_layout.cpp:761	C	 that salt.
+t/t_k_vnni_layout.cpp:767	C	 A new token takes offset 18, a row of the row-major block 1: block 0 stays
+t/t_k_vnni_layout.cpp:768	C	 VNNI, rows 0..17 stay readable, and block 1 completes only once rows
+t/t_k_vnni_layout.cpp:769	C	 18..31 are saved.
+t/t_k_vnni_layout.cpp:783	C	 A new token takes offset 16, the first row of the converted block 1: no
+t/t_k_vnni_layout.cpp:784	C	 row of that block survives, so only its bits drop; block 0 stays VNNI.
+t/t_k_vnni_layout.cpp:788	C	 Rows 16..31 again (blocks 0 and 1 converted), then a new token at offset
+t/t_k_vnni_layout.cpp:789	C	 3: block 0 goes back to row-major for rows 0..2, block 1 above it only
+t/t_k_vnni_layout.cpp:790	C	 drops its bits and its bytes stay as they are.
+t/t_k_vnni_layout.cpp:799	C	 Block 1's bytes: its 4 panels are exactly the elements at(tok, d) of the
+t/t_k_vnni_layout.cpp:800	C	 tokens 16..31 (Note [K VNNI storage]: token i owns column i % 16 of block
+t/t_k_vnni_layout.cpp:801	C	 i / 16 in every panel).
+t/t_k_vnni_layout.cpp:818	C	 Block 1's 4 panels are byte-identical to the snapshot.
+t/t_k_vnni_layout.cpp:821	C	 The rows of block 1 lost their bits with the forget at offset 3: one row
+t/t_k_vnni_layout.cpp:822	C	 saved again does not complete the block.
+t/t_k_vnni_layout.cpp:830	S	the EAGLE storage view keeps its own K layout state [kv_data][k_vnni]
+t/t_k_vnni_layout.cpp:831	C	 Note [K VNNI storage]: while the EAGLE view is active, logical slot 0
+t/t_k_vnni_layout.cpp:832	C	 addresses the extra storage slot and the extra state entry. Rows recorded
+t/t_k_vnni_layout.cpp:833	C	 and converted under the view must not show up in the primary slot's
+t/t_k_vnni_layout.cpp:834	C	 state, and each view reads its own rows.
+t/t_k_vnni_layout.cpp:842	C	 An EAGLE-capable book carries x storage (the hidden state per token, 16
+t/t_k_vnni_layout.cpp:843	C	 bytes here); the layout book without it cannot allocate the EAGLE slot.
+t/t_k_vnni_layout.cpp:847	C	max_model_layers=*/N_SLOTS_1, SUPPORT_EAGLE_TRUE);
+t/t_k_vnni_layout.cpp:848	S	one logical slot plus the EAGLE storage
+t/t_k_vnni_layout.cpp:849	C	n_pages=*/N_PAGES_1, STORAGE_SLOTS_2, SUPPORT_EAGLE_TRUE);
+t/t_k_vnni_layout.cpp:852	C	 Primary view: 16 rows saved and converted.
+t/t_k_vnni_layout.cpp:859	C	 EAGLE view: its own 16 rows, converted separately.
+t/t_k_vnni_layout.cpp:876	C	 Back to the primary view: its state and rows are untouched.
+t/t_k_vnni_layout.cpp:885	C	 A new token at offset 5 forgets rows 5.. in both storages; rows 0..4 of
+t/t_k_vnni_layout.cpp:886	C	 both stay readable (each storage converted back on its own).
+t/t_k_vnni_layout.cpp:906	S	forgetting a row acts on every slot's own block [kv_data][k_vnni]
+t/t_k_vnni_layout.cpp:907	C	 Note [K VNNI storage]: clear_kv_complete_at drops the bits of the offset
+t/t_k_vnni_layout.cpp:908	C	 in every storage slot and converts back only the slots whose block was
+t/t_k_vnni_layout.cpp:909	C	 converted. Two slots, converted in one of them only.
+t/t_k_vnni_layout.cpp:915	C	n_pages=*/N_PAGES_1);
+t/t_k_vnni_layout.cpp:922	C	 Slot 1 records its rows (and converts at row 15); slot 0 does not.
+t/t_k_vnni_layout.cpp:931	C	 forgotten in every slot
+t/t_k_vnni_layout.cpp:936	C	 the rows slot 1 keeps
+t/t_k_vnni_layout.cpp:944	S	page append carries the K layout state with the rows [kv_data][k_vnni]
+t/t_k_vnni_layout.cpp:945	C	 Note [K VNNI storage] item 5: the token-by-token copy moves rows between
+t/t_k_vnni_layout.cpp:946	C	 blocks of both layouts. Afterwards the destination's blocks are VNNI
+t/t_k_vnni_layout.cpp:947	C	 exactly where its 16 rows are saved.
+t/t_k_vnni_layout.cpp:950	C	 source: blocks 0 and 1 VNNI, block 2 with 8 rows
+t/t_k_vnni_layout.cpp:956	S	blocks 0 and 1 complete, block 2 with 13 rows
+t/t_k_vnni_layout.cpp:959	S	token-by-token append into a partly filled page
+t/t_k_vnni_layout.cpp:960	C	n_pages=*/N_PAGES_1);
+t/t_k_vnni_layout.cpp:961	C	n_pages=*/N_PAGES_1);
+t/t_k_vnni_layout.cpp:998	S	append into a converted destination block converts it back and forth
+t/t_k_vnni_layout.cpp:999	C	 The destination page has 64 recorded rows (every block converted) but a
+t/t_k_vnni_layout.cpp:1000	C	 size of 20; the source's 10 rows land at offsets 20..29 inside block 1.
+t/t_k_vnni_layout.cpp:1001	C	 Block 1 must go back to row-major for the copy, keep rows 16..19 and
+t/t_k_vnni_layout.cpp:1002	C	 30..31, and come back as VNNI (its 16 rows are saved after the copy).
+t/t_k_vnni_layout.cpp:1006	S	the constant's name states its value
+t/t_k_vnni_layout.cpp:1007	C	n_pages=*/N_PAGES_1);
+t/t_k_vnni_layout.cpp:1008	C	n_pages=*/N_PAGES_1);
+t/t_k_vnni_layout.cpp:1042	S	whole-page append copies the state of a fully VNNI page
+t/t_k_vnni_layout.cpp:1043	C	n_pages=*/N_PAGES_1);
+t/t_k_vnni_layout.cpp:1044	C	n_pages=*/N_PAGES_1);
+t/t_llama_unit.cpp:2502	C	 Give the VNNI build the K instance of the row-major build: the raw bytes
+t/t_llama_unit.cpp:2503	C	 fill_random wrote, read as consecutive 128-value rows (row i at element
+t/t_llama_unit.cpp:2504	C	 i * 128 of the plane; the packed view reaches element e through the
+t/t_llama_unit.cpp:2505	C	 inverse of the index map of Note [K VNNI storage]), stored through
+t/t_llama_unit.cpp:2506	C	 set_k_row. Then record the rows of layer 0 as save_k and the forward end
+t/t_llama_unit.cpp:2507	C	 would (Note [K VNNI storage]): page 0 whole (4 VNNI blocks, the dense AMX
+t/t_llama_unit.cpp:2508	C	 shape), every later page up to row 40 (blocks 0 and 1 VNNI, block 2 a
+t/t_llama_unit.cpp:2509	C	 row-major tail of 9 rows, block 3 row-major and unrecorded). The reference
+t/t_llama_unit.cpp:2510	C	 below reads the rows through get_k_row, so the mixed pages are scored
+t/t_llama_unit.cpp:2511	C	 against the same values, and against the same attention instance the
+t/t_llama_unit.cpp:2512	C	 row-major build scores.
+t/t_llama_unit.cpp:2515	C	 Element e of the plane as (token, dim) of the packed view.
+t/t_llama_unit.cpp:4020	C	 The marks: save_k marks K of every job with KV work exactly once. The
+t/t_llama_unit.cpp:4021	C	 helpers leave before the mark loop. K alone does not complete a token.
+t/t_llama_unit.cpp:4022	C	 The second mark completes it (mark_k_complete returns true only when
+t/t_llama_unit.cpp:4023	C	 the count was 1). A job without KV work has no mark (count 0). Once per
+t/t_llama_unit.cpp:4024	C	 section: the second mark completes the token, so the row check after the
+t/t_llama_unit.cpp:4025	C	 forward-end conversion does not repeat it.
+t/t_llama_unit.cpp:4035	C	 Rows 0..4 and 8 of page 0 are saved before the pass, so the pass's run
+t/t_llama_unit.cpp:4036	C	 5..15 (minus the job of token 8, which has no KV work) completes block 0
+t/t_llama_unit.cpp:4037	C	 of page 0 through save_k: the block is queued and converted at the forward
+t/t_llama_unit.cpp:4038	C	 end (convert_pending_k_blocks, Note [K VNNI storage]). Block 3 of page 0 is
+t/t_llama_unit.cpp:4039	C	 a whole run and is converted by the block save itself.
+t/t_llama_unit.cpp:4041	C	 its job has no KV work: add(8, false)
+t/t_llama_unit.cpp:4055	C	 The pages the pass does not complete a block of.
+t/t_llama_unit.cpp:4070	C	converted=*/false);
+t/t_llama_unit.cpp:4072	C	converted=*/true);
+t/t_llama_unit.cpp:4077	C	 Note [Row-major blocks under hardware attention] in kv_cache.hpp: the rows
+t/t_llama_unit.cpp:4078	C	 land the same way; only the row bits and the forward-end conversion of the
+t/t_llama_unit.cpp:4079	C	 hardware-scored operation are skipped. Catch2 builds a fresh state for
+t/t_llama_unit.cpp:4080	C	 every SECTION, so the flag needs no reset.
+t/t_llama_unit.cpp:4082	S	hardware attention scores the operation: the completed block stays 
+t/t_llama_unit.cpp:4083	S	row-major, the whole-block save is still VNNI
+t/t_llama_unit.cpp:4092	C	converted=*/false);
+t/t_llama_unit.cpp:4094	C	converted=*/false);
+t/t_llama_unit.cpp:4098	S	hardware attention scores another operation: this one still converts
+t/t_llama_unit.cpp:4099	C	 The flag is per operation, not model-wide: operation 1's flag does not
+t/t_llama_unit.cpp:4100	C	 change what the save of operation 0 records. The section does not
+t/t_llama_unit.cpp:4101	C	 distinguish the operation id from the layer id or the KV slot id:
+t/t_llama_unit.cpp:4102	C	 operation 0 is also layer 0 and KV slot 0, and operation 1 is layer 1
+t/t_llama_unit.cpp:4103	C	 and KV slot 1.
+t/t_llama_unit.cpp:4115	C	converted=*/false);
+t/t_llama_unit.cpp:4117	C	converted=*/true);
+t/t_llama_unit.cpp:4220	C	converted=*/false);
+t/t_llama_unit.cpp:4222	C	converted=*/true);
+t/t_llama_unit.cpp:4243	C	converted=*/false);
+t/t_llama_unit.cpp:4245	C	converted=*/true);

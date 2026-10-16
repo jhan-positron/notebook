@@ -1,0 +1,2315 @@
+{
+  "file": "h/tron/tensor/k_vnni.hpp",
+  "title": "Typed K storage, row transfers, and block conversion",
+  "summary": [
+    "PR4424 adds k_vnni_tensor, an owner for one key-data plane, and k_vnni_view, its typed borrowed view.",
+    "The operations map contiguous token rows to dimension-pair storage for vector and tile readers.",
+    "An incomplete token block can keep contiguous rows until an explicit conversion changes its layout."
+  ],
+  "terms": [
+    {
+      "name": "K / KV / QK",
+      "meaning": "K is cached key data. KV means key and value. QK scores compare query data with cached key data."
+    },
+    {
+      "name": "bf16 / fp32",
+      "meaning": "bf16 is the 16-bit brain floating-point format. fp32 is the 32-bit IEEE floating-point format."
+    },
+    {
+      "name": "VNNI / TRON_K_VNNI",
+      "meaning": "VNNI means Vector Neural Network Instructions. Here it names the layout that stores one dimension pair for each token in adjacent bf16 values. TRON_K_VNNI enables this storage for 128-dimension heads."
+    },
+    {
+      "name": "AMX / AVX-512",
+      "meaning": "AMX means Advanced Matrix Extensions, the CPU tile instructions. AVX-512 means Advanced Vector Extensions, the CPU 512-bit vector instructions."
+    },
+    {
+      "name": "DMA / FPGA",
+      "meaning": "DMA means direct memory access. FPGA means field-programmable gate array. The cache supplies DMA-backed storage; hardware staging copies cache rows for the FPGA."
+    },
+    {
+      "name": "plane / panel / token block",
+      "meaning": "A plane is K for one KV head of one page. A panel is one dimension step × one token block: 1 KiB. A token block holds 16 tokens across 4 panels: 4 KiB."
+    },
+    {
+      "name": "dimension pair / pair row / dword / lane",
+      "meaning": "A dimension pair contains 2 adjacent bf16 values. One pair row stores that pair for 16 tokens in 64 bytes. A dword is a 32-bit value. Each vector lane here holds one dword."
+    },
+    {
+      "name": "row-major",
+      "meaning": "A token has 128 contiguous bf16 values in dimension order. A row-major block uses the same 4 panels as the corresponding VNNI block."
+    },
+    {
+      "name": "Rows / Cols / s / c / dp / t / j",
+      "meaning": "Rows and Cols are the plane shape. s selects a 32-dimension step. c selects a 16-token block. dp selects a dimension pair. t selects a token within that block. j selects one of the pair’s 2 values."
+    },
+    {
+      "name": "k_vnni_tensor / k_vnni_view",
+      "meaning": "The tensor owns plane bytes. The view borrows plane bytes and restricts access to typed operations."
+    },
+    {
+      "name": "const_k_row_view / k_row_view",
+      "meaning": "These borrow one contiguous source row or writable destination row. Their Aligned and Dma template flags describe the caller’s buffer."
+    },
+    {
+      "name": "present / FULL_BLOCK_0XFFFF",
+      "meaning": "present is a 16-bit mask with one bit for each token in a block. FULL_BLOCK_0XFFFF selects all 16 tokens."
+    },
+    {
+      "name": "block_bit / offset_bit / BLOCKS_PER_PAGE_MASK_0XF",
+      "meaning": "block_bit selects one of a page’s 4 token blocks. offset_bit selects one of its 64 token offsets. BLOCKS_PER_PAGE_MASK_0XF selects all 4 blocks."
+    }
+  ],
+  "base_diagrams": [
+    {
+      "title": "One owner, one plane, borrowed access",
+      "caption": "The cache owns the bytes. A view does not allocate or copy the plane.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "kv_block",
+              "kind": "cache",
+              "description": "Stores K and V for one KV head in one KV slot.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2985
+            },
+            {
+              "name": "k_vnni_tensor",
+              "kind": "k",
+              "description": "Owns one 64-token × 128-dimension K plane.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 210
+            }
+          ],
+          "edges": [
+            "1 kv_block contains 1 k_vnni_tensor when layout_on<head_size> is true"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "k_vnni_tensor",
+              "kind": "k",
+              "description": "Owns one 64-token × 128-dimension K plane.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 210
+            },
+            {
+              "name": "data_[Rows * Cols]",
+              "kind": "k",
+              "description": "One 64-byte-aligned array of 8192 bf16 elements.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 230
+            }
+          ],
+          "edges": [
+            "1 owner contains Rows × Cols = 8192 bf16 elements (16 KiB)"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "k_vnni_tensor",
+              "kind": "k",
+              "description": "Owns one 64-token × 128-dimension K plane.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 210
+            },
+            {
+              "name": "k_vnni_view",
+              "kind": "k",
+              "description": "Borrows one plane; its owner must remain alive.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 164
+            }
+          ],
+          "edges": [
+            "1 owner supplies 0 or more borrowed views of the same 1 plane; no byte copy"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "The packed address formula defines the geometry",
+      "caption": "The diagram names source expressions. Their descriptions explain the dimensions represented by each address.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "plane",
+              "kind": "k",
+              "description": "The 64-token × 128-dimension K plane.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 27
+            },
+            {
+              "name": "panel",
+              "kind": "k",
+              "description": "One dimension step s and token block c.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 409
+            }
+          ],
+          "edges": [
+            "1 plane contains DIM_STEPS_4 × TOKEN_BLOCKS_4 = 16 panels"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "panel",
+              "kind": "k",
+              "description": "One 1 KiB panel.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 409
+            },
+            {
+              "name": "panel + dp * k_vnni::ROW_ELEMS_32",
+              "kind": "k",
+              "description": "The address of one 64-byte pair row.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 412
+            }
+          ],
+          "edges": [
+            "1 panel contains STEP_PAIRS_16 = 16 pair rows"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "panel + dp * k_vnni::ROW_ELEMS_32",
+              "kind": "k",
+              "description": "One dimension pair across a token block.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 412
+            },
+            {
+              "name": "K[c * 16 + t][s * 32 + 2 * dp + j]",
+              "kind": "k",
+              "description": "The source K element identified by the header formula.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 27
+            }
+          ],
+          "edges": [
+            "1 pair row contains BLOCK_TOKENS_16 = 16 tokens × PAIR_2 = 2 bf16 values"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Typed writers and layout-specific readers",
+      "caption": "The plane pointer is reached through detail::k_vnni_access::plane. The tensor type alone does not identify which blocks have already converted.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "const_k_row_view",
+              "kind": "k",
+              "description": "Borrows one contiguous token row in dimension order.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 255
+            },
+            {
+              "name": "store_row",
+              "kind": "function",
+              "description": "Scatters one contiguous K row into one packed token column.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 351
+            }
+          ],
+          "edges": [
+            "Read 1 contiguous row of Cols = 128 bf16 values"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "store_row",
+              "kind": "function",
+              "description": "Scatters one contiguous K row into one packed token column.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 351
+            },
+            {
+              "name": "k_vnni_view",
+              "kind": "k",
+              "description": "Borrows one plane; its owner must remain alive.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 164
+            }
+          ],
+          "edges": [
+            "Write 1 token’s 64 dimension pairs into the borrowed plane"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "page::k_packed",
+              "kind": "function",
+              "description": "Returns one read-only K plane for a slot and KV head.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2120
+            },
+            {
+              "name": "k_vnni::qk_group",
+              "kind": "function",
+              "description": "Scores the selected VNNI token lanes with AVX-512.",
+              "file": "h/tron/kernels/k_vnni.hpp",
+              "line": 61
+            }
+          ],
+          "edges": [
+            "Pass the 1 plane view; live bits select only converted blocks"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "page::k_packed",
+              "kind": "function",
+              "description": "Returns one read-only K plane for a slot and KV head.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2120
+            },
+            {
+              "name": "amx_attn_h128g4::qk_vnni_128x4",
+              "kind": "function",
+              "description": "Computes four query rows against all 64 tokens with AMX.",
+              "file": "h/tron/kernels/amx_attn_iface.hpp",
+              "line": 260
+            }
+          ],
+          "edges": [
+            "Pass the 1 plane view when all 4 token blocks hold VNNI"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "One token block has two possible layouts",
+      "caption": "The caller owns the layout state. Conversion is explicit and uses temporary rows to avoid overwriting unread input.",
+      "flows": [
+        {
+          "nodes": [
+            {
+              "name": "row_major_row",
+              "kind": "function",
+              "description": "Returns one token row inside a row-major block.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 464
+            },
+            {
+              "name": "block_to_vnni",
+              "kind": "function",
+              "description": "Converts one complete row-major block to VNNI in place.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 499
+            }
+          ],
+          "edges": [
+            "After all 16 token rows are saved, read all rows before rewriting the same 4 KiB"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "block_to_vnni",
+              "kind": "function",
+              "description": "Converts one complete row-major block to VNNI in place.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 499
+            },
+            {
+              "name": "block_to_rows",
+              "kind": "function",
+              "description": "Converts one VNNI block back to row-major in place.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 514
+            }
+          ],
+          "edges": [
+            "When the caller needs contiguous rows again, reverse the layout in the same block"
+          ]
+        },
+        {
+          "nodes": [
+            {
+              "name": "page::k_vnni_blocks",
+              "kind": "function",
+              "description": "Returns one converted-block bit for each block of a slot.",
+              "file": "h/tron/models/kv_cache.hpp",
+              "line": 2133
+            },
+            {
+              "name": "row_major_row",
+              "kind": "function",
+              "description": "Returns one token row inside a row-major block.",
+              "file": "h/tron/tensor/k_vnni.hpp",
+              "line": 464
+            }
+          ],
+          "edges": [
+            "A clear bit tells the caller to use row-major addressing for that block"
+          ]
+        }
+      ]
+    }
+  ],
+  "units": [
+    {
+      "id": "layout-geometry",
+      "title": "Define the fixed plane geometry and instruction-sized pieces",
+      "explanation": [
+        "The storage shape is 64 tokens × 128 dimensions of bf16, or 16 KiB.",
+        "The packed plane contains 4 dimension steps × 4 token blocks.",
+        "Each panel contains 16 pair rows of 64 bytes.",
+        "The compile-time assertions prove that these constants preserve the row-major element count.",
+        "BF16_BITS_16 and HIGH_HALF_0XFFFF0000 describe exact widening of the pair halves to fp32 bit patterns."
+      ],
+      "ranges": [
+        [
+          2,
+          41
+        ],
+        [
+          61,
+          90
+        ],
+        [
+          106,
+          117
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "From one plane to one pair row",
+          "caption": "The same number of elements is reorganized for pair-wise vector and tile reads.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "PAGE_TOKENS_64 * HEAD_SIZE_128",
+                  "kind": "value",
+                  "description": "64 token rows × 128 bf16 values per row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 114
+                },
+                {
+                  "name": "N_PANELS_16 * PANEL_ELEMS_512",
+                  "kind": "value",
+                  "description": "16 panels × 512 bf16 values per panel.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 114
+                }
+              ],
+              "edges": [
+                "Both expressions count the same 8192 bf16 elements"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "PANEL_ELEMS_512",
+                  "kind": "value",
+                  "description": "512 bf16 elements per panel.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 79
+                },
+                {
+                  "name": "ROW_ELEMS_32",
+                  "kind": "value",
+                  "description": "32 bf16 elements per pair row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 76
+                }
+              ],
+              "edges": [
+                "1 panel contains STEP_PAIRS_16 = 16 pair rows"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "ROW_DWORDS_16",
+                  "kind": "value",
+                  "description": "16 dwords per pair row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 77
+                },
+                {
+                  "name": "PAIR_2",
+                  "kind": "value",
+                  "description": "2 bf16 values in each dword.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 64
+                }
+              ],
+              "edges": [
+                "1 pair row holds 16 token lanes × 2 bf16 values per lane"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "state-masks",
+      "title": "Name the row-major subdivision and the page-state masks",
+      "explanation": [
+        "PANEL_ROWS_4 divides one panel into 4 contiguous token rows for row-major storage.",
+        "block_bit(c) selects one token block in the 4-bit converted-block mask.",
+        "offset_bit(offset) selects one token row in the 64-bit saved-row mask.",
+        "These masks describe different units: blocks for conversion state and individual token rows for completion."
+      ],
+      "ranges": [
+        [
+          91,
+          105
+        ],
+        [
+          112,
+          113
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "One page uses two mask granularities",
+          "caption": "The helper result is a bit value; the page stores and updates the masks.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "c",
+                  "kind": "value",
+                  "description": "One token-block index from 0 through 3.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 98
+                },
+                {
+                  "name": "block_bit",
+                  "kind": "function",
+                  "description": "Returns the converted-block bit for one token block.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 98
+                }
+              ],
+              "edges": [
+                "Select bit c: 1 bit represents 16 token rows"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "offset",
+                  "kind": "value",
+                  "description": "One token offset from 0 through 63.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 103
+                },
+                {
+                  "name": "offset_bit",
+                  "kind": "function",
+                  "description": "Returns the saved-row bit for one page offset.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 103
+                }
+              ],
+              "edges": [
+                "Select bit offset: 1 bit represents 1 token row"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "PANEL_ELEMS_512",
+                  "kind": "value",
+                  "description": "512 bf16 elements in one panel.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 79
+                },
+                {
+                  "name": "PANEL_ROWS_4",
+                  "kind": "value",
+                  "description": "4 contiguous rows in row-major form.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 93
+                }
+              ],
+              "edges": [
+                "1 panel holds 4 rows × 128 bf16 values per row = 512 bf16 values"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "layout-gate",
+      "title": "Select packed storage by compile option and head size",
+      "explanation": [
+        "With TRON_K_VNNI enabled, layout_on is true only for HEAD_SIZE_128.",
+        "Without the option, layout_on is false for every head size.",
+        "The choice does not depend on query type or AMX availability.",
+        "All users of one storage geometry therefore choose the same representation."
+      ],
+      "ranges": [
+        [
+          119,
+          130
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The storage choice is a compile-time property",
+          "caption": "The two declarations encode the enabled and disabled build cases.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "TRON_K_VNNI",
+                  "kind": "value",
+                  "description": "The compile-time option is defined.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 124
+                },
+                {
+                  "name": "head_size == HEAD_SIZE_128",
+                  "kind": "value",
+                  "description": "The head has exactly 128 dimensions.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 126
+                }
+              ],
+              "edges": [
+                "Defined option: layout_on equals this comparison"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "TRON_K_VNNI",
+                  "kind": "value",
+                  "description": "The compile-time option is not defined.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 124
+                },
+                {
+                  "name": "layout_on = false",
+                  "kind": "value",
+                  "description": "Every head keeps row-major storage.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 129
+                }
+              ],
+              "edges": [
+                "Undefined option: layout_on is false for every head size"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "packed-index",
+      "title": "Map a token and dimension to the packed element address",
+      "explanation": [
+        "index splits the token into block c and column t.",
+        "It splits the dimension into step s, pair dp, and pair member j.",
+        "The address order is dimension step, token block, pair row, token column, then pair member.",
+        "The formula keeps both members of one token’s dimension pair adjacent."
+      ],
+      "ranges": [
+        [
+          132,
+          141
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Coordinates become the packed array index",
+          "caption": "Each division and remainder has one role in the address formula.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "token",
+                  "kind": "value",
+                  "description": "The token coordinate in the 64-token page.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 134
+                },
+                {
+                  "name": "c = token / BLOCK_TOKENS_16",
+                  "kind": "value",
+                  "description": "The token-block coordinate.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 135
+                }
+              ],
+              "edges": [
+                "1 token selects 1 of TOKEN_BLOCKS_4 = 4 blocks"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "token",
+                  "kind": "value",
+                  "description": "The same page token coordinate.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 134
+                },
+                {
+                  "name": "t = token % BLOCK_TOKENS_16",
+                  "kind": "value",
+                  "description": "The column inside the selected token block.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 136
+                }
+              ],
+              "edges": [
+                "1 token selects 1 of BLOCK_TOKENS_16 = 16 columns"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "dim",
+                  "kind": "value",
+                  "description": "The dimension coordinate in the 128-dimension head.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 134
+                },
+                {
+                  "name": "k_vnni::index",
+                  "kind": "function",
+                  "description": "Maps one token and dimension to a packed element index.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 134
+                }
+              ],
+              "edges": [
+                "Split dim into s, dp, and j; combine with c and t"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni::index",
+                  "kind": "function",
+                  "description": "Maps one token and dimension to a packed element index.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 134
+                },
+                {
+                  "name": "data_[k_vnni::index(token, dim)]",
+                  "kind": "k",
+                  "description": "The bf16 element read by at().",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 185
+                }
+              ],
+              "edges": [
+                "Return the index of 1 bf16 element"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "view-type",
+      "title": "Restrict borrowed views to the supported element type and shape",
+      "explanation": [
+        "k_vnni_element permits bf16 and const bf16 only.",
+        "k_vnni_view permits 64-token × 128-dimension planes only.",
+        "The conversion constructor copies a writable view into a read-only view.",
+        "The private pointer constructor limits view creation to the owner and friend types.",
+        "The view holds one pointer and exposes no public raw-pointer conversion."
+      ],
+      "ranges": [
+        [
+          153,
+          178
+        ],
+        [
+          188,
+          199
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Borrow the plane without weakening its type",
+          "caption": "A const conversion changes access permission; it does not copy bytes.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni_view<U, Rows, Cols> other",
+                  "kind": "k",
+                  "description": "The writable source view accepted by the constrained constructor.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 176
+                },
+                {
+                  "name": "k_vnni_view(k_vnni_view<U, Rows, Cols> other)",
+                  "kind": "function",
+                  "description": "Creates a read-only view that borrows the same plane.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 176
+                }
+              ],
+              "edges": [
+                "Read 1 writable view; requires const destination element type"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni_view(k_vnni_view<U, Rows, Cols> other)",
+                  "kind": "function",
+                  "description": "Creates a read-only view that borrows the same plane.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 176
+                },
+                {
+                  "name": "data_",
+                  "kind": "k",
+                  "description": "The destination view’s borrowed pointer.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 198
+                }
+              ],
+              "edges": [
+                "Copy 1 pointer; retain the same 1 owner and 1 plane"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni_element",
+                  "kind": "value",
+                  "description": "The permitted element types are bf16 and const bf16.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 154
+                },
+                {
+                  "name": "k_vnni_view",
+                  "kind": "k",
+                  "description": "Borrows one plane; its owner must remain alive.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 164
+                }
+              ],
+              "edges": [
+                "The static assertion rejects every other element type"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "element-read",
+      "title": "Provide a checked, read-only element lookup",
+      "explanation": [
+        "at asserts that the token and dimension fit the view shape.",
+        "It delegates the packed address calculation to k_vnni::index.",
+        "The result is const bf16&, including when the view itself is writable.",
+        "Element writes remain in the row and block operations."
+      ],
+      "ranges": [
+        [
+          179,
+          186
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Bounds checks precede the packed read",
+          "caption": "The element accessor does not expose a write path.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "at",
+                  "kind": "function",
+                  "description": "Checks both coordinates and reads one packed bf16 element.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 182
+                },
+                {
+                  "name": "k_vnni::index",
+                  "kind": "function",
+                  "description": "Maps one token and dimension to a packed element index.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 134
+                }
+              ],
+              "edges": [
+                "After token < Rows and dim < Cols assertions, compute 1 index"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni::index",
+                  "kind": "function",
+                  "description": "Maps one token and dimension to a packed element index.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 134
+                },
+                {
+                  "name": "data_[k_vnni::index(token, dim)]",
+                  "kind": "k",
+                  "description": "The selected read-only bf16 reference.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 185
+                }
+              ],
+              "edges": [
+                "Address exactly 1 element without changing the plane"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "owner-storage",
+      "title": "Own the plane in one aligned inline array",
+      "explanation": [
+        "k_vnni_tensor stores exactly one bf16 array within the owner.",
+        "The owner and its array have 64-byte alignment.",
+        "The shape assertions match the address formula’s fixed geometry.",
+        "The size assertion forbids extra bytes beyond the 16 KiB plane.",
+        "The comments require the owner to remain trivial for the cache’s DMA allocation."
+      ],
+      "ranges": [
+        [
+          201,
+          213
+        ],
+        [
+          229,
+          236
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The owner is the storage",
+          "caption": "There is no separate allocation or initialization inside this type.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni_tensor",
+                  "kind": "k",
+                  "description": "Owns one 64-token × 128-dimension K plane.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 210
+                },
+                {
+                  "name": "data_[Rows * Cols]",
+                  "kind": "k",
+                  "description": "One 64-byte-aligned array of 8192 bf16 elements.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 230
+                }
+              ],
+              "edges": [
+                "1 owner contains exactly Rows × Cols bf16 elements; 16 KiB total"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "sizeof(k_vnni_tensor<k_vnni::PAGE_TOKENS_64, k_vnni::HEAD_SIZE_128>)",
+                  "kind": "value",
+                  "description": "The compile-time owner size.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 233
+                },
+                {
+                  "name": "k_vnni::PAGE_TOKENS_64 * k_vnni::HEAD_SIZE_128 * sizeof(bf16)",
+                  "kind": "value",
+                  "description": "The plane’s exact byte count.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 234
+                }
+              ],
+              "edges": [
+                "Assert equal byte counts; no storage overhead"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "alignof(k_vnni_tensor<k_vnni::PAGE_TOKENS_64, k_vnni::HEAD_SIZE_128>)",
+                  "kind": "value",
+                  "description": "The compile-time owner alignment.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 235
+                },
+                {
+                  "name": "64",
+                  "kind": "value",
+                  "description": "Required byte alignment.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 235
+                }
+              ],
+              "edges": [
+                "Assert 64-byte alignment for 64-byte pair rows"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "owner-views",
+      "title": "Return views only from owners with a usable lifetime",
+      "explanation": [
+        "The mutable lvalue overload returns a writable view.",
+        "The const lvalue overload returns a read-only view.",
+        "Both overloads carry the lifetime annotation that binds the result to the owner.",
+        "The rvalue overloads are deleted to prevent direct views of temporary owners."
+      ],
+      "ranges": [
+        [
+          201,
+          208
+        ],
+        [
+          214,
+          227
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Owner constness controls view access",
+          "caption": "The rvalue overloads reject a temporary owner before a view can escape.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "as_view() &",
+                  "kind": "function",
+                  "description": "Returns a writable view of this existing owner.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 215
+                },
+                {
+                  "name": "k_vnni_view<bf16, Rows, Cols>",
+                  "kind": "k",
+                  "description": "One writable borrow of the owner’s plane.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 215
+                }
+              ],
+              "edges": [
+                "Return 1 view over the owner’s 1 plane"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "as_view() const&",
+                  "kind": "function",
+                  "description": "Returns a read-only view of this existing owner.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 221
+                },
+                {
+                  "name": "k_vnni_view<const bf16, Rows, Cols>",
+                  "kind": "k",
+                  "description": "One read-only borrow of the same plane.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 221
+                }
+              ],
+              "edges": [
+                "Return 1 view over the owner’s 1 plane"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "as_view() &&",
+                  "kind": "function",
+                  "description": "Is deleted to reject a view from a temporary mutable owner.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 226
+                },
+                {
+                  "name": "as_view() const&&",
+                  "kind": "function",
+                  "description": "Is deleted to reject a view from a temporary const owner.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 227
+                }
+              ],
+              "edges": [
+                "Both temporary-owner overloads are rejected at compile time"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "internal-plane-access",
+      "title": "Centralize raw plane access behind a named helper",
+      "explanation": [
+        "detail::k_vnni_access::plane returns the view’s private pointer.",
+        "The helper preserves the element type’s constness.",
+        "The nearby comment limits use to typed operations, two layout-specific score kernels, and the documented random-fill exception.",
+        "This is an access convention around a public helper, not a separate runtime permission check."
+      ],
+      "ranges": [
+        [
+          146,
+          151
+        ],
+        [
+          238,
+          247
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The raw pointer comes from one named route",
+          "caption": "The view befriends the helper. No allocation or copy occurs.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_vnni_view",
+                  "kind": "k",
+                  "description": "Borrows one plane; its owner must remain alive.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 164
+                },
+                {
+                  "name": "detail::k_vnni_access::plane",
+                  "kind": "function",
+                  "description": "Returns the private plane pointer from a typed K view.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 243
+                }
+              ],
+              "edges": [
+                "Accept 1 typed view of 1 plane"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "detail::k_vnni_access::plane",
+                  "kind": "function",
+                  "description": "Returns the private plane pointer from a typed K view.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 243
+                },
+                {
+                  "name": "k.data_",
+                  "kind": "k",
+                  "description": "The first bf16 element of the borrowed plane.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 244
+                }
+              ],
+              "edges": [
+                "Return the pointer to the same 1 plane; preserve T constness"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "transfer-rows",
+      "title": "Separate contiguous transfer rows from packed plane views",
+      "explanation": [
+        "const_k_row_view and k_row_view represent contiguous rank-1 bf16 rows.",
+        "Their alignment and DMA flags describe the source or destination buffer.",
+        "k_source_row and k_destination_row wrap pointers without copying data or checking alignment.",
+        "The k_source_row overload for an existing view requires stride 1 and preserves its flags.",
+        "The packed row-transfer operations use unaligned vector instructions."
+      ],
+      "ranges": [
+        [
+          249,
+          283
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Wrapping changes the type, not the bytes",
+          "caption": "A row view represents Cols adjacent bf16 elements. A plane view represents the full storage with its separate address formula.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "k_source_row",
+                  "kind": "function",
+                  "description": "Wraps a contiguous source row while retaining its buffer flags.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 264
+                },
+                {
+                  "name": "const_k_row_view",
+                  "kind": "k",
+                  "description": "Borrows one contiguous token row in dimension order.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 255
+                }
+              ],
+              "edges": [
+                "Return 1 read-only view of Cols contiguous bf16 values"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_source_row",
+                  "kind": "function",
+                  "description": "Converts a stride-1 source view without changing its flags.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 274
+                },
+                {
+                  "name": "const_k_row_view",
+                  "kind": "k",
+                  "description": "Borrows one contiguous token row in dimension order.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 255
+                }
+              ],
+              "edges": [
+                "Preserve 1 row’s Aligned and Dma flags; require Stride == 1"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "k_destination_row",
+                  "kind": "function",
+                  "description": "Wraps a contiguous destination row with the caller’s flags.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 281
+                },
+                {
+                  "name": "k_row_view",
+                  "kind": "k",
+                  "description": "Borrows one writable contiguous token row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 258
+                }
+              ],
+              "edges": [
+                "Return 1 writable view of Cols contiguous bf16 values"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pair-addresses",
+      "title": "Share scatter and gather address calculations",
+      "explanation": [
+        "pair_base finds the first dimension pair for one token and dimension step.",
+        "Its mutable and const overloads use the same byte-address formula.",
+        "pair_row_offsets describes the 16 pair rows in that panel.",
+        "The gather and scatter scale converts dword offsets into 64-byte steps between pair rows."
+      ],
+      "ranges": [
+        [
+          285,
+          310
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "A token occupies one dword in each pair row",
+          "caption": "One base plus sixteen offsets addresses the token’s 32 dimensions for one step.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "pair_base",
+                  "kind": "function",
+                  "description": "Finds a token’s first pair address in one dimension step.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 291
+                },
+                {
+                  "name": "((s * TOKEN_BLOCKS_4 + c) * PANEL_DWORDS_256 + t) * DWORD_BYTES_4",
+                  "kind": "value",
+                  "description": "The byte offset from the plane to the first pair.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 294
+                }
+              ],
+              "edges": [
+                "Use step s, block c, and column t to select 1 dword"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "pair_row_offsets",
+                  "kind": "function",
+                  "description": "Returns the sixteen dword offsets between a panel’s pair rows.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 304
+                },
+                {
+                  "name": "ROW_STRIDE_16",
+                  "kind": "value",
+                  "description": "16 dwords, or 64 bytes, between successive pair rows.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 305
+                }
+              ],
+              "edges": [
+                "Produce 16 offsets: lane dp selects dp × 16 dwords"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "pair_base",
+                  "kind": "function",
+                  "description": "Finds a token’s first pair address in one dimension step.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 291
+                },
+                {
+                  "name": "pair_row_offsets",
+                  "kind": "function",
+                  "description": "Returns the sixteen dword offsets between a panel’s pair rows.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 304
+                }
+              ],
+              "edges": [
+                "Combine 1 base with 16 offsets to reach 16 dimension pairs"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "register-transpose",
+      "title": "Transpose token rows into pair rows in registers",
+      "explanation": [
+        "transpose_16x16_epi32 transposes a 16 × 16 matrix of dwords in place.",
+        "The first stage interleaves 32-bit lanes from pairs of input registers.",
+        "The next stage interleaves 64-bit groups from groups of 4 input registers.",
+        "Two quarter-shuffle stages finish the transpose.",
+        "The output register r[i] contains input lane i from every input register."
+      ],
+      "ranges": [
+        [
+          311,
+          341
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The lane position and register position exchange roles",
+          "caption": "Each input register represents one token for one dimension step. Each output register represents one dimension pair across sixteen tokens.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "r",
+                  "kind": "value",
+                  "description": "Input: 16 registers × 16 dword lanes.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 315
+                },
+                {
+                  "name": "transpose_16x16_epi32",
+                  "kind": "function",
+                  "description": "Transposes sixteen registers of sixteen 32-bit lanes.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 315
+                }
+              ],
+              "edges": [
+                "Transpose 256 dwords with 4 shuffle stages"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "transpose_16x16_epi32",
+                  "kind": "function",
+                  "description": "Transposes sixteen registers of sixteen 32-bit lanes.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 315
+                },
+                {
+                  "name": "r[i]",
+                  "kind": "value",
+                  "description": "Output: dimension-pair i from all 16 input token registers.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 311
+                }
+              ],
+              "edges": [
+                "Place input register t’s lane i into output register i’s lane t"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "_mm512_unpacklo_epi32",
+                  "kind": "function",
+                  "description": "Interleaves low 32-bit lanes within corresponding vector quarters.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 322
+                },
+                {
+                  "name": "_mm512_unpacklo_epi64",
+                  "kind": "function",
+                  "description": "Interleaves low 64-bit groups within corresponding vector quarters.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 326
+                }
+              ],
+              "edges": [
+                "The first 2 stages combine register pairs and then groups of 4"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "_mm512_shuffle_i32x4",
+                  "kind": "function",
+                  "description": "Selects 128-bit quarters from two input registers.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 332
+                },
+                {
+                  "name": "_mm512_shuffle_i32x4",
+                  "kind": "function",
+                  "description": "Selects quarters again to finish the register transpose.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 338
+                }
+              ],
+              "edges": [
+                "The last 2 stages select even and odd quarters with 0x88 and 0xdd"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "packed-store-row",
+      "title": "Scatter one contiguous row into its packed token column",
+      "explanation": [
+        "store_row reads 32 adjacent bf16 values for each of 4 dimension steps.",
+        "Each loaded vector contains 16 dimension pairs.",
+        "The scatter writes those pairs into the token’s column across 16 pair rows.",
+        "The 4 steps write only that token’s 64 pair slots.",
+        "The comment permits simultaneous stores to different token columns because the slots do not overlap."
+      ],
+      "ranges": [
+        [
+          344,
+          362
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "One token row becomes sixty-four pair slots",
+          "caption": "The row is loaded contiguously. The destination is spread across the block’s pair rows.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "const_k_row_view",
+                  "kind": "k",
+                  "description": "Borrows one contiguous token row in dimension order.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 255
+                },
+                {
+                  "name": "store_row",
+                  "kind": "function",
+                  "description": "Scatters one contiguous K row into one packed token column.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 351
+                }
+              ],
+              "edges": [
+                "Read 1 token × 128 bf16 values with 4 unaligned 64-byte loads"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "pairs",
+                  "kind": "value",
+                  "description": "16 dimension pairs loaded for the current step s.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 358
+                },
+                {
+                  "name": "plane",
+                  "kind": "k",
+                  "description": "The writable plane borrowed from dst.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 354
+                }
+              ],
+              "edges": [
+                "1 scatter writes 16 dwords at 64-byte intervals; repeat for 4 steps"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "store_row",
+                  "kind": "function",
+                  "description": "Scatters one contiguous K row into one packed token column.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 351
+                },
+                {
+                  "name": "k_vnni::detail::pair_base",
+                  "kind": "function",
+                  "description": "Finds the token’s first pair address for the current step.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 291
+                }
+              ],
+              "edges": [
+                "Select the token’s 1 column in each of its 4 panels"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "packed-load-row",
+      "title": "Gather one packed token column into a contiguous row",
+      "explanation": [
+        "load_row uses the same token base and pair offsets as store_row.",
+        "Each gather reads 16 dimension pairs from one dimension step.",
+        "An unaligned vector store writes those pairs consecutively into the destination row.",
+        "The 4 steps restore the token’s 128 dimensions in order."
+      ],
+      "ranges": [
+        [
+          364,
+          380
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Gather reverses the single-row scatter",
+          "caption": "The packed source remains unchanged.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "plane",
+                  "kind": "k",
+                  "description": "The read-only plane borrowed from src.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 372
+                },
+                {
+                  "name": "load_row",
+                  "kind": "function",
+                  "description": "Gathers one packed token column into a contiguous K row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 369
+                }
+              ],
+              "edges": [
+                "Read 1 token’s 64 dimension pairs with 4 gathers"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "load_row",
+                  "kind": "function",
+                  "description": "Gathers one packed token column into a contiguous K row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 369
+                },
+                {
+                  "name": "k_row_view",
+                  "kind": "k",
+                  "description": "Borrows one writable contiguous token row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 258
+                }
+              ],
+              "edges": [
+                "Write 1 contiguous row of Cols = 128 bf16 values"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "pairs",
+                  "kind": "value",
+                  "description": "16 pairs gathered for the current dimension step.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 376
+                },
+                {
+                  "name": "row + s * k_vnni::STEP_DIMS_32",
+                  "kind": "k",
+                  "description": "The current 32-dimension slice of the destination row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 378
+                }
+              ],
+              "edges": [
+                "1 vector supplies 32 bf16 elements; 4 slices fill the row"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "block-input-transpose",
+      "title": "Prepare present rows and transpose one block’s inputs",
+      "explanation": [
+        "store_block accepts up to 16 source row pointers and a presence mask.",
+        "For each dimension step it loads a 64-byte slice from every present row.",
+        "An absent row contributes a zero vector without dereferencing its pointer.",
+        "The register transpose converts token-indexed vectors into dimension-pair vectors.",
+        "This unit prepares the vectors; the next unit determines which destination lanes are written."
+      ],
+      "ranges": [
+        [
+          382,
+          408
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The presence mask controls source reads",
+          "caption": "Absent rows may have null pointers because the conditional expression does not load them.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "((present >> t) & 1u)",
+                  "kind": "value",
+                  "description": "Whether token lane t is present.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 404
+                },
+                {
+                  "name": "_mm512_loadu_si512",
+                  "kind": "function",
+                  "description": "Loads one row’s 32 bf16 values for dimension step s.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 405
+                }
+              ],
+              "edges": [
+                "Bit set: read rows[t] + s × STEP_DIMS_32"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "((present >> t) & 1u)",
+                  "kind": "value",
+                  "description": "Whether token lane t is present.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 404
+                },
+                {
+                  "name": "_mm512_setzero_si512",
+                  "kind": "function",
+                  "description": "Creates the placeholder vector for an absent token.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 406
+                }
+              ],
+              "edges": [
+                "Bit clear: produce zeros without dereferencing rows[t]"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "r",
+                  "kind": "value",
+                  "description": "16 token-indexed registers for one dimension step.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 402
+                },
+                {
+                  "name": "transpose_16x16_epi32",
+                  "kind": "function",
+                  "description": "Transposes sixteen registers of sixteen 32-bit lanes.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 315
+                }
+              ],
+              "edges": [
+                "Transpose 16 × 16 dwords into 16 pair-indexed registers"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "block-output-stores",
+      "title": "Write full pair rows or only the present token lanes",
+      "explanation": [
+        "After transposition, panel selects the destination for dimension step s and block c.",
+        "A full presence mask selects 16 unmasked 64-byte stores per panel.",
+        "A partial mask selects 16 masked dword stores per panel.",
+        "The partial path leaves absent token slots unchanged.",
+        "A full block writes 4 KiB with 64 whole-line stores, as stated in the code comment."
+      ],
+      "ranges": [
+        [
+          382,
+          399
+        ],
+        [
+          409,
+          420
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The same transposed vectors support full and partial blocks",
+          "caption": "Input zeros for absent rows do not overwrite absent destination slots: the partial stores mask those lanes.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "present == k_vnni::FULL_BLOCK_0XFFFF",
+                  "kind": "value",
+                  "description": "All 16 token lanes are present.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 410
+                },
+                {
+                  "name": "_mm512_storeu_si512",
+                  "kind": "function",
+                  "description": "Writes one complete 64-byte dimension-pair row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 412
+                }
+              ],
+              "edges": [
+                "True: issue 16 whole-line stores for each of 4 panels"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "present == k_vnni::FULL_BLOCK_0XFFFF",
+                  "kind": "value",
+                  "description": "Tests whether all 16 token lanes are present.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 410
+                },
+                {
+                  "name": "_mm512_mask_storeu_epi32",
+                  "kind": "function",
+                  "description": "Writes only the selected dword lanes of one pair row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 416
+                }
+              ],
+              "edges": [
+                "False: write only present lanes; leave all other token lanes intact"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "r[dp]",
+                  "kind": "value",
+                  "description": "One dimension pair across 16 token lanes.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 412
+                },
+                {
+                  "name": "panel + dp * k_vnni::ROW_ELEMS_32",
+                  "kind": "k",
+                  "description": "The corresponding destination pair row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 412
+                }
+              ],
+              "edges": [
+                "1 output vector maps to 1 pair row of 16 dwords"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "copy-token",
+      "title": "Copy one token through a contiguous temporary row",
+      "explanation": [
+        "copy_token first gathers the source token into a 64-byte-aligned local row.",
+        "It then scatters the local row into the destination token’s packed column.",
+        "The source and destination may belong to the same plane.",
+        "Only the destination token’s slots change."
+      ],
+      "ranges": [
+        [
+          422,
+          435
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Read the entire token before writing its destination",
+          "caption": "The local row separates the gather from the scatter.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "load_row",
+                  "kind": "function",
+                  "description": "Gathers one packed token column into a contiguous K row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 369
+                },
+                {
+                  "name": "row[Cols]",
+                  "kind": "k",
+                  "description": "The aligned temporary containing all 128 bf16 values.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 432
+                }
+              ],
+              "edges": [
+                "Gather src_token into 1 temporary row"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "row[Cols]",
+                  "kind": "k",
+                  "description": "The completed temporary row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 432
+                },
+                {
+                  "name": "store_row",
+                  "kind": "function",
+                  "description": "Scatters one contiguous K row into one packed token column.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 351
+                }
+              ],
+              "edges": [
+                "Scatter all Cols values into dst_token"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "copy_token",
+                  "kind": "function",
+                  "description": "Copies one token between packed planes through a temporary row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 428
+                },
+                {
+                  "name": "dst_token",
+                  "kind": "value",
+                  "description": "The only destination token modified.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 429
+                }
+              ],
+              "edges": [
+                "Write 1 token’s slots; preserve every other token"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-major-address",
+      "title": "Address incomplete blocks as contiguous token rows",
+      "explanation": [
+        "The row-major tail policy uses the same 4 KiB of block storage as the packed form.",
+        "row_major_row maps each token to one of 4 rows in one of the block’s 4 panels.",
+        "The returned row has Cols contiguous bf16 values and preserves constness.",
+        "The return type declares 64-byte alignment and no DMA flag.",
+        "The caller must know that the block is row-major from page state.",
+        "The comment contrasts 4 contiguous cache lines per row with 64 scattered pair locations."
+      ],
+      "ranges": [
+        [
+          437,
+          472
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The block keeps the same panels but assigns whole rows to them",
+          "caption": "This is a second address formula over the same owner. The view type does not distinguish the two block layouts.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "token",
+                  "kind": "value",
+                  "description": "One page token coordinate.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 464
+                },
+                {
+                  "name": "c = token / k_vnni::BLOCK_TOKENS_16",
+                  "kind": "value",
+                  "description": "The unchanged token-block coordinate.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 467
+                }
+              ],
+              "edges": [
+                "1 token selects 1 of the page’s 4 token blocks"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "t / k_vnni::PANEL_ROWS_4",
+                  "kind": "value",
+                  "description": "The panel number within this block.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 469
+                },
+                {
+                  "name": "(t % k_vnni::PANEL_ROWS_4) * Cols",
+                  "kind": "value",
+                  "description": "The row offset within that panel.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 471
+                }
+              ],
+              "edges": [
+                "1 panel contains 4 rows; each row spans Cols = 128 bf16 elements"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "row_major_row",
+                  "kind": "function",
+                  "description": "Returns one token row inside a row-major block.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 464
+                },
+                {
+                  "name": "row_t",
+                  "kind": "k",
+                  "description": "A const or writable contiguous row selected from T.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 465
+                }
+              ],
+              "edges": [
+                "Return 1 row view of 128 bf16 values, or 256 bytes"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-major-store",
+      "title": "Store one row without scattering incomplete-block data",
+      "explanation": [
+        "store_row_major selects the token’s contiguous row with row_major_row.",
+        "memcpy copies Cols bf16 values from the source row.",
+        "For the supported geometry, the copy writes 256 bytes across 4 complete 64-byte lines."
+      ],
+      "ranges": [
+        [
+          474,
+          482
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The row-major address makes the write contiguous",
+          "caption": "The caller selects this operation only while the token block holds row-major data.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "const_k_row_view",
+                  "kind": "k",
+                  "description": "Borrows one contiguous token row in dimension order.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 255
+                },
+                {
+                  "name": "store_row_major",
+                  "kind": "function",
+                  "description": "Copies one contiguous source row into a row-major token slot.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 478
+                }
+              ],
+              "edges": [
+                "Read 1 source row containing Cols = 128 bf16 values"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "store_row_major",
+                  "kind": "function",
+                  "description": "Copies one contiguous source row into a row-major token slot.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 478
+                },
+                {
+                  "name": "row_major_row(dst, token).data",
+                  "kind": "k",
+                  "description": "The destination token’s contiguous row address.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 481
+                }
+              ],
+              "edges": [
+                "Copy 1 row: Cols × sizeof(bf16) = 256 bytes"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "row-major-load",
+      "title": "Load one row from an incomplete block",
+      "explanation": [
+        "load_row_major resolves the source token through row_major_row.",
+        "memcpy copies its Cols bf16 values into the destination row.",
+        "This is the inverse of store_row_major."
+      ],
+      "ranges": [
+        [
+          484,
+          492
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "The same address supports a contiguous read",
+          "caption": "The packed gather is unnecessary for a row-major block.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "row_major_row(src, token).data",
+                  "kind": "k",
+                  "description": "The source token’s contiguous row address.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 491
+                },
+                {
+                  "name": "load_row_major",
+                  "kind": "function",
+                  "description": "Copies one row-major token row into a contiguous destination.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 488
+                }
+              ],
+              "edges": [
+                "Read 1 row: Cols × sizeof(bf16) = 256 bytes"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "load_row_major",
+                  "kind": "function",
+                  "description": "Copies one row-major token row into a contiguous destination.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 488
+                },
+                {
+                  "name": "k_row_view",
+                  "kind": "k",
+                  "description": "Borrows one writable contiguous token row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 258
+                }
+              ],
+              "edges": [
+                "Write 1 destination row of Cols = 128 bf16 values"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "convert-to-vnni",
+      "title": "Convert one complete row-major block without overwriting unread rows",
+      "explanation": [
+        "block_to_vnni allocates a 64-byte-aligned temporary for all 16 token rows.",
+        "It reads every row before calling store_block.",
+        "The pointer array refers to these temporary rows.",
+        "The full presence mask makes store_block write the block in packed form.",
+        "The temporary is required because an output panel overlaps rows that were stored in row-major form."
+      ],
+      "ranges": [
+        [
+          494,
+          509
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Read all rows first, then replace the layout in the same panels",
+          "caption": "The two phases preserve input bytes that would otherwise be overwritten before they were read.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "load_row_major",
+                  "kind": "function",
+                  "description": "Reads one contiguous row from the current block layout.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 488
+                },
+                {
+                  "name": "rows[k_vnni::BLOCK_TOKENS_16][Cols]",
+                  "kind": "k",
+                  "description": "The temporary holds every token row of the block.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 500
+                }
+              ],
+              "edges": [
+                "Repeat for 16 token rows; save all 4 KiB before writing the plane"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "row_ptrs",
+                  "kind": "k",
+                  "description": "16 pointers to the copied token rows.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 501
+                },
+                {
+                  "name": "rows[k_vnni::BLOCK_TOKENS_16][Cols]",
+                  "kind": "k",
+                  "description": "16 rows of Cols = 128 bf16 values.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 500
+                }
+              ],
+              "edges": [
+                "1 pointer per row: 16 pointers reference 16 temporary rows"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "block_to_vnni",
+                  "kind": "function",
+                  "description": "Converts one complete row-major block to VNNI in place.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 499
+                },
+                {
+                  "name": "store_block",
+                  "kind": "function",
+                  "description": "Transposes present token rows and writes their packed lanes.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 396
+                }
+              ],
+              "edges": [
+                "After all loads, pass FULL_BLOCK_0XFFFF and row_ptrs to replace block c"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "convert-to-rows",
+      "title": "Reverse the packed block into contiguous rows in place",
+      "explanation": [
+        "block_to_rows first gathers all 16 token rows into an aligned temporary.",
+        "Only after the last gather does it start writing row-major destinations.",
+        "The write loop uses store_row_major for each token.",
+        "The conversion changes the arrangement of one block while retaining its original panel storage."
+      ],
+      "ranges": [
+        [
+          511,
+          524
+        ]
+      ],
+      "old_ranges": [],
+      "diagrams": [
+        {
+          "title": "Gather every row before any row-major write",
+          "caption": "The inverse conversion follows the same complete-read-before-write rule.",
+          "flows": [
+            {
+              "nodes": [
+                {
+                  "name": "load_row",
+                  "kind": "function",
+                  "description": "Gathers one packed token column into a contiguous K row.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 369
+                },
+                {
+                  "name": "rows[k_vnni::BLOCK_TOKENS_16][Cols]",
+                  "kind": "k",
+                  "description": "All 16 token rows gathered from the packed block.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 515
+                }
+              ],
+              "edges": [
+                "Read 16 rows × 128 bf16 values into 1 temporary block"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "rows[k_vnni::BLOCK_TOKENS_16][Cols]",
+                  "kind": "k",
+                  "description": "The saved 4 KiB of token rows.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 515
+                },
+                {
+                  "name": "store_row_major",
+                  "kind": "function",
+                  "description": "Writes one saved token row into its contiguous block position.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 478
+                }
+              ],
+              "edges": [
+                "After every gather completes, write all 16 rows to block c"
+              ]
+            },
+            {
+              "nodes": [
+                {
+                  "name": "block_to_rows",
+                  "kind": "function",
+                  "description": "Converts one VNNI block back to row-major in place.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 514
+                },
+                {
+                  "name": "c * k_vnni::BLOCK_TOKENS_16 + t",
+                  "kind": "value",
+                  "description": "The page token offset for each row of block c.",
+                  "file": "h/tron/tensor/k_vnni.hpp",
+                  "line": 522
+                }
+              ],
+              "edges": [
+                "Visit exactly the 16 token offsets belonging to the selected block"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "trivial": [
+    {
+      "description": "Header guard, includes, namespace openings, and namespace closings provide compilation structure.",
+      "ranges": [
+        [
+          1,
+          1
+        ],
+        [
+          43,
+          59
+        ],
+        [
+          143,
+          145
+        ],
+        [
+          287,
+          287
+        ],
+        [
+          342,
+          342
+        ],
+        [
+          526,
+          526
+        ]
+      ]
+    }
+  ],
+  "coverage_notes": [
+    "This is a new file in PR4424. All substantive nonblank lines are assigned to the units below. Some comments and assertions appear beside more than one related unit.",
+    "The diagrams describe source contracts and data movement. They do not report measured performance or claim that tests were run.",
+    "The page owns per-block layout state. A k_vnni_view does not carry that state, and callers must select packed or row-major operations correctly.",
+    "The header allows typed row/block operations and the documented score readers to compute packed addresses. book::fill_random is the documented whole-plane exception."
+  ]
+}

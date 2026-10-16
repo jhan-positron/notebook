@@ -1,0 +1,27 @@
+from codex - Short version: a C++-only refactor is possible if we retain `save_k_helper` as a small forwarding function. That would give both callers one storage implementation. My reading of Ben's comment is that he asked for both callers to use the same function name too.
+
+The C++-only option would preserve this arrangement:
+
+```text
+save_k (main thread) --------+--> shared storage implementation
+save_k_helper (helper) ------+
+```
+
+Here, `save_k` stores attention keys. `save_k_helper` is the existing helper-thread entry point. A forwarding function passes its arguments to the shared implementation without duplicating the storage logic.
+
+Ben's comment is attached to the Haskell line that emits the `save_k_helper` call. He asks to extend `save_k` with `worker_ix` (the caller's worker index) and call it from both sides. The thread does not state a requirement to leave Haskell unchanged. The generator chooses the emitted C++ function name and arguments. [Ben's comment](https://github.com/positron-ai/tron/pull/4424#discussion_r4065141577)
+
+There are two different meanings of reverting the Haskell changes. In the calls below, `n_workers` is the participating thread count:
+
+| Restore the Haskell files to | Result |
+|---|---|
+| This PR's base, `6b939d25d2` | Main still calls `save_k(batch, keys, n_workers)`. Helpers still call `save_k_helper(batch, keys, worker_ix, n_workers)`. C++ must preserve those interfaces. |
+| PR #4424's main-branch base, `be0d5565b3` | Only main calls `save_k(batch, keys)`. Helpers perform no key save. The existing defaults select storage by main alone. |
+
+The first arrangement is visible in the [current base generator](https://github.com/positron-ai/tron/blob/6b939d25d24d0ea76be7669c4985e7b39a8de6c9/ingest/src/TronCpp.hs#L2887-L2894). The second follows from the [earlier helper schedule](https://github.com/positron-ai/tron/blob/be0d5565b3/ingest/src/TronCpp.hs#L2877) and its [main call](https://github.com/positron-ai/tron/blob/be0d5565b3/ingest/src/TronCpp.hs#L2932-L2937).
+
+Reverting only this PR's Haskell files while keeping its current C++ would leave incompatible calls. The helper function has been removed. The old main call would pass the thread count as `worker_ix`, while `n_workers` defaults to one thread. That violates the worker-index check. [Current interface and check](https://github.com/positron-ai/tron/blob/45e6bb266d26757c703749d93712a68e1ed323ec/h/tron/models/model.hpp#L3304-L3405)
+
+For zero Haskell changes in this PR, the concrete approach is to restore both Haskell files to `6b939d25d2`, preserve the old main signature, and retain a forwarding `save_k_helper`. Both would call the shared implementation with an explicit worker index. The description would then need to promise shared implementation rather than removal of the helper entry point.
+
+I checked feasibility by reading the code. I have not changed the branch or built either alternative. Removing helper participation through the broader revert would need a new performance comparison.

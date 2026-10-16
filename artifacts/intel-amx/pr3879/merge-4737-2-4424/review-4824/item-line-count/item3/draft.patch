@@ -1,0 +1,171 @@
+--- a/h/tron/tensor/k_vnni.hpp
++++ b/h/tron/tensor/k_vnni.hpp
+@@ -379,42 +379,31 @@
+   }
+ }
+ 
+-// Store the K rows of up to 16 tokens of one token block c (tokens c * 16 + t
+-// for the bits t set in `present`) into a packed plane with full-line stores.
+-// For each of the 4 dimension steps, the 16 rows' 16 dimension pairs (one
+-// 64-byte load per row) are transposed in registers into the panel's 16 pair
+-// rows. Each pair row is then written as one 64-byte store (masked to the
+-// present tokens' lanes when the block is partial). The absent tokens' slots
+-// are not written. rows[t] points at the 128 bf16 of token t, one native row
+-// in dimension order (not packed storage). It may be null for an absent
+-// token. Compared with store_row per token, a full block issues 64 stores of
+-// whole lines instead of 64 scatters, each writing 4 bytes into 16 lines
+-// (every one of the block's 64 lines receives 16 partial writes). The same
+-// 4 KiB is written. The write pattern differs.
++// Store all 16 K rows of token block c (tokens c * 16 + t) into a packed
++// plane with full-line stores. For each of the 4 dimension steps, the 16
++// rows' 16 dimension pairs (one 64-byte load per row) are transposed in
++// registers into the panel's 16 pair rows. Each pair row is then written as
++// one 64-byte store. rows[t] points at the 128 bf16 of token t, one native
++// row in dimension order (not packed storage). Every row must be present.
++// Compared with store_row per token, a full block issues 64 stores of whole
++// lines instead of 64 scatters, each writing 4 bytes into 16 lines (every
++// one of the block's 64 lines receives 16 partial writes). The same 4 KiB
++// is written. The write pattern differs.
+ template <size_t Rows, size_t Cols>
+ TRON(inline)
+ void store_block(k_vnni_view<bf16, Rows, Cols> dst,
+     size_t c,
+-    __mmask16 present,
+     const bf16* const rows[k_vnni::BLOCK_TOKENS_16]) noexcept {
+   bf16* const plane = detail::k_vnni_access::plane(dst);
+   for (size_t s = 0; s < k_vnni::DIM_STEPS_4; ++s) {
+     __m512i r[k_vnni::BLOCK_TOKENS_16];
+     for (size_t t = 0; t < k_vnni::BLOCK_TOKENS_16; ++t) {
+-      r[t] = ((present >> t) & 1u)
+-                 ? _mm512_loadu_si512(rows[t] + s * k_vnni::STEP_DIMS_32)
+-                 : _mm512_setzero_si512();
++      r[t] = _mm512_loadu_si512(rows[t] + s * k_vnni::STEP_DIMS_32);
+     }
+     k_vnni::detail::transpose_16x16_epi32(r);
+     bf16* panel = plane + (s * k_vnni::TOKEN_BLOCKS_4 + c) * k_vnni::PANEL_ELEMS_512;
+-    if (present == k_vnni::FULL_BLOCK_0XFFFF) {
+-      for (size_t dp = 0; dp < k_vnni::STEP_PAIRS_16; ++dp) {
+-        _mm512_storeu_si512(panel + dp * k_vnni::ROW_ELEMS_32, r[dp]);
+-      }
+-    } else {
+-      for (size_t dp = 0; dp < k_vnni::STEP_PAIRS_16; ++dp) {
+-        _mm512_mask_storeu_epi32(panel + dp * k_vnni::ROW_ELEMS_32, present, r[dp]);
+-      }
++    for (size_t dp = 0; dp < k_vnni::STEP_PAIRS_16; ++dp) {
++      _mm512_storeu_si512(panel + dp * k_vnni::ROW_ELEMS_32, r[dp]);
+     }
+   }
+ }
+@@ -505,7 +494,7 @@
+         source, c * k_vnni::BLOCK_TOKENS_16 + t, k_destination_row<Cols>(rows[t]));
+     row_ptrs[t] = rows[t];
+   }
+-  store_block(plane, c, k_vnni::FULL_BLOCK_0XFFFF, row_ptrs);
++  store_block(plane, c, row_ptrs);
+ }
+ 
+ // The inverse: block c from the VNNI layout back to row-major, in place.
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -2279,8 +2279,7 @@
+       size_t c,
+       const bf16* const rows[k_vnni::BLOCK_TOKENS_16]) noexcept {
+     TRON_ASSERT_LT(c, page_size / k_vnni::BLOCK_TOKENS_16);
+-    store_block(kv_block<geometry>(slot, kv_head).k.as_view(), c,
+-        k_vnni::FULL_BLOCK_0XFFFF, rows);
++    store_block(kv_block<geometry>(slot, kv_head).k.as_view(), c, rows);
+   }
+ 
+   // Layout-agnostic K row load: the inverse of set_k_row. The destination row
+--- a/t/t_k_vnni_layout.cpp
++++ b/t/t_k_vnni_layout.cpp
+@@ -37,7 +37,6 @@
+ 
+ using tron::k_vnni::BF16_BITS_16;
+ using tron::k_vnni::BLOCK_TOKENS_16;
+-using tron::k_vnni::FULL_BLOCK_0XFFFF;
+ using tron::k_vnni::HEAD_SIZE_128;
+ using tron::k_vnni::LINE_BYTES_64;
+ using tron::k_vnni::PAGE_TOKENS_64;
+@@ -213,25 +212,9 @@
+     "[kv_data][k_vnni]") {
+   // store_block (16 tokens transposed in registers, whole-line stores) is
+   // the prefill store of save_k (Note [Shared block save] in model.hpp). It
+-  // must leave the plane exactly as store_row per present token does. It
+-  // must not touch the slots of absent tokens (poison stays poison). The
+-  // masks cover: full block, single tokens, halves, alternating lanes, the
+-  // empty block, and random subsets.
++  // must leave the plane exactly as store_row for all 16 tokens does.
++  // Every other block must remain unchanged (poison stays poison).
+   constexpr uint32_t SEED_19 = 19;
+-  constexpr unsigned TOKEN_0_0X0001 = 0x0001;
+-  constexpr unsigned TOKEN_15_0X8000 = 0x8000;
+-  constexpr unsigned LOW_HALF_0X00FF = 0x00ff;
+-  constexpr unsigned HIGH_HALF_0XFF00 = 0xff00;
+-  constexpr unsigned EVEN_TOKENS_0X5555 = 0x5555;
+-  constexpr unsigned ODD_TOKENS_0XAAAA = 0xaaaa;
+-  constexpr unsigned EMPTY_BLOCK_0X0000 = 0x0000;
+-  constexpr unsigned MIXED_0X1234 = 0x1234;
+-  constexpr unsigned ALL_BUT_TOKEN_0_0XFFFE = 0xfffe;
+-  constexpr unsigned ALL_BUT_TOKEN_15_0X7FFF = 0x7fff;
+-  constexpr unsigned NIBBLES_0X0F0F = 0x0f0f;
+-  constexpr unsigned TOKEN_1_0X0002 = 0x0002;
+-  constexpr unsigned TOKEN_14_0X4000 = 0x4000;
+-  constexpr int N_RANDOM_MASKS_24 = 24;
+   auto ref = std::make_unique<plane_and_rows>();
+   auto blk = std::make_unique<plane_and_rows>();
+   std::mt19937 gen(SEED_19);
+@@ -239,31 +222,21 @@
+   for (auto& x : ref->rows) {
+     x = tron::bf16::from_bits(bits(gen));
+   }
+-  std::vector<unsigned> masks = {FULL_BLOCK_0XFFFF, TOKEN_0_0X0001, TOKEN_15_0X8000,
+-      LOW_HALF_0X00FF, HIGH_HALF_0XFF00, EVEN_TOKENS_0X5555, ODD_TOKENS_0XAAAA,
+-      EMPTY_BLOCK_0X0000, MIXED_0X1234, ALL_BUT_TOKEN_0_0XFFFE, ALL_BUT_TOKEN_15_0X7FFF,
+-      NIBBLES_0X0F0F, TOKEN_1_0X0002, TOKEN_14_0X4000};
+-  for (int i = 0; i < N_RANDOM_MASKS_24; ++i) {
+-    masks.push_back(bits(gen));
+-  }
+   size_t checked = 0;
+   for (size_t c = 0; c < TOKEN_BLOCKS_4; ++c) {
+-    for (unsigned m : masks) {
+-      poison_plane(ref->plane, POISON_0XA5A5);
+-      blk->plane = ref->plane;  // the owner copy: same bytes
+-      const tron::bf16* rows[BLOCK_TOKENS_16] = {};
+-      for (size_t t = 0; t < BLOCK_TOKENS_16; ++t) {
+-        if (!((m >> t) & 1u)) continue;
+-        const size_t tok = c * BLOCK_TOKENS_16 + t;
+-        rows[t] = ref->rows + tok * HEAD_SIZE_128;
+-        tron::store_row(ref->plane.as_view(), tok, row_of(*ref, tok));
+-      }
+-      tron::store_block(blk->plane.as_view(), c, __mmask16(m), rows);
+-      REQUIRE(std::memcmp(&blk->plane, &ref->plane, sizeof(ref->plane)) == 0);
+-      ++checked;
+-    }
+-  }
+-  REQUIRE(checked == TOKEN_BLOCKS_4 * masks.size());
++    poison_plane(ref->plane, POISON_0XA5A5);
++    blk->plane = ref->plane;  // the owner copy: same bytes
++    const tron::bf16* rows[BLOCK_TOKENS_16];
++    for (size_t t = 0; t < BLOCK_TOKENS_16; ++t) {
++      const size_t tok = c * BLOCK_TOKENS_16 + t;
++      rows[t] = ref->rows + tok * HEAD_SIZE_128;
++      tron::store_row(ref->plane.as_view(), tok, row_of(*ref, tok));
++    }
++    tron::store_block(blk->plane.as_view(), c, rows);
++    REQUIRE(std::memcmp(&blk->plane, &ref->plane, sizeof(ref->plane)) == 0);
++    ++checked;
++  }
++  REQUIRE(checked == TOKEN_BLOCKS_4);
+   SECTION("a block save on top of other blocks changes only its own block") {
+     constexpr size_t NEW_BLOCK_2 = 2;
+     constexpr size_t NEW_FIRST_TOKEN_32 = NEW_BLOCK_2 * BLOCK_TOKENS_16;
+@@ -286,7 +259,7 @@
+       tron::store_row(ref->plane.as_view(), NEW_FIRST_TOKEN_32 + t,
+           row_of(*ref, NEW_FIRST_TOKEN_32 + t));
+     }
+-    tron::store_block(blk->plane.as_view(), NEW_BLOCK_2, FULL_BLOCK_0XFFFF, rows);
++    tron::store_block(blk->plane.as_view(), NEW_BLOCK_2, rows);
+     REQUIRE(std::memcmp(&blk->plane, &ref->plane, sizeof(ref->plane)) == 0);
+     alignas(64) tron::bf16 row[HEAD_SIZE_128];
+     for (size_t tok = 0; tok < PAGE_TOKENS_64; ++tok) {

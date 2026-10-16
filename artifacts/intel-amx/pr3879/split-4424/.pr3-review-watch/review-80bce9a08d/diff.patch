@@ -1,0 +1,1074 @@
+diff --git a/h/tron/kernels/amx_attn_iface.hpp b/h/tron/kernels/amx_attn_iface.hpp
+index ece635a836..08500ebf9e 100644
+--- a/h/tron/kernels/amx_attn_iface.hpp
++++ b/h/tron/kernels/amx_attn_iface.hpp
+@@ -224,9 +224,11 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+ // takes the 4 query rows, padded to 16 rows, as the A operand. The 16 K panels
+ // of the page (a panel is 16 dimension-pair rows x 16 tokens, one B tile;
+ // h/tron/tensor/k_vnni.hpp) are the B operand. The tiles come out as
+-// S[query][token]. No transpose is needed. The extra work moves to the K store
+-// (a scatter of 64 dimension pairs per token, in save_k) and to the software
+-// reader k_vnni::qk_group for partial pages.
++// S[query][token]. No transpose is needed. The extra work moves to two places.
++// The K store scatters 64 dimension pairs per token when the token's run has
++// one token (save_k, page::set_k_row). A run of two or more consecutive tokens
++// of one block uses the block save (page::set_k_block). The software reader for
++// partial pages runs k_vnni::qk_group instead of the row-major dotter.
+ 
+ // Dense QK for one page: computes S^T = K_page . Q^T in tiles and transposes
+ // on the way out (see Note [QK orientation]); writes s[4][s_stride_floats]
+diff --git a/h/tron/models/common.hpp b/h/tron/models/common.hpp
+index 6b75859fa9..ed756ff03c 100644
+--- a/h/tron/models/common.hpp
++++ b/h/tron/models/common.hpp
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
+ #include <algorithm>
++#include <array>
++#include <atomic>
+ #include <compare>
+ #include <cstdint>
+ #include <span>
+@@ -1162,6 +1164,33 @@ struct batch : noncopyable<batch<model>> {
+   // Knowing whether the main and helper threads are done with this layer
+   latch_ref layer_done;
+ 
++  // The K store window of this minibatch, one per (layer, pass). The main
++  // thread opens it in save_k. The main helpers join it from the generated
++  // run_main_help. See Note [Shared block save] in model.hpp.
++  struct k_store_window_t {
++    // Worker counts above this take the unshared store (k_store_shared).
++    // This value is the array size of helper_windows below.
++    static constexpr size_t max_shared_workers = 128;
++    // The claim counter is on its own cache line. A claim must not
++    // invalidate the line the waiting threads poll.
++    alignas(cache_line_size) std::atomic<uint32_t> next_unit{0};
++    // Windows opened so far in this pass.
++    alignas(cache_line_size) std::atomic<uint32_t> opened{0};
++    std::atomic<uint32_t> finished{0};  // helpers done with the open window
++    uint32_t n_units = 0;               // work units of the open window
++    // Work unit u = items[unit_start[u], unit_start[u + 1]). A unit never
++    // crosses a page, a 16-token page block, or a change of
++    // token_jobs_do_kv. Items of one block that are not consecutive (a job
++    // without KV work between them, or a partner job moved to the end of a
++    // grain) fall into several units. Their writers touch disjoint token
++    // lanes (masked stores). So two threads may write one block without
++    // conflict. When a run fills the block, each pair row is written with
++    // one full-line store.
++    std::array<uint32_t, model::state::max_minibatch_size + 1> unit_start{};
++    // Windows a helper has entered, by worker_ix (the helper's own slot).
++    // The array size bounds the worker count of a shared store (k_store_shared).
++    std::array<uint32_t, max_shared_workers> helper_windows{};
++  } k_store_window;
+   // Note [Matrix callback lifetime]
+   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   // A matmul's completion callback runs on an RX thread and finishes this
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index 2395bbbde9..8391e5764d 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -663,8 +663,8 @@ struct kv_slot_offsets final {
+ // The plane is typed. kv_block::k is a k_vnni_tensor (the owner of the 16 KiB
+ // plane) for a VNNI slot and a bf16 array for a row-major slot. The plane is
+ // reached only through the owner's views (k_vnni_view) and the typed
+-// operations of h/tron/tensor/k_vnni.hpp (store_row, load_row, copy_token).
+-// No raw plane pointer leaves the cache. detail::k_vnni_access is
++// operations of h/tron/tensor/k_vnni.hpp (store_row, load_row, store_block,
++// copy_token). No raw plane pointer leaves the cache. detail::k_vnni_access is
+ // the one route from a view to the plane address, for those operations, the
+ // two score kernels and the test-only book::fill_random. That mirrors the
+ // packed V plane (Note [VNNI Packed V layout]).
+@@ -675,11 +675,19 @@ struct kv_slot_offsets final {
+ // (Note [QK orientation] in amx_attn_iface.hpp) is not needed.
+ //
+ // Consumers of a VNNI slot, and how each one changes:
+-//   1. save_k (model.hpp) stores every token's row with page::set_k_row. That
+-//      store scatters the 64 dimension pairs into the token's column
+-//      (store_row). It issues 4 AVX-512 scatters that together write 4 bytes
+-//      into each of 64 64-byte pair rows. The row-major store was 4 64-byte
+-//      stores per token. TRON_AMX_DISABLE leaves the store untouched.
++//   1. save_k (model.hpp) stores K with page::set_k_block when a run of the
++//      pass's tokens fills (part of) one 16-token block of a page. The 16
++//      rows are transposed in registers. Every 64-byte pair row of the four
++//      panels (a panel: the 16 pair rows of one 32-dimension step for one 16-token
++//      block, 1 KiB) is written whole (store_block). A run of one
++//      token (decode: one token per user per step) is stored with
++//      page::set_k_row. That store scatters the 64 dimension pairs into the
++//      token's column (store_row). It issues 4 AVX-512 scatters
++//      that together write 4 bytes into each of 64 64-byte pair rows. The
++//      row-major store was 4 64-byte stores per token. When a pass holds
++//      more than 16 tokens the store may be shared with the idle main helpers
++//      (Note [Shared block save] in model.hpp). TRON_AMX_DISABLE leaves both
++//      store paths untouched.
+ //   2. the dense AMX page path (self_attention.hpp) passes page::k_packed, the
+ //      read-only view of the plane, to qk_vnni_128x4.
+ //   3. every other visit of a VNNI slot uses k_vnni::qk_group with the same
+@@ -2020,6 +2028,26 @@ struct alignas(64) page final {
+     }
+   }
+ 
++  // K rows of up to 16 tokens of one 16-token block of this page, stored at
++  // once (VNNI slots only, Note [K VNNI storage] item 1). Block c holds the
++  // page offsets c * 16 .. c * 16 + 15. Bit t of `present` says that rows[t]
++  // (128 bf16) is the row of offset c * 16 + t. The other offsets are left
++  // untouched. The result is bit-identical to set_k_row per present token
++  // (store_block). The difference is the write pattern. The 16 row pointers are
++  // native source rows in dimension order, not packed storage.
++  template <kv_geometry geometry>
++    requires(book_t::template declares_geometry<geometry>() &&
++             k_vnni::layout_on<geometry.head_size>)
++  TRON(inline)
++  void set_k_block(kv_slot_id slot,
++      size_t kv_head,
++      size_t c,
++      __mmask16 present,
++      const bf16* const rows[k_vnni::BLOCK_TOKENS_16]) noexcept {
++    TRON_ASSERT_LT(c, page_size / k_vnni::BLOCK_TOKENS_16);
++    store_block(kv_block<geometry>(slot, kv_head).k.as_view(), c, present, rows);
++  }
++
+   // Layout-agnostic K row load: the inverse of set_k_row. The destination row
+   // is a writable typed view. The packed load writes it with unaligned stores.
+   template <kv_geometry geometry, bool Aligned, bool Dma>
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index 679a97e446..be70c5c1bd 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -7,11 +7,13 @@
+ #include <atomic>  // For gof_coop_outstanding_
+ #include <cerrno>
+ #include <charconv>
++#include <chrono>    // For the join watchdog (Note [Shared block save])
+ #include <concepts>  // For std::convertible_to
+ #include <cstdio>    // For std::remove
+ #include <cstdlib>
+ #include <fstream>
+-#include <functional>  // For std::function (kv_save_observer_t)
++#include <functional>   // For std::function (kv_save_observer_t)
++#include <immintrin.h>  // For _mm_pause (Note [Shared block save])
+ #include <iomanip>
+ #include <limits>
+ #include <mutex>
+@@ -3073,14 +3075,247 @@ public:
+       }
+     }
+ 
++    // Note [Shared block save]
++    // ~~~~~~~~~~~~~~~~~~~~~~~~
++    // save_k stores the K rows of every token of the minibatch once per
++    // (layer, pass). With the VNNI K layout (VNNI = Vector Neural Network
++    // Instructions, Note [K VNNI storage] in kv_cache.hpp) and one set_k_row
++    // scatter per token on the main thread alone, that store is the main
++    // thread's largest serial piece of work in a prefill layer. The
++    // measurement of 2026-09-14 on the test server delphi-3bda (model
++    // qwen3-4b, 8 users, prompt 1024, 128 tokens of each user per pass) gave
++    // 0.86 ms per layer, 105 ns per (token, KV head) row for that per-token
++    // store. The attention workers' pending sections wait behind it. Two
++    // things shorten it:
++    //   1. Block save (store_block in h/tron/tensor/k_vnni.hpp, page::set_k_block):
++    //      a run of the pass's tokens that fills (part of) one 16-token block of
++    //      a page is transposed in registers. It is then written as whole 64-byte
++    //      lines, instead of one 4-byte scatter per (token, dimension pair, line).
++    //      Chosen per run in store_k_block.
++    //   2. Sharing with the main helpers: in generated plugins the helpers
++    //      are idle while main runs save_k. Their next kernel waits for the
++    //      attention output. So the generated run_main_help calls save_k at
++    //      the same statement position, with the helper's worker_ix. One
++    //      function serves both sides: worker_ix 0 is main, 1 .. n_workers - 1
++    //      are the helpers. Every thread then claims work units (runs of
++    //      consecutive items inside one 16-token block, see the protocol
++    //      below) until none is left. n_workers == 1 never shares (the
++    //      handwritten plugins, and the unit tests except the shared-save case
++    //      of t_llama_unit).
++    // The window protocol (fields in batch::k_store_window, common.hpp):
++    //   - both sides decide with k_store_shared(). A window exists only
++    //     when it says yes. So a helper never waits for a window main does
++    //     not open. (A pass with at most 16 items, such as a decode step, or
++    //     more than 128 workers is not shared.)
++    //   - main cuts the item list into work units (unit_start[]). A unit is a
++    //     run of consecutive items in one 16-token block of one page with the
++    //     same token_jobs_do_kv value. Items of one block that are not
++    //     consecutive fall into several units. Their writers use masked
++    //     stores on disjoint token lanes. So two threads may write one block
++    //     without conflict. When a run fills the block, the block gets one
++    //     full-line store per pair row. Main then zeroes the claim counter
++    //     and `finished`. Next it increments `opened` (release). A helper's
++    //     W-th call waits for `opened` >= W
++    //     (acquire). So window W of a pass is the W-th shared save_k of that
++    //     pass on both sides.
++    //   - every thread claims units with fetch_add on `next_unit`. It stores
++    //     the rows of each unit it claims. A unit index is assigned once. So
++    //     a thread that leaves the claim loop has stored every unit it took.
++    //   - a helper increments `finished` (release) when its claim loop ends.
++    //     Main returns only when `finished` == n_workers - 1 (acquire). Four
++    //     things follow once main returns. Every unit is stored. No helper is
++    //     inside a window main has left. The counters are main's to reset.
++    //     Every row store happens-before the downstream latch count_down
++    //     below.
++    //   - the per-token completion marks and GOF credits stay on main, after
++    //     the join, in q_batch->items order, one token at a time.
++    // The rows a helper reads (ks) are ready for two reasons. Main waited for
++    // every token's K channel before calling save_k (the generated code). The
++    // channel phase cannot advance while main is inside save_k. A helper can
++    // reach its save_k call without main's help. Nothing blocks between its
++    // K/Q rope kernel and this statement. So main's join cannot deadlock. A
++    // join that does not complete within about two minutes
++    // (k_join_timeout_s after the first clock read) aborts with the
++    // counters in the message.
++
++    // Tokens per page block: the size of one block save and the longest run.
++    static constexpr size_t k_store_block = k_vnni::BLOCK_TOKENS_16;
++    // A run of this length is stored row by row (set_k_row), not as a block.
++    static constexpr size_t k_scatter_run_len = 1;
++    // The join watchdog of Note [Shared block save]: main reads the clock once
++    // every k_join_clock_spins pause loops. It aborts k_join_timeout_s seconds
++    // after the first clock read.
++    static constexpr uint64_t k_join_clock_spins = 1048576;  // 2^20
++    static_assert((k_join_clock_spins & (k_join_clock_spins - 1)) == 0,
++        "the spin count is a power of two: the check below masks with it");
++    static constexpr int k_join_timeout_s = 120;
++
++    // Whether the K store of this minibatch is shared with the helpers. The
++    // answer is the same on the main thread and on every helper.
++    template <attention_geometry geometry>
++    bool k_store_shared(batch* q_batch, size_t n_workers) const noexcept {
++      if constexpr (!k_vnni::layout_on<geometry.kv.head_size>) {
++        return false;
++      } else {
++        return n_workers > 1 &&
++               n_workers <= q_batch->k_store_window.helper_windows.size() &&
++               q_batch->items.size() > k_store_block;
++      }
++    }
++
++    // Cut the minibatch's items into the work units of Note [Shared block save].
++    // Only main calls this, before it opens the window.
++    void k_store_cut_units(batch* q_batch) noexcept {
++      auto& w = q_batch->k_store_window;
++      auto const& self = *this;
++      const size_t n_items = q_batch->items.size();
++      TRON_ASSERT(n_items + 1 <= w.unit_start.size(),
++          "save_k: {} items exceed the K store window's unit table", n_items);
++      uint32_t n_units = 0;
++      const page* run_page = nullptr;
++      size_t run_block = 0;
++      bool run_kv = false;
++      for (size_t t = 0; t < n_items; ++t) {
++        const token_job_id ix = q_batch->items[t];
++        const bool kv = self.token_jobs_do_kv[ix] != 0;
++        const page* pg = kv ? &page_of(token_jobs[ix]) : nullptr;
++        const size_t block =
++            kv ? static_cast<size_t>(pg->offset_in_page(token_jobs[ix])) / k_store_block
++               : 0;
++        if (t == 0 || kv != run_kv || pg != run_page || block != run_block) {
++          w.unit_start[n_units++] = static_cast<uint32_t>(t);
++          run_kv = kv;
++          run_page = pg;
++          run_block = block;
++        }
++      }
++      w.unit_start[n_units] = static_cast<uint32_t>(n_items);
++      w.n_units = n_units;
++    }
++
++    // Store the K rows (every KV head) of the tokens items[task_begin,
++    // task_end) of q_batch into slot `slot`. VNNI slots: consecutive items
++    // that fall into the same 16-token block of the same page are stored as
++    // one block (set_k_block). A run of one token is stored with set_k_row
++    // (scatter). Row-major slots: one row store per token and KV head
++    // (page::k(...).set). Marks and credits are not touched here. save_k_impl
++    // does them after every store is done.
++    template <attention_geometry geometry, typename kv_buffer_t>
++    void store_k_block(batch* q_batch,
++        kv_slot_id slot,
++        kv_buffer_t& ks,
++        size_t task_begin,
++        size_t task_end) noexcept {
++      auto const& self = *this;
++      auto row_of = [&](token_job_id ix, size_t kv_head) {
++        return slice<geometry.kv.head_size>()(
++            ks[ix].as_view(), kv_head * geometry.kv.head_size);
++      };
++      if constexpr (!k_vnni::layout_on<geometry.kv.head_size>) {
++        for (size_t t = task_begin; t < task_end; ++t) {
++          token_job_id ix = q_batch->items[t];
++          if (!self.token_jobs_do_kv[ix]) continue;
++          token_id tok_ix = token_jobs[ix];
++          page& pg = page_of(tok_ix);
++          int j = pg.offset_in_page(tok_ix);
++          for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
++            pg.template k<geometry.kv>(slot, kv_head, j).set(row_of(ix, kv_head));
++          }
++        }
++      } else {
++        using kv_elem_t = std::remove_cv_t<
++            std::remove_pointer_t<decltype(row_of(token_job_id{0}, 0).data)>>;
++        constexpr bool rows_are_bf16 = std::is_same_v<kv_elem_t, bf16>;
++        // A bf16 K buffer is read in place. Any other activation type is
++        // converted to bf16 on the stack first, as the row-major store does
++        // in place.
++        alignas(64) bf16 conv[k_store_block][geometry.kv.head_size];
++        size_t t = task_begin;
++        while (t < task_end) {
++          const token_job_id ix0 = q_batch->items[t];
++          if (!self.token_jobs_do_kv[ix0]) {
++            ++t;
++            continue;
++          }
++          page& pg = page_of(token_jobs[ix0]);
++          const size_t c =
++              static_cast<size_t>(pg.offset_in_page(token_jobs[ix0])) / k_store_block;
++          // The run: consecutive items in block c of this page (tokens
++          // without KV work in between are skipped and do not end the run).
++          token_job_id run_ix[k_store_block];
++          uint8_t run_t[k_store_block];
++          size_t n = 0;
++          __mmask16 present = 0;
++          for (; t < task_end && n < k_store_block; ++t) {
++            const token_job_id ix = q_batch->items[t];
++            if (!self.token_jobs_do_kv[ix]) continue;
++            const token_id tok_ix = token_jobs[ix];
++            if (&page_of(tok_ix) != &pg) break;
++            const size_t j = static_cast<size_t>(pg.offset_in_page(tok_ix));
++            if (j / k_store_block != c) break;
++            const __mmask16 bit = __mmask16(1u << (j % k_store_block));
++            if (present & bit) break;  // the same offset twice: not a run
++            run_ix[n] = ix;
++            run_t[n] = static_cast<uint8_t>(j % k_store_block);
++            present |= bit;
++            ++n;
++          }
++          if (n == k_scatter_run_len) {
++            for (size_t i = 0; i < n; ++i) {
++              const size_t j = c * k_store_block + run_t[i];
++              for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
++                auto kout = row_of(run_ix[i], kv_head);
++                if constexpr (rows_are_bf16) {
++                  // The row view keeps the K buffer's alignment and DMA flags.
++                  pg.template set_k_row<geometry.kv>(
++                      slot, kv_head, j, k_source_row(kout));
++                } else {
++                  k_destination_row<geometry.kv.head_size>(conv[0]).set(kout);
++                  pg.template set_k_row<geometry.kv>(
++                      slot, kv_head, j, k_source_row<geometry.kv.head_size>(conv[0]));
++                }
++              }
++            }
++          } else {
++            for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
++              const bf16* rows[k_store_block] = {};
++              for (size_t i = 0; i < n; ++i) {
++                auto kout = row_of(run_ix[i], kv_head);
++                if constexpr (rows_are_bf16) {
++                  rows[run_t[i]] = kout.data;
++                } else {
++                  k_destination_row<geometry.kv.head_size>(conv[i]).set(kout);
++                  rows[run_t[i]] = conv[i];
++                }
++              }
++              pg.template set_k_block<geometry.kv>(slot, kv_head, c, present, rows);
++            }
++          }
++        }
++      }
++    }
++
++    // Every worker of the store calls this (Note [Shared block save]).
++    // Worker 0 is main. It opens the window, stores its share, joins the
++    // helpers, then marks the tokens.
++    // Workers 1 .. n_workers - 1 are main helpers. Each waits for its
++    // window, stores its share and returns.
+     template <attention_geometry geometry, typename kv_buffer_t>
+     void save_k_impl(batch* q_batch,
+         attention_operation_descriptor const& operation,
+-        kv_buffer_t& ks) noexcept {
++        kv_buffer_t& ks,
++        size_t worker_ix,
++        size_t n_workers) noexcept {
+       static_assert(geometry.valid());
+       static_assert(attention_buffer_width<kv_buffer_t> == geometry.kv_width());
+       TRON_ASSERT(operation.writes_kv, "attention operation {} does not write KV",
+           operation.binding.operation);
++      TRON_ASSERT(worker_ix < n_workers,
++          "save_k: worker_ix {} is not below n_workers {}", worker_ix, n_workers);
++      const bool is_main = worker_ix == 0;
++      const bool shared = k_store_shared<geometry>(q_batch, n_workers);
++      // An unshared store is main's alone.
++      if (!is_main && !shared) return;
+       const attention_binding binding = operation.binding;
+       TRACE_EVENT("model", "Save K");
+       const model_layer_id layer = binding.model_layer;
+@@ -3088,6 +3323,52 @@ public:
+       tron_maybe_unused const bool has_hardware_slot =
+           geometry == self_attn_t::hardware_geometry &&
+           operation_is_hardware_candidate(operation);
++      const size_t n_items = q_batch->items.size();
++      // Update the pages first. That way HW sees the latest K values.
++      if (shared) {
++        // See Note [Shared block save].
++        auto& w = q_batch->k_store_window;
++        const uint32_t n_helpers = static_cast<uint32_t>(n_workers - 1);
++        if (is_main) {
++          k_store_cut_units(q_batch);
++          w.next_unit.store(0, std::memory_order_relaxed);
++          w.finished.store(0, std::memory_order_relaxed);
++          w.opened.fetch_add(1, std::memory_order_release);
++        } else {
++          const uint32_t my_window = ++w.helper_windows[worker_ix];
++          while (w.opened.load(std::memory_order_acquire) < my_window) {
++            _mm_pause();
++          }
++        }
++        const uint32_t n_units = w.n_units;
++        for (;;) {
++          const uint32_t u = w.next_unit.fetch_add(1, std::memory_order_acq_rel);
++          if (u >= n_units) break;
++          store_k_block<geometry>(
++              q_batch, slot, ks, w.unit_start[u], w.unit_start[u + 1]);
++        }
++        if (!is_main) {
++          w.finished.fetch_add(1, std::memory_order_release);
++          return;
++        }
++        uint64_t spins = 0;
++        std::chrono::steady_clock::time_point t0{};
++        while (w.finished.load(std::memory_order_acquire) < n_helpers) {
++          _mm_pause();
++          if ((++spins & (k_join_clock_spins - 1)) == 0) {
++            const auto now = std::chrono::steady_clock::now();
++            if (t0 == std::chrono::steady_clock::time_point{}) t0 = now;
++            TRON_ASSERT(now - t0 < std::chrono::seconds(k_join_timeout_s),
++                "save_k: the K store window did not close in {} s ({} of {} helpers "
++                "finished, {} of {} units claimed). The helpers' save_k calls do not "
++                "match this one",
++                k_join_timeout_s, w.finished.load(), n_helpers,
++                std::min<uint32_t>(w.next_unit.load(), n_units), n_units);
++          }
++        }
++      } else {
++        store_k_block<geometry>(q_batch, slot, ks, 0, n_items);
++      }
+       for (token_job_id ix : q_batch->items) {
+         auto const& self = *this;
+         if (!self.token_jobs_do_kv[ix]) continue;
+@@ -3095,34 +3376,6 @@ public:
+         token_id tok_ix = token_jobs[ix];
+         page& pg = page_of(tok_ix);
+         int j = pg.offset_in_page(tok_ix);
+-
+-        // Update the page first so HW sees the latest K values.
+-        for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+-          auto kout = slice<geometry.kv.head_size>()(
+-              ks[ix].as_view(), kv_head * geometry.kv.head_size);
+-          if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
+-            // VNNI K plane (Note [K VNNI storage] in kv_cache.hpp): the row is
+-            // scattered into the token's column of the plane (page::set_k_row).
+-            // A bf16 K buffer is read in place. Any other activation type is
+-            // converted to bf16 on the stack first, as the row-major store
+-            // does in place.
+-            using kv_elem_t =
+-                std::remove_cv_t<std::remove_pointer_t<decltype(kout.data)>>;
+-            if constexpr (std::is_same_v<kv_elem_t, bf16>) {
+-              // The row view keeps the K buffer's alignment and DMA flags.
+-              pg.template set_k_row<geometry.kv>(
+-                  slot, kv_head, static_cast<size_t>(j), k_source_row(kout));
+-            } else {
+-              alignas(64) bf16 row[geometry.kv.head_size];
+-              k_destination_row<geometry.kv.head_size>(row).set(kout);
+-              pg.template set_k_row<geometry.kv>(slot, kv_head, static_cast<size_t>(j),
+-                  k_source_row<geometry.kv.head_size>(row));
+-            }
+-          } else {
+-            pg.template k<geometry.kv>(slot, kv_head, j).set(kout);
+-          }
+-        }
+-
+         pg.mark_k_complete(slot, static_cast<size_t>(j));
+         // Drive the per-GOF dispatch counter. See Note [GOF dispatch
+         // synchronization].
+@@ -3135,20 +3388,31 @@ public:
+         batch_2->upstream_kvs_ready[slot].count_down();
+     }
+ 
++    // Store the K rows of the minibatch. Main (worker_ix 0) and the main
++    // helpers (worker_ix 1 .. n_workers - 1) call this with the same
++    // operation at the same point of the schedule. In the generated plugins,
++    // run() passes 0 and n_workers, and run_main_help passes its worker_ix
++    // and n_workers. See Note [Shared block save]. The defaults store every
++    // row on the calling thread.
+     template <attention_geometry geometry, size_t operation_ix, typename kv_buffer_t>
+-    void save_k(batch* q_batch, kv_buffer_t& ks) noexcept {
++    void save_k(batch* q_batch,
++        kv_buffer_t& ks,
++        size_t worker_ix = 0,
++        size_t n_workers = 1) noexcept {
+       constexpr auto const& operation =
+           generated_attention_operation<geometry, operation_ix>();
+       static_assert(operation.writes_kv);
+-      save_k_impl<geometry>(q_batch, operation, ks);
++      save_k_impl<geometry>(q_batch, operation, ks, worker_ix, n_workers);
+     }
+ 
+     template <attention_geometry geometry, typename kv_buffer_t>
+     void save_k(batch* q_batch,
+         attention_operation_descriptor const& operation,
+-        kv_buffer_t& ks) noexcept {
++        kv_buffer_t& ks,
++        size_t worker_ix = 0,
++        size_t n_workers = 1) noexcept {
+       self_attn_state.template validate_operation<geometry>(operation);
+-      save_k_impl<geometry>(q_batch, operation, ks);
++      save_k_impl<geometry>(q_batch, operation, ks, worker_ix, n_workers);
+     }
+ 
+     template <attention_geometry geometry, typename kv_buffer_t>
+diff --git a/h/tron/tensor/k_vnni.hpp b/h/tron/tensor/k_vnni.hpp
+index cd930525d9..9030e79eae 100644
+--- a/h/tron/tensor/k_vnni.hpp
++++ b/h/tron/tensor/k_vnni.hpp
+@@ -3,9 +3,9 @@
+ // (TRON_K_VNNI): an owner that holds the bytes (k_vnni_tensor), a matrix view
+ // that knows the address formula (k_vnni_view), the index map and its
+ // constants (namespace k_vnni), and the vector operations that move whole token
+-// rows in and out (store_row, load_row, copy_token). The AVX-512 score reader
+-// of this layout is in h/tron/kernels/k_vnni.hpp and the AMX QK kernel in
+-// h/tron/kernels/amx_attn_iface.hpp. Who writes and
++// rows in and out (store_row, load_row, store_block, copy_token). The AVX-512
++// score reader of this layout is in h/tron/kernels/k_vnni.hpp and the AMX QK
++// kernel in h/tron/kernels/amx_attn_iface.hpp. Who writes and
+ // reads the layout is described in Note [K VNNI storage] (kv_cache.hpp).
+ //
+ // Words used here: AMX (Advanced Matrix Extensions) is the tile instruction
+@@ -34,7 +34,7 @@
+ // amx_attn_h128g4::qk_vnni_128x4), which reach the plane through
+ // detail::k_vnni_access. Cache code, the model, hardware staging and the tests
+ // use the typed operations or the page accessors built on them (page::set_k_row,
+-// page::get_k_row, page::k_packed). book::fill_random is the
++// page::get_k_row, page::set_k_block, page::k_packed). book::fill_random is the
+ // one documented exception: it fills a whole kv_block without interpreting
+ // coordinates.
+ 
+@@ -77,6 +77,10 @@ inline constexpr size_t PANEL_ELEMS_512 = STEP_PAIRS_16 * BLOCK_TOKENS_16 * PAIR
+ inline constexpr size_t PANEL_BYTES_1024 = PANEL_ELEMS_512 * sizeof(bf16);
+ inline constexpr size_t PANEL_DWORDS_256 = PANEL_BYTES_1024 / DWORD_BYTES_4;
+ inline constexpr size_t N_PANELS_16 = DIM_STEPS_4 * TOKEN_BLOCKS_4;
++// The 16 lanes of one token block, all present.
++inline constexpr __mmask16 FULL_BLOCK_0XFFFF = 0xffffu;
++// 32-bit lanes of one 512-bit register (the transpose below is LANES x LANES).
++inline constexpr size_t LANES_16 = LINE_BYTES_64 / DWORD_BYTES_4;
+ // Width of a bf16: a bf16 shifted up by this many bits is the exact fp32.
+ inline constexpr int BF16_BITS_16 = 16;
+ // The high half of a dword: the odd value of a dimension pair as an fp32 bit pattern.
+@@ -84,10 +88,12 @@ inline constexpr uint32_t HIGH_HALF_0XFFFF0000 = 0xffff0000u;
+ static_assert(BLOCK_TOKENS_16 == 16 && TOKEN_BLOCKS_4 == 4 && STEP_PAIRS_16 == 16 &&
+                   DIM_STEPS_4 == 4 && ROW_ELEMS_32 == 32 && ROW_DWORDS_16 == 16 &&
+                   PANEL_ELEMS_512 == 512 && PANEL_BYTES_1024 == 1024 &&
+-                  PANEL_DWORDS_256 == 256 && N_PANELS_16 == 16,
++                  PANEL_DWORDS_256 == 256 && N_PANELS_16 == 16 && LANES_16 == 16,
+     "every constant's name states its value");
+ static_assert(N_PANELS_16 * PANEL_ELEMS_512 == PAGE_TOKENS_64 * HEAD_SIZE_128,
+     "the VNNI plane is a permutation of the row-major plane: same element count");
++static_assert(BLOCK_TOKENS_16 == LANES_16 && STEP_PAIRS_16 == LANES_16,
++    "the block save transposes 16 token rows onto the 16 pair rows of a panel");
+ 
+ // The layout gate. TRON_K_VNNI (CMake option) switches the K plane of every
+ // 128-dimension head to the VNNI layout. Every other head size keeps the row-major
+@@ -128,7 +134,7 @@ concept k_vnni_element = std::same_as<T, bf16> || std::same_as<T, const bf16>;
+ 
+ // A packed K plane of [Rows tokens * Cols dimensions]. One element is read
+ // through at(token, dim). There is no element write: rows enter through the
+-// operations below (store_row, load_row, copy_token). Views come
++// operations below (store_row, load_row, store_block, copy_token). Views come
+ // only from an owner (k_vnni_tensor::as_view). A writable view (bf16) converts
+ // to a read-only one (const bf16), never the reverse. There is no public
+ // pointer constructor, no data() accessor, no operator[] and no pointer
+@@ -150,7 +156,7 @@ struct k_vnni_view final {
+   : data_(other.data_) {}
+ 
+   // Bounds-checked read of element (token, dim). There is no element write:
+-  // rows enter through store_row and copy_token.
++  // rows enter through store_row, store_block and copy_token.
+   TRON(nodiscard, inline, pure)
+   const bf16& at(size_t token, size_t dim) const noexcept {
+     TRON_ASSERT_LT(token, Rows);
+@@ -281,14 +287,46 @@ __m512i pair_row_offsets() noexcept {
+       8 * ROW_STRIDE_16, 7 * ROW_STRIDE_16, 6 * ROW_STRIDE_16, 5 * ROW_STRIDE_16,
+       4 * ROW_STRIDE_16, 3 * ROW_STRIDE_16, 2 * ROW_STRIDE_16, 1 * ROW_STRIDE_16, 0);
+ }
++// In-place transpose of a 16 x 16 matrix of 32-bit lanes. On return r[i]
++// holds lane i of every input register (input register t in lane t). Four
++// stages of two-register shuffles, 64 shuffles in all.
++TRON(inline)
++void transpose_16x16_epi32(__m512i (&r)[LANES_16]) noexcept {
++  // Selectors of _mm512_shuffle_i32x4: the even 128-bit quarters of both
++  // inputs (0x88) or the odd quarters (0xdd).
++  constexpr int EVEN_QUARTERS_0X88 = 0x88;
++  constexpr int ODD_QUARTERS_0XDD = 0xdd;
++  __m512i t[LANES_16];
++  for (size_t i = 0; i < LANES_16 / 2; ++i) {
++    t[2 * i] = _mm512_unpacklo_epi32(r[2 * i], r[2 * i + 1]);
++    t[2 * i + 1] = _mm512_unpackhi_epi32(r[2 * i], r[2 * i + 1]);
++  }
++  for (size_t i = 0; i < LANES_16 / 4; ++i) {
++    r[4 * i] = _mm512_unpacklo_epi64(t[4 * i], t[4 * i + 2]);
++    r[4 * i + 1] = _mm512_unpackhi_epi64(t[4 * i], t[4 * i + 2]);
++    r[4 * i + 2] = _mm512_unpacklo_epi64(t[4 * i + 1], t[4 * i + 3]);
++    r[4 * i + 3] = _mm512_unpackhi_epi64(t[4 * i + 1], t[4 * i + 3]);
++  }
++  for (size_t i = 0; i < LANES_16 / 4; ++i) {
++    t[i] = _mm512_shuffle_i32x4(r[i], r[i + 4], EVEN_QUARTERS_0X88);
++    t[i + 4] = _mm512_shuffle_i32x4(r[i], r[i + 4], ODD_QUARTERS_0XDD);
++    t[i + 8] = _mm512_shuffle_i32x4(r[i + 8], r[i + 12], EVEN_QUARTERS_0X88);
++    t[i + 12] = _mm512_shuffle_i32x4(r[i + 8], r[i + 12], ODD_QUARTERS_0XDD);
++  }
++  for (size_t i = 0; i < LANES_16 / 2; ++i) {
++    r[i] = _mm512_shuffle_i32x4(t[i], t[i + 8], EVEN_QUARTERS_0X88);
++    r[i + 8] = _mm512_shuffle_i32x4(t[i], t[i + 8], ODD_QUARTERS_0XDD);
++  }
++}
+ }  // namespace k_vnni::detail
+ 
+ // Store one token's 128-dimension K row into a packed plane. This takes 4
+ // scatters of 16 dwords (one dimension pair each), one per dimension step. Only
+-// this token's 64 pair slots are written. The row is read with unaligned loads.
+-// The token index is checked here, as the packed-V operations check theirs: an
+-// index at or above Rows would scatter into other tokens' slots and past the end
+-// of the plane.
++// this token's 64 pair slots are written. So several threads may store
++// different tokens of one plane at the same time (Note [Shared block save] in
++// model.hpp). The row is read with unaligned loads. The token index is checked
++// here, as the packed-V operations check theirs: an index at or above Rows
++// would scatter into other tokens' slots and past the end of the plane.
+ template <size_t Rows, size_t Cols, bool Aligned, bool Dma>
+ TRON(inline)
+ void store_row(k_vnni_view<bf16, Rows, Cols> dst,
+@@ -324,6 +362,49 @@ void load_row(k_vnni_view<const bf16, Rows, Cols> src,
+   }
+ }
+ 
++// Store the K rows of up to 16 tokens of one token block c (tokens c * 16 + t
++// for the bits t set in `present`) into a packed plane with full-line stores.
++// For each of the 4 dimension steps, the 16 rows' 16 dimension pairs (one
++// 64-byte load per row) are transposed in registers into the panel's 16 pair
++// rows. Each pair row is then written as one 64-byte store (masked to the
++// present tokens' lanes when the block is partial). The absent tokens' slots
++// are not written. rows[t] points at the 128 bf16 of token t, one native row
++// in dimension order (not packed storage). It may be null for an absent
++// token. Compared with store_row per token, a full block issues 64 stores of
++// whole lines instead of 64 scatters, each writing 4 bytes into 16 lines
++// (every one of the block's 64 lines receives 16 partial writes). The same
++// 4 KiB is written. The write pattern differs. The block index is checked
++// here, as store_row checks its token index. A block index at or above
++// Rows / 16 would write into other panels and past the end of the plane.
++template <size_t Rows, size_t Cols>
++TRON(inline)
++void store_block(k_vnni_view<bf16, Rows, Cols> dst,
++    size_t c,
++    __mmask16 present,
++    const bf16* const rows[k_vnni::BLOCK_TOKENS_16]) noexcept {
++  TRON_ASSERT_LT(c, Rows / k_vnni::BLOCK_TOKENS_16);
++  bf16* const plane = detail::k_vnni_access::plane(dst);
++  for (size_t s = 0; s < k_vnni::DIM_STEPS_4; ++s) {
++    __m512i r[k_vnni::BLOCK_TOKENS_16];
++    for (size_t t = 0; t < k_vnni::BLOCK_TOKENS_16; ++t) {
++      r[t] = ((present >> t) & 1u)
++                 ? _mm512_loadu_si512(rows[t] + s * k_vnni::STEP_DIMS_32)
++                 : _mm512_setzero_si512();
++    }
++    k_vnni::detail::transpose_16x16_epi32(r);
++    bf16* panel = plane + (s * k_vnni::TOKEN_BLOCKS_4 + c) * k_vnni::PANEL_ELEMS_512;
++    if (present == k_vnni::FULL_BLOCK_0XFFFF) {
++      for (size_t dp = 0; dp < k_vnni::STEP_PAIRS_16; ++dp) {
++        _mm512_storeu_si512(panel + dp * k_vnni::ROW_ELEMS_32, r[dp]);
++      }
++    } else {
++      for (size_t dp = 0; dp < k_vnni::STEP_PAIRS_16; ++dp) {
++        _mm512_mask_storeu_epi32(panel + dp * k_vnni::ROW_ELEMS_32, present, r[dp]);
++      }
++    }
++  }
++}
++
+ // Copy one token between packed K planes (or within one plane): the token's
+ // row is gathered into a 64-byte-aligned local row (load_row) and scattered
+ // into its destination column (store_row). Tokens own disjoint slots, so no
+diff --git a/ingest/src/TronCpp.hs b/ingest/src/TronCpp.hs
+index 49cc335be8..45bc8da657 100644
+--- a/ingest/src/TronCpp.hs
++++ b/ingest/src/TronCpp.hs
+@@ -2861,7 +2861,25 @@ runHelperStatement env blendNames stmt = case stmt of
+         finishWriting (Var "worker_ix") name
+   PrepareForLogitsStmt -> []
+   PrepareAttentionStmt _ -> []
+-  AttentionStmt _ -> []
++  -- The helpers take part in the K store of a KV-writing operation. The main
++  -- thread's save_k opens a window over the pass's tokens. The helpers are
++  -- idle at this point of the schedule. Their next kernel waits for the
++  -- attention output. The idle helpers claim work units of the window (runs
++  -- of consecutive tokens inside one 16-token page block).
++  -- Both sides call save_k at the same position of the statement list. Main
++  -- passes worker index 0 (submitAttentionOperation). The helpers pass their
++  -- own worker_ix. So the N-th window a helper enters in a pass is the N-th
++  -- window main opens in that pass.
++  -- See Note [Shared block save] in model.hpp. Operations without a KV write
++  -- emit nothing here.
++  AttentionStmt attention -> case attentionKvWrite attention of
++    Nothing -> []
++    Just kvWrite ->
++      withTrace stmt $
++        attentionRuntimeCall
++          "save_k"
++          attention
++          [Var $ asCpp $ attentionKey kvWrite, Var "worker_ix", Var "n_workers"]
+   MoeRouteStmt{} -> []
+   MoeMatmulPrepareAndLaunchStmt{} -> []
+   MoeBlendStmt r w o i b lanes _ ->
+@@ -2917,10 +2935,13 @@ submitAttentionOperation env stmt =
+       ]
+   saveKv kvWrite =
+     [ startOperand $ attentionChannel env $ attentionKey kvWrite
+-    , attentionRuntimeCall
++    , -- Main is worker 0, as in kernelCall. n_workers (main + main helpers) is
++      -- in scope in run(). It lets save_k share the K store with the helpers'
++      -- save_k calls (runHelperStatement).
++      attentionRuntimeCall
+         "save_k"
+         stmt
+-        [Var $ asCpp $ attentionKey kvWrite]
++        [Var $ asCpp $ attentionKey kvWrite, LiteralExpr (IntLit 0), Var "n_workers"]
+     , startOperand $ attentionChannel env $ attentionValue kvWrite
+     , attentionRuntimeCall
+         "save_v"
+diff --git a/ingest/test/LoopyTronSpec.hs b/ingest/test/LoopyTronSpec.hs
+index e46471b130..8ae1402a2f 100644
+--- a/ingest/test/LoopyTronSpec.hs
++++ b/ingest/test/LoopyTronSpec.hs
+@@ -3119,7 +3119,23 @@ spec =
+         `shouldBe` False
+       ("q, q_batch->q_channel, attn_out, q_batch->attn_out_channel" `Txt.isInfixOf` cpp)
+         `shouldBe` True
+-      Txt.count "outer_state.template save_k" cpp `shouldBe` 1
++      -- Two save_k calls per KV-writing operation, one function on both sides
++      -- (Note [Shared block save] in model.hpp). Main passes worker index 0 and
++      -- the worker count of run(). It lets save_k share the store. The helpers
++      -- pass their own worker index and the worker count of run_main_help.
++      -- Every helper-side host kernel call also ends in "worker_ix, n_workers);".
++      -- So the whole call text is checked.
++      Txt.count "outer_state.template save_k<" cpp `shouldBe` 2
++      ( (attentionCallPrefix "save_k" geometry 0 <> "q_batch->outer_batch,k,0,n_workers);")
++          `Txt.isInfixOf` compactCpp cpp
++        )
++        `shouldBe` True
++      ( ( attentionCallPrefix "save_k" geometry 0
++            <> "q_batch->outer_batch,k,worker_ix,n_workers);"
++        )
++          `Txt.isInfixOf` compactCpp cpp
++        )
++        `shouldBe` True
+       Txt.count "outer_state.template save_v" cpp `shouldBe` 1
+       Txt.count "outer_state.template prepare_attention_job" cpp `shouldBe` 1
+       Txt.count "outer_state.template launch_early_hw_attention" cpp `shouldBe` 1
+@@ -3528,7 +3544,13 @@ spec =
+               (LiteralExpr $ IntLit 1)
+               (LiteralExpr $ IntLit 4)
+           ]
+-      Txt.count "outer_state.template save_k" cpp `shouldBe` 1
++      -- One main-side and one helper-side save_k call, for the operation that
++      -- writes KV. The second operation shares the slot. It writes nothing. See
++      -- Note [Shared block save] in model.hpp.
++      Txt.count "outer_state.template save_k<" cpp `shouldBe` 2
++      -- The shared module keeps the sparse module's K buffer "k".
++      (",k,0,n_workers);" `Txt.isInfixOf` compactCpp cpp) `shouldBe` True
++      (",k,worker_ix,n_workers);" `Txt.isInfixOf` compactCpp cpp) `shouldBe` True
+       Txt.count "outer_state.template save_v" cpp `shouldBe` 1
+       ("k2_channel" `Txt.isInfixOf` cpp) `shouldBe` False
+       ("v2_channel" `Txt.isInfixOf` cpp) `shouldBe` False
+diff --git a/t/t_k_vnni_layout.cpp b/t/t_k_vnni_layout.cpp
+index b29d6baa08..8c522925ea 100644
+--- a/t/t_k_vnni_layout.cpp
++++ b/t/t_k_vnni_layout.cpp
+@@ -32,8 +32,11 @@
+ namespace {
+ 
+ using tron::k_vnni::BF16_BITS_16;
++using tron::k_vnni::BLOCK_TOKENS_16;
++using tron::k_vnni::FULL_BLOCK_0XFFFF;
+ using tron::k_vnni::HEAD_SIZE_128;
+ using tron::k_vnni::PAGE_TOKENS_64;
++using tron::k_vnni::TOKEN_BLOCKS_4;
+ 
+ // The bytes of one fp32 (the 32-bit IEEE single format). The bf16 (the 16-bit
+ // brain floating-point format) helpers move bit patterns through memcpy.
+@@ -201,6 +204,62 @@ TEST_CASE(
+   }
+ }
+ 
++TEST_CASE("VNNI K block save equals the per-token row store, bit for bit",
++    "[kv_data][k_vnni]") {
++  // store_block (16 tokens transposed in registers, whole-line stores) is
++  // the prefill store of save_k (Note [Shared block save] in model.hpp). It
++  // must leave the plane exactly as store_row per present token does. It
++  // must not touch the slots of absent tokens (poison stays poison). The
++  // masks cover: full block, single tokens, halves, alternating lanes, the
++  // empty block, and random subsets.
++  constexpr uint32_t SEED_19 = 19;
++  constexpr unsigned TOKEN_0_0X0001 = 0x0001;
++  constexpr unsigned TOKEN_15_0X8000 = 0x8000;
++  constexpr unsigned LOW_HALF_0X00FF = 0x00ff;
++  constexpr unsigned HIGH_HALF_0XFF00 = 0xff00;
++  constexpr unsigned EVEN_TOKENS_0X5555 = 0x5555;
++  constexpr unsigned ODD_TOKENS_0XAAAA = 0xaaaa;
++  constexpr unsigned EMPTY_BLOCK_0X0000 = 0x0000;
++  constexpr unsigned MIXED_0X1234 = 0x1234;
++  constexpr unsigned ALL_BUT_TOKEN_0_0XFFFE = 0xfffe;
++  constexpr unsigned ALL_BUT_TOKEN_15_0X7FFF = 0x7fff;
++  constexpr unsigned NIBBLES_0X0F0F = 0x0f0f;
++  constexpr unsigned TOKEN_1_0X0002 = 0x0002;
++  constexpr unsigned TOKEN_14_0X4000 = 0x4000;
++  constexpr int N_RANDOM_MASKS_24 = 24;
++  auto ref = std::make_unique<plane_and_rows>();
++  auto blk = std::make_unique<plane_and_rows>();
++  std::mt19937 gen(SEED_19);
++  std::uniform_int_distribution<uint16_t> bits(0, BITS_MAX_0XFFFF);
++  for (auto& x : ref->rows) {
++    x = tron::bf16::from_bits(bits(gen));
++  }
++  std::vector<unsigned> masks = {FULL_BLOCK_0XFFFF, TOKEN_0_0X0001, TOKEN_15_0X8000,
++      LOW_HALF_0X00FF, HIGH_HALF_0XFF00, EVEN_TOKENS_0X5555, ODD_TOKENS_0XAAAA,
++      EMPTY_BLOCK_0X0000, MIXED_0X1234, ALL_BUT_TOKEN_0_0XFFFE, ALL_BUT_TOKEN_15_0X7FFF,
++      NIBBLES_0X0F0F, TOKEN_1_0X0002, TOKEN_14_0X4000};
++  for (int i = 0; i < N_RANDOM_MASKS_24; ++i) {
++    masks.push_back(bits(gen));
++  }
++  size_t checked = 0;
++  for (size_t c = 0; c < TOKEN_BLOCKS_4; ++c) {
++    for (unsigned m : masks) {
++      poison_plane(ref->plane, POISON_0XA5A5);
++      blk->plane = ref->plane;  // the owner copy: same bytes
++      const tron::bf16* rows[BLOCK_TOKENS_16] = {};
++      for (size_t t = 0; t < BLOCK_TOKENS_16; ++t) {
++        if (!((m >> t) & 1u)) continue;
++        const size_t tok = c * BLOCK_TOKENS_16 + t;
++        rows[t] = ref->rows + tok * HEAD_SIZE_128;
++        tron::store_row(ref->plane.as_view(), tok, row_of(*ref, tok));
++      }
++      tron::store_block(blk->plane.as_view(), c, __mmask16(m), rows);
++      REQUIRE(std::memcmp(&blk->plane, &ref->plane, sizeof(ref->plane)) == 0);
++      ++checked;
++    }
++  }
++  REQUIRE(checked == TOKEN_BLOCKS_4 * masks.size());
++}
+ namespace {
+ 
+ // The reader against the row-major dotter for one query-group size (KV_MUL
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index fd07e178eb..53342abe00 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -439,7 +439,8 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+   STATIC_REQUIRE(std::is_convertible_v<k_packed_mut_t, k_packed_t>);
+   STATIC_REQUIRE_FALSE(std::is_convertible_v<k_packed_t, k_packed_mut_t>);
+   STATIC_REQUIRE_FALSE(owner_views_temporary<k_owner_t>);
+-  // No view writes an element. Rows enter through store_row and copy_token.
++  // No view writes an element. Rows enter through store_row, store_block and
++  // copy_token.
+   STATIC_REQUIRE_FALSE(matrix_at_writes<k_packed_mut_t>);
+   // The 64-byte pair rows and the AMX tile rows need a 64-byte-aligned plane.
+   STATIC_REQUIRE(alignof(k_owner_t) == 64);
+@@ -3787,15 +3788,17 @@ TEST_CASE(
+   REQUIRE(result.served == tron::attn_stats::visit_path::empty);
+ }
+ 
+-// The K store of save_k: every token of a minibatch lands in its page at its
+-// offset, in the slot's K layout (Note [K VNNI storage] in kv_cache.hpp). The
+-// shapes a pass can present are all here: a run that starts in the middle of
+-// a 16-token block, a run that crosses a block boundary and one that crosses
+-// a page boundary, a whole block, a token alone in its block, and jobs
+-// without KV work inside and after a run. Every stored row must equal its
+-// source row bit for bit. Every other row of the book must be untouched. With
+-// TRON_K_VNNI off the same test runs the row-major store.
+-TEST_CASE("save_k stores every token's K row once and touches nothing else",
++// The K store of save_k (Note [Shared block save] in model.hpp): the grouping
++// of a minibatch's tokens into page blocks, and the window that shares the
++// store with helper threads. The shapes a pass can present are all here: a
++// run that starts in the middle of a 16-token block, a run that crosses a
++// block boundary and one that crosses a page boundary, a whole block, a
++// token alone in its block, and jobs without KV work inside and after a run.
++// Every stored row must equal its source row bit for bit. Every other row of
++// the book must be untouched. With TRON_K_VNNI off the same test runs the
++// row-major store. No window opens then.
++TEST_CASE("save_k stores every token's K row once, grouped by page block, alone or "
++          "with helper threads",
+     "[kv_data][k_vnni]") {
+   constexpr size_t head_size = 128;
+   constexpr size_t n_heads = 16;
+@@ -3864,7 +3867,8 @@ TEST_CASE("save_k stores every token's K row once and touches nothing else",
+   for (size_t tok = 64; tok < 72; ++tok) {
+     add(tok, true);
+   }
+-  // Token 100: alone in block 2 of page 1.
++  // Token 100: alone in block 2 of page 1. This case takes the per-token
++  // scatter path.
+   add(100, true);
+   // Tokens 130..135: page 2.
+   for (size_t tok = 130; tok < 136; ++tok) {
+@@ -3872,7 +3876,7 @@ TEST_CASE("save_k stores every token's K row once and touches nothing else",
+   }
+   add(21, false);  // a trailing job without KV work
+   const size_t n_items = job_tokens.size();
+-  REQUIRE(n_items == 48);
++  REQUIRE(n_items == 48);  // more than 16. So the window can open.
+ 
+   state_t state(*model, model_config{.max_layers = n_layers});
+   state.resize(n_items);
+@@ -3911,7 +3915,9 @@ TEST_CASE("save_k stores every token's K row once and touches nothing else",
+   // descriptor with it).
+   const attention_operation_descriptor operation = state.active_attention_operations[0];
+   REQUIRE(operation.writes_kv);
+-  const kv_slot_id slot = operation.binding.kv_slot;
++  // Not const: the three-thread section moves it to the next operation's slot.
++  // snapshot and check below read it by reference.
++  kv_slot_id slot = operation.binding.kv_slot;
+ 
+   // Snapshot of every K row of the slot, to prove the untouched rows stay.
+   auto snapshot = [&] {
+@@ -3959,8 +3965,8 @@ TEST_CASE("save_k stores every token's K row once and touches nothing else",
+     }
+     REQUIRE(stored == kv_jobs * n_kv_heads);
+     REQUIRE(kept == (num_kv_tokens - kv_jobs) * n_kv_heads);
+-    // The marks: save_k marks K of every job with KV work exactly once. K
+-    // alone does not complete a token.
++    // The marks: save_k marks K of every job with KV work exactly once. The
++    // helpers leave before the mark loop. K alone does not complete a token.
+     // The second mark completes it (mark_k_complete returns true only when
+     // the count was 1). A job without KV work has no mark (count 0).
+     for (size_t job = 0; job < n_items; ++job) {
+@@ -3971,10 +3977,122 @@ TEST_CASE("save_k stores every token's K row once and touches nothing else",
+     }
+   };
+ 
+-  bk.fill_random(gen);
+-  const auto before = snapshot();
+-  state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
+-  check(before);
++  SECTION("one thread: the grouping stores every row and touches nothing else") {
++    bk.fill_random(gen);
++    const auto before = snapshot();
++    state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
++    check(before);
++    REQUIRE(q_batch.k_store_window.opened.load() == 0);
++  }
++
++  SECTION("three threads: the helpers share the window and every row is stored once") {
++    bk.fill_random(gen);
++    constexpr size_t n_workers = 3;
++    constexpr size_t main_worker_ix = 0;
++    // Every worker calls the same save_k with its own index (Note [Shared
++    // block save] in model.hpp).
++    auto shared_save = [&](attention_operation_descriptor const& op) {
++      std::vector<std::thread> helpers;
++      for (size_t worker_ix = 1; worker_ix < n_workers; ++worker_ix) {
++        helpers.emplace_back([&, worker_ix] {
++          state.template save_k<geometry>(
++              &q_batch, op, state.plugin_state.kouts, worker_ix, n_workers);
++        });
++      }
++      state.template save_k<geometry>(
++          &q_batch, op, state.plugin_state.kouts, main_worker_ix, n_workers);
++      for (auto& h : helpers) {
++        h.join();
++      }
++    };
++    // The job's token position, its KV flag, its page and its 16-token block.
++    auto token_of = [&](size_t item) { return job_tokens[q_batch.items[item].i].i; };
++    auto kv_of = [&](size_t item) { return do_kv[q_batch.items[item].i] != 0; };
++    auto block_of = [&](size_t tok) {
++      return (tok % page_t::page_size) / k_vnni::BLOCK_TOKENS_16;
++    };
++    // The window state after the n_windows-th shared save on this batch.
++    [[maybe_unused]] auto check_window = [&](uint32_t n_windows) {
++      auto const& w = q_batch.k_store_window;
++      REQUIRE(w.opened.load() == n_windows);
++      REQUIRE(w.finished.load() == n_workers - 1);
++      // Each helper counts the windows it entered in its own slot. A helper's
++      // W-th call waits for the W-th window (Note [Shared block save]). That
++      // count pairs the call with the window.
++      for (size_t worker_ix = 1; worker_ix < n_workers; ++worker_ix) {
++        CAPTURE(worker_ix);
++        REQUIRE(w.helper_windows[worker_ix] == n_windows);
++      }
++      // Every worker claims with fetch_add until a claim returns an index at
++      // or past n_units. So each of the n_workers claim loops ends with one
++      // failed claim. The counter then reads n_units + n_workers. A helper
++      // that skipped its claim loop leaves it lower.
++      REQUIRE(w.n_units >= 1);
++      REQUIRE(w.unit_start[0] == 0);
++      REQUIRE(w.unit_start[w.n_units] == n_items);
++      REQUIRE(w.next_unit.load() == w.n_units + n_workers);
++      // The units are the maximal runs of Note [Shared block save]. A unit
++      // never crosses a page, a 16-token page block or a change of
++      // token_jobs_do_kv (batch::k_store_window). So two units never write
++      // the same token lanes, and a unit that fills its block may use
++      // whole-line stores.
++      for (size_t u = 0; u < w.n_units; ++u) {
++        const size_t begin = w.unit_start[u];
++        const size_t end = w.unit_start[u + 1];
++        CAPTURE(u, begin, end);
++        REQUIRE(begin < end);
++        const bool unit_kv = kv_of(begin);
++        const page_t* unit_page = unit_kv ? token_pages[token_of(begin)] : nullptr;
++        const size_t unit_block = unit_kv ? block_of(token_of(begin)) : 0;
++        for (size_t t = begin; t < end; ++t) {
++          CAPTURE(t);
++          REQUIRE(kv_of(t) == unit_kv);
++          if (unit_kv) {
++            REQUIRE(token_pages[token_of(t)] == unit_page);
++            REQUIRE(block_of(token_of(t)) == unit_block);
++          }
++        }
++      }
++      // A new unit starts only at such a change: the item before a unit's
++      // first item differs from it in the KV flag, the page or the block. So
++      // every run that could use the block save is one unit.
++      for (size_t u = 1; u < w.n_units; ++u) {
++        const size_t first = w.unit_start[u];
++        const size_t prev = first - 1;
++        CAPTURE(u, first);
++        const bool first_kv = kv_of(first);
++        const bool kv_changes = kv_of(prev) != first_kv;
++        const bool place_changes =
++            first_kv && (token_pages[token_of(prev)] != token_pages[token_of(first)] ||
++                            block_of(token_of(prev)) != block_of(token_of(first)));
++        REQUIRE((kv_changes || place_changes));
++      }
++    };
++    const auto before = snapshot();
++    shared_save(operation);
++    check(before);
++    if constexpr (k_vnni::layout_on<head_size>) {
++      check_window(1);
++    } else {
++      REQUIRE(q_batch.k_store_window.opened.load() == 0);
++    }
++    // A second window, on the next layer's operation and KV slot. Main resets
++    // the claim counter and `finished` before it opens a window. The helpers'
++    // second call meets the second window.
++    const attention_operation_descriptor operation_1 =
++        state.active_attention_operations[1];
++    REQUIRE(operation_1.writes_kv);
++    REQUIRE(operation_1.binding.kv_slot.i != slot.i);
++    slot = operation_1.binding.kv_slot;
++    const auto before_1 = snapshot();
++    shared_save(operation_1);
++    check(before_1);
++    if constexpr (k_vnni::layout_on<head_size>) {
++      check_window(2);
++    } else {
++      REQUIRE(q_batch.k_store_window.opened.load() == 0);
++    }
++  }
+ }
+ 
+ // The typed packed-V operations (h/tron/tensor/v_vnni.hpp) carry the bodies

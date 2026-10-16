@@ -62,3 +62,34 @@ These entries record the source inventory and regeneration limits for existing r
 - regenerate: unavailable; build_report.py has no output-path argument and unconditionally writes a session scratchpad path as well as report.html.
 
 - Session-store relocation: `artifacts/dev-machines/github-reviewer-removals-scan.sh` now points to `claude-agentsrv:/home/jhan/workspace/random/exec/workflows/github-reviewer-removals-scan.sh`; origin `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/8fe7ef6d-8594-4265-8524-a6107e65c691/scratchpad/scan.sh`. Bytes unchanged; relocation requires approval.
+
+## 2026-10-16 Codex handoff preservation
+
+This batch preserves the current canonical copies listed below. The related handoffs describe the historical chat results. A later change to a canonical document does not change those historical results. File sizes are bytes.
+
+Standalone report generators with fixed output paths were not executed. Their entries record the reason. Existing reports whose input or generator changed were regenerated in scratch using preserved copies. The four checks matched the proposed or existing report bytes.
+
+Files left behind are enumerated in `logs/codex-handoff-20261016-artifacts.json`. They include source checkouts, binaries, rebuildable caches, review screenshots, scheduler process files, and syntax logs summarized by retained results. The two historical humanize-writing install directories are missing. No mirror is deleted.
+
+- Canonical root mapping: `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/` -> `artifacts/dev-machines/amx-ci-monitor/`.
+
+### Files
+
+- `amx-ci-monitor/README.html` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/README.html` (4081 bytes). NEW. Groups: amx-ci-monitor.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/dev-machines/amx-ci-monitor/README.html
+- `amx-ci-monitor/check.py` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/check.py` (6650 bytes). NEW. Groups: amx-ci-monitor.
+- `amx-ci-monitor/config.json` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/config.json` (66 bytes). NEW. Groups: amx-ci-monitor.
+- `amx-ci-monitor/fetch-prompt.txt` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/fetch-prompt.txt` (1417 bytes). NEW. Groups: amx-ci-monitor.
+- `amx-ci-monitor/fetch-schema.json` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/fetch-schema.json` (382 bytes). NEW. Groups: amx-ci-monitor.
+- `amx-ci-monitor/run.sh` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/run.sh` (251 bytes). NEW. Groups: amx-ci-monitor.
+- `amx-ci-monitor/schedule.cron` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/schedule.cron` (96 bytes). NEW. Groups: amx-ci-monitor.
+- `amx-ci-monitor/send-schema.json` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/send-schema.json` (231 bytes). NEW. Groups: amx-ci-monitor.
+- `amx-ci-monitor/start-cron.sh` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/start-cron.sh` (456 bytes). NEW. Groups: amx-ci-monitor.
+- `amx-ci-monitor/test_check.py` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/test_check.py` (4393 bytes). NEW. Groups: amx-ci-monitor.
+- `claude-box` -> `claude-agentsrv:/home/jhan/claude-container/claude-box` (12543 bytes). REFRESH. Groups: registered-refresh.
+- `sw-dev-01-setup.sh` -> `claude-agentsrv:/home/jhan/sw-dev-01-setup.sh` (806 bytes). REFRESH. Groups: registered-refresh.
+
+### Related handoffs by file group
+
+- amx-ci-monitor: [codex_20260925_schedule-daily-amx-monitoring.md](../../handoffs/codex_20260925_schedule-daily-amx-monitoring.md), [codex_20261009_add-amx-alert-expected-ranges.md](../../handoffs/codex_20261009_add-amx-alert-expected-ranges.md).
+- registered-refresh: [codex_20261016_follow-codex-handoff-prompt.md](../../handoffs/codex_20261016_follow-codex-handoff-prompt.md).

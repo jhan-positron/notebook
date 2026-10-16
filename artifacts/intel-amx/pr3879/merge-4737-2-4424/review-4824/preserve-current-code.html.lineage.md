@@ -1,0 +1,47 @@
+# Lineage: preserve-current-code.html
+
+Short version: This inventory records the files preserved with user approval on 2026-10-16. Preservation did not modify these source files.
+
+- generator: none
+- input: none
+- input built by: none
+- sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/` (preserved: 8 files); `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/` (preserved: 20 files). Per-file decisions: `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/preserve-current-code.html.lineage.md`.
+- regenerate: none
+- regenerate unverified (authored review; counted draft patches and counting scripts preserved)
+
+| Decision | Canonical file | Repository path or reason | Bytes |
+| --- | --- | --- | ---: |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/barrier_and_greedy_range.patch` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/barrier-line-count/barrier_and_greedy_range.patch` | 11392 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/barrier_and_greedy_range/t/t_llama_unit.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/barrier-line-count/barrier_and_greedy_range/t/t_llama_unit.cpp` | 203285 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/barrier_only.patch` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/barrier-line-count/barrier_only.patch` | 11164 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/barrier_only/t/t_llama_unit.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/barrier-line-count/barrier_only/t/t_llama_unit.cpp` | 203285 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/base/t/t_llama_unit.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/barrier-line-count/base/t/t_llama_unit.cpp` | 174516 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/count.html` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/barrier-line-count/count.html` | 4968 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/counts.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/barrier-line-count/counts.json` | 4220 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/original/t/t_llama_unit.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/barrier-line-count/original/t/t_llama_unit.cpp` | 203343 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/changed-files.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/changed-files.json` | 912 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/comments.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/comments.json` | 21291 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/diff-stats.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/diff-stats.json` | 4066 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/build-items-3-4.py` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/build-items-3-4.py` | 11543 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/count.html` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/count.html` | 7580 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item1/counts.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item1/counts.json` | 1489 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item1/draft.patch` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item1/draft.patch` | 4291 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item2/counts.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item2/counts.json` | 1032 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item2/draft.patch` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item2/draft.patch` | 325 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/base/t/t_k_vnni_layout.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/base/t/t_k_vnni_layout.cpp` | 0 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/counts.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/counts.json` | 2642 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/draft.patch` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/draft.patch` | 8133 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/draft/t/t_k_vnni_layout.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/draft/t/t_k_vnni_layout.cpp` | 47052 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/original/t/t_k_vnni_layout.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/original/t/t_k_vnni_layout.cpp` | 48429 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/base/t/t_k_vnni_layout.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/base/t/t_k_vnni_layout.cpp` | 0 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/base/t/t_llama_unit.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/base/t/t_llama_unit.cpp` | 174516 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/counts.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/counts.json` | 2756 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/draft.patch` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/draft.patch` | 5007 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/draft/t/t_k_vnni_layout.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/draft/t/t_k_vnni_layout.cpp` | 47603 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/draft/t/t_llama_unit.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/draft/t/t_llama_unit.cpp` | 203326 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/original/t/t_k_vnni_layout.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/original/t/t_k_vnni_layout.cpp` | 48429 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/original/t/t_llama_unit.cpp` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/original/t/t_llama_unit.cpp` | 203343 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/summary.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/summary.json` | 1545 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/pr-info.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/pr-info.json` | 29913 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/preserve-current-code.html` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/preserve-current-code.html` | 24642 |
+| preserved | `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/scope-comments.json` | `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/scope-comments.json` | 8351 |

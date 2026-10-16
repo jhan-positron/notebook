@@ -1,0 +1,232 @@
+--- a/h/tron/models/common.hpp
++++ b/h/tron/models/common.hpp
+@@ -1010,6 +1010,7 @@
+   , ix(ix)
+   , kvs_needed(0)
+   , layer_done(latches.make_latch(0, "layer_done", ix))
++  , k_store_barrier(latches, "K store", ix)
+   , matrix_callbacks(latches.make_latch(0, "matrix callbacks", ix))
+   , plugin_batch(state.plugin_state, *this, latches, ix) {
+     // `items` as a query mask (see apply_page_range / token_ix_needed).
+@@ -1045,6 +1046,7 @@
+   void reset_channels(size_t n_attn_workers, size_t n_main_workers) {
+     plugin_batch.reset_channels(n_attn_workers, n_main_workers);
+     free_scratchpads_barrier.reset(n_attn_workers);
++    k_store_barrier.reset(n_main_workers);
+   }
+ 
+   void next_layer(size_t n_main_workers) {
+@@ -1163,21 +1165,18 @@
+ 
+   // Knowing whether the main and helper threads are done with this layer
+   latch_ref layer_done;
++  barrier k_store_barrier;
+ 
+   // The K store window of this minibatch, one per (layer, pass). The main
+   // thread opens it in save_k. The main helpers join it from the generated
+   // run_main_help. See Note [Shared block save] in model.hpp.
+   struct k_store_window_t {
+     // Worker counts above this take the unshared store (k_store_shared).
+-    // This value is the array size of helper_windows below.
+     static constexpr size_t max_shared_workers = 128;
+     // The claim counter is on its own cache line. A claim must not
+     // invalidate the line the waiting threads poll.
+     alignas(cache_line_size) std::atomic<uint32_t> next_unit{0};
+-    // Windows opened so far in this pass.
+-    alignas(cache_line_size) std::atomic<uint32_t> opened{0};
+-    std::atomic<uint32_t> finished{0};  // helpers done with the open window
+-    uint32_t n_units = 0;               // work units of the open window
++    uint32_t n_units = 0;  // work units of the open window
+     // Work unit u = items[unit_start[u], unit_start[u + 1]). A unit never
+     // crosses a page, a 16-token page block, or a change of
+     // token_jobs_do_kv. Items of one block that are not consecutive (a job
+@@ -1187,9 +1186,6 @@
+     // conflict. When a run fills the block, each pair row is written with
+     // one full-line store.
+     std::array<uint32_t, model::state::max_minibatch_size + 1> unit_start{};
+-    // Windows a helper has entered, by worker_ix (the helper's own slot).
+-    // The array size bounds the worker count of a shared store (k_store_shared).
+-    std::array<uint32_t, max_shared_workers> helper_windows{};
+   } k_store_window;
+   // Note [Matrix callback lifetime]
+   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -7,13 +7,12 @@
+ #include <atomic>  // For gof_coop_outstanding_
+ #include <cerrno>
+ #include <charconv>
+-#include <chrono>    // For the join watchdog (Note [Shared block save])
+ #include <concepts>  // For std::convertible_to
+ #include <cstdio>    // For std::remove
+ #include <cstdlib>
+ #include <fstream>
+ #include <functional>   // For std::function (kv_save_observer_t)
+-#include <immintrin.h>  // For _mm_pause (Note [Shared block save])
++#include <immintrin.h>  // For __mmask16 in store_k_block
+ #include <iomanip>
+ #include <limits>
+ #include <mutex>
+@@ -3114,7 +3113,7 @@
+     //      below) until none is left. n_workers == 1 never shares (the
+     //      handwritten plugins, and the unit tests except the shared-save case
+     //      of t_llama_unit).
+-    // The window protocol (fields in batch::k_store_window, common.hpp):
++    // The window protocol (batch::k_store_window and k_store_barrier):
+     //   - both sides decide with k_store_shared(). A window exists only
+     //     when it says yes. So a helper never waits for a window main does
+     //     not open. (A pass with at most 16 items, such as a decode step, or
+@@ -3125,30 +3124,22 @@
+     //     consecutive fall into several units. Their writers use masked
+     //     stores on disjoint token lanes. So two threads may write one block
+     //     without conflict. When a run fills the block, the block gets one
+-    //     full-line store per pair row. Main then zeroes the claim counter
+-    //     and `finished`. Next it increments `opened` (release). A helper's
+-    //     W-th call waits for `opened` >= W
+-    //     (acquire). So window W of a pass is the W-th shared save_k of that
+-    //     pass on both sides.
+-    //   - every thread claims units with fetch_add on `next_unit`. It stores
+-    //     the rows of each unit it claims. A unit index is assigned once. So
+-    //     a thread that leaves the claim loop has stored every unit it took.
+-    //   - a helper increments `finished` (release) when its claim loop ends.
+-    //     Main returns only when `finished` == n_workers - 1 (acquire). Four
+-    //     things follow once main returns. Every unit is stored. No helper is
+-    //     inside a window main has left. The counters are main's to reset.
+-    //     Every row store happens-before the downstream latch count_down
+-    //     below.
++    //     full-line store per pair row. Main opens the barrier phase after
++    //     preparing the unit table and zeroing the claim counter. Helpers wait
++    //     for that phase before reading the table. The barrier tracks each
++    //     worker's phase, so repeated saves use the matching window.
++    //   - every thread claims units with fetch_add on next_unit. Each unit
++    //     is assigned once. Every worker calls done after its stores finish.
++    //     Main waits for all workers before publishing completion marks.
++    //     The barrier orders the stores before publication and table reuse.
+     //   - the per-token completion marks and GOF credits stay on main, after
+     //     the join, in q_batch->items order, one token at a time.
+     // The rows a helper reads (ks) are ready for two reasons. Main waited for
+     // every token's K channel before calling save_k (the generated code). The
+     // channel phase cannot advance while main is inside save_k. A helper can
+     // reach its save_k call without main's help. Nothing blocks between its
+-    // K/Q rope kernel and this statement. So main's join cannot deadlock. A
+-    // join that does not complete within about two minutes
+-    // (k_join_timeout_s after the first clock read) aborts with the
+-    // counters in the message.
++    // K/Q rope kernel and this statement. So main's join cannot deadlock.
++    // Barrier waits use the existing latch diagnostics.
+ 
+     static constexpr size_t k_store_block = k_vnni::BLOCK_TOKENS_16;
+ 
+@@ -3178,14 +3169,6 @@
+       }
+       pending_k_blocks_.clear();
+     }
+-    // The join watchdog of Note [Shared block save]: main reads the clock once
+-    // every k_join_clock_spins pause loops. It aborts k_join_timeout_s seconds
+-    // after the first clock read.
+-    static constexpr uint64_t k_join_clock_spins = 1048576;  // 2^20
+-    static_assert((k_join_clock_spins & (k_join_clock_spins - 1)) == 0,
+-        "the spin count is a power of two: the check below masks with it");
+-    static constexpr int k_join_timeout_s = 120;
+-
+     // Whether the K store of this minibatch is shared with the helpers. The
+     // answer is the same on the main thread and on every helper.
+     template <attention_geometry geometry>
+@@ -3194,7 +3177,7 @@
+         return false;
+       } else {
+         return n_workers > 1 &&
+-               n_workers <= q_batch->k_store_window.helper_windows.size() &&
++               n_workers <= q_batch->k_store_window.max_shared_workers &&
+                q_batch->items.size() > k_store_block;
+       }
+     }
+@@ -3376,17 +3359,13 @@
+       if (shared) {
+         // See Note [Shared block save].
+         auto& w = q_batch->k_store_window;
+-        const uint32_t n_helpers = static_cast<uint32_t>(n_workers - 1);
+         if (is_main) {
+-          k_store_cut_units(q_batch);
+-          w.next_unit.store(0, std::memory_order_relaxed);
+-          w.finished.store(0, std::memory_order_relaxed);
+-          w.opened.fetch_add(1, std::memory_order_release);
++          q_batch->k_store_barrier.next_phase([&] {
++            k_store_cut_units(q_batch);
++            w.next_unit.store(0, std::memory_order_relaxed);
++          });
+         } else {
+-          const uint32_t my_window = ++w.helper_windows[worker_ix];
+-          while (w.opened.load(std::memory_order_acquire) < my_window) {
+-            _mm_pause();
+-          }
++          q_batch->k_store_barrier.wait(worker_ix);
+         }
+         const uint32_t n_units = w.n_units;
+         for (;;) {
+@@ -3395,25 +3374,9 @@
+           store_k_block<geometry>(
+               q_batch, slot, ks, w.unit_start[u], w.unit_start[u + 1]);
+         }
+-        if (!is_main) {
+-          w.finished.fetch_add(1, std::memory_order_release);
+-          return;
+-        }
+-        uint64_t spins = 0;
+-        std::chrono::steady_clock::time_point t0{};
+-        while (w.finished.load(std::memory_order_acquire) < n_helpers) {
+-          _mm_pause();
+-          if ((++spins & (k_join_clock_spins - 1)) == 0) {
+-            const auto now = std::chrono::steady_clock::now();
+-            if (t0 == std::chrono::steady_clock::time_point{}) t0 = now;
+-            TRON_ASSERT(now - t0 < std::chrono::seconds(k_join_timeout_s),
+-                "save_k: the K store window did not close in {} s ({} of {} helpers "
+-                "finished, {} of {} units claimed); the helpers' save_k calls do not "
+-                "match this one",
+-                k_join_timeout_s, w.finished.load(), n_helpers,
+-                std::min<uint32_t>(w.next_unit.load(), n_units), n_units);
+-          }
+-        }
++        q_batch->k_store_barrier.done(worker_ix);
++        if (!is_main) return;
++        q_batch->k_store_barrier.wait_for_all();
+       } else {
+         store_k_block<geometry>(q_batch, slot, ks, 0, n_items);
+       }
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -3935,7 +3935,7 @@
+     state.convert_pending_k_blocks();
+     check_blocks(/*converted=*/true);
+     check(before);
+-    REQUIRE(q_batch.k_store_window.opened.load() == 0);
++    REQUIRE(q_batch.k_store_window.n_units == 0);
+   }
+ 
+   // Note [Row-major blocks under hardware attention] in kv_cache.hpp: the rows
+@@ -3985,6 +3985,7 @@
+     const auto before = snapshot();
+     constexpr size_t n_workers = 3;
+     constexpr size_t main_worker_ix = 0;
++    q_batch.reset_channels(0, n_workers);
+     // Every worker calls the same save_k with its own index (Note [Shared
+     // block save] in model.hpp).
+     std::vector<std::thread> helpers;
+@@ -4007,8 +4008,6 @@
+     check(before);
+     if constexpr (k_vnni::layout_on<head_size>) {
+       auto const& w = q_batch.k_store_window;
+-      REQUIRE(w.opened.load() == 1);
+-      REQUIRE(w.finished.load() == n_workers - 1);
+       // The work units cover the items in order, and every unit was claimed.
+       // The exact cut is not a contract: the writers only need that a unit
+       // never crosses a page, a 16-token page block or a change of
+@@ -4044,7 +4043,7 @@
+         }
+       }
+     } else {
+-      REQUIRE(q_batch.k_store_window.opened.load() == 0);
++      REQUIRE(q_batch.k_store_window.n_units == 0);
+     }
+   }
+ }

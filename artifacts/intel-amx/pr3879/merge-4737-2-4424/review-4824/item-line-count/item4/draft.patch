@@ -1,0 +1,103 @@
+--- a/h/tron/tensor/k_vnni.hpp
++++ b/h/tron/tensor/k_vnni.hpp
+@@ -3,7 +3,7 @@
+ // (TRON_K_VNNI): an owner that holds the bytes (k_vnni_tensor), a matrix view
+ // that knows the address formula (k_vnni_view), the index map and its
+ // constants (namespace k_vnni), and the vector operations that move whole token
+-// rows in and out (store_row, load_row, store_block, copy_token), and the
++// rows in and out (store_row, load_row, store_block), and the
+ // in-place conversion of one 16-token block between its row-major and its VNNI
+ // form (block_to_vnni, block_to_rows, Note [Row-major tail block] below). The
+ // AVX-512 score reader of this layout is in h/tron/kernels/k_vnni.hpp. Who
+@@ -155,7 +155,7 @@
+ 
+ // A packed K plane of [Rows tokens * Cols dimensions]. One element is read
+ // through at(token, dim). There is no element write: rows enter through the
+-// operations below (store_row, load_row, store_block, copy_token). Views come
++// operations below (store_row, load_row, store_block). Views come
+ // only from an owner (k_vnni_tensor::as_view). A writable view (bf16) converts
+ // to a read-only one (const bf16), never the reverse. There is no public
+ // pointer constructor, no data() accessor, no operator[] and no pointer
+@@ -177,7 +177,7 @@
+   : data_(other.data_) {}
+ 
+   // Bounds-checked read of element (token, dim). There is no element write:
+-  // rows enter through store_row, store_block and copy_token.
++  // rows enter through store_row and store_block.
+   TRON(nodiscard, inline, pure)
+   const bf16& at(size_t token, size_t dim) const noexcept {
+     TRON_ASSERT_LT(token, Rows);
+@@ -419,21 +419,6 @@
+   }
+ }
+ 
+-// Copy one token between packed K planes (or within one plane): the token's
+-// row is gathered into a 64-byte-aligned local row (load_row) and scattered
+-// into its destination column (store_row). Tokens own disjoint slots, so no
+-// other token of the destination is touched.
+-template <size_t Rows, size_t Cols>
+-TRON(inline)
+-void copy_token(k_vnni_view<bf16, Rows, Cols> dst,
+-    size_t dst_token,
+-    k_vnni_view<const bf16, Rows, Cols> src,
+-    size_t src_token) noexcept {
+-  alignas(64) bf16 row[Cols];
+-  load_row(src, src_token, k_destination_row<Cols>(row));
+-  store_row(dst, dst_token, k_source_row<Cols>(row));
+-}
+-
+ // Note [Row-major tail block]
+ // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ // A 16-token block of the plane holds the VNNI layout above only once all 16
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -663,8 +663,8 @@
+ // The plane is typed. kv_block::k is a k_vnni_tensor (the owner of the 16 KiB
+ // plane) for a VNNI slot and a bf16 array for a row-major slot. The plane is
+ // reached only through the owner's views (k_vnni_view) and the typed
+-// operations of h/tron/tensor/k_vnni.hpp (store_row, load_row, store_block,
+-// copy_token). No raw plane pointer leaves the cache. detail::k_vnni_access is
++// operations of h/tron/tensor/k_vnni.hpp (store_row, load_row, store_block).
++// No raw plane pointer leaves the cache. detail::k_vnni_access is
+ // the one route from a view to the plane address, for those operations, the
+ // two score kernels and the test-only book::fill_random. That mirrors the
+ // packed V plane (Note [VNNI Packed V layout]).
+--- a/t/t_k_vnni_layout.cpp
++++ b/t/t_k_vnni_layout.cpp
+@@ -186,24 +186,6 @@
+       for (size_t d = 0; d < HEAD_SIZE_128; ++d) {
+         REQUIRE(bytes[tron::k_vnni::index(t, d)].to_bits() ==
+                 buf->rows[t * HEAD_SIZE_128 + d].to_bits());
+-      }
+-    }
+-  }
+-  SECTION("copy_token moves one token between planes, other tokens untouched") {
+-    constexpr size_t SOURCE_TOKEN_5 = 5;
+-    constexpr size_t DESTINATION_TOKEN_42 = 42;
+-    auto other = std::make_unique<plane_and_rows>();
+-    poison_plane(other->plane, POISON_0XA5A5);
+-    tron::copy_token(other->plane.as_view(), DESTINATION_TOKEN_42,
+-        std::as_const(buf->plane).as_view(), SOURCE_TOKEN_5);
+-    const plane_bytes_t bytes = bytes_of(other->plane);
+-    for (size_t t = 0; t < PAGE_TOKENS_64; ++t) {
+-      for (size_t d = 0; d < HEAD_SIZE_128; ++d) {
+-        const uint16_t expected =
+-            t == DESTINATION_TOKEN_42
+-                ? buf->rows[SOURCE_TOKEN_5 * HEAD_SIZE_128 + d].to_bits()
+-                : POISON_0XA5A5;
+-        REQUIRE(bytes[tron::k_vnni::index(t, d)].to_bits() == expected);
+       }
+     }
+   }
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -437,8 +437,7 @@
+   STATIC_REQUIRE(std::is_convertible_v<k_packed_mut_t, k_packed_t>);
+   STATIC_REQUIRE_FALSE(std::is_convertible_v<k_packed_t, k_packed_mut_t>);
+   STATIC_REQUIRE_FALSE(owner_views_temporary<k_owner_t>);
+-  // No view writes an element. Rows enter through store_row, store_block and
+-  // copy_token.
++  // No view writes an element. Rows enter through store_row and store_block.
+   STATIC_REQUIRE_FALSE(matrix_at_writes<k_packed_mut_t>);
+   // The 64-byte pair rows and the AMX tile rows need a 64-byte-aligned plane.
+   STATIC_REQUIRE(alignof(k_owner_t) == 64);

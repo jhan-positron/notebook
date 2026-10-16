@@ -1,0 +1,27 @@
+Short version: No verified new correctness defect in the assigned storage, owner/view, model-store, or page-copy changes at a711aeee831c7c4da24ce3737d93dd0c76df1149 against 72308ec90c80318403c4575dd9ce4a3bc9af5033.
+
+Scope inspected
+- h/tron/tensor/k_vnni.hpp and tensor/kv_cache_fwd.hpp: complete headers.
+- h/tron/models/kv_cache.hpp: changed access, allocation/lifetime, geometry dispatch, append, completion, owner, and relevant unchanged paths.
+- h/tron/models/model.hpp: save_k_impl and its public wrappers, completion ordering, callers in plugins/llama.hpp, source view/slice/chunky conversion code.
+- t/t_k_vnni_layout.cpp storage and copy cases; t/t_llama_unit.cpp typed-boundary, geometry, append, and save_k cases; direct K access search across h/src/t/ingest.
+
+Evidence
+- Executed Python arithmetic audit for all 8192 token/dimension coordinates. The index formula and the scatter/gather byte addresses agree. They form a bijection over 16384 bytes. This audits source arithmetic, not the compiled intrinsics.
+- Page set_k_row/get_k_row assert the token range at kv_cache.hpp:2014 and 2032. copy_from asserts both source and destination ranges at 2324-2325. The generic store/load helpers are not separately bounds checked, but current production callers meet those preconditions.
+- Geometry-specific dispatch in kv_block and kv_block_at_storage is unchanged. The packed owner has the same size and alignment as native K. Every head/slot/page is still addressed through the same geometry machinery.
+- Packed copies use whole-owner assignment only for both offsets zero and count equal to page_size (2295-2296). Other copies gather one token before scattering it to its destination (2298-2300), so page offset changes preserve logical rows.
+- save_k_impl writes every head before mark_k_complete and hardware credit (model.hpp:3100-3133). Stack conversion buffers are consumed synchronously by scatter operations. No new asynchronous owner is introduced.
+- Remaining production row-view calls are excluded for packed geometry in model, software attention, AMX dispatch, and FPGA staging. The layout gate is independent of activation dtype.
+
+Rejected candidate
+- Old bf16 save_k used view::set, which widened through fp32 and converted back. New packed save copies bf16 bits directly. That changes treatment of bf16 subnormals and signaling NaNs. The ordinary llama production caller writes rope results into the bf16 buffer immediately before save_k (plugins/llama.hpp:1036-1039), using the normal bf16 conversion first. No reachable valid-data failure was established. Do not present this as a correctness finding without another producer.
+
+Coverage facts for subsequent named passes
+- The added save_k case uses make_llm_executor<false, tensor, tensor, tensor> (t_llama_unit.cpp:3794). tensor has scalar float (tensor.hpp:32). It exercises the stack-conversion branch, not the newly added direct bf16 source-view path at model.hpp:3111-3114.
+- store/load/copy_token tests directly exercise packed owners regardless of TRON_K_VNNI. Cache and model packed paths require that option. Required-CI exception is accepted context (issue4865), not reported as a new defect.
+- The independent physical byte check compares scatter/gather addressing to index(), which is separately tied to ten explicit anchors. It is not just a store/load round trip.
+
+Limits
+- No C++ build, unit-test execution, sanitizer run, or hardware workload was performed by this subagent. The arithmetic script was the only executable check. Runtime claims must use parent-reviewed logs or a separately authorized run.
+- This is the default correctness review only. No Ben, Tron, Wade, Positron, or PR-body plain-English pass has been run here.

@@ -109,7 +109,9 @@ When both arms scored the same prompts, generated the same number of tokens (--d
 
 ## 4. Token jobs by path set
 
-How many token jobs of a class touched which paths within a forward (a job may use several paths across its pages and layers).
+A token job is one token of one user inside one forward. During that forward the token's keys are scored layer by layer, KV head by KV head, page by page, and each (KV head, page) step takes one path: the AMX kernel, the AVX loop or the FPGA card. One token job therefore usually touches more than one path in a forward, for example the kernel for its full pages and the AVX loop for its pending page.
+
+The table counts token jobs by the combination of paths that touched them. Each token job goes into exactly one column: the set of all paths it used in its forward, over all layers, KV heads and pages. The counts add up over every forward of the class, so the token jobs column equals forwards x jobs per forward (8 in decode here), and the eight path-set columns add up to it.
 
 | cell | class | arm | token jobs | forwards | FPGA queries | none | avx | amx | avx+amx | fpga | fpga+avx | fpga+amx | fpga+avx+amx |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|

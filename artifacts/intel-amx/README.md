@@ -787,8 +787,10 @@ Registered by the 2026-09-18 SCOPE:auto handoff run on claude-agentsrv. Same rul
   (handoffs: claude_20260916-20260917_pr4424-vs-pre-pr3879-perf-test.md)
 - `vnnied-k-in-place/status/amx-options-page/page.md` -> `WS/VNNIed-K-in-place/status/amx-options-page/page.md`
   (handoffs: claude_20260915_vnni-branch-rebase-onto-main-for-pr4424.md)
-- `vnnied-k-in-place/status/amx-tree-hw-attn.html` -> `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place/150fe5cd-91f2-4ba4-a357-dc1a80c785c9/scratchpad/amx-tree-hw-attn.html` (volatile session scratchpad, the repo copy is the durable one)
-  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/amx-tree-hw-attn.html
+- `exec/workflows/amx-tree-hw-attn.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/amx-tree-hw-attn.html` (restored from the repository copy on 2026-10-16)
+  origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place/150fe5cd-91f2-4ba4-a357-dc1a80c785c9/scratchpad/amx-tree-hw-attn.html` (history only; do not fetch).
+  Previous mirror: `artifacts/intel-amx/vnnied-k-in-place/status/amx-tree-hw-attn.html`. Historical handoff references resolve through this entry.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/workflows/amx-tree-hw-attn.html
   (handoffs: claude_20260916-20260917_amx-and-vnni-k-dispatch-flags.md)
 - `vnnied-k-in-place/status/block-store-animation.html` -> `WS/VNNIed-K-in-place/status/block-store-animation.html`
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/status/block-store-animation.html
@@ -838,8 +840,10 @@ Registered by the 2026-09-18 SCOPE:auto handoff run on claude-agentsrv. Same rul
 - `pr3879/PR1/nightly-amx-check-20260916.html` -> `WS/PR3879/new-PRs/PR1/nightly-amx-check-20260916.html`
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/PR1/nightly-amx-check-20260916.html
   (handoffs: claude_20260916-20260917_tron-amx-dispatch-in-ci-builds-after-pr3879.md)
-- `pr3879/amx-shape-ci.html` -> `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/5435bd53-a7f6-440c-894a-f90c35d3546e/scratchpad/amx-shape-ci.html` (volatile session scratchpad, the repo copy is the durable one)
-  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/amx-shape-ci.html
+- `exec/workflows/amx-shape-ci.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/amx-shape-ci.html` (restored from the repository copy on 2026-10-16)
+  origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/5435bd53-a7f6-440c-894a-f90c35d3546e/scratchpad/amx-shape-ci.html` (history only; do not fetch).
+  Previous mirror: `artifacts/intel-amx/pr3879/amx-shape-ci.html`. Historical handoff references resolve through this entry.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/workflows/amx-shape-ci.html
   (handoffs: claude_20260918_amx-compatible-128x4-models-in-nightly-ci.md)
 - `pr3879/gen_sec2.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/gen_sec2.py` (volatile session scratchpad, the repo copy is the durable one)
   (handoffs: claude_20260914_baseline-vs-mirror-sketch-html-matrix-dimensions.md)
@@ -4163,3 +4167,521 @@ Related: [claude_20261002_pr4557-to-pr4424-sync.md](../../handoffs/claude_202610
   Edit-safe sources: `analyze.py`, `build_report.py`, and `README.md` in the canonical directory.
   Regenerate: `python3 analyze.py` then `python3 build_report.py` from the report directory.
   Lineage: [report.html.lineage.md](CI-test/status/ci-machine-history-20261006/report.html.lineage.md).
+
+## 2026-10-16 Codex handoff preservation
+
+This batch preserves the current canonical copies listed below. The related handoffs describe the historical chat results. A later change to a canonical document does not change those historical results. File sizes are bytes.
+
+Standalone report generators with fixed output paths were not executed. Their entries record the reason. Existing reports whose input or generator changed were regenerated in scratch using preserved copies. The four checks matched the proposed or existing report bytes.
+
+Files left behind are enumerated in `logs/codex-handoff-20261016-artifacts.json`. They include source checkouts, binaries, rebuildable caches, review screenshots, scheduler process files, and syntax logs summarized by retained results. The two historical humanize-writing install directories are missing. No mirror is deleted.
+
+- Canonical root mapping: `claude-agentsrv:/tmp/` -> `artifacts/intel-amx/review-scratch/`.
+
+### Files
+
+- `exec/attnstats-20261002/final_prose.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/final_prose.md` (38895 bytes). REFRESH. Groups: registered-refresh.
+- `exec/attnstats-20261002/gen_compare.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/gen_compare.py` (31813 bytes). REFRESH. Groups: registered-refresh.
+- `exec/logs/bill-share.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/bill-share.log` (12062 bytes). REFRESH. Groups: registered-refresh.
+- `exec/results/attnstats-20261002/attn-stats-compare.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/attn-stats-compare.md` (34742 bytes). REFRESH. Groups: registered-refresh.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_0` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_0` (653 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_10` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_10` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_12` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_12` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_14` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_14` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_16` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_16` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_18` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_18` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_2` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_2` (654 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_20` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_20` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_22` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_22` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_24` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_24` (656 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_26` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_26` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_28` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_28` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_30` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_30` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_32` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_32` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_34` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_34` (655 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_4` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_4` (654 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_6` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_6` (656 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_8` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_8` (654 bytes). NEW. Groups: tron-intuition.
+- `exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/summary` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/summary` (260 bytes). NEW. Groups: tron-intuition.
+- `exec/sync4424-20261002/summarize.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py` (10578 bytes). REFRESH. Groups: registered-refresh.
+- `memory/MEMORY.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md` (24227 bytes). REFRESH. Groups: registered-refresh.
+- `memory/pr-description-no-history.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr-description-no-history.md` (3508 bytes). REFRESH. Groups: registered-refresh.
+- `memory/pr4557-ben-review-response.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4557-ben-review-response.md` (11178 bytes). REFRESH. Groups: registered-refresh.
+- `pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-k_vnni.hpp.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/from-codex/diagramming-code-changes-k_vnni.hpp.html` (275157 bytes). NEW. Groups: code-diagrams.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-k_vnni.hpp.html
+- `pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-kv_cache.hpp.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/from-codex/diagramming-code-changes-kv_cache.hpp.html` (425458 bytes). NEW. Groups: code-diagrams.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-kv_cache.hpp.html
+- `pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-model.hpp.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/from-codex/diagramming-code-changes-model.hpp.html` (246410 bytes). NEW. Groups: code-diagrams.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-model.hpp.html
+- `pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-validation.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/from-codex/diagramming-code-changes-validation.json` (6820 bytes). NEW. Groups: code-diagrams.
+- `pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/from-codex/diagramming-code-changes.html` (49121 bytes). NEW. Groups: code-diagrams.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes.html
+- `pr3879/merge-4737-2-4424/review-4824/barrier-line-count/barrier_and_greedy_range.patch` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/barrier_and_greedy_range.patch` (11392 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/barrier-line-count/barrier_and_greedy_range/t/t_llama_unit.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/barrier_and_greedy_range/t/t_llama_unit.cpp` (203285 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/barrier-line-count/barrier_only.patch` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/barrier_only.patch` (11164 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/barrier-line-count/barrier_only/t/t_llama_unit.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/barrier_only/t/t_llama_unit.cpp` (203285 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/barrier-line-count/base/t/t_llama_unit.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/base/t/t_llama_unit.cpp` (174516 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/barrier-line-count/count.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/count.html` (4968 bytes). NEW. Groups: scope-reduction.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/barrier-line-count/count.html
+- `pr3879/merge-4737-2-4424/review-4824/barrier-line-count/counts.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/counts.json` (4220 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/barrier-line-count/original/t/t_llama_unit.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/original/t/t_llama_unit.cpp` (203343 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/changed-files.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/changed-files.json` (912 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/comments.json` (21291 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/diff-stats.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/diff-stats.json` (4066 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/build-items-3-4.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/build-items-3-4.py` (11543 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/count.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/count.html` (7580 bytes). NEW. Groups: scope-reduction.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/item-line-count/count.html
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item1/counts.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item1/counts.json` (1489 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item1/draft.patch` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item1/draft.patch` (4291 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item2/counts.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item2/counts.json` (1032 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item2/draft.patch` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item2/draft.patch` (325 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/base/t/t_k_vnni_layout.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/base/t/t_k_vnni_layout.cpp` (0 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/counts.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/counts.json` (2642 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/draft.patch` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/draft.patch` (8133 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/draft/t/t_k_vnni_layout.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/draft/t/t_k_vnni_layout.cpp` (47052 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item3/original/t/t_k_vnni_layout.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item3/original/t/t_k_vnni_layout.cpp` (48429 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/base/t/t_k_vnni_layout.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/base/t/t_k_vnni_layout.cpp` (0 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/base/t/t_llama_unit.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/base/t/t_llama_unit.cpp` (174516 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/counts.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/counts.json` (2756 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/draft.patch` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/draft.patch` (5007 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/draft/t/t_k_vnni_layout.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/draft/t/t_k_vnni_layout.cpp` (47603 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/draft/t/t_llama_unit.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/draft/t/t_llama_unit.cpp` (203326 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/original/t/t_k_vnni_layout.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/original/t/t_k_vnni_layout.cpp` (48429 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/item4/original/t/t_llama_unit.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/item4/original/t/t_llama_unit.cpp` (203343 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/item-line-count/summary.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/summary.json` (1545 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/pr-info.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/pr-info.json` (29913 bytes). NEW. Groups: scope-reduction.
+- `pr3879/merge-4737-2-4424/review-4824/preserve-current-code.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/preserve-current-code.html` (24642 bytes). NEW. Groups: scope-reduction.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/preserve-current-code.html
+- `pr3879/merge-4737-2-4424/review-4824/scope-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/scope-comments.json` (8351 bytes). NEW. Groups: scope-reduction.
+- `pr3879/new-counters/Q-K-page-AMX_tile-codex.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/Q-K-page-AMX_tile-codex.html` (67386 bytes). NEW. Groups: qk-tiles.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/Q-K-page-AMX_tile-codex.html
+- `pr3879/new-counters/attn-stats-compare.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attn-stats-compare.md` (61056 bytes). REFRESH. Groups: registered-refresh.
+- `pr3879/new-counters/image.png` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/image.png` (208955 bytes). NEW. Groups: tron-intuition.
+- `pr3879/new-counters/tron-intuition-codex.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/tron-intuition-codex.html` (353721 bytes). NEW. Groups: tron-intuition.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/tron-intuition-codex.html
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/commits.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/commits.txt` (4322 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/completion.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/completion.json` (1031 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/description-before.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/description-before.json` (51506 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/description-edit-receipt.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/description-edit-receipt.json` (154 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/description-edits.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/description-edits.json` (6352 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/description-patch.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/description-patch.json` (51482 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/diff.patch` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/diff.patch` (45588 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-before-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-before-comments.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-before-inline.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-before-inline.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-before-reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-before-reviews.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-latest-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-latest-comments.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-latest-inline.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-latest-inline.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-latest-reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/discussion-latest-reviews.json` (6605 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/posted-reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/posted-reviews.json` (713 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/pr-after.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/pr-after.json` (72033 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/review.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/review.html` (70784 bytes). NEW. Groups: split-reviews.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/review.html
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/reviews.json` (6157 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/source/README.ci.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/source/README.ci.md` (42099 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/source/t/t_amx_dispatch_dtype.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/source/t/t_amx_dispatch_dtype.cpp` (13484 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/source/t/t_amx_numerics.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/source/t/t_amx_numerics.cpp` (16608 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/source/t/t_llama_unit.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/source/t/t_llama_unit.cpp` (198947 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/review-0ee8671d35/wade-checks.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/review-0ee8671d35/wade-checks.json` (4962 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/state.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/state.json` (1621 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr2-review-watch/watch.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr2-review-watch/watch.py` (4385 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/body-pre-post.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/body-pre-post.diff` (1544 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/body.md` (61262 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/comments.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/issue-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/issue-comments.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/post-review-pr.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/post-review-pr.json` (61857 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/post_reviews.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/post_reviews.py` (2623 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/pr.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/pr.json` (75105 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/pr2-body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/pr2-body.md` (53541 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/pr2-live.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/pr2-live.json` (53997 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/pre-post-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/pre-post-comments.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/pre-post-issue-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/pre-post-issue-comments.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/pre-post-reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/pre-post-reviews.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/pre-post.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/pre-post.json` (68277 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/prepare_posts.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/prepare_posts.py` (9509 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/prepare_review.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/prepare_review.py` (12557 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/band-differences.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/band-differences.json` (1890 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/description-edits.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/description-edits.json` (16000 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/diff.patch` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/diff.patch` (55413 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/head/ingest/src/TronCpp.hs` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/head/ingest/src/TronCpp.hs` (152148 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/head/ingest/test/LoopyTronSpec.hs` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/head/ingest/test/LoopyTronSpec.hs` (203376 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/head/t/t_k_vnni_layout.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/head/t/t_k_vnni_layout.cpp` (23423 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/head/t/t_llama_unit.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/head/t/t_llama_unit.cpp` (204451 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/passes.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/passes.json` (22445 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/post-1-normal.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/post-1-normal.json` (1481 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/post-2-tron.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/post-2-tron.json` (2421 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/post-3-wade.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/post-3-wade.json` (2792 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/post-4-ben.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/post-4-ben.json` (1033 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/post-5-plain.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/post-5-plain.json` (16215 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/post-description-draft.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/post-description-draft.json` (61496 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/posted.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/posted.json` (1503 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/proposed-description.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/proposed-description.json` (61059 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/review.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/review-80bce9a08d/review.html` (80605 bytes). NEW. Groups: split-reviews.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/split-4424/.pr3-review-watch/review-80bce9a08d/review.html
+- `pr3879/split-4424/.pr3-review-watch/reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/reviews.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/state.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/state.json` (2758 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/verified-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/verified-comments.json` (4786 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/verified-issue-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/verified-issue-comments.json` (63121 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/verified-reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/verified-reviews.json` (29998 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/.pr3-review-watch/watch.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/.pr3-review-watch/watch.py` (5849 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/PR2-handoff-review.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR2-handoff-review.md` (7980 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/PR2-handoff.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR2-handoff.md` (87714 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/PR3-handoff-review.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR3-handoff-review.md` (10209 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/PR3-handoff.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR3-handoff.md` (120710 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/PR4-handoff-review.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR4-handoff-review.md` (13429 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/PR4-handoff.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/PR4-handoff.md` (229667 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/create-PR1-handoff.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/create-PR1-handoff.md` (36108 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/added-prose.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/added-prose.txt` (54102 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/body-latest.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/body-latest.md` (62136 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/body-original.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/body-original.md` (61849 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/body-proposed.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/body-proposed.md` (47796 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/checks-required.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/checks-required.txt` (0 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/comments.json` (20082 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/commits.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/commits.txt` (16065 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/diff-stat.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/diff-stat.txt` (724 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/finalize_review.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/finalize_review.py` (15234 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/inline-comments-final.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/inline-comments-final.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/inline-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/inline-comments.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/notes.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/notes.json` (3945 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/pr-after-edit.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/pr-after-edit.json` (48560 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/pr-at-edit.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/pr-at-edit.json` (62923 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/pr-before-edit.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/pr-before-edit.json` (68272 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/pr-initial.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/pr-initial.json` (80752 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/pr-prepublish.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/pr-prepublish.json` (68262 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/pr.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/pr.diff` (114139 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/review.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/review.html` (12554 bytes). NEW. Groups: split-reviews.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/split-4424/pr4-review/review.html
+- `pr3879/split-4424/pr4-review/reviews-final.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/reviews-final.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/reviews.json` (2 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/rewrite_body.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/rewrite_body.py` (21757 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/pr4-review/state.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/state.json` (1956 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/split-handoff-review.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-handoff-review.md` (3918 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/split-handoff.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-handoff.md` (51558 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/split-plan-codex.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-plan-codex.md` (11386 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/split-plan.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-plan.md` (69243 bytes). NEW. Groups: split-reviews.
+- `pr3879/split-4424/split-status.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md` (270899 bytes). NEW. Groups: split-reviews.
+- `review-scratch/build_pr4424_diagrams.py` -> `claude-agentsrv:/tmp/build_pr4424_diagrams.py` (27436 bytes). NEW. Groups: code-diagrams.
+- `review-scratch/build_tron_intuition_fresh.py` -> `claude-agentsrv:/tmp/build_tron_intuition_fresh.py` (60834 bytes). NEW. Groups: tron-intuition.
+- `review-scratch/codex-4774-review-state.json` -> `claude-agentsrv:/tmp/codex-4774-review-state.json` (2138 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-comment-pointer.json` -> `claude-agentsrv:/tmp/codex-pr4812-comment-pointer.json` (221 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-comments.json` -> `claude-agentsrv:/tmp/codex-pr4812-comments.json` (11599 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-final-candidate.json` -> `claude-agentsrv:/tmp/codex-pr4812-final-candidate.json` (11399 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-final-review.txt` -> `claude-agentsrv:/tmp/codex-pr4812-final-review.txt` (782 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-grammar-format.log` -> `claude-agentsrv:/tmp/codex-pr4812-grammar-format.log` (3225 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-grammar-update.json` -> `claude-agentsrv:/tmp/codex-pr4812-grammar-update.json` (251423 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-initial-review.txt` -> `claude-agentsrv:/tmp/codex-pr4812-initial-review.txt` (870 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-initial.json` -> `claude-agentsrv:/tmp/codex-pr4812-initial.json` (17707 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-issues.json` -> `claude-agentsrv:/tmp/codex-pr4812-issues.json` (4238 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-latest.json` -> `claude-agentsrv:/tmp/codex-pr4812-latest.json` (11630 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-plugin-check.txt` -> `claude-agentsrv:/tmp/codex-pr4812-plugin-check.txt` (713 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-reply-6068326584.txt` -> `claude-agentsrv:/tmp/codex-pr4812-reply-6068326584.txt` (3029 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-review-thread.json` -> `claude-agentsrv:/tmp/codex-pr4812-review-thread.json` (851 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-reviews.json` -> `claude-agentsrv:/tmp/codex-pr4812-reviews.json` (7115 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812-skill-description.txt` -> `claude-agentsrv:/tmp/codex-pr4812-skill-description.txt` (674 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/codex-pr4812.diff` -> `claude-agentsrv:/tmp/codex-pr4812.diff` (17237 bytes). NEW. Groups: pr4812-review.
+- `review-scratch/pr2-handoff-review.nv3jNe/construction-checks.json` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/construction-checks.json` (183 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/script-checks.json` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/script-checks.json` (712 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-short/base.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-short/base.tokens` (2 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-short/head.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-short/head.tokens` (2 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-short/new.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-short/new.tokens` (2 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-short/new2.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-short/new2.tokens` (2 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-short/newoff.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-short/newoff.tokens` (2 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-short/verdict.txt` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-short/verdict.txt` (410 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-unequal/base.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-unequal/base.tokens` (914 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-unequal/head.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-unequal/head.tokens` (914 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-unequal/new.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-unequal/new.tokens` (914 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-unequal/new2.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-unequal/new2.tokens` (910 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-unequal/newoff.tokens` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-unequal/newoff.tokens` (914 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/smoke-unequal/verdict.txt` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/smoke-unequal/verdict.txt` (450 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/summary-corrected/rt-results.txt` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/summary-corrected/rt-results.txt` (87658 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/summary-corrected/summary.json` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/summary-corrected/summary.json` (16012 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/summary-corrected/summary.md` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/summary-corrected/summary.md` (3038 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/summary-default/rt-results.txt` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/summary-default/rt-results.txt` (87658 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/summary-default/summary.json` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/summary-default/summary.json` (5132 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/summary-default/summary.md` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/summary-default/summary.md` (1565 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/summary-inherited/rt-results.txt` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/summary-inherited/rt-results.txt` (87658 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/summary-inherited/summary.json` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/summary-inherited/summary.json` (10557 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/summary-inherited/summary.md` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/summary-inherited/summary.md` (2305 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/syntax/lcheck-vnni.sh` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/syntax/lcheck-vnni.sh` (1715 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/syntax/lcheck.sh` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/syntax/lcheck.sh` (1701 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/syntax/matrix.sh` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/syntax/matrix.sh` (1868 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr2-handoff-review.nv3jNe/syntax/out/review/summary.txt` -> `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/syntax/out/review/summary.txt` (1191 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/PR3-handoff-reviewed.md` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/PR3-handoff-reviewed.md` (101238 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/catch-filter/build-results.json` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/catch-filter/build-results.json` (26054 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/catch-filter/fixture` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/catch-filter/fixture` (3426896 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/catch-filter/fixture.cpp` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/catch-filter/fixture.cpp` (250 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/catch-filter/results.json` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/catch-filter/results.json` (1887 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/catch-filters.log` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/catch-filters.log` (1888 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/check-catch-filters.py` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/check-catch-filters.py` (1909 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/cleanup-fixture.sh` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/cleanup-fixture.sh` (373 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/cleanup-fixture.txt` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/cleanup-fixture.txt` (164 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/diff-vs-ba69-after-edit.patch` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/diff-vs-ba69-after-edit.patch` (80787 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/format.txt` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/format.txt` (41 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/history-check.json` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/history-check.json` (268 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/numstat.txt` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/numstat.txt` (275 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/syntax/lcheck-vnni.sh` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/syntax/lcheck-vnni.sh` (1715 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/syntax/lcheck.sh` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/syntax/lcheck.sh` (1701 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/syntax/matrix.sh` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/syntax/matrix.sh` (1870 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr3-handoff-review.t0c2og3n/syntax/out/review/summary.txt` -> `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/syntax/out/review/summary.txt` (1191 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/PR4-handoff-reviewed.md` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/PR4-handoff-reviewed.md` (169218 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/apply-final-parent.txt` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/apply-final-parent.txt` (719 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/apply-tail.txt` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/apply-tail.txt` (719 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/ci-busy-after-driver.sh` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/ci-busy-after-driver.sh` (4464 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/ci-busy-after-driver.trace` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/ci-busy-after-driver.trace` (289 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/cleanup-results.json` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/cleanup-results.json` (679 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/format-final.txt` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/format-final.txt` (14 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/numstat-final.txt` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/numstat-final.txt` (358 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/parent-self_attention.hpp` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/parent-self_attention.hpp` (107466 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/plugin-changed/fixture.hpp` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/plugin-changed/fixture.hpp` (219 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/plugin-check-results.json` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/plugin-check-results.json` (874 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/plugin-parent/fixture.hpp` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/plugin-parent/fixture.hpp` (223 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/reference-final.patch` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/reference-final.patch` (59841 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/resolve-final-parent.txt` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/resolve-final-parent.txt` (463 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/resolve.py` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/resolve.py` (26464 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/retry-verdict-fixture.sh` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/retry-verdict-fixture.sh` (3530 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/retry-verdict-result.json` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/retry-verdict-result.json` (269 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/retry-verdict.trace` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/retry-verdict.trace` (188 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/stat-final.txt` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/stat-final.txt` (678 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/syntax/lcheck-vnni.sh` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/syntax/lcheck-vnni.sh` (1715 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/syntax/lcheck.sh` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/syntax/lcheck.sh` (1701 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/syntax/matrix.sh` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/syntax/matrix.sh` (1870 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/syntax/out/final/summary.txt` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/syntax/out/final/summary.txt` (1191 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/verification.json` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/verification.json` (372 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/waiting-for-precheck.sh` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/waiting-for-precheck.sh` (4446 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4-handoff-review.d1he2l9w/waiting-for-precheck.trace` -> `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/waiting-for-precheck.trace` (40 bytes). NEW. Groups: split-reviews.
+- `review-scratch/pr4424-build-audit.json` -> `claude-agentsrv:/tmp/pr4424-build-audit.json` (937 bytes). NEW. Groups: code-diagrams.
+- `review-scratch/pr4424-cache.json` -> `claude-agentsrv:/tmp/pr4424-cache.json` (94793 bytes). NEW. Groups: code-diagrams.
+- `review-scratch/pr4424-model.json` -> `claude-agentsrv:/tmp/pr4424-model.json` (72868 bytes). NEW. Groups: code-diagrams.
+- `review-scratch/pr4424-tensor.json` -> `claude-agentsrv:/tmp/pr4424-tensor.json` (81292 bytes). NEW. Groups: code-diagrams.
+- `review-scratch/pr4424_overview.py` -> `claude-agentsrv:/tmp/pr4424_overview.py` (12747 bytes). NEW. Groups: code-diagrams.
+- `review-scratch/qk-build.py` -> `claude-agentsrv:/tmp/qk-build.py` (58806 bytes). NEW. Groups: qk-tiles.
+- `review-scratch/qk-pr-output.svg` -> `claude-agentsrv:/tmp/qk-pr-output.svg` (3699 bytes). NEW. Groups: qk-tiles.
+- `review-scratch/tron-pr1-monitor-20261010.py` -> `claude-agentsrv:/tmp/tron-pr1-monitor-20261010.py` (1414 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/added-comments.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/added-comments.txt` (48507 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/ben-review.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/ben-review.txt` (3730 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/body.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/body.txt` (31710 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/corrected-description-comment.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/corrected-description-comment.txt` (37691 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/corrected-description.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/corrected-description.txt` (37354 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/default-storage-review.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/default-storage-review.txt` (3722 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/diff.patch` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/diff.patch` (136781 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/files.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/files.txt` (565 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/final-inline-comments.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/final-inline-comments.json` (18184 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/final-issue-comments.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/final-issue-comments.json` (5463 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/final-pr.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/final-pr.json` (49561 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/final-required-checks.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/final-required-checks.json` (1526 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/final-review-payload.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/final-review-payload.json` (9638 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/final-reviews.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/final-reviews.json` (3242 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/inline-comments.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/inline-comments.json` (2 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/issue-comments.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/issue-comments.json` (5461 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/log.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/log.txt` (860 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/monitor.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/monitor.json` (523 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/plain-english-comment.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/plain-english-comment.txt` (34846 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/plain-english-review.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/plain-english-review.txt` (34687 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/positron-review.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/positron-review.txt` (1028 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/posted-audit.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/posted-audit.json` (38296 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/posted-description.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/posted-description.json` (41456 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/posted-inline-comments.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/posted-inline-comments.json` (25945 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/posted-review.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/posted-review.json` (6546 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/posting-checks.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/posting-checks.json` (1526 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/posting-pr.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/posting-pr.json` (49561 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/pr.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/pr.json` (49561 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/required-checks.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/required-checks.json` (460 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/review-body-draft.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/review-body-draft.txt` (4357 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/review-comments.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/review-comments.json` (4388 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/reviews.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/reviews.json` (2 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/revisions.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/revisions.json` (167 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/task.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/task.json` (2728 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/tron-review.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/tron-review.txt` (8603 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-added-lines.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-added-lines.txt` (140962 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-full-file-manifest.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-full-file-manifest.json` (3403 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-inline-comments.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-inline-comments.json` (18184 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-issue-comments.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-issue-comments.json` (5463 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-log-full.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-log-full.txt` (7591 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-pr.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-pr.json` (32287 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-prose.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-prose.txt` (51528 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-required-checks.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-required-checks.json` (1526 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-review.txt` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-review.txt` (20790 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-reviews.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-reviews.json` (3242 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron-pr1-review-state-20261010/wade-threads-edits.json` -> `claude-agentsrv:/tmp/tron-pr1-review-state-20261010/wade-threads-edits.json` (3360 bytes). NEW. Groups: split-reviews.
+- `review-scratch/tron_intuition_fresh.js` -> `claude-agentsrv:/tmp/tron_intuition_fresh.js` (12870 bytes). NEW. Groups: tron-intuition.
+- `review-scratch/validate_pr4424_diagrams.py` -> `claude-agentsrv:/tmp/validate_pr4424_diagrams.py` (5269 bytes). NEW. Groups: code-diagrams.
+- `review-scratch/wade-review-refresh/build_report.py` -> `claude-agentsrv:/tmp/wade-review-refresh/build_report.py` (12420 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-code-review/copy-observability.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-code-review/copy-observability.json` (3665 bytes). NEW. Groups: wade-pr4557.
+- `vnnied-k-in-place/issue4525/evidence/wade-code-review/copy-observability.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-code-review/copy-observability.py` (3311 bytes). NEW. Groups: wade-pr4557.
+- `vnnied-k-in-place/issue4525/evidence/wade-code-review/pr4557-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-code-review/pr4557-comments.json` (26256 bytes). NEW. Groups: wade-pr4557.
+- `vnnied-k-in-place/issue4525/evidence/wade-code-review/pr4557-metadata.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-code-review/pr4557-metadata.json` (20506 bytes). NEW. Groups: wade-pr4557.
+- `vnnied-k-in-place/issue4525/evidence/wade-code-review/pr4557-threads.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-code-review/pr4557-threads.json` (21229 bytes). NEW. Groups: wade-pr4557.
+- `vnnied-k-in-place/issue4525/evidence/wade-code-review/validation.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-code-review/validation.json` (1202 bytes). NEW. Groups: wade-pr4557.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/analysis-0.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/analysis-0.md` (13760 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/analysis-1.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/analysis-1.md` (16216 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/analysis-2.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/analysis-2.md` (19826 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/classification-0.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/classification-0.json` (29885 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/classification-1.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/classification-1.json` (31857 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/classification-2.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/classification-2.json` (31074 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/commented-search.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/commented-search.json` (1313583 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/corpus.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/corpus.json` (1205616 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/fetch-errors.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/fetch-errors.json` (2 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/fetch_corpus.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/fetch_corpus.py` (1746 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/forward-test-assessment.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/forward-test-assessment.json` (1252 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/forward-test-cases.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/forward-test-cases.md` (4380 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/forward-test-result.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/forward-test-result.md` (8151 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/manifest.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/manifest.json` (3146 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/previous-skill/SKILL.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/previous-skill/SKILL.md` (34194 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/previous-skill/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/previous-skill/agents/openai.yaml` (268 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/previous-skill/references/pr4557-misses.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/previous-skill/references/pr4557-misses.md` (13822 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/previous-skill/references/procedures.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/previous-skill/references/procedures.md` (27420 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/prs.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/prs.json` (560349 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/raw-github-responses.tar.gz` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/raw-github-responses.tar.gz` (1946036 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/reading-ledger.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/reading-ledger.json` (92810 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/reviewed-search.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/reviewed-search.json` (1246090 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/SKILL.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/SKILL.md` (11344 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/agents/openai.yaml` (288 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/references/pr4557-misses.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/references/pr4557-misses.md` (6395 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/references/procedures.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/references/procedures.md` (8066 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/references/review-history.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/updated-skill/references/review-history.md` (12312 bytes). NEW. Groups: wade-history.
+- `vnnied-k-in-place/issue4525/status/PR4557-Wade-review-misses.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/PR4557-Wade-review-misses.html` (16413 bytes). NEW. Groups: wade-pr4557.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4525/status/PR4557-Wade-review-misses.html
+- `vnnied-k-in-place/issue4525/status/wade-review-history-20261006.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/wade-review-history-20261006.html` (204057 bytes). NEW. Groups: wade-history.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/issue4525/status/wade-review-history-20261006.html
+
+### pr3879/new-counters/Q-K-page-AMX_tile-codex.html
+
+- generator: `claude-agentsrv:/tmp/qk-build.py`
+- input: `claude-agentsrv:/tmp/qk-pr-output.svg`
+- input built by: none
+- sources: none (no runtime measurement source). Per-file decisions: `artifacts/intel-amx/pr3879/new-counters/Q-K-page-AMX_tile-codex.html.lineage.md`.
+- regenerate: unavailable (generator has a fixed canonical output path)
+- regenerate unverified (fixed output path; counted operations, no runtime measurements)
+
+### vnnied-k-in-place/issue4525/status/PR4557-Wade-review-misses.html
+
+- generator: none
+- input: none
+- input built by: none
+- sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-code-review/` (preserved: 6 files). Per-file decisions: `artifacts/intel-amx/vnnied-k-in-place/issue4525/status/PR4557-Wade-review-misses.html.lineage.md`.
+- regenerate: none
+- regenerate unverified (agent-authored report; scalar fixture sources preserved)
+
+### vnnied-k-in-place/issue4525/status/wade-review-history-20261006.html
+
+- generator: `claude-agentsrv:/tmp/wade-review-refresh/build_report.py`
+- input: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/corpus.json`; `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/classification-0.json`; `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/classification-1.json`; `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/classification-2.json`
+- input built by: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/fetch_corpus.py
+- sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/wade-review-refresh-20261006/` (preserved: 27 files). Per-file decisions: `artifacts/intel-amx/vnnied-k-in-place/issue4525/status/wade-review-history-20261006.html.lineage.md`.
+- regenerate: unavailable (generator has fixed /tmp and canonical output paths and copies live staging directories)
+- regenerate unverified (fixed output paths and live scratch dependencies)
+
+### pr3879/new-counters/tron-intuition-codex.html
+
+- generator: `claude-agentsrv:/tmp/build_tron_intuition_fresh.py`
+- input: `claude-agentsrv:/tmp/tron_intuition_fresh.js`; `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/image.png`
+- input built by: none
+- sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/rt/gptoss-8u-p1024-fpga__fpga__amxon__rep1.log` (left behind (duplicate (artifacts/intel-amx/exec/results/attnstats-20261002/rt/gptoss-8u-p1024-fpga__fpga__amxon__rep1.log)): 1 files); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/build-main1002.txt` (left behind (duplicate (artifacts/intel-amx/exec/results/attnstats-20261002/build-main1002.txt)): 1 files); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/summary` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_0` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_2` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_4` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_6` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_8` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_10` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_12` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_14` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_16` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_18` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_20` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_22` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_24` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_26` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_28` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_30` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_32` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/gptoss-8u-p1024-fpga__fpga__amxon__rep1/decode_like_layer_34` (preserved: 1 file). Per-file decisions: `artifacts/intel-amx/pr3879/new-counters/tron-intuition-codex.html.lineage.md`.
+- regenerate: unavailable (generator has a fixed canonical output path)
+- regenerate unverified (fixed output path; the exact read set is preserved)
+
+### pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-model.hpp.html
+
+- generator: `claude-agentsrv:/tmp/build_pr4424_diagrams.py`
+- input: `claude-agentsrv:/tmp/pr4424-tensor.json`; `claude-agentsrv:/tmp/pr4424-cache.json`; `claude-agentsrv:/tmp/pr4424-model.json`
+- input built by: none (agent-authored logical-change records)
+- sources: `claude-agentsrv:/tmp/pr4424-build-audit.json` (preserved: 1 file). Per-file decisions: `artifacts/intel-amx/pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-model.hpp.html.lineage.md`.
+- regenerate: unavailable (fixed output directory and live git queries)
+- regenerate unverified (generator reads live git and writes a fixed directory)
+
+### pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes.html
+
+- generator: `claude-agentsrv:/tmp/build_pr4424_diagrams.py`
+- input: `claude-agentsrv:/tmp/pr4424-tensor.json`; `claude-agentsrv:/tmp/pr4424-cache.json`; `claude-agentsrv:/tmp/pr4424-model.json`
+- input built by: none (agent-authored logical-change records)
+- sources: `claude-agentsrv:/tmp/pr4424-build-audit.json` (preserved: 1 file). Per-file decisions: `artifacts/intel-amx/pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes.html.lineage.md`.
+- regenerate: unavailable (fixed output directory and live git queries)
+- regenerate unverified (generator reads live git and writes a fixed directory)
+
+### pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-k_vnni.hpp.html
+
+- generator: `claude-agentsrv:/tmp/build_pr4424_diagrams.py`
+- input: `claude-agentsrv:/tmp/pr4424-tensor.json`; `claude-agentsrv:/tmp/pr4424-cache.json`; `claude-agentsrv:/tmp/pr4424-model.json`
+- input built by: none (agent-authored logical-change records)
+- sources: `claude-agentsrv:/tmp/pr4424-build-audit.json` (preserved: 1 file). Per-file decisions: `artifacts/intel-amx/pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-k_vnni.hpp.html.lineage.md`.
+- regenerate: unavailable (fixed output directory and live git queries)
+- regenerate unverified (generator reads live git and writes a fixed directory)
+
+### pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-kv_cache.hpp.html
+
+- generator: `claude-agentsrv:/tmp/build_pr4424_diagrams.py`
+- input: `claude-agentsrv:/tmp/pr4424-tensor.json`; `claude-agentsrv:/tmp/pr4424-cache.json`; `claude-agentsrv:/tmp/pr4424-model.json`
+- input built by: none (agent-authored logical-change records)
+- sources: `claude-agentsrv:/tmp/pr4424-build-audit.json` (preserved: 1 file). Per-file decisions: `artifacts/intel-amx/pr3879/merge-4737-2-4424/from-codex/diagramming-code-changes-kv_cache.hpp.html.lineage.md`.
+- regenerate: unavailable (fixed output directory and live git queries)
+- regenerate unverified (generator reads live git and writes a fixed directory)
+
+### pr3879/merge-4737-2-4424/review-4824/preserve-current-code.html
+
+- generator: none
+- input: none
+- input built by: none
+- sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/barrier-line-count/` (preserved: 8 files); `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/merge-4737-2-4424/review-4824/item-line-count/` (preserved: 20 files). Per-file decisions: `artifacts/intel-amx/pr3879/merge-4737-2-4424/review-4824/preserve-current-code.html.lineage.md`.
+- regenerate: none
+- regenerate unverified (authored review; counted draft patches and counting scripts preserved)
+
+### pr3879/split-4424/pr4-review/review.html
+
+- generator: none
+- input: none
+- input built by: none
+- sources: `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/body-original.md` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/body-latest.md` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/body-proposed.md` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/notes.json` (preserved: 1 file); `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-review/pr.diff` (preserved: 1 file). Per-file decisions: `artifacts/intel-amx/pr3879/split-4424/pr4-review/review.html.lineage.md`.
+- regenerate: none
+- regenerate unverified (authored review summary; original test records were inspected, not rerun)
+
+### pr3879/split-4424/PR2-handoff-review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/script-checks.json` (preserved: 1 file); `claude-agentsrv:/tmp/pr2-handoff-review.nv3jNe/construction-checks.json` (preserved: 1 file). Per-file decisions: `artifacts/intel-amx/pr3879/split-4424/PR2-handoff-review.md.lineage.md`.
+- regenerate: none
+- regenerate unverified (agent-authored review; fixture and syntax results preserved)
+
+### pr3879/split-4424/PR3-handoff-review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/catch-filter/results.json` (preserved: 1 file); `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/history-check.json` (preserved: 1 file); `claude-agentsrv:/tmp/pr3-handoff-review.t0c2og3n/cleanup-fixture.txt` (preserved: 1 file). Per-file decisions: `artifacts/intel-amx/pr3879/split-4424/PR3-handoff-review.md.lineage.md`.
+- regenerate: none
+- regenerate unverified (agent-authored review; fixture and syntax results preserved)
+
+### pr3879/split-4424/PR4-handoff-review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/cleanup-results.json` (preserved: 1 file); `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/plugin-check-results.json` (preserved: 1 file); `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/retry-verdict-result.json` (preserved: 1 file); `claude-agentsrv:/tmp/pr4-handoff-review.d1he2l9w/verification.json` (preserved: 1 file). Per-file decisions: `artifacts/intel-amx/pr3879/split-4424/PR4-handoff-review.md.lineage.md`.
+- regenerate: none
+- regenerate unverified (agent-authored review; fixture and syntax results preserved)
+
+### Existing report regeneration checks
+
+- `artifacts/intel-amx/exec/results/attnstats-20261002/attn-stats-compare.md`: regenerate verified 2026-10-16 (byte-identical using preserved copies). Command used with `<OUT>`: `python3 /tmp/codex-handoff-20261016/regeneration/gen_compare.py /tmp/codex-handoff-20261016/regeneration/attnstats-20261002 > <OUT>`.
+- `artifacts/intel-amx/pr3879/new-counters/attn-stats-compare.md`: regenerate verified 2026-10-16 (byte-identical using preserved copies). Command used with `<OUT>`: `python3 /tmp/codex-handoff-20261016/regeneration/assemble.py /tmp/codex-handoff-20261016/regeneration/attnstats-generated.md /tmp/codex-handoff-20261016/regeneration/final_prose.md <OUT>`.
+- `artifacts/intel-amx/exec/results/sync4424-E-cpu/summary.md`: regenerate verified 2026-10-16 (byte-identical using preserved copies). Command used with `<OUT>`: `python3 /tmp/codex-handoff-20261016/regeneration/sync-summarize.py /tmp/codex-handoff-20261016/regeneration/sync4424-E-cpu > <OUT>`.
+- `artifacts/intel-amx/exec/results/sync4424-E-fpga/summary.md`: regenerate verified 2026-10-16 (byte-identical using preserved copies). Command used with `<OUT>`: `python3 /tmp/codex-handoff-20261016/regeneration/sync-summarize.py /tmp/codex-handoff-20261016/regeneration/sync4424-E-fpga > <OUT>`.
+
+### Kept repository revision
+
+`rampup/operand-B.html` retains the contents section added in notebook commit 71fc29c. The registered canonical lacks it. The canonical remains different and is not copied over this version.
+
+### Related handoffs by file group
+
+- code-diagrams: [codex_20261009_diagram-pr4424-code-changes.md](../../handoffs/codex_20261009_diagram-pr4424-code-changes.md).
+- pr4812-review: [codex_20261008_review-new-pr-iteratively.md](../../handoffs/codex_20261008_review-new-pr-iteratively.md).
+- qk-tiles: [codex_20261004_explain-qk-tile-register-usage.md](../../handoffs/codex_20261004_explain-qk-tile-register-usage.md).
+- registered-refresh: [codex_20261016_follow-codex-handoff-prompt.md](../../handoffs/codex_20261016_follow-codex-handoff-prompt.md).
+- scope-reduction: [codex_20261008_review-pr-4824-scope.md](../../handoffs/codex_20261008_review-pr-4824-scope.md).
+- scratchpad-restorations: [CI model shapes](../../handoffs/claude_20260918_amx-compatible-128x4-models-in-nightly-ci.md), [dispatch flags](../../handoffs/claude_20260916-20260917_amx-and-vnni-k-dispatch-flags.md). Their historical artifact paths are recorded above.
+- split-reviews: [codex_20261009_review-pr-4424-split-plan.md](../../handoffs/codex_20261009_review-pr-4424-split-plan.md), [codex_20261009_review-split-handoff-md.md](../../handoffs/codex_20261009_review-split-handoff-md.md), [codex_20261009-20261010_monitor-and-review-draft-pr.md](../../handoffs/codex_20261009-20261010_monitor-and-review-draft-pr.md), [codex_20261010_review-pr2-handoff-md.md](../../handoffs/codex_20261010_review-pr2-handoff-md.md), [codex_20261010-20261011_review-split-pr4887.md](../../handoffs/codex_20261010-20261011_review-split-pr4887.md), [codex_20261011_review-pr3-handoff-md.md](../../handoffs/codex_20261011_review-pr3-handoff-md.md), [codex_20261011-20261012_review-pr-after-pr3-handoff-md.md](../../handoffs/codex_20261011-20261012_review-pr-after-pr3-handoff-md.md), [codex_20261012_review-pr4-handoff-md.md](../../handoffs/codex_20261012_review-pr4-handoff-md.md), [codex_20261012_review-split-pr4901.md](../../handoffs/codex_20261012_review-split-pr4901.md).
+- tron-intuition: [codex_20261007_build-tron-timing-intuition.md](../../handoffs/codex_20261007_build-tron-timing-intuition.md).
+- wade-history: [codex_20261006_update-wade-code-review-skill.md](../../handoffs/codex_20261006_update-wade-code-review-skill.md).
+- wade-pr4557: [codex_20261005_analyze-pr4557-review-misses.md](../../handoffs/codex_20261005_analyze-pr4557-review-misses.md).
+
+- humanfia-guide: [codex_20261007-20261008_assess-humanfia-for-pr-4424.md](../../handoffs/codex_20261007-20261008_assess-humanfia-for-pr-4424.md).

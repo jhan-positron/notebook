@@ -1,0 +1,333 @@
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index a8769811e9..589de6b09c 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -3092,12 +3092,14 @@ public:
+     //      Chosen per run in store_k_block.
+     //   2. Sharing with the main helpers: in generated plugins the helpers
+     //      are idle while main runs save_k. Their next kernel waits for the
+-    //      attention output. So the generated run_main_help calls
+-    //      save_k_helper at the same statement position. Every thread then
+-    //      claims work units (runs of consecutive items inside one 16-token
+-    //      block, see the protocol below) until none is left. n_workers == 1
+-    //      never shares (the handwritten plugins, and the unit tests except
+-    //      the shared-save case of t_llama_unit).
++    //      attention output. So the generated run_main_help calls save_k at
++    //      the same statement position, with the helper's worker_ix. One
++    //      function serves both sides: worker_ix 0 is main, 1 .. n_workers - 1
++    //      are the helpers. Every thread then claims work units (runs of
++    //      consecutive items inside one 16-token block, see the protocol
++    //      below) until none is left. n_workers == 1 never shares (the
++    //      handwritten plugins, and the unit tests except the shared-save case
++    //      of t_llama_unit).
+     // The window protocol (fields in batch::k_store_window, common.hpp):
+     //   - both sides decide with k_store_shared(). A window exists only
+     //     when it says yes. So a helper never waits for a window main does
+@@ -3128,9 +3130,9 @@ public:
+     // The rows a helper reads (ks) are ready for two reasons. Main waited for
+     // every token's K channel before calling save_k (the generated code). The
+     // channel phase cannot advance while main is inside save_k. A helper can
+-    // reach its save_k_helper call without main's help. Nothing blocks
+-    // between its K/Q rope kernel and this statement. So main's join cannot
+-    // deadlock. A join that does not complete within about two minutes
++    // reach its save_k call without main's help. Nothing blocks between its
++    // K/Q rope kernel and this statement. So main's join cannot deadlock. A
++    // join that does not complete within about two minutes
+     // (k_join_timeout_s after the first clock read) aborts with the
+     // counters in the message.
+ 
+@@ -3294,58 +3296,26 @@ public:
+       }
+     }
+ 
+-    // A helper's share of the K store window (Note [Shared block save]).
+-    // Called by the generated run_main_help at the attention statement of
+-    // every KV-writing operation, with the helper's worker_ix (1 ..
+-    // n_workers - 1).
+-    template <attention_geometry geometry, size_t operation_ix, typename kv_buffer_t>
+-    void save_k_helper(
+-        batch* q_batch, kv_buffer_t& ks, size_t worker_ix, size_t n_workers) noexcept {
+-      constexpr auto const& operation =
+-          generated_attention_operation<geometry, operation_ix>();
+-      static_assert(operation.writes_kv);
+-      save_k_helper<geometry>(q_batch, operation, ks, worker_ix, n_workers);
+-    }
+-
+-    template <attention_geometry geometry, typename kv_buffer_t>
+-    void save_k_helper(batch* q_batch,
+-        attention_operation_descriptor const& operation,
+-        kv_buffer_t& ks,
+-        size_t worker_ix,
+-        size_t n_workers) noexcept {
+-      if constexpr (!k_vnni::layout_on<geometry.kv.head_size>) {
+-        return;
+-      } else {
+-        if (!k_store_shared<geometry>(q_batch, n_workers)) return;
+-        const kv_slot_id slot = operation.binding.kv_slot;
+-        auto& w = q_batch->k_store_window;
+-        TRON_ASSERT(worker_ix >= 1 && worker_ix < n_workers,
+-            "save_k_helper: worker_ix {} outside the helper range 1..{}", worker_ix,
+-            n_workers - 1);
+-        const uint32_t my_window = ++w.helper_windows[worker_ix];
+-        while (w.opened.load(std::memory_order_acquire) < my_window) {
+-          _mm_pause();
+-        }
+-        const uint32_t n_units = w.n_units;
+-        for (;;) {
+-          const uint32_t u = w.next_unit.fetch_add(1, std::memory_order_acq_rel);
+-          if (u >= n_units) break;
+-          store_k_block<geometry>(
+-              q_batch, slot, ks, w.unit_start[u], w.unit_start[u + 1]);
+-        }
+-        w.finished.fetch_add(1, std::memory_order_release);
+-      }
+-    }
+-
++    // Every worker of the store calls this (Note [Shared block save]).
++    // worker_ix 0 is main: it opens the window, stores its share, joins the
++    // helpers, then marks the tokens. worker_ix 1 .. n_workers - 1 is a main
++    // helper: it waits for its window, stores its share and leaves.
+     template <attention_geometry geometry, typename kv_buffer_t>
+     void save_k_impl(batch* q_batch,
+         attention_operation_descriptor const& operation,
+         kv_buffer_t& ks,
++        size_t worker_ix,
+         size_t n_workers) noexcept {
+       static_assert(geometry.valid());
+       static_assert(attention_buffer_width<kv_buffer_t> == geometry.kv_width());
+       TRON_ASSERT(operation.writes_kv, "attention operation {} does not write KV",
+           operation.binding.operation);
++      TRON_ASSERT(worker_ix < n_workers, "save_k: worker_ix {} outside 0..{}",
++          worker_ix, n_workers - 1);
++      const bool is_main = worker_ix == 0;
++      const bool shared = k_store_shared<geometry>(q_batch, n_workers);
++      // An unshared store is main's alone.
++      if (!is_main && !shared) return;
+       const attention_binding binding = operation.binding;
+       TRACE_EVENT("model", "Save K");
+       const model_layer_id layer = binding.model_layer;
+@@ -3355,21 +3325,32 @@ public:
+           operation_is_hardware_candidate(operation);
+       const size_t n_items = q_batch->items.size();
+       // Update the pages first. That way HW sees the latest K values.
+-      if (k_store_shared<geometry>(q_batch, n_workers)) {
++      if (shared) {
+         // See Note [Shared block save].
+         auto& w = q_batch->k_store_window;
+         const uint32_t n_helpers = static_cast<uint32_t>(n_workers - 1);
+-        k_store_cut_units(q_batch);
++        if (is_main) {
++          k_store_cut_units(q_batch);
++          w.next_unit.store(0, std::memory_order_relaxed);
++          w.finished.store(0, std::memory_order_relaxed);
++          w.opened.fetch_add(1, std::memory_order_release);
++        } else {
++          const uint32_t my_window = ++w.helper_windows[worker_ix];
++          while (w.opened.load(std::memory_order_acquire) < my_window) {
++            _mm_pause();
++          }
++        }
+         const uint32_t n_units = w.n_units;
+-        w.next_unit.store(0, std::memory_order_relaxed);
+-        w.finished.store(0, std::memory_order_relaxed);
+-        w.opened.fetch_add(1, std::memory_order_release);
+         for (;;) {
+           const uint32_t u = w.next_unit.fetch_add(1, std::memory_order_acq_rel);
+           if (u >= n_units) break;
+           store_k_block<geometry>(
+               q_batch, slot, ks, w.unit_start[u], w.unit_start[u + 1]);
+         }
++        if (!is_main) {
++          w.finished.fetch_add(1, std::memory_order_release);
++          return;
++        }
+         uint64_t spins = 0;
+         std::chrono::steady_clock::time_point t0{};
+         while (w.finished.load(std::memory_order_acquire) < n_helpers) {
+@@ -3379,8 +3360,8 @@ public:
+             if (t0 == std::chrono::steady_clock::time_point{}) t0 = now;
+             TRON_ASSERT(now - t0 < std::chrono::seconds(k_join_timeout_s),
+                 "save_k: the K store window did not close in {} s ({} of {} helpers "
+-                "finished, {} of {} units claimed); the helpers' save_k_helper calls "
+-                "do not match this save_k",
++                "finished, {} of {} units claimed); the helpers' save_k calls do not "
++                "match this one",
+                 k_join_timeout_s, w.finished.load(), n_helpers,
+                 std::min<uint32_t>(w.next_unit.load(), n_units), n_units);
+           }
+@@ -3407,24 +3388,30 @@ public:
+         batch_2->upstream_kvs_ready[slot].count_down();
+     }
+ 
+-    // n_workers = 1 + the main helpers that call save_k_helper for this
+-    // operation (the generated plugins pass their run() split). The default
+-    // 1 stores every row on the calling thread.
++    // Store the K rows of the minibatch. Main (worker_ix 0) and the main
++    // helpers (worker_ix 1 .. n_workers - 1) call this with the same
++    // operation at the same point of the schedule (the generated plugins
++    // pass their run() split). See Note [Shared block save]. The defaults
++    // store every row on the calling thread.
+     template <attention_geometry geometry, size_t operation_ix, typename kv_buffer_t>
+-    void save_k(batch* q_batch, kv_buffer_t& ks, size_t n_workers = 1) noexcept {
++    void save_k(batch* q_batch,
++        kv_buffer_t& ks,
++        size_t worker_ix = 0,
++        size_t n_workers = 1) noexcept {
+       constexpr auto const& operation =
+           generated_attention_operation<geometry, operation_ix>();
+       static_assert(operation.writes_kv);
+-      save_k_impl<geometry>(q_batch, operation, ks, n_workers);
++      save_k_impl<geometry>(q_batch, operation, ks, worker_ix, n_workers);
+     }
+ 
+     template <attention_geometry geometry, typename kv_buffer_t>
+     void save_k(batch* q_batch,
+         attention_operation_descriptor const& operation,
+         kv_buffer_t& ks,
++        size_t worker_ix = 0,
+         size_t n_workers = 1) noexcept {
+       self_attn_state.template validate_operation<geometry>(operation);
+-      save_k_impl<geometry>(q_batch, operation, ks, n_workers);
++      save_k_impl<geometry>(q_batch, operation, ks, worker_ix, n_workers);
+     }
+ 
+     template <attention_geometry geometry, typename kv_buffer_t>
+diff --git a/ingest/src/TronCpp.hs b/ingest/src/TronCpp.hs
+index 7f6f480449..f328f5291d 100644
+--- a/ingest/src/TronCpp.hs
++++ b/ingest/src/TronCpp.hs
+@@ -2879,9 +2879,10 @@ runHelperStatement env blendNames stmt = case stmt of
+   -- idle at this point of the schedule. Their next kernel waits for the
+   -- attention output. The idle helpers claim work units of the window (runs
+   -- of consecutive tokens inside one 16-token page block).
+-  -- Both sides run the statement at the same position of the statement list.
+-  -- So the N-th window a helper enters in a pass is the N-th window main opens
+-  -- in that pass.
++  -- Both sides call save_k, main with worker index 0 (submitAttentionOperation)
++  -- and the helpers with their own worker_ix, at the same position of the
++  -- statement list. So the N-th window a helper enters in a pass is the N-th
++  -- window main opens in that pass.
+   -- See Note [Shared block save] in model.hpp. Operations without a KV write
+   -- emit nothing here.
+   AttentionStmt attention -> case attentionKvWrite attention of
+@@ -2889,7 +2890,7 @@ runHelperStatement env blendNames stmt = case stmt of
+     Just kvWrite ->
+       withTrace stmt $
+         attentionRuntimeCall
+-          "save_k_helper"
++          "save_k"
+           attention
+           [Var $ asCpp $ attentionKey kvWrite, ExprLit "worker_ix", ExprLit "n_workers"]
+   MoeRouteStmt{} -> []
+@@ -2948,13 +2949,13 @@ submitAttentionOperation env stmt =
+       ]
+   saveKv kvWrite =
+     [ startOperand $ attentionChannel env $ attentionKey kvWrite
+-    , -- n_workers (main + main helpers) is in scope in run(). It lets save_k
+-      -- share the K store with the helpers' save_k_helper calls
+-      -- (runHelperStatement).
++    , -- Main is worker 0, as in kernelCall. n_workers (main + main helpers) is
++      -- in scope in run(). It lets save_k share the K store with the helpers'
++      -- save_k calls (runHelperStatement).
+       attentionRuntimeCall
+         "save_k"
+         stmt
+-        [Var $ asCpp $ attentionKey kvWrite, ExprLit "n_workers"]
++        [Var $ asCpp $ attentionKey kvWrite, LiteralExpr (IntLit 0), ExprLit "n_workers"]
+     , startOperand $ attentionChannel env $ attentionValue kvWrite
+     , attentionRuntimeCall
+         "save_v"
+diff --git a/ingest/test/LoopyTronSpec.hs b/ingest/test/LoopyTronSpec.hs
+index 4aa82b8c4f..581cd7f31f 100644
+--- a/ingest/test/LoopyTronSpec.hs
++++ b/ingest/test/LoopyTronSpec.hs
+@@ -3131,19 +3131,18 @@ spec =
+         `shouldBe` False
+       ("q, q_batch->q_channel, attn_out, q_batch->attn_out_channel" `Txt.isInfixOf` cpp)
+         `shouldBe` True
+-      Txt.count "outer_state.template save_k<" cpp `shouldBe` 1
+-      -- Main passes the worker count of run(). It lets save_k share the store.
+-      -- The helpers' side (Note [Shared block save] in model.hpp) is one
+-      -- save_k_helper call per KV-writing operation. That call passes the
+-      -- helper's worker index and the worker count of run_main_help. Every
+-      -- helper-side host kernel call also ends in "worker_ix, n_workers);". So
+-      -- the whole call text is checked.
+-      ( (attentionCallPrefix "save_k" geometry 0 <> "q_batch->outer_batch,k,n_workers);")
++      -- Two save_k calls per KV-writing operation, one function on both sides
++      -- (Note [Shared block save] in model.hpp). Main passes worker index 0 and
++      -- the worker count of run(). It lets save_k share the store. The helpers
++      -- pass their own worker index and the worker count of run_main_help.
++      -- Every helper-side host kernel call also ends in "worker_ix, n_workers);".
++      -- So the whole call text is checked.
++      Txt.count "outer_state.template save_k<" cpp `shouldBe` 2
++      ( (attentionCallPrefix "save_k" geometry 0 <> "q_batch->outer_batch,k,0,n_workers);")
+           `Txt.isInfixOf` compactCpp cpp
+         )
+         `shouldBe` True
+-      Txt.count "outer_state.template save_k_helper<" cpp `shouldBe` 1
+-      ( ( attentionCallPrefix "save_k_helper" geometry 0
++      ( ( attentionCallPrefix "save_k" geometry 0
+             <> "q_batch->outer_batch,k,worker_ix,n_workers);"
+         )
+           `Txt.isInfixOf` compactCpp cpp
+@@ -3557,13 +3556,12 @@ spec =
+               (LiteralExpr $ IntLit 1)
+               (LiteralExpr $ IntLit 4)
+           ]
+-      Txt.count "outer_state.template save_k<" cpp `shouldBe` 1
++      -- One main-side and one helper-side save_k call, for the operation that
++      -- writes KV. The second operation shares the slot. It writes nothing. See
++      -- Note [Shared block save] in model.hpp.
++      Txt.count "outer_state.template save_k<" cpp `shouldBe` 2
+       -- The shared module keeps the sparse module's K buffer "k".
+-      (",k,n_workers);" `Txt.isInfixOf` compactCpp cpp) `shouldBe` True
+-      -- One helper-side call, for the operation that writes KV. The second
+-      -- operation shares the slot. It writes nothing. See Note [Shared block save]
+-      -- in model.hpp.
+-      Txt.count "outer_state.template save_k_helper<" cpp `shouldBe` 1
++      (",k,0,n_workers);" `Txt.isInfixOf` compactCpp cpp) `shouldBe` True
+       (",k,worker_ix,n_workers);" `Txt.isInfixOf` compactCpp cpp) `shouldBe` True
+       Txt.count "outer_state.template save_v" cpp `shouldBe` 1
+       ("k2_channel" `Txt.isInfixOf` cpp) `shouldBe` False
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index 5747591552..522acb4792 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -3829,6 +3829,16 @@ TEST_CASE("save_k stores every token's K row once, grouped by page block, alone
+     }
+     REQUIRE(stored == kv_jobs * n_kv_heads);
+     REQUIRE(kept == (num_kv_tokens - kv_jobs) * n_kv_heads);
++    // The marks: save_k marks K of every job with KV work exactly once. The
++    // helpers leave before the mark loop. K alone does not complete a token.
++    // The second mark completes it (mark_k_complete returns true only when
++    // the count was 1). A job without KV work has no mark (count 0).
++    for (size_t job = 0; job < n_items; ++job) {
++      page_t* page = token_pages[job_tokens[job].i];
++      const size_t offset = static_cast<size_t>(page->offset_in_page(job_tokens[job]));
++      REQUIRE_FALSE(page->is_kv_complete(slot, offset));
++      REQUIRE(page->mark_k_complete(slot, offset) == (do_kv[job] != 0));
++    }
+   };
+ 
+   SECTION("one thread: the grouping stores every row and touches nothing else") {
+@@ -3843,15 +3853,18 @@ TEST_CASE("save_k stores every token's K row once, grouped by page block, alone
+     bk.fill_random(gen);
+     const auto before = snapshot();
+     constexpr size_t n_workers = 3;
++    constexpr size_t main_worker_ix = 0;
++    // Every worker calls the same save_k with its own index (Note [Shared
++    // block save] in model.hpp).
+     std::vector<std::thread> helpers;
+     for (size_t worker_ix = 1; worker_ix < n_workers; ++worker_ix) {
+       helpers.emplace_back([&, worker_ix] {
+-        state.template save_k_helper<geometry>(
++        state.template save_k<geometry>(
+             &q_batch, operation, state.plugin_state.kouts, worker_ix, n_workers);
+       });
+     }
+     state.template save_k<geometry>(
+-        &q_batch, operation, state.plugin_state.kouts, n_workers);
++        &q_batch, operation, state.plugin_state.kouts, main_worker_ix, n_workers);
+     for (auto& h : helpers) {
+       h.join();
+     }

@@ -40,3 +40,32 @@ These entries record the source inventory and regeneration limits for existing r
 - input built by: Inline Python in the recorded session downloaded the checkpoint headers and wrote the tensor JSON. The exact command is recorded at `/home/jhan/.claude/projects/-home-jhan-workspace-notebook/d476fbee-fdd0-4d28-aa39-5857b37fed9f.jsonl:269`. No separate builder file was created by that command.
 - sources: Downloaded config, index, and tensor-header records: left behind (missing on 2026-09-20). The public model URLs used `main`, without a pinned revision. These are checkpoint storage counts, not runtime benchmark measurements. Full per-file inventory: [weights-bytes-qwen2.5-32b.html.lineage.md](weights-bytes-qwen2.5-32b.html.lineage.md).
 - regenerate: unavailable (generator, template, and downloaded input records are missing; the page also received later direct edits). regenerate unverified (missing inputs).
+
+## 2026-10-16 Codex handoff preservation
+
+This batch preserves the current canonical copies listed below. The related handoffs describe the historical chat results. A later change to a canonical document does not change those historical results. File sizes are bytes.
+
+Standalone report generators with fixed output paths were not executed. Their entries record the reason. Existing reports whose input or generator changed were regenerated in scratch using preserved copies. The four checks matched the proposed or existing report bytes.
+
+Files left behind are enumerated in `logs/codex-handoff-20261016-artifacts.json`. They include source checkouts, binaries, rebuildable caches, review screenshots, scheduler process files, and syntax logs summarized by retained results. The two historical humanize-writing install directories are missing. No mirror is deleted.
+
+- Canonical root mapping: `claude-agentsrv:/home/jhan/workspace/random/` -> `artifacts/common-knowledge/random/`.
+
+### Files
+
+- `random/how-to-use-humafia.html` -> `claude-agentsrv:/home/jhan/workspace/random/how-to-use-humafia.html` (156994 bytes). NEW. Groups: humanfia-guide.
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/common-knowledge/random/how-to-use-humafia.html
+
+### random/how-to-use-humafia.html
+
+- generator: none
+- input: none
+- input built by: none
+- sources: none (no runtime measurement source). Per-file decisions: `artifacts/common-knowledge/random/how-to-use-humafia.html.lineage.md`.
+- regenerate: none
+- regenerate unverified (authored research guide; no benchmark measurements)
+
+### Related handoffs by file group
+
+
+- humanfia-guide: [codex_20261007-20261008_assess-humanfia-for-pr-4424.md](../../handoffs/codex_20261007-20261008_assess-humanfia-for-pr-4424.md).
