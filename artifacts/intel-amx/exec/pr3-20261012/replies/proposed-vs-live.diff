@@ -1,0 +1,132 @@
+--- live
++++ codex-proposed
+@@ -3 +3 @@
+-This pull request replaces the per-row store of the packed attention keys introduced by PR #4868 with a block save: a run of 2 to 16 consecutive tokens of one 16-token block is transposed in registers and written as 64-byte cache lines (masked to the run's tokens when the run is shorter than the block), and the main thread shares that store with its idle helper threads when a pass holds more than 16 tokens, while a single token, as in every decode step, keeps the per-row store. In the measured runs of the qwen3-4b model with a 1,024-token prompt, time to first token against the kernel PR's binary (PR #4887, the pull request this one is based on) at `0ee8671d35` changes by -153 ms (-4.7 %) at tp2 (the model split across 2 devices) and -243 ms (-10.2 %) at tp4 (4 devices), both beyond the 0.15 s decision band (the threshold below which a difference does not count as a change), against `main` at `72308ec90c` by -57 ms (-1.8 %) at tp2 and -75 ms (-3.4 %) at tp4, both inside the band, and decode throughput against the kernel PR's binary changes by +0.3 % (+0.22 tokens per second per user, TPS, inside the 0.88 TPS band) at tp2. The packed key layout remains disabled in every build preset, and the row-major tail block (a block whose rows stay row-major until all 16 are saved) and the `deb` package preset follow in the fourth PR.
++This PR (pull request) saves packed attention keys in blocks and shares the work with idle helper threads. In the measured 1,024-token runs, time to first token fell by 153 ms on 2 devices and 243 ms on 4 devices against PR #4887. The feature remains disabled in all build presets.
+@@ -6,0 +7,2 @@
++The qwen3-4b model used below is the Qwen3 4-billion-parameter instruction-following model. The detailed results, decision thresholds and comparison revisions remain in Measurements. Words used here defines the technical terms.
++
+@@ -9 +11,7 @@
+-The traces of 2026-09-14 on the Granite Rapids test machine measured that cost on the PR #4424 branch at commit `9928cb28` (qwen3-4b, 8 users, prompt length 1,024 tokens, CPU attention, 128 tokens of each user per pass). With the per-row scatter store, the K store of one prefill layer took 858 us at tp2, which is 105 ns per (token, KV head) row (a KV head is one key/value head). With the block save shared with the helpers it took 80 us at tp2 and 60 us at tp4. PR #3879 is the pull request that added the AMX attention kernels to `main`. The row-major store of its binary at commit `544ca05c7a` took 274 us at tp2 and 281 us at tp4 in a second trace set of the same day and settings. The V store, which this PR does not change, took 289 us to 316 us per layer in every arm of the two trace sets. These numbers are the reason for the design. The measurements of this PR are in the Measurements section.
++The traces of 2026-09-14 on the Granite Rapids test machine measured that cost on the PR #4424 branch at commit `9928cb28` (qwen3-4b, 8 users, prompt length 1,024 tokens, CPU attention, 128 tokens of each user per pass).
++
++With the per-row scatter store, the K store of one prefill layer took 858 us at tp2, which is 105 ns per (token, KV head) row (a KV head is one key/value head). With the block save shared with the helpers it took 80 us at tp2 and 60 us at tp4.
++
++PR #3879 is the pull request that added the AMX attention kernels to `main`. The row-major store of its binary at commit `544ca05c7a` took 274 us at tp2 and 281 us at tp4 in a second trace set of the same day and settings.
++
++The V store, which this PR does not change, took 289 us to 316 us per layer in every arm of the two trace sets. These numbers are the reason for the design. The measurements of this PR are in the Measurements section.
+@@ -17 +25,7 @@
+-In a generated plugin (the model code that the code generator emits), the main thread runs `save_k` while its helper threads (the threads that run the per-token kernels) are idle. Their next kernel waits for the attention output. So the helpers take part in the store. The main thread cuts the pass's items into work units. A unit is a group of consecutive items in one 16-token block of one page with the same KV-write flag. A unit whose items have no KV work stores nothing. Every thread takes the next unit from one shared counter until no unit is left. The runtime's split heuristic (the rule that chooses how many helper threads a pass gets) sets the number of helpers once per pass. In the traced runs of 2026-09-14 it was 7 helpers plus the main thread at tp2, and 8 at tp4. Three cases are not shared and store on the thread that calls `save_k`. The first is a pass of at most 16 tokens, for example a decode step of the 8-user runs. The second is a caller that passes one worker: the handwritten plugins, and the unit tests except the three-thread section of `t_llama_unit` (the model and cache unit-test binary). The third is more than 128 workers.
++In a generated plugin (the model code that the code generator emits), the main thread runs `save_k` while its helper threads (the threads that run the per-token kernels) are idle. Their next kernel waits for the attention output. So the helpers take part in the store. The main thread cuts the pass's items into work units. A unit is a group of consecutive items in one 16-token block of one page with the same KV-write flag. A unit whose items have no KV work stores nothing. Every thread takes the next unit from one shared counter until no unit is left. The runtime's split heuristic (the rule that chooses how many helper threads a pass gets) sets the number of helpers once per pass. In the traced runs of 2026-09-14, tp2 used 7 helpers plus the main thread. The tp4 run used 8 helpers plus the main thread.
++
++Three cases store on the calling thread alone:
++
++- A pass has at most 16 tokens, such as a decode step in the 8-user runs.
++- The caller passes one worker. This covers the handwritten plugins and the unit tests, except the three-thread section of `t_llama_unit` (the model and cache unit-test binary).
++- The caller passes more than 128 workers.
+@@ -26 +40 @@
+-| attention, head, Q, K, V | Attention combines saved token information using scores. A head is one attention computation channel. Q holds query vectors, K holds key vectors, and V holds value vectors. The KV cache stores K and V for past tokens. |
++| attention, head, Q, K, V, QK, PV | Attention combines saved token information using scores. A head is one attention computation channel. Q holds query vectors. K holds key vectors. V holds value vectors. The KV cache stores K and V for past tokens. QK is the query-key score calculation. PV combines attention probabilities with value vectors. |
+@@ -60 +74 @@
+-| cell, band, standard deviation, paired t | A cell is one model, parallelism, prompt length, and attention configuration. Standard deviation measures variation between repetitions. The band is twice the larger of the two binaries' standard deviations. It is never smaller than 0.4 TPS for throughput or 0.15 s for TTFT. The paired t statistic expresses the mean paired difference relative to its uncertainty. It is dimensionless. |
++| arm, cell, band, standard deviation, paired t | An arm is one binary with its runtime settings. A cell is one model, parallelism, prompt length, and attention configuration. Standard deviation measures variation between repetitions. The band is twice the larger of the two binaries' standard deviations. It is never smaller than 0.4 TPS for throughput or 0.15 s for TTFT. The paired t statistic expresses the mean paired difference relative to its uncertainty. It is dimensionless. |
+@@ -82 +96,10 @@
+-- `batch::k_store_window_t` holds the claim counter `next_unit` on its own cache line (a claim must not invalidate the line the waiting threads poll), the counters `opened` and `finished`, the unit count, the unit table of `max_minibatch_size + 1` entries, and `helper_windows`, one counter per helper of the windows it has entered. The size of that array, 128, bounds the worker count of a shared store. One window state exists per minibatch. It holds the claim counter on its own 64-byte cache line, the counters `opened` and `finished` and the unit count (12 bytes), the unit table (4 bytes per entry, `max_minibatch_size + 1` entries) and the 512-byte `helper_windows` array. With the generated plugins' `max_minibatch_size` of 1,024 that is 4,736 bytes, alignment padding included.
++One `batch::k_store_window_t` exists per minibatch. Its fields are:
++
++| Field | Purpose and size |
++|---|---|
++| `next_unit` | Assigns work units. It occupies its own 64-byte cache line, so claims do not invalidate the line that waiting threads poll. |
++| `opened`, `finished`, `n_units` | Count opened windows, finished helpers and work units. Together they occupy 12 bytes. |
++| `unit_start` | The unit table: `max_minibatch_size + 1` entries, at 4 bytes per entry. |
++| `helper_windows` | Each helper's entered-window count. The array has 128 entries and occupies 512 bytes. Its capacity bounds the shared worker count. |
++
++The generated plugins allow 1,024 items per minibatch. Their window state occupies 4,736 bytes, including alignment padding.
+@@ -90 +113,10 @@
+-- `save_k_impl` takes the worker index and the worker count. An unshared store is the main thread's alone: a helper returns at once. In a shared store the main thread cuts the units, resets the claim counter and `finished` to 0, and increments `opened` with release ordering. Release and acquire are the C++ memory orders of atomic operations: every write a thread makes before its release increment is visible to the thread whose acquire read sees that increment. A helper's W-th shared call waits until `opened` reaches W with acquire ordering, so window W of a pass is the W-th shared `save_k` of that pass on both sides. Every thread claims units with an atomic add on the claim counter and stores each unit it claims. A helper increments `finished` with release ordering when its claim loop ends and returns. The main thread waits until `finished` equals `n_workers - 1` with acquire ordering. Every row store therefore happens before the main thread continues. The watchdog runs inside that wait.
++`save_k_impl` takes the worker index and worker count. For an unshared store, helpers return immediately. For a shared store, the sequence is:
++
++1. The main thread creates the work units and resets `next_unit` and `finished` to zero.
++2. It increments `opened` with release ordering.
++3. Each helper waits for its W-th shared window with an acquire read of `opened`.
++4. Every worker claims unit indices with an atomic add. It stores each unit it claims.
++5. Each helper increments `finished` with release ordering after its claim loop ends. It then returns.
++6. The main thread waits for all `n_workers - 1` helpers with acquire reads of `finished`. The watchdog checks this wait.
++
++Release and acquire are C++ memory orders for atomic operations. Writes made before a release become visible through the corresponding acquire. The main thread therefore observes every helper's row stores before it continues. The W-th shared call on each helper matches the W-th window opened by main.
+@@ -95 +127 @@
+-Note [QK orientation] in the kernel interface names the K store, with its two store paths, and the reader as the two places the extra work of the flipped orientation moves to (the kernel takes the query rows as the left operand of the tile multiply and the packed K plane as the right operand, the reverse of `main`'s row-major AMX kernel). [h/tron/kernels/amx_attn_iface.hpp]
++Note [QK orientation] explains the order of the kernel's matrix operands. The query rows are the left operand. The packed K plane is the right operand. This reverses the order used by `main`'s row-major AMX kernel. The Note identifies the K store and the reader as the two places that perform the extra work. [h/tron/kernels/amx_attn_iface.hpp]
+@@ -167,4 +199,4 @@
+-| tp2, 1,024 tokens | new vs head | +0.3 % (+0.22 TPS, t +0.6), inside | -153 ms (-4.7 %, t -35.6), beyond | 0.88 TPS / 0.15 s |
+-| tp2, 1,024 tokens | newoff vs new | -11.1 % (-9.43 TPS, t -69.1), beyond | +768 ms (+24.6 %, t +198.9), beyond | 0.44 TPS / 0.15 s |
+-| tp2, 1,024 tokens | newoff vs headoff | -0.1 % (-0.10 TPS, t -0.6), inside | -50 ms (-1.3 %, t -150.3), inside | 0.76 TPS / 0.15 s |
+-| tp2, 1,024 tokens | head vs base | +4.9 % (+3.95 TPS, t +36.2), beyond | +95 ms (+3.0 %, t +20.3), inside | 0.88 TPS / 0.15 s |
++| tp2, 1,024 tokens | new vs head | +0.3 % (+0.22 TPS, t +0.6), inside | -153 ms (-4.7 %, t -35.6), beyond | 0.87 TPS / 0.15 s |
++| tp2, 1,024 tokens | newoff vs new | -11.1 % (-9.43 TPS, t -69.1), beyond | +768 ms (+24.6 %, t +198.9), beyond | 0.43 TPS / 0.15 s |
++| tp2, 1,024 tokens | newoff vs headoff | -0.1 % (-0.10 TPS, t -0.6), inside | -50 ms (-1.3 %, t -150.3), inside | 0.77 TPS / 0.15 s |
++| tp2, 1,024 tokens | head vs base | +4.9 % (+3.95 TPS, t +36.2), beyond | +95 ms (+3.0 %, t +20.3), inside | 0.87 TPS / 0.15 s |
+@@ -176,5 +208,5 @@
+-| tp4, 1,024 tokens | new vs base | +3.4 % (+3.98 TPS, t +15.3), beyond | -75 ms (-3.4 %, t -13.9), inside | 0.96 TPS / 0.15 s |
+-| tp4, 1,024 tokens | new vs head | +0.9 % (+1.08 TPS, t +2.6), inside | -243 ms (-10.2 %, t -45.2), beyond | 1.26 TPS / 0.15 s |
+-| tp4, 1,024 tokens | newoff vs new | -7.9 % (-9.63 TPS, t -44.5), beyond | +268 ms (+12.5 %, t +77.0), beyond | 0.72 TPS / 0.15 s |
+-| tp4, 1,024 tokens | newoff vs headoff | +0.6 % (+0.66 TPS, t +2.7), inside | -132 ms (-5.2 %, t -28.7), inside | 1.34 TPS / 0.15 s |
+-| tp4, 1,024 tokens | head vs base | +2.5 % (+2.90 TPS, t +4.8), beyond | +167 ms (+7.6 %, t +80.0), beyond | 1.26 TPS / 0.15 s |
++| tp4, 1,024 tokens | new vs base | +3.4 % (+3.98 TPS, t +15.3), beyond | -75 ms (-3.4 %, t -13.9), inside | 0.95 TPS / 0.15 s |
++| tp4, 1,024 tokens | new vs head | +0.9 % (+1.08 TPS, t +2.6), inside | -243 ms (-10.2 %, t -45.2), beyond | 1.25 TPS / 0.15 s |
++| tp4, 1,024 tokens | newoff vs new | -7.9 % (-9.63 TPS, t -44.5), beyond | +268 ms (+12.5 %, t +77.0), beyond | 0.71 TPS / 0.15 s |
++| tp4, 1,024 tokens | newoff vs headoff | +0.6 % (+0.66 TPS, t +2.7), inside | -132 ms (-5.2 %, t -28.7), inside | 1.33 TPS / 0.15 s |
++| tp4, 1,024 tokens | head vs base | +2.5 % (+2.90 TPS, t +4.8), beyond | +167 ms (+7.6 %, t +80.0), beyond | 1.25 TPS / 0.15 s |
+@@ -195 +227 @@
+-A decode pass of the 8-user runs holds 8 items. That is not more than 16, so no window opens. Each item is a run of one token. A run of one token takes the per-row store, as in the kernel PR. The store path still differs in three ways: a grouping pass runs before the scatter, the completion marks run in a separate loop, and every helper calls `save_k`, evaluates the sharing predicate and returns. The expectation is a TPS difference inside the band. The measured pair decides.
++A decode pass of the 8-user runs holds 8 items. This is below the sharing threshold. No window opens. Each item is a run of one token. A run of one token takes the per-row store, as in the kernel PR. The store path still differs in three ways: a grouping pass runs before the scatter, the completion marks run in a separate loop, and every helper calls `save_k`, evaluates the sharing predicate and returns. The expectation is a TPS difference inside the band. The measured pair decides.
+@@ -198 +230 @@
+-  - +0.3 % (+0.22 TPS, inside the 0.88 TPS band, paired t +0.6) at tp2, 1,024 tokens.
++  - +0.3 % (+0.22 TPS, inside the 0.87 TPS band, paired t +0.6) at tp2, 1,024 tokens.
+@@ -200,3 +232,3 @@
+-  - +0.9 % (+1.08 TPS, inside the 1.26 TPS band, paired t +2.6) at tp4, 1,024 tokens.
+-
+-Decode TPS is inside the band in all three cells, so the expectation holds. The tp2 cell at prompt length 8,192 tokens shows a consistent -0.10 TPS (-0.6 %, paired t -8.7) inside the 0.40 TPS floor of the band. The three store-path differences named above run in every decode pass, so they are a candidate cause of a difference of that size. The measurement named under the reader pair below would settle it.
++  - +0.9 % (+1.08 TPS, inside the 1.25 TPS band, paired t +2.6) at tp4, 1,024 tokens.
++
++Decode TPS is inside the band in all three cells. This meets the stated expectation. The tp2 cell at prompt length 8,192 tokens shows a consistent -0.10 TPS (-0.6 %, paired t -8.7) inside the minimum band of 0.40 TPS. The three store-path differences named above run in every decode pass. Hypothesis: they contribute to this measured difference. The measurement named under the reader pair below would settle it.
+@@ -209 +241 @@
+-  - +3.4 % (+3.98 TPS, beyond the 0.96 TPS band, paired t +15.3) at tp4, 1,024 tokens.
++  - +3.4 % (+3.98 TPS, beyond the 0.95 TPS band, paired t +15.3) at tp4, 1,024 tokens.
+@@ -219 +251 @@
+-Both binaries run the reader for every page with the kill switch. The store does not depend on the attention path, so the expected TTFT gain is about the same absolute size as `new` against `head`. A decode TPS difference beyond the band needs investigation, including the three store-path differences named above. The measurement that would settle such a difference: the K-store spans of a Perfetto trace (tron's timing trace) of the same decode workload for both arms.
++Both binaries run the reader for every page with the kill switch. The store does not depend on the attention path. The expected TTFT gain is about the same absolute size as `new` against `head`. A decode TPS difference beyond the band needs investigation, including the three store-path differences named above. The measurement that would settle such a difference: the K-store spans of a Perfetto trace (tron's timing trace) of the same decode workload for both arms.
+@@ -222 +254 @@
+-  - -0.1 % (-0.10 TPS, inside the 0.76 TPS band, paired t -0.6) at tp2, 1,024 tokens.
++  - -0.1 % (-0.10 TPS, inside the 0.77 TPS band, paired t -0.6) at tp2, 1,024 tokens.
+@@ -224 +256 @@
+-  - +0.6 % (+0.66 TPS, inside the 1.34 TPS band, paired t +2.7) at tp4, 1,024 tokens.
++  - +0.6 % (+0.66 TPS, inside the 1.33 TPS band, paired t +2.7) at tp4, 1,024 tokens.
+@@ -230 +262,5 @@
+-TPS is inside the band in all three cells. TTFT is lower with this PR's binary at both 1,024-token cells: 50 ms at tp2 and 132 ms at tp4, both inside the 0.15 s band. Those gains are smaller than the 153 ms and 243 ms of `new` against `head` in the same cells. The expectation of the same absolute size therefore does not hold under the reader. The cause of the smaller gain is not measured. TTFT is higher by 599 ms at tp2 prompt length 8,192 tokens, beyond the 0.22 s band (paired t +4.8). The TTFT of that cell is about 117 s under the reader, so the difference is 0.5 % of it. The store's expected effect at this prompt length is the 172 ms of the `new` against `head` pair, which is smaller than the difference. The cause is not measured. [Open items below]
++TPS is inside the band in all three cells. TTFT is lower with this PR's binary at both 1,024-token cells: 50 ms at tp2 and 132 ms at tp4, both inside the 0.15 s band.
++
++Those gains are smaller than the 153 ms and 243 ms of `new` against `head` in the same cells. The expectation of the same absolute size therefore does not hold under the reader. The cause of the smaller gain is not measured.
++
++TTFT is higher by 599 ms at tp2 prompt length 8,192 tokens, beyond the 0.22 s band (paired t +4.8). The TTFT of that cell is about 117 s under the reader, so the difference is 0.5 % of it. The store's expected effect at this prompt length is the 172 ms of the `new` against `head` pair, which is smaller than the difference. The cause is not measured. [Open items below]
+@@ -237 +273 @@
+-  - -11.1 % (-9.43 TPS, beyond the 0.44 TPS band, paired t -69.1) at tp2, 1,024 tokens.
++  - -11.1 % (-9.43 TPS, beyond the 0.43 TPS band, paired t -69.1) at tp2, 1,024 tokens.
+@@ -239 +275 @@
+-  - -7.9 % (-9.63 TPS, beyond the 0.72 TPS band, paired t -44.5) at tp4, 1,024 tokens.
++  - -7.9 % (-9.63 TPS, beyond the 0.71 TPS band, paired t -44.5) at tp4, 1,024 tokens.
+@@ -252 +288 @@
+-  - +4.9 % (+3.95 TPS, beyond the 0.88 TPS band, paired t +36.2) at tp2, 1,024 tokens.
++  - +4.9 % (+3.95 TPS, beyond the 0.87 TPS band, paired t +36.2) at tp2, 1,024 tokens.
+@@ -254 +290 @@
+-  - +2.5 % (+2.90 TPS, beyond the 1.26 TPS band, paired t +4.8) at tp4, 1,024 tokens.
++  - +2.5 % (+2.90 TPS, beyond the 1.25 TPS band, paired t +4.8) at tp4, 1,024 tokens.
+@@ -260 +296,5 @@
+-The kernel PR's TPS claim repeats within 0.5 percentage points at tp2: +4.9 % and +9.7 % here against +5.4 % and +9.5 % in its own run. Its TTFT claim repeats within 0.3 percentage points: +3.0 % (+95 ms, inside the band) and -1.2 % (-655 ms, beyond) here against +3.2 % (+100 ms) and -1.0 % (-523 ms). The two sessions differ by 0.41 TPS and 5 ms at prompt length 1,024 tokens and by 0.03 TPS and 132 ms at 8,192 tokens, all inside the bands. So no machine-speed change between the sessions limits the other pairs of this run. At tp4, measured for the first time, `head` is +2.5 % in TPS (beyond the 1.26 TPS band) and +167 ms in TTFT (beyond the 0.15 s band). That +167 ms is the net TTFT effect of the layout, the kernel and the scatter store together. The scatter store alone costs more at tp4: `new`, which removes it, is 243 ms below `head` and 75 ms below `base` (the first and third subsections above).
++The kernel PR's TPS claim repeats within 0.5 percentage points at tp2: +4.9 % and +9.7 % here against +5.4 % and +9.5 % in its own run. Its TTFT claim repeats within 0.3 percentage points: +3.0 % (+95 ms, inside the band) and -1.2 % (-655 ms, beyond) here against +3.2 % (+100 ms) and -1.0 % (-523 ms).
++
++The two sessions differ by 0.41 TPS and 5 ms at prompt length 1,024 tokens and by 0.03 TPS and 132 ms at 8,192 tokens, all inside the bands. So no machine-speed change between the sessions limits the other pairs of this run.
++
++At tp4, measured for the first time, `head` is +2.5 % in TPS (beyond the 1.25 TPS band) and +167 ms in TTFT (beyond the 0.15 s band). That +167 ms is the net TTFT effect of the layout, the kernel and the scatter store together. The scatter store alone costs more at tp4: `new`, which removes it, is 243 ms below `head` and 75 ms below `base` (the first and third subsections above).
+@@ -478 +517,0 @@
+-

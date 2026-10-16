@@ -1,0 +1,62 @@
+  SECTION("three threads: the helpers share the window and every row lands once") {
+    bk.fill_random(gen);
+    const auto before = snapshot();
+    constexpr size_t n_workers = 3;
+    constexpr size_t main_worker_ix = 0;
+    // Every worker calls the same save_k with its own index (Note [Shared
+    // block save] in model.hpp).
+    std::vector<std::thread> helpers;
+    for (size_t worker_ix = 1; worker_ix < n_workers; ++worker_ix) {
+      helpers.emplace_back([&, worker_ix] {
+        state.template save_k<geometry>(
+            &q_batch, operation, state.plugin_state.kouts, worker_ix, n_workers);
+      });
+    }
+    state.template save_k<geometry>(
+        &q_batch, operation, state.plugin_state.kouts, main_worker_ix, n_workers);
+    for (auto& h : helpers) {
+      h.join();
+    }
+    check(before);
+    if constexpr (k_vnni::layout_on<head_size>) {
+      auto const& w = q_batch.k_store_window;
+      REQUIRE(w.opened.load() == 1);
+      REQUIRE(w.finished.load() == n_workers - 1);
+      // The work units cover the items in order, and every unit was claimed.
+      // The exact cut is not a contract: the writers only need that a unit
+      // never crosses a page, a 16-token page block or a change of
+      // token_jobs_do_kv (batch::k_store_window), so that two units never
+      // write the same token lanes and a unit that fills its block may use
+      // whole-line stores.
+      REQUIRE(w.n_units >= 1);
+      REQUIRE(w.unit_start[0] == 0);
+      REQUIRE(w.unit_start[w.n_units] == n_items);
+      REQUIRE(w.next_unit.load() >= w.n_units);
+      for (size_t u = 0; u < w.n_units; ++u) {
+        const size_t begin = w.unit_start[u];
+        const size_t end = w.unit_start[u + 1];
+        CAPTURE(u, begin, end);
+        REQUIRE(begin < end);
+        // The job's token position, its page and its 16-token block.
+        auto token_of = [&](size_t item) {
+          return job_tokens[q_batch.items[item].i].i;
+        };
+        auto block_of = [&](size_t tok) {
+          return (tok % page_t::page_size) / k_vnni::BLOCK_TOKENS_16;
+        };
+        const bool unit_kv = do_kv[q_batch.items[begin].i] != 0;
+        const page_t* unit_page = unit_kv ? token_pages[token_of(begin)] : nullptr;
+        const size_t unit_block = unit_kv ? block_of(token_of(begin)) : 0;
+        for (size_t t = begin; t < end; ++t) {
+          CAPTURE(t);
+          REQUIRE((do_kv[q_batch.items[t].i] != 0) == unit_kv);
+          if (unit_kv) {
+            REQUIRE(token_pages[token_of(t)] == unit_page);
+            REQUIRE(block_of(token_of(t)) == unit_block);
+          }
+        }
+      }
+    } else {
+      REQUIRE(q_batch.k_store_window.opened.load() == 0);
+    }
+  }

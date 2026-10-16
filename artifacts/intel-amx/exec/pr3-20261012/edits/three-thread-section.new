@@ -1,0 +1,108 @@
+  SECTION("three threads: the helpers share the window and every row is stored once") {
+    bk.fill_random(gen);
+    constexpr size_t n_workers = 3;
+    constexpr size_t main_worker_ix = 0;
+    // Every worker calls the same save_k with its own index (Note [Shared
+    // block save] in model.hpp).
+    auto shared_save = [&](attention_operation_descriptor const& op) {
+      std::vector<std::thread> helpers;
+      for (size_t worker_ix = 1; worker_ix < n_workers; ++worker_ix) {
+        helpers.emplace_back([&, worker_ix] {
+          state.template save_k<geometry>(
+              &q_batch, op, state.plugin_state.kouts, worker_ix, n_workers);
+        });
+      }
+      state.template save_k<geometry>(
+          &q_batch, op, state.plugin_state.kouts, main_worker_ix, n_workers);
+      for (auto& h : helpers) {
+        h.join();
+      }
+    };
+    // The job's token position, its KV flag, its page and its 16-token block.
+    auto token_of = [&](size_t item) { return job_tokens[q_batch.items[item].i].i; };
+    auto kv_of = [&](size_t item) { return do_kv[q_batch.items[item].i] != 0; };
+    auto block_of = [&](size_t tok) {
+      return (tok % page_t::page_size) / k_vnni::BLOCK_TOKENS_16;
+    };
+    // The window state after the n_windows-th shared save on this batch.
+    [[maybe_unused]] auto check_window = [&](uint32_t n_windows) {
+      auto const& w = q_batch.k_store_window;
+      REQUIRE(w.opened.load() == n_windows);
+      REQUIRE(w.finished.load() == n_workers - 1);
+      // Each helper counts the windows it entered in its own slot. A helper's
+      // W-th call waits for the W-th window (Note [Shared block save]). That
+      // count pairs the call with the window.
+      for (size_t worker_ix = 1; worker_ix < n_workers; ++worker_ix) {
+        CAPTURE(worker_ix);
+        REQUIRE(w.helper_windows[worker_ix] == n_windows);
+      }
+      // Every worker claims with fetch_add until a claim returns an index at
+      // or past n_units. So each of the n_workers claim loops ends with one
+      // failed claim. The counter then reads n_units + n_workers. A helper
+      // that skipped its claim loop leaves it lower.
+      REQUIRE(w.n_units >= 1);
+      REQUIRE(w.unit_start[0] == 0);
+      REQUIRE(w.unit_start[w.n_units] == n_items);
+      REQUIRE(w.next_unit.load() == w.n_units + n_workers);
+      // The units are the maximal runs of Note [Shared block save]. A unit
+      // never crosses a page, a 16-token page block or a change of
+      // token_jobs_do_kv (batch::k_store_window). So two units never write
+      // the same token lanes, and a unit that fills its block may use
+      // whole-line stores.
+      for (size_t u = 0; u < w.n_units; ++u) {
+        const size_t begin = w.unit_start[u];
+        const size_t end = w.unit_start[u + 1];
+        CAPTURE(u, begin, end);
+        REQUIRE(begin < end);
+        const bool unit_kv = kv_of(begin);
+        const page_t* unit_page = unit_kv ? token_pages[token_of(begin)] : nullptr;
+        const size_t unit_block = unit_kv ? block_of(token_of(begin)) : 0;
+        for (size_t t = begin; t < end; ++t) {
+          CAPTURE(t);
+          REQUIRE(kv_of(t) == unit_kv);
+          if (unit_kv) {
+            REQUIRE(token_pages[token_of(t)] == unit_page);
+            REQUIRE(block_of(token_of(t)) == unit_block);
+          }
+        }
+      }
+      // A new unit starts only at such a change: the item before a unit's
+      // first item differs from it in the KV flag, the page or the block. So
+      // every run that could use the block save is one unit.
+      for (size_t u = 1; u < w.n_units; ++u) {
+        const size_t first = w.unit_start[u];
+        const size_t prev = first - 1;
+        CAPTURE(u, first);
+        const bool first_kv = kv_of(first);
+        const bool kv_changes = kv_of(prev) != first_kv;
+        const bool place_changes =
+            first_kv && (token_pages[token_of(prev)] != token_pages[token_of(first)] ||
+                            block_of(token_of(prev)) != block_of(token_of(first)));
+        REQUIRE((kv_changes || place_changes));
+      }
+    };
+    const auto before = snapshot();
+    shared_save(operation);
+    check(before);
+    if constexpr (k_vnni::layout_on<head_size>) {
+      check_window(1);
+    } else {
+      REQUIRE(q_batch.k_store_window.opened.load() == 0);
+    }
+    // A second window, on the next layer's operation and KV slot. Main resets
+    // the claim counter and `finished` before it opens a window. The helpers'
+    // second call meets the second window.
+    const attention_operation_descriptor operation_1 =
+        state.active_attention_operations[1];
+    REQUIRE(operation_1.writes_kv);
+    REQUIRE(operation_1.binding.kv_slot.i != slot.i);
+    slot = operation_1.binding.kv_slot;
+    const auto before_1 = snapshot();
+    shared_save(operation_1);
+    check(before_1);
+    if constexpr (k_vnni::layout_on<head_size>) {
+      check_window(2);
+    } else {
+      REQUIRE(q_batch.k_store_window.opened.load() == 0);
+    }
+  }

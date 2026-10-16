@@ -1,0 +1,66 @@
+save_k: block runs, shared with the main helpers
+
+save_k (h/tron/models/model.hpp) stores the K rows (K = the attention
+keys, V = the values, KV = both) of every token of a minibatch (one
+group of a pass's token jobs) once per (layer, pass). A pass is one
+forward computation of the model. With the VNNI K layout (VNNI = Vector
+Neural Network Instructions, Note [K VNNI storage] in kv_cache.hpp)
+store_k_block cuts the items into runs. A run is a sequence of
+consecutive items that fall into the same 16-token block of the same
+page (a page is a 64-token unit of the K and V caches). A run of one
+token takes the per-token scatter (page::set_k_row). A run of 2 to 16
+tokens takes the block save (page::set_k_block, with masked stores when
+the block is partial). A K row that is not bf16 (the 16-bit brain
+floating-point format) is converted on the stack first. Row-major slots
+keep one row store per token and KV head.
+
+The store is shared with the main helpers (the threads of a generated
+plugin that run the per-token kernels). They are idle while main runs
+save_k. Their next kernel waits for the attention output. save_k_impl
+takes worker_ix and n_workers. Worker 0 is main. Workers 1 to
+n_workers - 1 are the helpers. k_store_shared says whether a window
+(one shared store) exists: the VNNI K layout on the slot (the option
+TRON_K_VNNI on and a 128-dimension head), 1 < n_workers <= 128, and
+more than 16 items. Both sides compute it from the same inputs. Main
+cuts the items into work units with k_store_cut_units. A unit never
+crosses a page, a 16-token block or a change of token_jobs_do_kv (the
+per-job flag that says the job writes KV). Main resets the claim counter
+and `finished`, then increments `opened` (release, the C++ memory order
+that publishes the writes before it). A helper's W-th shared call waits
+for `opened` >= W (acquire, the order that reads them). Every thread
+claims units with fetch_add on next_unit and stores them. A helper
+increments `finished` (release) when its claim loop ends. Main returns
+when `finished` equals n_workers - 1 (acquire). A join watchdog reads
+the clock once every 2^20 pause loops. It aborts with TRON_ASSERT (the
+check that stops the process with a message) when the join has not
+completed 120 s after the first clock read. The per-token completion
+marks and the dispatch credits stay on main, after the join. An unshared
+store is main's alone. A helper returns from it at once. Note [Shared
+block save] holds the protocol and the deadlock argument.
+
+batch::k_store_window_t (h/tron/models/common.hpp) holds the window
+state: the claim counter next_unit on its own cache line, the counters
+opened and finished, n_units, the unit table unit_start[] and
+helper_windows[] (the windows each helper has entered). The size of
+helper_windows, 128, bounds the worker count of a shared store.
+
+The two save_k overloads take worker_ix and n_workers with the defaults
+0 and 1. The defaults store every row on the calling thread. Note [QK
+orientation] (h/tron/kernels/amx_attn_iface.hpp) names the two store
+paths.
+
+The t_llama_unit case "save_k stores every token's K row once, grouped
+by page block, alone or with helper threads" has two sections. One
+thread: the grouping stores every row bit for bit, touches nothing
+else, marks every KV job once, and opens no window. Three threads: two
+helper threads and main call save_k with their worker indices, on the
+operations of both layers in turn. The rows and the marks are checked
+the same way after each window. With the option on, the window state is
+checked too: the window count, the finished-helper count, each helper's
+own window count, the claim counter at n_units + n_workers (every claim
+loop ran to exhaustion), and the unit table. Every unit lies inside one
+page, one block and one token_jobs_do_kv value. A new unit starts only
+at a change of one of those. So the units are the maximal runs. With
+the option off no window opens in either section.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
