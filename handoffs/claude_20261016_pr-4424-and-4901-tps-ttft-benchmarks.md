@@ -94,16 +94,16 @@ The PR 3879 divergence was a tie-break change, not a wrong score. In PR 3879 the
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/perf-latest-4424-4901-vs-main-20261016.html (34,956 bytes). The page, title "Latest PR vs main performance": dot charts per cell (filled = resolved, hollow = noise, grey strip = runtron band), hover tooltips with t values and bands, a chart of the three shared cells with both PRs, and the exact-value tables. Published as https://claude.ai/artifact/VGKTKdgYJKGxjYoCJa84MV (version 1). Layout unchecked in a browser (no browser or node on the host).
-  - generator: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/build.py
-  - input: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/data.json (12,908 bytes, keys pr4424 and pr4901)
-  - input built by: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/collect.py (parses the summary.md of each record)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/perf-latest-4424-4901-vs-main-20261016.html (34,956 bytes). The page, title "Latest PR vs main performance": dot charts per cell (filled = resolved, hollow = noise, grey strip = runtron band), hover tooltips with t values and bands, a chart of the three shared cells with both PRs, and the exact-value tables. Published as https://claude.ai/artifact/VGKTKdgYJKGxjYoCJa84MV (version 1). Layout unchecked in a browser (no browser or node on the host). (preserved: artifacts/intel-amx/pr3879/split-4424/perf-latest-4424-4901-vs-main-20261016.html)
+  - generator: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/build.py (preserved: artifacts/intel-amx/pr3879/split-4424/exec/perf-latest-20261016/build.py)
+  - input: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/data.json (12,908 bytes, keys pr4424 and pr4901) (preserved: artifacts/intel-amx/pr3879/split-4424/exec/perf-latest-20261016/data.json)
+  - input built by: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/collect.py (parses the summary.md of each record) (preserved: artifacts/intel-amx/pr3879/split-4424/exec/perf-latest-20261016/collect.py)
   - sources: /home/jhan/workspace/intel-AMX/exec/results/{pr4424ci-20261009,m4737-E-cpu,pr4ci-20261012,pr4-E-cpu,pr4-E-fpga,pr4off-E-cpu}/summary.md
   - regenerate: `cd /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016 && python3 -I collect.py && python3 -I build.py` (build.py writes `<OUT>` = ../../perf-latest-4424-4901-vs-main-20261016.html)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/collect.py (5,058 bytes). The collector.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/build.py (24,330 bytes). The page builder.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/data.json (12,908 bytes). The collected rows.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/a90ff7e0-44b5-4191-8045-bfd04256b58b/scratchpad/page.js (21,600 bytes). The page's script extracted for a syntax check. Scratchpad, may be cleaned up.
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/a90ff7e0-44b5-4191-8045-bfd04256b58b/scratchpad/page.js (21,600 bytes). The page's script extracted for a syntax check. Scratchpad, may be cleaned up. (preserved: artifacts/intel-amx/exec/scratch-relocated/a90ff7e0/page.js, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/a90ff7e0/page.js)
 - Code: none changed. No commit, no PR change.
 
 ## Current state
