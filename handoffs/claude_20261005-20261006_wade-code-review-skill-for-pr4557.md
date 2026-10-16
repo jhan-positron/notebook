@@ -87,45 +87,56 @@ Three verified facts that change the replies the user had drafted for Wade:
 
 Skill (written by this session as v1, then OVERWRITTEN on 2026-10-06 13:07 by a later session's v2 with 35 checks, see Current state):
 
-- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/SKILL.md (now 79,222 bytes, v2). This session's v1 version (34,194 bytes) survives at claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261005/skill/skill-snapshot/SKILL.md.
-- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/procedures.md (now 105,059 bytes, v2). v1 (27,420 bytes) at .../exec/wade-20261005/skill/skill-snapshot/references/procedures.md.
-- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/pr4557-misses.md (13,822 bytes, unchanged by v2). v1 copy at .../skill-snapshot/references/pr4557-misses.md (13,822 bytes).
-- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/agents/openai.yaml (now 313 bytes, v2). v1 (268 bytes) at .../skill-snapshot/agents/openai.yaml.
+- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/SKILL.md (now 79,222 bytes, v2). This session's v1 version (34,194 bytes) survives at claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261005/skill/skill-snapshot/SKILL.md. (preserved: artifacts/claude-skills/Wade-code-review/SKILL.md)
+- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/procedures.md (now 105,059 bytes, v2). v1 (27,420 bytes) at .../exec/wade-20261005/skill/skill-snapshot/references/procedures.md. (preserved: artifacts/claude-skills/Wade-code-review/references/procedures.md)
+- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/pr4557-misses.md (13,822 bytes, unchanged by v2). v1 copy at .../skill-snapshot/references/pr4557-misses.md (13,822 bytes). (preserved: artifacts/claude-skills/Wade-code-review/references/pr4557-misses.md)
+- claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/agents/openai.yaml (now 313 bytes, v2). v1 (268 bytes) at .../skill-snapshot/agents/openai.yaml. (preserved: artifacts/claude-skills/Wade-code-review/agents/openai.yaml)
 - claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/ (installed 2026-10-06 10:05 from the Claude v1 skill, re-installed from v2 on 2026-10-07 14:22 by a later session, now identical to the Claude v2 files).
 
 Report page:
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/Wade-code-review-skill.html (105,207 bytes). The 13 points with verdicts and evidence, why each was missed, the derived checks, the cross-check scores and the judges' error list. Published privately at https://claude.ai/artifact/BeofeQLqGFeYmS79R2HY6Y (version 1).
-  - generator: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261005/skill/gen_report.py (27,902 bytes)
-  - input: analysis.json (729,883 bytes) and crosscheck.json (288,017 bytes) in the same directory
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/Wade-code-review-skill.html (105,207 bytes). The 13 points with verdicts and evidence, why each was missed, the derived checks, the cross-check scores and the judges' error list. Published privately at https://claude.ai/artifact/BeofeQLqGFeYmS79R2HY6Y (version 1). (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/status/Wade-code-review-skill.html)
+  - generator: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261005/skill/gen_report.py (27,902 bytes) (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/gen_report.py)
+  - input: analysis.json (729,883 bytes) and crosscheck.json (288,017 bytes) in the same directory (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/crosscheck.json)
   - input built by: the workflows wade-miss-analysis (wf_f8254d84-b13) and wade-skill-crosscheck (wf_ede30b01-af0) of this session, copied from the task outputs
   - sources: the tron worktree /home/jhan/workspace/ai-runs/tron-issue4525 at 96a6220ab6, GitHub review 5420005787 and the inline comments of PR 4557, the 2026-09-22 review workflow records (prior-0922-lenses.txt, prior-0922-results.txt), and the memory notes in /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/
   - regenerate: `cd /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261005/skill && python3 gen_report.py` writes `<OUT>` (the output path is fixed in the script as ../../../status/Wade-code-review-skill.html)
 
 Record directory claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261005/skill/ (1,685,506 bytes in all):
 
-- analysis.json (729,883 bytes), crosscheck.json (288,017 bytes), codex-claims-check.json (114,110 bytes): the three workflow results.
+- analysis.json (729,883 bytes), crosscheck.json (288,017 bytes), codex-claims-check.json (114,110 bytes): the three workflow results. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/codex-claims-check.json)
 - digest.md (163,017 bytes): the per-point digest of analysis.json.
 - CONTEXT.md (7,450 bytes): the context file given to every workflow agent.
-- wade-inline-corpus.jsonl (174,851 bytes) and wade-prs.json (24,084 bytes): Wade's 480 inline comments across the repo, 2025-09 to 2026-10. wade-inline-4557.md (2,438 bytes): his PR 4557 comments.
+- wade-inline-corpus.jsonl (174,851 bytes) and wade-prs.json (24,084 bytes): Wade's 480 inline comments across the repo, 2025-09 to 2026-10. wade-inline-4557.md (2,438 bytes): his PR 4557 comments. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/wade-inline-corpus.jsonl)
 - pr4557-body-as-reviewed.md (20,019 bytes), prior-0922-lenses.txt (13,402 bytes), prior-0922-results.txt (5,701 bytes).
-- wade-miss-analysis-wf_f8254d84-b13.js (15,206 bytes) and codex-claims-check-wf_29b24ce0-20d.js (5,803 bytes): copies of two of the three workflow scripts. The crosscheck script was not copied here.
-- skill-snapshot/ (the Claude v1 skill) and codex-skill-snapshot/ (codex's own skill: SKILL.md 10,034 bytes, agents/openai.yaml 234 bytes, references/pr4557.md 7,610 bytes), both taken at 22:59 on 2026-10-05.
+- wade-miss-analysis-wf_f8254d84-b13.js (15,206 bytes) and codex-claims-check-wf_29b24ce0-20d.js (5,803 bytes): copies of two of the three workflow scripts. The crosscheck script was not copied here. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/wade-miss-analysis-wf_f8254d84-b13.js)
+- skill-snapshot/ (the Claude v1 skill) and codex-skill-snapshot/ (codex's own skill: SKILL.md 10,034 bytes, agents/openai.yaml 234 bytes, references/pr4557.md 7,610 bytes), both taken at 22:59 on 2026-10-05. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/codex-skill-snapshot/references/pr4557.md)
 
 Workflow scripts (session store):
 
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/workflows/scripts/wade-miss-analysis-wf_f8254d84-b13.js (15,206 bytes).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/workflows/scripts/codex-claims-check-wf_29b24ce0-20d.js (5,803 bytes).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/workflows/scripts/wade-skill-crosscheck-wf_ede30b01-af0.js (7,396 bytes).
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/workflows/scripts/codex-claims-check-wf_29b24ce0-20d.js (5,803 bytes). (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/codex-claims-check-wf_29b24ce0-20d.js)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/workflows/scripts/wade-skill-crosscheck-wf_ede30b01-af0.js (7,396 bytes). (preserved: artifacts/intel-amx/exec/workflows/wade-skill-crosscheck-wf_ede30b01-af0.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/wade-skill-crosscheck-wf_ede30b01-af0.js)
 
 Memory:
 
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-code-review-skill.md (4,261 bytes). Written by this session at 22:31 and updated at 22:59, 23:00 and 10:05. Rewritten by a later session on 2026-10-06 and 2026-10-07 to describe v2 (the current content).
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-code-review-skill.md (4,261 bytes). Written by this session at 22:31 and updated at 22:59, 23:00 and 10:05. Rewritten by a later session on 2026-10-06 and 2026-10-07 to describe v2 (the current content). (preserved: artifacts/intel-amx/memory/wade-code-review-skill.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md. One index line added.
 
 Scratchpad (may be cleaned up): claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/ (2,019,419 bytes): the raw inputs, cc-digest.md (203,320 bytes), cc-refuters.txt, cc-english.txt, the PR 4557 diff at 96a6220ab6, head copies of kv_cache.hpp, t_llama_unit.cpp and v_vnni.hpp, and the refuter and probe folders.
 
 Code: no commits. Worktree tron-issue4525 read only.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/scratch-relocated/7a540599/wade/` (11 files)
+- `artifacts/intel-amx/memory/` (80 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/` (8 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/codex-skill-snapshot/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/codex-skill-snapshot/agents/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/skill-snapshot/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/skill-snapshot/agents/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/skill/skill-snapshot/references/` (2 files)
 
 ## Current state
 

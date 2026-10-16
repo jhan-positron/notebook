@@ -1,0 +1,21 @@
+---
+name: wade-code-review-skill
+description: "Wade-code-review skill ~/.claude/skills/Wade-code-review: v2 2026-10-06 = 35 checks from Wade's whole record (115 non-own PRs, 273 texts; corpus + method in issue4525/exec/wade-20261006/); v1 2026-10-05 = 13 checks from PR 4557 only; codex copy at ~/.codex/skills/wade-code-review is codex's OWN rewrite (not synced); report status/Wade-code-review-skill-v2.html"
+metadata:
+  node_type: memory
+  type: project
+  originSessionId: e3464929-24a2-4b17-a0e1-8ff95273256c
+  modified: 2026-10-06T19:51:46.199Z
+---
+
+jhan (2026-10-05): "Analyze his comments, how come we had not spotted the problems? Write a code review skill ... call it Wade-code-review." jhan (2026-10-06): "go through all Wade's PR review, and update wade-code-review skill at claude. ... codex did the same on its skill wade-code-review, please cross check, and update claude skill if anything you pick up from codex skill".
+
+**v2 (2026-10-06), installed at ~/.claude/skills/Wade-code-review/** (SKILL.md 79 KB, 35 checks / 36 questions; references/procedures.md 105 KB; wade-style.md; wade-corpus.md; check15/ typo scripts; pr4557-misses.md kept; v2 snapshot exec/wade-20261006/skill-snapshot-v2/). v1 snapshot: issue4525/exec/wade-20261006/skill-snapshot-v1/.
+- Corpus: union of `gh search prs --reviewed-by Wado-posi` and `--commenter` minus his own PRs = 115 PRs (2025-09..2026-10), 334 reviews (100 APPROVED / 234 COMMENTED / 0 CHANGES_REQUESTED), 243 inline + 11 conversation comments; 48 PRs silent. Inline by area: h/ 126, src/ 77, t/ 27. The reviewed-by search alone MISSES conversation-only PRs (3879, 2898).
+- Checks 1-13 keep their v1 numbers (9 widened; 3 split into 3A test cannot fail / 3B named run at head); 14-35 new: 14 dead symbol, 15 typo, 16 debug switch left on, 17 comment vs code, 18 duplicate logic, 19 type/init, 20 identifier, 21 missing explanation, 22 redundant code, 23 disabled code, 24 placement, 25 silent behavior change, 26 index/wait set, 27 silent fallback, 28 lock placement, 29 buffer lifetime, 30 hot path, 31 state ownership, 32 observability, 33 test reaches path, 34 workaround tracking, 35 bot findings.
+- Facts that changed v1 wording: BASE = merge base against the PR's base branch (42/115 PRs target hwattention_sync etc.), never origin/main; value suffix in SHARED code is a non-blocking nit (6021333114), accepted only in the author's kernel files; Wade does ask for test runs (4265644124) and for before/after Perfetto captures (4607543703); he never uses CHANGES_REQUESTED, must-change = "before merging"/"needs"/"Please <verb>"/withheld approval; nine disclosed assistant pastes (first 2026-03-27), PR 4557 review style matches assisted PR 4128 with no disclosure (Insufficient data); check 12 precedent n = 1.
+- Pipeline (reusable): fetch.py + digest.py (corpus/pr/*.md) -> classify (30 agents) -> 3 taxonomists + judge -> per cluster draft / 3 refuters (precision on silent-PR diffs, verbatim facts, executability) / tighten -> critic -> compress -> English + consistency review. Scripts in the session workflow dir; data in issue4525/exec/wade-20261006/.
+- Codex cross-check: codex-factcheck.md (8 claims: 4 hold, 4 partly) and codex-map.json (65 bullets: 58 Wade-backed, 2 paste-only, 5 none; 39 adopted). Codex's skill is principle prose; ours is grep-level triggers with do-not-fire lists. 2026-10-07 jhan: "Install the new version wade-code-review to codex skill" -> ~/.codex/skills/wade-code-review/ = copy of the Claude v2 skill (frontmatter name and openai.yaml lowercased to match the dir; codex's own 2026-10-06 10:26 rewrite survives only in exec/wade-20261006/codex-skill-snapshot-1026/). Keep the two copies in sync from now on; re-install after every Claude-side change.
+
+**How to apply:** run the skill at the FINAL head after every review round (full files + body + log + CI yml), and run it on Wade's own comments before replying. Code checks first (144 of 238 review comments), tests second. Never emit CHANGES_REQUESTED or LGTM in his name. Quote him only from corpus.json ids; author replies carry other ids.
+Related: [[wade-pr4557-review-response]], [[reviewer-personas]], [[cpp-guide-literals-include-bools]], [[pr-description-no-history]], [[artifact-utf8-mojibake-trap]].

@@ -1,0 +1,748 @@
+{
+  "summary": "Verify the factual claims codex made in its wade-code-review reference note against the code at 96a6220ab6 and the local design-review records",
+  "agentCount": 12,
+  "logs": [],
+  "result": [
+    {
+      "id": "C1-k-explicit",
+      "verdict": "supported",
+      "evidence": [
+        {
+          "ref": "h/tron/tensor/view.hpp:296-297 @96a6220ab6",
+          "quote": "explicit const_view(T const* data = nullptr) noexcept\n  : data(data) {}"
+        },
+        {
+          "ref": "h/tron/tensor/view.hpp:43-44 @96a6220ab6",
+          "quote": "explicit constexpr view(T* data = nullptr) noexcept\n  : data(data) {}"
+        },
+        {
+          "ref": "h/tron/tensor/kv_cache_fwd.hpp:49-53 @96a6220ab6",
+          "quote": "using const_native_k_view = const_view<bf16,\n    VIEW_ALIGNED_TRUE,\n    VIEW_DMA_FALSE,\n    std::integer_sequence<size_t, Rows, Cols>,\n    std::integer_sequence<ptrdiff_t, Cols, 1>>;"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:95-98 @96a6220ab6",
+          "quote": "template <typename K>\nconstexpr bool amx_qk_accepts = requires(K k, const bf16* q, float* s) {\n  amx_attn_h128g4::qk_rowmajor_128x4(k, q, s, size_t{0});\n};"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:382-385 @96a6220ab6",
+          "quote": "STATIC_REQUIRE(amx_qk_accepts<k_plane_t>);\n  STATIC_REQUIRE_FALSE(amx_qk_accepts<const bf16*>);\n  STATIC_REQUIRE_FALSE(amx_qk_accepts<bf16*>);\n  STATIC_REQUIRE_FALSE(amx_qk_accepts<v_plane_t>);"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:391-397 @96a6220ab6",
+          "quote": "// Packed views come only from an owner; a bare pointer does not say\n  // which layout it points at. The native K alias keeps its explicit pointer\n  // wrap: that view type is the existing row-major view.\n  STATIC_REQUIRE_FALSE(std::is_constructible_v<v_plane_mut_t, bf16*>);\n  STATIC_REQUIRE_FALSE(std::is_constructible_v<v_plane_t, const bf16*>);\n  STATIC_REQUIRE_FALSE(std::is_default_constructible_v<v_plane_t>);\n  STATIC_REQUIRE(std::is_constructible_v<k_plane_t, const bf16*>);"
+        },
+        {
+          "ref": "h/tron/tensor/v_vnni.hpp:130-138 @96a6220ab6",
+          "quote": "private:\n  friend struct v_vnni_tensor<Rows, Cols>;\n  friend struct detail::v_vnni_access;\n  template <typename U, size_t R, size_t C>\n  friend struct v_vnni_view;\n\n  TRON(inline)\n  explicit v_vnni_view(T* data) noexcept\n  : data_(data) {}"
+        },
+        {
+          "ref": "t/t_amx_numerics.cpp:162-166 @96a6220ab6",
+          "quote": "// The fixture's aligned row-major K block, wrapped explicitly as the whole\n    // native K plane the kernel takes.\n    tron::amx_attn_h128g4::qk_rowmajor_128x4(\n        tron::const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>{in->k}, q_packed,\n        &s_amx[0][0], PAGE_TOKENS_64);"
+        },
+        {
+          "ref": "h/tron/kernels/amx_attn_iface.hpp:218-222 @96a6220ab6",
+          "quote": "k_page = the page's whole native K\n// plane, 64 tokens x 128 dims bf16 row-major (the kv_block K storage), passed\n// as its typed view so that a packed V plane or a bare pointer cannot be handed\n// in by mistake; q_packed = the pack_q_group_128x4 output.\nvoid qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page,"
+        },
+        {
+          "ref": "scratchpad/wade/pr4557-body-as-reviewed.md:65 (PR description Wade read)",
+          "quote": "The packed V plane (16-lane build) and the native K plane cross the cache and kernel boundaries as typed views. A bare pointer or the other plane's view is a compile error (tested with `STATIC_REQUIRE`)."
+        },
+        {
+          "ref": "Wade comment 4188336267 (kv_cache_fwd.hpp:43)",
+          "quote": "`native_k_view` is an alias of the generic row-major `view`, and t_llama_unit asserts it is constructible from `const bf16*`. So any pointer or row-major 64x128 bf16 view passes the QK kernel; \"a bare pointer is a compile error\" holds for V only."
+        }
+      ],
+      "consequence_for_rule": "Codex's qualification is right and it refines the claim-vs-enforcement rule rather than overturning it. The rule should grade an \"X is a compile error\" claim on three enforcement levels and name the level the code reaches: (1) direct call with a bare pointer rejected (needs only an explicit constructor; both K and V reach this, tested by amx_qk_accepts/amx_pv_accepts at t_llama_unit.cpp:383-384,388-389); (2) one-line explicit wrap of an arbitrary pointer rejected (needs a private or absent pointer constructor; V reaches this via v_vnni.hpp:137 private ctor and the is_constructible FALSE probes at 394-395; K does NOT, line 397 asserts the wrap is allowed and t_amx_numerics.cpp:165 uses it on a raw fixture array); (3) the parameter type is nominally distinct from any generic view of the same shape (V yes; K no, because const_native_k_view is a `using` alias of the generic const_view, kv_cache_fwd.hpp:49, so any row-major 64x128 bf16 const_view is the same type). Two sub-rules follow. (a) When a test uses std::is_constructible_v, read it as \"explicit construction allowed\", never as \"implicit pass allowed\": is_constructible is true for explicit constructors, so line 397 is not evidence that a bare pointer passes at the call. (b) When a PR description says \"typed view\" or \"cannot be handed in by mistake\" (amx_attn_iface.hpp:220), check whether the type is a nominal new type or a `using` alias; an alias gives layout-by-shape only, not provenance, and the description must say which. The reply to Wade should concede levels (2) and (3) for K (his substantive point) while correcting the literal wording \"any pointer ... passes\": a bare pointer at the call is rejected for K as well (line 383), only a pointer wrapped in one explicit line passes.",
+      "notes": "What I read: both pointer constructors are `explicit` (view.hpp:43, view.hpp:296). The amx_qk_accepts probe is a requires-expression that calls the kernel with a value of type K (t_llama_unit.cpp:96-98), so it tests implicit conversion at the call; STATIC_REQUIRE_FALSE(amx_qk_accepts<const bf16*>) at line 383 passes only because the constructor is explicit. Line 397 is a separate probe (std::is_constructible_v), which tests direct-initialization and so is true for an explicit constructor; the comment at 392-393 says this is deliberate (\"keeps its explicit pointer wrap\"). For V the pointer constructor is private (v_vnni.hpp:130-138), so is_constructible is false outside friends (394-395). Wade's comment does not use the word \"implicit\"; he cites the is_constructible assertion and concludes \"any pointer ... passes the QK kernel\". Read literally that is an overstatement: a bare pointer at the call is a compile error for K too (line 383, and the PR body sentence at line 65 is literally true at that level). Read as \"any pointer wrapped in one explicit line passes\" it is correct, and the repo itself does exactly that in t_amx_numerics.cpp:165 on a raw fixture array. Wade's second claim, \"any row-major 64x128 bf16 view passes\", is exactly right because the alias is the same type as the generic const_view (kv_cache_fwd.hpp:49-53). So Codex's qualification (\"the pointer constructor is explicit: direct unwrapped pointer calls are rejected. Wade's wording that any pointer passes needs that qualification\") is correct, and Codex's \"a matching unrelated generic view or an explicitly wrapped pointer remains accepted\" is correct. What I infer: the substantive overclaim Wade targets is the description's \"typed view ... cannot be handed in by mistake\" for K, which holds only for the direct-pointer case, not for wrapped pointers or unrelated same-shape views. Not checked: whether the 2026-09-22 design records already flagged the alias limitation (Codex says so; outside this claim's scope). No compiler run was done; the explicit/is_constructible semantics are standard C++ ([class.conv.ctor], [meta.unary.prop]), not measured here.",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Every quote in the verifier's evidence list is present at the cited file:line at 96a6220ab6 (checked with git show on the read-only worktree), and the verdict follows from them. Both pointer constructors of the generic view types are `explicit` (view.hpp:43 and :296; the other const_view specialisation at :373 too), and view.hpp has no other constructor or conversion operator that takes a pointer, so a bare `const bf16*` cannot be copy-initialised into the kernel parameter. The amx_qk_accepts probe (t_llama_unit.cpp:95-98) is a requires-expression that calls the kernel with a value of type K, so it tests implicit conversion at the call site, and STATIC_REQUIRE_FALSE(amx_qk_accepts<const bf16*>) at :383 holds exactly because the constructor is explicit. Line 397 (std::is_constructible_v<k_plane_t, const bf16*>) tests direct-initialisation, which succeeds for an explicit constructor, and the comment at :391-393 says the wrap is deliberate. A standalone g++ -std=c++20 probe with the same shapes confirms these semantics: all four asserts hold with an explicit ctor, and removing `explicit` flips the two \"pointer rejected at the call\" asserts to failures. The PR body as reviewed also records t_llama_unit passing at 96a6220ab6 on delphi-3bda (lines 147 and 153), so the STATIC_REQUIRE_FALSE at :383 compiled in the real tree. Wade's comment (4188336267) cites the is_constructible assertion and concludes \"any pointer or row-major 64x128 bf16 view passes the QK kernel\"; read literally that is an overstatement for the bare-pointer-at-the-call case, and Codex's qualification (\"the pointer constructor is explicit: direct unwrapped pointer calls are rejected\") is correct. Wade's substantive point stands: const_native_k_view is a `using` alias of the generic const_view (kv_cache_fwd.hpp:49-53), so any same-shape row-major const_view is the same type, and a one-line explicit wrap of an arbitrary pointer is accepted (t_amx_numerics.cpp:164-166 does exactly that on a raw fixture array), whereas the V view's pointer constructor is private (v_vnni.hpp:130-138) and is_constructible is false outside friends (:394-395). The verifier's three-level grading of \"X is a compile error\" claims (direct call / explicit wrap / nominal type) and its two sub-rules (is_constructible means explicit construction, not implicit pass; `using` alias gives shape only, not provenance) are consistent with the evidence and refine rather than overturn the claim-vs-enforcement rule. No quote mismatch and no gap between evidence and verdict was found.",
+          "evidence": [
+            "h/tron/tensor/view.hpp:43-44 @96a6220ab6: `explicit constexpr view(T* data = nullptr) noexcept : data(data) {}` (verified by git show)",
+            "h/tron/tensor/view.hpp:296-297 @96a6220ab6: `explicit const_view(T const* data = nullptr) noexcept : data(data) {}`; grep of all constructors/operators in view.hpp (lines 43,46,49,125,128,131,296,299,302,305,308,373,376,379,382,385) shows every pointer constructor is explicit and the only non-explicit constructors take view/const_view, never a pointer",
+            "h/tron/tensor/kv_cache_fwd.hpp:49-53 @96a6220ab6: `using const_native_k_view = const_view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE, std::integer_sequence<size_t, Rows, Cols>, std::integer_sequence<ptrdiff_t, Cols, 1>>;` (alias, not a new type); native_k_view at :43-47 likewise",
+            "t/t_llama_unit.cpp:95-98 @96a6220ab6: `constexpr bool amx_qk_accepts = requires(K k, const bf16* q, float* s) { amx_attn_h128g4::qk_rowmajor_128x4(k, q, s, size_t{0}); };` -- a call with a value of type K, i.e. an implicit-conversion probe",
+            "t/t_llama_unit.cpp:382-385 @96a6220ab6: STATIC_REQUIRE(amx_qk_accepts<k_plane_t>); STATIC_REQUIRE_FALSE(amx_qk_accepts<const bf16*>); STATIC_REQUIRE_FALSE(amx_qk_accepts<bf16*>); STATIC_REQUIRE_FALSE(amx_qk_accepts<v_plane_t>);",
+            "t/t_llama_unit.cpp:391-397 @96a6220ab6: comment 'The native K alias keeps its explicit pointer wrap: that view type is the existing row-major view.' then STATIC_REQUIRE_FALSE(std::is_constructible_v<v_plane_mut_t, bf16*>); STATIC_REQUIRE_FALSE(std::is_constructible_v<v_plane_t, const bf16*>); ... STATIC_REQUIRE(std::is_constructible_v<k_plane_t, const bf16*>);",
+            "h/tron/tensor/v_vnni.hpp:130-138 @96a6220ab6: `private:` + friend declarations + `explicit v_vnni_view(T* data) noexcept : data_(data) {}` -- pointer ctor private for V",
+            "t/t_amx_numerics.cpp:162-166 @96a6220ab6: comment 'wrapped explicitly as the whole native K plane' and call `qk_rowmajor_128x4(tron::const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>{in->k}, ...)` on the fixture's raw K array",
+            "h/tron/kernels/amx_attn_iface.hpp:218-222 @96a6220ab6: 'passed as its typed view so that a packed V plane or a bare pointer cannot be handed in by mistake' then `void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page,`",
+            "scratchpad/wade/pr4557-body-as-reviewed.md:65: 'A bare pointer or the other plane's view is a compile error (tested with `STATIC_REQUIRE`).'; lines 147 and 153: t_llama_unit ran at 96a6220ab6 on delphi-3bda in both gen and gen-amxoff trees (255274 assertions, 61 test cases), so the STATIC_REQUIRE_FALSE at :383 compiled in the real tree",
+            "scratchpad/wade/wade-inline-4557.md:7-8 (comment 4188336267): '`native_k_view` is an alias of the generic row-major `view`, and t_llama_unit asserts it is constructible from `const bf16*`. So any pointer or row-major 64x128 bf16 view passes the QK kernel; \"a bare pointer is a compile error\" holds for V only.' -- no use of the word 'implicit'",
+            "/home/jhan/.codex/skills/wade-code-review/references/pr4557.md:26: Codex's claim text as quoted in the task, present verbatim",
+            "Standalone semantics probe /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/c1k/probe.cpp: g++ -std=c++20 -fsyntax-only passes with an explicit pointer ctor (requires-expression with const bf16* false, is_constructible true, is_convertible false, private-ctor type not constructible); probe_nonexplicit.cpp (same file with `explicit` removed) fails the static_asserts at lines 11, 12 and 15, showing the FALSE probes depend on `explicit`"
+          ]
+        },
+        {
+          "refuted": false,
+          "reason": "Every cited quote is at the cited place at 96a6220ab6 and the verdict follows from the evidence. Both pointer constructors are `explicit` (view.hpp:43, view.hpp:296; the other overloads at 299-308 only accept view/const_view). `const_native_k_view` is a `using` alias of the generic const_view (kv_cache_fwd.hpp:49-53), so a same-shape row-major const_view is the identical type and passes the QK kernel. The amx_qk_accepts probe (t_llama_unit.cpp:95-98) calls the kernel with a value of type K, so it tests copy-initialization of the parameter, i.e. implicit conversion at the call. Line 397 uses std::is_constructible_v, which tests direct-initialization and is true for an explicit constructor; the comment at 392-393 says the explicit wrap is deliberate. I confirmed the language semantics with a minimal g++ 11.4 -std=c++20 compile (explicit ctor from const short*): accepts<cv> true, accepts<const short*> false, accepts<short*> false, is_constructible true, is_convertible false. So: a bare pointer at the call is rejected for K (line 383), a pointer wrapped in one explicit line passes (line 397; used on a raw fixture array at t_amx_numerics.cpp:165), and any same-shape generic view passes (alias). Wade's comment (4188336267) does not say \"implicit\"; read literally \"any pointer ... passes the QK kernel\" overstates, read as \"any pointer wrapped in one line\" it is right, and \"row-major 64x128 bf16 view passes\" is exactly right. Codex's qualification is therefore correct and refines, not overturns, the claim-vs-enforcement rule: grade \"X is a compile error\" on the three levels (direct call / explicit wrap / nominal distinct type) and never read is_constructible as evidence of implicit passing. The reply to Wade should concede levels 2 and 3 for K and correct only the literal \"any pointer\" wording. The verifier's note that no compiler run was done is now closed by the probe above; nothing in the probe contradicts the verdict.",
+          "evidence": [
+            "h/tron/tensor/view.hpp:43-44 @96a6220ab6: `explicit constexpr view(T* data = nullptr) noexcept : data(data) {}` (verified by git show)",
+            "h/tron/tensor/view.hpp:296-297 @96a6220ab6: `explicit const_view(T const* data = nullptr) noexcept : data(data) {}`; the only other const_view ctors (299-308) take view/const_view, none takes a pointer implicitly",
+            "h/tron/tensor/kv_cache_fwd.hpp:49-53 @96a6220ab6: `using const_native_k_view = const_view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE, integer_sequence<size_t, Rows, Cols>, integer_sequence<ptrdiff_t, Cols, 1>>;` (a using alias, not a new type)",
+            "t/t_llama_unit.cpp:95-98 @96a6220ab6: `constexpr bool amx_qk_accepts = requires(K k, const bf16* q, float* s) { amx_attn_h128g4::qk_rowmajor_128x4(k, q, s, size_t{0}); };` (calls the kernel with a K value = implicit conversion at the call)",
+            "t/t_llama_unit.cpp:382-385 @96a6220ab6: `STATIC_REQUIRE(amx_qk_accepts<k_plane_t>); STATIC_REQUIRE_FALSE(amx_qk_accepts<const bf16*>); STATIC_REQUIRE_FALSE(amx_qk_accepts<bf16*>); STATIC_REQUIRE_FALSE(amx_qk_accepts<v_plane_t>);`",
+            "t/t_llama_unit.cpp:391-397 @96a6220ab6: comment `The native K alias keeps its explicit pointer wrap: that view type is the existing row-major view.` then `STATIC_REQUIRE(std::is_constructible_v<k_plane_t, const bf16*>);` and FALSE for v_plane_mut_t/v_plane_t",
+            "h/tron/tensor/v_vnni.hpp:130-138 @96a6220ab6: `private: friend struct v_vnni_tensor<Rows, Cols>; ... explicit v_vnni_view(T* data) noexcept : data_(data) {}` (private ctor, so is_constructible false outside friends)",
+            "t/t_amx_numerics.cpp:162-166 @96a6220ab6: `// The fixture's aligned row-major K block, wrapped explicitly as the whole native K plane the kernel takes.` `qk_rowmajor_128x4(tron::const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>{in->k}, ...)` (repo itself wraps a raw fixture array in one line)",
+            "h/tron/kernels/amx_attn_iface.hpp:218-222 @96a6220ab6: `passed as its typed view so that a packed V plane or a bare pointer cannot be handed in by mistake` then `void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page,`",
+            "scratchpad/wade/pr4557-body-as-reviewed.md:65: `A bare pointer or the other plane's view is a compile error (tested with STATIC_REQUIRE).`",
+            "scratchpad/wade/wade-inline-4557.md:7-8 (comment 4188336267, kv_cache_fwd.hpp:43): `native_k_view is an alias of the generic row-major view, and t_llama_unit asserts it is constructible from const bf16*. So any pointer or row-major 64x128 bf16 view passes the QK kernel; \"a bare pointer is a compile error\" holds for V only.` (no word 'implicit')",
+            "/home/jhan/.codex/skills/wade-code-review/references/pr4557.md:26: `However, the pointer constructor is explicit: direct unwrapped pointer calls are rejected. Wade's wording that any pointer passes needs that qualification.`",
+            "Compile probe /tmp/claude-0/.../scratchpad/wade/refute-c1k/p.cpp, g++ 11.4.0 -std=c++20 -fsyntax-only: static_assert(accepts<cv>), static_assert(!accepts<const short*>), static_assert(!accepts<short*>), static_assert(is_constructible_v<cv, const short*>), static_assert(!is_convertible_v<const short*, cv>) all pass (COMPILE_OK), confirming the explicit-ctor vs is_constructible semantics the verdict rests on"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C2-parity-branches",
+      "verdict": "supported",
+      "evidence": [
+        {
+          "ref": "h/tron/tensor/v_vnni.hpp:359-364 @96a6220ab6",
+          "quote": "if (src_token % V_PAIR_TOKENS_2 == 0) {\n    if (dst_token % V_PAIR_TOKENS_2 == 0) {\n      // src=[a b]; store [0 b]. See Note [Zero-Initialized V Slots].\n      ... bf16x32 zero_b = _mm512_andnot_si512(hi_16_of_32, a_b);"
+        },
+        {
+          "ref": "h/tron/tensor/v_vnni.hpp:378-383 @96a6220ab6",
+          "quote": "} else {\n    if (dst_token % V_PAIR_TOKENS_2 == 0) {\n      // src=[a b]; store [0 a]. See Note [Zero-Initialized V Slots].\n      ... bf16x32 zero_a = _mm512_srli_epi32(a_b, BF16_BITS_16);"
+        },
+        {
+          "ref": "h/tron/tensor/v_vnni.hpp:368-373 @96a6220ab6 (odd-destination branch overwrites the whole odd half; it does not depend on a prior zero)",
+          "quote": "// Load src=[a b] and dst=[c d]; store [b d].\n ... bf16x32 b_d = _mm512_ternarylogic_epi32(\n            b_zero, c_d, hi_16_of_32, _MM_TERNLOG_A | (_MM_TERNLOG_B & ~_MM_TERNLOG_C));"
+        },
+        {
+          "ref": "h/tron/models/kv_cache.hpp:1750 @96a6220ab6",
+          "quote": "inline static const size_t page_size = 64;"
+        },
+        {
+          "ref": "h/tron/models/kv_cache.hpp:1181-1215 @96a6220ab6 (book::append copies page-wise with dst_begin = tok_ct)",
+          "quote": "size_t dst_begin = tok_ct; ... dst_pg->copy_from(src_pg, src_offset, dst_offset, count);"
+        },
+        {
+          "ref": "h/tron/models/kv_cache.hpp:2127-2130 @96a6220ab6 (copy_storage_slot: token i goes to dst_begin+i from src_begin+i, so dst parity = (dst_tokens+i)%2, src parity = i%2)",
+          "quote": "for (size_t i = 0; i < count; ++i)\n        append_v<geometry>(\n            storage_offset, kv_head, dst_begin + i, src_page, src_begin + i);"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:89-90 @96a6220ab6",
+          "quote": "constexpr size_t EVEN_START_DST_TOKENS_2 = 2;\nconstexpr size_t ODD_START_DST_TOKENS_3 = 3;"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3285,3298-3299 @96a6220ab6 (poison section: dst_tokens 2 -> copies (dst,src) (2,0)(3,1)(4,2)(5,3)(6,4), last = even<-even = branch at v_vnni.hpp:361; dst_tokens 3 -> (3,0)(4,1)(5,2)(6,3), last = even<-odd = branch at v_vnni.hpp:380)",
+          "quote": "static constexpr size_t APPENDED_TOKENS_7 = 7;\n ... const size_t dst_tokens = GENERATE(EVEN_START_DST_TOKENS_2, ODD_START_DST_TOKENS_3);\n    const size_t src_tokens = APPENDED_TOKENS_7 - dst_tokens;"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3294-3297 @96a6220ab6 (the test's own comment names the parity pairs per GENERATE value)",
+          "quote": "// dst_tokens 3 copies odd<-even and even<-odd; dst_tokens 2 copies\n    // even<-even and odd<-odd. Together they exercise the four parity\n    // combinations of copy_token, each time with the last copy landing next to\n    // the poisoned token 7."
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3322-3334 @96a6220ab6 (token 7 poisoned with NaN before the append)",
+          "quote": "// Poison the padding slot (token index 7 = odd partner of token 6 in pair\n    // 3). ... The\n    // append's last copy (dst=6 from src=6-dst_tokens) must zero this NaN"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3345-3366 @96a6220ab6 (observation point of the poison section: scaled_v with count 7 reads pair (6,7); NaN at 7 would surface)",
+          "quote": "// Probe every valid token via one-hot scales.  scaled_v rounds\n    // count=7 to 8, reading pair (6,7).  Token 7 holds the poisoned NaN.\n ... REQUIRE_FALSE(std::isnan(actual_v[i]));"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3368-3378 @96a6220ab6 (the poison section's value check compares two reads of the destination, not destination vs source; it does not verify the copied row bits)",
+          "quote": "// Verify value correctness: one-hot scaled_v must match get_v.\n ... dst_book.page_of(tok)->get_v(... expected_v ...);\n ... REQUIRE(actual_v[i] == expected_v[i]);"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3664-3665,3688 @96a6220ab6 (bit-exact section fills the whole 64-token page; last copy lands at token 63 = odd destination)",
+          "quote": "const size_t dst_tokens = GENERATE(EVEN_START_DST_TOKENS_2, ODD_START_DST_TOKENS_3);\n    const size_t src_tokens = page_t::page_size - dst_tokens;\n ... REQUIRE(dst_book.size() == page_t::page_size);"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3689-3698 @96a6220ab6 (bit-exact section observes only written tokens 0..63; every odd token 3..63 was overwritten by an odd-destination copy after its even partner's copy, so no partner-zero is observed)",
+          "quote": "for (size_t token = 0; token < page_t::page_size; ++token) {\n ... const uint16_t expected = token < dst_tokens\n                                      ? pattern(token, dim)\n                                      : source_bits(token - dst_tokens, dim);\n ... REQUIRE(back[dim].to_bits() == expected);"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3651-3656 @96a6220ab6 (bit-exact section's stated purpose: row bits of the copied tokens, not partner clearing)",
+          "quote": "// specials sit on source tokens 2 and 3, so a wrong half-lane merge in any\n    // parity branch changes bits here, which the float comparisons of the\n    // append cases above cannot see."
+        },
+        {
+          "ref": "wade-inline-4557.md 4188336316 (t/t_llama_unit.cpp:3298)",
+          "quote": "both run all four `copy_token` parities through `book::append`; the bit-exact one covers more. One parity here already protects the NaN zeroing, so one of these is duplicate coverage."
+        }
+      ],
+      "consequence_for_rule": "A \"duplicate coverage\" rule needs the guard \"same observation point\". Two tests that drive the same code paths (here: all four copy_token parities through book::append) are duplicates only when they assert the same observable at the same point. Executable form: (1) for each test, list the observable it asserts (which memory, which assertion) and the implementation branch that produced that memory at the observed point; (2) for a GENERATE/parametrised test, do this per parameter value (here: dst_tokens 2 -> last copy even<-even -> andnot branch v_vnni.hpp:361-364; dst_tokens 3 -> last copy even<-odd -> srli branch v_vnni.hpp:380-383); (3) check whether a later write in the same test overwrites the observable before the assertion (here: the full-page bit-exact section overwrites every odd partner, so it is blind to partner clearing, and the poison section never compares destination with source, so it is blind to row-copy bit errors); (4) call it duplicate only if the observable sets coincide. Here they are disjoint: the poison GENERATE is the only observation of both partner-clearing branches, and the bit-exact section is the only observation of the row bits. Reducing the poison section to one GENERATE value would drop one clearing branch from observation; dropping the bit-exact section would drop the row-bit check.",
+      "notes": "Decision on the three-way question: both partly, with codex's objection the correct conclusion. Wade's factual premise is right: both sections run all four parities through book::append (verified from copy_storage_slot's dst_begin+i / src_begin+i loop and the GENERATE values 2/3). Wade's conclusion (\"one parity here already protects the NaN zeroing, so one of these is duplicate\") is wrong on two counts verified at 96a6220ab6: (a) copy_token has two distinct even-destination clearing branches (andnot at :364 for even source, srli at :383 for odd source) and the poison section's two GENERATE values reach one each at the last copy (dst 6 <- src 4, dst 6 <- src 3), so a single value observes only one branch; (b) the bit-exact section fills the full 64-token page (page_size = 64, kv_cache.hpp:1750), its last copy lands on odd token 63, and the odd-destination branches overwrite the whole odd half (ternarylogic A | (B & ~C) masks the destination's odd half out), so no odd partner left by an even-destination copy survives to the check loop at 3689-3698. Codex's three sub-claims (\"separate implementation branches\", \"two poison configurations end with those different branches\", \"full-page bit-copy case subsequently overwrites odd partner positions\", \"partial-page poison case observes the final unused odd partner\") are each supported by the lines quoted. Read vs inferred: the parity sequence per GENERATE value is inferred by arithmetic from copy_storage_slot's loop (read) and the GENERATE constants (read); the test's own comment at 3294-3297 states the same pairs. One extra observation not in codex's text: the poison section's value check (3368-3378) compares scaled_v with get_v, both reads of the destination, so it does not verify the copied row bits against the source; the bit-exact section is the only row-bit check. That strengthens \"disjoint observables\" in both directions. Not run: no test was executed (worktree read only, no build); all claims are from reading the code at 96a6220ab6.",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "The verdict \"supported\" stands. I opened every cited location at 96a6220ab6 (read-only git show). The substantive quotes are real and the inference chain holds: (1) copy_token has two distinct even-destination clearing branches, andnot at v_vnni.hpp:364 (even source) and srli at :383 (odd source); (2) book::append copies token i to dst_begin+i from src_begin+i (kv_cache.hpp:1194, 1209, 2128-2130, via copy_from -> copy_storage_slot -> append_v -> copy_token at 2104), so for the poison section dst_tokens=2 gives copies (2<-0)(3<-1)(4<-2)(5<-3)(6<-4) with the last copy even<-even (andnot branch), and dst_tokens=3 gives (3<-0)(4<-1)(5<-2)(6<-3) with the last copy even<-odd (srli branch); the even<-even branch never runs under dst_tokens=3, so one GENERATE value alone observes only one clearing branch; (3) the poison section observes token 7 (the odd partner of the last even-destination copy) through scaled_v count 7 rounded to 8 and REQUIRE_FALSE(isnan) (t_llama_unit.cpp:3366-3385), and its value check compares scaled_v with get_v, both destination reads (3387-3397), so it never checks copied bits against the source; (4) the bit-exact section fills the whole 64-token page (3664-3665, page_size=64 at kv_cache.hpp:1750), so its last copy lands on token 63 (odd destination), every even-destination copy at token 2k is followed by an odd-destination copy at 2k+1 whose ternarylogic A|(B&~C) with C=hi_16_of_32 replaces the whole odd half (v_vnni.hpp:373-374, 392-393), and the check loop reads only tokens 0..63 one at a time via get_v (3687-3698); hence no odd partner left by an even-destination copy is observed. So the two sections assert disjoint observables: the poison section is the only observation of both partner-clearing branches, and the bit-exact section is the only observation of the copied row bits. Wade's premise (both sections run all four parities) is right; his conclusion (one of them is duplicate) is wrong. Codex's objection is right. The consequence for the rule follows: \"duplicate coverage\" needs the guard \"same observation point\". Citation defects found but not verdict-changing: four line ranges in the verifier's evidence are off by about 2-20 lines (see evidence list); the quoted text exists in the same SECTION of the same file at the reviewed head. No test was run (read-only worktree); all claims come from reading the code.",
+          "evidence": [
+            "CONFIRMED h/tron/tensor/v_vnni.hpp:359-365 @96a6220ab6: `if (src_token % V_PAIR_TOKENS_2 == 0) { if (dst_token % V_PAIR_TOKENS_2 == 0) { // src=[a b]; store [0 b]. ... bf16x32 zero_b = _mm512_andnot_si512(hi_16_of_32, a_b);` (even<-even clearing branch).",
+            "CONFIRMED h/tron/tensor/v_vnni.hpp:378-384 @96a6220ab6: `} else { if (dst_token % V_PAIR_TOKENS_2 == 0) { // src=[a b]; store [0 a]. ... bf16x32 zero_a = _mm512_srli_epi32(a_b, BF16_BITS_16);` (even<-odd clearing branch; a separate code path from :364).",
+            "CONFIRMED h/tron/tensor/v_vnni.hpp:368-375 and 387-394 @96a6220ab6: both odd-destination branches end in `_mm512_ternarylogic_epi32(x, c_d, hi_16_of_32, _MM_TERNLOG_A | (_MM_TERNLOG_B & ~_MM_TERNLOG_C))`; with C = the odd-half mask this yields [src_half, c] and discards d, so the odd half is replaced regardless of its prior content.",
+            "CONFIRMED h/tron/models/kv_cache.hpp:1750 @96a6220ab6: `inline static const size_t page_size = 64;`",
+            "CONFIRMED h/tron/models/kv_cache.hpp:1194,1209 @96a6220ab6: `size_t dst_begin = tok_ct;` ... `dst_pg->copy_from(src_pg, src_offset, dst_offset, count);` and kv_cache.hpp:2139-2141 copy_from -> copy_storage_slot, 2128-2130 `for (size_t i = 0; i < count; ++i) append_v<geometry>(storage_offset, kv_head, dst_begin + i, src_page, src_begin + i);`, 2104 append_v -> `copy_token(...)`. So destination token = dst_tokens + i, source token = i.",
+            "CONFIRMED t/t_llama_unit.cpp:89-90 @96a6220ab6: `constexpr size_t EVEN_START_DST_TOKENS_2 = 2; constexpr size_t ODD_START_DST_TOKENS_3 = 3;`",
+            "CONFIRMED t/t_llama_unit.cpp:3285,3298-3299 @96a6220ab6: `APPENDED_TOKENS_7 = 7` ... `const size_t dst_tokens = GENERATE(EVEN_START_DST_TOKENS_2, ODD_START_DST_TOKENS_3); const size_t src_tokens = APPENDED_TOKENS_7 - dst_tokens;`. INFERRED by arithmetic: dst_tokens=2 -> last copy dst 6 <- src 4 (even<-even, andnot branch); dst_tokens=3 -> last copy dst 6 <- src 3 (even<-odd, srli branch); under dst_tokens=3 the even<-even branch never executes.",
+            "CONFIRMED t/t_llama_unit.cpp:3294-3297 @96a6220ab6 (test comment states the same parity pairs): `// dst_tokens 3 copies odd<-even and even<-odd; dst_tokens 2 copies // even<-even and odd<-odd.`",
+            "CONFIRMED t/t_llama_unit.cpp:3323-3334 @96a6220ab6: `// Poison the padding slot (token index 7 = odd partner of token 6 in pair // 3). ... The append's last copy (dst=6 from src=6-dst_tokens) must zero this NaN` followed by set_v of a NaN row at APPENDED_TOKENS_7.",
+            "LINE DRIFT (quote real, range wrong): verifier cited t/t_llama_unit.cpp:3345-3366 for the probe; actual location is 3366-3385: `// Probe every valid token via one-hot scales.  scaled_v rounds // count=7 to 8, reading pair (6,7).  Token 7 holds the poisoned NaN.` (3366-3367) and `REQUIRE_FALSE(std::isnan(actual_v[i]));` (3385). Lines 3345-3354 are the source-book fill loop.",
+            "LINE DRIFT (quote real, range wrong): verifier cited t/t_llama_unit.cpp:3368-3378 for the value check; actual location is 3387-3397: `// Verify value correctness: one-hot scaled_v must match get_v.` ... `dst_book.page_of(tok)->get_v(... expected_v ...)` ... `REQUIRE(actual_v[i] == expected_v[i]);`. Both operands are reads of the destination book; no comparison against src_book exists in this section.",
+            "CONFIRMED t/t_llama_unit.cpp:3664-3665 @96a6220ab6: `const size_t dst_tokens = GENERATE(EVEN_START_DST_TOKENS_2, ODD_START_DST_TOKENS_3); const size_t src_tokens = page_t::page_size - dst_tokens;`. LINE DRIFT: `REQUIRE(dst_book.size() == page_t::page_size);` is at 3686, not 3688. INFERRED: last destination token = 63 (odd) for both GENERATE values.",
+            "CONFIRMED t/t_llama_unit.cpp:3687-3698 @96a6220ab6 (verifier cited 3689-3698): `for (size_t token = 0; token < page_t::page_size; ++token) { ... get_v(slot, 0, token, ...) ... expected = token < dst_tokens ? pattern(token, dim) : source_bits(token - dst_tokens, dim); ... REQUIRE(back[dim].to_bits() == expected);`. Only written tokens are read, one token per get_v; no partner slot is observed.",
+            "CONFIRMED t/t_llama_unit.cpp:3651-3656 @96a6220ab6: `// specials sit on source tokens 2 and 3, so a wrong half-lane merge in any // parity branch changes bits here, which the float comparisons of the // append cases above cannot see.` (stated purpose = row bits, not partner clearing).",
+            "CONFIRMED wade-inline-4557.md comment 4188336316 (t/t_llama_unit.cpp:3298): `both run all four copy_token parities through book::append; the bit-exact one covers more. One parity here already protects the NaN zeroing, so one of these is duplicate coverage.`",
+            "CONFIRMED codex /home/jhan/.codex/skills/wade-code-review/references/pr4557.md section 'Matching copy parities do not prove matching observations': the three sub-claims (separate clearing branches; the two poison configurations end with different branches; the full-page bit-copy case overwrites odd partner positions while the poison case observes the final unused odd partner) each match the code quoted above.",
+            "NOT RUN: no test executed, no build; worktree read-only. Decision: Wade's premise right, conclusion wrong; codex's objection right; rule 'duplicate coverage' needs the guard 'same observation point' (same asserted memory at the same point, per parameter value, with no later overwrite before the assertion)."
+          ]
+        },
+        {
+          "refuted": false,
+          "reason": "The verdict \"supported\" stands. I opened every cited location at 96a6220ab6 (git show 96a6220ab6:<path> in the read-only worktree /home/jhan/workspace/ai-runs/tron-issue4525). All quotes from h/tron/tensor/v_vnni.hpp, h/tron/models/kv_cache.hpp, t/t_llama_unit.cpp lines 89-90, 3285, 3294-3299, 3651-3656, 3664-3665 and the Wade comment file are verbatim at the cited lines. Four t/t_llama_unit.cpp citations carry wrong line ranges but the quoted text is verbatim in the same SECTION: the probe quote cited as 3345-3366 is at 3366-3385 (REQUIRE_FALSE(isnan) at 3385); the value-check quote cited as 3368-3378 is at 3387-3397; the REQUIRE(dst_book.size() == page_t::page_size) cited as 3688 is at 3686; the check loop cited as 3689-3698 is at 3687-3698. These are clerical offsets, not misattributed evidence, and the parent should correct them. I independently re-derived the substance: (1) copy_token has two distinct even-destination branches that zero the odd partner, andnot at :364 (even source) and srli at :383 (odd source), and the two odd-destination branches (:372-375, :391-394) overwrite the whole odd half via ternarylogic A|(B&~C) with A carrying the new odd half, so they never depend on a prior zero. (2) book::append -> copy_from -> copy_storage_slot copies token i to dst_begin+i from src_begin+i (kv_cache.hpp:1194,1209,2128-2130) and append_v forwards those indices to copy_token unchanged (kv_cache.hpp:2104-2108), so with APPENDED_TOKENS_7=7 the GENERATE value 2 produces copies (2<-0)(3<-1)(4<-2)(5<-3)(6<-4), last = even<-even = :361 branch, and value 3 produces (3<-0)(4<-1)(5<-2)(6<-3), last = even<-odd = :380 branch; value 2 never runs the srli branch at all, value 3 never runs the andnot branch. The test's own comment at 3294-3297 states the same. (3) The poison section observes the partner only via the NaN at token 7 (poisoned at 3327-3335, probed at 3366-3385); dst_book is a fresh book, so intermediate partner zeroings are unobservable. (4) The bit-exact section fills the full 64-token page (page_size=64 at kv_cache.hpp:1750; src_tokens = page_size - dst_tokens at 3665), its last copy lands on odd token 63, every even-destination copy at 2k is followed by an odd-destination copy at 2k+1 that overwrites the odd half, and the check loop (3687-3698) reads only tokens 0..63, all written, so it observes no partner clearing. (5) The poison section's value check (3387-3397) compares scaled_v with get_v, both reads of the destination, so it does not check copied bits against the source; the bit-exact section is the only source-vs-destination bit check. (6) I also checked the other append tests for an independent observation of the partner-clearing branches: \"book.append()\" / \"append books of different sizes\" (3101-3267) compares dst_book against a fresh expected_book with no poison, so a non-zeroing even copy would leave a zero either way and go unobserved; \"single-token dirty-buffer reuse\" (3408) uses set_v, not copy_token. So the poison GENERATE is indeed the only observation of both clearing branches. Conclusion: Wade's premise (both sections run all four parities through book::append) is right, his conclusion (one of these is duplicate coverage) is wrong, codex's objection is right, and the \"duplicate coverage\" rule needs the guard \"same observation point\".",
+          "evidence": [
+            "h/tron/tensor/v_vnni.hpp:359-365 @96a6220ab6 (even<-even): `if (src_token % V_PAIR_TOKENS_2 == 0) { if (dst_token % V_PAIR_TOKENS_2 == 0) { // src=[a b]; store [0 b]. ... bf16x32 zero_b = _mm512_andnot_si512(hi_16_of_32, a_b);` - verbatim at cited lines",
+            "h/tron/tensor/v_vnni.hpp:378-384 @96a6220ab6 (even<-odd): `} else { if (dst_token % V_PAIR_TOKENS_2 == 0) { // src=[a b]; store [0 a]. ... bf16x32 zero_a = _mm512_srli_epi32(a_b, BF16_BITS_16);` - verbatim; a second, distinct partner-clearing branch",
+            "h/tron/tensor/v_vnni.hpp:368-375 and 387-394 @96a6220ab6 (odd destinations): `b_zero = _mm512_slli_epi32(a_b, BF16_BITS_16)` / `a_zero = _mm512_and_si512(hi_16_of_32, a_b)` then `_mm512_ternarylogic_epi32(x, c_d, hi_16_of_32, _MM_TERNLOG_A | (_MM_TERNLOG_B & ~_MM_TERNLOG_C))` - A supplies the whole odd (high-16) half, B&~C keeps only the even half of the destination, so the odd half is fully overwritten regardless of prior content",
+            "h/tron/tensor/v_vnni.hpp:39-40 @96a6220ab6: `In every 32-bit lane the even token sits in the low 16 bits and the odd token in the high 16 bits.` and :358 `hi_16_of_32 = _mm512_set1_epi32(V_ODD_TOKEN_LANE_MASK_0XFFFF0000)` - confirms the mask selects the odd partner",
+            "h/tron/models/kv_cache.hpp:1750 @96a6220ab6: `inline static const size_t page_size = 64;` - verbatim",
+            "h/tron/models/kv_cache.hpp:1194,1209 @96a6220ab6: `size_t dst_begin = tok_ct;` ... `dst_pg->copy_from(src_pg, src_offset, dst_offset, count);` - verbatim (inside 1181-1215)",
+            "h/tron/models/kv_cache.hpp:2128-2130 @96a6220ab6: `for (size_t i = 0; i < count; ++i) append_v<geometry>(storage_offset, kv_head, dst_begin + i, src_page, src_begin + i);` - verbatim",
+            "h/tron/models/kv_cache.hpp:2104-2108 @96a6220ab6: `copy_token(kv_block_at_storage<geometry>(storage_offset, kv_head).v.as_view(), dst_i_page, src_page->...v.as_view(), src_i_page);` - append_v forwards token indices unchanged, so copy_token parity = book token index parity (read, not in the verifier's list)",
+            "t/t_llama_unit.cpp:89-90 @96a6220ab6: `constexpr size_t EVEN_START_DST_TOKENS_2 = 2;` `constexpr size_t ODD_START_DST_TOKENS_3 = 3;` - verbatim",
+            "t/t_llama_unit.cpp:3285,3298-3299 @96a6220ab6: `static constexpr size_t APPENDED_TOKENS_7 = 7;` ... `const size_t dst_tokens = GENERATE(EVEN_START_DST_TOKENS_2, ODD_START_DST_TOKENS_3); const size_t src_tokens = APPENDED_TOKENS_7 - dst_tokens;` - verbatim; arithmetic (inferred): dst 2 -> copies (2<-0)(3<-1)(4<-2)(5<-3)(6<-4), last even<-even; dst 3 -> (3<-0)(4<-1)(5<-2)(6<-3), last even<-odd",
+            "t/t_llama_unit.cpp:3294-3297 @96a6220ab6: `// dst_tokens 3 copies odd<-even and even<-odd; dst_tokens 2 copies // even<-even and odd<-odd. ... each time with the last copy landing next to // the poisoned token 7.` - verbatim; agrees with the arithmetic",
+            "t/t_llama_unit.cpp:3323-3326,3333-3334 @96a6220ab6 (verifier cited 3322-3334, acceptable): `// Poison the padding slot (token index 7 = odd partner of token 6 in pair // 3). ... The // append's last copy (dst=6 from src=6-dst_tokens) must zero this NaN` ... `dst_page.set_v(test_kv_slot<book_t>(layer), kv_head, APPENDED_TOKENS_7, v_source_row<head_size>(nan_buf));` - verbatim",
+            "t/t_llama_unit.cpp:3366-3367,3385 @96a6220ab6 (verifier cited 3345-3366 - LINE RANGE WRONG, text verbatim ~20 lines later): `// Probe every valid token via one-hot scales.  scaled_v rounds // count=7 to 8, reading pair (6,7).  Token 7 holds the poisoned NaN.` ... `REQUIRE_FALSE(std::isnan(actual_v[i]));`",
+            "t/t_llama_unit.cpp:3387-3397 @96a6220ab6 (verifier cited 3368-3378 - LINE RANGE WRONG, text verbatim ~19 lines later): `// Verify value correctness: one-hot scaled_v must match get_v.` ... `dst_book.page_of(tok)->get_v(... v_destination_row<head_size>(expected_v));` ... `REQUIRE(actual_v[i] == expected_v[i]);` - both operands are reads of the destination",
+            "t/t_llama_unit.cpp:3301-3302 @96a6220ab6: `book_t dst_book(1); book_t src_book(1);` - fresh books, so only the poisoned token 7 can reveal a missing partner zero; intermediate even copies' partner zeroing is unobservable (inferred)",
+            "t/t_llama_unit.cpp:3664-3665,3686 @96a6220ab6 (verifier cited 3688 for the REQUIRE - off by 2): `const size_t dst_tokens = GENERATE(EVEN_START_DST_TOKENS_2, ODD_START_DST_TOKENS_3); const size_t src_tokens = page_t::page_size - dst_tokens;` ... `REQUIRE(dst_book.size() == page_t::page_size);` - full 64-token page, last copy at token 63 (odd)",
+            "t/t_llama_unit.cpp:3687-3698 @96a6220ab6 (verifier cited 3689-3698 - off by 2): `for (size_t token = 0; token < page_t::page_size; ++token) { ... get_v(slot, 0, token, ...) ... const uint16_t expected = token < dst_tokens ? pattern(token, dim) : source_bits(token - dst_tokens, dim); ... REQUIRE(back[dim].to_bits() == expected);` - reads only tokens 0..63, all written; every odd token >= dst_tokens was last written by an odd-destination copy",
+            "t/t_llama_unit.cpp:3651-3656 @96a6220ab6: `// specials sit on source tokens 2 and 3, so a wrong half-lane merge in any // parity branch changes bits here, which the float comparisons of the // append cases above cannot see.` - verbatim; stated purpose is row bits, not partner clearing",
+            "t/t_llama_unit.cpp:3101-3131,3253-3262 @96a6220ab6 (extra check, not in the verifier's list): TEST_CASE \"book.append()\" / SECTION \"append books of different sizes\" compares `dst_book...scaled_v` with `expected_book...scaled_v`, both fresh `book_t ...(1)`, no poison -> a non-zeroing even copy leaves a zero either way, unobserved",
+            "t/t_llama_unit.cpp:3408,3426 @96a6220ab6 (extra check): SECTION \"single-token dirty-buffer reuse\" uses set_v (`// partner via cvtepu16_epi32, overwriting the NaN poison above.`), not copy_token",
+            "wade-inline-4557.md, comment 4188336316 (t/t_llama_unit.cpp:3298): `both run all four copy_token parities through book::append; the bit-exact one covers more. One parity here already protects the NaN zeroing, so one of these is duplicate coverage.` - verbatim",
+            "Not run: no build or test execution (read-only worktree); all conclusions from code reading at 96a6220ab6"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C3-known-at-design",
+      "verdict": "supported",
+      "evidence": [
+        {
+          "ref": "/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/design-new-tensor-type.html:282 (sub-claim 1: conversion-preservation requested)",
+          "quote": "Packed V append from fp16 / float: Keep today's conversion to fp32 and upper-16-bit truncation. Do not substitute general expression conversion."
+        },
+        {
+          "ref": "design-new-tensor-type.html:287 (sub-claim 1: the exact NaN->inf row Wade flagged is the design's own bit table)",
+          "quote": "Independent input bits | Packed append | ... fp32 0x7F800001: NaN with upper seven mantissa bits zero | bf16 0x7F80: +infinity | bf16 0x7F81: NaN | bf16 0x7F80: +infinity"
+        },
+        {
+          "ref": "design-new-tensor-type.html:390 (sub-claim 1: section 8 test row)",
+          "quote": "Bits and conversions: closest existing cache cases. Use independent input/expected bit patterns for truncation boundaries, infinity, and NaN. Keep packed append expectations separate from generic conversion."
+        },
+        {
+          "ref": "claude-review-design-new-tensor-type.html:1173 (sub-claim 1: risk reviewer accepted the table; nobody asked for a consumer)",
+          "quote": "The NaN table is right: fp32 0x7F800001 truncates to bf16 0x7F80 (+infinity) in the packed append, and the generic conversion gives 0x7F81 (a NaN) only without TRON_IGNORE_NAN"
+        },
+        {
+          "ref": "scratchpad/wade/prior-0922-results.txt ## critic, omission 1 (sub-claim 1: the 09-22 critic asked for MORE NaN rows, not fewer)",
+          "quote": "The float section (t/t_llama_unit.cpp:3033-3064) asserts the packed path only: {0x7f800001u, 0x7f80u} at :3057, which is macro-independent. ... recommendation: In the float section, beside the packed expectation for 0x7f800001, add the generic conversion of the same input"
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3575 @96a6220ab6 (the row Wade flagged, matches the design table)",
+          "quote": "{0x7f800001u, 0x7f80u},  // NaN with payload only in the low bits -> +inf"
+        },
+        {
+          "ref": "design-new-tensor-type.html:228 (sub-claim 2: alias limitation known)",
+          "quote": "The new const_native_k_view alias still permits an explicit ordinary pointer wrap. It prevents accidental argument mixing."
+        },
+        {
+          "ref": "design-new-tensor-type.html:391 (sub-claim 2: explicit pointer wrap kept legal by decision)",
+          "quote": "Reject raw-pointer construction of packed matrices and rows. Accept writable-to-read-only matrix conversion only. Keep explicit native-view pointer construction legal."
+        },
+        {
+          "ref": "design-new-tensor-type.html:501 and :519 (sub-claim 2: round-1 F30 and round-2 N22 both recorded it)",
+          "quote": "F30 ... The alias does not prove the provenance of an explicitly wrapped pointer. / N14 N20 N22 N50 ... State the native alias limitation and whole-plane QK call. ... Explicit wrapping of an ordinary pointer remains legal. The alias is not a provenance guarantee."
+        },
+        {
+          "ref": "claude-review-design-new-tensor-type.html:249 and :323 (sub-claim 2)",
+          "quote": "N22 Minor round 2 Native K alias still accepts explicit pointer wrap resolved in round 3 / F33 round 1 const_native_k_view is a structural alias shared with 8-lane V Still rejected; the design's section 9 says so"
+        },
+        {
+          "ref": "scratchpad/wade/pr4557-body-as-reviewed.md:65 (sub-claim 2: the PR body dropped the limitation and generalized to K)",
+          "quote": "The packed V plane (16-lane build) and the native K plane cross the cache and kernel boundaries as typed views. A bare pointer or the other plane's view is a compile error (tested with STATIC_REQUIRE)."
+        },
+        {
+          "ref": "h/tron/tensor/kv_cache_fwd.hpp:43-47 @96a6220ab6 (sub-claim 2: alias is the generic view)",
+          "quote": "using native_k_view = view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE, std::integer_sequence<size_t, Rows, Cols>, std::integer_sequence<ptrdiff_t, Cols, 1>>;"
+        },
+        {
+          "ref": "design-new-tensor-type.html:398 (sub-claim 3: hardware-skip warning, test-policy section)",
+          "quote": "Do not count disabled-feature placeholders or hardware-unavailable early returns as feature execution. [S12]"
+        },
+        {
+          "ref": "design-new-tensor-type.html:427 (sub-claim 3: same warning as an evidence rule for t_amx_numerics)",
+          "quote": "retain logs-<host>/run-NNNN/t_amx_numerics.log showing both QK and PV precision cases passed without AMX unavailable on this host warnings. ... A pass line alone is insufficient: the early-return path also passes."
+        },
+        {
+          "ref": "design-new-tensor-type.html:332 (sub-claim 3: the design itself placed the byte compare inside the AMX-gated PV case)",
+          "quote": "Keep the test's independent pair-interleave formula as expected physical bytes. Copy bytes out of the trivially copyable owner into a plain test buffer and compare them."
+        },
+        {
+          "ref": "t/t_amx_numerics.cpp:196-199 and :235-240 @96a6220ab6 (sub-claim 3: as built, the compare sits after the early return)",
+          "quote": "if (!tron::amx_attn_h128g4::available()) { WARN(\"AMX unavailable on this host - PV precision check skipped\"); return; } ... std::memcpy(owner_bytes.data(), v_owner.get(), sizeof(*v_owner)); for (...) { REQUIRE(owner_bytes[i].to_bits() == v_page[i].to_bits()); }"
+        },
+        {
+          "ref": "scratchpad/wade/prior-0922-results.txt (sub-claim 3: the 09-22 run has no finding on the early return; grep available|t_amx_numerics|skip returns nothing)",
+          "quote": "## find:design - New packed-only test case is not guarded by TRON_CHUNK_SIZE == 16 | t/t_llama_unit.cpp:2963"
+        },
+        {
+          "ref": "git show -s 707159b9ef (sub-claim 4: commit message names the completeness critic as the origin of the expanded copy tests)",
+          "quote": "Two test-contract gaps the completeness critic named against design section 8 of issue #4525: - \"append_v preserves poison\" now runs for dst_tokens 2 and 3, so the NaN-poison observation covers even<-even and odd<-odd copies as well as odd<-even and even<-odd ... - The packed-V bit case gains a section that appends whole books at both destination parities and requires the copied bits ... to equal the source bits"
+        },
+        {
+          "ref": "scratchpad/wade/prior-0922-results.txt ## critic, omission 2 (sub-claim 4: the critic knew the poison is CLEARED, yet asked to keep the setup; the section name stayed 'preserves')",
+          "quote": "The poison at token 7 (:2806-2812) is cleared by the single even<-odd copy dst 6 <- src 3 ... recommendation: In 'append_v preserves poison' GENERATE dst_tokens from {2, 3} ... Keep the existing poison-at-7 setup and one-hot probe unchanged."
+        },
+        {
+          "ref": "t/t_llama_unit.cpp:3293-3298 @96a6220ab6 (the result of that critic request, flagged by Wade 4188336316/4188336324)",
+          "quote": "SECTION(\"append_v preserves poison\") { // dst_tokens 3 copies odd<-even and even<-odd; dst_tokens 2 copies even<-even and odd<-odd. ... const size_t dst_tokens = GENERATE(EVEN_START_DST_TOKENS_2, ODD_START_DST_TOKENS_3);"
+        }
+      ],
+      "consequence_for_rule": "Root cause for the skill: known-but-not-carried-forward, not unknown. All four sub-claims hold against the records. (1) The NaN->inf and truncation rows were requested by the design (:282, :287, :390), accepted by the risk reviewer, and the 09-22 critic asked to add MORE conversion rows; nobody asked whether a durable contract or a named consumer justifies pinning the row, nor checked it against AGENTS.md \"Treat NaN as corruption\". (2) The K alias limitation was recorded three times (:228, :391, F30 :501, N22 :519) and the PR body as reviewed (line 65) still generalized \"a bare pointer ... is a compile error\" to native K; no step compared each PR-body claim against the design's recorded limitations. (3) The hardware-skip warning existed only as an EXECUTION-EVIDENCE rule (:398, :427: logs must show no 'AMX unavailable' warning) while the same design placed the independent-formula byte compare inside the AMX-gated PV case (:332); the two rules were never joined, and the 09-22 lenses found nothing on it. (4) The duplicate parity coverage and the stale 'preserves poison' name are direct products of the completeness critic's requests (707159b9ef; critic omission 2 knew the poison is cleared and still said keep the setup). Structural lesson for the skill: a completeness critic that scores 'is every design row covered' can only ADD assertions, never remove or re-justify them, and never compares the PR body against the design decisions. The skill's rule must therefore be: for every added assertion and every PR-body contract claim, map it to the design decision it comes from, then check three things the design records already contained: (a) the decision's stated limitation is carried into the PR body verbatim (alias limitation, 'AMX-off is required CI'); (b) the assertion names a consumer or durable contract, 'the design/critic asked for it' is not a justification, and repository rules (AGENTS.md NaN rule, test policy) override the design plan; (c) the assertion sits in a case that executes on the required CI runner (apply the design's own early-return rule to test placement, not only to log evidence). Nuance for the write-up: Codex's phrase 'warned about hardware skips' is accurate but the warning targeted log evidence, not test placement; state that distinction so the rule targets the real gap.",
+      "notes": "Records read: design-new-tensor-type.html (round-4 design, 2026-09-22 09:41), claude-review-design-new-tensor-type.html (round-4 review, 2026-09-22 13:05), prior-0922-results.txt (42 lines, critic JSON truncated at omission 3 in the file itself, 'het' cut), git show -s 707159b9ef, PR body as reviewed, code at 96a6220ab6. Worktree read only; no edits. The 09-22 critic output in the scratchpad is truncated mid-omission-3; omissions 1-2 suffice for sub-claims 1 and 4. Wade's 'any pointer passes' wording vs Codex's qualification (explicit constructor; direct unwrapped pointer call rejected): the design at :391 'Keep explicit native-view pointer construction legal' matches Codex's qualified reading; I did not re-verify the explicit constructor in view.hpp at 96a6220ab6 (outside this claim).",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "I opened every cited location. Each quote is at the cited place, and the verdict (all four sub-claims hold: the misses were known at design time and not carried forward) follows from the records. Details: (1) design-new-tensor-type.html:282, :287 and :390 ask for the packed-append conversion rows including the fp32 0x7F800001 -> bf16 0x7F80 (+infinity) row; the round-4 risk reviewer (claude-review-design-new-tensor-type.html:1173) accepted that table; the 09-22 critic (prior-0922-results.txt, omission 1) asked to ADD a generic-conversion row beside it; t/t_llama_unit.cpp:3575 at 96a6220ab6 carries exactly that row. The 09-22 tests lens prompt (prior-0922-lenses.txt:29) cited the durable-contract policy but no lens mentions NaN or AGENTS.md:73 'Treat NaN as corruption'. (2) The K alias limitation is recorded at design :228, :391 ('Keep explicit native-view pointer construction legal'), F30 (:501) and N22 (:519), and in the review page at :249 and :323; the PR body as reviewed (line 65) states 'A bare pointer or the other plane's view is a compile error' for both planes; kv_cache_fwd.hpp:43-47 confirms native_k_view is the generic view alias. Wade's 4188336267 asks only that the description say so. (3) The hardware-skip rule exists at design :398 and :427 as an execution-evidence rule, and design :332 (section 'AMX numerics fixture migration', which is explicitly about 'the PV case of t/t_amx_numerics.cpp') places the owner-byte compare inside that case; main e5fa372c19 already had the available() early return at t_amx_numerics.cpp:189 and the v_page formula at :207, so the PR added the compare (96a6220ab6 :236-240) after the pre-existing early return (:196-199), as the design asked. No 09-22 finding mentions available, t_amx_numerics, skip or early (grep returns nothing). The verifier's nuance (the warning targeted log evidence, not test placement) is correct and worth keeping. (4) git show -s 707159b9ef says 'Two test-contract gaps the completeness critic named against design section 8' and lists the dst_tokens 2 and 3 expansion; critic omission 2 says the poison 'is cleared' and still says 'Keep the existing poison-at-7 setup and one-hot probe unchanged'; t_llama_unit.cpp:3293-3298 is the result, still named 'append_v preserves poison'. Minor notes, not refutations: the verifier's line range ':235-240' starts one line early (the compare loop is :236-240, :235 is the opening brace); the scratchpad critic JSON is truncated mid-omission-3, as the verifier noted, and omissions 1-2 suffice.",
+          "evidence": [
+            "/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/design-new-tensor-type.html:282 verbatim: 'Keep today's conversion to fp32 and upper-16-bit truncation. Do not substitute general expression conversion.'",
+            "design-new-tensor-type.html:287 verbatim bit-table row: 'fp32 0x7F800001: NaN with upper seven mantissa bits zero | bf16 0x7F80: +infinity | bf16 0x7F81: NaN | bf16 0x7F80: +infinity'",
+            "design-new-tensor-type.html:390 verbatim: 'Use independent input/expected bit patterns for truncation boundaries, infinity, and NaN. Keep packed append expectations separate from generic conversion.'",
+            "design-new-tensor-type.html:228 verbatim: 'The new const_native_k_view alias still permits an explicit ordinary pointer wrap. It prevents accidental argument mixing.'",
+            "design-new-tensor-type.html:391 verbatim: 'Keep explicit native-view pointer construction legal.'",
+            "design-new-tensor-type.html:501 (F30) verbatim: 'The alias does not prove the provenance of an explicitly wrapped pointer.'; :519 (N14 N20 N22 N50) verbatim: 'Explicit wrapping of an ordinary pointer remains legal. The alias is not a provenance guarantee.'",
+            "design-new-tensor-type.html:398 verbatim: 'Do not count disabled-feature placeholders or hardware-unavailable early returns as feature execution. [S12]'; :427 verbatim: 'A pass line alone is insufficient: the early-return path also passes.'",
+            "design-new-tensor-type.html:329-332: section 'AMX numerics fixture migration' opens 'In the PV case of t/t_amx_numerics.cpp, replace the hand-packed std::vector<bf16> kernel input with a v_vnni_tensor...'; :332 verbatim: 'Keep the test's independent pair-interleave formula as expected physical bytes. Copy bytes out of the trivially copyable owner into a plain test buffer and compare them.'",
+            "/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/claude-review-design-new-tensor-type.html:1173 verbatim: 'The NaN table is right: fp32 0x7F800001 truncates to bf16 0x7F80 (+infinity) in the packed append, and the generic conversion gives 0x7F81 (a NaN) only without TRON_IGNORE_NAN'",
+            "claude-review-design-new-tensor-type.html:249 verbatim: 'N22 Minor round 2 Native K alias still accepts explicit pointer wrap resolved in round 3'; :323 verbatim: 'F33 round 1 const_native_k_view is a structural alias shared with 8-lane V Still rejected; the design's section 9 says so and this round agrees.'",
+            "scratchpad/wade/prior-0922-results.txt line 42 (critic omission 1) verbatim: 'The float section (t/t_llama_unit.cpp:3033-3064) asserts the packed path only: {0x7f800001u, 0x7f80u} at :3057, which is macro-independent.' and recommendation 'add the generic conversion of the same input'",
+            "prior-0922-results.txt line 42 (critic omission 2) verbatim: 'The poison at token 7 (:2806-2812) is cleared by the single even<-odd copy dst 6 <- src 3' ... 'GENERATE dst_tokens from {2, 3}' ... 'Keep the existing poison-at-7 setup and one-hot probe unchanged.'",
+            "prior-0922-results.txt: grep -iE 'available|t_amx_numerics|skip|early' returns no match; line 25 verbatim: 'New packed-only test case is not guarded by TRON_CHUNK_SIZE == 16 | t/t_llama_unit.cpp:2963'",
+            "scratchpad/wade/prior-0922-lenses.txt:29 (tests lens) cites 'every new or changed assertion must protect a durable contract, no tautologies, no testing of implementation details without a consumer'; no lens line mentions NaN, available() or the AGENTS.md NaN rule (grep -iE 'NaN|hardware|available' hits only lines 11 and 14, both unrelated context)",
+            "AGENTS.md at e5fa372c19 line 73: 'Treat NaN as corruption'",
+            "scratchpad/wade/pr4557-body-as-reviewed.md:65 verbatim: 'The packed V plane (16-lane build) and the native K plane cross the cache and kernel boundaries as typed views. A bare pointer or the other plane's view is a compile error (tested with STATIC_REQUIRE).'",
+            "git show 96a6220ab6:h/tron/tensor/kv_cache_fwd.hpp lines 42-47: 'template <size_t Rows, size_t Cols> using native_k_view = view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE, std::integer_sequence<size_t, Rows, Cols>, std::integer_sequence<ptrdiff_t, Cols, 1>>;'",
+            "git show 96a6220ab6:t/t_llama_unit.cpp line 3575: '{0x7f800001u, 0x7f80u},  // NaN with payload only in the low bits -> +inf'",
+            "git show 96a6220ab6:t/t_llama_unit.cpp lines 3293-3298: 'SECTION(\"append_v preserves poison\") { // dst_tokens 3 copies odd<-even and even<-odd; dst_tokens 2 copies even<-even and odd<-odd. ... const size_t dst_tokens = GENERATE(EVEN_START_DST_TOKENS_2, ODD_START_DST_TOKENS_3);'",
+            "git show 96a6220ab6:t/t_amx_numerics.cpp lines 196-199: 'if (!tron::amx_attn_h128g4::available()) { WARN(\"AMX unavailable on this host - PV precision check skipped\"); return; }'; lines 236-240: 'std::memcpy(owner_bytes.data(), v_owner.get(), sizeof(*v_owner)); for (...) { REQUIRE(owner_bytes[i].to_bits() == v_page[i].to_bits()); }'",
+            "git show e5fa372c19:t/t_amx_numerics.cpp (main side, before the PR): available() early return already at lines 189-190 of the PV case, v_page formula at :207; the owner-byte compare does not exist there, so the PR added it after the pre-existing early return, as design :332 directed",
+            "git show -s 707159b9ef verbatim: 'Two test-contract gaps the completeness critic named against design section 8 of issue #4525: - \"append_v preserves poison\" now runs for dst_tokens 2 and 3, so the NaN-poison observation covers even<-even and odd<-odd copies as well as odd<-even and even<-odd'",
+            "scratchpad/wade/wade-inline-4557.md 4188336267 verbatim: '\"a bare pointer is a compile error\" holds for V only. Fine as a first step, but please say so in the description'; 4188336256 verbatim: 'it sits after the available() early return (line 197), so it silently skips on hosts without AMX'; 4188336324 verbatim: 'the section is still named \"append_v preserves poison\", but it now asserts that the poison is zeroed.'"
+          ]
+        },
+        {
+          "refuted": false,
+          "reason": "Every cited quote is at the cited place, and the verdict follows. I opened all 20 citations: design-new-tensor-type.html lines 228, 282, 287, 332, 390, 391, 398, 427, 501, 519; claude-review-design-new-tensor-type.html lines 249, 323, 1173; prior-0922-results.txt (42 lines, critic omissions 1-2, truncated at 'het'; grep for available|t_amx_numerics|skip returns nothing, exit 1); pr4557-body-as-reviewed.md line 65; git show -s 707159b9ef; and the code at 96a6220ab6 (kv_cache_fwd.hpp:42-47, t_amx_numerics.cpp:196-199 and 235-240, t_llama_unit.cpp:3293-3298 and 3575). All match the verifier's quotes after tag stripping. The verdict 'known-but-not-carried-forward' follows: (1) the design requested the NaN/truncation rows and its own bit table holds the exact 0x7F800001 -> 0x7F80 row Wade flagged, and the 09-22 critic asked to add a generic-conversion row beside it; (2) the alias limitation is recorded four times (:228, :391, F30 :501, N22 :519) and the PR body line 65 still says a bare pointer is a compile error for both planes; (3) :398 and :427 warn that the t_amx_numerics early-return path also passes, while :329-332 ('In the PV case of t/t_amx_numerics.cpp ... Copy bytes out of the trivially copyable owner ... and compare them') places the byte compare in that same case, whose available() early return already existed on main e5fa372c19 (t_amx_numerics.cpp:189-192 there); (4) the commit message of 707159b9ef names the completeness critic as the origin of the dst_tokens {2,3} GENERATE and the bit-exact copy section, and critic omission 2 states the poison is cleared yet says to keep the 'preserves poison' setup. Two additional confirmations that strengthen rather than weaken the verdict: AGENTS.md:73-75 at 96a6220ab6 holds 'Treat NaN as corruption ... infinities may be valid identities', and the 09-22 tests lens prompt (prior-0922-lenses.txt:29) already cited the 'durable contract / no implementation details without a consumer' policy yet produced no finding on the NaN row. The verifier's stated nuance (the hardware-skip warning targeted log evidence, not test placement) is accurate and is correctly carried into the rule.",
+          "evidence": [
+            "design-new-tensor-type.html:282 verbatim: 'Packed V append from fp16 / float: Keep today's conversion to fp32 and upper-16-bit truncation. Do not substitute general expression conversion.'",
+            "design-new-tensor-type.html:287 verbatim (table row): 'fp32 0x7F800001: NaN with upper seven mantissa bits zero | bf16 0x7F80: +infinity | bf16 0x7F81: NaN | bf16 0x7F80: +infinity'",
+            "design-new-tensor-type.html:390 verbatim: 'Use independent input/expected bit patterns for truncation boundaries, infinity, and NaN. Keep packed append expectations separate from generic conversion.'",
+            "claude-review-design-new-tensor-type.html:1173 verbatim: 'The NaN table is right: fp32 0x7F800001 truncates to bf16 0x7F80 (+infinity) in the packed append, and the generic conversion gives 0x7F81 (a NaN) only without TRON_IGNORE_NAN'",
+            "prior-0922-results.txt:42 critic omission 1 verbatim: '{0x7f800001u, 0x7f80u} at :3057, which is macro-independent ... recommendation: In the float section, beside the packed expectation for 0x7f800001, add the generic conversion of the same input'",
+            "t/t_llama_unit.cpp:3575 @96a6220ab6 verbatim: '{0x7f800001u, 0x7f80u},  // NaN with payload only in the low bits -> +inf'",
+            "design-new-tensor-type.html:228 verbatim: 'The new const_native_k_view alias still permits an explicit ordinary pointer wrap. It prevents accidental argument mixing.'",
+            "design-new-tensor-type.html:391 verbatim: 'Reject raw-pointer construction of packed matrices and rows. Accept writable-to-read-only matrix conversion only. Keep explicit native-view pointer construction legal.'",
+            "design-new-tensor-type.html:501 verbatim: 'F30 ... The alias does not prove the provenance of an explicitly wrapped pointer.'; :519 verbatim: 'N14 N20 N22 N50 ... State the native alias limitation and whole-plane QK call. ... Explicit wrapping of an ordinary pointer remains legal. The alias is not a provenance guarantee.'",
+            "claude-review-design-new-tensor-type.html:249 verbatim: 'N22 Minor round 2 Native K alias still accepts explicit pointer wrap resolved in round 3'; :323 verbatim: 'F33 round 1 const_native_k_view is a structural alias shared with 8-lane V Still rejected; the design's section 9 says so'",
+            "pr4557-body-as-reviewed.md:65 verbatim: 'The packed V plane (16-lane build) and the native K plane cross the cache and kernel boundaries as typed views. A bare pointer or the other plane's view is a compile error (tested with STATIC_REQUIRE).'",
+            "h/tron/tensor/kv_cache_fwd.hpp:42-47 @96a6220ab6 verbatim: 'template <size_t Rows, size_t Cols> using native_k_view = view<bf16, VIEW_ALIGNED_TRUE, VIEW_DMA_FALSE, std::integer_sequence<size_t, Rows, Cols>, std::integer_sequence<ptrdiff_t, Cols, 1>>;'",
+            "design-new-tensor-type.html:398 verbatim: 'Do not count disabled-feature placeholders or hardware-unavailable early returns as feature execution. [S12]'",
+            "design-new-tensor-type.html:427 verbatim: 'retain logs-<host>/run-NNNN/t_amx_numerics.log showing both QK and PV precision cases passed without AMX unavailable on this host warnings. ... A pass line alone is insufficient: the early-return path also passes.'",
+            "design-new-tensor-type.html:329 (section heading context for :332) verbatim: 'In the PV case of t/t_amx_numerics.cpp, replace the hand-packed std::vector<bf16> kernel input with a v_vnni_tensor<PAGE_TOKENS_64,HEAD_SIZE_128> owner.'; :332 verbatim: 'Keep the test's independent pair-interleave formula as expected physical bytes. Copy bytes out of the trivially copyable owner into a plain test buffer and compare them.'",
+            "t/t_amx_numerics.cpp:189-192 @e5fa372c19 (main side of the merge) already holds 'if (!tron::amx_attn_h128g4::available()) { WARN(\"AMX unavailable on this host - PV precision check skipped\"); return; }'; the PR diff adds only the owner_bytes memcpy + REQUIRE loop after it (t_amx_numerics.cpp:235-240 @96a6220ab6)",
+            "prior-0922-results.txt: grep -niE 'available|t_amx_numerics|skip' exits 1 (no match); the only design-lens finding is line 25 'New packed-only test case is not guarded by TRON_CHUNK_SIZE == 16 | t/t_llama_unit.cpp:2963'",
+            "git show -s 707159b9ef verbatim: 'Two test-contract gaps the completeness critic named against design section 8 of issue #4525: - \"append_v preserves poison\" now runs for dst_tokens 2 and 3, so the NaN-poison observation covers even<-even and odd<-odd copies as well as odd<-even and even<-odd ... - The packed-V bit case gains a section that appends whole books at both destination parities and requires the copied bits ... to equal the source bits'",
+            "prior-0922-results.txt:42 critic omission 2 verbatim: 'The poison at token 7 (:2806-2812) is cleared by the single even<-odd copy dst 6 <- src 3 ... recommendation: In 'append_v preserves poison' GENERATE dst_tokens from {2, 3} ... Keep the existing poison-at-7 setup and one-hot probe unchanged.'",
+            "t/t_llama_unit.cpp:3293-3298 @96a6220ab6 verbatim: 'SECTION(\"append_v preserves poison\") { // dst_tokens 3 copies odd<-even and even<-odd; dst_tokens 2 copies even<-even and odd<-odd. ... const size_t dst_tokens = GENERATE(EVEN_START_DST_TOKENS_2, ODD_START_DST_TOKENS_3);'",
+            "AGENTS.md:73-75 @96a6220ab6 verbatim: 'Treat NaN as corruption and check the exact IEEE 754 condition intended; infinities may be valid identities.' (the repository rule the design table never checked against)",
+            "prior-0922-lenses.txt:29 (tests lens prompt) verbatim: 'every new or changed assertion must protect a durable contract, no tautologies, no testing of implementation details without a consumer' and item (b) lists '0x7f800001->0x7f80' as a constant to verify for correctness, not for justification",
+            "wade-inline-4557.md 4188336250 verbatim: 'AGENTS.md treats NaN as corruption; this pins the path that hides it. The truncation and tie rows likewise pin today's rounding, with no named consumer.'; 4188336256: 'it sits after the available() early return (line 197), so it silently skips on hosts without AMX'; 4188336267: '\"a bare pointer is a compile error\" holds for V only'; 4188336324: 'the section is still named \"append_v preserves poison\", but it now asserts that the poison is zeroed.'"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C4-memory-fake",
+      "verdict": "supported",
+      "evidence": [
+        {
+          "ref": "h/system/memory.hpp:192-195 @96a6220ab6",
+          "quote": "// No test fails if a caller goes back to calling dma_allocate_aligned directly.\n// The unit-test allocator (aligned_alloc in src/pos/fake.cpp) is on the list\n// above ([c.malloc]). So it creates the objects by itself, and the tests behave\n// the same either way."
+        },
+        {
+          "ref": "h/system/memory.hpp:165,196-201 @96a6220ab6",
+          "quote": "}  // namespace tron::hardware\n...\nTRON(nodiscard, inline)\nvoid* operator new[](size_t bytes,\n    tron::hardware::dma_allocation_t,\n    std::align_val_t alignment) noexcept {\n  return tron::hardware::dma_allocate_aligned(bytes, size_t(alignment));\n}"
+        },
+        {
+          "ref": "h/system/memory.hpp:180-186 @96a6220ab6",
+          "quote": "// dma_allocate_aligned is not on that list. It is an ordinary function that\n// calls none of them, so the memory it returns holds no objects. ... So try_make_unique_dma_for_overwrite gets\n// its memory through the wrapper below, a function named operator new[]. That\n// call creates the objects. The wrapper writes no bytes and runs no\n// constructor."
+        },
+        {
+          "ref": "h/system/memory.hpp:380-382 @96a6220ab6",
+          "quote": "// See Note [DMA allocation creates objects].\n  U* array =\n      static_cast<U*>(::operator new[](size * sizeof(U), dma_allocation, alignment));"
+        },
+        {
+          "ref": "src/pos/fake.cpp:439-444 @96a6220ab6",
+          "quote": "TRON(nodiscard, noinline)\nvoid* dma_allocate_aligned(size_t size, size_t alignment) noexcept {\n  void* p = aligned_alloc(alignment, size);\n  if (p) ++fake_dma_allocations;\n  return p;\n}"
+        },
+        {
+          "ref": "t/t_heap_v2.cpp:1206-1220 @96a6220ab6",
+          "quote": "TEST_CASE(\"try_make_unique_dma_for_overwrite: empty on failure, live on success\",\n    \"[heap_v2][exhaustion][try_alloc]\") {\n...\n  auto live = try_make_unique_dma_for_overwrite<uint8_t[]>(\n      REQUEST_BYTES_1024, std::align_val_t{ARENA_ALIGNMENT_64});\n  CHECK(live.get() != nullptr);\n  CHECK(tron::is_aligned(live.get(), ARENA_ALIGNMENT_64));"
+        },
+        {
+          "ref": "pr4557-at-96a6220ab6.diff t/t_heap_v2.cpp hunk @1209",
+          "quote": "+  CHECK(tron::is_aligned(live.get(), ARENA_ALIGNMENT_64));   (the only assertion the PR adds to t_heap_v2; the TEST_CASE itself predates the PR)"
+        },
+        {
+          "ref": "git grep -l 'system/memory.hpp' 96a6220ab6 -- h src t",
+          "quote": "45 files include system/memory.hpp directly: h/ 8, src/ 12, t/ 25. Transitive includers by a regex include-resolver script (est.): 159 files, 110 of 245 .cpp files."
+        },
+        {
+          "ref": "h/tron/models/kv_cache.hpp:1289,1424,1434 @96a6220ab6",
+          "quote": "auto x = hardware::try_make_unique_dma_for_overwrite<uint8_t[]>(x_storage_bytes_);  (KV book = the only production caller of the wrapper path)"
+        },
+        {
+          "ref": "wade-inline-4557.md 4188336279 (memory.hpp:192)",
+          "quote": "As this line says, nothing can catch a regression here, and it adds a global `operator new[]` overload in a widely included header. It's a correct reading of [intro.object], but since it came from 39a68994465f3fb753623eec18378544be806862 rather than #4698, it'd be good to get @bgamari-positron's explicit sign-off on the approach."
+        },
+        {
+          "ref": "memory/pr4587-alloc-creates-blocks.md (2026-09-24)",
+          "quote": "Fallback if the maintainer rejects allocation-time creation: P' (#4557 + launder + Note fix). Maintainer question drafted on the page, NOT posted. ... Maintainer question (allocation call vs \"the page arena must construct the actual storage type\") explained to jhan in plain English; NOT posted."
+        },
+        {
+          "ref": "prior-0922-results.txt + git log 39a6899446",
+          "quote": "The 2026-09-22 review predates commit 39a6899446 (dated 2026-09-23 22:13 -0700); its results mention no memory.hpp, operator new, or heap_v2 item. The includes lens covered v_vnni.hpp/kv_cache_fwd.hpp/kv_cache.hpp/amx_attn_iface.hpp only."
+        }
+      ],
+      "consequence_for_rule": "Rule \"self-declared untestable change in a widely included header needs explicit owner sign-off\" is supported by the code facts. (1) Self-declared untestable: memory.hpp:192-195 says in the PR's own words that no test fails if the wrapper is bypassed, because the fake allocator (fake.cpp:440-444, aligned_alloc) is itself an object-creating function; the only test on this path, t_heap_v2.cpp:1206-1236, observes null/non-null and alignment and cannot observe the lifetime rule. (2) Widely included: 45 direct includers (h 8, src 12, t 25) and est. 159 transitive files; the overload sits in the global namespace (line 165 closes the namespace before line 197). (3) Owner sign-off was known to be needed and never requested: the 2026-09-24 memory note records a drafted, unposted maintainer question and a fallback plan if the maintainer rejects the approach. Detection recipe for the skill: grep the diff for comment phrases that admit a test gap (\"No test fails\", \"cannot be tested\", \"tests behave the same\", \"nothing can catch\"); for each hit, count includers of the file (git grep -l) and check whether the change is in the global namespace or alters language-level semantics (operator new/delete, launder, lifetime); if the commit originated outside the owner's PRs, flag \"owner sign-off required, post the question\" as a blocking item rather than a design-page note. Nuance Codex's text should keep: the trigger is the combination (untestable + global/wide + outside-owner origin), not \"widely included\" alone; and whether sign-off was later given is Insufficient data (thread resolved by the author; no maintainer reply in the scratchpad).",
+      "notes": "Codex's paraphrase of memory.hpp:192-195 is accurate. Wade's \"as this line says, nothing can catch a regression here\" is his paraphrase; the comment's exact words are \"No test fails if a caller goes back to calling dma_allocate_aligned directly\". The overload is tag-selected (dma_allocation_t at memory.hpp:160-163, explicit default ctor), so it cannot be picked by an ordinary new-expression; the \"widely included\" concern is about exposure of a global-namespace operator overload, not accidental selection. The 2026-09-22 agent review could not have seen this hunk (commit 39a6899446 is dated 2026-09-23); the 2026-09-30 Ben-response analysis and the guide checks looked at the Note wording only. The miss is therefore a process miss (sign-off question drafted and not posted), not only a detection miss.",
+      "votes": [
+        {
+          "refuted": false,
+          "reason": "Every cited quote is at the cited place at 96a6220ab6, and the three premises of the rule (self-declared untestable, widely included global-namespace overload, origin outside the maintainer's PRs with a sign-off question drafted and never posted) are each supported by the code and the review record. One nuance the verifier's notes understate: the maintainer Wade names (bgamari-positron) did reply on the Note thread on 2026-09-29 (comment 4133869073: \"Claude is (rightly) playing language lawyer ... the previous implementation was strictly-speaking incorrect ... reword the Note more clearly\"). That reply endorses the lifetime reasoning but does not mention the global operator new[] overload or its header exposure, Ben's review state stays CHANGES_REQUESTED with no later APPROVED review, and Wade asked for explicit sign-off six days after that reply. So \"explicit sign-off neither requested nor given\" still holds; the verifier's \"no maintainer reply\" should be corrected to \"no maintainer reply on the overload approach\". Thread 4159939672 cited in jhan's answer is jhan's own 2026-10-01 reply (\"The comments are updated\"), not a Ben request, so it does not count as sign-off either.",
+          "evidence": [
+            "h/system/memory.hpp:192-195 @96a6220ab6 verified verbatim: \"// No test fails if a caller goes back to calling dma_allocate_aligned directly. // The unit-test allocator (aligned_alloc in src/pos/fake.cpp) is on the list // above ([c.malloc]). So it creates the objects by itself, and the tests behave // the same either way.\" Wade's \"nothing can catch a regression here\" is his paraphrase; the comment never uses those words.",
+            "h/system/memory.hpp:165 \"}  // namespace tron::hardware\" and :196-201 \"TRON(nodiscard, inline) void* operator new[](size_t bytes, tron::hardware::dma_allocation_t, std::align_val_t alignment) noexcept { return tron::hardware::dma_allocate_aligned(bytes, size_t(alignment)); }\" verified: the overload is in the global namespace (namespace reopens at :203). Tag type dma_allocation_t at :160-163 has an explicit default ctor, so an ordinary new-expression cannot select it.",
+            "h/system/memory.hpp:180-186 and :380-382 verified verbatim (\"// See Note [DMA allocation creates objects].\" then \"static_cast<U*>(::operator new[](size * sizeof(U), dma_allocation, alignment));\").",
+            "src/pos/fake.cpp:439-444 @96a6220ab6 verified verbatim: dma_allocate_aligned = aligned_alloc(alignment, size) + ++fake_dma_allocations. t/CMakeLists.txt:603 \"add_catch_test(NAME t_heap_v2 LIBRARIES tron pos_fake ...)\" confirms t_heap_v2 links the fake allocator, so bypassing the wrapper is unobservable in that test.",
+            "t/t_heap_v2.cpp:1206-1236 @96a6220ab6 verified: TEST_CASE \"try_make_unique_dma_for_overwrite: empty on failure, live on success\"; assertions are CHECK(live.get() != nullptr) :1219, CHECK(is_aligned ...) :1220, CHECK(empty.get() == nullptr) :1234. None observes object lifetime.",
+            "pr4557-at-96a6220ab6.diff lines 1855-1870: the t_heap_v2 hunk \"@@ -1209,9 +1209,15 @@ TEST_CASE(\\\"try_make_unique_dma_for_overwrite ...\" adds only the two constexpr names and \"+  CHECK(tron::is_aligned(live.get(), ARENA_ALIGNMENT_64));\"; the TEST_CASE header is context, so it predates the PR.",
+            "git grep -l 'system/memory.hpp' 96a6220ab6 -- h src t: 45 files (h 8, src 12, t 25), exactly as cited. Regex include-resolver rerun over h/ src/ t/ at 96a6220ab6: 159 transitive includers, 110 of 245 .cpp files, matching the cited est.",
+            "h/tron/models/kv_cache.hpp:1289, :1424, :1434 @96a6220ab6 each call hardware::try_make_unique_dma_for_overwrite<uint8_t[]>; memory.hpp:312 comment says \"(try_make_unique_dma_for_overwrite, whose only callers are book::try_create\"; git grep for the factory in h/ src/ shows no other production caller; t/ callers are t_heap_v2.cpp:1217,1233,1255 and a comment in t_kv_oom_injection.cpp:146.",
+            "wade-inline-4557.md line 10-11 (4188336279, memory.hpp:192) matches the GitHub comment body fetched via gh api (created 2026-10-05T20:18:17Z, user Wado-posi) word for word.",
+            "memory/pr4587-alloc-creates-blocks.md lines 26-27: \"Fallback if the maintainer rejects allocation-time creation: P' (#4557 + launder + Note fix). Maintainer question drafted on the page, NOT posted.\" and line 73: \"Maintainer question (allocation call vs \\\"the page arena must construct the actual storage type\\\") explained to jhan in plain English; NOT posted.\" Both present as cited; allocation-time creation is the operator new[] wrapper approach, so the drafted question is about the same approach Wade asks sign-off for.",
+            "git log 39a6899446: 2026-09-23 22:13:08 -0700 \"Create the KV blocks in the DMA allocation, not in a second pass\", touches h/system/memory.hpp (+41); it is the first PR-side commit touching memory.hpp (git log e5fa372c19..96a6220ab6 -- h/system/memory.hpp). prior-0922-results.txt has no match for memory.hpp, operator new, heap_v2, intro.object or implicit-lifetime, so the 2026-09-22 review could not have seen the hunk.",
+            "Nuance (gh api, not in the scratchpad): Ben's comment 4133869073 on memory.hpp, 2026-09-29T13:14:23Z: \"Claude is (rightly) playing language lawyer. The C++ spec states that an implicitly-created object's ... lifetime must begin in an `operator new`. Consequently, the previous implementation was strictly-speaking incorrect ... I think it would be good to reword the Note more clearly.\" It endorses the reasoning but says nothing about the global overload or header exposure. PR 4557 review list: Ben's only states are CHANGES_REQUESTED (5352791816) and COMMENTED (5354385317) at c73e7fb2f9; no APPROVED from Ben. Wade's sign-off request came after this comment, so it did not count as explicit sign-off.",
+            "Thread 4159939672 that jhan cites as \"Ben's request\" is jhan's own comment (user jhan-positron, 2026-10-01T20:06:38Z, memory.hpp, commit c73e7fb2f9): \"Sorry I did not ease the pain enough ... The comments are updated, please let me know if it is accurate.\" It is a reply inside Ben's B3 thread, not a Ben sign-off."
+          ]
+        },
+        {
+          "refuted": false,
+          "reason": "Every quoted location checks out at 96a6220ab6 (memory.hpp:165/180-186/192-195/196-201/380-382, fake.cpp:439-444, t_heap_v2.cpp:1206-1220, the t_heap_v2 diff hunk, kv_cache.hpp:1289/1424/1434, Wade comment 4188336279, the 2026-09-24 memory note, the 0922 results with 0 memory.hpp hits, commit 39a6899446 dated 2026-09-23 22:13 -0700). Legs (1) self-declared untestable and (2) global-namespace overload in a widely included header (45 direct includers; my own regex transitive count = 153 files / 104 of 245 .cpp, vs the verifier's est. 159) are fully supported, and they alone carry the rule. Three details of the verdict are overstated and should be corrected in the skill text, but none overturns it: (a) \"the only test on this path\" is wrong in letter: t_heap_v2.cpp:1250-1255 (fault-injection seam) and every KV-book test via kv_cache.hpp:1424/1434 also run the wrapper; the conclusion survives because every test executable links testfake_objects (t/CMakeLists.txt:39-40,152), so all of them run on fake.cpp aligned_alloc and none can observe the lifetime rule. (b) \"Owner sign-off ... never requested\" and \"no maintainer reply = Insufficient data\" are too strong: GitHub shows the maintainer bgamari-positron opened his own thread on memory.hpp:175 (4133772400 / 4133869073, 2026-09-29) calling the Note \"rightly playing language lawyer\" and the old code \"strictly-speaking incorrect\", and the author answered (4159939672, 2026-10-01) asking only \"please let me know if it is accurate\". That is maintainer engagement with the Note wording, not an explicit sign-off on the global operator new[] approach; Wade posted 4188336279 on 2026-10-05 knowing of #4698 and still asked for explicit sign-off, and the thread was closed by the author's reply 4190971320 (2026-10-06) with no maintainer reply. So the accurate statement is: the explicit approach question (drafted 2026-09-24, NOT posted) was never posted; the maintainer saw the Note but was never asked to approve the overload. (c) The 0922 includes lens also named amx_attn.cpp and \"the tests\", not only the four headers; memory.hpp was still absent, so the point stands. Side fact for the skill: the author's reply to Wade (4190971320) says 39a6899 responded to Ben's request, but 39a6899446 (2026-09-23) predates Ben's thread (2026-09-29); the reword commits are a52ce4db25/55f0068cbf/34b157326f (2026-09-30).",
+          "evidence": [
+            "h/system/memory.hpp:192-195 @96a6220ab6 (git show): \"// No test fails if a caller goes back to calling dma_allocate_aligned directly. // The unit-test allocator (aligned_alloc in src/pos/fake.cpp) is on the list // above ([c.malloc]). So it creates the objects by itself, and the tests behave // the same either way.\" -- exact match; Wade's \"nothing can catch a regression here\" is his paraphrase.",
+            "h/system/memory.hpp:165 \"}  // namespace tron::hardware\"; :196-201 \"TRON(nodiscard, inline) void* operator new[](size_t bytes, tron::hardware::dma_allocation_t, std::align_val_t alignment) noexcept { return tron::hardware::dma_allocate_aligned(bytes, size_t(alignment)); }\"; :203 \"namespace tron::hardware {\" reopens -- overload is in the global namespace, tag-selected (dma_allocation_t at :160-163, explicit default ctor; :157-158 comment says `new (dma_allocation) T[n]` does not compile).",
+            "h/system/memory.hpp:380-382 \"// See Note [DMA allocation creates objects]. U* array = static_cast<U*>(::operator new[](size * sizeof(U), dma_allocation, alignment));\" -- matches.",
+            "src/pos/fake.cpp:439-444 \"TRON(nodiscard, noinline) void* dma_allocate_aligned(size_t size, size_t alignment) noexcept { void* p = aligned_alloc(alignment, size); if (p) ++fake_dma_allocations; return p; }\" -- matches. Production src/system/memory.cpp:461-469 goes through heap->allocate instead.",
+            "t/t_heap_v2.cpp:1206 TEST_CASE(\"try_make_unique_dma_for_overwrite: empty on failure, live on success\"), :1217-1220 the live alloc + CHECK != nullptr + CHECK(tron::is_aligned(live.get(), ARENA_ALIGNMENT_64)) -- matches. git diff e5fa372c19 96a6220ab6 -- t/t_heap_v2.cpp = one hunk @@ -1209,9 +1209,15 @@ adding two constexpr constants and the single is_aligned CHECK; TEST_CASE line is context (predates the PR).",
+            "Overstatement: t/t_heap_v2.cpp:1250-1255 (fault-injection test) and h/tron/models/kv_cache.hpp:1289,1424,1434 (book arenas, reached by every KV-book test) also call try_make_unique_dma_for_overwrite; t/CMakeLists.txt:39-40 add_library(testfake_objects OBJECT fake.cpp) ... pos_fake, :152 LIST(APPEND TEST_FILES $<TARGET_OBJECTS:testfake_objects>) -- all test binaries use the fake aligned_alloc, so the untestability conclusion still holds for all of them.",
+            "git grep -l 'system/memory.hpp' 96a6220ab6 -- h src t: 45 files (h 8, src 12, t 25) -- matches. Own regex include-resolver (trans_inc.py in the scratchpad): 153 transitive files (t 78, h 46, src 29), 104 of 245 .cpp -- close to the verifier's est. 159; both are regex estimates.",
+            "git grep try_make_unique_dma_for_overwrite: production callers only in h/tron/models/kv_cache.hpp:1289,1424,1434; memory.hpp:312 comment \"whose only callers are book::try_create\" -- 'KV book = only production caller' holds.",
+            "wade-inline-4557.md:10-11 and wade-inline-corpus.jsonl:477 (id 4188336279, path h/system/memory.hpp, line 192, created 2026-10-05T20:18:17Z): quote matches verbatim.",
+            "memory/pr4587-alloc-creates-blocks.md:26-27 \"Fallback if the maintainer rejects allocation-time creation: P' (#4557 + launder + Note fix). Maintainer question drafted on the page, NOT posted.\" and :73-74 \"Maintainer question ... explained to jhan in plain English; NOT posted.\" -- matches.",
+            "git log -S'No test fails if a caller goes back' and -S'tron::hardware::dma_allocation_t,' e5fa372c19..96a6220ab6: both introduced by 39a6899446 2026-09-23 22:13:08 -0700 \"Create the KV blocks in the DMA allocation, not in a second pass\"; later touches a52ce4db25 / 55f0068cbf / 34b157326f are all 2026-09-30 Note rewords. grep -c 'memory.hpp|operator new|heap_v2' prior-0922-results.txt = 0 -- the 2026-09-22 review could not have seen the hunk.",
+            "prior-0922-lenses.txt:32 includes lens lists v_vnni.hpp, kv_cache_fwd.hpp, kv_cache.hpp, amx_attn_iface.hpp, amx_attn.cpp and 'the tests' -- the verifier's 'only' four headers is slightly incomplete; memory.hpp is absent either way.",
+            "gh api graphql reviewThreads on PR 4557, path h/system/memory.hpp: thread A (resolved) 4133772400 bgamari-positron 2026-09-29T13:04:19Z \"I'm not sure I understand what Claude is trying to say here. Can you clarify?\"; 4133869073 bgamari-positron 2026-09-29T13:14:23Z \"...Claude is (rightly) playing language lawyer... the previous implementation was strictly-speaking incorrect... I think it would be good to reword the Note more clearly.\"; 4159939672 jhan-positron 2026-10-01T20:06:38Z \"The comments are updated, please let me know if it is accurate.\" -- the maintainer did review the Note; explicit sign-off on the global operator new[] approach was neither asked for nor given there.",
+            "gh api graphql thread B (line 192, resolved): 4188336279 Wado-posi 2026-10-05T20:18:17Z (the sign-off request); 4190971320 jhan-positron 2026-10-06T02:36:34Z \"39a6899 is responding to Ben's request of updating the comment.\" -- no maintainer reply; closed by the author. The author's attribution is chronologically wrong: 39a6899446 (2026-09-23) predates Ben's 2026-09-29 thread; the reword commits are a52ce4db25/55f0068cbf/34b157326f (2026-09-30).",
+            "status/PR4557-respond-2-Ben.html B3 row and memory/pr4557-ben-review-response.md:27-33: the 2026-09-30 analysis graded Ben's three claims about the Note wording and applied rewords; status/pr4557-guide-checks.html has 0 'memory.hpp' hits -- 'looked at the Note wording only' holds."
+          ]
+        }
+      ]
+    }
+  ],
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Refute"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "verify:C1-k-explicit",
+      "phaseIndex": 1,
+      "phaseTitle": "Verify",
+      "agentId": "a93570ca3299f033f",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262814803,
+      "queuedAt": 1791262814789,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "C1-k-explicit",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791262923320,
+      "tokens": 84117,
+      "toolCalls": 16,
+      "durationMs": 108514,
+      "resultPreview": "{\"id\":\"C1-k-explicit\",\"verdict\":\"supported\",\"evidence\":[{\"ref\":\"h/tron/tensor/view.hpp:296-297 @96a6220ab6\",\"quote\":\"explicit const_view(T const* data = nullptr) noexcept\\n  : data(data) {}\"},{\"ref\":\"h/tron/tensor/view.hpp:43-44 @96a6220ab6\",\"quote\":\"explicit constexpr view(T* data = nullptr) noexcept\\n  : data(data) {}\"},{\"ref\":\"h/tron/tensor/kv_cache_fwd.hpp:49-53 @96a6220ab6\",\"quote\":\"using con…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "verify:C2-parity-branches",
+      "phaseIndex": 1,
+      "phaseTitle": "Verify",
+      "agentId": "ae6d2b9ca879ea23b",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262814804,
+      "queuedAt": 1791262814789,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "C2-parity-branches",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791262966584,
+      "tokens": 83056,
+      "toolCalls": 12,
+      "durationMs": 149329,
+      "resultPreview": "{\"id\":\"C2-parity-branches\",\"verdict\":\"supported\",\"evidence\":[{\"ref\":\"h/tron/tensor/v_vnni.hpp:359-364 @96a6220ab6\",\"quote\":\"if (src_token % V_PAIR_TOKENS_2 == 0) {\\n    if (dst_token % V_PAIR_TOKENS_2 == 0) {\\n      // src=[a b]; store [0 b]. See Note [Zero-Initialized V Slots].\\n      ... bf16x32 zero_b = _mm512_andnot_si512(hi_16_of_32, a_b);\"},{\"ref\":\"h/tron/tensor/v_vnni.hpp:378-383 @96a6220ab…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "verify:C3-known-at-design",
+      "phaseIndex": 1,
+      "phaseTitle": "Verify",
+      "agentId": "ac69f9bf18d477d95",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262814805,
+      "queuedAt": 1791262814789,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "C3-known-at-design",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791262957996,
+      "tokens": 103036,
+      "toolCalls": 15,
+      "durationMs": 140741,
+      "resultPreview": "{\"id\":\"C3-known-at-design\",\"verdict\":\"supported\",\"evidence\":[{\"ref\":\"/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/design-new-tensor-type.html:282 (sub-claim 1: conversion-preservation requested)\",\"quote\":\"Packed V append from fp16 / float: Keep today's conversion to fp32 and upper-16-bit truncation. Do not substitute general expression conversion.\"},{\"ref\":\"design-new-tensor-t…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "verify:C4-memory-fake",
+      "phaseIndex": 1,
+      "phaseTitle": "Verify",
+      "agentId": "afd2f4cf1983f09dd",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262814806,
+      "queuedAt": 1791262814789,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "C4-memory-fake",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791262935432,
+      "tokens": 91361,
+      "toolCalls": 20,
+      "durationMs": 118176,
+      "resultPreview": "{\"id\":\"C4-memory-fake\",\"verdict\":\"supported\",\"evidence\":[{\"ref\":\"h/system/memory.hpp:192-195 @96a6220ab6\",\"quote\":\"// No test fails if a caller goes back to calling dma_allocate_aligned directly.\\n// The unit-test allocator (aligned_alloc in src/pos/fake.cpp) is on the list\\n// above ([c.malloc]). So it creates the objects by itself, and the tests behave\\n// the same either way.\"},{\"ref\":\"h/system…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "refute:C1-k-explicit:0",
+      "phaseIndex": 2,
+      "phaseTitle": "Refute",
+      "agentId": "aa9d5983e576055cd",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262924417,
+      "queuedAt": 1791262924406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Every quote in the verifier's evidence list is present at t…",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791263020920,
+      "tokens": 73112,
+      "toolCalls": 7,
+      "durationMs": 96502,
+      "resultPreview": "{\"refuted\":false,\"reason\":\"Every quote in the verifier's evidence list is present at the cited file:line at 96a6220ab6 (checked with git show on the read-only worktree), and the verdict follows from them. Both pointer constructors of the generic view types are `explicit` (view.hpp:43 and :296; the other const_view specialisation at :373 too), and view.hpp has no other constructor or conversion ope…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "refute:C1-k-explicit:1",
+      "phaseIndex": 2,
+      "phaseTitle": "Refute",
+      "agentId": "a9f6c471ba143f841",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262924418,
+      "queuedAt": 1791262924406,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Every cited quote is at the cited place at 96a6220ab6 and t…",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791262988284,
+      "tokens": 67884,
+      "toolCalls": 5,
+      "durationMs": 62167,
+      "resultPreview": "{\"refuted\":false,\"reason\":\"Every cited quote is at the cited place at 96a6220ab6 and the verdict follows from the evidence. Both pointer constructors are `explicit` (view.hpp:43, view.hpp:296; the other overloads at 299-308 only accept view/const_view). `const_native_k_view` is a `using` alias of the generic const_view (kv_cache_fwd.hpp:49-53), so a same-shape row-major const_view is the identical…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "refute:C4-memory-fake:0",
+      "phaseIndex": 2,
+      "phaseTitle": "Refute",
+      "agentId": "ac07537f7b21fce2e",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262936579,
+      "queuedAt": 1791262936577,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Every cited quote is at the cited place at 96a6220ab6, and …",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791263110594,
+      "tokens": 86919,
+      "toolCalls": 11,
+      "durationMs": 174014,
+      "resultPreview": "{\"refuted\":false,\"reason\":\"Every cited quote is at the cited place at 96a6220ab6, and the three premises of the rule (self-declared untestable, widely included global-namespace overload, origin outside the maintainer's PRs with a sign-off question drafted and never posted) are each supported by the code and the review record. One nuance the verifier's notes understate: the maintainer Wade names (b…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "refute:C4-memory-fake:1",
+      "phaseIndex": 2,
+      "phaseTitle": "Refute",
+      "agentId": "acfdcbf5af8341da4",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262936580,
+      "queuedAt": 1791262936577,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Every quoted location checks out at 96a6220ab6 (memory.hpp:…",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791263115162,
+      "tokens": 88761,
+      "toolCalls": 14,
+      "durationMs": 178582,
+      "resultPreview": "{\"refuted\":false,\"reason\":\"Every quoted location checks out at 96a6220ab6 (memory.hpp:165/180-186/192-195/196-201/380-382, fake.cpp:439-444, t_heap_v2.cpp:1206-1220, the t_heap_v2 diff hunk, kv_cache.hpp:1289/1424/1434, Wade comment 4188336279, the 2026-09-24 memory note, the 0922 results with 0 memory.hpp hits, commit 39a6899446 dated 2026-09-23 22:13 -0700). Legs (1) self-declared untestable and…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "refute:C3-known-at-design:0",
+      "phaseIndex": 2,
+      "phaseTitle": "Refute",
+      "agentId": "abf89603f23d0bf65",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262959363,
+      "queuedAt": 1791262959360,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "I opened every cited location. Each quote is at the cited p…",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791263078724,
+      "tokens": 79177,
+      "toolCalls": 9,
+      "durationMs": 119360,
+      "resultPreview": "{\"refuted\":false,\"reason\":\"I opened every cited location. Each quote is at the cited place, and the verdict (all four sub-claims hold: the misses were known at design time and not carried forward) follows from the records. Details: (1) design-new-tensor-type.html:282, :287 and :390 ask for the packed-append conversion rows including the fp32 0x7F800001 -> bf16 0x7F80 (+infinity) row; the round-4 r…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 10,
+      "label": "refute:C3-known-at-design:1",
+      "phaseIndex": 2,
+      "phaseTitle": "Refute",
+      "agentId": "a219df6225d7820e3",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262959364,
+      "queuedAt": 1791262959360,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Every cited quote is at the cited place, and the verdict fo…",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791263058737,
+      "tokens": 75394,
+      "toolCalls": 6,
+      "durationMs": 99372,
+      "resultPreview": "{\"refuted\":false,\"reason\":\"Every cited quote is at the cited place, and the verdict follows. I opened all 20 citations: design-new-tensor-type.html lines 228, 282, 287, 332, 390, 391, 398, 427, 501, 519; claude-review-design-new-tensor-type.html lines 249, 323, 1173; prior-0922-results.txt (42 lines, critic omissions 1-2, truncated at 'het'; grep for available|t_amx_numerics|skip returns nothing, …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 11,
+      "label": "refute:C2-parity-branches:0",
+      "phaseIndex": 2,
+      "phaseTitle": "Refute",
+      "agentId": "a358e5a6b9d30ab30",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262967847,
+      "queuedAt": 1791262967845,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "The verdict \"supported\" stands. I opened every cited locati…",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791263069931,
+      "tokens": 76538,
+      "toolCalls": 8,
+      "durationMs": 102083,
+      "resultPreview": "{\"refuted\":false,\"reason\":\"The verdict \\\"supported\\\" stands. I opened every cited location at 96a6220ab6 (read-only git show). The substantive quotes are real and the inference chain holds: (1) copy_token has two distinct even-destination clearing branches, andnot at v_vnni.hpp:364 (even source) and srli at :383 (odd source); (2) book::append copies token i to dst_begin+i from src_begin+i (kv_cach…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 12,
+      "label": "refute:C2-parity-branches:1",
+      "phaseIndex": 2,
+      "phaseTitle": "Refute",
+      "agentId": "ac47aae1333d7bb2e",
+      "model": "claude-fable-5-1",
+      "state": "done",
+      "startedAt": 1791262967847,
+      "queuedAt": 1791262967845,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "The verdict \"supported\" stands. I opened every cited locati…",
+      "promptPreview": "Read /tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/7a540599-d50b-411e-aee6-c923ccb479ca/scratchpad/wade/CONTEXT.md first. Worktree READ ONLY: /home/jhan/workspace/ai-runs/tron-issue4525; reviewed head 96a6220ab6 (use git show 96a6220ab6:<path>). Codex (another agent) wrote /home/jhan/.codex/skills/wade-code-review/references/pr4557.md; read it in full. You check ONE of i…",
+      "promptFramed": true,
+      "lastProgressAt": 1791263123773,
+      "tokens": 90267,
+      "toolCalls": 8,
+      "durationMs": 155925,
+      "resultPreview": "{\"refuted\":false,\"reason\":\"The verdict \\\"supported\\\" stands. I opened every cited location at 96a6220ab6 (git show 96a6220ab6:<path> in the read-only worktree /home/jhan/workspace/ai-runs/tron-issue4525). All quotes from h/tron/tensor/v_vnni.hpp, h/tron/models/kv_cache.hpp, t/t_llama_unit.cpp lines 89-90, 3285, 3294-3299, 3651-3656, 3664-3665 and the Wade comment file are verbatim at the cited lin…"
+    }
+  ],
+  "totalTokens": 999622,
+  "totalToolCalls": 131
+}
