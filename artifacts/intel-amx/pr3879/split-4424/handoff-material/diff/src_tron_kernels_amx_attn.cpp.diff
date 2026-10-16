@@ -1,0 +1,118 @@
+diff --git a/src/tron/kernels/amx_attn.cpp b/src/tron/kernels/amx_attn.cpp
+index 9ee1dbaf2c..493f0c1145 100644
+--- a/src/tron/kernels/amx_attn.cpp
++++ b/src/tron/kernels/amx_attn.cpp
+@@ -11,6 +11,7 @@
+ #include <sys/syscall.h>
+ 
+ #include "tron/kernels/amx_attn_iface.hpp"
++#include "tron/tensor/k_vnni.hpp"
+ #include "tron/tensor/kv_cache_fwd.hpp"
+ #include "tron/tensor/v_vnni.hpp"
+ #include "tron/tensor/view.hpp"
+@@ -37,8 +38,8 @@ namespace {
+ // shape.
+ constexpr int N_TILES_8 = 8;
+ // Tile register numbers. Tiles 0-3 are accumulator tiles: _tile_dpbf16ps adds
+-// its products into them, so they hold the running sums. Both kernels load
+-// their operands into tiles 4-6. The tile intrinsics take the number as a
++// its products into them, so they hold the running sums. All three kernels
++// load their operands into tiles 4-6. The tile intrinsics take the number as a
+ // constant.
+ constexpr int ACCUMULATOR_TILE_0 = 0;
+ constexpr int ACCUMULATOR_TILE_1 = 1;
+@@ -54,6 +55,12 @@ constexpr int Q_TILE_6 = 6;
+ constexpr int P_TILE_4 = 4;
+ constexpr int V_EVEN_SLICE_TILE_5 = 5;
+ constexpr int V_ODD_SLICE_TILE_6 = 6;
++// qk_vnni_128x4: the padded Q rows load into tile 4. In each dimension step,
++// the K panels of token blocks 0 and 2 load into tile 5 and those of token
++// blocks 1 and 3 into tile 6.
++constexpr int Q_ROWS_TILE_4 = 4;
++constexpr int K_EVEN_PANEL_TILE_5 = 5;
++constexpr int K_ODD_PANEL_TILE_6 = 6;
+ // One stored tile's worth of fp32 scores (16 rows x 16 values).
+ static_assert(sizeof(float) == 4, "AMX/AVX fp32 kernels assume 32-bit float");
+ constexpr size_t TILE_FP32S = TILE_ROWS_16 * TILE_ROW_BYTES_64 / sizeof(float);
+@@ -215,6 +222,81 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+   }
+ }
+ 
++void pack_q_rows_128x4(const bf16* q_group, bf16* padded) noexcept {
++  // Rows 0..3 only. Rows 4..15 are padding the caller keeps zero (see the
++  // contract at the declaration).
++  std::memcpy(padded, q_group, GROUP_HEADS_4 * HEAD_SIZE_128 * sizeof(bf16));
++}
++
++// S[16 q][64 tok] = Q . K^T. K is read from the VNNI (Vector Neural Network
++// Instructions) plane as the B operand (see the declaration and
++// Note [K VNNI storage] in kv_cache.hpp). A = the padded Q rows (16 rows x 32
++// dimensions per step, row stride 256 bytes). B = one K panel per (step, token
++// block): 16 dimension-pair rows x 16 tokens, 64-byte rows. C (destination) tiles
++// 0..3 = the four 16-token blocks.
++void qk_vnni_128x4(k_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
++    const bf16* q_rows,
++    float* s,
++    size_t s_stride_floats) noexcept {
++  // The plane's first element: panel (step 0, block 0), pair row 0. This kernel
++  // is one of the two layout-specific readers allowed to take the plane address
++  // (the other is k_vnni::qk_group).
++  const bf16* const k_vnni_plane = detail::k_vnni_access::plane(k_page);
++  // The tile stores write 16 rows (Note [Tile stores write 16 rows]). Rows
++  // 4..15 are the products of the zero padding rows. They are dropped below.
++  alignas(64) float s16[TILE_ROWS_16 * PAGE_TOKENS_64];
++  constexpr size_t S16_ROW_BYTES_256 = PAGE_TOKENS_64 * sizeof(float);
++  static_assert(S16_ROW_BYTES_256 == 256, "the constant's name states its value");
++  // One K panel = 16 dimension-pair rows x 16 tokens x 2 paired values (1 KiB).
++  // Panel (step, block) is at (step * 4 + block) panels from the plane base
++  // (the k_vnni.hpp layout). One token block = the 16 token columns of one
++  // tile row.
++  using k_vnni::BLOCK_TOKENS_16;
++  using k_vnni::PANEL_ELEMS_512;
++  using k_vnni::TOKEN_BLOCKS_4;
++  static_assert(k_vnni::PAGE_TOKENS_64 == PAGE_TOKENS_64 &&
++                    k_vnni::HEAD_SIZE_128 == HEAD_SIZE_128 &&
++                    k_vnni::STEP_DIMS_32 == DIM_STEP_32,
++      "the VNNI plane and the AMX kernels describe the same page and dim step");
++  static_assert(BLOCK_TOKENS_16 * sizeof(float) == TILE_ROW_BYTES_64,
++      "one token block is the 16 fp32 columns of one C tile row");
++  static_assert(k_vnni::STEP_PAIRS_16 == TILE_ROWS_16,
++      "the 16 dim-pair rows of one K panel are the 16 rows of one B tile");
++  // Tile registers: the padded Q rows are the A operand in Q_ROWS_TILE_4. The
++  // K panels are the B operand in K_EVEN_PANEL_TILE_5 and K_ODD_PANEL_TILE_6,
++  // used in turn. Token block b accumulates its scores in ACCUMULATOR_TILE_b.
++  _tile_zero(ACCUMULATOR_TILE_0);
++  _tile_zero(ACCUMULATOR_TILE_1);
++  _tile_zero(ACCUMULATOR_TILE_2);
++  _tile_zero(ACCUMULATOR_TILE_3);
++  for (size_t step = 0; step < HEAD_SIZE_128 / DIM_STEP_32; step++) {
++    _tile_loadd(Q_ROWS_TILE_4, q_rows + step * DIM_STEP_32, BF16_ROW_BYTES);
++    _tile_loadd(K_EVEN_PANEL_TILE_5,
++        k_vnni_plane + (step * TOKEN_BLOCKS_4 + 0) * PANEL_ELEMS_512,
++        TILE_ROW_BYTES_64);
++    _tile_dpbf16ps(ACCUMULATOR_TILE_0, Q_ROWS_TILE_4, K_EVEN_PANEL_TILE_5);
++    _tile_loadd(K_ODD_PANEL_TILE_6,
++        k_vnni_plane + (step * TOKEN_BLOCKS_4 + 1) * PANEL_ELEMS_512,
++        TILE_ROW_BYTES_64);
++    _tile_dpbf16ps(ACCUMULATOR_TILE_1, Q_ROWS_TILE_4, K_ODD_PANEL_TILE_6);
++    _tile_loadd(K_EVEN_PANEL_TILE_5,
++        k_vnni_plane + (step * TOKEN_BLOCKS_4 + 2) * PANEL_ELEMS_512,
++        TILE_ROW_BYTES_64);
++    _tile_dpbf16ps(ACCUMULATOR_TILE_2, Q_ROWS_TILE_4, K_EVEN_PANEL_TILE_5);
++    _tile_loadd(K_ODD_PANEL_TILE_6,
++        k_vnni_plane + (step * TOKEN_BLOCKS_4 + 3) * PANEL_ELEMS_512,
++        TILE_ROW_BYTES_64);
++    _tile_dpbf16ps(ACCUMULATOR_TILE_3, Q_ROWS_TILE_4, K_ODD_PANEL_TILE_6);
++  }
++  _tile_stored(ACCUMULATOR_TILE_0, s16 + 0 * BLOCK_TOKENS_16, S16_ROW_BYTES_256);
++  _tile_stored(ACCUMULATOR_TILE_1, s16 + 1 * BLOCK_TOKENS_16, S16_ROW_BYTES_256);
++  _tile_stored(ACCUMULATOR_TILE_2, s16 + 2 * BLOCK_TOKENS_16, S16_ROW_BYTES_256);
++  _tile_stored(ACCUMULATOR_TILE_3, s16 + 3 * BLOCK_TOKENS_16, S16_ROW_BYTES_256);
++  for (size_t r = 0; r < GROUP_HEADS_4; r++) {
++    std::memcpy(s + r * s_stride_floats, s16 + r * PAGE_TOKENS_64, S16_ROW_BYTES_256);
++  }
++}
++
+ void weights_times_v_128x4(
+     v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page,
+     const float* exp_rows,

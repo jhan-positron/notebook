@@ -1,0 +1,47 @@
+diff --git a/h/tron/models/common.hpp b/h/tron/models/common.hpp
+index 6b75859fa9..ed756ff03c 100644
+--- a/h/tron/models/common.hpp
++++ b/h/tron/models/common.hpp
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
+ #include <algorithm>
++#include <array>
++#include <atomic>
+ #include <compare>
+ #include <cstdint>
+ #include <span>
+@@ -1162,6 +1164,33 @@ struct batch : noncopyable<batch<model>> {
+   // Knowing whether the main and helper threads are done with this layer
+   latch_ref layer_done;
+ 
++  // The K store window of this minibatch, one per (layer, pass). The main
++  // thread opens it in save_k. The main helpers join it from the generated
++  // run_main_help. See Note [Shared block save] in model.hpp.
++  struct k_store_window_t {
++    // Worker counts above this take the unshared store (k_store_shared).
++    // This value is the array size of helper_windows below.
++    static constexpr size_t max_shared_workers = 128;
++    // The claim counter is on its own cache line. A claim must not
++    // invalidate the line the waiting threads poll.
++    alignas(cache_line_size) std::atomic<uint32_t> next_unit{0};
++    // Windows opened so far in this pass.
++    alignas(cache_line_size) std::atomic<uint32_t> opened{0};
++    std::atomic<uint32_t> finished{0};  // helpers done with the open window
++    uint32_t n_units = 0;               // work units of the open window
++    // Work unit u = items[unit_start[u], unit_start[u + 1]). A unit never
++    // crosses a page, a 16-token page block, or a change of
++    // token_jobs_do_kv. Items of one block that are not consecutive (a job
++    // without KV work between them, or a partner job moved to the end of a
++    // grain) fall into several units. Their writers touch disjoint token
++    // lanes (masked stores). So two threads may write one block without
++    // conflict. When a run fills the block, each pair row is written with
++    // one full-line store.
++    std::array<uint32_t, model::state::max_minibatch_size + 1> unit_start{};
++    // Windows a helper has entered, by worker_ix (the helper's own slot).
++    // The array size bounds the worker count of a shared store (k_store_shared).
++    std::array<uint32_t, max_shared_workers> helper_windows{};
++  } k_store_window;
+   // Note [Matrix callback lifetime]
+   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   // A matmul's completion callback runs on an RX thread and finishes this

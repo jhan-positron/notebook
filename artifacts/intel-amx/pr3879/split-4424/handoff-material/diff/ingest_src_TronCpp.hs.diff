@@ -1,0 +1,47 @@
+diff --git a/ingest/src/TronCpp.hs b/ingest/src/TronCpp.hs
+index ff27178f97..f328f5291d 100644
+--- a/ingest/src/TronCpp.hs
++++ b/ingest/src/TronCpp.hs
+@@ -2874,7 +2874,25 @@ runHelperStatement env blendNames stmt = case stmt of
+         finishWriting (Var "worker_ix") name
+   PrepareForLogitsStmt -> []
+   PrepareAttentionStmt _ -> []
+-  AttentionStmt _ -> []
++  -- The helpers take part in the K store of a KV-writing operation. The main
++  -- thread's save_k opens a window over the pass's tokens. The helpers are
++  -- idle at this point of the schedule. Their next kernel waits for the
++  -- attention output. The idle helpers claim work units of the window (runs
++  -- of consecutive tokens inside one 16-token page block).
++  -- Both sides call save_k, main with worker index 0 (submitAttentionOperation)
++  -- and the helpers with their own worker_ix, at the same position of the
++  -- statement list. So the N-th window a helper enters in a pass is the N-th
++  -- window main opens in that pass.
++  -- See Note [Shared block save] in model.hpp. Operations without a KV write
++  -- emit nothing here.
++  AttentionStmt attention -> case attentionKvWrite attention of
++    Nothing -> []
++    Just kvWrite ->
++      withTrace stmt $
++        attentionRuntimeCall
++          "save_k"
++          attention
++          [Var $ asCpp $ attentionKey kvWrite, ExprLit "worker_ix", ExprLit "n_workers"]
+   MoeRouteStmt{} -> []
+   MoeMatmulPrepareAndLaunchStmt{} -> []
+   MoeBlendStmt r w o i b lanes _ ->
+@@ -2931,10 +2949,13 @@ submitAttentionOperation env stmt =
+       ]
+   saveKv kvWrite =
+     [ startOperand $ attentionChannel env $ attentionKey kvWrite
+-    , attentionRuntimeCall
++    , -- Main is worker 0, as in kernelCall. n_workers (main + main helpers) is
++      -- in scope in run(). It lets save_k share the K store with the helpers'
++      -- save_k calls (runHelperStatement).
++      attentionRuntimeCall
+         "save_k"
+         stmt
+-        [Var $ asCpp $ attentionKey kvWrite]
++        [Var $ asCpp $ attentionKey kvWrite, LiteralExpr (IntLit 0), ExprLit "n_workers"]
+     , startOperand $ attentionChannel env $ attentionValue kvWrite
+     , attentionRuntimeCall
+         "save_v"

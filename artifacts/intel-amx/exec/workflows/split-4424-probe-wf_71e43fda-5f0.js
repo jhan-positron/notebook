@@ -1,0 +1,63 @@
+export const meta = {
+  name: 'split-4424-probe',
+  description: 'Feasibility probe: construct the candidate PR-1 tree of a PR 4424 split by subtracting the AMX kernel and the shared block save from the tested commit ba69cb513e, syntax-check it, then verify independently',
+  phases: [
+    { title: 'Probe', detail: 'baseline lcheck, subtract A, subtract S, lcheck after each, commit each stage' },
+    { title: 'Verify', detail: 'independent re-check of the probe commits' },
+  ],
+}
+
+const S = '/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8147fd4d-377d-40bd-ae3a-3103383074b7/scratchpad'
+const P = '/home/jhan/workspace/ai-runs/tron-split-probe'
+const L = '/home/jhan/workspace/ai-runs/lcheck'
+
+const CONCERNS = `Concern codes:
+- L = K VNNI layout/storage/views + minimal per-row store (h/tron/tensor/k_vnni.hpp types, index map, store_row/load_row/copy_token, kv_cache_fwd.hpp, kv_cache.hpp integration: kv_block::k owner, page::k_packed, set_k_row/get_k_row, k() constrained to row-major, copy_storage_slot, Note [K VNNI storage]; k_vnni::layout_on; CMake option TRON_K_VNNI; model.hpp per-row K store; tests of these).
+- R = AVX-512 reader (h/tron/kernels/k_vnni.hpp qk_group; the self_attention software loop live mask + qk_group call; attn_stats comment; reader tests).
+- G = FPGA/GOF staging (gof.hpp/gof.cpp/full.hpp k_head_fn scratch; lambda updates in t_gof_dma, t_gof_staging_leaks, t_phase1_integration).
+- A = AMX dense kernel on the VNNI plane (amx_attn.cpp pack_q_rows_128x4 + qk_vnni_128x4 + tile constants; amx_attn_iface.hpp declarations + Note text; self_attention.hpp packed_amx_query if-constexpr and apply_dense_amx_page if-constexpr; t_amx_numerics bit-identity case; t_amx_dispatch_dtype fakes/cases for the new entry points).
+- S = shared block save (store_block + transpose_16x16_epi32 + helpers in h/tron/tensor/k_vnni.hpp; page::set_k_block; model.hpp k_store_window use, k_store_cut_units, store_k_block's run/block logic, save_k worker_ix/n_workers, Note [Shared block save], the join watchdog; common.hpp k_store_window_t; ingest/src/TronCpp.hs + ingest/test/LoopyTronSpec.hs; the t_llama_unit shared-save case; t_k_vnni_layout store_block tests).
+- B = build/CI/preset/cost rows/README.`
+
+const PROBE_OUT = {
+  type: 'object',
+  properties: {
+    baseline: { type: 'array', items: { type: 'object', properties: { tree: { type: 'string' }, vnni: { type: 'boolean' }, file: { type: 'string' }, errors: { type: 'integer' }, first_error: { type: 'string' } }, required: ['tree', 'vnni', 'file', 'errors'] } },
+    stage_A_off: { type: 'object', properties: { commit: { type: 'string' }, diffstat_vs_ba69cb513e: { type: 'string' }, edits: { type: 'array', items: { type: 'string' } }, temporary_code: { type: 'array', items: { type: 'string' } }, lcheck: { type: 'array', items: { type: 'object', properties: { tree: { type: 'string' }, vnni: { type: 'boolean' }, file: { type: 'string' }, errors: { type: 'integer' }, first_error: { type: 'string' } }, required: ['tree', 'vnni', 'file', 'errors'] } }, problems: { type: 'array', items: { type: 'string' } } }, required: ['commit', 'diffstat_vs_ba69cb513e', 'edits', 'lcheck', 'problems'] },
+    stage_S_off: { type: 'object', properties: { commit: { type: 'string' }, diffstat_vs_stage_A_off: { type: 'string' }, diffstat_vs_base_be0d5565b3: { type: 'string' }, edits: { type: 'array', items: { type: 'string' } }, save_k_shape: { type: 'string' }, lcheck: { type: 'array', items: { type: 'object', properties: { tree: { type: 'string' }, vnni: { type: 'boolean' }, file: { type: 'string' }, errors: { type: 'integer' }, first_error: { type: 'string' } }, required: ['tree', 'vnni', 'file', 'errors'] } }, problems: { type: 'array', items: { type: 'string' } } }, required: ['commit', 'diffstat_vs_stage_A_off', 'diffstat_vs_base_be0d5565b3', 'edits', 'save_k_shape', 'lcheck', 'problems'] },
+    sizes: { type: 'object', properties: { PR1_L_R_G_B_vs_base: { type: 'string' }, A_only: { type: 'string' }, S_only: { type: 'string' }, T_only_ba69_to_9d5c: { type: 'string' } } },
+    verdict: { type: 'string' },
+    hours_spent_note: { type: 'string' },
+  },
+  required: ['baseline', 'stage_A_off', 'stage_S_off', 'sizes', 'verdict'],
+}
+
+phase('Probe')
+const probe = await agent(`You run a feasibility probe for splitting PR 4424 of positron-ai/tron into a PR stack. Work ONLY inside the scratch worktree ${P} (branch jhan-split-probe, currently at ba69cb513e = the PR head minus the PR 4737 merge minus the deb preset commit; this tree was built and tested on delphi-3bda on 2026-10-08). Never touch any other worktree, never push, never run git worktree prune, never modify files outside ${P} and the scratchpad ${S}/probe/ (create it). Commit your stages on the branch jhan-split-probe with \`git -C ${P} -c core.hooksPath=/dev/null commit --no-verify\` (the lefthook hook is missing on this box).
+
+${CONCERNS}
+
+Goal: produce two commits and syntax-check them.
+  Stage A-off: remove concern A from the tree. Result = L+R+G+S+B. Rules: amx_attn.cpp and amx_attn_iface.hpp go back to their base content (\`git -C ${P} show be0d5565b3:<path>\`), except where a comment line of the diagram must be kept consistent; in self_attention.hpp the packed_amx_query packer goes back to pack_q_group_128x4 only and apply_dense_amx_page back to the qk_rowmajor_128x4 call, and the dense AMX page path must never be instantiated for a VNNI slot: wrap the AMX block of apply_page_tok (the \`if constexpr (amx_attn_h128g4::eligible...)\` region) so that it is discarded when k_vnni::layout_on<operation_head_size> (a VNNI slot takes the software loop; this is the temporary code PR-1 carries until the AMX PR lands; name it in a comment "temporary until the VNNI AMX kernel lands"). t_amx_numerics.cpp goes back to base. t_amx_dispatch_dtype.cpp: drop the fakes and cases of the new entry points; if a remaining case expects the dense kernel on a 128/4 geometry that is now a VNNI slot, make that expectation layout-aware (under TRON_K_VNNI the software loop serves it) or skip it with if constexpr; keep the change minimal and list it. Keep everything of L, R, G, S, B.
+  Stage S-off: on top of A-off, remove concern S. Result = L+R+G+B = the candidate PR-1. model.hpp: save_k(q_batch, ks) without worker_ix/n_workers, save_k_impl stores every token's K rows on the calling thread: for a row-major slot the base code (page::k(...).set(row)), for a VNNI slot one page::set_k_row per (token, kv_head) from the typed source row (k_source_row), converting a non-bf16 K buffer to bf16 on the stack as the head does; remove k_store_cut_units, store_k_block's run/block logic, k_store_shared, the window/join code, the watchdog constants, Note [Shared block save], the <chrono>/<immintrin.h> includes if unused. common.hpp: back to base. ingest/src/TronCpp.hs and ingest/test/LoopyTronSpec.hs: back to base. h/tron/tensor/k_vnni.hpp: remove store_block, transpose_16x16_epi32 and helpers only they use, and FULL_BLOCK_0XFFFF if unused; keep store_row/load_row/copy_token and the index map. kv_cache.hpp: remove page::set_k_block and its Note text. t_k_vnni_layout.cpp: remove the store_block / block-save TEST_CASEs and SECTIONs. t_llama_unit.cpp: remove the shared-save (three-thread) case and any use of worker_ix / set_k_block; keep the layout-independent accessor cases. Keep the comments truthful (remove sentences that describe the removed code).
+
+Syntax checks: ${L}/lcheck.sh <tree> <repo-relative file> ${P} runs clang 19 -fsyntax-only with the product flags of tree gen (TRON_AMX_DISPATCH on) or gen-amxoff (off); read ${L}/README.md. It has no TRON_K_VNNI flag: copy it to ${S}/probe/lcheck-vnni.sh and append -DTRON_K_VNNI to the flags (insert before -ferror-limit). Run with ERRLIM=0. Check these files in all four combinations (gen / gen-amxoff) x (VNNI on / off): t/t_llama_unit.cpp, t/t_k_vnni_layout.cpp, t/t_amx_dispatch_dtype.cpp, t/t_amx_numerics.cpp, t/heterogeneous_scheduler_compile.cpp; plus src/tron/kernels/amx_attn.cpp with tree gen (both VNNI settings). Count errors with \`grep -c 'error:'\`. FIRST run the full matrix on the untouched ba69cb513e tree as the baseline and record it; a check that already errors at baseline (e.g. a mirror/header staleness) is noted, not fixed. After each stage, the matrix must show the same or fewer errors than the baseline; fix compile errors your subtraction caused until it does (iterate; it may take several rounds; keep edits minimal and list every one). Note: the Haskell files cannot be tested here (no cabal); their base content is main's tested state.
+
+Sizes: report \`git -C ${P} diff --shortstat be0d5565b3 <S-off commit>\` (= PR-1), \`git diff --shortstat <S-off> <A-off>\` (= S alone, reversed), \`git diff --shortstat <A-off> ba69cb513e\` (= A alone), and \`git diff --shortstat ba69cb513e 9d5c7a389b\` (= T). Also the per-file --stat for PR-1.
+Reference material: ${S}/diff/ per-file diffs of the whole PR (base be0d5565b3 -> 0a5334ccb6), ${S}/ref/L-orig-first-commit-0ec355b641.diff (the original layout commit: its save_k shows the per-row form before S existed, pre typed port), ${S}/ref/S-orig-striping-0b54..804a.diff (what S added originally), ${S}/ref/S-4774-fold.diff.
+Return the structured result; verdict = whether the two cuts are technically clean, what temporary code PR-1 carries, and anything that surprised you. Do not stop early: the result must include both commits with the lcheck matrix after each.`, { label: 'probe:A-off,S-off', phase: 'Probe', schema: PROBE_OUT })
+
+phase('Verify')
+const VERIFY = { type: 'object', properties: { holds: { type: 'boolean' }, lcheck_recheck: { type: 'array', items: { type: 'string' } }, leftover_symbols: { type: 'array', items: { type: 'string' } }, wrongly_removed: { type: 'array', items: { type: 'string' } }, comment_truth: { type: 'array', items: { type: 'string' } }, corrections: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, required: ['holds', 'lcheck_recheck', 'leftover_symbols', 'wrongly_removed', 'comment_truth', 'corrections', 'summary'] }
+const verify = await agent(`Independently verify a feasibility probe for splitting PR 4424 (positron-ai/tron). Read-only on the worktree ${P} (branch jhan-split-probe) except that you may run the syntax checker; do not commit, do not modify tracked files (if you must experiment, use \`git -C ${P} stash\` discipline or copies under ${S}/probe-verify/).
+Probe report: ${JSON.stringify(probe)}
+${CONCERNS}
+Checks:
+1. Re-run the lcheck matrix on the S-off commit (and spot-check A-off): ${L}/lcheck.sh <gen|gen-amxoff> <file> ${P} with ERRLIM=0, plus the -DTRON_K_VNNI variant at ${S}/probe/lcheck-vnni.sh (make your own copy if missing). Files: t/t_llama_unit.cpp, t/t_k_vnni_layout.cpp, t/t_amx_dispatch_dtype.cpp, t/t_amx_numerics.cpp, t/heterogeneous_scheduler_compile.cpp, src/tron/kernels/amx_attn.cpp (gen only). Report error counts; compare with the probe's numbers.
+2. Leftover symbols: grep the S-off tree for qk_vnni_128x4, pack_q_rows_128x4, set_k_block, store_block, transpose_16x16_epi32, k_store_window, k_store_cut_units, k_store_shared, worker_ix (in model.hpp/t_llama_unit/TronCpp.hs), n_workers in save_k, Note [Shared block save], FULL_BLOCK_0XFFFF; every hit outside base content is a leftover.
+3. Wrongly removed: diff S-off against be0d5565b3 and confirm every L/R/G/B item of the PR is still present (k_vnni_tensor/k_vnni_view/index/store_row/load_row/copy_token/k_source_row/k_destination_row; page::k_packed/set_k_row/get_k_row/copy_storage_slot; kv_block::k conditional; qk_group and its call in self_attention's software loop; gof/full k_head_fn scratch; CMake option + tron_model_compile_config + CI yml + README + test registration; t_k_vnni_layout layout/reader/copy cases; t_llama_unit accessor and typed-boundary cases). List anything missing.
+4. Comment truth: grep the S-off tree's changed files for sentences that still describe removed code (shared save, helpers, work units, block save, AMX reading the plane, qk_vnni) and list them with file:line.
+5. Did the temporary gate in self_attention.hpp discard the dense AMX path for VNNI slots only (row-major geometries unchanged)? Quote the lines.
+Return holds=true only if the lcheck matrix is at or below baseline and no leftover/wrongly-removed item exists; otherwise list corrections.`, { label: 'verify:probe', phase: 'Verify', schema: VERIFY })
+
+return { probe, verify }

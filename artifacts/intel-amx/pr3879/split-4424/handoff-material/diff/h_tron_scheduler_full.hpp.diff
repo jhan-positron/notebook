@@ -1,0 +1,42 @@
+diff --git a/h/tron/scheduler/full.hpp b/h/tron/scheduler/full.hpp
+index 5fb09cde6f..2ae06c98b3 100644
+--- a/h/tron/scheduler/full.hpp
++++ b/h/tron/scheduler/full.hpp
+@@ -2744,12 +2744,31 @@ struct full_scheduler : scheduler {
+                     pi.kv_complete_fn = [pg_ptr, off](kv_slot_id slot) -> bool {
+                       return pg_ptr->is_kv_complete(slot, off);
+                     };
+-                    pi.k_head_fn = [pg_ptr, off](
+-                                       kv_slot_id slot, size_t kv_head) -> bf16* {
+-                      return pg_ptr
+-                          ->template k<model_t::hardware_attention_geometry.kv>(
+-                              slot, kv_head, off)
+-                          .data;
++                    pi.k_head_fn = [pg_ptr, off](kv_slot_id slot, size_t kv_head,
++                                       bf16* dest) -> bf16* {
++                      constexpr kv_geometry hw_kv =
++                          model_t::hardware_attention_geometry.kv;
++                      if constexpr (k_vnni::layout_on<hw_kv.head_size>) {
++                        // K is stored as the VNNI plane (VNNI: Vector Neural Network
++                        // Instructions). VNNI dot-product operands use this
++                        // pair-interleaved layout. Note [K VNNI storage] in
++                        // kv_cache.hpp describes the layout. A row of a row-major
++                        // block (the usual case under hardware attention, Note
++                        // [Row-major blocks under hardware attention] there) is
++                        // read in place; a row of a converted block is gathered
++                        // into the caller's scratch buffer (dest: page_info's
++                        // 64-byte-aligned scratch, 256 bytes per head). The V
++                        // callback below always unpacks into the scratch.
++                        const auto row = pg_ptr->template k_row_if_row_major<hw_kv>(
++                            slot, kv_head, off);
++                        if (row.valid()) return row.data;
++                        pg_ptr->template get_k_row<hw_kv>(slot, kv_head, off,
++                            k_destination_row<hw_kv.head_size>(dest));
++                        return dest;
++                      } else {
++                        (void)dest;
++                        return pg_ptr->template k<hw_kv>(slot, kv_head, off).data;
++                      }
+                     };
+                     pi.v_head_fn = [pg_ptr, off](kv_slot_id slot, size_t kv_head,
+                                        bf16* dest) -> bf16* {

@@ -1,0 +1,532 @@
+diff --git a/h/tron/tensor/k_vnni.hpp b/h/tron/tensor/k_vnni.hpp
+new file mode 100644
+index 0000000000..21c6a2e5da
+--- /dev/null
++++ b/h/tron/tensor/k_vnni.hpp
+@@ -0,0 +1,526 @@
++#pragma once
++// This file defines typed access to the K plane stored in the VNNI layout
++// (TRON_K_VNNI): an owner that holds the bytes (k_vnni_tensor), a matrix view
++// that knows the address formula (k_vnni_view), the index map and its
++// constants (namespace k_vnni), and the vector operations that move whole token
++// rows in and out (store_row, load_row, store_block, copy_token), and the
++// in-place conversion of one 16-token block between its row-major and its VNNI
++// form (block_to_vnni, block_to_rows, Note [Row-major tail block] below). The
++// AVX-512 score reader of this layout is in h/tron/kernels/k_vnni.hpp. Who
++// writes and reads the layout is described in Note [K VNNI storage]
++// (kv_cache.hpp).
++//
++// Words used here: AMX (Advanced Matrix Extensions) is the tile instruction
++// set of the CPU. AVX-512 (Advanced Vector Extensions) is the CPU's 512-bit
++// vector instruction set. bf16 is the 16-bit brain floating-point format. VNNI
++// (Vector Neural Network Instructions) layout means that the two values of a
++// dimension pair of one token are stored next to each other. One 64-byte row
++// holds that dimension pair for 16 consecutive tokens. The VNNI layout is the
++// B-operand layout of the AMX tile multiply (TDPBF16PS). It is also the operand
++// layout of the AVX-512 pair dot product (VDPBF16PS). A KV page holds 64
++// tokens. The layout exists for 128-dimension heads only. A plane is K for one
++// KV head of one page.
++//
++// Plane layout (64 tokens x 128 dimensions of bf16 = 16 KiB, the same bytes as the
++// row-major plane), indexed by dimension step s (32 dimensions), token block c (16
++// tokens), dimension pair dp and token t:
++//   plane[(((s * 4 + c) * 16 + dp) * 16 + t) * 2 + j] == K[c * 16 + t][s * 32 + 2 * dp
++//   + j]
++// One (s, c) is one 1 KiB panel: 16 dimension-pair rows of 64 bytes. A panel is
++// exactly one AMX B tile. Token i owns column (i % 16) of token block (i / 16)
++// in every panel. So tokens are written independently (no read-modify-write
++// between tokens, unlike the pair-interleaved V plane).
++//
++// Who may compute a packed address: the typed operations in this header, and
++// the two layout-specific score kernels (k_vnni::qk_group and
++// amx_attn_h128g4::qk_vnni_128x4), which reach the plane through
++// detail::k_vnni_access. Cache code, the model, hardware staging and the tests
++// use the typed operations or the page accessors built on them (page::set_k_row,
++// page::get_k_row, page::set_k_block, page::k_packed). book::fill_random is the
++// one documented exception: it fills a whole kv_block without interpreting
++// coordinates.
++
++#include <concepts>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <immintrin.h>
++#include <type_traits>
++
++#include "common/assert.hpp"
++#include "common/attributes.hpp"
++#include "common/numerics/bf16.hpp"
++#include "tron/tensor/kv_cache_fwd.hpp"
++#include "tron/tensor/seq.hpp"
++#include "tron/tensor/view.hpp"
++
++namespace tron {
++
++namespace k_vnni {
++
++inline constexpr size_t PAGE_TOKENS_64 = 64;
++inline constexpr size_t HEAD_SIZE_128 = 128;
++// The two values of one dimension pair share one 32-bit lane.
++inline constexpr size_t PAIR_2 = 2;
++inline constexpr size_t DWORD_BYTES_4 = 4;
++// One 64-byte line holds one dimension pair of 16 consecutive tokens.
++inline constexpr size_t LINE_BYTES_64 = 64;
++inline constexpr size_t BLOCK_TOKENS_16 = LINE_BYTES_64 / (PAIR_2 * sizeof(bf16));
++inline constexpr size_t TOKEN_BLOCKS_4 = PAGE_TOKENS_64 / BLOCK_TOKENS_16;
++// One dimension step = 32 dimensions = 16 dimension pairs: the depth of one AMX
++// tile multiply.
++inline constexpr size_t STEP_DIMS_32 = 32;
++inline constexpr size_t STEP_PAIRS_16 = STEP_DIMS_32 / PAIR_2;
++inline constexpr size_t DIM_STEPS_4 = HEAD_SIZE_128 / STEP_DIMS_32;
++// One pair row = one 64-byte line = 32 bf16 = 16 dwords.
++inline constexpr size_t ROW_ELEMS_32 = LINE_BYTES_64 / sizeof(bf16);
++inline constexpr size_t ROW_DWORDS_16 = LINE_BYTES_64 / DWORD_BYTES_4;
++// One panel = 16 dimension-pair rows x 16 tokens x 2 paired values (1 KiB).
++inline constexpr size_t PANEL_ELEMS_512 = STEP_PAIRS_16 * BLOCK_TOKENS_16 * PAIR_2;
++inline constexpr size_t PANEL_BYTES_1024 = PANEL_ELEMS_512 * sizeof(bf16);
++inline constexpr size_t PANEL_DWORDS_256 = PANEL_BYTES_1024 / DWORD_BYTES_4;
++inline constexpr size_t N_PANELS_16 = DIM_STEPS_4 * TOKEN_BLOCKS_4;
++// The 16 lanes of one token block, all present.
++inline constexpr __mmask16 FULL_BLOCK_0XFFFF = 0xffffu;
++// 32-bit lanes of one 512-bit register (the transpose below is LANES x LANES).
++inline constexpr size_t LANES_16 = LINE_BYTES_64 / DWORD_BYTES_4;
++// Width of a bf16: a bf16 shifted up by this many bits is the exact fp32.
++inline constexpr int BF16_BITS_16 = 16;
++// The high half of a dword: the odd value of a dimension pair as an fp32 bit pattern.
++inline constexpr uint32_t HIGH_HALF_0XFFFF0000 = 0xffff0000u;
++// A row-major block (Note [Row-major tail block] below) keeps 4 token rows of
++// 256 bytes in each of its 4 panels.
++inline constexpr size_t PANEL_ROWS_4 = PANEL_ELEMS_512 / HEAD_SIZE_128;
++// The 4 token blocks of a page, one bit each (page::k_vnni_blocks). A block
++// mask equal to it has every block of the page set.
++inline constexpr uint8_t BLOCKS_PER_PAGE_MASK_0XF = 0xfu;
++// Bit c of a block mask (page::k_vnni_blocks): token block c of the page.
++constexpr uint8_t block_bit(size_t c) noexcept {
++  return uint8_t(1u << c);
++}
++// Bit `offset` of a page-offset mask (the saved rows of a page): the row at
++// that page offset.
++constexpr uint64_t offset_bit(size_t offset) noexcept {
++  return uint64_t{1} << offset;
++}
++static_assert(BLOCK_TOKENS_16 == 16 && TOKEN_BLOCKS_4 == 4 && STEP_PAIRS_16 == 16 &&
++                  DIM_STEPS_4 == 4 && ROW_ELEMS_32 == 32 && ROW_DWORDS_16 == 16 &&
++                  PANEL_ELEMS_512 == 512 && PANEL_BYTES_1024 == 1024 &&
++                  PANEL_DWORDS_256 == 256 && N_PANELS_16 == 16 && LANES_16 == 16 &&
++                  PANEL_ROWS_4 == 4,
++    "every constant's name states its value");
++static_assert(BLOCKS_PER_PAGE_MASK_0XF == block_bit(TOKEN_BLOCKS_4) - 1,
++    "one bit per token block");
++static_assert(N_PANELS_16 * PANEL_ELEMS_512 == PAGE_TOKENS_64 * HEAD_SIZE_128,
++    "the VNNI plane is a permutation of the row-major plane: same element count");
++static_assert(BLOCK_TOKENS_16 == LANES_16 && STEP_PAIRS_16 == LANES_16,
++    "the block save transposes 16 token rows onto the 16 pair rows of a panel");
++
++// The layout gate. TRON_K_VNNI (CMake option) switches the K plane of every
++// 128-dimension head to the VNNI layout. Every other head size keeps the row-major
++// plane. The gate is a property of the storage geometry, not of the query
++// type or of the AMX availability. So every reader and writer of a slot sees
++// the same layout.
++#ifdef TRON_K_VNNI
++template <size_t head_size>
++inline constexpr bool layout_on = head_size == HEAD_SIZE_128;
++#else
++template <size_t head_size>
++inline constexpr bool layout_on = false;
++#endif
++
++// Element index of K[token][dim] inside the plane (the formula of the header
++// comment).
++constexpr size_t index(size_t token, size_t dim) noexcept {
++  const size_t s = dim / STEP_DIMS_32, c = token / BLOCK_TOKENS_16,
++               dp = (dim % STEP_DIMS_32) / PAIR_2, t = token % BLOCK_TOKENS_16,
++               j = dim % PAIR_2;
++  return (((s * TOKEN_BLOCKS_4 + c) * STEP_PAIRS_16 + dp) * BLOCK_TOKENS_16 + t) *
++             PAIR_2 +
++         j;
++}
++
++}  // namespace k_vnni
++
++namespace detail {
++// The one route from a packed K view to its plane address, for the typed
++// operations below, the two layout-specific score kernels (k_vnni::qk_group,
++// amx_attn_h128g4::qk_vnni_128x4) and the test-only book::fill_random, the
++// documented exception (Note [K VNNI storage] in kv_cache.hpp).
++struct k_vnni_access;
++}  // namespace detail
++
++template <typename T>
++concept k_vnni_element = std::same_as<T, bf16> || std::same_as<T, const bf16>;
++
++// A packed K plane of [Rows tokens * Cols dimensions]. One element is read
++// through at(token, dim). There is no element write: rows enter through the
++// operations below (store_row, load_row, store_block, copy_token). Views come
++// only from an owner (k_vnni_tensor::as_view). A writable view (bf16) converts
++// to a read-only one (const bf16), never the reverse. There is no public
++// pointer constructor, no data() accessor, no operator[] and no pointer
++// conversion: a bare pointer does not say which layout it points at.
++template <typename T, size_t Rows, size_t Cols>
++struct k_vnni_view final {
++  static_assert(k_vnni_element<T>, "a packed K plane holds bf16 or const bf16");
++  // The index map (k_vnni::index) is written for 4 token blocks and 4 dimension
++  // steps. So the packed K layout exists for one shape.
++  static_assert(Rows == k_vnni::PAGE_TOKENS_64 && Cols == k_vnni::HEAD_SIZE_128,
++      "the K VNNI layout exists for 64-token pages of 128-dimension heads only");
++
++  // Writable-to-read-only conversion. Rebinding a view copies it; the owner
++  // must outlive every view.
++  template <typename U>
++    requires(std::is_const_v<T> && std::same_as<U, std::remove_const_t<T>>)
++  TRON(inline)
++  k_vnni_view(k_vnni_view<U, Rows, Cols> other) noexcept
++  : data_(other.data_) {}
++
++  // Bounds-checked read of element (token, dim). There is no element write:
++  // rows enter through store_row, store_block and copy_token.
++  TRON(nodiscard, inline, pure)
++  const bf16& at(size_t token, size_t dim) const noexcept {
++    TRON_ASSERT_LT(token, Rows);
++    TRON_ASSERT_LT(dim, Cols);
++    return data_[k_vnni::index(token, dim)];
++  }
++
++private:
++  friend struct k_vnni_tensor<Rows, Cols>;
++  friend struct detail::k_vnni_access;
++  template <typename U, size_t R, size_t C>
++  friend struct k_vnni_view;
++
++  TRON(inline)
++  explicit k_vnni_view(T* data) noexcept
++  : data_(data) {}
++
++  T* data_;
++};
++
++// Owns one packed K plane: exactly one 64-byte-aligned bf16 array, no separate
++// allocation and no initialization (the cache's DMA allocation creates the
++// kv_blocks that hold it; see Note [KV block lifetime] in kv_cache.hpp).
++// Trivial to construct, copy and destroy; copying an owner copies the plane
++// (page::copy_storage_slot copies a whole page as `dst_block.k = src_block.k`).
++// as_view() on a temporary is deleted: a view must not outlive its owner.
++// 64-byte alignment: every pair row is one 64-byte line, and the AMX QK kernel
++// reads the plane in 64-byte tile rows.
++template <size_t Rows, size_t Cols>
++struct alignas(64) k_vnni_tensor final {
++  static_assert(Rows == k_vnni::PAGE_TOKENS_64 && Cols == k_vnni::HEAD_SIZE_128,
++      "the K VNNI layout exists for 64-token pages of 128-dimension heads only");
++
++  TRON(nodiscard, inline)
++  k_vnni_view<bf16, Rows, Cols> as_view() & noexcept TRON(this_lifetimebound)
++  {
++    return k_vnni_view<bf16, Rows, Cols>(data_);
++  }
++
++  TRON(nodiscard, inline)
++  k_vnni_view<const bf16, Rows, Cols> as_view() const& noexcept TRON(this_lifetimebound)
++  {
++    return k_vnni_view<const bf16, Rows, Cols>(data_);
++  }
++
++  k_vnni_view<bf16, Rows, Cols> as_view() && = delete;
++  k_vnni_view<const bf16, Rows, Cols> as_view() const&& = delete;
++
++private:
++  alignas(64) bf16 data_[Rows * Cols];
++};
++static_assert(
++    sizeof(k_vnni_tensor<k_vnni::PAGE_TOKENS_64, k_vnni::HEAD_SIZE_128>) ==
++            k_vnni::PAGE_TOKENS_64 * k_vnni::HEAD_SIZE_128 * sizeof(bf16) &&
++        alignof(k_vnni_tensor<k_vnni::PAGE_TOKENS_64, k_vnni::HEAD_SIZE_128>) == 64,
++    "the owner is the plane: the same bytes as the row-major K plane, 64-byte aligned");
++
++namespace detail {
++struct k_vnni_access final {
++  // The plane's first element: panel (step 0, block 0), pair row 0, token 0.
++  template <typename T, size_t Rows, size_t Cols>
++  TRON(nodiscard, inline, pure)
++  static T* plane(k_vnni_view<T, Rows, Cols> k) noexcept {
++    return k.data_;
++  }
++};
++}  // namespace detail
++
++// Contiguous transfer rows for page::set_k_row / page::get_k_row: one token's
++// head_size bf16 values in dimension order, not packed storage. The caller's
++// alignment and DMA flags travel with the row: the K row operations load and
++// store the row with unaligned vector instructions, so they do not require
++// VIEW_ALIGNED_TRUE (unlike the packed V rows).
++template <size_t Cols, bool Aligned = VIEW_ALIGNED_TRUE, bool Dma = VIEW_DMA_FALSE>
++using const_k_row_view = const_view<bf16, Aligned, Dma, seq<Cols>, sseq<1>>;
++
++template <size_t Cols, bool Aligned = VIEW_ALIGNED_TRUE, bool Dma = VIEW_DMA_FALSE>
++using k_row_view = view<bf16, Aligned, Dma, seq<Cols>, sseq<1>>;
++
++// The helpers neither check alignment nor copy data: the flags state what the
++// caller knows about its buffer.
++template <size_t Cols, bool Aligned = VIEW_ALIGNED_TRUE, bool Dma = VIEW_DMA_FALSE>
++TRON(nodiscard, inline)
++const_k_row_view<Cols, Aligned, Dma> k_source_row(const bf16* row) noexcept {
++  return const_k_row_view<Cols, Aligned, Dma>{row};
++}
++
++// A row that already is a rank-1 bf16 view keeps its own flags (the model's K
++// buffer rows come from slice<>, which carries the buffer's alignment and DMA
++// flags).
++template <size_t Cols, bool Aligned, bool Dma, ptrdiff_t Stride>
++  requires(Stride == 1)
++TRON(nodiscard, inline)
++const_k_row_view<Cols, Aligned, Dma> k_source_row(
++    view<bf16, Aligned, Dma, seq<Cols>, sseq<Stride>> row) noexcept {
++  return const_k_row_view<Cols, Aligned, Dma>{row};
++}
++
++template <size_t Cols, bool Aligned = VIEW_ALIGNED_TRUE, bool Dma = VIEW_DMA_FALSE>
++TRON(nodiscard, inline)
++k_row_view<Cols, Aligned, Dma> k_destination_row(bf16* row) noexcept {
++  return k_row_view<Cols, Aligned, Dma>{row};
++}
++
++// The operations below are AVX-512 code.
++
++namespace k_vnni::detail {
++// The byte address of dimension pair 0 of dimension step s for token `token`. The pair
++// rows dp = 0..15 of that panel follow at 64-byte steps.
++TRON(inline)
++char* pair_base(bf16* plane, size_t s, size_t token) noexcept {
++  const size_t c = token / BLOCK_TOKENS_16, t = token % BLOCK_TOKENS_16;
++  return reinterpret_cast<char*>(plane) +
++         ((s * TOKEN_BLOCKS_4 + c) * PANEL_DWORDS_256 + t) * DWORD_BYTES_4;
++}
++TRON(inline)
++const char* pair_base(const bf16* plane, size_t s, size_t token) noexcept {
++  const size_t c = token / BLOCK_TOKENS_16, t = token % BLOCK_TOKENS_16;
++  return reinterpret_cast<const char*>(plane) +
++         ((s * TOKEN_BLOCKS_4 + c) * PANEL_DWORDS_256 + t) * DWORD_BYTES_4;
++}
++// Dword offsets of the 16 pair rows of one panel (64 bytes = 16 dwords apart).
++TRON(inline)
++__m512i pair_row_offsets() noexcept {
++  constexpr int ROW_STRIDE_16 = int(ROW_DWORDS_16);
++  return _mm512_set_epi32(15 * ROW_STRIDE_16, 14 * ROW_STRIDE_16, 13 * ROW_STRIDE_16,
++      12 * ROW_STRIDE_16, 11 * ROW_STRIDE_16, 10 * ROW_STRIDE_16, 9 * ROW_STRIDE_16,
++      8 * ROW_STRIDE_16, 7 * ROW_STRIDE_16, 6 * ROW_STRIDE_16, 5 * ROW_STRIDE_16,
++      4 * ROW_STRIDE_16, 3 * ROW_STRIDE_16, 2 * ROW_STRIDE_16, 1 * ROW_STRIDE_16, 0);
++}
++// In-place transpose of a 16 x 16 matrix of 32-bit lanes. On return r[i]
++// holds lane i of every input register (input register t in lane t). Four
++// stages of two-register shuffles, 64 shuffles in all.
++TRON(inline)
++void transpose_16x16_epi32(__m512i (&r)[LANES_16]) noexcept {
++  // Selectors of _mm512_shuffle_i32x4: the even 128-bit quarters of both
++  // inputs (0x88) or the odd quarters (0xdd).
++  constexpr int EVEN_QUARTERS_0X88 = 0x88;
++  constexpr int ODD_QUARTERS_0XDD = 0xdd;
++  __m512i t[LANES_16];
++  for (size_t i = 0; i < LANES_16 / 2; ++i) {
++    t[2 * i] = _mm512_unpacklo_epi32(r[2 * i], r[2 * i + 1]);
++    t[2 * i + 1] = _mm512_unpackhi_epi32(r[2 * i], r[2 * i + 1]);
++  }
++  for (size_t i = 0; i < LANES_16 / 4; ++i) {
++    r[4 * i] = _mm512_unpacklo_epi64(t[4 * i], t[4 * i + 2]);
++    r[4 * i + 1] = _mm512_unpackhi_epi64(t[4 * i], t[4 * i + 2]);
++    r[4 * i + 2] = _mm512_unpacklo_epi64(t[4 * i + 1], t[4 * i + 3]);
++    r[4 * i + 3] = _mm512_unpackhi_epi64(t[4 * i + 1], t[4 * i + 3]);
++  }
++  for (size_t i = 0; i < LANES_16 / 4; ++i) {
++    t[i] = _mm512_shuffle_i32x4(r[i], r[i + 4], EVEN_QUARTERS_0X88);
++    t[i + 4] = _mm512_shuffle_i32x4(r[i], r[i + 4], ODD_QUARTERS_0XDD);
++    t[i + 8] = _mm512_shuffle_i32x4(r[i + 8], r[i + 12], EVEN_QUARTERS_0X88);
++    t[i + 12] = _mm512_shuffle_i32x4(r[i + 8], r[i + 12], ODD_QUARTERS_0XDD);
++  }
++  for (size_t i = 0; i < LANES_16 / 2; ++i) {
++    r[i] = _mm512_shuffle_i32x4(t[i], t[i + 8], EVEN_QUARTERS_0X88);
++    r[i + 8] = _mm512_shuffle_i32x4(t[i], t[i + 8], ODD_QUARTERS_0XDD);
++  }
++}
++}  // namespace k_vnni::detail
++
++// Store one token's 128-dimension K row into a packed plane. This takes 4
++// scatters of 16 dwords (one dimension pair each), one per dimension step. Only
++// this token's 64 pair slots are written. So several threads may store
++// different tokens of one plane at the same time (Note [Shared block save] in
++// model.hpp). The row is read with unaligned loads.
++template <size_t Rows, size_t Cols, bool Aligned, bool Dma>
++TRON(inline)
++void store_row(k_vnni_view<bf16, Rows, Cols> dst,
++    size_t token,
++    const_k_row_view<Cols, Aligned, Dma> src) noexcept {
++  bf16* const plane = detail::k_vnni_access::plane(dst);
++  const bf16* const row = src.data;
++  const __m512i offsets = k_vnni::detail::pair_row_offsets();
++  for (size_t s = 0; s < k_vnni::DIM_STEPS_4; ++s) {
++    const __m512i pairs = _mm512_loadu_si512(row + s * k_vnni::STEP_DIMS_32);
++    _mm512_i32scatter_epi32(k_vnni::detail::pair_base(plane, s, token), offsets, pairs,
++        k_vnni::DWORD_BYTES_4);
++  }
++}
++
++// Load one token's 128-dimension K row out of a packed plane (the inverse of
++// store_row). This takes 4 gathers of 16 dwords. The row is written with
++// unaligned stores.
++template <size_t Rows, size_t Cols, bool Aligned, bool Dma>
++TRON(inline)
++void load_row(k_vnni_view<const bf16, Rows, Cols> src,
++    size_t token,
++    k_row_view<Cols, Aligned, Dma> dst) noexcept {
++  const bf16* const plane = detail::k_vnni_access::plane(src);
++  bf16* const row = dst.data;
++  const __m512i offsets = k_vnni::detail::pair_row_offsets();
++  for (size_t s = 0; s < k_vnni::DIM_STEPS_4; ++s) {
++    const __m512i pairs = _mm512_i32gather_epi32(
++        offsets, k_vnni::detail::pair_base(plane, s, token), k_vnni::DWORD_BYTES_4);
++    _mm512_storeu_si512(row + s * k_vnni::STEP_DIMS_32, pairs);
++  }
++}
++
++// Store the K rows of up to 16 tokens of one token block c (tokens c * 16 + t
++// for the bits t set in `present`) into a packed plane with full-line stores.
++// For each of the 4 dimension steps, the 16 rows' 16 dimension pairs (one
++// 64-byte load per row) are transposed in registers into the panel's 16 pair
++// rows. Each pair row is then written as one 64-byte store (masked to the
++// present tokens' lanes when the block is partial). The absent tokens' slots
++// are not written. rows[t] points at the 128 bf16 of token t, one native row
++// in dimension order (not packed storage). It may be null for an absent
++// token. Compared with store_row per token, a full block issues 64 stores of
++// whole lines instead of 64 scatters, each writing 4 bytes into 16 lines
++// (every one of the block's 64 lines receives 16 partial writes). The same
++// 4 KiB is written. The write pattern differs.
++template <size_t Rows, size_t Cols>
++TRON(inline)
++void store_block(k_vnni_view<bf16, Rows, Cols> dst,
++    size_t c,
++    __mmask16 present,
++    const bf16* const rows[k_vnni::BLOCK_TOKENS_16]) noexcept {
++  bf16* const plane = detail::k_vnni_access::plane(dst);
++  for (size_t s = 0; s < k_vnni::DIM_STEPS_4; ++s) {
++    __m512i r[k_vnni::BLOCK_TOKENS_16];
++    for (size_t t = 0; t < k_vnni::BLOCK_TOKENS_16; ++t) {
++      r[t] = ((present >> t) & 1u)
++                 ? _mm512_loadu_si512(rows[t] + s * k_vnni::STEP_DIMS_32)
++                 : _mm512_setzero_si512();
++    }
++    k_vnni::detail::transpose_16x16_epi32(r);
++    bf16* panel = plane + (s * k_vnni::TOKEN_BLOCKS_4 + c) * k_vnni::PANEL_ELEMS_512;
++    if (present == k_vnni::FULL_BLOCK_0XFFFF) {
++      for (size_t dp = 0; dp < k_vnni::STEP_PAIRS_16; ++dp) {
++        _mm512_storeu_si512(panel + dp * k_vnni::ROW_ELEMS_32, r[dp]);
++      }
++    } else {
++      for (size_t dp = 0; dp < k_vnni::STEP_PAIRS_16; ++dp) {
++        _mm512_mask_storeu_epi32(panel + dp * k_vnni::ROW_ELEMS_32, present, r[dp]);
++      }
++    }
++  }
++}
++
++// Copy one token between packed K planes (or within one plane): the token's
++// row is gathered into a 64-byte-aligned local row (load_row) and scattered
++// into its destination column (store_row). Tokens own disjoint slots, so no
++// other token of the destination is touched.
++template <size_t Rows, size_t Cols>
++TRON(inline)
++void copy_token(k_vnni_view<bf16, Rows, Cols> dst,
++    size_t dst_token,
++    k_vnni_view<const bf16, Rows, Cols> src,
++    size_t src_token) noexcept {
++  alignas(64) bf16 row[Cols];
++  load_row(src, src_token, k_destination_row<Cols>(row));
++  store_row(dst, dst_token, k_source_row<Cols>(row));
++}
++
++// Note [Row-major tail block]
++// ~~~~~~~~~~~~~~~~~~~~~~~~~~~
++// A 16-token block of the plane holds the VNNI layout above only once all 16
++// of its K rows are saved. Until then the block holds its rows row-major:
++// token t of block c owns 256 contiguous bytes (its 128 bf16 values in
++// dimension order) at row_major_row(). Those bytes are the block's own 4
++// panels: panel (t / 4, c) holds the rows of tokens 4 (t / 4) .. 4 (t / 4) + 3,
++// 256 bytes each. So a row-major block and a VNNI block occupy the same 4 KiB,
++// and no other block is touched by either layout.
++// Why: in decode every step saves one token per user. The VNNI scatter of one
++// row writes 4 bytes into each of 64 lines; the row-major store writes 4 whole
++// lines. The readers of an incomplete block (the AVX-512 tail scoring through
++// the row-major dotter, and the FPGA staging gather) read 4 lines per token
++// instead of 64 as well. At the forward end of the pass that saved the 16th
++// row (or at once, when a whole-block save wrote the block), block_to_vnni()
++// transposes the block in place (4 KiB read, 4 KiB written), and the AMX
++// kernel reads the page as its B operand once every block of the page is
++// VNNI. Which layout a block holds is recorded per (page, slot) by the page
++// (its converted-block bit, Note [K VNNI storage] in kv_cache.hpp). The
++// operations here take the layout from the caller.
++
++// The token's row inside a row-major block, as a typed row view: Cols
++// contiguous bf16 in dimension order, on a 64-byte line, not DMA memory. The
++// caller knows from the page's state (page::k_vnni_blocks) that the block is
++// row-major; the view does not say so.
++template <typename T, size_t Rows, size_t Cols>
++TRON(nodiscard, inline, pure)
++auto row_major_row(k_vnni_view<T, Rows, Cols> plane, size_t token) noexcept {
++  using row_t =
++      std::conditional_t<std::is_const_v<T>, const_k_row_view<Cols>, k_row_view<Cols>>;
++  const size_t c = token / k_vnni::BLOCK_TOKENS_16, t = token % k_vnni::BLOCK_TOKENS_16;
++  return row_t{detail::k_vnni_access::plane(plane) +
++               ((t / k_vnni::PANEL_ROWS_4) * k_vnni::TOKEN_BLOCKS_4 + c) *
++                   k_vnni::PANEL_ELEMS_512 +
++               (t % k_vnni::PANEL_ROWS_4) * Cols};
++}
++
++// Store one token's row into its row-major block: 4 whole 64-byte lines, the
++// same lines the row-major layout's store writes.
++template <size_t Rows, size_t Cols, bool Aligned, bool Dma>
++TRON(inline)
++void store_row_major(k_vnni_view<bf16, Rows, Cols> dst,
++    size_t token,
++    const_k_row_view<Cols, Aligned, Dma> src) noexcept {
++  std::memcpy(row_major_row(dst, token).data, src.data, Cols * sizeof(bf16));
++}
++
++// Load one token's row out of its row-major block (the inverse of
++// store_row_major).
++template <size_t Rows, size_t Cols, bool Aligned, bool Dma>
++TRON(inline)
++void load_row_major(k_vnni_view<const bf16, Rows, Cols> src,
++    size_t token,
++    k_row_view<Cols, Aligned, Dma> dst) noexcept {
++  std::memcpy(dst.data, row_major_row(src, token).data, Cols * sizeof(bf16));
++}
++
++// Convert block c from row-major (Note [Row-major tail block]) to the VNNI
++// layout, in place. The 16 rows are copied to the stack first: store_block
++// writes panel (s, c) while the rows of tokens 4 s .. 4 s + 3 still live there.
++template <size_t Rows, size_t Cols>
++TRON(inline)
++void block_to_vnni(k_vnni_view<bf16, Rows, Cols> plane, size_t c) noexcept {
++  alignas(k_vnni::LINE_BYTES_64) bf16 rows[k_vnni::BLOCK_TOKENS_16][Cols];
++  const bf16* row_ptrs[k_vnni::BLOCK_TOKENS_16];
++  const k_vnni_view<const bf16, Rows, Cols> source = plane;
++  for (size_t t = 0; t < k_vnni::BLOCK_TOKENS_16; ++t) {
++    load_row_major(
++        source, c * k_vnni::BLOCK_TOKENS_16 + t, k_destination_row<Cols>(rows[t]));
++    row_ptrs[t] = rows[t];
++  }
++  store_block(plane, c, k_vnni::FULL_BLOCK_0XFFFF, row_ptrs);
++}
++
++// The inverse: block c from the VNNI layout back to row-major, in place.
++template <size_t Rows, size_t Cols>
++TRON(inline)
++void block_to_rows(k_vnni_view<bf16, Rows, Cols> plane, size_t c) noexcept {
++  alignas(k_vnni::LINE_BYTES_64) bf16 rows[k_vnni::BLOCK_TOKENS_16][Cols];
++  const k_vnni_view<const bf16, Rows, Cols> source = plane;
++  for (size_t t = 0; t < k_vnni::BLOCK_TOKENS_16; ++t) {
++    load_row(source, c * k_vnni::BLOCK_TOKENS_16 + t, k_destination_row<Cols>(rows[t]));
++  }
++  for (size_t t = 0; t < k_vnni::BLOCK_TOKENS_16; ++t) {
++    store_row_major(
++        plane, c * k_vnni::BLOCK_TOKENS_16 + t, k_source_row<Cols>(rows[t]));
++  }
++}
++
++}  // namespace tron

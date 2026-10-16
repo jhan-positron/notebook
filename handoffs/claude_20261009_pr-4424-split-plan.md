@@ -44,7 +44,7 @@ Answer whether the split is technically sound, propose the PRs and their merge o
 ## Timeline (2026-10-09, Pacific)
 
 - 16:39 The user set `/effort ultracode`. 16:40 The user pasted the question (split 4424 only if technically sound).
-- 16:40 to 16:46 Claude read 15 memory notes, fetched PR 4424 (head 0a5334ccb6, main a0056c1ecc), split the diff per file into the scratchpad, and extracted the stage patches (T-4737-merge.diff, S and A diffs) from the tested history.
+- 16:40 to 16:46 Claude read 15 memory notes, fetched PR 4424 (head 0a5334ccb6, main a0056c1ecc), split the diff per file into the scratchpad, and extracted the stage patches (T-4737-merge.diff, S and A diffs) from the tested history. (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/ref/T-4737-merge.diff)
 - 16:49 The analysis workflow started: 8 classifiers label every hunk by concern, refuters verify the seams, then 3 planners and a judge (27 agents in all).
 - 16:51 Worktree tron-split-probe created on branch jhan-split-probe at ba69cb513e.
 - 16:52 The probe workflow started (2 agents): subtract A and S from ba69cb513e, syntax-check, verify.
@@ -60,7 +60,7 @@ Answer whether the split is technically sound, propose the PRs and their merge o
 - 18:44 The user asked for split-handoff.md. 18:44 handoff-material/ was created and the scratchpad material copied in. 18:48 split-handoff.md written. 18:49 A check agent was launched.
 - 18:58 The check agent reported 13 fact rows and 43 English rows. The 38-cell logs and the refuter outputs were copied into handoff-material, matrix.sh was made portable. 19:01 and 19:04 split-handoff.md rewritten. 19:04 Report.
 - 20:58 The user asked how it was going. Report: all done, decisions D1 to D10 waiting.
-- 21:03 The user asked for a review of codex's split-handoff-review.md (12,572 bytes then). 21:04 to 21:06 Ten points verified. The matrix scripts were fixed to use the compiler exit status. ref/S-diff-4d3a..ba69.patch added. 21:07 split-handoff-update1.md written. 21:08 Report: all ten hold, D11 (build host) is new. split-handoff.md was not edited because the user had it open in vim.
+- 21:03 The user asked for a review of codex's split-handoff-review.md (12,572 bytes then). 21:04 to 21:06 Ten points verified. The matrix scripts were fixed to use the compiler exit status. ref/S-diff-4d3a..ba69.patch added. 21:07 split-handoff-update1.md written. 21:08 Report: all ten hold, D11 (build host) is new. split-handoff.md was not edited because the user had it open in vim. (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/ref/S-diff-4d3a..ba69.patch)
 - 21:14 The user asked for new-PRs.html. 21:19 gen_new_prs.py written, seven SVG figures rendered to PNG and checked as images. 21:20 Update 1 folded into split-handoff.md after the user closed vim. 21:22 Report.
 - 22:12 The user asked three questions about PR-1 (does the AVX-512 reader stay, why an option for K and none for V, which inherited items later PRs address). 22:13 Answered, and the PR-1 card of the page updated.
 - 22:19 to 22:23 Two short questions answered (was the handoff updated, what is the feedback draft).
@@ -105,31 +105,94 @@ The benefit numbers in new-PRs.html come from earlier campaigns, not from this s
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-plan-codex.md (11,386 bytes). codex's review of the plan. Read only.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-handoff.md (51,558 bytes). The executor's brief: decision sheet D1 to D11, context, inputs, the stack, the step-by-step plan, the checks (matrix, grep lists, delphi-3bda chain, claims), the body rules, reporting checkpoints, traps. Header records Update 1 and Update 2 folded in.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-handoff-review.md (3,918 bytes, last written 22:41). codex's review of the handoff, in its latest form. The session read the 12,572-byte first version at 21:04 and the 8,457-byte second version at 22:28.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-handoff-update1.md (17,539 bytes). The verdict on each codex point of both rounds.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-handoff-update1.md (17,539 bytes). The verdict on each codex point of both rounds. (preserved: artifacts/intel-amx/pr3879/split-4424/split-handoff-update1.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/create-PR1-handoff.md (36,108 bytes, 249 lines). The PR-1 executor's brief.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/new-PRs.html (57,939 bytes). The explainer page: glossary, figure 1 (the 3,918 added lines as seven blocks), four PR cards, figure 2 (lineage against PR 4424's history), figure 3 (dependency graph), figure 4 (size per PR), figures 5a to 5c (dumbbells of what each step buys), a stage table.
-  - generator: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/gen_new_prs.py (39,493 bytes)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/new-PRs.html (57,939 bytes). The explainer page: glossary, figure 1 (the 3,918 added lines as seven blocks), four PR cards, figure 2 (lineage against PR 4424's history), figure 3 (dependency graph), figure 4 (size per PR), figures 5a to 5c (dumbbells of what each step buys), a stage table. (preserved: artifacts/intel-amx/pr3879/split-4424/new-PRs.html)
+  - generator: /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/gen_new_prs.py (39,493 bytes) (preserved: artifacts/intel-amx/pr3879/split-4424/gen_new_prs.py)
   - input: the numbers embedded in gen_new_prs.py (hunk totals, probe tree sizes, the campaign percentages)
   - input built by: the analysis workflow (hunk totals), the probe workflow and the probe-pr2 agent (sizes), earlier campaign records cited in split-plan.md (percentages)
-  - sources: split-plan.md, split-handoff.md, handoff-material/hunk-classification.json, the memory notes in /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/
+  - sources: split-plan.md, split-handoff.md, handoff-material/hunk-classification.json, the memory notes in /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/hunk-classification.json)
   - regenerate: `cd /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424 && python3 -I gen_new_prs.py` (writes `<OUT>` = new-PRs.html next to the script and svg/*.svg)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/svg/ (14 files, 411,754 bytes): fig1-decomposition, fig2-lineage, fig3-deps, fig4-sizes, fig5-0, fig5-1, fig5-2 as .svg (written by gen_new_prs.py) and .png (rendered with cairosvg for inspection).
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/handoff-material/ (created in this session, later sessions added probe-pr3/ and probe-pr4/):
-  - ref/ (11 patches, 668,498 bytes): T-4737-merge.diff (106,402), A-diff.patch (32,609), B-preset.diff (1,348), PR1-diff-base..76a0.patch (136,931), PR2-diff-76a0..4d3a.patch (32,429), S-diff-76a0..3c56.patch (51,911), S-diff-4d3a..ba69.patch (53,105, the nine-file PR-3 patch added at 21:05), S-4774-fold.diff (17,243), S-orig-striping-0b54..804a.diff (45,842), L-orig-first-commit-0ec355b641.diff (80,326), P-typed-port-66c2..154d.diff (110,352).
-  - probe/ (scripts A_*.py, S_*.py, edit.py, lcheck-vnni.sh, matrix.sh 1,866 bytes made portable at 21:06, and out/ with the baseline and A-off-r1 matrix logs, 144,600 bytes).
-  - probe-pr2/ (5,915 bytes): repair.py, lcheck-vnni.sh, matrix.sh, out/pr2-r1 logs.
-  - pr1check/ (4,143 bytes): run.sh (1,765 bytes, the 38-cell checker, fixed at 21:06 to record exit status) and out/summary.txt (2,333 bytes).
+  - ref/ (11 patches, 668,498 bytes): T-4737-merge.diff (106,402), A-diff.patch (32,609), B-preset.diff (1,348), PR1-diff-base..76a0.patch (136,931), PR2-diff-76a0..4d3a.patch (32,429), S-diff-76a0..3c56.patch (51,911), S-diff-4d3a..ba69.patch (53,105, the nine-file PR-3 patch added at 21:05), S-4774-fold.diff (17,243), S-orig-striping-0b54..804a.diff (45,842), L-orig-first-commit-0ec355b641.diff (80,326), P-typed-port-66c2..154d.diff (110,352). (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/ref/A-diff.patch)
+  - probe/ (scripts A_*.py, S_*.py, edit.py, lcheck-vnni.sh, matrix.sh 1,866 bytes made portable at 21:06, and out/ with the baseline and A-off-r1 matrix logs, 144,600 bytes). (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/lcheck-vnni.sh)
+  - probe-pr2/ (5,915 bytes): repair.py, lcheck-vnni.sh, matrix.sh, out/pr2-r1 logs. (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr2/repair.py)
+  - pr1check/ (4,143 bytes): run.sh (1,765 bytes, the 38-cell checker, fixed at 21:06 to record exit status) and out/summary.txt (2,333 bytes). (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/pr1check/run.sh)
   - refute1/ (55,881 bytes) and refuter2/ (73,813 bytes): the refuters' matrix outputs.
-  - diff/ (29 per-file diffs of PR 4424 plus full.diff, 534,381 bytes).
+  - diff/ (29 per-file diffs of PR 4424 plus full.diff, 534,381 bytes). (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/diff/full.diff)
   - hunk-classification.json (292,818 bytes). The analysis workflow's classification.
-  - pr4424-body-20261009.md (37,778 bytes). The PR 4424 body as fetched.
+  - pr4424-body-20261009.md (37,778 bytes). The PR 4424 body as fetched. (preserved: artifacts/intel-amx/pr3879/split-4424/handoff-material/pr4424-body-20261009.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/split-4424-plan.md (10,814 bytes). Memory note, created 17:24 and extended through 23:05 (status, codex rounds, decisions, the PR-1 handoff).
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md (24,491 bytes). One index line added.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8147fd4d-377d-40bd-ae3a-3103383074b7/workflows/scripts/split-4424-analysis-wf_b3743267-d3e.js (23,453 bytes). The classify, verify and plan workflow.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8147fd4d-377d-40bd-ae3a-3103383074b7/workflows/scripts/split-4424-probe-wf_71e43fda-5f0.js (12,465 bytes). The feasibility probe workflow.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8147fd4d-377d-40bd-ae3a-3103383074b7/scratchpad/ (scratch, may be cleaned up): draft-static.md (1,889 bytes), update1-draft.md (18,294), appended-u1.md (18,294), update1-addendum.md (6,595), update2.md (4,301), issue-ci-vnni.md (3,864, the issue body), pr4424-body.md (37,778), wf1-partial.json (292,818), and the directories diff/, ref/, probe/, probe-pr2/, probe-verify/, pr1check/, pr1tree/, refute1/, refuter2/, verifyT/, classify/, count/, tests/.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8147fd4d-377d-40bd-ae3a-3103383074b7/workflows/scripts/split-4424-analysis-wf_b3743267-d3e.js (23,453 bytes). The classify, verify and plan workflow. (preserved: artifacts/intel-amx/exec/workflows/split-4424-analysis-wf_b3743267-d3e.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/split-4424-analysis-wf_b3743267-d3e.js)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8147fd4d-377d-40bd-ae3a-3103383074b7/workflows/scripts/split-4424-probe-wf_71e43fda-5f0.js (12,465 bytes). The feasibility probe workflow. (preserved: artifacts/intel-amx/exec/workflows/split-4424-probe-wf_71e43fda-5f0.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/split-4424-probe-wf_71e43fda-5f0.js)
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8147fd4d-377d-40bd-ae3a-3103383074b7/scratchpad/ (scratch, may be cleaned up): draft-static.md (1,889 bytes), update1-draft.md (18,294), appended-u1.md (18,294), update1-addendum.md (6,595), update2.md (4,301), issue-ci-vnni.md (3,864, the issue body), pr4424-body.md (37,778), wf1-partial.json (292,818), and the directories diff/, ref/, probe/, probe-pr2/, probe-verify/, pr1check/, pr1tree/, refute1/, refuter2/, verifyT/, classify/, count/, tests/. (preserved: artifacts/intel-amx/exec/scratch-relocated/8147fd4d/draft-static.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/8147fd4d/draft-static.md)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8147fd4d-377d-40bd-ae3a-3103383074b7/tasks/wkp9hzxit.output (47,171 bytes) and wpz3hhww2.output (620,453 bytes). Raw outputs of the probe and analysis workflows.
 - Code: worktree claude-agentsrv:/home/jhan/workspace/ai-runs/tron-split-probe on branch jhan-split-probe-pr2 at 4d3a042225. Local commits, never pushed: 76a0160b72 and 3c56db9a95 on jhan-split-probe, 4d3a042225 on jhan-split-probe-pr2 (verified with `git log` on 2026-10-16). PR read: https://github.com/positron-ai/tron/pull/4424. Issue created: https://github.com/positron-ai/tron/issues/4865.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/scratch-relocated/8147fd4d/` (6 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/diff/` (28 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/pr1check/out/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/` (2 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe-pr2/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/A-off-r1/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/S-off-r1/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/baseline/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-fwdtest/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-m2/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-m3/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-m3b/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-m4/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-q15/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-q16/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-q17/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-q18/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-q19/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-q20/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-r1/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-r2/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/ctrl-nouvx-r3/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/i4934-baseline/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/i4934-c7/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/i4934-head/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr1/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr1b/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr2/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr2-m2/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr2-r1/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr2b/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr3-m3/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr3-m3b/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr3-r1/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr3-r2/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr3-r3/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr3probe/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-fwdtest/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-m4/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-q15/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-q16/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-q17/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-q18/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-q19/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-q20/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-r1/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-r2/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4-r3/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4lazy/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/pr4probe/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/rebased/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/probe/out/rebased2/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/ref/` (8 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/refute1/out/stacked/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/refute1/out/strict/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/refuter2/out/L1gate/` (2 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/refuter2/out/laNoR/` (2 files)
+- `artifacts/intel-amx/pr3879/split-4424/handoff-material/refuter2/out/laTree/` (2 files)
+- `artifacts/intel-amx/pr3879/split-4424/svg/` (7 files)
 
 ## Current state
 
