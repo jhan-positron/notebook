@@ -91,17 +91,26 @@ Other verified counts: the four old and new PR diffs at 14:30 were byte-identica
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/newprs-20261015/ (1,387,896 bytes in all). The record of the re-opening: live/ (the four old bodies, 4868.md 19,142 bytes, 4887.md 13,896, 4898.md 12,761, 4901.md 14,277), new/ (16 files: <n>.md the renumbered bodies posted at 14:30, <n>-v2.md the bodies with the new heads posted at 16:00, <n>-live-before.md and <n>-live-after.md the fetched live bodies), diffs/ (12 files: <old>.diff and <new>.diff at 14:30, <new>-merged.diff at 16:00), issue-4444-body.md (6,469), issue-4444-c6158706248.md and -new.md (4,827 each), issue-4934-body.md and -new.md (8,225 each), issue-4955-body.md and -new.md (3,072 each), new-urls.txt (184).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/merge-20261015/ (8,267 bytes in all): msg-pr1-merge.txt (486), msg-pr2-merge.txt (994), msg-pr3-merge.txt (853), msg-pr4-merge.txt (1,057), the four commit messages, each ending with the Co-Authored-By trailer. Also matrix-m1.log (2,383) and pr1check-out-m1/ (40 files, summary.txt 2,333 bytes, the PR 1 38-cell result).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/newprs-20261015/ (1,387,896 bytes in all). The record of the re-opening: live/ (the four old bodies, 4868.md 19,142 bytes, 4887.md 13,896, 4898.md 12,761, 4901.md 14,277), new/ (16 files: <n>.md the renumbered bodies posted at 14:30, <n>-v2.md the bodies with the new heads posted at 16:00, <n>-live-before.md and <n>-live-after.md the fetched live bodies), diffs/ (12 files: <old>.diff and <new>.diff at 14:30, <new>-merged.diff at 16:00), issue-4444-body.md (6,469), issue-4444-c6158706248.md and -new.md (4,827 each), issue-4934-body.md and -new.md (8,225 each), issue-4955-body.md and -new.md (3,072 each), new-urls.txt (184). (preserved: artifacts/intel-amx/pr3879/split-4424/exec/newprs-20261015/live/4868.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/merge-20261015/ (8,267 bytes in all): msg-pr1-merge.txt (486), msg-pr2-merge.txt (994), msg-pr3-merge.txt (853), msg-pr4-merge.txt (1,057), the four commit messages, each ending with the Co-Authored-By trailer. Also matrix-m1.log (2,383) and pr1check-out-m1/ (40 files, summary.txt 2,333 bytes, the PR 1 38-cell result). (preserved: artifacts/intel-amx/exec/merge-20261015/msg-pr1-merge.txt)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/step4-m2.out (1,096 bytes), /home/jhan/workspace/intel-AMX/exec/pr3-20261012/step4-m3.out (921), step4-m3b.out (921), /home/jhan/workspace/intel-AMX/exec/pr4-20261012/step4-m4.out (1,280). The check-script verdict lines.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/handoff-material/probe/out/ctrl-nouvx-m2, ctrl-nouvx-m3, ctrl-nouvx-m3b, ctrl-nouvx-m4 (directories). Negative-control matrix outputs written by step4.sh.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md (270,899 bytes). Two sections appended: "The four stack PRs re-opened with fresh conversations" (line 1060) and "Conflicts resolved by merges, bodies updated to the new heads, issues renumbered" (line 1087).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/stack-reopened-20261015.md (1,894 bytes). Memory note with the number mapping, the merge commits and the renumbered issues.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/stack-reopened-20261015.md (1,894 bytes). Memory note with the number mapping, the merge commits and the renumbered issues. (preserved: artifacts/intel-amx/memory/split-4424/stack-reopened-20261015.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md (10,006 bytes). Index line added.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/652aa784-b86c-4101-bdd6-30ef61db97cf/workflows/scripts/verify-renumbered-pr-bodies-wf_6b47c437-eea.js (3,854 bytes). The body-review workflow.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/652aa784-b86c-4101-bdd6-30ef61db97cf/workflows/scripts/verify-renumbered-pr-bodies-wf_6b47c437-eea.js (3,854 bytes). The body-review workflow. (preserved: artifacts/intel-amx/exec/workflows/verify-renumbered-pr-bodies-wf_6b47c437-eea.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/verify-renumbered-pr-bodies-wf_6b47c437-eea.js)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/652aa784-b86c-4101-bdd6-30ef61db97cf/tasks/w392a7zef.output (12,042 bytes). The workflow result. bshkv40g5.output (691 bytes), the m3b re-run verdict.
 - claude-agentsrv:/tmp/mt-pr1.txt (32 bytes) and /tmp/cf-pr1.log (0 bytes). Scratch from the failed merge-tree call and the PR 1 clang-format run.
 - Code, all pushed to origin: a5697f86d3 tron jhan-vnnik-1-layout, 26b86a279a tron jhan-vnnik-2-amx, b39765ec29 tron jhan-vnnik-3-shared-save, 6b081187e1 tron jhan-vnnik-4-tail-block. Worktrees /home/jhan/workspace/ai-runs/tron-split-pr1 to -pr4 are at those commits (verified with `git log` on 2026-10-16). GitHub: PRs 4956 to 4959 opened, 4868, 4887, 4898, 4901 closed with a superseded comment, issues 4934 and 4955 edited, issue 4444 comment 6158706248 edited.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/merge-20261015/` (4 files)
+- `artifacts/intel-amx/exec/merge-20261015/pr1check-out-m1/` (1 files)
+- `artifacts/intel-amx/pr3879/split-4424/exec/newprs-20261015/` (8 files)
+- `artifacts/intel-amx/pr3879/split-4424/exec/newprs-20261015/diffs/` (12 files)
+- `artifacts/intel-amx/pr3879/split-4424/exec/newprs-20261015/live/` (3 files)
+- `artifacts/intel-amx/pr3879/split-4424/exec/newprs-20261015/new/` (16 files)
 
 ## Current state
 
