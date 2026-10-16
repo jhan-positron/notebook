@@ -99,23 +99,31 @@ Word counts of the posted bodies: PR 4887 1,562 (from 1,700), PR 4898 1,663 afte
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-amx-off-vs-main-20261014.html (17,841 bytes). Chart page of the campaign: per cell a decode panel and a prefill panel, four dots per panel with values, the PR 4 versus main band shaded, exact-number tables, the three-run history of the PR 4 versus PR 3 pair, a Words list, and the issue 4934 reference.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-amx-off-vs-main-20261014.html (17,841 bytes). Chart page of the campaign: per cell a decode panel and a prefill panel, four dots per panel with values, the PR 4 versus main band shaded, exact-number tables, the three-run history of the PR 4 versus PR 3 pair, a Words list, and the issue 4934 reference. (preserved: artifacts/intel-amx/pr3879/split-4424/pr4-amx-off-vs-main-20261014.html)
   - generator: none (hand-written HTML with the numbers as inline constants)
   - input: /home/jhan/workspace/intel-AMX/exec/results/pr4off-E-cpu/summary.md
   - input built by: exec/pr4-20261012/probe-off.sh on delphi-3bda (campaign pr4off-20261014) and the campaign's summarize.py
   - sources: the 36 runtron runs recorded in /home/jhan/workspace/intel-AMX/exec/results/pr4off-E-cpu/rt-results.txt
   - regenerate: unavailable (hand-written; edit the T constants in the file from summary.md)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/probe-off.sh (6,517 bytes). The campaign script (runs on delphi-3bda, detached). launch-off.sh (938 bytes) starts it with START_NOT_BEFORE and END_BY.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4off-E-cpu/: summary.md (4,465 bytes, the tables above), summary.json (26,470), rt-results.txt (132,117, the run log), summary.err (0), rt/ (per-run outputs). delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4off-20261014/: steps.txt (465), probe.done (5). delphi-3bda:/home/jhan/workspace/intel-AMX/exec/logs/pr4off-20261014-probe.log (3,472).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/: pr-body-v5.md (16,505 bytes), pr-body-v6.md (16,304), pr-body-v7.md (15,856, the body posted at 11:56), pr-body-v8-jhan-edited.md (13,954, the user's hand-edited body saved at 13:55).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/probe-off.sh (6,517 bytes). The campaign script (runs on delphi-3bda, detached). launch-off.sh (938 bytes) starts it with START_NOT_BEFORE and END_BY. (preserved: artifacts/intel-amx/exec/pr4-20261012/probe-off.sh)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4off-E-cpu/: summary.md (4,465 bytes, the tables above), summary.json (26,470), rt-results.txt (132,117, the run log), summary.err (0), rt/ (per-run outputs). delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4off-20261014/: steps.txt (465), probe.done (5). delphi-3bda:/home/jhan/workspace/intel-AMX/exec/logs/pr4off-20261014-probe.log (3,472). (preserved: artifacts/intel-amx/exec/results/pr4off-20261014/steps.txt)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr2-20261011/: pr-body-v5.md (16,505 bytes), pr-body-v6.md (16,304), pr-body-v7.md (15,856, the body posted at 11:56), pr-body-v8-jhan-edited.md (13,954, the user's hand-edited body saved at 13:55). (preserved: artifacts/intel-amx/exec/pr2-20261011/pr-body-v5.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr3-20261012/: pr-body-v5-jhan-edited.md (13,249), pr-body-v6.md (13,045, posted 12:24), pr-body-v7.md (12,761, posted 13:55).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/: pr-body-v5-jhan-edited.md (14,548), pr-body-v6.md (14,120, posted 13:55), pr-body-v7.md (14,808, posted 15:53), pr-body-v8.md (14,057, posted 16:38).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/issue-pr4off-decode/body-20261014.md (8,224 bytes, the issue 4934 body) and issue-url.txt (48 bytes).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/: pr-body-v5-jhan-edited.md (14,548), pr-body-v6.md (14,120, posted 13:55), pr-body-v7.md (14,808, posted 15:53), pr-body-v8.md (14,057, posted 16:38). (preserved: artifacts/intel-amx/exec/pr4-20261012/pr-body-v8.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/issue-pr4off-decode/body-20261014.md (8,224 bytes, the issue 4934 body) and issue-url.txt (48 bytes). (preserved: artifacts/intel-amx/pr3879/split-4424/issue-pr4off-decode/body-20261014.md)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md (270,899 bytes). Six sections appended in this session (11:53, 11:57, 12:25, 13:56, 14:45, 15:54, 16:39). Later sessions appended more.
 - Memory (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/): pr2-split-execution.md (6,663 bytes), pr3-split-execution.md (5,959), pr4-split-execution.md (25,221), MEMORY.md (10,006). UPDATE paragraphs appended at 11:53, 11:57, 12:25, 13:56, 14:45, 15:54 and the index line edited at 14:46. Later sessions modified these files again.
-- Session scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/378572a8-0384-47c8-aada-262372b4b8ca/scratchpad/ (45 files plus a chrome-profile folder, may be cleaned up): the make_v5/v6/v7, make_4898_v6, make_4901_v6 edit scripts, the patch-*.json payloads, the re-fetched live bodies before and after each post (pr4887-live-*.md, pr4898-*.md, pr4901-*.md), issue4444.md (11,510), pr4424-body.md (37,777), read_pr4off.sh (933), page.png, page-top.png, page-top2.png, page-phone.png (renders of the chart page), page-script.js.
+- Session scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/378572a8-0384-47c8-aada-262372b4b8ca/scratchpad/ (45 files plus a chrome-profile folder, may be cleaned up): the make_v5/v6/v7, make_4898_v6, make_4901_v6 edit scripts, the patch-*.json payloads, the re-fetched live bodies before and after each post (pr4887-live-*.md, pr4898-*.md, pr4901-*.md), issue4444.md (11,510), pr4424-body.md (37,777), read_pr4off.sh (933), page.png, page-top.png, page-top2.png, page-phone.png (renders of the chart page), page-script.js. (preserved: artifacts/intel-amx/exec/scratch-relocated/378572a8/issue4444.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/378572a8/issue4444.md)
 - Task output claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/f0fb48e7-5749-4983-870b-ce4ee0ace8fa/tasks/bhds34gq2.output (1,418 bytes, the campaign waiter).
 - GitHub writes: PR 4887 body v5, v6, v7; PR 4898 body v6, v7; PR 4901 body v6, v7, v8; issue 4934 created. No code commits. The probe commit ca6456b7dc (deferred dotter) predates this session.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr2-20261011/` (3 files)
+- `artifacts/intel-amx/exec/pr3-20261012/` (3 files)
+- `artifacts/intel-amx/exec/pr4-20261012/` (4 files)
+- `artifacts/intel-amx/exec/scratch-relocated/378572a8/` (3 files)
+- `artifacts/intel-amx/pr3879/split-4424/issue-pr4off-decode/` (1 files)
 
 ## Current state
 
