@@ -85,10 +85,10 @@ Evidence:
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/3bda-platformd-sst-dev-build-2026-10-07.md (3,027 bytes). New memory note: who, when, the install command, the build and PR, the Oct 8 SST change, how to recognise John Mark's work, and "do not uninstall his build without asking him".
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/3bda-platformd-sst-dev-build-2026-10-07.md (3,027 bytes). New memory note: who, when, the install command, the build and PR, the Oct 8 SST change, how to recognise John Mark's work, and "do not uninstall his build without asking him". (preserved: artifacts/tron/memory/3bda-platformd-sst-dev-build-2026-10-07.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/ci-amx-regression-20261009.md (3,277 bytes). One UPDATE paragraph appended: the SST core-power enable at 2026-10-08 21:56 UTC is a candidate cause of the TTFT shift.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/MEMORY.md (4,408 bytes). One index line added.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/982baa5f-31cf-4307-a70b-df9c23ede8c8/scratchpad/sst_compare.py (3,154 bytes). The script that compared the Oct 7 and Oct 8 SST captures on delphi-3bda with the September policy (scratch, may be cleaned up).
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/982baa5f-31cf-4307-a70b-df9c23ede8c8/scratchpad/sst_compare.py (3,154 bytes). The script that compared the Oct 7 and Oct 8 SST captures on delphi-3bda with the September policy (scratch, may be cleaned up). (preserved: artifacts/intel-amx/exec/scratch-relocated/982baa5f/sst_compare.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/982baa5f/sst_compare.py)
 - Read only on delphi-3bda, not created by the session: /tmp/platformd-sst-validation-20261007T183541Z/ and /tmp/platformd-sst-core-power-20261008/ (John Mark's capture directories).
 - No commits. No workflow scripts.
 
