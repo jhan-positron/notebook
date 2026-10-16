@@ -1,0 +1,6 @@
+Description updated at 82d05e94be (the edit is visible in the description's history):
+
+- CI coverage: the paragraph now distinguishes what required CI runs (the first three `t_k_vnni_layout` cases exercise the packed owner, the row operations and the reader in every build; only the cache case depends on the option; `t_amx_dispatch_dtype` without dispatch is a `SUCCEED` placeholder) from what it misses (the option-dependent cache and model paths). The exception and #4865 stay.
+- The next PR's effect is stated as the intended result, to be measured at that PR's head.
+- The cause of the loss against `main` is stated with the decomposition that supports it: `baseoff - base` (main's AMX kernel) plus `newoff - baseoff` (the layout, the reader and the row store with AMX off) equals `new - base` within `new - newoff`, which is inside the band in both cells.
+- The plain-English proposal is adopted as the base of the description, with these differences: the Short version keeps the specifics of what is stored, who reads it and the state of the option; the decision rule of the earlier "resolved" pass pairs is given (paired t at least 2.26 in magnitude and a difference of at least 1 %) instead of "insufficient data"; the review-fix items are added to The changes; the Verification numbers are those of the re-run at 82d05e94be.

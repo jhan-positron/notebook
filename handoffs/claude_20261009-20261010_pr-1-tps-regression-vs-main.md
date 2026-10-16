@@ -62,7 +62,7 @@ Three requests from the user, in order:
 - 23:18 to 23:21 First 22-cell syntax matrix passed. One diagram line in amx_attn_iface.hpp was 100 columns (limit 88). The branch was rebuilt from a deterministic script, exec/pr1-20261010/build-branch.sh, with the line folded into the kernels commit. Head a711aeee83.
 - 23:21 Second 22-cell matrix passed. Both negative controls behaved (a bad file counted, a missing launcher gave MATRIX FAILED). The 38-cell variant passed. clang-format and `git diff --check` clean.
 - 23:26 chain.sh written. 23:27 Launched on delphi-3bda with COMMIT=a711aeee83. It waited for the lease.
-- 23:28 to 23:31 wait-chain.sh poller started. PR body draft written with placeholders.
+- 23:28 to 23:31 wait-chain.sh poller started. PR body draft written with placeholders. (preserved: artifacts/intel-amx/exec/pr1-20261010/wait-chain.sh)
 - 23:32 Memory note pr1-split-execution.md written. Step-4 checkpoint reported to the user.
 
 2026-10-10:
@@ -179,36 +179,36 @@ Code:
 Plan execution records (claude-agentsrv, workspace NFS):
 
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md (270,899 bytes today). Status record of every step, result line and decision. Created by this session, extended by later sessions.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/build-branch.sh (6,068 bytes). Deterministic rebuild of the branch from the probe tree.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/chain.sh (12,962 bytes), launch.sh (308 bytes), wait-chain.sh (1,232 bytes). Chain 1.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/chain2.sh (15,844 bytes), launch2.sh (310 bytes), wait-chain2.sh (1,236 bytes). Chain 2 with the mutation step.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/chain3.sh (12,872 bytes), launch3.sh (310 bytes), wait-chain3.sh (1,236 bytes). Chain 3, whole-machine steps with the our-half results reused.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/build-branch.sh (6,068 bytes). Deterministic rebuild of the branch from the probe tree. (preserved: artifacts/intel-amx/exec/pr1-20261010/build-branch.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/chain.sh (12,962 bytes), launch.sh (308 bytes), wait-chain.sh (1,232 bytes). Chain 1. (preserved: artifacts/intel-amx/exec/pr1-20261010/chain.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/chain2.sh (15,844 bytes), launch2.sh (310 bytes), wait-chain2.sh (1,236 bytes). Chain 2 with the mutation step. (preserved: artifacts/intel-amx/exec/pr1-20261010/chain2.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/chain3.sh (12,872 bytes), launch3.sh (310 bytes), wait-chain3.sh (1,236 bytes). Chain 3, whole-machine steps with the our-half results reused. (preserved: artifacts/intel-amx/exec/pr1-20261010/chain3.sh)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/msgs/ (8 files, 6,320 bytes) and msgs2/ (4 files, 2,340 bytes). Commit messages.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/matrix-pr1.log (1,310 bytes), matrix-pr1b.log (1,310 bytes), control-a.log (388 bytes), control-b.log (3,488 bytes), pr1check-38.log (2,395 bytes), pr1check-38b.log (2,395 bytes), pr1check-out/ (2,486 bytes), pr1check-out-b/ (2,486 bytes), lcheck-phase1/ (empty). Syntax matrix logs and the two negative controls.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/pr-body-v1.md (31,710 bytes). The body as first published at 08:02.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/pr-body-v2.md (43,495 bytes) and pr-body.md (43,495 bytes). The plain-English rewrite published at 11:12. Report page with measured numbers.
-  - generator: none (hand-written, numbers inserted by /home/jhan/workspace/intel-AMX/exec/pr1-20261010/fill-body.py)
-  - input: /home/jhan/workspace/intel-AMX/exec/results/pr1b-20261010/ and /home/jhan/workspace/intel-AMX/exec/results/pr1b-E-cpu/summary.md
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/matrix-pr1.log (1,310 bytes), matrix-pr1b.log (1,310 bytes), control-a.log (388 bytes), control-b.log (3,488 bytes), pr1check-38.log (2,395 bytes), pr1check-38b.log (2,395 bytes), pr1check-out/ (2,486 bytes), pr1check-out-b/ (2,486 bytes), lcheck-phase1/ (empty). Syntax matrix logs and the two negative controls. (preserved: artifacts/intel-amx/exec/pr1-20261010/matrix-pr1.log)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/pr-body-v1.md (31,710 bytes). The body as first published at 08:02. (preserved: artifacts/intel-amx/exec/pr1-20261010/pr-body-v1.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/pr-body-v2.md (43,495 bytes) and pr-body.md (43,495 bytes). The plain-English rewrite published at 11:12. Report page with measured numbers. (preserved: artifacts/intel-amx/exec/pr1-20261010/pr-body-v2.md)
+  - generator: none (hand-written, numbers inserted by /home/jhan/workspace/intel-AMX/exec/pr1-20261010/fill-body.py) (preserved: artifacts/intel-amx/exec/pr1-20261010/fill-body.py)
+  - input: /home/jhan/workspace/intel-AMX/exec/results/pr1b-20261010/ and /home/jhan/workspace/intel-AMX/exec/results/pr1b-E-cpu/summary.md (preserved: artifacts/intel-amx/exec/results/pr1b-E-cpu/summary.md)
   - input built by: chain2.sh and chain3.sh on delphi-3bda
   - sources: runtron binaries in /var/tmp/jhan/tron-pr1 (82d05e94be) and the main binary (72308ec90c) on delphi-3bda
   - regenerate: unavailable (fill-body.py replaces placeholders that the published file no longer holds)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/fill-body.py (11,111 bytes). Placeholder filler for the body.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/replies.md (4,934 bytes) and replies/ (6 files, 4,404 bytes). The five thread replies and the PR comment as posted.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/ci-checks-4868.log (64,459 bytes), ci-checks-4868-b.log (52,929 bytes). The two `gh pr checks --watch` logs.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/replies.md (4,934 bytes) and replies/ (6 files, 4,404 bytes). The five thread replies and the PR comment as posted. (preserved: artifacts/intel-amx/exec/pr1-20261010/replies.md)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr1-20261010/ci-checks-4868.log (64,459 bytes), ci-checks-4868-b.log (52,929 bytes). The two `gh pr checks --watch` logs. (preserved: artifacts/intel-amx/exec/pr1-20261010/ci-checks-4868.log)
 
 Results written on delphi-3bda (same NFS paths):
 
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr1-20261010/ (919,608 bytes). Chain 1: builds, tests, format check, smokes, host suite, steps.txt (3,599 bytes).
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr1-E-cpu/summary.md (3,074 bytes). Chain 1 cells. Directory 1,224,042 bytes.
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr1-E-cpu/summary.md (3,074 bytes). Chain 1 cells. Directory 1,224,042 bytes. (preserved: artifacts/intel-amx/exec/results/pr1-E-cpu/summary.md)
   - generator: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py
-  - input: /home/jhan/workspace/intel-AMX/exec/results/pr1-E-cpu/rt-results.txt and rt/*.log
+  - input: /home/jhan/workspace/intel-AMX/exec/results/pr1-E-cpu/rt-results.txt and rt/*.log (preserved: artifacts/intel-amx/exec/results/pr1-E-cpu/rt-results.txt)
   - input built by: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/campaign.sh, called from chain.sh step E
   - sources: runtron at a711aeee83 and the main binary at 72308ec90c in /var/tmp/jhan/tron-pr1 on delphi-3bda
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py /home/jhan/workspace/intel-AMX/exec/results/pr1-E-cpu > <OUT>`
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr1b-20261010/ (906,961 bytes). Chains 2 and 3: builds, tests, mutation-*.txt, smokes, host suite, steps.txt (4,118 bytes).
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr1b-E-cpu/summary.md (3,071 bytes). Chain 3 cells. Directory 1,222,321 bytes.
   - generator: same summarize.py
-  - input: /home/jhan/workspace/intel-AMX/exec/results/pr1b-E-cpu/rt-results.txt and rt/*.log
+  - input: /home/jhan/workspace/intel-AMX/exec/results/pr1b-E-cpu/rt-results.txt and rt/*.log (preserved: artifacts/intel-amx/exec/results/pr1b-E-cpu/rt-results.txt)
   - input built by: campaign.sh, called from chain3.sh step E
   - sources: runtron at 82d05e94be and the main binary at 72308ec90c on delphi-3bda
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py /home/jhan/workspace/intel-AMX/exec/results/pr1b-E-cpu > <OUT>`
@@ -216,19 +216,41 @@ Results written on delphi-3bda (same NFS paths):
 
 Memory and workflows:
 
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr1-split-execution.md (8,105 bytes today). Project note: branch, heads, chain, PR, decisions. Created by this session, updated later.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md (10,006 bytes today). Index, created by this session.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8fea3a6f-7ad9-451b-8c8e-0abdf5692000/workflows/scripts/pr1-tps-loss-why-wf_b00598b7-9a4.js (6,371 bytes), pr1-review-fix-check-wf_5e529f55-b1c.js (5,677 bytes), pr1-body-v2-check-wf_daa456c5-21a.js (6,133 bytes). The three workflow scripts.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr1-split-execution.md (8,105 bytes today). Project note: branch, heads, chain, PR, decisions. Created by this session, updated later. (preserved: artifacts/intel-amx/memory/split-4424/pr1-split-execution.md)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md (10,006 bytes today). Index, created by this session. (preserved: artifacts/intel-amx/memory/split-4424/MEMORY.md)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8fea3a6f-7ad9-451b-8c8e-0abdf5692000/workflows/scripts/pr1-tps-loss-why-wf_b00598b7-9a4.js (6,371 bytes), pr1-review-fix-check-wf_5e529f55-b1c.js (5,677 bytes), pr1-body-v2-check-wf_daa456c5-21a.js (6,133 bytes). The three workflow scripts. (preserved: artifacts/intel-amx/exec/pr1-20261010/pr1-tps-loss-why-wf_b00598b7-9a4.js, relocated to /home/jhan/workspace/intel-AMX/exec/pr1-20261010/pr1-tps-loss-why-wf_b00598b7-9a4.js)
 
 Scratchpad (claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/8fea3a6f-7ad9-451b-8c8e-0abdf5692000/, may be cleaned up):
 
 - scratchpad/msgs/ (8 files, 10,406 bytes). First copies of the commit messages.
-- scratchpad/pr4424-body-live.md (37,778 bytes). PR 4424 body as read.
-- scratchpad/pr4868-body-live.md, -live2.md, -live3.md (31,711 bytes each), pr4868-body-after.md (43,496 bytes). PR 4868 body before and after the rewrite.
-- scratchpad/pe-proposal.md (37,692 bytes), pe-findings.md (34,847 bytes). The plain-English check and corrected description posted as issue comments by the user's checker.
-- scratchpad/pr1.diff (141,787 bytes), main_self_attention.hpp (104,125 bytes), main_page.hpp (69 bytes), decomp.py (2,652 bytes), scatter.py (923 bytes), t_proxy_lib.head (485 bytes), allow.txt (557,173 bytes). Working files of the TPS and review analyses.
+- scratchpad/pr4424-body-live.md (37,778 bytes). PR 4424 body as read. (preserved: artifacts/intel-amx/exec/scratch-relocated/8fea3a6f/pr4424-body-live.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/8fea3a6f/pr4424-body-live.md)
+- scratchpad/pr4868-body-live.md, -live2.md, -live3.md (31,711 bytes each), pr4868-body-after.md (43,496 bytes). PR 4868 body before and after the rewrite. (preserved: artifacts/intel-amx/exec/scratch-relocated/8fea3a6f/pr4868-body-live.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/8fea3a6f/pr4868-body-live.md)
+- scratchpad/pe-proposal.md (37,692 bytes), pe-findings.md (34,847 bytes). The plain-English check and corrected description posted as issue comments by the user's checker. (preserved: artifacts/intel-amx/exec/scratch-relocated/8fea3a6f/pe-proposal.md, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/8fea3a6f/pe-proposal.md)
+- scratchpad/pr1.diff (141,787 bytes), main_self_attention.hpp (104,125 bytes), main_page.hpp (69 bytes), decomp.py (2,652 bytes), scatter.py (923 bytes), t_proxy_lib.head (485 bytes), allow.txt (557,173 bytes). Working files of the TPS and review analyses. (preserved: artifacts/intel-amx/exec/scratch-relocated/8fea3a6f/pr1.diff, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/8fea3a6f/pr1.diff)
 - tasks/bcgiah9km.output (3,693 bytes), bju9l00rc.output (3,711 bytes), btnvn17a4.output (4,214 bytes). The three chain pollers' outputs.
 - tasks/wqu13pjv9.output (61,216 bytes), wl37nw6gk.output (40,916 bytes), w9m6v99mw.output (81,593 bytes). The three workflow results.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr1-20261010/` (14 files)
+- `artifacts/intel-amx/exec/pr1-20261010/msgs/` (8 files)
+- `artifacts/intel-amx/exec/pr1-20261010/msgs2/` (4 files)
+- `artifacts/intel-amx/exec/pr1-20261010/pr1check-out/` (2 files)
+- `artifacts/intel-amx/exec/pr1-20261010/pr1check-out-b/` (2 files)
+- `artifacts/intel-amx/exec/pr1-20261010/replies/` (6 files)
+- `artifacts/intel-amx/exec/results/pr1-20261010/` (12 files)
+- `artifacts/intel-amx/exec/results/pr1-20261010/smoke/cpu-p1024/` (1 files)
+- `artifacts/intel-amx/exec/results/pr1-20261010/smoke/cpu-p8192/` (1 files)
+- `artifacts/intel-amx/exec/results/pr1-20261010/smoke/fpga-p1024/` (1 files)
+- `artifacts/intel-amx/exec/results/pr1-E-cpu/` (1 files)
+- `artifacts/intel-amx/exec/results/pr1-E-cpu/rt/` (24 files)
+- `artifacts/intel-amx/exec/results/pr1b-20261010/` (14 files)
+- `artifacts/intel-amx/exec/results/pr1b-20261010/smoke/cpu-p1024/` (1 files)
+- `artifacts/intel-amx/exec/results/pr1b-20261010/smoke/cpu-p8192/` (1 files)
+- `artifacts/intel-amx/exec/results/pr1b-20261010/smoke/fpga-p1024/` (1 files)
+- `artifacts/intel-amx/exec/results/pr1b-E-cpu/` (1 files)
+- `artifacts/intel-amx/exec/results/pr1b-E-cpu/rt/` (24 files)
+- `artifacts/intel-amx/exec/scratch-relocated/8fea3a6f/` (8 files)
 
 ## Current state
 
