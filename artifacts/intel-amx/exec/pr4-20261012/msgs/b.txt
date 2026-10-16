@@ -1,0 +1,69 @@
+attention: the dense gate and the dotter for the row-major tail rows
+
+Words used here. K = the attention keys, KV = keys and values. AMX
+(Advanced Matrix Extensions) is the tile instruction set. VNNI (Vector
+Neural Network Instructions) is the pair-interleaved K layout that the
+AMX kernel qk_vnni_128x4 reads as its B operand (the second matrix of
+the tile multiply). A KV slot is one persistent K and V storage region.
+A VNNI slot is a KV slot whose K planes (the K storage of one page and
+one KV head) hold the VNNI layout. A block is 16 consecutive tokens of
+a page. The dense AMX path scores a full 64-token page with the kernel.
+The software loop scores one page token by token on the CPU. A
+relevant token is a cached token that the query attends to. The dotters
+are the row-major dot products, one per query head of the group (the
+query heads that share one KV head). AVX-512 is the 512-bit vector
+instruction set. The FPGA (field-programmable gate array) is the
+accelerator card that scores attention past the engagement point. The
+FPGA staging is the copy of K and V rows into the buffer that the card
+reads (h/tron/scheduler/full.hpp). save_k is the function that stores
+the K rows of a pass (one forward computation of the model). The
+forward end is the point of a pass after its worker threads joined and
+the cooperative staging drained. TRON_K_VNNI is the CMake option that
+stores the K plane of 128-dimension heads in the VNNI layout.
+
+The dense AMX path of h/tron/models/self_attention.hpp gets a third
+gate after amx_q_packed (the packed query) and is_dense_amx_page (the
+dense page predicate): k_layout_dense. It is true when
+page::k_vnni_blocks says that every block of the page holds the VNNI
+layout (the mask BLOCKS_PER_PAGE_MASK_0XF, binary 1111). It is read
+after the dense predicate. So a page nothing is relevant for is never
+asked for its state. Otherwise the page takes the software loop.
+
+The software loop of a VNNI slot fetches the page's block mask and its
+packed plane at the first relevant token. A token of a converted block
+sets its bit in `live` (the mask of the tokens the reader scores). The
+AVX-512 reader k_vnni::qk_group scores those tokens after the loop
+when `live` is not zero. A token of a row-major block (Note [Row-major
+tail block] in h/tron/tensor/k_vnni.hpp) is scored inside the loop by
+the dotters through its typed row (row_major_row). The dotter array is
+built for VNNI slots too. Note [QK orientation] in
+h/tron/kernels/amx_attn_iface.hpp names the two store paths. The reader
+comment in h/tron/kernels/k_vnni.hpp states the live-bit rule: every
+block with a live bit holds the VNNI layout.
+
+The FPGA staging reads a row of a row-major block in place through
+page::k_row_if_row_major. It gathers a row of a converted block into
+its scratch buffer with get_k_row.
+
+t_amx_dispatch_dtype (the unit test of the AMX dispatch) records the
+stored rows as save_k and the forward end do (note_k_row_saved,
+k_block_to_vnni). So a full page's blocks hold the VNNI layout under
+TRON_K_VNNI. A new section stores a full page without recording its
+rows. Under TRON_K_VNNI the dispatch must then pack the query and call
+no kernel. A row-major slot keeps no layout state. With the option off
+the kernel therefore runs. t_llama_unit (the model and cache unit
+test): the apply-and-join case gives the VNNI build the K instance of
+the row-major build. It records page 0 whole and every later page up
+to row 40 (blocks 0 and 1 VNNI, block 2 a row-major tail of 9 rows,
+block 3 unrecorded). So the mixed pages are scored against the same
+reference. The save_k case gains the sections "hardware attention
+scores the operation: the completed block stays row-major, the
+whole-block save is still VNNI" and "hardware attention scores another
+operation: this one still converts". Every section of that case checks
+the completion marks (the per-token counters of the K and V stores)
+and page 0's converted blocks before and after
+convert_pending_k_blocks. Rows 0 to 4 and row 8 of page 0 are marked
+saved before the pass. So the pass completes block 0 through save_k
+and block 3 through the whole-block save.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

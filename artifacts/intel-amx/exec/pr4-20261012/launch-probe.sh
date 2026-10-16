@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Launch probe-lazy.sh detached on delphi-3bda from claude-box (fork of launch2.sh). Only on jhan's order: the probe takes
+# Bill's marker (bill-share.sh take) for its whole-machine part.
+# Usage: COMMIT=<full sha of the probe commit> END_BY=<ISO UTC> [START_NOT_BEFORE=<ISO UTC>] bash launch-probe.sh
+set -u
+COMMIT=${COMMIT:?}; START_NOT_BEFORE=${START_NOT_BEFORE:-}
+END_BY=${END_BY:?END_BY is required (ISO UTC, for example 2026-10-13T12:30:00Z)}
+date -u -d "$END_BY" +%s >/dev/null 2>&1 || { echo "END_BY '$END_BY' is not a date that 'date -u -d' accepts"; exit 64; }
+[ -z "$START_NOT_BEFORE" ] || date -u -d "$START_NOT_BEFORE" +%s >/dev/null 2>&1 || { echo "START_NOT_BEFORE '$START_NOT_BEFORE' is not a date"; exit 64; }
+ssh -n delphi-3bda "COMMIT=$COMMIT START_NOT_BEFORE=$START_NOT_BEFORE END_BY=$END_BY W_WAIT=${W_WAIT:-1} setsid nohup bash /home/jhan/workspace/intel-AMX/exec/pr4-20261012/probe-lazy.sh >/dev/null 2>&1 </dev/null & echo launched pid \$!"

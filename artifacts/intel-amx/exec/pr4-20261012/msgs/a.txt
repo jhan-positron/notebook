@@ -1,0 +1,111 @@
+kv_cache: keep short K-cache writes row-major, convert at the forward end
+
+Words used here. K = the attention keys, V = the values, KV = both. A
+pass is one forward computation of the model. A page is a 64-token unit
+of the K and V caches. A run is the consecutive tokens of one pass that
+fall into one 16-token block of one page. bf16 is the 16-bit brain
+floating-point format. VNNI (Vector Neural Network Instructions) is the
+pair-interleaved layout that the AMX kernel reads as its B operand (the
+second matrix of the tile multiply). AMX (Advanced Matrix Extensions)
+is the tile instruction set. A KV slot is one persistent K and V
+storage region of the cache. A KV head is one key/value head of the
+attention. A panel is a 1 KiB part of a block's plane (the K storage of
+one page and one KV head). The FPGA (field-programmable gate array) is
+the accelerator card that scores attention past the engagement point,
+the first sequence position it scores. The FPGA staging is the copy of
+K and V rows into the buffer that the card reads. save_k
+(h/tron/models/model.hpp) is the function that stores the K rows of a
+pass. The forward end is the point of a pass after its worker threads
+joined and the cooperative staging drained (wait_for_coop_gof). The
+logit delivery is the step of a pass that computes the per-word scores.
+
+A run shorter than its block is stored row-major. Token t of block c
+owns 256 contiguous bytes (its 128 bf16 values in dimension order, 4
+cache lines) inside the block's own 4 KiB, at row_major_row
+(h/tron/tensor/k_vnni.hpp). A run of 16 tokens that fills its block
+takes the block save (page::set_k_block) and holds the VNNI layout at
+once. Note [Row-major tail block] in h/tron/tensor/k_vnni.hpp describes
+the row-major form. store_row_major and load_row_major move one row in
+and out of it with std::memcpy (the header includes <cstring>).
+block_to_vnni converts a block in place to the VNNI layout. The 16 rows
+are copied to a 64-byte aligned stack array first. Then store_block
+(the whole-line block store behind page::set_k_block) writes the block
+with the full mask (all 16 tokens present). block_to_rows is the
+inverse. The result equals store_row (the per-token scatter store) per
+token bit for bit. Four names carry the constants: PANEL_ROWS_4 (the
+token rows one panel holds in the row-major form),
+BLOCKS_PER_PAGE_MASK_0XF (the 4 blocks of a page as a bit mask),
+block_bit and offset_bit.
+
+The page (h/tron/models/kv_cache.hpp) records the layout per storage
+slot (the storage of one KV slot). k_rows_saved_ holds one bit per
+saved row. k_vnni_blocks_ holds one bit per converted block. The EAGLE
+view (the separate storage of EAGLE speculative decoding, a draft-model
+technique) has its own entry. note_k_row_saved sets a row's bit. It
+returns true when the row's block has all 16 rows saved and is not
+converted yet. A row saved again into such a block returns true again.
+A row of a converted block returns false. note_k_block_saved sets the
+16 row bits and the block bit after a whole-block save.
+k_block_to_vnni_at converts a complete, unconverted block of every KV
+head and then sets the block bit. It takes a k_storage_ref (the
+storage slot and its state entry, resolved by k_storage_of at the
+save). So a later storage-view change cannot redirect the conversion.
+set_k_row and get_k_row follow the block's recorded layout.
+set_k_block has no mask parameter: it stores a whole block.
+k_row_if_row_major returns a token's row in place when its block is
+row-major, for the FPGA staging's direct read. k_forget_row runs from
+clear_kv_complete_at when a new token takes a page offset. It drops the
+saved-row bits of that offset and of every offset above it, and the
+converted-block bits of those blocks, in every storage slot. The
+offset's own block is converted back to row-major first under three
+conditions: it was converted, it keeps rows below the offset, and the
+page's storage is readable (published, and the page's own chunk of a
+sliding-window slot resident). A whole-page copy carries both bit sets.
+A token-by-token copy converts the destination blocks it touches back
+to row-major, copies the rows row-major, and converts the blocks whose
+16 rows are saved after the copy. Note [K VNNI storage] describes the
+state and what each of its six consumers does with it.
+
+Note [Row-major blocks under hardware attention]: when the FPGA scores
+an operation's K (one attention operation of the model, decided by
+cached_operation_uses_hw in model.hpp), save_k records no row bits for
+the rows of a short run and queues no block. A block completed by short
+runs then stays row-major. A whole-block save still writes the VNNI
+layout. Past the engagement point the FPGA holds the K of every
+complete GOF (group of four consecutive tokens). The CPU scores only
+the tail above them. So the AMX kernel never reads a block that decode
+(the passes that generate one token per user) completes there.
+
+save_k: store_k_block (the helper that stores the K rows of one run of
+items) chooses per run by `n < k_store_block` (n = the run's token
+count, k_store_block = 16). A run shorter than 16 tokens is stored row
+by row with set_k_row. A run of 16 tokens takes set_k_block and
+note_k_block_saved. A TRON_ASSERT (the check that stops the process
+with a message) checks that such a run covers its block. store_block
+keeps its mask parameter for the block-save case of t_k_vnni_layout.
+After the join (the main thread's wait for the helper threads of the
+shared block save to finish, Note [Shared block save] in model.hpp),
+save_k_impl records on the main thread every stored row with
+note_k_row_saved. It queues a completed block (pending_k_block,
+pending_k_blocks_) unless the hardware attention scores the operation.
+convert_pending_k_blocks converts the queued blocks at the forward end,
+before the logit delivery, under the trace event convert_k_blocks. The
+cooperative staging gather is the last reader of a pass that can hold
+a block's rows row-major. No earlier point of the pass is free of
+readers.
+
+t_k_vnni_layout (the unit test of the layout, t/t_k_vnni_layout.cpp)
+gains five cases. The conversion equals store_row per token and touches
+no other block, and row_major_row rows are distinct, 64-byte aligned
+and inside the block's panels. The page's blocks turn VNNI at the 16th
+saved row and back when a row is forgotten. The rows stay readable
+across every transition, a row saved again into a converted block
+stores its new values in its VNNI column, the FPGA staging's in-place
+read is valid for the row-major block only, and one row saved again
+after a forget does not complete a block whose bits are gone. The EAGLE
+storage view keeps its own layout state. Forgetting a row acts on every
+slot's own block. A page append carries the layout state with the rows
+(a token-by-token append into a partly filled page, an append into a
+converted destination block, and a whole-page append).
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>

@@ -23,7 +23,7 @@ The session executed PR4-handoff.md: it built branch jhan-vnnik-4-tail-block (th
 - **Arms**: base = main at 72308ec90c, head = PR-3 at dfafd13dce, new = PR-4 at ea94e95a4e, lazy = the deferred-dotter probe build ca6456b7dc. The suffix "off" means the same binary with the kill switch.
 - **Dotter**: the row-major dot-product reader of K. **Deferred dotter, lazy dotter**: a probe change that constructs a page's four dotters only at its first row-major row.
 - **Campaign W**: the whole-machine package comparison, base deb against target deb, three nightly configs, four passes. Scripts in exec/pr4ci-20261012/, written by the delegated agent w-fork.
-- **Run 1, run 2**: the two parts of the test chain exec/pr4-20261012/chain2.sh on delphi-3bda. Run 1 = builds, unit tests, mutation checks, deb builds on our half of the machine. Run 2 = token-identity smokes, runtron cells, host suite and bench on the whole machine.
+- **Run 1, run 2**: the two parts of the test chain exec/pr4-20261012/chain2.sh on delphi-3bda. Run 1 = builds, unit tests, mutation checks, deb builds on our half of the machine. Run 2 = token-identity smokes, runtron cells, host suite and bench on the whole machine. (preserved: artifacts/intel-amx/exec/pr4-20261012/chain2.sh)
 - **Mutation check**: a deliberate source change that must make exactly one test case fail, to prove the test protects the code.
 - **Forced run**: a runtron run fed a fixed 256-token sequence that logs the scores of every step. **ulp**: one bf16 step at the score's size.
 - **TPS**: decode tokens per second per user. **TTFT**: time to first token. **Band**: the runtron rule from the PR bodies, twice the larger standard deviation, floor 0.4 TPS or 0.15 s. **Resolved**: the harness rule, paired t at least 2.26 and change at least 1 %.
@@ -41,7 +41,7 @@ The user asked on 2026-10-12 at 13:37 PDT: "Execute PR4-handoff.md, after you op
 - Hosts: claude-agentsrv (branch construction, campaign driver, PR body work) and delphi-3bda over ssh (chains, probes, campaign device under test).
 - Working directory (cwd): /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424.
 - Worktree: claude-agentsrv:/home/jhan/workspace/ai-runs/tron-split-pr4, branch jhan-vnnik-4-tail-block, created from jhan-vnnik-3-shared-save. At handoff time the worktree is at 6b081187e1 because later sessions merged the parent branches.
-- Chain scripts: /home/jhan/workspace/intel-AMX/exec/pr4-20261012/ (forked from exec/pr3-20261012/ by fork-chain.py). Campaign W: /home/jhan/workspace/intel-AMX/exec/pr4ci-20261012/.
+- Chain scripts: /home/jhan/workspace/intel-AMX/exec/pr4-20261012/ (forked from exec/pr3-20261012/ by fork-chain.py). Campaign W: /home/jhan/workspace/intel-AMX/exec/pr4ci-20261012/. (preserved: artifacts/intel-amx/exec/pr4-20261012/fork-chain.py)
 - Memory directory: /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/.
 - Binaries on delphi-3bda: /var/tmp/jhan/tron-pr4/gen/runtron.pr4 (ea94e95a4e), tron-pr3 (dfafd13dce), tron-main1010 (72308ec90c), tron-pr4lazy (ca6456b7dc). Unverified from claude-agentsrv at handoff time.
 - The session hit the context limit three times (2026-10-12 17:29, 2026-10-13 06:29 and 12:31 PDT) and continued from summaries.
@@ -51,7 +51,7 @@ The user asked on 2026-10-12 at 13:37 PDT: "Execute PR4-handoff.md, after you op
 - 13:37 The user gave the task. Claude read PR4-handoff.md, the memory notes, split-status.md, the PR-3 chain scripts and the probe material under handoff-material/probe-pr4.
 - 13:40 The worktree was created and the handoff's patch applied with resolve.py. The result matched the handoff's probe byte for byte.
 - 13:43 The agent w-fork was spawned to fork campaign W from exec/pr4424ci-20261009. At 13:57 a scope change was sent: three configs (llama-3.1-8b at 8 users and at 32 users, gpt-oss-120b), no 8k cell.
-- 13:47 to 13:53 build-branch.sh, fork-chain.py, cleanup-test.sh, launch2.sh, wait-chain2.sh and the commit messages msgs/a.txt to c.txt were written.
+- 13:47 to 13:53 build-branch.sh, fork-chain.py, cleanup-test.sh, launch2.sh, wait-chain2.sh and the commit messages msgs/a.txt to c.txt were written. (preserved: artifacts/intel-amx/exec/pr4-20261012/build-branch.sh)
 - 14:00 The pre-review workflow pr4-pre-review was launched: ten lenses over the diff jhan-vnnik-3-shared-save..144a6dedd3, three refuters per must-fix or should-fix finding.
 - 14:09 Step 4 (22-cell and 38-cell syntax matrices, controls, clang-format, whitespace) passed on the provisional head 144a6dedd3.
 - 14:10 to 14:30 The workflow's kept findings were read. 13 fixes were staged as exact-text edit pairs under exec/pr4-20261012/edits/ and applied through build-branch.sh. The final head is ea94e95a4e (three commits on dfafd13dce, 12 files, +1516/-120). Step 4 passed again.
@@ -64,7 +64,7 @@ The user asked on 2026-10-12 at 13:37 PDT: "Execute PR4-handoff.md, after you op
 - 17:24 Run 2 finished at 17:17 PDT. Three decisions were put to the user: accept the token pattern, run the AMX-off probe, and run the campaign-gate accept script (the auto-mode classifier refused Claude the gate edit).
 - 17:42 Everything that did not depend on the decisions was prepared (body draft, cost-row commit message, probe scripts).
 - 20:42 The user answered: go ahead on all three, and asked what "run the probe" and "investigate further" differ in.
-- 20:52 PR 4901 was opened as a draft on jhan-vnnik-3-shared-save, head e7d06a1267 (ea94e95a4e plus the cost-row commit). GitHub refused the 84 KB body (65,536-character limit), so the glossary became the first PR comment and post-body.py repeats that split. probe-lazy.sh and probe83.sh were queued on delphi-3bda.
+- 20:52 PR 4901 was opened as a draft on jhan-vnnik-3-shared-save, head e7d06a1267 (ea94e95a4e plus the cost-row commit). GitHub refused the 84 KB body (65,536-character limit), so the glossary became the first PR comment and post-body.py repeats that split. probe-lazy.sh and probe83.sh were queued on delphi-3bda. (preserved: artifacts/intel-amx/exec/pr4-20261012/post-body.py)
 - 20:55 All eight draft CI checks passed.
 - 21:09 The user ran accept-verdict-and-relaunch.sh. Campaign W was relaunched (pid 2458712).
 - 21:11 The user asked Claude to respond to codex's reviews on PR 4901.
@@ -142,44 +142,67 @@ Forced-run probe (p83-20261013, 8 runs, CPU and FPGA prompt-1024 cells, every ar
 ## Artifacts
 
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/split-status.md (270,899 bytes at handoff time). The status file, appended by this session under the PR-4 headings from Step 4 through the watchers. Later sessions appended more.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-campaign-w-20261013.html (9,667 bytes). Dumbbell chart of campaign W next to the PR 4424 campaign.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-campaign-w-20261013.html (9,667 bytes). Dumbbell chart of campaign W next to the PR 4424 campaign. (preserved: artifacts/intel-amx/pr3879/split-4424/pr4-campaign-w-20261013.html)
   - generator: none (hand-written HTML)
   - input: exec/results/pr4ci-20261012/summary.md and exec/results/pr4424ci-20261009/summary.md
   - input built by: exec/pr4ci-20261012/summarize.py and exec/pr4424ci-20261009/summarize.py
   - sources: the two summary.md files above
   - regenerate: unavailable (numbers were copied by hand into the page)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-lazy-dotter-20261013.html (7,009 bytes). Chart of the deferred-dotter probe.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/pr4-lazy-dotter-20261013.html (7,009 bytes). Chart of the deferred-dotter probe. (preserved: artifacts/intel-amx/pr3879/split-4424/pr4-lazy-dotter-20261013.html)
   - generator: none (hand-written HTML)
   - input: exec/results/pr4lazy-E-cpu/summary.md
-  - input built by: the sync4424-20261002 summarizer called by exec/pr4-20261012/probe-lazy.sh on delphi-3bda
+  - input built by: the sync4424-20261002 summarizer called by exec/pr4-20261012/probe-lazy.sh on delphi-3bda (preserved: artifacts/intel-amx/exec/pr4-20261012/probe-lazy.sh)
   - sources: exec/results/pr4lazy-E-cpu/summary.md, summary.json
   - regenerate: unavailable (numbers were copied by hand into the page)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/: build-branch.sh (9,862 bytes), fork-chain.py (32,253), chain2.sh (34,915), chain-finish.sh (3,108), cleanup-test.sh (5,483), launch2.sh (1,806), wait-chain2.sh (1,780), validate-smoke.py (1,493), validator-test.sh (1,160), plugin-calls.py (1,963), step4.sh (4,102), fill-body.py (26,314), post-body.py (3,790), probe-lazy.sh (8,364), probe83.sh (13,436), launch-probe.sh (985), campaign-probe.sh (17,843), test-forward.sh (7,656), w-launch-notes.sh (2,486), msgs/a.txt to e.txt (6,985, 4,195, 1,105, 2,005, 1,897), edits/ (28 old/new pairs), pr-body-template.md (69,467), pr-body-template-part1.md (35,922), pr-body-template-part2.md (33,545), pr-body.md (84,535), pr-body-post.md (62,136), words-comment.md (18,380), review-findings.txt (701,216), replies/ (13 files: codex-round1.md, the body before and after each patch, the four comments). The step4 logs r1 to r3 and fwdtest. The files dated 2026-10-14 and later (q15 to q20, m4, pr-body-v5 to v16, launch-off.sh, probe-off.sh, review-20261015/) belong to other sessions.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4ci-20261012/: build-deb.sh (10,467 bytes), campaign.sh (50,789), launch.sh (8,174), dut.sh (22,973), summarize.py (18,946), subset3.json (1,058), README.md (23,509), w-cleanup-test.sh (29,659), w-cleanup-test.log (8,524), accept-verdict-and-relaunch.sh (3,930), plus byte-identical copies of st_ci_perf.py, nightly_to_arm.py, sw8k.json, configs.py, nightly14.json, talos_stub/talos.py. Written by the agent w-fork, except the accept script.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4ci-20261012/summary.md (2,242 bytes). The campaign W table.
-  - generator: /home/jhan/workspace/intel-AMX/exec/pr4ci-20261012/summarize.py
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4-20261012/: build-branch.sh (9,862 bytes), fork-chain.py (32,253), chain2.sh (34,915), chain-finish.sh (3,108), cleanup-test.sh (5,483), launch2.sh (1,806), wait-chain2.sh (1,780), validate-smoke.py (1,493), validator-test.sh (1,160), plugin-calls.py (1,963), step4.sh (4,102), fill-body.py (26,314), post-body.py (3,790), probe-lazy.sh (8,364), probe83.sh (13,436), launch-probe.sh (985), campaign-probe.sh (17,843), test-forward.sh (7,656), w-launch-notes.sh (2,486), msgs/a.txt to e.txt (6,985, 4,195, 1,105, 2,005, 1,897), edits/ (28 old/new pairs), pr-body-template.md (69,467), pr-body-template-part1.md (35,922), pr-body-template-part2.md (33,545), pr-body.md (84,535), pr-body-post.md (62,136), words-comment.md (18,380), review-findings.txt (701,216), replies/ (13 files: codex-round1.md, the body before and after each patch, the four comments). The step4 logs r1 to r3 and fwdtest. The files dated 2026-10-14 and later (q15 to q20, m4, pr-body-v5 to v16, launch-off.sh, probe-off.sh, review-20261015/) belong to other sessions. (preserved: artifacts/intel-amx/exec/pr4-20261012/chain-finish.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr4ci-20261012/: build-deb.sh (10,467 bytes), campaign.sh (50,789), launch.sh (8,174), dut.sh (22,973), summarize.py (18,946), subset3.json (1,058), README.md (23,509), w-cleanup-test.sh (29,659), w-cleanup-test.log (8,524), accept-verdict-and-relaunch.sh (3,930), plus byte-identical copies of st_ci_perf.py, nightly_to_arm.py, sw8k.json, configs.py, nightly14.json, talos_stub/talos.py. Written by the agent w-fork, except the accept script. (preserved: artifacts/intel-amx/exec/pr4ci-20261012/build-deb.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4ci-20261012/summary.md (2,242 bytes). The campaign W table. (preserved: artifacts/intel-amx/exec/results/pr4ci-20261012/summary.md)
+  - generator: /home/jhan/workspace/intel-AMX/exec/pr4ci-20261012/summarize.py (preserved: artifacts/intel-amx/exec/pr4ci-20261012/summarize.py)
   - input: perf.json under exec/results/pr4ci-20261012/<tag>/ for base-pass1, target-pass1, target-pass2, base-pass2
-  - input built by: exec/pr4ci-20261012/campaign.sh driving st_ci_perf.py from claude-agentsrv, 2026-10-13 06:58 to 08:32 PDT
-  - sources: the four tag directories, status-history.log, outcome.txt, preflight.txt
+  - input built by: exec/pr4ci-20261012/campaign.sh driving st_ci_perf.py from claude-agentsrv, 2026-10-13 06:58 to 08:32 PDT (preserved: artifacts/intel-amx/exec/pr4ci-20261012/campaign.sh)
+  - sources: the four tag directories, status-history.log, outcome.txt, preflight.txt (preserved: artifacts/intel-amx/exec/results/pr4ci-20261012/status-history.log)
   - regenerate: `~/workspace/ai-runs/systems_test/.venv/bin/python ~/workspace/intel-AMX/exec/pr4ci-20261012/summarize.py --res ~/workspace/intel-AMX/exec/results/pr4ci-20261012 > <OUT>` (unverified: the flag form is taken from the 2026-10-09 campaign's call)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4ci-20261012/: summary.json (6,953 bytes), outcome.txt (116), status-history.log (7,708), preflight.txt (3,926), the four tag directories, check-mode/.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr4ci-20261012/: summary.json (6,953 bytes), outcome.txt (116), status-history.log (7,708), preflight.txt (3,926), the four tag directories, check-mode/. (preserved: artifacts/intel-amx/exec/results/pr4ci-20261012/outcome.txt)
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4-20261012/: steps.txt, chain.done (113 bytes), all.done, the build, mutation, deb, host-suite and bench records, and smoke/ (the three smoke cells). The chain record of runs 1 and 2.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4-E-cpu/summary.md (4,807 bytes) and pr4-E-fpga/summary.md (2,511 bytes). The run 2 cell tables. Both carry the stale title "sync4424-20261002 summary" (codex finding, acknowledged).
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4-E-cpu/summary.md (4,807 bytes) and pr4-E-fpga/summary.md (2,511 bytes). The run 2 cell tables. Both carry the stale title "sync4424-20261002 summary" (codex finding, acknowledged). (preserved: artifacts/intel-amx/exec/results/pr4-E-cpu/summary.md)
   - generator: the sync4424-20261002 summarizer called by exec/pr4-20261012/chain2.sh step E
   - input: rt-results.txt (163,735 and 68,483 bytes) and rt/ in each directory
   - input built by: chain2.sh steps E-cpu and E-fpga on delphi-3bda, 2026-10-12 15:36 to 17:05 PDT
   - sources: summary.json (30,019 and 12,376 bytes), rt-results.txt
   - regenerate: unavailable (the summarizer call is inside chain2.sh and was not shown in the transcript)
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4lazy-E-cpu/summary.md (5,243 bytes), summary.json (33,895), rt-results.txt (196,553). The deferred-dotter probe (same lineage shape as above, generator called by probe-lazy.sh, 2026-10-13 09:23 to 10:13 PDT, regenerate unavailable).
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/p83-20261013/: verdict.txt (3,393 bytes), tokens.txt (620), runs.txt (4,486), six steps-*.txt (about 24 KB each) and steps-*.json (about 173 KB each). The forced-run probe.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4lazy-20261013/steps.txt (741 bytes), build-pr4lazy.log (3,126). The probe build.
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4lazy-E-cpu/summary.md (5,243 bytes), summary.json (33,895), rt-results.txt (196,553). The deferred-dotter probe (same lineage shape as above, generator called by probe-lazy.sh, 2026-10-13 09:23 to 10:13 PDT, regenerate unavailable). (preserved: artifacts/intel-amx/exec/results/pr4lazy-E-cpu/summary.md)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/p83-20261013/: verdict.txt (3,393 bytes), tokens.txt (620), runs.txt (4,486), six steps-*.txt (about 24 KB each) and steps-*.json (about 173 KB each). The forced-run probe. (preserved: artifacts/intel-amx/exec/results/p83-20261013/verdict.txt)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/pr4lazy-20261013/steps.txt (741 bytes), build-pr4lazy.log (3,126). The probe build. (preserved: artifacts/intel-amx/exec/results/pr4lazy-20261013/steps.txt)
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/logs/: pr4-20261012-chain.log (14,484 bytes), pr4-20261012.log (6,553), pr4-E-cpu.log (22,992), pr4-E-fpga.log (10,756), pr4lazy-E-cpu.log (26,688), pr4lazy-20261013-probe.log (4,129), p83-20261013.log (14,307), pr4fwd-20261013.log (2,108). claude-agentsrv:exec/logs/pr4ci-20261012.log (21,667).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr4-split-execution.md (25,221 bytes). The execution record, appended at each milestone. Later sessions changed it (mtime 2026-10-15).
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/15630040-e750-46e7-b46a-df8546e00b44/workflows/scripts/pr4-pre-review-wf_bae27221-aeb.js (24,809 bytes). The pre-review workflow script.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr4-split-execution.md (25,221 bytes). The execution record, appended at each milestone. Later sessions changed it (mtime 2026-10-15). (preserved: artifacts/intel-amx/memory/split-4424/pr4-split-execution.md)
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/15630040-e750-46e7-b46a-df8546e00b44/workflows/scripts/pr4-pre-review-wf_bae27221-aeb.js (24,809 bytes). The pre-review workflow script. (preserved: artifacts/intel-amx/exec/workflows/pr4-pre-review-wf_bae27221-aeb.js, relocated to /home/jhan/workspace/intel-AMX/exec/workflows/pr4-pre-review-wf_bae27221-aeb.js)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/15630040-e750-46e7-b46a-df8546e00b44/scratchpad/ (135 files, 15.8 MB): per-file diffs of the PR, review-all.md, review-detail.md, commit messages, body-live-*.md snapshots, comment drafts. Scratchpad, may be cleaned up.
 - Read, not written: split-4424/pr4-review/ (codex's review passes and rewrite, 25 files), PR4-handoff.md, PR4-handoff-update1.md, PR4-handoff-review.md.
 - Code: tron, branch jhan-vnnik-4-tail-block. Commits ea94e95a4e30830e33a2e1feda51ac231e97c667 (the measured head, three commits on dfafd13dce), e7d06a126766272f73483ef886c77d37c807a5ff (cost rows, the PR's first head), 175b1837b978c8e935f2bc6e651d77a8c1553b60 (the forward test, the PR head at session end). Probe commits never pushed to the PR: 144a6dedd3 (provisional head), ca6456b7dc (lazy dotter), 86bdbd31b7 (first forward test).
 - GitHub: PR 4901 opened, four PR titles set, one review-answer comment and four result comments posted, the description patched after each result.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr4-20261012/` (26 files)
+- `artifacts/intel-amx/exec/pr4-20261012/msgs/` (5 files)
+- `artifacts/intel-amx/exec/pr4-20261012/replies/` (7 files)
+- `artifacts/intel-amx/exec/pr4ci-20261012/` (11 files)
+- `artifacts/intel-amx/exec/pr4ci-20261012/talos_stub/` (1 files)
+- `artifacts/intel-amx/exec/results/p83-20261013/` (14 files)
+- `artifacts/intel-amx/exec/results/pr4-20261012/` (13 files)
+- `artifacts/intel-amx/exec/results/pr4-E-cpu/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4-E-cpu/rt/` (45 files)
+- `artifacts/intel-amx/exec/results/pr4-E-fpga/` (3 files)
+- `artifacts/intel-amx/exec/results/pr4-E-fpga/rt/` (18 files)
+- `artifacts/intel-amx/exec/results/pr4ci-20261012/` (5 files)
+- `artifacts/intel-amx/exec/results/pr4ci-20261012/base-pass1/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4ci-20261012/base-pass2/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4ci-20261012/check-mode/` (1 files)
+- `artifacts/intel-amx/exec/results/pr4ci-20261012/target-pass1/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4ci-20261012/target-pass2/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4lazy-20261013/` (1 files)
+- `artifacts/intel-amx/exec/results/pr4lazy-E-cpu/` (2 files)
+- `artifacts/intel-amx/exec/results/pr4lazy-E-cpu/rt/` (54 files)
 
 ## Current state
 
@@ -202,7 +225,7 @@ Forced-run probe (p83-20261013, 8 runs, CPU and FPGA prompt-1024 cells, every ar
 
 - GitHub's PR body limit is 65,536 characters. The 84 KB body was split: glossary table as the first comment, duplicate pair bullets dropped. post-body.py repeats the split on every regeneration.
 - Always re-fetch the live PR body before an edit. Codex replaced the body at 21:09 PDT on 2026-10-12 and the user edited it at 11:12 PDT on 2026-10-13. Both edits were kept.
-- The auto-mode classifier refused the campaign-gate edit twice ("Security Weaken", "Auto-Mode Bypass"). The user ran accept-verdict-and-relaunch.sh by hand.
+- The auto-mode classifier refused the campaign-gate edit twice ("Security Weaken", "Auto-Mode Bypass"). The user ran accept-verdict-and-relaunch.sh by hand. (preserved: artifacts/intel-amx/exec/pr4ci-20261012/accept-verdict-and-relaunch.sh)
 - tron reads USE_HW_ATTN once per process. A test that sets it with setenv after earlier cases ran sees no effect. The fixture plugin got a template flag instead.
 - The token-identity pattern is not a defect. Dense pages are bit-identical in every arm. On partial pages PR-3 and PR-4 score converted blocks with the AVX-512 reader while main uses the dotter, so exact ties flip by one ulp. Identity with main is not a structural property of the layout, and the PR body states the measured pattern instead.
 - "Resolved = no" means no detectable change, not equivalence. The 95 % intervals bound the possible loss at 1.3 % and 1.4 % in the two unresolved campaign W cells.
