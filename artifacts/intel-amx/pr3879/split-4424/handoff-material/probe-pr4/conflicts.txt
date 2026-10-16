@@ -1,0 +1,204 @@
+=================== h/tron/kernels/amx_attn_iface.hpp ===================
+<<<<<<< ours
+// of the page (a panel is 16 dimension-pair rows x 16 tokens, one B tile;
+// h/tron/tensor/k_vnni.hpp) are the B operand. The tiles come out as
+// S[query][token]. No transpose is needed. The extra work moves to two places.
+// The K store scatters 64 dimension pairs per token when the token's run has
+// one token (save_k, page::set_k_row). A run of two or more consecutive tokens
+// of one block uses the block save (page::set_k_block). The software reader for
+// partial pages runs k_vnni::qk_group instead of the row-major dotter.
+=======
+// of the page are the B operand. The tiles come out as S[query][token]. No
+// transpose is needed. The cost moves to the K save. A run of 16 consecutive
+// tokens that fills one 16-token block uses the block save (page::set_k_block,
+// a register transpose and whole-line stores). A shorter run (decode: one
+// token per user per step) is stored row-major into the block's own bytes,
+// and the block is transposed in place at the end of the forward pass that
+// saved its 16th row (Note [Row-major tail block] in h/tron/tensor/k_vnni.hpp). The
+// software reader for the VNNI blocks of partial pages runs k_vnni::qk_group; the
+// row-major tail block keeps the row-major dotter.
+>>>>>>> theirs
+---
+=================== h/tron/kernels/k_vnni.hpp ===================
+<<<<<<< ours
+// change the result. Token lanes: one 64-byte load supplies one dimension pair
+// of 16 tokens. The query's dimension pair is broadcast. VDPBF16PS accumulates 16
+// scores at once. So there is no horizontal reduction and no per-token gather.
+// k_page is the page's packed K plane as its typed view (page::k_packed). This
+// reader is one of the two layout-specific score kernels allowed to take the
+// plane address (the other is amx_attn_h128g4::qk_vnni_128x4). q points at
+// kv_mul rows of 128 values (the group's heads, row stride 128). kv_mul is
+// any group size: a group of more than 16 heads is
+// scored 16 heads at a time. Every head's scores are its own accumulation.
+// So the split changes no head's add order.
+=======
+// change the result. Every token block with a live bit must hold the VNNI
+// layout (Note [Row-major tail block] in h/tron/tensor/k_vnni.hpp): the
+// caller scores the tokens of a row-major block with the row-major dotter
+// and keeps their bits clear here. Token lanes: one 64-byte load supplies
+// one dimension pair of 16 tokens. The query's dimension pair is broadcast.
+// VDPBF16PS accumulates 16 scores at once. So there is no horizontal
+// reduction and no per-token gather. k_page is the page's packed K plane as
+// its typed view (page::k_packed). This reader is one of the two
+// layout-specific readers allowed to take the plane address. q points at
+// kv_mul rows of 128 values (the group's heads, row stride 128). kv_mul is
+// any group size: a group of more than 16 heads is scored 16 heads at a
+// time. Every head's scores are its own accumulation. So the split changes
+// no head's add order.
+>>>>>>> theirs
+---
+=================== h/tron/models/kv_cache.hpp ===================
+<<<<<<< ours
+//      read-only view of the plane, to qk_vnni_128x4.
+//   3. every other visit of a VNNI slot uses k_vnni::qk_group with the same
+//      view: partial or partly visible pages, the kill switch
+//      (TRON_AMX_DISABLE=1), hosts without AMX, builds without
+//      TRON_AMX_DISPATCH, and the shapes and query types outside the AMX
+//      gate (Note [AMX attention dispatch]). That reader is AVX-512 code
+//      with one token per vector lane. It needs no per-token gather and no
+//      horizontal reduction. The
+//      row-major dotter loop (the per-token dot-product loop of
+//      self_attention.hpp) is
+//      compiled only for row-major slots.
+=======
+//      read-only view of the plane, to qk_vnni_128x4 when page::k_vnni_blocks
+//      says every block of the page is converted. A page whose last block
+//      waits for the forward end, a page with a block that stays row-major
+//      under hardware attention, or a page filled by another writer than
+//      save_k, takes the software loop.
+//   3. the software path for partial pages, the kill switch
+//      (TRON_AMX_DISABLE=1) and hosts without AMX read the VNNI blocks with
+//      k_vnni::qk_group, with the same view. That reader is AVX-512 code with
+//      one token per vector lane. It needs no per-token gather and no
+//      horizontal reduction. The tokens of the row-major tail block are
+//      scored with the row-major dotter (the per-token dot-product loop of
+//      self_attention.hpp) through their typed row (row_major_row), 4 lines
+//      per token.
+>>>>>>> theirs
+---
+=================== h/tron/tensor/k_vnni.hpp ===================
+<<<<<<< ours
+// rows in and out (store_row, load_row, store_block, copy_token). The AVX-512
+// score reader of this layout is in h/tron/kernels/k_vnni.hpp and the AMX QK
+// kernel in h/tron/kernels/amx_attn_iface.hpp. Who writes and
+// reads the layout is described in Note [K VNNI storage] (kv_cache.hpp).
+=======
+// rows in and out (store_row, load_row, store_block, copy_token), and the
+// in-place conversion of one 16-token block between its row-major and its VNNI
+// form (block_to_vnni, block_to_rows, Note [Row-major tail block] below). The
+// AVX-512 score reader of this layout is in h/tron/kernels/k_vnni.hpp. Who
+// writes and reads the layout is described in Note [K VNNI storage]
+// (kv_cache.hpp).
+>>>>>>> theirs
+---
+=================== t/t_llama_unit.cpp ===================
+<<<<<<< ours
+  SECTION("three threads: the helpers share the window and every row is stored once") {
+    bk.fill_random(gen);
+    constexpr size_t n_workers = 3;
+    constexpr size_t main_worker_ix = 0;
+    // Every worker calls the same save_k with its own index (Note [Shared
+    // block save] in model.hpp). The last helper starts late, so the main
+    // thread's join has to wait for it. The finished count is read as the main
+    // call returns, before this test joins its threads: the production join,
+    // not the test's joins, must have seen every helper finish.
+    constexpr std::chrono::milliseconds late_helper_delay{20};
+    auto shared_save = [&](attention_operation_descriptor const& op) {
+      std::vector<std::thread> helpers;
+      for (size_t worker_ix = 1; worker_ix < n_workers; ++worker_ix) {
+        helpers.emplace_back([&, worker_ix] {
+          if (worker_ix == n_workers - 1)
+            std::this_thread::sleep_for(late_helper_delay);
+          state.template save_k<geometry>(
+              &q_batch, op, state.plugin_state.kouts, worker_ix, n_workers);
+        });
+      }
+      state.template save_k<geometry>(
+          &q_batch, op, state.plugin_state.kouts, main_worker_ix, n_workers);
+      const uint32_t finished_at_return = q_batch.k_store_window.finished.load();
+      for (auto& h : helpers) {
+        h.join();
+      }
+      return finished_at_return;
+    };
+    // The job's token position, its KV flag, its page and its 16-token block.
+    auto token_of = [&](size_t item) { return job_tokens[q_batch.items[item].i].i; };
+    auto kv_of = [&](size_t item) { return do_kv[q_batch.items[item].i] != 0; };
+    auto block_of = [&](size_t tok) {
+      return (tok % page_t::page_size) / k_vnni::BLOCK_TOKENS_16;
+    };
+    // The window state after the n_windows-th shared save on this batch.
+    // finished_at_return is the finished count when the main call returned.
+    [[maybe_unused]] auto check_window = [&](uint32_t n_windows,
+                                             uint32_t finished_at_return) {
+=======
+  // Note [Row-major blocks under hardware attention] in kv_cache.hpp: the rows
+  // land the same way; only the row bits and the forward-end conversion of the
+  // hardware-scored operation are skipped. Catch2 builds a fresh state for
+  // every SECTION, so the flag needs no reset.
+  constexpr uint8_t operation_uses_hw = 1;
+  SECTION("hardware attention scores the operation: the completed block stays "
+          "row-major, the whole-block save is still VNNI") {
+    bk.fill_random(gen);
+    pre_save();
+    state.attention_operation_uses_hw[operation.binding.operation.i] =
+        operation_uses_hw;
+    const auto before = snapshot();
+    state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
+    check(before);
+    check_marks();
+    check_blocks(/*converted=*/false);
+    state.convert_pending_k_blocks();
+    check_blocks(/*converted=*/false);
+    check(before);
+  }
+
+  SECTION("hardware attention scores another operation: this one still converts") {
+    // The flag is read for the saving operation, not for another id space
+    // (operation 0 is also layer 0 and KV slot 0; operation 1 is not).
+    bk.fill_random(gen);
+    pre_save();
+    constexpr size_t other_operation = 1;
+    const attention_op_id other =
+        state.active_attention_operations[other_operation].binding.operation;
+    REQUIRE(other != operation.binding.operation);
+    state.attention_operation_uses_hw[other.i] = operation_uses_hw;
+    const auto before = snapshot();
+    state.template save_k<geometry>(&q_batch, operation, state.plugin_state.kouts);
+    check(before);
+    check_marks();
+    check_blocks(/*converted=*/false);
+    state.convert_pending_k_blocks();
+    check_blocks(/*converted=*/true);
+    check(before);
+  }
+
+  SECTION("three threads: the helpers share the window and every row lands once") {
+    bk.fill_random(gen);
+    pre_save();
+    const auto before = snapshot();
+    constexpr size_t n_workers = 3;
+    constexpr size_t main_worker_ix = 0;
+    // Every worker calls the same save_k with its own index (Note [Shared
+    // block save] in model.hpp).
+    std::vector<std::thread> helpers;
+    for (size_t worker_ix = 1; worker_ix < n_workers; ++worker_ix) {
+      helpers.emplace_back([&, worker_ix] {
+        state.template save_k<geometry>(
+            &q_batch, operation, state.plugin_state.kouts, worker_ix, n_workers);
+      });
+    }
+    state.template save_k<geometry>(
+        &q_batch, operation, state.plugin_state.kouts, main_worker_ix, n_workers);
+    for (auto& h : helpers) {
+      h.join();
+    }
+    check(before);
+    check_marks();
+    check_blocks(/*converted=*/false);
+    state.convert_pending_k_blocks();
+    check_blocks(/*converted=*/true);
+    check(before);
+    if constexpr (k_vnni::layout_on<head_size>) {
+>>>>>>> theirs
+---
