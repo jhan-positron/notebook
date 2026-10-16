@@ -93,22 +93,22 @@ The "run" answer given at 10:23, as a table of what each PR does with a run of n
 
 Pages (all in the cwd, all rebuilt 10:35 to 10:36):
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4958-model.hpp.html (555,230 bytes). PR 4958 page for h/tron/models/model.hpp, 8 units, 14 figures.
-  - generator: /home/jhan/workspace/intel-AMX/exec/pr4958-diagrams-20261016/spec_builder.py (2,629 bytes), with page_common.py, svg_helpers.py and figs/*.py of the same directory
-  - input: units_model.json (29,797 bytes) and figs/base_model.py, figs/d_model_m0.py to d_model_m7.py in the same directory
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4958-model.hpp.html (555,230 bytes). PR 4958 page for h/tron/models/model.hpp, 8 units, 14 figures. (preserved: artifacts/intel-amx/pr3879/split-4424/diagramming-code-changes-PR4958-model.hpp.html)
+  - generator: /home/jhan/workspace/intel-AMX/exec/pr4958-diagrams-20261016/spec_builder.py (2,629 bytes), with page_common.py, svg_helpers.py and figs/*.py of the same directory (preserved: artifacts/intel-amx/exec/pr4958-diagrams-20261016/spec_builder.py)
+  - input: units_model.json (29,797 bytes) and figs/base_model.py, figs/d_model_m0.py to d_model_m7.py in the same directory (preserved: artifacts/intel-amx/exec/pr4958-diagrams-20261016/figs/d_model_m7.py)
   - input built by: the page-builder agent "Build PR 4958 model.hpp page" of this session, from facts/model.hpp.runs.txt (difflib_units.py output) and the diff 26b86a279a..b39765ec29 in worktree tron-split-pr3
   - sources: git worktree /home/jhan/workspace/ai-runs/tron-split-pr3 at b39765ec29, the PR body draft /home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/newprs-20261015/new/4958-v2.md
   - regenerate: `cd /home/jhan/workspace/intel-AMX/exec/pr4958-diagrams-20261016 && python3 spec_builder.py model` writes `<OUT>`, then `python3 check_page.py <OUT>` and `python3 check_legend.py <OUT>`
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4958-tensor-k_vnni.hpp.html (633,554 bytes). PR 4958 page for h/tron/tensor/k_vnni.hpp, 4 units, 10 figures. Same lineage as above with key `k_vnni`, input units_k_vnni.json (18,800 bytes) and figs/base_k_vnni.py, figs/d_k_vnni_k0.py to k3.py.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4958-common.hpp.html (211,313 bytes). PR 4958 page for h/tron/models/common.hpp, 1 unit, 7 figures. Same lineage with key `common`, input units_common.json (12,145 bytes) and figs/base_common.py, figs/d_common_c1.py.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4959-kv_cache.hpp.html (999,665 bytes). PR 4959 page for h/tron/models/kv_cache.hpp, 10 units, 23 figures.
-  - generator: /home/jhan/workspace/intel-AMX/exec/pr4959-diagrams-20261016/spec_builder.py (2,637 bytes), with page_common.py, svg_helpers.py and figs/*.py of the same directory
-  - input: units_kv_cache.json (34,289 bytes) and figs/base_kv_cache.py, figs/d_kv_cache_c0.py to c9.py
-  - input built by: the page-builder agent "Build PR 4959 kv_cache.hpp page" of this session, from facts/kv_cache.hpp.runs.txt and the diff b39765ec29..6b081187e1 in worktree tron-split-pr4
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4958-tensor-k_vnni.hpp.html (633,554 bytes). PR 4958 page for h/tron/tensor/k_vnni.hpp, 4 units, 10 figures. Same lineage as above with key `k_vnni`, input units_k_vnni.json (18,800 bytes) and figs/base_k_vnni.py, figs/d_k_vnni_k0.py to k3.py. (preserved: artifacts/intel-amx/pr3879/split-4424/diagramming-code-changes-PR4958-tensor-k_vnni.hpp.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4958-common.hpp.html (211,313 bytes). PR 4958 page for h/tron/models/common.hpp, 1 unit, 7 figures. Same lineage with key `common`, input units_common.json (12,145 bytes) and figs/base_common.py, figs/d_common_c1.py. (preserved: artifacts/intel-amx/pr3879/split-4424/diagramming-code-changes-PR4958-common.hpp.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4959-kv_cache.hpp.html (999,665 bytes). PR 4959 page for h/tron/models/kv_cache.hpp, 10 units, 23 figures. (preserved: artifacts/intel-amx/pr3879/split-4424/diagramming-code-changes-PR4959-kv_cache.hpp.html)
+  - generator: /home/jhan/workspace/intel-AMX/exec/pr4959-diagrams-20261016/spec_builder.py (2,637 bytes), with page_common.py, svg_helpers.py and figs/*.py of the same directory (preserved: artifacts/intel-amx/exec/pr4959-diagrams-20261016/spec_builder.py)
+  - input: units_kv_cache.json (34,289 bytes) and figs/base_kv_cache.py, figs/d_kv_cache_c0.py to c9.py (preserved: artifacts/intel-amx/exec/pr4959-diagrams-20261016/units_kv_cache.json)
+  - input built by: the page-builder agent "Build PR 4959 kv_cache.hpp page" of this session, from facts/kv_cache.hpp.runs.txt and the diff b39765ec29..6b081187e1 in worktree tron-split-pr4 (preserved: artifacts/intel-amx/exec/pr4959-diagrams-20261016/facts/kv_cache.hpp.runs.txt)
   - sources: git worktree /home/jhan/workspace/ai-runs/tron-split-pr4 at 6b081187e1, the PR body draft exec/newprs-20261015/new/4959-v2.md
   - regenerate: `cd /home/jhan/workspace/intel-AMX/exec/pr4959-diagrams-20261016 && python3 spec_builder.py kv_cache` writes `<OUT>`, then the two checks
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4959-tensor-k_vnni.hpp.html (416,623 bytes). PR 4959 page for h/tron/tensor/k_vnni.hpp, 5 units, 11 figures. Same lineage with key `k_vnni`, input units_k_vnni.json (23,544 bytes) and figs/d_k_vnni_k0.py to k4.py.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4959-model.hpp.html (293,202 bytes). PR 4959 page for h/tron/models/model.hpp, 4 units, 9 figures. Same lineage with key `model`, input units_model.json (21,365 bytes) and figs/d_model_m0.py to m3.py.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4959-tensor-k_vnni.hpp.html (416,623 bytes). PR 4959 page for h/tron/tensor/k_vnni.hpp, 5 units, 11 figures. Same lineage with key `k_vnni`, input units_k_vnni.json (23,544 bytes) and figs/d_k_vnni_k0.py to k4.py. (preserved: artifacts/intel-amx/pr3879/split-4424/diagramming-code-changes-PR4959-tensor-k_vnni.hpp.html)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/diagramming-code-changes-PR4959-model.hpp.html (293,202 bytes). PR 4959 page for h/tron/models/model.hpp, 4 units, 9 figures. Same lineage with key `model`, input units_model.json (21,365 bytes) and figs/d_model_m0.py to m3.py. (preserved: artifacts/intel-amx/pr3879/split-4424/diagramming-code-changes-PR4959-model.hpp.html)
 
 Record directories (toolchain copies, unit files, facts and PNGs):
 
@@ -117,16 +117,25 @@ Record directories (toolchain copies, unit files, facts and PNGs):
 
 Memory:
 
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr4958-pr4959-diagram-pages.md (3,300 bytes, written at 08:35 and updated at 09:09). Where the pages are, how to rebuild, the file-choice reason, the worked examples, the caveats. The 09:55 to 10:36 follow-ups (new Short versions, the STACK comparison) are NOT recorded in it.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/pr4958-pr4959-diagram-pages.md (3,300 bytes, written at 08:35 and updated at 09:09). Where the pages are, how to rebuild, the file-choice reason, the worked examples, the caveats. The 09:55 to 10:36 follow-ups (new Short versions, the STACK comparison) are NOT recorded in it. (preserved: artifacts/intel-amx/memory/split-4424/pr4958-pr4959-diagram-pages.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/memory/MEMORY.md (10,006 bytes). One index line added.
 
 Scratchpad (may be cleaned up):
 
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/6e1ee77b-f9bd-4187-97dd-77321eb2f890/scratchpad/setup.py (5,136 bytes). The script that copied and repointed the toolchain.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/6e1ee77b-f9bd-4187-97dd-77321eb2f890/scratchpad/legends.py (8,746 bytes). The script that rewrote the LEGEND text of each page_common.py.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/6e1ee77b-f9bd-4187-97dd-77321eb2f890/scratchpad/units_model_4958.py (28,809 bytes) plus head-file copies (full.hpp, model.hpp, kv_cache_head.hpp, self_attention.hpp, gof.cpp, gof.hpp, k_vnni.hpp, t_k_vnni_layout.cpp) written by the builders at 08:36.
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/6e1ee77b-f9bd-4187-97dd-77321eb2f890/scratchpad/setup.py (5,136 bytes). The script that copied and repointed the toolchain. (preserved: artifacts/intel-amx/exec/scratch-relocated/6e1ee77b/setup.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/6e1ee77b/setup.py)
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/6e1ee77b-f9bd-4187-97dd-77321eb2f890/scratchpad/legends.py (8,746 bytes). The script that rewrote the LEGEND text of each page_common.py. (preserved: artifacts/intel-amx/exec/scratch-relocated/6e1ee77b/legends.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/6e1ee77b/legends.py)
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-split-4424/6e1ee77b-f9bd-4187-97dd-77321eb2f890/scratchpad/units_model_4958.py (28,809 bytes) plus head-file copies (full.hpp, model.hpp, kv_cache_head.hpp, self_attention.hpp, gof.cpp, gof.hpp, k_vnni.hpp, t_k_vnni_layout.cpp) written by the builders at 08:36. (preserved: artifacts/intel-amx/exec/scratch-relocated/6e1ee77b/units_model_4958.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/6e1ee77b/units_model_4958.py)
 
 Code: no commits made. Worktrees tron-split-pr3 and tron-split-pr4 read only.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/pr4958-diagrams-20261016/` (12 files)
+- `artifacts/intel-amx/exec/pr4958-diagrams-20261016/facts/` (3 files)
+- `artifacts/intel-amx/exec/pr4958-diagrams-20261016/figs/` (15 files)
+- `artifacts/intel-amx/exec/pr4959-diagrams-20261016/` (11 files)
+- `artifacts/intel-amx/exec/pr4959-diagrams-20261016/facts/` (2 files)
+- `artifacts/intel-amx/exec/pr4959-diagrams-20261016/figs/` (22 files)
 
 ## Current state
 

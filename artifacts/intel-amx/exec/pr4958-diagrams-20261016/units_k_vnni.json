@@ -1,0 +1,111 @@
+{
+ "file": "h/tron/tensor/k_vnni.hpp",
+ "short": [
+  "PR 4958 (tron pull request 4958, the third of four PRs that split PR 4424) adds the block save to h/tron/tensor/k_vnni.hpp: store_block writes the K rows (the saved keys of attention) of up to 16 tokens of one 16-token block into the VNNI plane (the pair-interleaved layout that the AMX tile multiply reads as its B operand) as whole 64-byte lines, after a 16 x 16 register transpose (transpose_16x16_epi32), instead of one 4-byte scatter per (token, dimension pair, line).",
+  "The file gains two constants (FULL_BLOCK_0XFFFF, LANES_16), two static_asserts, the transpose, store_block, and one sentence in the comment of store_row: several threads may store different tokens of one plane at the same time, which is what the shared save_k window of model.hpp relies on. The bytes a block save leaves in the plane are bit-identical to the per-token store (the test compares 4 blocks x 38 present masks).",
+  "This page draws the plane and the present mask, the registers of one dimension step, the function model, the bytes of one block through the three store paths and the threads of one shared window once (section 1), then shows each of the four logical changes of the file beside the diagram it alters (section 2)."
+ ],
+ "base_intro": "Five diagrams carry the context that every change below refers to. B1 is the data model (one K plane, its panels, pair rows and token lanes, with the present mask of the worked example's unit 2), B2 the register model of one dimension step before and after the transpose, B3 the function model (the new operations, their neighbours, callers and callees), B4 the sequencing model (the bytes of one block through store_block, full and masked, and through store_row) and B5 the interaction model (which thread of a shared save_k window stores which block). The per-change diagrams in section 2 reuse their shapes and colours and say which base diagram they update.",
+ "changes_intro": "A unit is one logical change: a comment, a group of constants, one function. Each unit shows the head code with its comments (added lines green, removed base lines red, head line numbers in the second column, base line numbers in the first) and, beside it, the diagram that updates a base diagram. Units are ordered as the file is: the header comment (K0), the constants and static_asserts (K1), the transpose (K2) and store_block with the changed comment of store_row (K3).",
+ "trivial_intro": "One comment edit alters no behaviour and needs no picture.",
+ "trivial_bullets": [],
+ "method": [
+  "Facts in the diagrams come from the file's own comments (the header comment at head lines 2-39 and the function comments), from Note [K VNNI storage] in kv_cache.hpp (head lines 685-760, item 1 at 712-724), from Note [Shared block save] in model.hpp (head lines 3075-3136) and the comment of batch::k_store_window_t in common.hpp (1193-1219), and from the callers' code in kv_cache.hpp, model.hpp, self_attention.hpp, full.hpp and the tests of the same PR. Every line number was read from the PR 4958 head (b39765ec29) in the worktree, and check_page.py verifies that each cited range contains the box's name.",
+  "The four stages of the transpose in K2 and the place of the worked example's dword after each stage were computed by a simulation of the intrinsics (base_k_vnni.transpose_sim), which checks that the result is the exact transpose; they are not hand-drawn.",
+  "The worked example (one shared save_k window of 41 items at page 7 offsets 0..40 with 3 workers; unit 2 = block 2 with present 0x01ff; token 37, dimension 70) is an illustration, not a measurement. No performance number appears on this page.",
+  "Every figure is an SVG (Scalable Vector Graphics, the drawing format of the figures). Each SVG was rendered to a PNG image (a pixel image) with cairosvg (a Python SVG renderer) and inspected for overlaps and clipped text before delivery."
+ ],
+ "base": [
+  {"id": "k_vnni-b1", "short": "data model: the plane and the present mask",
+   "title": "Data model: one K plane, its panels, pair rows, lanes and the present mask",
+   "intro": "A plane is K for one KV head of one page: 64 tokens x 128 dimensions of bf16 = 16 KiB. It is 16 panels of 1 KiB, indexed by dimension step s and token block c. A panel is 16 pair rows of 64 bytes. A pair row holds one dimension pair of 16 token lanes. New in this PR is the present mask: bit t set means that lane t of the block is stored by the block save. Every arrow says how many. The worked example (unit 2 of the shared window: block 2, present 0x01ff; token 37, dimension 70) is traced through the index formula."},
+  {"id": "k_vnni-b2", "short": "register model",
+   "title": "Register model: the 16 x 16 dwords of one dimension step before and after the transpose",
+   "intro": "store_block handles one dimension step at a time with 16 zmm registers of 16 dword lanes. After the loads, register t holds the row of token c * 16 + t and lane dp its dimension pair dp. After transpose_16x16_epi32, register dp holds pair row dp of the panel and lane t the token. The diagram shows both grids on the worked example, the zero registers of the absent lanes, and a table of what a lane means before and after."},
+  {"id": "k_vnni-b3", "short": "function model",
+   "title": "Function model: the new operations, their neighbours, callers and callees",
+   "intro": "Each band is one group of operations: the block save (new), one token's row in and out (PR 4956, with store_row's comment changed), and the one access route with the address helpers (unchanged). Every cell says in one line what the function does, cites its definition and carries its tag. Callers in other files sit at the left with their call-site lines."},
+  {"id": "k_vnni-b4", "short": "sequencing model",
+   "title": "Sequencing model: the bytes of one block through store_block (full and masked) and store_row",
+   "intro": "The worked example's blocks pass through the three store paths of this PR: a full block (unit 0, present 0xffff), a partial block (unit 2, present 0x01ff) and the per-token scatter of a decode step (a run of one token). Each row shows the block's 4 panels (4 KiB) after the store. The bottom row quotes the comment's comparison of the write patterns."},
+  {"id": "k_vnni-b5", "short": "interaction model",
+   "title": "Interaction model: which thread calls which operation on which block",
+   "intro": "One lane per thread of the worked example's shared save_k window (main and two helpers), plus the attention workers and a decode step. Left to right: main cuts the items into units and opens the window, every thread claims units and runs store_k_block -> page::set_k_block -> store_block on its own block, the helpers finish and return, main joins and marks. The rules under the lanes cite the comment that states each one."}
+ ],
+ "units": [
+  {"id": "k0", "title": "The header comment: store_block and page::set_k_block join the lists", "kind": "comment only",
+   "ranges": [[2, 9], [32, 39]],
+   "lead": [
+    "Comment text only. The first paragraph lists the vector operations that move whole token rows in and out; store_block joins store_row, load_row and copy_token [k_vnni.hpp:5-6].",
+    "The last paragraph lists the page accessors built on the typed operations; page::set_k_block joins page::set_k_row, page::get_k_row and page::k_packed [k_vnni.hpp:36-37].",
+    "The rule on who may compute a packed address does not change: the typed operations of this header and the two layout-specific score kernels, through detail::k_vnni_access [k_vnni.hpp:32-35].",
+    "The sentence on the readers (the AVX-512 score reader in kernels/k_vnni.hpp, the AMX QK kernel in amx_attn_iface.hpp) is re-wrapped after the longer list [k_vnni.hpp:6-8]."
+   ],
+   "base": "(set by the figure module)"},
+  {"id": "k1", "title": "The constants FULL_BLOCK_0XFFFF and LANES_16 and the two static_asserts", "kind": "new",
+   "ranges": [[76, 79], [84, 92]],
+   "lead": [
+    "FULL_BLOCK_0XFFFF is the present mask of a full block: the 16 lanes of one token block, all present. store_block compares present against it to choose whole-line stores [k_vnni.hpp:76-77, 357].",
+    "LANES_16 = LINE_BYTES_64 / DWORD_BYTES_4 is the number of 32-bit lanes of one 512-bit register; the transpose is LANES x LANES [k_vnni.hpp:78-79].",
+    "The first static_assert gains LANES_16 == 16 ('every constant's name states its value') [k_vnni.hpp:84-88].",
+    "The new static_assert states that BLOCK_TOKENS_16 == LANES_16 and STEP_PAIRS_16 == LANES_16: the block save transposes 16 token rows onto the 16 pair rows of a panel [k_vnni.hpp:91-92]."
+   ],
+   "base": "(set by the figure module)"},
+  {"id": "k2", "title": "transpose_16x16_epi32: the in-place 16 x 16 transpose of dword lanes", "kind": "new",
+   "ranges": [[257, 287]],
+   "lead": [
+    "On return r[i] holds lane i of every input register (input register t in lane t). Four stages of two-register shuffles, 64 shuffles in all [k_vnni.hpp:257-259].",
+    "Stage 1 interleaves the dwords of neighbour registers (_mm512_unpacklo_epi32 / _mm512_unpackhi_epi32 of r[2i], r[2i+1]); stage 2 interleaves qwords (_mm512_unpacklo_epi64 / _mm512_unpackhi_epi64); stages 3 and 4 shuffle 128-bit quarters (_mm512_shuffle_i32x4 with the selectors EVEN_QUARTERS_0X88 and ODD_QUARTERS_0XDD) [k_vnni.hpp:262-286].",
+    "The helper lives in namespace k_vnni::detail next to pair_base and pair_row_offsets. Its one caller is store_block [k_vnni.hpp:234, 355].",
+    "The page's diagram comes from a simulation of the four stages that checks the result is the exact transpose; the worked example's dword (token 37, pair 3) moves r[5] lane 3 -> r[7] lane 1 -> r[3] lane 9 -> r[3] lane 5."
+   ],
+   "base": "(set by the figure module)"},
+  {"id": "k3", "title": "store_block: up to 16 rows of one block, transposed in registers and written as whole lines; store_row's comment", "kind": "new + changed comment",
+   "ranges": [[290, 292], [326, 367]],
+   "lead": [
+    "store_block(dst, c, present, rows) stores the K rows of up to 16 tokens of token block c (the bits t set in present) into a packed plane with full-line stores. rows[t] points at the 128 bf16 of token t in dimension order; it may be null for an absent token [k_vnni.hpp:326-334].",
+    "Per dimension step s: one 64-byte load per present row into r[t] (a zero register for an absent lane), transpose_16x16_epi32(r), then 16 stores into panel (s, c): _mm512_storeu_si512 whole lines when present == FULL_BLOCK_0XFFFF, else _mm512_mask_storeu_epi32 masked to the present lanes [k_vnni.hpp:348-365].",
+    "Compared with store_row per token, a full block issues 64 stores of whole lines instead of 64 scatters, each writing 4 bytes into 16 lines. The same 4 KiB is written; the write pattern differs. The block index is checked as store_row checks its token index [k_vnni.hpp:334-339, 346].",
+    "The comment of store_row gains the concurrency rule: only this token's 64 pair slots are written, so several threads may store different tokens of one plane at the same time (Note [Shared block save] in model.hpp). The code of store_row is unchanged [k_vnni.hpp:290-292].",
+    "Callers at the head: page::set_k_block (kv_cache.hpp:2089-2095) from store_k_block for a run of 2 to 16 tokens, with the run's mask, on any thread of the shared window (model.hpp:3276-3289); the block-save test with 38 masks (t_k_vnni_layout.cpp:192-250)."
+   ],
+   "base": "(set by the figure module)"}
+ ],
+ "trivial": [
+  {"id": "t1", "title": "Comment of k_vnni_view: store_block joins the ways rows enter a plane", "ranges": [[127, 129]],
+   "what": "Two comment lines of the k_vnni_view declaration: rows enter only through store_row, store_block and copy_token; there is still no element write and no public pointer access."}
+ ],
+ "glossary": [
+  ["AMX", "Advanced Matrix Extensions, the tile instruction set of the CPU. Its tile multiply reads its B operand (the second matrix) in the VNNI layout; a panel of the plane is one B tile. This PR adds no AMX instruction. [k_vnni.hpp:11-19, 27-28]"],
+  ["AVX-512", "Advanced Vector Extensions, the CPU's 512-bit vector instruction set. One zmm register holds 16 lanes of 32 bits (LANES_16). store_block, the transpose, store_row and load_row are AVX-512 code. [k_vnni.hpp:12-13, 78-79]"],
+  ["bf16", "The 16-bit brain floating-point format of the stored K values. One 128-dimension K row is 128 bf16 = 256 bytes = 4 steps of 64 bytes. [k_vnni.hpp:13, 22]"],
+  ["block save", "The store of up to 16 rows of one token block at once: page::set_k_block -> store_block. A run of 2 to 16 consecutive tokens of one block takes it; a run of one token takes the per-row store. [kv_cache.hpp:712-724; model.hpp:3260-3289]"],
+  ["dimension pair (dp) / dword / lane", "Dimensions 2 dp and 2 dp + 1 of one token, stored together in one 32-bit lane (a dword, DWORD_BYTES_4). A 512-bit register has 16 such lanes; in a pair row, lane t belongs to token lane t. [k_vnni.hpp:60-62, 71]"],
+  ["dimension step (s)", "32 dimensions = 16 dimension pairs (STEP_DIMS_32, STEP_PAIRS_16). store_block handles one step at a time: one 64-byte load per row, one transpose, 16 stores. HEAD_SIZE_128 / STEP_DIMS_32 = DIM_STEPS_4 steps. [k_vnni.hpp:67-69, 348]"],
+  ["FULL_BLOCK_0XFFFF", "The present mask with all 16 lanes of one token block set (new). store_block compares present against it to choose the whole-line stores. [k_vnni.hpp:76-77, 357]"],
+  ["helpers / main helpers", "The idle threads of a generated plugin that run the per-token kernels next to the main thread. In this PR they join the K store through run_main_help with their worker_ix. [model.hpp:3092-3101; TronCpp.hs:2924-2942]"],
+  ["k_store_window / batch::k_store_window_t", "The data structure of the shared K store window in common.hpp: the claim counter next_unit, the window counters opened and finished, the unit table unit_start and the per-helper helper_windows. [common.hpp:1193-1219]"],
+  ["k_vnni_access (detail::k_vnni_access::plane)", "The one route from a view to the plane address. store_block uses it like store_row and load_row. [k_vnni.hpp:195-203, 347]"],
+  ["k_vnni_tensor / k_vnni_view", "The owner of one packed K plane and the typed view of it (PR 4956). store_block takes a writable view; the view's comment now lists store_block among the ways rows enter. [k_vnni.hpp:127-188]"],
+  ["LANES_16", "LINE_BYTES_64 / DWORD_BYTES_4 = 16: the 32-bit lanes of one 512-bit register, the width of the transpose (new). [k_vnni.hpp:78-79]"],
+  ["line (pair row)", "One 64-byte line of a panel: one dimension pair for 16 token lanes, 32 bf16 = 16 dwords (ROW_ELEMS_32, ROW_DWORDS_16). store_block writes a line whole; store_row writes 4 bytes of it per token. [k_vnni.hpp:63-64, 70-71, 334-337]"],
+  ["masked store (_mm512_mask_storeu_epi32)", "A 64-byte store that writes only the dword lanes whose bit is set in the mask. store_block uses it for a partial block, with present as the mask, so absent lanes are never written. [k_vnni.hpp:361-365]"],
+  ["Note [K VNNI storage]", "The kv_cache.hpp note that says who writes and who reads the VNNI K layout. Its item 1 now describes the block save, the per-row store of a run of one token, and the sharing with the helpers. [kv_cache.hpp:685-760]"],
+  ["Note [Shared block save]", "The model.hpp note that records the window protocol: who opens, who claims, who joins, and why the join cannot deadlock. [model.hpp:3075-3136]"],
+  ["page (KV page)", "The unit of KV storage: 64 contiguous tokens (PAGE_TOKENS_64). [k_vnni.hpp:18-19, 58]"],
+  ["page::set_k_block", "The page accessor of the block save: it takes the slot, the KV head, the block c, the present mask and the 16 row pointers, and calls store_block on the owner's writable view. [kv_cache.hpp:2078-2096]"],
+  ["page::set_k_row / store_row", "The per-row store of PR 4956: 4 AVX-512 scatters that write 4 bytes into each of the token's 64 lines. A run of one token (a decode step) still takes it. [k_vnni.hpp:290-307; kv_cache.hpp:2061-2075]"],
+  ["panel", "One (s, c) pair of the plane: 16 pair rows of 64 bytes = 1 KiB (PANEL_BYTES_1024), one AMX B tile. store_block fills panel (s, c) with 16 line stores per step. [k_vnni.hpp:27-28, 72-75, 356]"],
+  ["plane", "K for one KV head of one page: 64 tokens x 128 dimensions of bf16 = 16 KiB, the same bytes as the row-major plane, owned by k_vnni_tensor. [k_vnni.hpp:19-26]"],
+  ["present (__mmask16)", "The 16-bit mask of the tokens of a block that a save holds: bit t set means rows[t] is the row of offset c * 16 + t. 0xffff = a full block; the worked example's unit 2 has 0x01ff. [k_vnni.hpp:326-327, 344; model.hpp:3245-3257]"],
+  ["run / work unit", "A run is a sequence of consecutive items of the pass that fall into one 16-token block of one page (store_k_block). A work unit is the range items[unit_start[u], unit_start[u + 1]) that one thread of the shared window claims. [model.hpp:3240-3259; common.hpp:1207-1215]"],
+  ["shared window", "The K store of one minibatch shared between main and the helpers (Note [Shared block save]): main opens it, every thread claims units with fetch_add, the helpers count themselves finished, main joins. [model.hpp:3325-3365]"],
+  ["store_block", "The new operation of this PR: up to 16 rows of one block, transposed in registers per dimension step and written as whole (or masked) 64-byte lines into the block's 4 panels. Bit-identical to store_row per present token. [k_vnni.hpp:326-367]"],
+  ["token block (c)", "16 consecutive tokens of a page (BLOCK_TOKENS_16), page offsets 16 c .. 16 c + 15, owning panel (s, c) for every step s: 4 KiB. A page has TOKEN_BLOCKS_4 blocks. [k_vnni.hpp:22-28, 65-66]"],
+  ["token lane (t)", "A token's position inside its block, 0..15: token c * 16 + t owns column t of the block's 4 panels, register r[t] before the transpose and lane t after it. [k_vnni.hpp:27-29, 257-259]"],
+  ["transpose_16x16_epi32", "The new in-place transpose of a 16 x 16 matrix of dword lanes: four stages of two-register shuffles, 64 shuffles. Called once per dimension step by store_block. [k_vnni.hpp:257-287, 355]"],
+  ["tron", "The inference program under test. Every type of this header is declared inside namespace tron. [k_vnni.hpp:54]"],
+  ["VNNI", "Vector Neural Network Instructions layout: the two values of a dimension pair of one token sit next to each other in one 32-bit lane; one 64-byte row holds that pair for 16 consecutive tokens. [k_vnni.hpp:13-18]"],
+  ["worked example", "One prefill pass of 41 items at page 7 offsets 0..40, storage slot 5, KV head 0, shared by 3 workers: units [0,16) [16,32) [32,41); unit 2 = block 2 with present 0x01ff; token 37 = lane 5 of block 2, dimension 70 = step 2, pair 3; element index 5226. An illustration, not a measurement."]
+ ]
+}

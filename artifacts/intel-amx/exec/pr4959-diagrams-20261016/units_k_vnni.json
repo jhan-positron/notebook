@@ -1,0 +1,169 @@
+{
+ "file": "h/tron/tensor/k_vnni.hpp",
+ "short": [
+  "PR 4959 (tron pull request 4959, the last of four PRs that split PR 4424) lets a 16-token block of the VNNI K plane (the saved keys of one KV head for one 64-token page, in the pair-interleaved order the AMX tile multiply reads) hold its rows row-major until all 16 rows are saved. In h/tron/tensor/k_vnni.hpp this is Note [Row-major tail block]: token t of block c owns 256 contiguous bytes inside the block's own 4 KiB, at panel (t / 4, c), row t % 4.",
+  "The file gains the typed row view of that form (row_major_row), the two row operations on it (store_row_major, load_row_major: one memcpy of 4 whole 64-byte lines), the in-place conversion of a complete block to the VNNI layout and back (block_to_vnni, block_to_rows: a 4 KiB stack copy, then store_block or 16 row stores), and the bit helpers that name the page's layout state (block_bit, offset_bit, BLOCKS_PER_PAGE_MASK_0XF, PANEL_ROWS_4). Which form a block holds is recorded by the page in kv_cache.hpp; the operations here take the layout from the caller.",
+  "This page draws the plane with one block in both forms, the bit model, the function model, the life of one block's bytes and the thread model once (section 1), then shows each of the five logical changes of the file (K0 to K4) beside its diagram (section 2)."
+ ],
+ "base_intro": "Five diagrams carry the context that every change below refers to. B1 is the data model (the plane, and block 2 of the worked example in its row-major form and its VNNI form), B2 the bit model (the saved-row bits and the converted-block bits the page keeps, and the helpers of this file that name them), B3 the function model (every operation the PR adds, its callers and what it calls), B4 the sequencing model (the bytes of one block from its first row-major row to the VNNI form and back) and B5 the interaction model (which thread calls what, and the rules). The per-change diagrams in section 2 reuse their shapes and colours and say which base diagram they update.",
+ "changes_intro": "A unit is one logical change: a comment, a group of constants, one form of a block with its operations, one conversion pair. Each unit shows the head code with its comments (added lines green, removed base lines red, head line numbers in the second column, base line numbers in the first) and, beside it, the diagram that updates a base diagram. Units are ordered as the file is: the header comment (K0), the constants and bit helpers (K1), Note [Row-major tail block] with row_major_row (K2), the row operations of that form (K3) and the in-place conversions (K4).",
+ "trivial_intro": "The include line needs no picture.",
+ "trivial_bullets": [],
+ "method": [
+  "Facts in the diagrams come from the file's own comments (the header comment at head lines 2-11, Note [Row-major tail block] at 403-423 and the function comments), from Note [K VNNI storage] and Note [Row-major blocks under hardware attention] in kv_cache.hpp (head lines 685-770), and from the callers' code in kv_cache.hpp, model.hpp, self_attention.hpp, full.hpp, gof.cpp, kernels/k_vnni.hpp and the tests at the PR 4959 head 6b081187e1. Every line number was read from the head file in the worktree, and check_page.py verifies that each cited range contains the box's name.",
+  "The worked example (page 7, storage slot 5, KV head 0; offsets 0..45 saved, blocks 0 and 1 converted, block 2 row-major with 14 rows; token 37, dimension 70) is an illustration, not a measurement. The two element indexes of K[37][70] (3270 in the row-major form, 5226 in the VNNI form) are computed from the formulas of row_major_row and k_vnni::index.",
+  "Every figure is an SVG (Scalable Vector Graphics, the drawing format of the figures). Each SVG was rendered to a PNG image (a pixel image) with cairosvg (a Python SVG renderer) and inspected for overlaps and clipped text before delivery."
+ ],
+ "base": [
+  {
+   "id": "k_vnni-b1",
+   "short": "data model: the plane, one block in two forms",
+   "title": "Data model: one K plane and the two forms of one 16-token block",
+   "intro": "A plane is K for one KV head of one page: 16 panels of 1 KiB, one per (dimension step s, token block c). A block owns the 4 panels of its column, 4 KiB. In the row-major form a panel holds 4 token rows of 256 bytes (PANEL_ROWS_4); in the VNNI form it holds 16 pair rows of 64 bytes. The worked example (page 7, slot 5, KV head 0) has blocks 0 and 1 converted, block 2 row-major with 14 rows, block 3 empty; token 37 and dimension 70 are followed to their element in both forms."
+  },
+  {
+   "id": "k_vnni-b2",
+   "short": "bit model",
+   "title": "The bit model: the saved-row bits, the converted-block bits and the helpers that name them",
+   "intro": "The page (kv_cache.hpp) keeps two words per storage slot: k_rows_saved_ (one bit per page offset) and k_vnni_blocks_ (one bit per 16-token block). This file names the bits: offset_bit, block_bit and BLOCKS_PER_PAGE_MASK_0XF. The diagram shows the worked example's words, the block states they encode, and the readers of the bits."
+  },
+  {
+   "id": "k_vnni-b3",
+   "short": "function model",
+   "title": "Function model: every operation the PR adds, its callers and what it calls",
+   "intro": "The operations are grouped by purpose: the bit helpers, the row-major form of a block, the in-place conversion, and the unchanged operations of PR 4956 and PR 4958 that the new ones call. Every cell says in one line what the function does and cites its definition. Callers in other files sit at the left with their call-site lines."
+  },
+  {
+   "id": "k_vnni-b4",
+   "short": "sequencing model",
+   "title": "Sequencing model: the bytes of one block from its first row-major row to the VNNI form and back",
+   "intro": "Block 2 of the worked example passes through the prefill's short run (store_row_major), the decode steps and their readers (row_major_row), the 16th row, the forward-end conversion (block_to_vnni through a 4 KiB stack copy) and the way back (block_to_rows). The diagram shows which operation writes or reads which bytes of the block's 4 KiB."
+  },
+  {
+   "id": "k_vnni-b5",
+   "short": "interaction model",
+   "title": "Interaction model: who calls which operation from which thread",
+   "intro": "The operations of this file are called from the save_k window (main and the main helpers), the attention workers, the FPGA staging, main at the forward end and the scheduler's tree work. Lanes are kinds of threads or callers. The rules under the lanes cite the comment that states each one."
+  }
+ ],
+ "units": [
+  {
+   "id": "k0",
+   "title": "The header comment: the file now names the in-place conversion of a block",
+   "kind": "comment only",
+   "ranges": [[2, 11]],
+   "lead": [
+    "Comment text only. The first paragraph of the header lists what the file defines. It gains the in-place conversion of one 16-token block between its row-major and its VNNI form (block_to_vnni, block_to_rows) and points at Note [Row-major tail block] below [k_vnni.hpp:6-8].",
+    "The rest of the paragraph is reflowed: the AVX-512 score reader stays in h/tron/kernels/k_vnni.hpp, the AMX QK kernel in h/tron/kernels/amx_attn_iface.hpp, and Note [K VNNI storage] in kv_cache.hpp still says who writes and reads the layout [k_vnni.hpp:8-11].",
+    "The other three paragraphs (the Words used here, the plane formula, who may compute a packed address) do not change [k_vnni.hpp:13-41]."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "k1",
+   "title": "The constants and bit helpers of the layout state: PANEL_ROWS_4, BLOCKS_PER_PAGE_MASK_0XF, block_bit, offset_bit",
+   "kind": "new",
+   "ranges": [[87, 113]],
+   "lead": [
+    "PANEL_ROWS_4 = PANEL_ELEMS_512 / HEAD_SIZE_128 = 4: a row-major block keeps 4 token rows of 256 bytes in each of its 4 panels [k_vnni.hpp:87-89]. row_major_row divides and takes the remainder by it [k_vnni.hpp:436, 438].",
+    "block_bit(c) = uint8_t(1u << c) is bit c of a block mask, one bit per 16-token block of a page (page::k_vnni_blocks) [k_vnni.hpp:93-96]. BLOCKS_PER_PAGE_MASK_0XF = 0xf is the mask with every block of the page set; the static_assert at 108-109 pins it to block_bit(TOKEN_BLOCKS_4) - 1 [k_vnni.hpp:90-92].",
+    "offset_bit(offset) = uint64_t{1} << offset is the bit of one page offset in a page-offset mask (the saved rows of a page) [k_vnni.hpp:97-101].",
+    "The big static_assert gains PANEL_ROWS_4 == 4: every constant's name states its value [k_vnni.hpp:102-107].",
+    "Readers, one per bullet:",
+    "kv_cache.hpp reads the bits with them: note_k_row_saved (offset_bit, block_bit), note_k_block_saved, k_block_to_vnni_at, k_block_is_vnni, k_forget_row (offset_bit - 1 and block_bit - 1 as the masks of the bits below an offset), copy_storage_slot [kv_cache.hpp:2222, 2229, 2246, 2265, 2549, 2585-2586, 2602, 2744, 2770, 2777, 2788].",
+    "self_attention.hpp compares page::k_vnni_blocks with BLOCKS_PER_PAGE_MASK_0XF before the AMX kernel (k_layout_dense) and tests block_bit(i / 16) per token in the loop; a converted block's token goes into the live mask with offset_bit(i) [self_attention.hpp:1915-1922, 2008-2009]. The tests name the mask too [t_k_vnni_layout.cpp:916]."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "k2",
+   "title": "Note [Row-major tail block] and the typed row of that form: row_major_row",
+   "kind": "new",
+   "ranges": [[403, 439]],
+   "lead": [
+    "The Note: a block holds the VNNI layout only once all 16 of its K rows are saved. Until then token t of block c owns 256 contiguous bytes (its 128 bf16 values in dimension order) at row_major_row(): panel (t / 4, c) holds the rows of tokens 4 (t / 4) .. 4 (t / 4) + 3. A row-major block and a VNNI block occupy the same 4 KiB, and no other block is touched by either layout [k_vnni.hpp:405-411].",
+    "Why: in decode every step saves one token per user. The VNNI scatter of one row writes 4 bytes into each of 64 lines; the row-major store writes 4 whole lines. The readers of an incomplete block (the row-major dotter, the FPGA staging gather) read 4 lines per token instead of 64 as well [k_vnni.hpp:412-416].",
+    "When: at the forward end of the pass that saved the 16th row, block_to_vnni() transposes the block in place (4 KiB read, 4 KiB written). A whole-block save writes the VNNI form at once (store_block). The AMX kernel reads the page once every block is VNNI. Which layout a block holds is recorded per (page, slot) by the page's converted-block bit; the operations here take the layout from the caller [k_vnni.hpp:416-423].",
+    "row_major_row(plane, token) returns the token's row inside a row-major block as a typed row view: k_row_view<Cols> for a bf16 plane, const_k_row_view<Cols> for a const bf16 plane. The address is k_vnni_access::plane + ((t / PANEL_ROWS_4) * TOKEN_BLOCKS_4 + c) * PANEL_ELEMS_512 + (t % PANEL_ROWS_4) * Cols. The view does not say that the block is row-major: the caller knows it from page::k_vnni_blocks [k_vnni.hpp:425-439].",
+    "Callers: set_k_row and get_k_row through store_row_major / load_row_major, k_row_if_row_major (the FPGA staging's in-place row), copy_storage_slot (the row-major side of a token copy), and the dotter loop of apply_page_tok [kv_cache.hpp:2385, 2779, 2782; self_attention.hpp:2013]. The layout test checks that the 16 rows of a block are distinct, 64-byte aligned and inside the block's own panels [t_k_vnni_layout.cpp:270-291]."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "k3",
+   "title": "One token's row into and out of its row-major block: store_row_major, load_row_major",
+   "kind": "new",
+   "ranges": [[441, 459]],
+   "lead": [
+    "store_row_major(dst, token, src) is one memcpy of Cols * sizeof(bf16) = 256 bytes from the transfer row src into row_major_row(dst, token): 4 whole 64-byte lines, the same lines the row-major layout's store writes [k_vnni.hpp:441-449].",
+    "load_row_major(src, token, dst) is the inverse: one memcpy of 256 bytes out of row_major_row(src, token) into the transfer row dst [k_vnni.hpp:451-459].",
+    "Both take the same transfer rows as store_row and load_row (const_k_row_view / k_row_view with the caller's Aligned and Dma flags), so a page accessor can pick either pair by the block's bit [k_vnni.hpp:229-233].",
+    "Callers, one per bullet:",
+    "page::set_k_row stores with store_row_major when k_block_is_vnni is false (the block's bit clear), with store_row otherwise; page::get_k_row loads with load_row_major or load_row the same way [kv_cache.hpp:2296-2303, 2340-2346].",
+    "copy_storage_slot stores a token that comes from a row-major source block with store_row_major into the destination's row-major row [kv_cache.hpp:2781-2782].",
+    "block_to_vnni reads the 16 rows with load_row_major; block_to_rows writes them back with store_row_major [k_vnni.hpp:471, 488]. The layout test stores a block row by row with store_row_major and compares the bytes against store_row per token [t_k_vnni_layout.cpp:300-310]."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "k4",
+   "title": "The in-place conversion of one block: block_to_vnni and block_to_rows",
+   "kind": "new",
+   "ranges": [[461, 491]],
+   "lead": [
+    "block_to_vnni(plane, c) converts block c from row-major to the VNNI layout in place. It copies the 16 rows to the stack first (rows[BLOCK_TOKENS_16][Cols], 64-byte aligned, 4 KiB) with load_row_major, then calls store_block(plane, c, FULL_BLOCK_0XFFFF, row_ptrs). The copy is needed because store_block writes panel (s, c) while the rows of tokens 4 s .. 4 s + 3 still live there [k_vnni.hpp:461-476].",
+    "block_to_rows(plane, c) is the inverse: 16 load_row calls (4 gathers each) fill the same stack array, then 16 store_row_major calls write the rows back into the block's own panels [k_vnni.hpp:478-491].",
+    "Both read 4 KiB and write 4 KiB; neither touches another block [k_vnni.hpp:410-411, 416-418].",
+    "Callers, one per bullet:",
+    "page::k_block_to_vnni_at, from convert_pending_k_blocks on the main thread at the forward end: block_to_vnni for every KV head of the slot when the block's 16 row bits are set and its block bit is clear, then the block bit [kv_cache.hpp:2261-2284; model.hpp:3170-3177, 1838-1842].",
+    "page::k_forget_row, from clear_kv_complete_at between passes: block_to_rows for every KV head when the offset's block is converted and keeps rows below the offset, then the bits at and above the offset drop [kv_cache.hpp:2583-2618].",
+    "page::copy_storage_slot for a range that is not a whole page: block_to_rows on every converted destination block the range touches, the rows copied row-major, then block_to_vnni on every block whose 16 bits are set after the copy [kv_cache.hpp:2766-2791]. The layout test converts a block both ways and compares bit for bit against store_row per token [t_k_vnni_layout.cpp:253-320]."
+   ],
+   "base": "(set by the figure module)"
+  }
+ ],
+ "trivial": [
+  {
+   "id": "t1",
+   "title": "Include of <cstring>",
+   "ranges": [[46, 46]],
+   "what": "One include line: <cstring> for the std::memcpy of store_row_major, load_row_major (K3)."
+  }
+ ],
+ "glossary": [
+  ["AMX", "Advanced Matrix Extensions, the tile instruction set of the CPU. Its tile multiply reads its B operand (the second matrix) in the VNNI layout. The AMX QK kernel of PR 4957 reads a page only once every block of the page is VNNI. [k_vnni.hpp:13, 19-20, 418-420]"],
+  ["AVX-512", "Advanced Vector Extensions, the CPU's 512-bit vector instruction set. store_block, store_row, load_row and the score reader k_vnni::qk_group are AVX-512 code. [k_vnni.hpp:14-15]"],
+  ["bf16", "The 16-bit brain floating-point format of the stored K values. One 128-dimension K row is 128 bf16 = 256 bytes = 4 lines of 64 bytes. [k_vnni.hpp:15, 407-408]"],
+  ["block (token block c)", "16 consecutive tokens of a page (BLOCK_TOKENS_16), page offsets 16 c .. 16 c + 15. Its bytes are its 4 panels (s, c), 4 KiB, in either form. [k_vnni.hpp:25-27, 68-69, 405-411]"],
+  ["block_bit, offset_bit, BLOCKS_PER_PAGE_MASK_0XF", "The bit helpers of the layout state: block_bit(c) is bit c of a block mask (one bit per block), offset_bit(offset) is the bit of one page offset in a page-offset mask (the saved rows), BLOCKS_PER_PAGE_MASK_0XF = 0xf has every block of a page set. [k_vnni.hpp:90-101]"],
+  ["block_to_vnni / block_to_rows", "The in-place conversion of block c: block_to_vnni copies the 16 row-major rows to a 4 KiB stack array and then calls store_block; block_to_rows gathers the 16 rows with load_row and writes them back with store_row_major. [k_vnni.hpp:461-491]"],
+  ["complete, may wait", "A block whose 16 row bits are set and whose block bit is clear: it is complete and waits for block_to_vnni at the forward end. [kv_cache.hpp:717-718]"],
+  ["converted block / converted-block bit", "A block that holds the VNNI layout, recorded by bit c of k_vnni_blocks_ (page::k_vnni_blocks). Every reader and writer of a row takes the layout from that bit. [kv_cache.hpp:715-720, 2649-2653]"],
+  ["dotter (row-major dotter)", "dotter<scalar, 128> in h/tron/kernels/dotter.hpp, driven by the per-token dot-product loop of apply_page_tok. It scores the tokens of a row-major block through row_major_row, 4 lines per token. [self_attention.hpp:1956-1960, 2010-2017]"],
+  ["FPGA / GOF staging", "The FPGA (field-programmable gate array) runs hardware attention. The staging (gof::populate) copies the K/V rows of a GOF (a group of four consecutive tokens) into a buffer that DMA (direct memory access) moves to the card. Its callback page_info::k_head_fn reads a row-major row in place (k_row_if_row_major) and gathers a converted one (get_k_row -> load_row). [gof.cpp:201-211; full.hpp:2747-2765]"],
+  ["forward end", "The point of a forward pass after the plugin's run() joined its workers and wait_for_coop_gof drained the cooperative staging. convert_pending_k_blocks runs there: no reader of a completed block is left. [model.hpp:1838-1842; kv_cache.hpp:721-733]"],
+  ["FULL_BLOCK_0XFFFF", "The 16 lanes of one token block, all present: the mask store_block takes for a whole block. block_to_vnni always passes it. [k_vnni.hpp:79-80, 475]"],
+  ["hardware attention (cached_operation_uses_hw)", "An operation whose K the FPGA scores. For it save_k records no row bit for a short run and queues no block: the block stays row-major. [kv_cache.hpp:763-770; model.hpp:3419]"],
+  ["k_rows_saved_ / k_vnni_blocks_", "The K layout state the page keeps per storage slot (entry layout_t::n_slots is the EAGLE storage): a uint64_t with one bit per page offset (saved rows), and a uint8_t with one bit per block (converted blocks). [kv_cache.hpp:2639-2653]"],
+  ["k_vnni_access::plane", "The one route from a packed K view to its plane address, a friend of k_vnni_view. row_major_row, store_row, load_row and store_block use it. [k_vnni.hpp:216-224]"],
+  ["k_vnni::index", "The element index of K[token][dim] inside the VNNI plane: (((s * 4 + c) * 16 + dp) * 16 + t) * 2 + j. For token 37, dimension 70 it is 5226. [k_vnni.hpp:126-135]"],
+  ["KV head / kv_mul", "One key/value head of grouped-query attention. A plane is K for one KV head of one page. kv_mul is the number of query heads that share one KV head. [k_vnni.hpp:21-22]"],
+  ["line", "One 64-byte cache line. A pair row is one line; a row-major token row is 4 lines; the VNNI column of one token touches 64 lines. [k_vnni.hpp:17-18, 66-67, 412-414]"],
+  ["live mask (live)", "A 64-bit word of apply_page_tok with one bit per token of the page: the relevant tokens of converted blocks. k_vnni::qk_group scores those tokens; the tokens of row-major blocks are scored by the dotter and keep their bits clear. [kernels/k_vnni.hpp:25-31; self_attention.hpp:1962, 2008-2009]"],
+  ["Note [K VNNI storage]", "The kv_cache.hpp note on who writes and who reads the VNNI K layout. PR 4959 adds the paragraph on the two bit sets, the forward-end conversion and why the transition is at 16 saved rows. [kv_cache.hpp:685-770]"],
+  ["Note [Row-major tail block]", "The note of this file (head lines 403-423): a block holds its rows row-major inside its own 4 KiB until all 16 rows are saved; why (4 lines per token instead of 64); when it converts; and that the operations take the layout from the caller."],
+  ["page (KV page) / page offset", "The unit of KV storage: 64 contiguous tokens (PAGE_TOKENS_64). A page offset is a token's position inside its page, 0..63; its block is offset / 16 and its lane t is offset % 16. [k_vnni.hpp:20-21, 61]"],
+  ["pair row / panel", "A pair row is one 64-byte line of a panel: one dimension pair for 16 consecutive tokens. A panel is one (s, c) pair of the plane: 16 pair rows = 1 KiB = one AMX B tile. [k_vnni.hpp:17-18, 29-30]"],
+  ["PANEL_ROWS_4", "The 4 token rows of 256 bytes that a panel holds in the row-major form of a block: PANEL_ELEMS_512 / HEAD_SIZE_128. [k_vnni.hpp:87-89]"],
+  ["plane", "K for one KV head of one page: 64 tokens x 128 dimensions of bf16 = 16 KiB, owned by k_vnni_tensor and named by k_vnni_view. [k_vnni.hpp:20-25, 148-152, 184-188]"],
+  ["row_major_row", "The typed row view (k_row_view<Cols> or const_k_row_view<Cols>) of token t of block c inside a row-major block: panel (t / 4, c), row t % 4, 256 contiguous bytes on a 64-byte line, not DMA memory. The caller knows from page::k_vnni_blocks that the block is row-major. [k_vnni.hpp:425-439]"],
+  ["save_k / store_k_block / the window", "The model function that stores the K rows of one layer for every token job of a batch. Its window (PR 4958) shares the store with the idle main helpers. store_k_block stores a run of 16 tokens as one VNNI block (set_k_block) and a shorter run row by row (set_k_row). [model.hpp:3238-3334, 3345]"],
+  ["set_k_row / get_k_row / set_k_block / k_row_if_row_major", "The page accessors of kv_cache.hpp. set_k_row and get_k_row follow the block's bit (store_row_major / load_row_major for a row-major block, store_row / load_row for a converted one). set_k_block stores a whole block in the VNNI form. k_row_if_row_major hands the FPGA staging the in-place row of a row-major block. [kv_cache.hpp:2291-2307, 2321-2328, 2334-2350, 2378-2387]"],
+  ["store_block", "The whole-line block store of PR 4958: per dimension step, one 64-byte load per present row, a 16 x 16 register transpose, 16 line stores into panel (s, c). block_to_vnni calls it with FULL_BLOCK_0XFFFF. [k_vnni.hpp:347-388]"],
+  ["store_row / load_row", "The per-token VNNI operations of PR 4956: 4 scatters (or gathers) of 16 dwords, into (or out of) the token's column of its block's 4 panels, 64 pair slots in 64 lines. [k_vnni.hpp:311-345]"],
+  ["store_row_major / load_row_major", "One token's row into or out of its row-major block: one memcpy of Cols * sizeof(bf16) = 256 bytes, 4 whole 64-byte lines. [k_vnni.hpp:441-459]"],
+  ["transfer row (const_k_row_view, k_row_view)", "A rank-1 typed view of one token's Cols bf16 values in dimension order, with the caller's Aligned and Dma flags. Both row pairs (store_row / load_row and store_row_major / load_row_major) take them. [k_vnni.hpp:226-253]"],
+  ["tron", "The inference program under test (the project's CLAUDE.md term list). Every type of this header is declared inside namespace tron. [k_vnni.hpp:57]"],
+  ["VNNI", "Vector Neural Network Instructions layout: the two values of a dimension pair of one token sit next to each other in one 32-bit lane; one 64-byte row holds that pair for 16 consecutive tokens. It is the B-operand layout of the AMX tile multiply. [k_vnni.hpp:15-20]"]
+ ]
+}

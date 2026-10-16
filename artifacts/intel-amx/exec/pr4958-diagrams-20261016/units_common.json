@@ -1,0 +1,157 @@
+{
+ "file": "h/tron/models/common.hpp",
+ "short": [
+  "PR 4958 (tron pull request 4958, the third of four PRs that split PR 4424) lets the idle helper threads of a generated plugin share the K store of a forward pass with the main thread, and stores a run of 2 to 16 consecutive tokens of one 16-token block as whole 64-byte lines (store_block) instead of one scatter per token.",
+  "In common.hpp the PR adds one data model: batch::k_store_window_t, the K store window of one minibatch (one window per layer and pass). It holds the claim counter next_unit, the window counter opened, the helper counter finished, the unit count n_units, the unit table unit_start and the per-helper table helper_windows. The protocol that uses them is in model.hpp (Note [Shared block save]).",
+  "This page draws the window's data model, who reads and writes each field, the field values through one window, the three threads over wall-clock time and the work-unit invariants (section 1), then shows the one logical change of the file (the new struct and its member) beside two diagrams (section 2)."
+ ],
+ "base_intro": "Five diagrams carry the context that the change below refers to. B1 is the data model (the batch, the window type, the work unit, the page, the cache-line placement), B2 the function model (who calls what and who touches which field), B3 the sequencing model (the field values through one window of the worked example, with the memory orders), B4 the interaction model (main, two helpers and the attention workers as wall-clock lanes) and B5 the work-unit invariants of the unit_start comment. The change diagrams in section 2 reuse their shapes and colours and say which base diagram they update.",
+ "changes_intro": "A unit is one logical change. This file has one: the data model k_store_window_t and the member k_store_window of struct batch. The unit shows the head code with its comments (every line is added, so the base column is empty) and, beside it, two diagrams: the window over a whole forward pass (which fields count up, which are reset per window) and the cut of the worked example's items into unit_start with the present mask of each unit.",
+ "trivial_intro": "Changes that alter no behaviour and need no picture.",
+ "trivial_bullets": [],
+ "method": [
+  "The worked example (one prefill pass, layer 5, 3 workers, 41 items at page 7 offsets 0..40, unit_start = [0, 16, 32, 41]) is an illustration, not a measurement. The one timing on this page (0.86 ms per layer, 105 ns per (token, KV head) row for the per-token store before this PR) is quoted from Note [Shared block save] in model.hpp with its date and settings.",
+  "Thread and ordering facts in the diagrams come from the comments in the diff itself (the field comments, head lines 1193-1218) and from the users of the fields at the PR head b39765ec29: k_store_shared, k_store_cut_units and save_k_impl in model.hpp, the generated calls in ingest/src/TronCpp.hs and the three-thread section of t_llama_unit.cpp. Every line number was read from the head file.",
+  "The claim order drawn (main takes unit 0, helper 1 unit 1, helper 2 unit 2) is one possible order: fetch_add fixes none. Facts about the later PR of the split (the row-major tail block, the saved-row bits) are not drawn."
+ ],
+ "base": [
+  {
+   "id": "common-b1",
+   "short": "data model",
+   "title": "Data model: batch, k_store_window_t, work units, cache lines",
+   "intro": "One batch (a minibatch) owns one K store window. The window holds three counters, a unit count and two tables. A work unit is a run of consecutive items in one 16-token block of one page. The bottom row shows the memory placement: next_unit and opened each start a cache line, so a claim does not invalidate the line the waiting threads poll. Every arrow says how many. The worked example's tables are at the lower left."
+  },
+  {
+   "id": "common-b2",
+   "short": "function model",
+   "title": "Function model: callers, save_k and its helpers, the fields each one touches",
+   "intro": "The generated plugin calls save_k from run() (main, worker 0) and from run_main_help (each helper, its worker_ix) at the same statement position. One save_k_impl serves both sides and calls k_store_shared, k_store_cut_units (main only) and store_k_block (once per claimed unit). The right column lists, per field, who reads and writes it and with which memory order."
+  },
+  {
+   "id": "common-b3",
+   "short": "sequencing model",
+   "title": "Sequencing model: the window fields through one shared save_k window",
+   "intro": "The field values after each step of one window of the worked example: main cuts, resets and opens; the helpers count their window and wait for opened; all three claim with fetch_add and store; the helpers bump finished; main joins and marks. The two release / acquire edges (opened, finished) are named under the table."
+  },
+  {
+   "id": "common-b4",
+   "short": "interaction model",
+   "title": "Interaction model: main, two helpers and the attention workers over wall-clock time",
+   "intro": "Wall-clock lanes of one shared window: the helpers wait for opened, the three stores overlap, main waits for finished and then marks the tokens, which releases the attention workers' pending sections. Main's serial part (the cut, the open, the join wait, the marks) is the critical path. Durations are schematic."
+  },
+  {
+   "id": "common-b5",
+   "short": "work-unit invariants",
+   "title": "The work-unit invariants: what ends a unit, disjoint lanes, full-line stores",
+   "intro": "Three cases on one 16-token block: a run of 16 fills the block (one full-line store per pair row); a job without KV work between two items ends the run; items of one block that are not consecutive fall into several units whose writers touch disjoint lanes (masked stores). This is why two threads may write one block without conflict."
+  }
+ ],
+ "units": [
+  {
+   "id": "c1",
+   "title": "batch::k_store_window_t and the member k_store_window: the K store window of one minibatch",
+   "kind": "new data model",
+   "ranges": [
+    [
+     1193,
+     1219
+    ]
+   ],
+   "lead": [
+    "The struct is the shared state of one K store window, one window per (layer, pass) (1193-1195). The main thread opens it in save_k; the main helpers join it from the generated run_main_help. Note [Shared block save] in model.hpp states the protocol.",
+    "max_shared_workers = 128 is the array size of helper_windows and the upper bound of a shared store's worker count (1197-1199; k_store_shared in model.hpp:3153-3161 checks n_workers <= helper_windows.size()).",
+    "next_unit is the claim counter, on its own cache line (alignas(cache_line_size)): a claim must not invalidate the line the waiting threads poll (1200-1202). opened counts the windows opened so far in this pass, also on its own line (1203-1204). finished counts the helpers done with the open window (1205). n_units is the unit count of the open window (1206).",
+    "unit_start holds max_minibatch_size + 1 entries: work unit u = items[unit_start[u], unit_start[u + 1]). A unit never crosses a page, a 16-token page block, or a change of token_jobs_do_kv. Items of one block that are not consecutive fall into several units; their writers touch disjoint token lanes (masked stores), so two threads may write one block without conflict. When a run fills the block, each pair row is written with one full-line store (1207-1215).",
+    "helper_windows holds one entry per worker_ix: the windows a helper has entered. A helper's W-th call waits for opened >= W, so the count pairs the call with the window (1216-1218). The member k_store_window sits in struct batch next to layer_done (1219)."
+   ],
+   "base": "(set by the figure module)"
+  }
+ ],
+ "trivial": [
+  {
+   "id": "t1",
+   "title": "Includes for the window's arrays and atomics",
+   "ranges": [
+    [
+     4,
+     5
+    ]
+   ],
+   "what": "Two include lines: <array> for unit_start and helper_windows, <atomic> for next_unit, opened and finished."
+  }
+ ],
+ "glossary": [
+  [
+   "batch, minibatch",
+   "struct batch (common.hpp:1019): the token jobs of one minibatch of a forward pass and the shared state those jobs need. Its member items (common.hpp:1111) lists the jobs in order."
+  ],
+  [
+   "K store, save_k",
+   "The write of every token's K row (the key vector of one attention head) of the minibatch into the KV cache, once per (layer, pass). save_k in model.hpp does it; save_k_impl is its body. [model.hpp:3077-3078]"
+  ],
+  [
+   "K store window, k_store_window_t",
+   "The shared state of one save_k on one minibatch, one per (layer, pass): the struct added by this PR. [common.hpp:1193-1219]"
+  ],
+  [
+   "main thread, main helpers, worker_ix, n_workers",
+   "In a generated plugin the main thread runs the schedule (run()) and the main helpers run run_main_help. worker_ix is 0 for main and 1 .. n_workers - 1 for the helpers; n_workers = main + the helpers. [model.hpp:3094-3099; TronCpp.hs:1364]"
+  ],
+  [
+   "work unit, unit_start, n_units",
+   "A run of consecutive items of the minibatch inside one 16-token block of one page with one token_jobs_do_kv value: unit u = items[unit_start[u], unit_start[u + 1]), u < n_units. [common.hpp:1207-1215]"
+  ],
+  [
+   "next_unit, claim",
+   "The atomic claim counter: every thread of the window takes units with next_unit.fetch_add(1) until the result is >= n_units. A unit index is assigned once. [common.hpp:1200-1202; model.hpp:3341-3346]"
+  ],
+  [
+   "opened, helper_windows",
+   "opened counts the windows main opened in this pass; helper_windows[worker_ix] counts the windows that helper entered. A helper's W-th call waits for opened >= W. [common.hpp:1203-1204, 1216-1218]"
+  ],
+  [
+   "finished, join",
+   "finished counts the helpers that left the claim loop of the open window. Main's join waits for finished == n_workers - 1, then marks the tokens. [common.hpp:1205; model.hpp:3351-3365]"
+  ],
+  [
+   "present mask, set_k_block, store_block",
+   "A 16-bit mask of the tokens of one block that a run holds (bit t = page offset c * 16 + t). set_k_block (kv_cache.hpp:2078-2097) stores those rows as whole 64-byte lines through store_block (tensor/k_vnni.hpp:326-368), masked to the present lanes when the block is partial."
+  ],
+  [
+   "set_k_row, scatter",
+   "The per-token store of PR 4956: one token's K row into its column of the VNNI plane with 4 AVX-512 scatters. store_k_block uses it for a run of one token. [model.hpp:3193-3199]"
+  ],
+  [
+   "16-token block, page",
+   "A page holds 64 token offsets; block c holds the offsets c * 16 .. c * 16 + 15. [kv_cache.hpp:2078-2081]"
+  ],
+  [
+   "VNNI layout, VNNI plane",
+   "The pair-interleaved layout of the stored K of one (slot, KV head, page) that the AMX tile multiply reads as its B operand (PR 4956, Note [K VNNI storage] in kv_cache.hpp)."
+  ],
+  [
+   "token_jobs_do_kv",
+   "Per token job, 1 if the job needs KV work in this forward. A change of its value ends a work unit. [model.hpp:1158; common.hpp:1209-1210]"
+  ],
+  [
+   "cache_line_size, alignas",
+   "64 bytes (h/common/util.hpp:37-39). alignas(cache_line_size) puts a field at the start of its own cache line, so that writes to it do not invalidate the line of its neighbours."
+  ],
+  [
+   "memory order (relaxed, release, acquire, acq_rel)",
+   "The C++ atomic orderings. A release store followed by an acquire load of the same atomic makes every earlier write of the releasing thread visible to the acquiring thread. acq_rel on fetch_add does both. relaxed orders nothing."
+  ],
+  [
+   "pending sections, upstream_kvs_ready",
+   "The attention workers' work on the K rows of this minibatch, which starts when save_k counts the downstream latch upstream_kvs_ready[slot] down after the marks. [model.hpp:3085, 3385; common.hpp:1185-1188]"
+  ],
+  [
+   "critical path",
+   "In a wall-clock-lanes figure, the serial part of the main thread that every other thread waits behind."
+  ],
+  [
+   "worked example",
+   "One prefill pass, layer 5, 3 workers, 41 items at page 7 offsets 0..40: unit_start = [0, 16, 32, 41], units of 16, 16 and 9 tokens, present masks 0xffff, 0xffff, 0x01ff (STYLE.md of the record directory)."
+  ]
+ ]
+}
