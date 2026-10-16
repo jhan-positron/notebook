@@ -1,0 +1,653 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/pr3879/new-counters/tron-intuition-claude.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/pr3879/new-counters/tron-intuition-claude.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tron mental map for timing estimates</title>
+<style>
+:root { color-scheme: light; }
+body { margin: 0; background: #f9f9f7; color: #0b0b0b; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.5; }
+main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 60px; }
+h1 { font-size: 26px; margin: 0 0 6px; }
+h2 { font-size: 20px; margin: 36px 0 10px; border-bottom: 1px solid #e1e0d9; padding-bottom: 4px; }
+h3 { font-size: 16px; margin: 22px 0 8px; }
+p { margin: 8px 0 10px; }
+.sub { color: #52514e; font-size: 13.5px; margin-bottom: 14px; }
+.short { background: #ffffff; border: 1px solid #e1e0d9; border-left: 4px solid #2a78d6; padding: 12px 16px; margin: 14px 0 18px; }
+.note { background: #fff8ef; border: 1px solid #f1d9bb; padding: 10px 14px; margin: 10px 0; }
+figure { margin: 14px 0 18px; background: #fcfcfb; border: 1px solid #e1e0d9; padding: 8px; overflow-x: auto; }
+figcaption { color: #52514e; font-size: 13px; margin-top: 6px; }
+table { border-collapse: collapse; margin: 10px 0 14px; font-size: 13px; background: #ffffff; }
+caption { caption-side: top; text-align: left; color: #52514e; font-size: 12.5px; padding: 4px 0; }
+th, td { border: 1px solid #e1e0d9; padding: 5px 8px; vertical-align: top; text-align: left; }
+th { background: #f2f1ee; font-weight: 600; }
+table.num td:nth-child(n+3) { font-variant-numeric: tabular-nums; }
+pre { background: #f2f1ee; border: 1px solid #e1e0d9; padding: 10px 12px; overflow-x: auto; font-size: 12.5px; line-height: 1.45; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+dl { margin: 8px 0; }
+dt { font-weight: 600; margin-top: 8px; }
+dd { margin: 2px 0 0 18px; color: #1f1f1d; }
+.rule { background: #ffffff; border: 1px solid #e1e0d9; padding: 8px 12px; margin: 8px 0; }
+.rule-t { font-weight: 600; }
+.rule-b { color: #1f1f1d; margin-top: 4px; font-size: 14px; }
+ul, ol { margin: 6px 0 12px; }
+li { margin: 4px 0; }
+nav.toc { font-size: 13.5px; background: #ffffff; border: 1px solid #e1e0d9; padding: 8px 14px; margin: 12px 0 18px; }
+nav.toc a { margin-right: 14px; color: #1c5cab; text-decoration: none; }
+a { color: #1c5cab; }
+</style>
+</head>
+<body>
+<main>
+<h1>A mental map of tron for timing estimates by hand</h1>
+<div class="sub">AMX / AVX / attention on the FPGA, for llama-3.1, qwen-2.5 and gpt-oss. Written by Claude for jhan, 2026-10-07, from the measurements of 2026-08-31 to 2026-10-04 on delphi-3bda. Every number is measured and cited unless marked est. Generator: exec/tron-intuition-20261007/gen_intuition.py.</div>
+
+<div class="short"><b>Short version.</b> A decode step of tron is one forward over all layers for all users of one engine, and its time is other work (the weight multiplies on the FPGA cards, about flat in context) plus attention (which re-reads the whole context every step, so it grows with prompt length and with users per engine). AMX changes only the attention page visits that run on the CPU, on a full 64-token page, for a model whose attention shape fits the kernel. So the estimate by hand is: count those visits, price them with the per-unit costs, and pass the saving to the forward through the layer's waits and overlaps.
+<ul>
+<li><b>llama-3.1-8b</b> gains: +3 % at 8 users and prompt 1024 in lockstep decode, +16 % at prompt 8192, +11 to +14 % in the CI harness at 8 users per engine.</li>
+<li><b>qwen-2.5-32b</b> gains nothing today. It fails the kernel's shape gate (5 query heads per KV head), so every page visit stays on the AVX loop.</li>
+<li><b>gpt-oss</b> runs attention on the FPGA and keeps only 1-to-4-key tails and 128-key sliding windows on the CPU. A kernel for its shape could gain under 1 % of decode throughput (est.).</li>
+</ul></div>
+<nav class="toc"><a href="#s1">1 Map</a><a href="#s2">2 Internalize</a><a href="#s3">3 One layer, four ways</a><a href="#s4">4 Path per visit</a><a href="#s5">5 Unit cost</a><a href="#s6">6 Recipe + examples</a><a href="#s7">7 CI levers</a><a href="#s8">8 Keep handy</a><a href="#s9">9 Edges</a><a href="#s10">10 Sources</a></nav>
+<h2 id="words">Words used here</h2>
+<dl>
+<dt>tron, runtron, rinzler</dt><dd>tron is Positron's inference program. runtron is its command-line tool: one process, a fixed number of users, all users decode in lockstep. rinzler is the production server: continuous batching behind a proxy, started by platformd.</dd>
+<dt>engine, tp2, tp4</dt><dd>An engine is one tron process bound to FPGA cards and CPU cores. tp2 splits every weight multiply over 2 cards, tp4 over 4. On delphi-3bda (the test server, two Intel Xeon 6962P sockets) a tp2 engine has 28 application cores (one main thread plus 27 workers) and a tp4 engine 56 (main plus 55).</dd>
+<dt>nightly, CI harness, users per engine</dt><dd>The nightly is the systems_test performance run on delphi-3bda. Its harness spreads 8 users over 4 engines at tp2 (2 users per engine) or 2 engines at tp4 (4 per engine). The 32-user llama-3.1-8b row runs 8 users per engine. U in the formulas below is always users per engine.</dd>
+<dt>AMX, AVX, dotter, kernel</dt><dd>AMX is Intel's tile matrix instruction set (bf16 tiles of 16 rows by 64 bytes, multiplied by one instruction). AVX is the 512-bit vector set. tron's AVX attention loop is called the dotter. "The kernel" below means tron's AMX attention kernel (canonical form, in main since 2026-09-15).</dd>
+<dt>AoF, CPU attention</dt><dd>AoF = attention on the FPGA: the card scores the stored keys and values, and the CPU keeps a short tail. It is the default for ingested models (qwen3-4b, gpt-oss) when USE_HW_ATTN is unset. USE_HW_ATTN=0 forces CPU attention. Hand-written plugins (llama, qwen-2.5) default to CPU attention.</dd>
+<dt>kill switch</dt><dd>TRON_AMX_DISABLE=1: the AMX binary with the kernel switched off. Every page visit then runs on the AVX loop. Same visits, same key counts, different speed.</dd>
+<dt>bf16, KV cache, KV page</dt><dd>bf16 is the 16-bit floating-point format of the keys, values and queries. The KV cache stores every past token's keys and values per layer per KV head, in pages of 64 tokens: 16 KiB of keys plus 16 KiB of values = 32 KiB per page.</dd>
+<dt>KV head, kv_mul, head size</dt><dd>Models store fewer key/value heads than query heads. kv_mul = query heads per KV head (also called the GQA ratio). Head size = numbers per head. The kernel serves exactly head size 128 and kv_mul 4 [amx_attn_iface.hpp:148-150].</dd>
+<dt>unit, page visit</dt><dd>One query token (its kv_mul query heads) scored against one KV page of one KV head: the QK multiply, the softmax pieces, the PV multiply and the running-state update. It reads the page's 32 KiB. "Visit" and "unit" are the same thing: the counters say visit, the timing pages say unit.</dd>
+<dt>forward, decode step, token job, TPS</dt><dd>A forward is one pass over all layers. In decode it produces one new token for each user: one token job per user. TPS = tokens per second per user. In lockstep decode (runtron) TPS = 1 / forward time.</dd>
+<dt>prefill, chunk, TTFT</dt><dd>The prompt is scored in chunks of 128 tokens per user per forward (TRON_PER_USER_PROMPT_CHUNK_LIMIT, default 128 [libtron.hpp:194-205]). TTFT = time to first token, which the harness divides into the prompt length to print a prefill rate.</dd>
+<dt>minibatch</dt><dd>The users of one forward can be split into groups whose card work and CPU attention overlap. The hand-written llama plugin allows this (max_minibatches = -1 [llama.hpp:183]) and runs 8 users as two minibatches of 4. Ingested plugins run one minibatch.</dd>
+<dt>attention worker, main thread, job, ready pass, pending pass, join</dt><dd>The main thread runs the plugin schedule and launches the card jobs. Attention workers run the attention jobs: each layer's attention operation is split over the workers as (KV head, page range) sections, one job per worker. A job has a ready pass (pages that were complete before this layer), a pending pass (the newest page, after this layer's K/V landed) and a join (the fold of partial results across workers).</dd>
+<dt>T1 to T5</dt><dd>The five timers of the attention stats (PR 4596): T1 = wall time of a forward. T2 = busy time of one attention job (both passes plus the join, without the K/V wait). T3 = wall time of a job as worker 0 sees it, waits included. T4 = layer period on worker 0 (from the start of one layer's job to the start of the next). T5 = join wait, inside T2.</dd>
+<dt>GOF, shard, engagement</dt><dd>GOF = group of four tokens, the card's copy and scoring unit. A shard is 1024 tokens of K/V on the card. Engagement 127 = the card scores positions from 127 on. Earlier positions stay on the CPU.</dd>
+<dt>sliding window</dt><dd>A layer whose attention sees only the last N keys. gpt-oss uses N = 128 on its even layers. Such layers never run on the card [model.hpp:1554-1556 per attn-stats-compare-QA.html 3.5].</dd>
+<dt>prompt N</dt><dd>A prompt of N tokens. Every run quoted here then generates 256 tokens per user, so the context a decode step reads is N plus the tokens generated so far.</dd>
+<dt>lever</dt><dd>A setting of the cell that moves the gain: users per engine, prompt length, attention mode.</dd>
+<dt>est., Insufficient data</dt><dd>est. marks an estimate. Insufficient data marks a quantity nobody measured, with the measurement named.</dd>
+</dl>
+<h2 id="s1">1. The map in one picture</h2>
+<p>Figure 1 is the containment chain. Every estimate reads it from right to left. A visit has a cost. A job is a worker's visits plus its waits. A layer is a job plus the card work around it. A forward is the layers, and TPS is one over the forward.</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 400" width="1180" height="400" role="img" aria-label="The map: engine, decode step, layer, attention operation, page visit" font-family="system-ui, -apple-system, Segoe UI, sans-serif" style="max-width:100%;height:auto;display:block">
+<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#52514e"/></marker><marker id="arrred" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#d03b3b"/></marker></defs>
+<rect x="0" y="0" width="1180" height="400" fill="#fcfcfb"/>
+<rect x="18.0" y="60.0" width="215.0" height="200.0" fill="#ffffff" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="28.0" y="80.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Engine (one tron process)</text>
+<text x="28.0" y="98.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >tp2: 2 cards, 28 app cores</text>
+<text x="28.0" y="113.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  = main thread + 27 workers</text>
+<text x="28.0" y="129.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >tp4: 4 cards, 56 app cores</text>
+<text x="28.0" y="144.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  = main + 55 workers</text>
+<text x="28.0" y="160.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Serves U users at once.</text>
+<text x="28.0" y="175.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Nightly: tp2 = 4 engines,</text>
+<text x="28.0" y="191.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >tp4 = 2 engines per machine.</text>
+<text x="28.0" y="206.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" ></text>
+<text x="28.0" y="222.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Count that matters: U,</text>
+<text x="28.0" y="237.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >the users PER ENGINE.</text>
+<line x1="235.0" y1="160.0" x2="251.0" y2="160.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<rect x="253.0" y="60.0" width="215.0" height="200.0" fill="#ffffff" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="263.0" y="80.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Decode step = one forward</text>
+<text x="263.0" y="98.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >One new token for each of</text>
+<text x="263.0" y="113.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >the U users (one token job</text>
+<text x="263.0" y="129.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >per user), over all L layers.</text>
+<text x="263.0" y="144.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Timer T1 = its wall time.</text>
+<text x="263.0" y="160.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >TPS per user = 1 / T1.</text>
+<text x="263.0" y="175.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" ></text>
+<text x="263.0" y="191.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >llama (hand-written plugin):</text>
+<text x="263.0" y="206.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  8 users -&gt; 2 minibatches of 4</text>
+<text x="263.0" y="222.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >qwen, gpt-oss (ingested):</text>
+<text x="263.0" y="237.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  one minibatch</text>
+<line x1="470.0" y1="160.0" x2="486.0" y2="160.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<rect x="488.0" y="60.0" width="215.0" height="200.0" fill="#ffffff" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="498.0" y="80.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Layer (period T4)</text>
+<text x="498.0" y="98.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Cards: WQ, WK, WV, WO,</text>
+<text x="498.0" y="113.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  WFF1, WFF3, WFF2 (matmuls).</text>
+<text x="498.0" y="129.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >CPU: rope Q, norms, and</text>
+<text x="498.0" y="144.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  the attention operation.</text>
+<text x="498.0" y="160.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >The RX workers save K and V</text>
+<text x="498.0" y="175.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  into KV pages (host DRAM).</text>
+<text x="498.0" y="191.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" ></text>
+<text x="498.0" y="206.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >&#x27;Other work&#x27; = everything</text>
+<text x="498.0" y="222.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >but attention: about flat</text>
+<text x="498.0" y="237.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >in context.</text>
+<line x1="705.0" y1="160.0" x2="721.0" y2="160.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<rect x="723.0" y="60.0" width="215.0" height="200.0" fill="#ffffff" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="733.0" y="80.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Attention operation</text>
+<text x="733.0" y="98.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Split over the attention</text>
+<text x="733.0" y="113.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >workers as (KV head, page</text>
+<text x="733.0" y="129.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >range) sections: one JOB per</text>
+<text x="733.0" y="144.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >worker per layer (T2 busy,</text>
+<text x="733.0" y="160.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >T3 wall on worker 0).</text>
+<text x="733.0" y="175.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >ready pass: old pages.</text>
+<text x="733.0" y="191.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >pending pass: this layer&#x27;s</text>
+<text x="733.0" y="206.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  newest page (waits for K/V).</text>
+<text x="733.0" y="222.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >join: fold partial results</text>
+<text x="733.0" y="237.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  (T5 = join wait).</text>
+<line x1="940.0" y1="160.0" x2="956.0" y2="160.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<rect x="958.0" y="60.0" width="215.0" height="200.0" fill="#eef4fc" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="968.0" y="80.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Page visit = one unit</text>
+<text x="968.0" y="98.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >1 query token (its kv_mul</text>
+<text x="968.0" y="113.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >query heads) x 1 KV head x</text>
+<text x="968.0" y="129.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >1 KV page (64 tokens):</text>
+<text x="968.0" y="144.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >reads 32 KiB (K 16 + V 16).</text>
+<text x="968.0" y="160.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" ></text>
+<text x="968.0" y="175.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Path per visit:</text>
+<text x="968.0" y="191.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  AMX kernel: full page,</text>
+<text x="968.0" y="206.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >    fitting shape, AMX on</text>
+<text x="968.0" y="222.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  AVX loop: everything else</text>
+<text x="968.0" y="237.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  card: under AoF</text>
+<text x="18.0" y="30.0" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Figure 1. The map: what contains what, and which count sets its size.</text>
+<text x="18.0" y="294.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="normal" >Counts per decode step:  visits on the CPU  =  U users  x  L layers on the CPU  x  KV heads  x  pages per user (context / 64, rounded up)</text>
+<text x="18.0" y="314.0" font-size="12" fill="#52514e" text-anchor="start" font-weight="normal" >Shared by the attention workers (27 at tp2 at most, 55 at tp4). The split heuristic hands 13 to 26 of the 27 to attention at 8 users. Time per worker = its visits x unit cost + waits.</text>
+<text x="18.0" y="334.0" font-size="12" fill="#52514e" text-anchor="start" font-weight="normal" >Under AoF the card scores every whole group of 4 tokens (GOF) and the CPU keeps a 1-to-4-key tail per (user, KV head, layer): the kernel&#x27;s unit (64 keys) never fills.</text>
+<text x="18.0" y="354.0" font-size="11" fill="#898781" text-anchor="start" font-weight="normal" >Sources: tron-amx-distilled.html (Decode architecture); counter.html sections 2 and 3; attention-stats-claude.html (timers); self_attention.hpp:1710-1721 (the full-page predicate).</text>
+</svg>
+<figcaption>Figure 1. What contains what in one engine, and the count that sets each level's size. The blue box is the unit the kernel changes.</figcaption></figure>
+<h2 id="s2">2. What to internalize: ten rules with their numbers</h2>
+<p>These are the facts to keep in memory. Each has one measured number attached so that a guess can be checked against it.</p>
+<div class="rule"><div class="rule-t">1. A decode step is other work plus attention, and only attention grows.</div><div class="rule-b">The weight multiplies run on the cards and take about the same time whatever the context. Attention re-reads every stored page each step, so its time grows with context and with users per engine. Measured attention share of a worker's forward: 16 / 31 / 62 % at prompt 256 / 2048 / 8192 for one qwen3-4b user on the AVX path [make-sense-amx-vs-avx.html section 7]. At 8 users and prompt 1024 it is 56 % for qwen3-4b and 67 % for llama-3.1-8b. At prompt 8192 llama reaches 93 % (Table 1).</div></div>
+<div class="rule"><div class="rule-t">2. Attention is a loop over page visits, and the count is arithmetic.</div><div class="rule-b">Visits per decode step = U users x L layers on the CPU x KV heads x pages per user (context / 64, rounded up). The attention workers share them. Example: qwen3-4b, 8 users, context 1152 (prompt 1024 plus 128 generated tokens): 8 x 36 x 8 x 18 = 41,472 visits, 2,074 per worker with 20 workers.</div></div>
+<div class="rule"><div class="rule-t">3. A unit costs about 3 us, and AMX removes 0.5 to 1.0 us of it.</div><div class="rule-b">One unit (32 KiB read) takes 3.64 us on the AVX path and 2.89 us with the canonical kernel at prompt 8192, where the pages come from DRAM. At prompt 2048 the pair is 2.80 vs 2.14 us, and at prompt 256 (pages in cache) 2.88 vs 2.38 us [make-sense-amx-vs-avx.html 7.2.1]. Hot in the L2 cache the two paths take 1.68 and 0.62 us [perf-model/index.html section 5]. The memory time of a unit is 2.49 us (32 KiB at 13.1 GB/s per core while 27 cores read). So the arithmetic can be 33x faster and the unit still shortens by only 1.26x, because the bytes set the lower bound.</div></div>
+<div class="rule"><div class="rule-t">4. Pass the attention saving to the forward through the layer's overlap.</div><div class="rule-b">With one minibatch (ingested plugins: qwen3-4b, gpt-oss) a shorter attention job shortens the layer period 1:1. When the kernel was enabled, qwen3-4b's attention busy fell 33 us per layer (1.2 ms over 36 layers), T4 fell 1.41 ms and T1 fell 1.45 ms per forward. With two minibatches (llama at 8 users) the cards' work for the other minibatch overlaps the attention, and at prompt 1024 the period did not move at all (247 vs 248 us) although busy per job fell 9 %. At prompt 8192 attention is 93 % of the forward and the saving passed 1:1 again (period 1405 -> 1207 us). Working rule for llama: one third at short prompts, 1:1 at long prompts (section 3).</div></div>
+<div class="rule"><div class="rule-t">5. The path is chosen per page visit, not per model and not per token.</div><div class="rule-b">Figure 3 is the decision. Under AoF the card scores every whole GOF and the CPU keeps a 1-to-4-key tail, so the kernel's 64-key unit never fills: 0 AMX visits in the steady state. A sliding-window layer never goes to the card. The shape gate (head size 128 and kv_mul 4) is compile-time. llama-3.1-8b and qwen3-4b pass it. qwen-2.5-32b (kv_mul 5), llama-3.1/3.3-70b (kv_mul 8) and gpt-oss (head size 64, kv_mul 8) do not. A partial page always takes the AVX loop, so even under CPU attention the newest page is AVX in 63 of every 64 steps.</div></div>
+<div class="rule"><div class="rule-t">6. Keys are not time.</div><div class="rule-b">The counters count keys scored per path. Convert keys to visits, and visits to time with the unit costs. Keep the waits fixed: the join wait (T5) and the K/V wait do not shrink when a kernel is faster. gpt-oss scores 10.2 % of its decode keys on the CPU, which is 6.3 % of a worker's forward time, of which a kernel could remove under 1 % (section 6, example C).</div></div>
+<div class="rule"><div class="rule-t">7. Under AoF the step still grows with context, inside the card.</div><div class="rule-b">qwen3-4b at 8 users: T1 = 7.75 ms per forward at prompt 1024 and 15.96 ms at prompt 8192. The join wait (the workers waiting for the card's partial results) rises from 58 % to 88 % of the workers' busy time [attn-stats-compare.md section 7]. The CPU build matters little there: AMX on vs off differ by under 1 % in both cells. AoF beats CPU attention with AMX by 1.6x at prompt 1024 (126.6 vs 79.5 TPS) and 3.6x at prompt 8192 (61.5 vs 17.1 TPS, runtron 8 users) [attn-stats-compare.md section 1, and q4b-rt8u-20260922].</div></div>
+<div class="rule"><div class="rule-t">8. Users per engine is the lever in CI, not users in total.</div><div class="rule-b">The nightly's 8 users are 2 per engine at tp2 and 4 per engine at tp4. llama-3.1-8b gains +0.2 / +4.8 / +10.8 % at 2 / 4 / 8 users per engine (prompt 1024) and +14.0 % at 8 users per engine with prompt 2048 or 4096 (Figure 5). The same model at 2 users per engine and prompt 1024 shows nothing, which is what the nightly's 8-user llama row measures.</div></div>
+<div class="rule"><div class="rule-t">9. Prefill is the other place where the kernel counts.</div><div class="rule-b">The prompt is scored 128 tokens per user per forward. The kernel takes the full pages of earlier chunks, so under CPU attention prefill forwards run 1.7x to 2.5x faster per attention job [attn-stats-compare.md section 7]: llama-3.1-8b, 8 users, prompt 8192: TTFT 34.6 s with the kernel vs 78.8 s without. Under AoF the card does that work and the kernel sees only copy-lag pages (0.6 % of the prefill keys at prompt 8192). The nightly reports prefill as prompt length divided by TTFT. Nothing on the server times prefill.</div></div>
+<div class="rule"><div class="rule-t">10. Name the denominator, and check that AMX actually ran.</div><div class="rule-b">Three pairs are easy to mix: kill switch vs a clean AVX build (the switch costs 0 to 5 points by itself, build-dependent), runtron lockstep vs the CI harness (section 9, edge 1), and users in total vs per engine. A TPS step on the night AMX arrived is not proof: on 2026-09-23 qwen-3-4b tp4 rose +18.3 % and gpt-oss-120b +12.8 %, both AoF rows with 0 AMX visits, in a package with two other merges [Was-AMX-boosting-all-models.html section 1]. Proof is the stats (ready_amx_visits > 0) or the AMX busy-cycle counter (section 8, card 4).</div></div>
+<h2 id="s3">3. One decode layer, four ways</h2>
+<p>Figure 2 draws the same thing for four cells: one layer's period on attention worker 0, split into the part outside attention, the waits, the busy part and the join. The red bracket marks the only block a kernel changes. The numbers are means over the layers of the class from the in-flight FUSE snapshots of the 2026-10-02 runs. Table 1 carries the whole-run totals.</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 996" width="1180" height="996" role="img" aria-label="One decode layer as attention worker 0 sees it, four cases, durations to scale" font-family="system-ui, -apple-system, Segoe UI, sans-serif" style="max-width:100%;height:auto;display:block">
+<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#52514e"/></marker><marker id="arrred" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#d03b3b"/></marker></defs>
+<rect x="0" y="0" width="1180" height="996" fill="#fcfcfb"/>
+<text x="18.0" y="24.0" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Figure 2. One decode layer on attention worker 0, four cases. Durations to scale: 1 us = 1.9 px.</text>
+<text x="18.0" y="42.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >8 users, runtron on our half of delphi-3bda, 2026-10-02. Solid = the worker computes. Dashed = the worker waits (for main&#x27;s next layer, for Q, for this layer&#x27;s K/V, or for the card).</text>
+<text x="18.0" y="58.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Red bracket = the only slice a kernel changes. The ORDER of the blocks inside a period is schematic: the counters give durations, not start times.</text>
+<text x="18.0" y="90.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="bold" >(a) llama-3.1-8b, tp2, CPU attention, prompt 1024, kernel on vs kill switch: two minibatches, 2 jobs per layer</text>
+<text x="18.0" y="110.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >main + cards (schematic): while the workers score minibatch A, the cards run minibatch B&#x27;s weight multiplies, and the other way round</text>
+<rect x="200.0" y="118.0" width="471.2" height="18.0" fill="#e6f6ef" stroke="#1baf7a" stroke-width="1" rx="0"></rect>
+<text x="206.0" y="131.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >main thread + FPGA cards: the weight multiplies and launches of this layer (not timed per phase)</text>
+<text x="18.0" y="131.0" font-size="11" fill="#898781" text-anchor="start" font-weight="normal" >main + cards</text>
+<line x1="200.0" y1="149.0" x2="530.6" y2="149.0" stroke="#d03b3b" stroke-width="2"/>
+<line x1="200.0" y1="149.0" x2="200.0" y2="154.0" stroke="#d03b3b" stroke-width="2"/>
+<line x1="530.6" y1="149.0" x2="530.6" y2="154.0" stroke="#d03b3b" stroke-width="2"/>
+<text x="18.0" y="179.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >worker 0, kernel on</text>
+<rect x="200.0" y="165.0" width="165.3" height="20.0" fill="#2a78d6" stroke="none" stroke-width="1" rx="0"><title>job A 87: 87 us</title></rect>
+<text x="204.0" y="180.0" font-size="10" fill="#ffffff" text-anchor="start" font-weight="normal" >job A 87</text>
+<rect x="365.3" y="165.0" width="165.3" height="20.0" fill="#2a78d6" stroke="none" stroke-width="1" rx="0"><title>job B 87: 87 us</title></rect>
+<text x="369.3" y="180.0" font-size="10" fill="#ffffff" text-anchor="start" font-weight="normal" >job B 87</text>
+<rect x="530.6" y="165.0" width="138.7" height="20.0" fill="none" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>not in attention: 73 us</title></rect>
+<text x="534.6" y="180.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >not in attention 73</text>
+<text x="677.3" y="180.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="bold" >period 247 us</text>
+<text x="18.0" y="217.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >worker 0, kill switch</text>
+<rect x="200.0" y="203.0" width="169.1" height="20.0" fill="#eb6834" stroke="none" stroke-width="1" rx="0"><title>job A 89: 89 us</title></rect>
+<text x="204.0" y="218.0" font-size="10" fill="#ffffff" text-anchor="start" font-weight="normal" >job A 89</text>
+<rect x="369.1" y="203.0" width="169.1" height="20.0" fill="#eb6834" stroke="none" stroke-width="1" rx="0"><title>job B 89: 89 us</title></rect>
+<text x="373.1" y="218.0" font-size="10" fill="#ffffff" text-anchor="start" font-weight="normal" >job B 89</text>
+<rect x="538.2" y="203.0" width="133.0" height="20.0" fill="none" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>not in attention: 70 us</title></rect>
+<text x="542.2" y="218.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >not in attention 70</text>
+<text x="679.2" y="218.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="bold" >period 248 us</text>
+<text x="200.0" y="246.0" font-size="11" fill="#d03b3b" text-anchor="start" font-weight="normal" >Red bracket: the kernel shortens the jobs (busy per job 98 -&gt; 89 us, mean over workers) but not the period.</text>
+<text x="200.0" y="264.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Reading: period 247 vs 248 us: unchanged. The card lane of the other minibatch sets the period here, so the attention saving does not reach T1 at this</text>
+<text x="200.0" y="278.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >prompt length (T1 8.92 -&gt; 8.66 ms = one third of the saving).</text>
+<text x="18.0" y="320.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="bold" >(b) qwen3-4b, tp2, CPU attention, prompt 1024, kernel on vs kill switch: one minibatch, 1 job per layer</text>
+<text x="18.0" y="340.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >main + cards (schematic): WQ, WK, WV before the attention, then WO and the feed-forward block after it, and main waits for the workers&#x27; output in between</text>
+<rect x="200.0" y="348.0" width="695.4" height="18.0" fill="#e6f6ef" stroke="#1baf7a" stroke-width="1" rx="0"></rect>
+<text x="206.0" y="361.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >main thread + FPGA cards: the weight multiplies and launches of this layer (not timed per phase)</text>
+<text x="18.0" y="361.0" font-size="11" fill="#898781" text-anchor="start" font-weight="normal" >main + cards</text>
+<line x1="466.0" y1="379.0" x2="808.0" y2="379.0" stroke="#d03b3b" stroke-width="2"/>
+<line x1="466.0" y1="379.0" x2="466.0" y2="384.0" stroke="#d03b3b" stroke-width="2"/>
+<line x1="808.0" y1="379.0" x2="808.0" y2="384.0" stroke="#d03b3b" stroke-width="2"/>
+<text x="18.0" y="409.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >worker 0, kernel on</text>
+<rect x="200.0" y="395.0" width="157.7" height="20.0" fill="none" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>not in attention: 83 us</title></rect>
+<text x="204.0" y="410.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >not in attention 83</text>
+<rect x="357.7" y="395.0" width="108.3" height="20.0" fill="#f2f1ee" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>waits: 57 us</title></rect>
+<text x="361.7" y="410.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >waits 57</text>
+<rect x="466.0" y="395.0" width="342.0" height="20.0" fill="#2a78d6" stroke="none" stroke-width="1" rx="0"><title>busy: ready pages on AMX, newest page on AVX: 180 us</title></rect>
+<text x="470.0" y="410.0" font-size="10" fill="#ffffff" text-anchor="start" font-weight="normal" >busy: ready pages on AMX, newest page on AVX 180</text>
+<rect x="808.0" y="395.0" width="7.6" height="20.0" fill="#52514e" stroke="none" stroke-width="1" rx="0"><title>join: 4 us</title></rect>
+<text x="823.6" y="410.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="bold" >period 329 us</text>
+<text x="18.0" y="447.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >worker 0, kill switch</text>
+<rect x="200.0" y="433.0" width="159.6" height="20.0" fill="none" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>not in attention: 84 us</title></rect>
+<text x="204.0" y="448.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >not in attention 84</text>
+<rect x="359.6" y="433.0" width="114.0" height="20.0" fill="#f2f1ee" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>waits: 60 us</title></rect>
+<text x="363.6" y="448.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >waits 60</text>
+<rect x="473.6" y="433.0" width="404.7" height="20.0" fill="#eb6834" stroke="none" stroke-width="1" rx="0"><title>busy: every page on the AVX loop: 213 us</title></rect>
+<text x="477.6" y="448.0" font-size="10" fill="#ffffff" text-anchor="start" font-weight="normal" >busy: every page on the AVX loop 213</text>
+<rect x="878.3" y="433.0" width="9.5" height="20.0" fill="#52514e" stroke="none" stroke-width="1" rx="0"><title>join: 5 us</title></rect>
+<text x="895.8" y="448.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="bold" >period 366 us</text>
+<text x="200.0" y="476.0" font-size="11" fill="#d03b3b" text-anchor="start" font-weight="normal" >Red bracket: the kernel shortens this block, 213 -&gt; 180 us (-33 us per layer).</text>
+<text x="200.0" y="494.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Reading: period 329 vs 366 us. The 33 us of busy per layer (1.2 ms over 36 layers) passed to the forward in full: T4 fell 1.41 ms and T1 1.45 ms per</text>
+<text x="200.0" y="508.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >forward.</text>
+<text x="18.0" y="550.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="bold" >(c) qwen3-4b, tp2, attention on the FPGA (AoF), prompt 1024: the card scores all whole GOFs</text>
+<text x="18.0" y="570.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >main + cards (schematic): the weight multiplies AND the attention passes over the card-resident K/V. The counters do not split the two</text>
+<rect x="200.0" y="578.0" width="381.9" height="18.0" fill="#e6f6ef" stroke="#1baf7a" stroke-width="1" rx="0"></rect>
+<text x="206.0" y="591.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >main thread + FPGA cards: the weight multiplies and launches of this layer (not timed per phase)</text>
+<text x="18.0" y="591.0" font-size="11" fill="#898781" text-anchor="start" font-weight="normal" >main + cards</text>
+<line x1="502.1" y1="609.0" x2="536.3" y2="609.0" stroke="#d03b3b" stroke-width="2"/>
+<line x1="502.1" y1="609.0" x2="502.1" y2="614.0" stroke="#d03b3b" stroke-width="2"/>
+<line x1="536.3" y1="609.0" x2="536.3" y2="614.0" stroke="#d03b3b" stroke-width="2"/>
+<text x="18.0" y="639.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >worker 0, either arm</text>
+<rect x="200.0" y="625.0" width="191.9" height="20.0" fill="none" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>not in attention: 101 us</title></rect>
+<text x="204.0" y="640.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >not in attention 101</text>
+<rect x="391.9" y="625.0" width="110.2" height="20.0" fill="#f2f1ee" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>waits: 58 us</title></rect>
+<text x="395.9" y="640.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >waits 58</text>
+<rect x="502.1" y="625.0" width="34.2" height="20.0" fill="#2a78d6" stroke="none" stroke-width="1" rx="0"><title>tail: 18 us</title></rect>
+<text x="519.2" y="619.0" font-size="10" fill="#52514e" text-anchor="middle" font-weight="normal" >18</text>
+<rect x="536.3" y="625.0" width="45.6" height="20.0" fill="#e6f6ef" stroke="#1baf7a" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>card: 24 us</title></rect>
+<text x="559.1" y="619.0" font-size="10" fill="#52514e" text-anchor="middle" font-weight="normal" >24</text>
+<text x="589.9" y="640.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="bold" >period 201 us</text>
+<text x="200.0" y="668.0" font-size="11" fill="#d03b3b" text-anchor="start" font-weight="normal" >Red bracket: 18 us of scoring 1 to 4 keys per (KV head, layer): no full page on the CPU, the kernel never runs. Then 24 us waiting for the card&#x27;s partial result.</text>
+<text x="200.0" y="686.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Reading: both arms measure the same within 1 %. The period still grows with context inside the card: T1 7.75 ms at prompt 1024 and 15.96 ms at 8192,</text>
+<text x="200.0" y="700.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >with the join wait at 58 % and 88 % of the workers&#x27; busy time.</text>
+<text x="18.0" y="742.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="bold" >(d) gpt-oss-120b, tp4, AoF, prompt 1024: a sliding-window layer (even layers) and a card layer (odd layers)</text>
+<text x="18.0" y="762.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >main + cards (schematic): the weight multiplies of all 36 layers, and attention passes on the card in the 18 card layers only</text>
+<rect x="200.0" y="770.0" width="516.8" height="18.0" fill="#e6f6ef" stroke="#1baf7a" stroke-width="1" rx="0"></rect>
+<text x="206.0" y="783.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >main thread + FPGA cards: the weight multiplies and launches of this layer (not timed per phase)</text>
+<text x="18.0" y="783.0" font-size="11" fill="#898781" text-anchor="start" font-weight="normal" >main + cards</text>
+<line x1="648.4" y1="801.0" x2="703.5" y2="801.0" stroke="#d03b3b" stroke-width="2"/>
+<line x1="648.4" y1="801.0" x2="648.4" y2="806.0" stroke="#d03b3b" stroke-width="2"/>
+<line x1="703.5" y1="801.0" x2="703.5" y2="806.0" stroke="#d03b3b" stroke-width="2"/>
+<text x="18.0" y="831.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >worker 0, sliding-window layer</text>
+<rect x="200.0" y="817.0" width="343.9" height="20.0" fill="none" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>not in attention: 181 us</title></rect>
+<text x="204.0" y="832.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >not in attention 181</text>
+<rect x="543.9" y="817.0" width="104.5" height="20.0" fill="#f2f1ee" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>waits: 55 us</title></rect>
+<text x="547.9" y="832.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >waits 55</text>
+<rect x="648.4" y="817.0" width="55.1" height="20.0" fill="#2a78d6" stroke="none" stroke-width="1" rx="0"><title>window 29: 29 us</title></rect>
+<text x="675.9" y="811.0" font-size="10" fill="#52514e" text-anchor="middle" font-weight="normal" >29</text>
+<rect x="703.5" y="817.0" width="13.3" height="20.0" fill="#52514e" stroke="none" stroke-width="1" rx="0"><title>join: 7 us</title></rect>
+<text x="710.1" y="811.0" font-size="10" fill="#52514e" text-anchor="middle" font-weight="normal" >7</text>
+<text x="724.8" y="832.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="bold" >period 272 us</text>
+<text x="18.0" y="869.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >worker 0, card layer</text>
+<rect x="200.0" y="855.0" width="292.6" height="20.0" fill="none" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>not in attention: 154 us</title></rect>
+<text x="204.0" y="870.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >not in attention 154</text>
+<rect x="492.6" y="855.0" width="119.7" height="20.0" fill="#f2f1ee" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="4 3"><title>waits: 63 us</title></rect>
+<text x="496.6" y="870.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >waits 63</text>
+<rect x="612.3" y="855.0" width="45.6" height="20.0" fill="#2a78d6" stroke="none" stroke-width="1" rx="0"><title>tail: 24 us</title></rect>
+<text x="635.1" y="849.0" font-size="10" fill="#52514e" text-anchor="middle" font-weight="normal" >24</text>
+<rect x="657.9" y="855.0" width="7.6" height="20.0" fill="#52514e" stroke="none" stroke-width="1" rx="0"><title>join: 4 us</title></rect>
+<text x="673.5" y="870.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="bold" >period 245 us</text>
+<text x="200.0" y="898.0" font-size="11" fill="#d03b3b" text-anchor="start" font-weight="normal" >Red bracket: the 29 us of scoring the 128-key window on the AVX loop is the only block a 64x8 kernel could touch, and only half of its keys sit in a full page.</text>
+<text x="200.0" y="916.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Reading: 0.04 to 0.05 ms per 10.26 ms forward (est.) = under 1 %. The ceiling with free scoring is 18 x 29 us = 0.53 ms = 5.2 %.</text>
+<line x1="200.0" y1="950.0" x2="390.0" y2="950.0" stroke="#0b0b0b" stroke-width="1.5"/>
+<line x1="200.0" y1="946.0" x2="200.0" y2="954.0" stroke="#0b0b0b" stroke-width="1.5"/>
+<line x1="390.0" y1="946.0" x2="390.0" y2="954.0" stroke="#0b0b0b" stroke-width="1.5"/>
+<text x="398.0" y="954.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >100 us</text>
+<rect x="500.0" y="944.0" width="14.0" height="12.0" fill="#2a78d6" stroke="none" stroke-width="1" rx="0"></rect>
+<text x="518.0" y="954.0" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >busy, kernel on</text>
+<rect x="620.0" y="944.0" width="14.0" height="12.0" fill="#eb6834" stroke="none" stroke-width="1" rx="0"></rect>
+<text x="638.0" y="954.0" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >busy, kill switch</text>
+<rect x="750.0" y="944.0" width="14.0" height="12.0" fill="#52514e" stroke="none" stroke-width="1" rx="0"></rect>
+<text x="768.0" y="954.0" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >join</text>
+<rect x="810.0" y="944.0" width="14.0" height="12.0" fill="#f2f1ee" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="3 2"></rect>
+<text x="828.0" y="954.0" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >wait (Q, K/V)</text>
+<rect x="930.0" y="944.0" width="14.0" height="12.0" fill="none" stroke="#898781" stroke-width="1" rx="0" stroke-dasharray="3 2"></rect>
+<text x="948.0" y="954.0" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >not in attention</text>
+<rect x="1060.0" y="944.0" width="14.0" height="12.0" fill="#e6f6ef" stroke="#1baf7a" stroke-width="1" rx="0" stroke-dasharray="3 2"></rect>
+<text x="1078.0" y="954.0" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >waiting for the card</text>
+<text x="18.0" y="974.0" font-size="10" fill="#898781" text-anchor="start" font-weight="normal" >Source: decode_like_layer_* leaves of exec/results/attnstats-20261002/leaves/&lt;run&gt;/, read by exec/tron-intuition-20261007/leaves.py: means over the layers of the class (gpt-oss: even and odd</text>
+<text x="18.0" y="987.0" font-size="10" fill="#898781" text-anchor="start" font-weight="normal" >layers separately), in-flight snapshots of 98 to 198 forwards. Whole-run totals are in Table 1.</text>
+</svg>
+<figcaption>Figure 2. One decode layer on attention worker 0 in four cells, durations to scale. Panels (a) and (b) show the kernel's effect under CPU attention: the busy block shrinks in both, but only the single-minibatch model (b) shortens its period. Panels (c) and (d) show AoF: the CPU's blocks are tails and windows, and the card's time hides in the waits.</figcaption></figure>
+<table class="num">
+<caption>Table 1. The six cells of 2026-10-02 (tron main dd0f942c75, 256 generated tokens per user). Share = busy per job x jobs per worker per forward / T1. Source: attn-stats-compare.md sections 1 and 7.</caption>
+<thead><tr><th>cell (8 users, runtron, our half)</th><th>attention</th><th>TPS per user, AMX on</th><th>kill switch</th><th>gain</th><th>T1 ms per forward, on / off</th><th>T2 busy us per job, on / off</th><th>jobs per worker per forward</th><th>attention busy share of T1 (AMX on)</th></tr></thead>
+<tbody>
+<tr><td>llama-3.1-8b tp2, prompt 1024</td><td>CPU</td><td>113.9</td><td>110.7</td><td>+2.9 %</td><td>8.66 / 8.92</td><td>91 / 103</td><td>64</td><td>67 %</td></tr>
+<tr><td>llama-3.1-8b tp2, prompt 8192</td><td>CPU</td><td>24.8</td><td>21.4</td><td>+16.0 %</td><td>39.64 / 46.05</td><td>574 / 679</td><td>64</td><td>93 %</td></tr>
+<tr><td>qwen3-4b tp2, prompt 1024</td><td>CPU (USE_HW_ATTN=0)</td><td>79.5</td><td>71.2</td><td>+11.6 %</td><td>12.48 / 13.93</td><td>193 / 229</td><td>36</td><td>56 %</td></tr>
+<tr><td>qwen3-4b tp2, prompt 1024</td><td>AoF</td><td>126.6</td><td>127.7</td><td>-0.9 %</td><td>7.75 / 7.68</td><td>43 / 43</td><td>36</td><td>20 % (58 % of it join wait)</td></tr>
+<tr><td>qwen3-4b tp2, prompt 8192</td><td>AoF</td><td>60.5</td><td>60.9</td><td>-0.5 %</td><td>15.96 / 15.87</td><td>242 / 243</td><td>36</td><td>55 % (88 % of it join wait)</td></tr>
+<tr><td>gpt-oss-120b tp4, prompt 1024</td><td>AoF</td><td>96.1</td><td>96.2</td><td>-0.2 %</td><td>10.26 / 10.24</td><td>32 / 31</td><td>36</td><td>11 %</td></tr>
+</tbody></table>
+<p>How to read Table 1 for an estimate: the share column is the most a kernel can touch. The gain column is what it did touch. The difference between them is rule 3 (the bytes set the lower bound) and rule 4 (the overlap).</p>
+<h2 id="s4">4. Which path serves a page visit</h2>
+<p>The path is a property of one visit, decided at the moment the worker reaches the page. Three questions decide it. The right-hand panel has the closed forms that the counters reproduce exactly.</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 500" width="1180" height="500" role="img" aria-label="Which path serves one page visit" font-family="system-ui, -apple-system, Segoe UI, sans-serif" style="max-width:100%;height:auto;display:block">
+<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#52514e"/></marker><marker id="arrred" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#d03b3b"/></marker></defs>
+<rect x="0" y="0" width="1180" height="500" fill="#fcfcfb"/>
+<text x="18.0" y="26.0" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Figure 3. Which path serves one page visit (one query, one KV head, one 64-token page). Read left to right.</text>
+<rect x="18.0" y="60.0" width="200.0" height="96.0" fill="#ffffff" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="28.0" y="80.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >1. Attention on the FPGA?</text>
+<text x="28.0" y="98.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >(AoF: USE_HW_ATTN unset for</text>
+<text x="28.0" y="113.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >ingested models such as qwen3</text>
+<text x="28.0" y="129.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >and gpt-oss, and =0 forces CPU)</text>
+<line x1="220.0" y1="108.0" x2="258.0" y2="108.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="224.0" y="102.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >yes</text>
+<rect x="260.0" y="56.0" width="250.0" height="104.0" fill="#e6f6ef" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="270.0" y="76.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Card layer under AoF</text>
+<text x="270.0" y="94.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >card: every whole GOF (4 tokens)</text>
+<text x="270.0" y="109.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >CPU, AVX loop: the 1-to-4-key tail</text>
+<text x="270.0" y="125.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >kernel: 0 (no full page on the CPU)</text>
+<text x="270.0" y="140.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >exceptions: prompt &lt; 128, copy lag,</text>
+<text x="270.0" y="156.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >prefix-cache branch, card store full</text>
+<line x1="118.0" y1="158.0" x2="118.0" y2="194.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="124.0" y="182.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >no, or a sliding-window layer (never on the card)</text>
+<rect x="18.0" y="198.0" width="200.0" height="112.0" fill="#ffffff" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="28.0" y="218.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >2. Shape fits the kernel?</text>
+<text x="28.0" y="236.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >head size 128 AND kv_mul 4</text>
+<text x="28.0" y="251.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >[amx_attn_iface.hpp:148-150]</text>
+<text x="28.0" y="267.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >llama-3.1-8b, qwen3-4b: yes</text>
+<text x="28.0" y="282.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >qwen-2.5-32b (5), llama-70b (8),</text>
+<text x="28.0" y="298.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >gpt-oss (64 wide, 8): no</text>
+<line x1="220.0" y1="246.0" x2="258.0" y2="246.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="224.0" y="240.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >no</text>
+<rect x="260.0" y="208.0" width="250.0" height="76.0" fill="#fdece5" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="270.0" y="228.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >AVX loop (the dotter)</text>
+<text x="270.0" y="246.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >every page, full or partial</text>
+<text x="270.0" y="261.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >3.6 us per unit at prompt 8192</text>
+<text x="270.0" y="277.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >(1.7 us hot in L2)</text>
+<line x1="118.0" y1="312.0" x2="118.0" y2="348.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="124.0" y="336.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >yes</text>
+<rect x="18.0" y="352.0" width="200.0" height="76.0" fill="#ffffff" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="28.0" y="372.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >3. Full page, visible, AMX on?</text>
+<text x="28.0" y="390.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >64 tokens stored, one visible</text>
+<text x="28.0" y="405.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >range, inside the window, and</text>
+<text x="28.0" y="421.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >TRON_AMX_DISABLE not set</text>
+<line x1="220.0" y1="390.0" x2="258.0" y2="390.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="224.0" y="384.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >yes</text>
+<rect x="260.0" y="352.0" width="250.0" height="76.0" fill="#eef4fc" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="270.0" y="372.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >AMX kernel</text>
+<text x="270.0" y="390.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >2.9 us per unit at prompt 8192</text>
+<text x="270.0" y="405.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >(canonical; 0.6 us hot in L2)</text>
+<text x="270.0" y="421.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >ready pages: all but the newest</text>
+<line x1="512.0" y1="390.0" x2="550.0" y2="390.0" stroke="#52514e" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="516.0" y="384.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >no</text>
+<rect x="552.0" y="352.0" width="250.0" height="76.0" fill="#fdece5" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="562.0" y="372.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >AVX loop</text>
+<text x="562.0" y="390.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >the newest (pending) page in 63</text>
+<text x="562.0" y="405.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >of every 64 steps, prefill&#x27;s own</text>
+<text x="562.0" y="421.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >chunk pages, kill-switch runs</text>
+<rect x="830.0" y="56.0" width="330.0" height="330.0" fill="#f9f9f7" stroke="#c3c2b7" stroke-width="1.2" rx="6"></rect>
+<text x="840.0" y="76.0" font-size="13" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Per (user, KV head, layer) and step s</text>
+<text x="840.0" y="94.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >p = prompt + s - 1 = the query&#x27;s position</text>
+<text x="840.0" y="109.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" ></text>
+<text x="840.0" y="125.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >CPU attention, kernel on:</text>
+<text x="840.0" y="140.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  AMX visits = floor(p / 64)  (+1 when p mod 64 = 63)</text>
+<text x="840.0" y="156.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  AVX visits = 1 with (p mod 64) + 1 keys</text>
+<text x="840.0" y="171.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  kill switch: same visits, all AVX</text>
+<text x="840.0" y="187.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" ></text>
+<text x="840.0" y="202.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >AoF, steady state:</text>
+<text x="840.0" y="218.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  AMX visits = 0</text>
+<text x="840.0" y="233.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  AVX visits = 1 with (p mod 4) + 1 keys</text>
+<text x="840.0" y="249.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  card: 4 x floor(p / 4) keys</text>
+<text x="840.0" y="264.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" ></text>
+<text x="840.0" y="280.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >gpt-oss sliding-window layer (128 keys):</text>
+<text x="840.0" y="295.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >  1 full page + 2 partial pages, all AVX</text>
+<text x="840.0" y="311.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" ></text>
+<text x="840.0" y="326.5" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Checked against the counters exactly</text>
+<text x="840.0" y="342.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >[attn-stats-compare-QA.html 1.3-1.4]</text>
+<text x="18.0" y="490.0" font-size="10" fill="#898781" text-anchor="start" font-weight="normal" >Sources: self_attention.hpp:1710-1721 (predicate), full.hpp:2850-2889 (card boundary), counter.html 2.2-2.3 (AoF exceptions), tron-amx-distilled.html 4.1 (shape table).</text>
+</svg>
+<figcaption>Figure 3. The decision per page visit, and the visit counts per (user, KV head, layer) and step that follow from it.</figcaption></figure>
+<h2 id="s5">5. What a unit costs, and why the kernel's gain is 1.3x and not 8x</h2>
+<p>A unit is the smallest thing the kernel changes. Its cost has two parts: the instructions, and the wait for its 32 KiB. Hot in the L2 cache the AMX path is 2.7x faster than the AVX path (0.62 vs 1.68 us). Under decode load the pages come from DRAM at 13.1 GB/s per core, so the 32 KiB need 2.49 us however fast the instructions run, and the two paths end 0.75 us apart (2.89 vs 3.64 us at prompt 8192).</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 365" width="1180" height="365" role="img" aria-label="Cost of one unit on each code path" font-family="system-ui, -apple-system, Segoe UI, sans-serif" style="max-width:100%;height:auto;display:block">
+<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#52514e"/></marker><marker id="arrred" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#d03b3b"/></marker></defs>
+<rect x="0" y="0" width="1180" height="365" fill="#fcfcfb"/>
+<text x="18.0" y="26.0" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Figure 4. Cost of one unit (one query x one page x one KV head, 32 KiB read) on each code path, in us.</text>
+<text x="18.0" y="44.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Rows 1 to 3 measured inside tron (worker 0 medians over 510 tokens, 1 user, 2026-09-01). Row 4 from the unit benchmark outside tron (2026-09-03, clock-scaled).</text>
+<line x1="330.0" y1="74.0" x2="330.0" y2="254.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="330.0" y="270.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >0 us</text>
+<line x1="505.0" y1="74.0" x2="505.0" y2="254.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="505.0" y="270.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >1 us</text>
+<line x1="680.0" y1="74.0" x2="680.0" y2="254.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="680.0" y="270.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >2 us</text>
+<line x1="855.0" y1="74.0" x2="855.0" y2="254.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="855.0" y="270.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >3 us</text>
+<line x1="1030.0" y1="74.0" x2="1030.0" y2="254.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="1030.0" y="270.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >4 us</text>
+<line x1="765.8" y1="70.0" x2="765.8" y2="254.0" stroke="#52514e" stroke-width="1.2" stroke-dasharray="5 3"/>
+<text x="770.8" y="68.0" font-size="10" fill="#52514e" text-anchor="start" font-weight="normal" >memory time 2.49 us = 32 KiB at 13.1 GB/s per core (27 cores reading)</text>
+<text x="318.0" y="102.0" font-size="12" fill="#0b0b0b" text-anchor="end" font-weight="normal" >prompt 8192 (pages from DRAM)</text>
+<line x1="795.5" y1="98.0" x2="967.0" y2="98.0" stroke="#d9d8d2" stroke-width="3"/>
+<circle cx="967.0" cy="98.0" r="6.5" fill="#eb6834" stroke="none" stroke-width="1"><title>AVX 3.64 us</title></circle>
+<text x="978.0" y="102.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >AVX 3.64</text>
+<circle cx="835.8" cy="98.0" r="6.5" fill="#2a78d6" stroke="none" stroke-width="1"><title>canonical AMX 2.89 us</title></circle>
+<text x="835.8" y="87.0" font-size="10" fill="#0b0b0b" text-anchor="middle" font-weight="normal" >canon 2.89</text>
+<circle cx="795.5" cy="98.0" r="6.5" fill="#ffffff" stroke="#2a78d6" stroke-width="2.2"><title>mirror / VNNI-K AMX 2.66 us</title></circle>
+<text x="795.5" y="118.0" font-size="10" fill="#0b0b0b" text-anchor="middle" font-weight="normal" >mirror 2.66</text>
+<text x="318.0" y="146.0" font-size="12" fill="#0b0b0b" text-anchor="end" font-weight="normal" >prompt 2048</text>
+<line x1="692.2" y1="142.0" x2="820.0" y2="142.0" stroke="#d9d8d2" stroke-width="3"/>
+<circle cx="820.0" cy="142.0" r="6.5" fill="#eb6834" stroke="none" stroke-width="1"><title>AVX 2.80 us</title></circle>
+<text x="831.0" y="146.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >AVX 2.80</text>
+<circle cx="704.5" cy="142.0" r="6.5" fill="#2a78d6" stroke="none" stroke-width="1"><title>canonical AMX 2.14 us</title></circle>
+<text x="704.5" y="131.0" font-size="10" fill="#0b0b0b" text-anchor="middle" font-weight="normal" >canon 2.14</text>
+<circle cx="692.2" cy="142.0" r="6.5" fill="#ffffff" stroke="#2a78d6" stroke-width="2.2"><title>mirror / VNNI-K AMX 2.07 us</title></circle>
+<text x="692.2" y="162.0" font-size="10" fill="#0b0b0b" text-anchor="middle" font-weight="normal" >mirror 2.07</text>
+<text x="318.0" y="190.0" font-size="12" fill="#0b0b0b" text-anchor="end" font-weight="normal" >prompt 256 (pages in cache)</text>
+<line x1="568.0" y1="186.0" x2="834.0" y2="186.0" stroke="#d9d8d2" stroke-width="3"/>
+<circle cx="834.0" cy="186.0" r="6.5" fill="#eb6834" stroke="none" stroke-width="1"><title>AVX 2.88 us</title></circle>
+<text x="845.0" y="190.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >AVX 2.88</text>
+<circle cx="746.5" cy="186.0" r="6.5" fill="#2a78d6" stroke="none" stroke-width="1"><title>canonical AMX 2.38 us</title></circle>
+<text x="746.5" y="175.0" font-size="10" fill="#0b0b0b" text-anchor="middle" font-weight="normal" >canon 2.38</text>
+<circle cx="568.0" cy="186.0" r="6.5" fill="#ffffff" stroke="#2a78d6" stroke-width="2.2"><title>mirror / VNNI-K AMX 1.36 us</title></circle>
+<text x="568.0" y="206.0" font-size="10" fill="#0b0b0b" text-anchor="middle" font-weight="normal" >mirror 1.36</text>
+<text x="318.0" y="234.0" font-size="12" fill="#0b0b0b" text-anchor="end" font-weight="normal" >hot in L2, benchmark (no data wait)</text>
+<line x1="438.5" y1="230.0" x2="624.0" y2="230.0" stroke="#d9d8d2" stroke-width="3"/>
+<circle cx="624.0" cy="230.0" r="6.5" fill="#eb6834" stroke="none" stroke-width="1"><title>AVX 1.68 us</title></circle>
+<text x="635.0" y="234.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >AVX 1.68</text>
+<circle cx="438.5" cy="230.0" r="6.5" fill="#ffffff" stroke="#2a78d6" stroke-width="2.2"><title>mirror / VNNI-K AMX 0.62 us</title></circle>
+<text x="438.5" y="250.0" font-size="10" fill="#0b0b0b" text-anchor="middle" font-weight="normal" >AMX 0.62</text>
+<circle cx="330.0" cy="294.0" r="6.0" fill="#eb6834" stroke="none" stroke-width="1"></circle>
+<text x="342.0" y="298.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >AVX loop (dotter)</text>
+<circle cx="480.0" cy="294.0" r="6.0" fill="#2a78d6" stroke="none" stroke-width="1"></circle>
+<text x="492.0" y="298.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >AMX, canonical kernel (in main since 2026-09-15)</text>
+<circle cx="800.0" cy="294.0" r="6.0" fill="#ffffff" stroke="#2a78d6" stroke-width="2.2"></circle>
+<text x="812.0" y="298.0" font-size="11" fill="#0b0b0b" text-anchor="start" font-weight="normal" >AMX reading a VNNI K copy (mirror; PR 4424, open)</text>
+<text x="18.0" y="322.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Takeaway: once the pages come from DRAM the unit sits near the memory time whatever the arithmetic does. AMX saves 0.5 to 1.0 us of 3.6 us (1.26x with the canonical</text>
+<text x="18.0" y="336.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >kernel), not the 1.1 us it saves when the page is hot. Sources: rows 1-3 PR3879/make-sense-amx-vs-avx.html 7.2.1, and row 4 perf-model/index.html section 5.</text>
+</svg>
+<figcaption>Figure 4. One unit on each code path at three prompt lengths (measured inside tron, worker 0 medians, 2026-09-01) and hot in L2 (unit benchmark, 2026-09-03). The dashed line is the memory time with 27 cores reading.</figcaption></figure>
+<p>Two consequences for estimates. First, use the row that matches the context: 0.50 us saved per unit at prompt 256, 0.66 at 2048, 0.75 at 8192 (canonical kernel). Second, the AMX tile does useful work on 4 of its 16 rows in private decode (one query token per user, 4 query heads per KV head), so the 8x instruction-level figure never applies to decode. It applies to prefill, where many query tokens share a page [make-sense-amx-vs-avx.html section 4].</p>
+<h2 id="s6">6. The recipe: six steps, then four worked examples</h2>
+<p>The steps turn the map into a number. Each example then runs the steps on one of your models and compares with a measurement when one exists.</p>
+<ol>
+<li><b>Fix the cell.</b> Model, tp, users per engine U, prompt length, attention mode (AoF or CPU), and the two arms (kill switch vs kernel, or AVX build vs AMX build). Take the context at mid-run: prompt plus 128 generated tokens.</li>
+<li><b>Decide what is on the CPU.</b> Figure 3: under AoF only the 1-to-4-key tails and the sliding-window layers are on the CPU, and no page is full. Under CPU attention every page is on the CPU.</li>
+<li><b>Count the kernel-eligible visits per forward per worker.</b> U x (layers on the CPU) x KV heads x full pages per user, divided by the attention workers (Table 1 gives the worker counts the split heuristic chose). Only models that pass the shape gate have any.</li>
+<li><b>Price them.</b> Saving per worker per forward = visits x (AVX unit - AMX unit) at that context: 0.50 us at prompt 256, 0.66 us at 2048, 0.75 us at 8192 (Figure 4). This is the drop in T2 summed over a worker's jobs.</li>
+<li><b>Pass the saving to the forward.</b> One minibatch, or attention over 90 % of the forward: 1:1. llama at 8 users and a short prompt: about one third. New T1 = T1 - pass x saving. Gain = T1 / new T1 - 1.</li>
+<li><b>Check against an anchor.</b> Table 1, Figure 5 or the nightly rows. When no anchor exists, name the cell to run (TRON_ATTN_STATS=1, both arms) instead of trusting the number.</li>
+</ol>
+<h3 id="s6a">Example A: llama-3.1-8b, tp2, 8 users, CPU attention, kill switch vs kernel</h3>
+<p>Prompt 1024. Context at mid-run 1152 tokens = 18 pages per user, 17 of them full. Visits = 8 users x 32 layers x 8 KV heads x 17 full pages = 34,816 per forward. The run used 23 to 24 attention workers [Table 1 source], so about 1,450 visits per worker. At this context the pages are between the cache and the DRAM regime, so the unit saving is 0.50 to 0.66 us: 0.73 to 0.96 ms per worker per forward (est.). Measured: busy per job fell from 103 to 91 us over 64 jobs per worker per forward = 0.77 ms. The two minibatches overlap most of it with the cards' work for the other minibatch: the pass is about one third, so T1 drops 0.24 to 0.32 ms of 8.92 ms = +2.8 to +3.7 % (est.). Measured: T1 8.92 -> 8.66 ms, TPS 110.7 -> 113.9 per user = +2.9 %.</p>
+<p>Prompt 8192. Context 8320 tokens = 130 pages, 129 full. Visits = 8 x 32 x 8 x 129 = 264,192 per forward, 26 workers, 10,161 per worker. Saving = 10,161 x 0.75 us = 7.6 ms per worker per forward (est.). Measured drop of T2 over the 64 jobs: (679 - 574) us x 64 = 6.7 ms. Attention is 93 % of the forward, so the pass is 1:1: T1 46.05 -> 38.4 to 39.3 ms = +17 to +20 % (est.). Measured: 39.64 ms, TPS 21.4 -> 24.8 = +16.0 %.</p>
+<p>The same model in the CI harness at 8 users per engine and prompt 1024 gains +10.8 % (nightly package vs canonical package, 3 passes) and +12.9 % (same binary, kill switch, rinzler) [CI-test/status/llama-3.1-8b.html, and VNNIed-K-in-place/status/llama8b-AMX-gain-vs-load.html]. The map's decode-only arithmetic gives +3 % for that cell. The gap is the first edge of the map (section 9).</p>
+<h3 id="s6b">Example B: qwen3-4b, tp2, 8 users, AoF (the deployed mode)</h3>
+<p>Step 2 ends the estimate. The card scores every whole GOF of every user from position 127 on. The CPU keeps (p mod 4) + 1 keys per (user, KV head, layer) per step, 1 to 4 keys, mean 2.49. No page is ever full on the CPU, so the kernel-eligible visits are 0 and the predicted gain is 0. Measured: TPS -0.9 % at prompt 1024 and -0.5 % at prompt 8192 with the kernel on, busy per job equal within 1 %, 0 AMX visits in both cells (Table 1, and attn-stats-compare.md section 2.1).</p>
+<p>The useful question for qwen3-4b is therefore AoF vs CPU attention, not AMX vs AVX: at prompt 1024 and 8 users AoF gives 126.6 TPS per user against 79.5 with CPU attention and the kernel (1.6x). At prompt 8192 the ratio is 3.6x (61.5 vs 17.1 TPS, runtron 8 users, 2026-09-22) [CI-test/status/qwen3-4b-prefill-amx-vs-fpga.html section 7]. The kernel matters for this model only where the card is absent, full (HBM exhaustion), or bypassed (prefix-cache branches, prompts under 128 tokens) [counter.html section 2.3].</p>
+<h3 id="s6c">Example C: gpt-oss-120b, tp4, 8 users, AoF, prompt 1024 (the Scratch page question)</h3>
+<p>The question on the Scratch page was whether the 10 % of decode keys that gpt-oss scores on the CPU means a kernel for its shape would pay. The map answers in four lines.</p>
+<ol>
+<li><b>What is on the CPU.</b> The 18 card layers keep a 1-to-4-key tail (40,960 AVX keys per layer per run, no full page). The 18 sliding-window layers score 128 keys per query on the CPU: 1 full page plus 2 partial pages in 252 of the 256 steps. That is 2,097,152 AVX keys per layer per run (8 users x 8 KV heads x 128 keys x 256 steps) [attn-stats-compare.md section 6, and the exit report's per-layer line].</li>
+<li><b>Kernel-eligible visits.</b> One full page per (user, KV head, sliding layer) per step: 8 x 8 x 18 = 1,152 per forward, holding half of those layers' keys. Today the shape gate (64 wide, kv_mul 8) sends them to the AVX loop.</li>
+<li><b>Time.</b> Busy per job in a sliding-window layer is 36.0 us (29.4 us scoring plus 6.6 us join wait), 18 jobs per worker per forward = 0.65 ms = 6.3 % of the 10.26 ms forward (Figure 2d). The join wait does not change with a kernel, so the ceiling for any kernel is the 0.53 ms of scoring = 5.2 % of T1.</li>
+<li><b>Price.</b> On the fitting models the kernel cut decode busy per job by 12 to 16 % while taking 96 to 99 % of the keys (Table 1: llama 103 -> 91 us, qwen 229 -> 193 us). Half the keys at that rate is 6 to 8 % of 0.65 ms = 0.04 to 0.05 ms per forward = 0.4 to 0.5 % of T1 (est.). Pass 1:1 (one minibatch). So the answer is: under 1 % of decode TPS, with 5.2 % as the ceiling.</li>
+</ol>
+<p>Two cautions that the map makes visible. The 128-key window of one KV head is 32 KiB and stays in cache across steps. So the per-key cost there is the cache-regime one, not the 3.6 us DRAM unit (Insufficient data for the exact value: only a built kernel measures it). Prefill has more room than decode. The sliding layers' attention busy is 8.7 % of a 335 ms prompt forward, and the kernel's prefill cut on the fitting models is 1.7x to 2.5x per job. So 3 to 4 % of TTFT is reachable (est.) [Notion Scratch page 2026-10-07, and the leaves prompt_or_mixed_layer_*].</p>
+<h3 id="s6d">Example D: qwen-2.5-32b, tp2, nightly (2 users per engine), CPU attention</h3>
+<p>qwen-2.5-32b is a hand-written plugin configuration (model_type::llama), so it defaults to CPU attention like llama [llama.hpp:1594, and hw_attn_config.hpp:12-15]. Its attention has 40 query heads over 8 KV heads: kv_mul 5 with head size 128. The gate fails, the AMX branch is not compiled for it, and every page visit runs on the AVX loop [tron-amx-distilled.html 4.1.1]. Predicted AMX gain today: 0. The nightly row moved +1.2 to +1.6 % between the pre and post windows, the same small step as nine other rows without the kernel, which arrived six nights after the AMX package [Was-AMX-boosting-all-models.html sections 1 and 2].</p>
+<p>If a kv_mul-5 kernel existed, the map gives the shape of the gain but not its size. Visits per forward at 2 users per engine and prompt 1024 = 2 x 64 layers x 8 KV heads x 17 full pages = 17,408, about 645 per worker over 27 workers. At 0.5 to 0.66 us saved per visit that is 0.3 to 0.4 ms per forward (est.). The forward time of that row is at most 28 ms (1 / 35.3 TPS per user) [nightly table], so the gain at that cell is at least +1 % and probably a few percent (est.). The missing input is the attention share of this model's forward, which also decides the 8-users-per-engine case. Insufficient data: one TRON_ATTN_STATS=1 runtron cell of qwen-2.5-32b-it-fast tp2 at 2 and 8 users, prompt 1024 and 8192, gives T2 x 64 jobs / T1 directly, with no kernel needed.</p>
+<h2 id="s7">7. The levers in CI: users per engine and prompt length</h2>
+<p>Figure 5 is the measured shape of rule 8 for llama-3.1-8b. Both levers work through the same quantity, the attention share of the forward. The nightly's llama-3.1-8b 8-user row sits at the bottom left of the left panel (2 users per engine, prompt 1024, +0.2 %). The 32-user row sits at the top (8 users per engine).</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 345" width="1180" height="345" role="img" aria-label="llama-3.1-8b decode gain of the canonical AMX package over the nightly package, CI harness" font-family="system-ui, -apple-system, Segoe UI, sans-serif" style="max-width:100%;height:auto;display:block">
+<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#52514e"/></marker><marker id="arrred" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 z" fill="#d03b3b"/></marker></defs>
+<rect x="0" y="0" width="1180" height="345" fill="#fcfcfb"/>
+<text x="18.0" y="26.0" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="bold" >Figure 5. llama-3.1-8b decode gain, canonical-AMX package vs the nightly package, CI harness, nightly layout, whole machine.</text>
+<line x1="80.0" y1="260.0" x2="550.0" y2="260.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="72.0" y="264.0" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+0 %</text>
+<line x1="80.0" y1="212.5" x2="550.0" y2="212.5" stroke="#e1e0d9" stroke-width="1"/>
+<text x="72.0" y="216.5" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+4 %</text>
+<line x1="80.0" y1="165.0" x2="550.0" y2="165.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="72.0" y="169.0" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+8 %</text>
+<line x1="80.0" y1="117.5" x2="550.0" y2="117.5" stroke="#e1e0d9" stroke-width="1"/>
+<text x="72.0" y="121.5" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+12 %</text>
+<line x1="80.0" y1="70.0" x2="550.0" y2="70.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="72.0" y="74.0" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+16 %</text>
+<text x="80.0" y="278.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >1024</text>
+<text x="236.7" y="278.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >2048</text>
+<text x="382.3" y="278.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >3000</text>
+<text x="550.0" y="278.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >4096</text>
+<text x="315.0" y="296.0" font-size="11" fill="#52514e" text-anchor="middle" font-weight="normal" >prompt length, tokens</text>
+<text x="80.0" y="54.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="bold" >gain vs prompt length</text>
+<line x1="80.0" y1="257.5" x2="236.7" y2="241.6" stroke="#898781" stroke-width="2"/>
+<line x1="236.7" y1="241.6" x2="382.3" y2="173.3" stroke="#898781" stroke-width="2"/>
+<line x1="382.3" y1="173.3" x2="550.0" y2="162.7" stroke="#898781" stroke-width="2"/>
+<circle cx="80.0" cy="257.5" r="5.0" fill="#898781" stroke="none" stroke-width="1"><title>2 users per engine, prompt 1024: +0.21 %</title></circle>
+<text x="88.0" y="249.5" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >+0.2</text>
+<circle cx="236.7" cy="241.6" r="5.0" fill="#898781" stroke="none" stroke-width="1"><title>2 users per engine, prompt 2048: +1.55 %</title></circle>
+<text x="244.7" y="233.6" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >+1.6</text>
+<circle cx="382.3" cy="173.3" r="5.0" fill="#898781" stroke="none" stroke-width="1"><title>2 users per engine, prompt 3000: +7.30 %</title></circle>
+<text x="390.3" y="165.3" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >+7.3</text>
+<circle cx="550.0" cy="162.7" r="5.0" fill="#898781" stroke="none" stroke-width="1"><title>2 users per engine, prompt 4096: +8.19 %</title></circle>
+<text x="542.0" y="154.7" font-size="10" fill="#0b0b0b" text-anchor="end" font-weight="normal" >+8.2</text>
+<text x="542.0" y="178.7" font-size="11" fill="#898781" text-anchor="end" font-weight="bold" >2 users per engine</text>
+<line x1="80.0" y1="131.9" x2="236.7" y2="93.9" stroke="#2a78d6" stroke-width="2"/>
+<line x1="236.7" y1="93.9" x2="550.0" y2="93.6" stroke="#2a78d6" stroke-width="2"/>
+<circle cx="80.0" cy="131.9" r="5.0" fill="#2a78d6" stroke="none" stroke-width="1"><title>8 users per engine, prompt 1024: +10.79 %</title></circle>
+<text x="88.0" y="123.9" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >+10.8</text>
+<circle cx="236.7" cy="93.9" r="5.0" fill="#2a78d6" stroke="none" stroke-width="1"><title>8 users per engine, prompt 2048: +13.99 %</title></circle>
+<text x="244.7" y="85.9" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >+14.0</text>
+<circle cx="550.0" cy="93.6" r="5.0" fill="#2a78d6" stroke="none" stroke-width="1"><title>8 users per engine, prompt 4096: +14.01 %</title></circle>
+<text x="542.0" y="85.6" font-size="10" fill="#0b0b0b" text-anchor="end" font-weight="normal" >+14.0</text>
+<text x="542.0" y="109.6" font-size="11" fill="#2a78d6" text-anchor="end" font-weight="bold" >8 users per engine</text>
+<line x1="680.0" y1="260.0" x2="1100.0" y2="260.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="672.0" y="264.0" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+0 %</text>
+<line x1="680.0" y1="212.5" x2="1100.0" y2="212.5" stroke="#e1e0d9" stroke-width="1"/>
+<text x="672.0" y="216.5" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+4 %</text>
+<line x1="680.0" y1="165.0" x2="1100.0" y2="165.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="672.0" y="169.0" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+8 %</text>
+<line x1="680.0" y1="117.5" x2="1100.0" y2="117.5" stroke="#e1e0d9" stroke-width="1"/>
+<text x="672.0" y="121.5" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+12 %</text>
+<line x1="680.0" y1="70.0" x2="1100.0" y2="70.0" stroke="#e1e0d9" stroke-width="1"/>
+<text x="672.0" y="74.0" font-size="11" fill="#898781" text-anchor="end" font-weight="normal" >+16 %</text>
+<text x="680.0" y="278.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >2</text>
+<text x="820.0" y="278.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >4</text>
+<text x="1100.0" y="278.0" font-size="11" fill="#898781" text-anchor="middle" font-weight="normal" >8</text>
+<text x="890.0" y="296.0" font-size="11" fill="#52514e" text-anchor="middle" font-weight="normal" >users per engine (prompt 1024)</text>
+<text x="680.0" y="54.0" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="bold" >gain vs users per engine</text>
+<line x1="680.0" y1="257.5" x2="820.0" y2="203.6" stroke="#2a78d6" stroke-width="2"/>
+<line x1="820.0" y1="203.6" x2="1100.0" y2="131.9" stroke="#2a78d6" stroke-width="2"/>
+<circle cx="680.0" cy="257.5" r="5.0" fill="#2a78d6" stroke="none" stroke-width="1"><title>2 users per engine, prompt 1024: +0.21 %</title></circle>
+<text x="688.0" y="249.5" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >+0.2</text>
+<circle cx="820.0" cy="203.6" r="5.0" fill="#2a78d6" stroke="none" stroke-width="1"><title>4 users per engine, prompt 1024: +4.75 %</title></circle>
+<text x="828.0" y="195.6" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >+4.8</text>
+<circle cx="1100.0" cy="131.9" r="5.0" fill="#2a78d6" stroke="none" stroke-width="1"><title>8 users per engine, prompt 1024: +10.79 %</title></circle>
+<text x="1108.0" y="123.9" font-size="10" fill="#0b0b0b" text-anchor="start" font-weight="normal" >+10.8</text>
+<text x="18.0" y="319.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >Both levers raise the attention share of the step. The 2-user cells are the nightly layout (8 users over 4 engines). Source: CI-test/status/llama-3.1-8b.html (campaigns</text>
+<text x="18.0" y="333.0" font-size="11" fill="#52514e" text-anchor="start" font-weight="normal" >l8b-levers-20260919 and l8b-8u4k-20260920; nightly deb 3faba6d0 vs canonical deb 0594dc54; 3 interleaved passes).</text>
+</svg>
+<figcaption>Figure 5. llama-3.1-8b decode gain of the canonical-AMX package over the nightly package in the CI harness. Left: against prompt length at 2 and 8 users per engine. Right: against users per engine at prompt 1024. Values are the mean over 3 interleaved passes. Every point except 2 users x 1024 is resolved (paired t above 4.3).</figcaption></figure>
+<h2 id="s8">8. What to keep handy</h2>
+<p>Six cards. Cards 1 to 3 are the inputs of the recipe. Cards 4 to 6 are how to measure and where to read more.</p>
+<h3 id="s8a">Card 1: model geometry</h3>
+<table class="">
+<caption>Table 2. Attention geometry of the models in question, read from the tron sources (tron-amx checkout, 85fc8ff4de). The gate is compile-time: a failing model never compiles the AMX branch [self_attention.hpp, amx_shape_ok].</caption>
+<thead><tr><th>model</th><th>layers</th><th>query heads</th><th>KV heads</th><th>head size</th><th>kv_mul</th><th>default attention</th><th>kernel shape gate</th><th>what the map says</th><th>source</th></tr></thead>
+<tbody>
+<tr><td>llama-3.1-8b</td><td>32</td><td>32</td><td>8</td><td>128</td><td>4</td><td>CPU (hand-written plugin)</td><td>pass</td><td>the measured AMX case: +3 to +16 % runtron, +11 to +14 % CI at 8 users per engine</td><td>llama.hpp:1583</td></tr>
+<tr><td>llama-3.1 / 3.3-70b</td><td>80</td><td>64</td><td>8</td><td>128</td><td>8</td><td>CPU</td><td>fail (kv_mul 8)</td><td>0 today; a width-8 kernel would be new code</td><td>llama.hpp:1584</td></tr>
+<tr><td>qwen-2.5-32b</td><td>64</td><td>40</td><td>8</td><td>128</td><td>5</td><td>CPU</td><td>fail (kv_mul 5)</td><td>0 today; a kv_mul-5 kernel would be new code (section 6, example D)</td><td>llama.hpp:1594</td></tr>
+<tr><td>qwen3-4b</td><td>36</td><td>32</td><td>8</td><td>128</td><td>4</td><td>AoF (ingested, force_hw_attn)</td><td>pass</td><td>0 under AoF in decode; +12 to +18 % under CPU attention</td><td>qwen_3_4b_instruct_2507.hpp:28-41</td></tr>
+<tr><td>gpt-oss-120b</td><td>36 = 18 sliding (128) + 18 full</td><td>64</td><td>8</td><td>64</td><td>8</td><td>AoF (ingested)</td><td>fail (64 wide, kv_mul 8)</td><td>0 today; a 64x8 kernel: under 1 % of decode (est.)</td><td>ingested_gpt_oss_120b.hpp:28-52</td></tr>
+<tr><td>gpt-oss-20b</td><td>24 = 12 sliding + 12 full</td><td>64</td><td>8</td><td>64</td><td>8</td><td>AoF (ingested)</td><td>fail</td><td>same as the 120b</td><td>rampup/gptoss-estimate.html section 1</td></tr>
+</tbody></table>
+<h3 id="s8b">Card 2: machine and engine numbers (delphi-3bda)</h3>
+<ul>
+<li>Engine cores: tp2 = 28 application cores (main thread + 27 workers), tp4 = 56 (main + 55). The card drivers use separate dev cores. Our half of the machine = socket 1 with cards 90/93/b9/bc [exec/results/attnstats-20261002/rt-results.txt placement lines].</li>
+<li>Attention workers the split heuristic actually used at 8 users: qwen3-4b 20 of 27, llama-3.1-8b 23-24 (prompt 1024) and 26 (prompt 8192), gpt-oss-120b 40 of 55 at tp4 [exit report model lines, active_workers, and attn-stats-compare.md section 7].</li>
+<li>Per-core streaming rate from DRAM: 19.8 GB/s for one core alone, 13.1 GB/s per core with 27 cores reading. Memory time of one 32 KiB unit: 2.49 us. DRAM latency 127 to 147 ns [perf-model/index.html sections 5 and 10].</li>
+<li>Caches: L2 2 MiB per core, L3 432 MiB per socket. One qwen3-4b user at prompt 8192 reads 36 layers x 8 KV heads x 130 pages x 32 KiB = 1,170 MiB per decode step, 2.7x the L3, so the pages come from DRAM [perf-model/index.html, Words used here].</li>
+<li>Clocks while busy: 3.74 GHz on the AVX path, 3.60 GHz with AMX tiles in use on 27 cores (the AMX license clock) [perf-model/index.html section 5]. The stats count TSC cycles at 2.70 GHz: divide by tsc_hz from the exit report's model line.</li>
+<li>Fixed costs per attention operation: joins plus barrier 9 to 13 us per layer at 1 user (320 to 480 us per token), join wait T5 3 to 6 us per job at 8 users under CPU attention [make-sense-amx-vs-avx.html 7.2.1, and the Table 1 source].</li>
+</ul>
+<h3 id="s8c">Card 3: unit costs and visit counts</h3>
+<ul>
+<li>Unit (one visit, 32 KiB), AVX / canonical AMX / mirror AMX: 3.64 / 2.89 / 2.66 us at prompt 8192. 2.80 / 2.14 / 2.07 us at prompt 2048. 2.88 / 2.38 / 1.36 us at prompt 256. Hot in L2: 1.68 us (AVX) and 0.62 us (AMX) [Figure 4 sources].</li>
+<li>Visits per decode step on the CPU: U x L(CPU) x KV heads x ceil(context / 64). Kernel-eligible = the full pages: floor(context / 64) per (user, KV head, layer), plus the pending page in 1 of 64 steps.</li>
+<li>AoF steady state: 0 kernel visits, one AVX visit of (p mod 4) + 1 keys per (user, KV head, layer) per step, and the card scores 4 x floor(p / 4) keys per query. Exceptions that put pages on the CPU: a prompt under 128 tokens, a whole-page copy lag, a prefix-cache branch inside a shard, a full card store [counter.html 2.3, and attn-stats-compare-QA.html 1.3].</li>
+<li>Prefill: 128-token chunks per user per forward. The chunk's own pages are always AVX (one range per token), and earlier chunks' full pages are kernel-eligible. One 8-user prompt-1024 run has 7,168 ready kernel visits per (user, KV head, layer) [attention-stats-claude.html].</li>
+<li>Kill-switch identity: the same visits with the same key counts, every former AMX visit becomes one avx_full_page visit of 64 keys. Use it to check a counter reading before trusting a timing.</li>
+</ul>
+<h3 id="s8d">Card 4: switches, commands, and where the counters appear</h3>
+<pre><code>TRON_ATTN_STATS=1              # exit report on stderr ([attn-stats] lines) + live FUSE leaves
+TRON_AMX_DISABLE=1             # kill switch: same visits, all on the AVX loop; exit report says &quot;amx_available&quot;:false
+USE_HW_ATTN=0 | USE_HW_ATTN=1  # force CPU attention | force FPGA attention; unset = the model default
+TRON_PER_USER_PROMPT_CHUNK_LIMIT=128   # prefill chunk per user per forward (default 128)
+
+# runtron, 8 users in lockstep, 256 tokens each, our half of delphi-3bda (tp2 placement)
+env -u SYSTEM_CONFIG -u TRON_AMX_DISABLE USE_HW_ATTN=0 TRON_ATTN_STATS=1 \
+  gen/runtron &lt;model-name&gt; --prompt-length 1024 -l 256 -u 8 --dont-stop \
+  --instance 2,4 --devices 90:00.0,93:00.0 --app-cores 223-224,96-101,120-125,225-226,102-107,126-131 \
+  --dev-cores 75,76 --numa 1 --nr_hugepages 128
+# tp4: --instance 1,2 --devices 90:00.0,93:00.0,b9:00.0,bc:00.0 --app-cores &lt;28 more&gt; --dev-cores 75,76,77,78 --nr_hugepages 256
+
+# hardware proof that the kernel ran (0 under the kill switch): EXE.AMX_BUSY on the engine pid
+sudo perf stat -e cpu/event=0xb7,umask=0x02/ -p &lt;engine pid&gt; -- sleep 20
+
+# live leaves while a run is on: runtron mounts &lt;worktree&gt;/stats/instance-N/; rinzler mounts /var/run/rinzler/N/rinzler/stats/
+#   .../attention/decode_like_forwards   T1 (wall_cycles / forwards), token_jobs_by_path_set, n_attn_workers
+#   .../attention/decode_like_totals     T2 (busy_cycles / attn_jobs), T5 (join_wait_cycles), T4 (period_cycles_w0 / period_count_w0)
+#   .../attention/decode_like_layer_&lt;L&gt;  the same per layer (the sliding-window vs card split of gpt-oss)
+#   .../attention/prompt_or_mixed_*      the prefill class</code></pre>
+<p>Reading the exit report: the model line gives n_layers, kv_mul, head_size, n_workers, active_workers and tsc_hz. The totals lines give the visit and key counts per path and the cycle sums of T2, T3, T4, T5. The forwards line gives the forward count, T1 and the path sets of the token jobs. The per-layer line gives K tokens per layer as amx/avx/fpga. A multi-leaf snapshot is not one consistent read: take ratios inside one leaf [attention-stats-claude.html, Traps].</p>
+<h3 id="s8e">Card 5: measured anchors beyond Table 1</h3>
+<table class="">
+<caption>Table 3. Anchors to check an estimate against. Each row names its harness and layout: never compare across harnesses.</caption>
+<thead><tr><th>cell</th><th>harness, layout</th><th>result</th><th>source</th></tr></thead>
+<tbody>
+<tr><td>qwen3-4b tp2, 1 user, prompt 256 / 2048 / 8192, canonical kernel vs kill switch</td><td>runtron, our half</td><td>+0.2 / +3.9 / +10.8 % TPS; attention share 16 / 31 / 62 %</td><td>make-sense-amx-vs-avx.html section 7 (fence3, 2026-09-01)</td></tr>
+<tr><td>qwen3-4b tp2, 1 user, prompt 256 to 32768, mirror kernel vs clean AVX build</td><td>runtron, our half, 8 reps</td><td>+0.6 / +1.9 / +1.7 / +5.0 / +14.9 / +18.0 / +26.0 / +27.6 % at 256 / 512 / 1024 / 2048 / 4096 / 8192 / 16384 / 32768</td><td>make-sense-amx-vs-avx.html 2.1 (ctxfill, 2026-09-01)</td></tr>
+<tr><td>qwen3-4b tp2, 8 users, prompt 8192, decode TPS per user: AVX-CPU / AMX-CPU / AoF+AVX / AoF+AMX</td><td>runtron, our half, 3 reps</td><td>14.5 / 17.1 / 61.5 / 61.5; batched prefill of the 8 prompts 123.1 / 53.5 / 29.7 / 29.1 s</td><td>CI-test/status/qwen3-4b-prefill-amx-vs-fpga.html section 7 (2026-09-22)</td></tr>
+<tr><td>qwen3-4b tp2, cold prefill at prompt 8192: CPU AMX vs FPGA</td><td>CI harness, whole machine</td><td>12,743 ms vs 6,743 ms TTFT (1.9x for the card); CPU AMX vs CPU AVX 2.3x</td><td>same page, section 5</td></tr>
+<tr><td>llama-3.1-8b tp2, 2 / 4 / 8 users per engine, prompt 1024, kill switch vs on</td><td>rinzler + CI harness, our half</td><td>+0.2 / +3.9 / +12.9 %; AMX busy 40 / 68 / 92 G cycles per 20 s</td><td>VNNIed-K-in-place/status/llama8b-AMX-gain-vs-load.html (2026-09-18)</td></tr>
+<tr><td>llama-3.1-8b tp2, 8 users per engine, prompt 4096, nightly package vs canonical package</td><td>CI harness, nightly layout, whole machine, 3 passes</td><td>28.24 -> 32.20 TPS = +14.0 %; TTFT 19.0 -> 11.5 s</td><td>CI-test/status/llama-3.1-8b-8u-4k.html (2026-09-20)</td></tr>
+<tr><td>nightly rows, medians of 12 nights after 2026-09-23 vs 8 nights before</td><td>nightly, Intel machine</td><td>llama-3.1-8b 32 users +15.4 % (28.25 -> 32.61, the AMX row); llama-3.1-8b 8 users, qwen-2.5-32b, qwen-3-4b tp2: +1.2 to +1.6 % (no kernel); gpt-oss-120b tp4 +12.8 % and qwen-3-4b tp4 +18.3 % (AoF rows, not the kernel)</td><td>Was-AMX-boosting-all-models.html sections 1, 2 and 8</td></tr>
+<tr><td>mixtral-8x7b tp2, 8 users, prompt 2048 / 8192, canonical kernel vs kill switch</td><td>runtron</td><td>+2.3 / +9.4 % decode; +56 % prefill at 8192</td><td>tron-amx-distilled.html 4.1 (results/ci-models/mixtral-ab.txt, 2026-08-21)</td></tr>
+</tbody></table>
+<h3 id="s8f">Card 6: where the detail lives</h3>
+<ul>
+<li><b>tron-amx-distilled.html</b> (intel-AMX root): what AMX is, the decode architecture with the attention-worker lane figure, the shape table of every model, the kv_mul 3 / 5 / 8 explanation.</li>
+<li><b>PR3879/make-sense-amx-vs-avx.html</b>: the boost-vs-prompt curves, the attention share, the per-unit measurement 7.2.1, the counters of the fence rounds.</li>
+<li><b>perf-model/index.html</b>: the data-wait model of a unit (compute, memory time, overlap), the chain from a unit to the token, the benchmark outside tron.</li>
+<li><b>PR3879/new-PRs/new-counters/counter.html</b>: which path serves a page visit in prefill and decode, the AoF exceptions, the counter design.</li>
+<li><b>PR3879/new-PRs/new-counters/attention-stats-claude.html</b>: the five timers line by line, the closed-form visit counts, the check script attention-stats-claude-check.py.</li>
+<li><b>PR3879/new-PRs/new-counters/attn-stats-compare.md</b> and <b>attn-stats-compare-QA.html</b>: the 2026-10-02 three-model comparison and the AoF questions (unit of 64, GOF of 4, equations).</li>
+<li><b>rampup/gptoss-estimate.html</b>: what a gpt-oss kernel needs (new 64x8 kernels, two gate sites).</li>
+<li><b>CI-test/status/llama-3.1-8b.html</b> and <b>qwen3-4b-prefill-amx-vs-fpga.html</b>: the CI-harness campaigns behind Figure 5 and the AoF-vs-CPU comparison.</li>
+<li><b>Was-AMX-boosting-all-models.html</b> (new-counters): the nightly rows night by night, and why most September gains were not the kernel.</li>
+</ul>
+<h2 id="s9">9. Edges of the map: what it does not predict</h2>
+<ol>
+<li><b>The CI harness at 8 users per engine, prompt 1024.</b> The map gives +3 % for llama-3.1-8b (lockstep decode, measured +2.9 %) while the CI harness measures +10.8 to +12.9 % in that cell. Hypothesis: in continuous batching a user's decode steps share forwards with other users' prefill chunks, and the kernel speeds those jobs 1.7x to 2.5x, so the per-user token interval drops more than the pure decode step. Measurement that decides it: the TRON_ATTN_STATS exit report of one rinzler engine under the CI harness, both arms, reading the T1 sums of the decode_like and prompt_or_mixed classes.</li>
+<li><b>The card's own time under AoF.</b> The counters see it only as waits and join wait on the CPU side (Figure 2c). A card-side timer or a trace would split the matmuls from the attention passes.</li>
+<li><b>qwen-2.5-32b's attention share.</b> No stats cell exists. One runtron cell with TRON_ATTN_STATS=1 (no kernel needed) closes it (example D).</li>
+<li><b>The llama pass fraction at short prompts.</b> The one-third pass comes from one cell (8 users, prompt 1024). Cells at 2 and 4 users per engine, and at prompt 2048 and 4096, would show the shape of the rule.</li>
+<li><b>Per-unit costs for shapes without a kernel.</b> kv_mul 5 (qwen-2.5-32b), kv_mul 8 (llama-70b) and 64x8 (gpt-oss) have no measured unit. The memory time (2.49 us per 32 KiB, or 1.25 us per 16 KiB page of a 64-wide head) is the only number the map can give.</li>
+<li><b>The AMX clock license in serving.</b> Busy clocks fall from 3.74 to 3.60 GHz when the tiles are in use. The effect on the other work of the same cores is not separated in any run.</li>
+</ol>
+<h2 id="s10">10. Sources</h2>
+<ul>
+<li>exec/results/attnstats-20261002/{exit-reports.txt, rt-results.txt, leaves/&lt;run&gt;/decode_like_*}: the six 2026-10-02 cells (tron main dd0f942c75), and PR3879/new-PRs/new-counters/attn-stats-compare.md (sections 1, 2, 6, 7) built from them.</li>
+<li>exec/tron-intuition-20261007/leaves.py reads the per-layer leaves for Figure 2 (means over the layers of each class: gpt-oss even and odd layers, the other cells all layers).</li>
+<li>PR3879/make-sense-amx-vs-avx.html sections 2.1, 3, 7, 7.2.1 (unit costs, attention share, boost curves, 2026-08-31 to 2026-09-01).</li>
+<li>perf-model/index.html sections 2, 5, 6, 10 (compute, memory time, overlap, per-core rate, clocks; 2026-09-03).</li>
+<li>PR3879/new-PRs/new-counters/{counter.html, attention-stats-claude.html, attn-stats-compare-QA.html, Was-AMX-boosting-all-models.html}.</li>
+<li>CI-test/status/{llama-3.1-8b.html, llama-3.1-8b-8u-4k.html, qwen3-4b-prefill-amx-vs-fpga.html}, and VNNIed-K-in-place/status/llama8b-AMX-gain-vs-load.html.</li>
+<li>tron sources (tron-amx checkout, 85fc8ff4de): h/tron/plugins/llama.hpp:183 and 1583-1594, gen-amd/src/tron/h/tron/plugins/{ingested_gpt_oss_120b.hpp, qwen_3_4b_instruct_2507.hpp}:28-52, h/tron/kernels/amx_attn_iface.hpp:148-150, h/tron/models/self_attention.hpp:1710-1721, h/libtron.hpp:194-205, h/tron/models/model.hpp:1937-1970 (the worker split).</li>
+<li>Notion Scratch page (2026-10-07): the gpt-oss time-budget answer that example C re-derives.</li>
+</ul>
+</main>
+</body>
+</html>

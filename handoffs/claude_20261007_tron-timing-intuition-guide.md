@@ -87,35 +87,39 @@ The page did not run any test. Every number below is taken from earlier measurem
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/tron-intuition-claude.html (98,996 bytes). The page: Short version, Words used here, ten rules to internalize, the six-step manual estimate, worked examples, what to keep handy, five inline SVG figures. Pure ASCII, light theme.
-  - generator: /home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/gen_intuition.py (writes the output path hard-coded in its `OUT` constant), with leaves.py next to it for the per-layer timer means
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/tron-intuition-claude.html (98,996 bytes). The page: Short version, Words used here, ten rules to internalize, the six-step manual estimate, worked examples, what to keep handy, five inline SVG figures. Pure ASCII, light theme. (preserved: artifacts/intel-amx/pr3879/new-counters/tron-intuition-claude.html)
+  - generator: /home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/gen_intuition.py (writes the output path hard-coded in its `OUT` constant), with leaves.py next to it for the per-layer timer means (preserved: artifacts/intel-amx/exec/tron-intuition-20261007/gen_intuition.py)
   - input: /home/jhan/workspace/intel-AMX/exec/results/attnstats-20261002/leaves/<run>/decode_like_layer_*, rt-results.txt and the exit reports of that campaign; the model geometry in /home/jhan/workspace/tron-amx (config/models.yaml, plugin headers); the memory notes and earlier pages listed under Environment
   - input built by: the attnstats-20261002 campaign (/home/jhan/workspace/intel-AMX/exec/attnstats-20261002/campaign.sh) on delphi-3bda, 2026-10-02, with TRON_ATTN_STATS on
   - sources: the campaign result files above, the Notion Scratch screenshot, attn-stats-compare.md
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/gen_intuition.py` (writes `<OUT>` = the path above; edit `OUT` in the script to write elsewhere)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/tron-intuition-claude-humanized.html. The humanized copy, reported at 17:50 as written. NOT on disk on 2026-10-16 (unverified where it went; the transcript shows no deletion in this session).
-  - generator: /home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/humanize.py (applies 38 edits to the generator source and runs it with `OUT` pointed at the humanized path)
+  - generator: /home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/humanize.py (applies 38 edits to the generator source and runs it with `OUT` pointed at the humanized path) (preserved: artifacts/intel-amx/exec/tron-intuition-20261007/humanize.py)
   - input: gen_intuition.py and the same data as above
   - input built by: as above
   - sources: as above
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/humanize.py` (writes `<OUT>` = the humanized path hard-coded in its `OUT` constant)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/compare-humanized-n-not.md. Reported at 18:11 as 32 KB: 48 prose blocks and 2 figure text runs that differ, each with the section, the block type and the full before and after text. NOT on disk on 2026-10-16.
-  - generator: /home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/compare_pages.py
+  - generator: /home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/compare_pages.py (preserved: artifacts/intel-amx/exec/tron-intuition-20261007/compare_pages.py)
   - input: the two HTML pages above
   - input built by: gen_intuition.py and humanize.py
   - sources: none beyond the two pages
   - regenerate: `python3 /home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/compare_pages.py` (reads the two pages and writes `<OUT>` = compare-humanized-n-not.md; needs the humanized page first)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/gen_intuition.py (73,349 bytes). The page generator.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/leaves.py (3,165 bytes). Reads the campaign leaves and prints per-layer T2 to T5 means. A copy of the scratchpad version.
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/leaves.py (3,165 bytes). Reads the campaign leaves and prints per-layer T2 to T5 means. A copy of the scratchpad version. (preserved: artifacts/intel-amx/exec/tron-intuition-20261007/leaves.py)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/humanize.py (15,274 bytes). The 38 (old, new) edits and the runner.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/tron-intuition-20261007/compare_pages.py (5,163 bytes). The block diff.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/tron-intuition-page.md (4,041 bytes). Memory note: what the page holds, the generator, the humanized edition, the open edge. Written at 17:02 and updated at 17:50. One index line added to MEMORY.md in the same directory.
 - Scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-new-counters/ca85cde0-d3cd-49b4-9d0f-c42111714d4a/scratchpad/ (may be cleaned up):
   - notion-img/scratch-conversation.png (208,955 bytes) and strip0.png (192,171 bytes). The Notion screenshot and a strip of it.
   - render/fig1.png to fig5.png and hfig2.png, hfig4.png (64 KB to 303 KB each). The rendered figure checks.
-  - txt/ (8 text dumps of the earlier pages, 10 KB to 123 KB each), page.txt, page-prose.txt, page-prose-h.txt (the text dumps used for the checks and the lint), leaves.py.
+  - txt/ (8 text dumps of the earlier pages, 10 KB to 123 KB each), page.txt, page-prose.txt, page-prose-h.txt (the text dumps used for the checks and the lint), leaves.py. (preserved: artifacts/intel-amx/exec/scratch-relocated/ca85cde0/page-prose-h.txt, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/ca85cde0/page-prose-h.txt)
 - Removed: ~/.claude/skills/humanize-writing/ and ~/.codex/skills/humanize-writing/ (both real directories, with the slash command commands/humanizer.md inside the Claude copy).
 - Code: nothing changed in any git checkout. No commit, no PR.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/scratch-relocated/ca85cde0/` (3 files)
 
 ## Current state
 
