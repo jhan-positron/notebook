@@ -20,7 +20,7 @@ The user asked for a new branch off jhan-amx-vnniK that carries the code change 
 - **PR 4812**: https://github.com/positron-ai/tron/pull/4812, the draft PR this session created. Base jhan-amx-vnniK, head 45e6bb266d, label "Skip benchmarks".
 - **PR 4737**: https://github.com/positron-ai/tron/pull/4737, a later PR on the same branch family that still names save_k_helper in 15 places.
 - **save_k**: the method of the model that stores one token's K rows (key vectors) into the KV cache. **main helpers**: the worker threads 1 to n_workers - 1 that share the work of the main thread. **worker_ix**: the caller's worker index.
-- **Haskell code generator**: ingest/src/TronCpp.hs, the program that writes the per-model C++ plugin files. **LoopyTronSpec.hs**: its test file.
+- **Haskell code generator**: ingest/src/TronCpp.hs, the program that writes the per-model C++ plugin files. **LoopyTronSpec.hs**: its test file. (preserved: artifacts/intel-amx/exec/scratch-relocated/350a38ed/TronCpp.hs, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/350a38ed/TronCpp.hs)
 - **VNNI build and row-major build**: two CMake settings of tron, with the K cache stored in the VNNI layout or in plain row order.
 - **Kill switch**: the environment variable TRON_AMX_DISABLE=1 that turns the AMX kernels off at run time.
 - **Reviewer agent**: a second Claude session that posts reviews on GitHub as the user's account once ~/tmp/new-pr.txt exists.
@@ -47,8 +47,8 @@ The user asked for a new branch off jhan-amx-vnniK that carries the code change 
 ## Timeline (2026-10-08, Pacific)
 
 - 12:09 Request received. Claude read four memory notes (vnnied-k-in-place-project, sync-4424-main-20261007, savek-worker-fold, pr4424-description-on-github), fetched the branch heads, and read PR 4774 on GitHub.
-- 12:11 Worktree created on the new branch at 6b939d25d2. `git merge --no-ff f52d634c32` gave 6 conflict hunks in 3 files (model.hpp 2, TronCpp.hs 1, t_llama_unit.cpp 3). The cause was name drift: the branch head had renamed local constants (k_join_timeout_s, kv_jobs, n_kv_heads, num_kv_tokens, n_workers) where PR 4774 still used value-suffix names.
-- 12:15 A small script (resolve.py) resolved the hunks: the head's names, PR 4774's code and text, new test constant main_worker_ix. Merge commit 45e6bb266d.
+- 12:11 Worktree created on the new branch at 6b939d25d2. `git merge --no-ff f52d634c32` gave 6 conflict hunks in 3 files (model.hpp 2, TronCpp.hs 1, t_llama_unit.cpp 3). The cause was name drift: the branch head had renamed local constants (k_join_timeout_s, kv_jobs, n_kv_heads, num_kv_tokens, n_workers) where PR 4774 still used value-suffix names. (preserved: artifacts/intel-amx/exec/scratch-relocated/350a38ed/model.hpp, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/350a38ed/model.hpp)
+- 12:15 A small script (resolve.py) resolved the hunks: the head's names, PR 4774's code and text, new test constant main_worker_ix. Merge commit 45e6bb266d. (preserved: artifacts/intel-amx/exec/scratch-relocated/350a38ed/resolve.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/350a38ed/resolve.py)
 - 12:16 Build-and-test script build-test.sh and launch.sh written. 12:17 launched on delphi-3bda with COMMIT=45e6bb266d (the machine was free, lease absent, serving on the other half).
 - 12:17 Branch pushed. Draft PR 4812 opened with PR 4774's title, body v1 with a pending Test subsection.
 - 12:20 Workflow verify-merge-4774 launched (6 lenses, 3 refuters each). 12:21 Workflow check-pr4812-body launched (fact lens and English lens, 2 refuters each). Memory note pr4812-merge-4774-onto-4424-head.md written.
@@ -81,7 +81,7 @@ Build and unit tests on delphi-3bda at 45e6bb266d (script exec/savek2-20261008/b
 | A | VNNI | t_heterogeneous_scheduler | pass, 2,783 assertions in 3 cases |
 | A | VNNI | t_phase1_integration | pass, 2,124 assertions in 64 cases |
 | A | VNNI | t_amx_numerics with the kill switch | pass, 2,060 assertions in 5 cases, with the three expected "AMX unavailable" warnings |
-| A | VNNI | generated plugin text, 19 plugins | main-side save_k calls = helper-side save_k calls = save_v calls in every plugin, 0 save_k_helper (plugin-calls.txt) |
+| A | VNNI | generated plugin text, 19 plugins | main-side save_k calls = helper-side save_k calls = save_v calls in every plugin, 0 save_k_helper (plugin-calls.txt) | (preserved: artifacts/intel-amx/exec/results/savek2-20261008/plugin-calls.txt)
 | A2 | VNNI | ingest Haskell test suite | pass (114 s) |
 | F | VNNI | clang-format, fourmolu, diff check | rc=0 each |
 | B | row-major | t_k_vnni_layout, t_amx_dispatch_dtype, t_amx_numerics, t_heterogeneous_scheduler | pass, same counts as step A |
@@ -92,25 +92,31 @@ Numbers quoted in the 13:50 reply (from earlier records, not measured in this se
 ## Artifacts
 
 - Code: worktree claude-agentsrv:/home/jhan/workspace/ai-runs/tron-vnnik-savek2, branch jhan-amx-vnniK-savek-worker2, merge commit 45e6bb266d (PR 4774's f52d634c32 onto 6b939d25d2). Pushed. PR: https://github.com/positron-ai/tron/pull/4812. At the time of this handoff the worktree head is ba69cb513e, a one-comment commit made by a later session (see Gotchas).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek2-20261008/build-test.sh (6,843 bytes). The build-and-test script that runs on delphi-3bda, detached. Steps A, A2, F, B as in the Results table.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek2-20261008/launch.sh (321 bytes). Starts build-test.sh on delphi-3bda with COMMIT set.
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek2-20261008/pr-threads.sh (2,324 bytes). Review-loop helper: list, open, reviews, reply, resolve.
-- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek2-20261008/ (26 files, written by build-test.sh on delphi-3bda to NFS). Key files: steps.txt (1,699 bytes, one line per step with the test counts), tests-savek2.txt (3,998), tests-savek2rm.txt (681), plugin-calls.txt (2,262, the corrected per-plugin counts), format-savek2.txt (3,069), ingest-test-savek2.txt (4,984), build-savek2.log (4,524), build-savek2rm.log (3,867), the per-test .out files, all.done (3).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek2-20261008/build-test.sh (6,843 bytes). The build-and-test script that runs on delphi-3bda, detached. Steps A, A2, F, B as in the Results table. (preserved: artifacts/intel-amx/exec/savek2-20261008/build-test.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek2-20261008/launch.sh (321 bytes). Starts build-test.sh on delphi-3bda with COMMIT set. (preserved: artifacts/intel-amx/exec/savek2-20261008/launch.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/savek2-20261008/pr-threads.sh (2,324 bytes). Review-loop helper: list, open, reviews, reply, resolve. (preserved: artifacts/intel-amx/exec/savek2-20261008/pr-threads.sh)
+- delphi-3bda:/home/jhan/workspace/intel-AMX/exec/results/savek2-20261008/ (26 files, written by build-test.sh on delphi-3bda to NFS). Key files: steps.txt (1,699 bytes, one line per step with the test counts), tests-savek2.txt (3,998), tests-savek2rm.txt (681), plugin-calls.txt (2,262, the corrected per-plugin counts), format-savek2.txt (3,069), ingest-test-savek2.txt (4,984), build-savek2.log (4,524), build-savek2rm.log (3,867), the per-test .out files, all.done (3). (preserved: artifacts/intel-amx/exec/results/savek2-20261008/format-savek2.txt)
 - delphi-3bda:/home/jhan/workspace/intel-AMX/exec/logs/savek2-20261008-build-test.log (5,361 bytes). The script's own log.
 - claude-agentsrv:/home/jhan/tmp/new-pr.txt (5 bytes). Contains 4812.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4812-merge-4774-onto-4424-head.md (10,587 bytes). Project memory note: request, merge resolution, 3bda results, both review rounds, the 13:50 reply with the measured costs, helper usage, traps. Later sessions appended to it (MERGED, DESCRIPTION PROPOSAL, APPLIED entries).
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr-description-no-history.md (3,508 bytes). One UPDATE paragraph added at 12:48 with the reviewer's round-2 rule.
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md (24,227 bytes). One index line added for the note above.
-- Workflow scripts (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4774-2-4424/350a38ed-e19c-400f-a674-ca4754d64af2/workflows/scripts/): verify-merge-4774-wf_82688cb9-fad.js (9,839 bytes), check-pr4812-body-wf_6c7207e4-ad8.js (4,326 bytes), no-haskell-savek-exploration-wf_181fd229-16a.js (9,053 bytes).
-- Session scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4774-2-4424/350a38ed-e19c-400f-a674-ca4754d64af2/scratchpad/ (45 files, may be cleaned up). Meaningful ones: resolve.py (2,797 bytes, the conflict resolver), merge-msg.txt (1,952, the merge commit message), pr-body-v1.md to pr-body-v4.md (6,880 to 11,443, the four body versions; v4 is the final body), reply-thread-1.md (1,123), reply-issue-1.md (729), reply-issue-2.md (534), reply-jhan-draft.md (4,145), reply-jhan-final.md (5,050, the posted reply), live-body-before/after-v2..v4.md (the re-fetched bodies around each patch), pr4774-body.md (7,507), the .diff and .norm files used to check that the merged diff equals PR 4774's diff up to the renames, and copies of model.hpp, kv_cache.hpp, TronCpp.hs, LoopyTronSpec.hs, t_llama_unit.cpp, pr4737.diff, pr4746.diff.
+- Workflow scripts (claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4774-2-4424/350a38ed-e19c-400f-a674-ca4754d64af2/workflows/scripts/): verify-merge-4774-wf_82688cb9-fad.js (9,839 bytes), check-pr4812-body-wf_6c7207e4-ad8.js (4,326 bytes), no-haskell-savek-exploration-wf_181fd229-16a.js (9,053 bytes). (preserved: artifacts/intel-amx/exec/savek2-20261008/check-pr4812-body-wf_6c7207e4-ad8.js, relocated to /home/jhan/workspace/intel-AMX/exec/savek2-20261008/check-pr4812-body-wf_6c7207e4-ad8.js)
+- Session scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4774-2-4424/350a38ed-e19c-400f-a674-ca4754d64af2/scratchpad/ (45 files, may be cleaned up). Meaningful ones: resolve.py (2,797 bytes, the conflict resolver), merge-msg.txt (1,952, the merge commit message), pr-body-v1.md to pr-body-v4.md (6,880 to 11,443, the four body versions; v4 is the final body), reply-thread-1.md (1,123), reply-issue-1.md (729), reply-issue-2.md (534), reply-jhan-draft.md (4,145), reply-jhan-final.md (5,050, the posted reply), live-body-before/after-v2..v4.md (the re-fetched bodies around each patch), pr4774-body.md (7,507), the .diff and .norm files used to check that the merged diff equals PR 4774's diff up to the renames, and copies of model.hpp, kv_cache.hpp, TronCpp.hs, LoopyTronSpec.hs, t_llama_unit.cpp, pr4737.diff, pr4746.diff. (preserved: artifacts/intel-amx/exec/scratch-relocated/350a38ed/LoopyTronSpec.hs, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/350a38ed/LoopyTronSpec.hs)
 - Task outputs claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-PR3879-new-PRs-merge-4774-2-4424/350a38ed-e19c-400f-a674-ca4754d64af2/tasks/: w2qe5pda6.output (10,800 bytes, merge verification), wn2ptc0ap.output (221,501, body check), wgye65spp.output (116,156, no-Haskell exploration), broqgv1d0.output (2,092, build wait), bqyhwoonm, b7jibd5gk, b4vnjd71d, b0beslydd (the PR watchers, 1,968 to 2,793).
 - GitHub writes: draft PR 4812 (body v1 to v4), thread reply r4223408205, issue comments 6067717389, 6067794844 and 6068804057 on PR 4812.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/results/savek2-20261008/` (5 files)
+- `artifacts/intel-amx/exec/savek2-20261008/` (2 files)
+- `artifacts/intel-amx/exec/scratch-relocated/350a38ed/` (13 files)
 
 ## Current state
 
 - PR 4812 is a draft, head 45e6bb266d, base jhan-amx-vnniK, 0 unresolved threads, reviewer agent closed both rounds (verified at 12:50 by a GraphQL query of the PR).
 - The branch is pushed and the worktree was clean at 13:50.
-- All 3bda checks pass at 45e6bb266d (steps.txt, all.done = ok at 12:39).
+- All 3bda checks pass at 45e6bb266d (steps.txt, all.done = ok at 12:39). (preserved: artifacts/intel-amx/exec/results/savek2-20261008/steps.txt)
 - The reply to the user's comment is posted and asks the user to pick one of three routes: (A) keep the PR, (B) prototype a wait-primitive variant on a scratch branch and measure, (C) drop the sharing.
 - Later the same day, outside this transcript, the user chose route A. The memory note records: a grammar fix commit ba69cb513e by codex, PR 4812 closed by the user, jhan-amx-vnniK fast-forwarded 6b939d25d2 to ba69cb513e, PR 4424 head ba69cb513e, PR 4774 shown as merged by GitHub. Those facts are from the memory note, not from this transcript (unverified here).
 
