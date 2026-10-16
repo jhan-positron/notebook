@@ -1,0 +1,49 @@
+          if constexpr (k_vnni_on) {
+            live |= k_vnni::offset_bit(i);
+          } else {
+            if (!keys.valid()) keys = page.template k<geometry.kv>(slot, kv_head);
+            const auto k = keys[i];
+            for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
+              s_pages[offset][i] = dot_q[offset](k);
+            }
+          }
+        }
+        if constexpr (k_vnni_on) {
+          static_assert(page::page_size == k_vnni::PAGE_TOKENS_64,
+              "the live mask is one bit per token");
+          // `live` is zero exactly when no token was relevant: every relevant
+          // token of a VNNI slot set its bit. The plane is fetched only
+          // otherwise: a page nothing is relevant for is never asked for its
+          // plane (the accessor asserts that the slot's storage is present,
+          // and a book may have no active KV slot).
+          if (live != 0) {
+            const auto plane = page.template k_packed<geometry.kv>(slot, kv_head);
+            // The split of `live` by layout. vnni_tokens holds the 64 token
+            // bits of the page's VNNI blocks (page::k_vnni_blocks expanded by
+            // k_vnni::block_token_mask). qk_group scores the live tokens of
+            // those blocks and leaves every other lane at -inf. The other
+            // live tokens lie in row-major blocks: the dotters score them one
+            // row at a time. The two readers add in fp32 in different orders
+            // (the numerics contract in Note [AMX attention dispatch] in
+            // amx_attn_iface.hpp), so a token's score changes its add order
+            // when its block converts.
+            const uint8_t vnni_blocks = page.template k_vnni_blocks<geometry.kv>(slot);
+            const uint64_t vnni_tokens = k_vnni::block_token_mask(vnni_blocks);
+            if (const uint64_t in_vnni = live & vnni_tokens; in_vnni != 0) {
+              k_vnni::qk_group<operation_kv_mul>(plane,
+                  q.data + kv_head * operation_kv_mul * operation_head_size, in_vnni,
+                  &s_pages[0][0], page::page_size);
+            }
+            if (uint64_t rows = live & ~vnni_tokens; rows != 0) {
+              const auto dot_rows = make_dot_q();
+              for (; rows != 0; rows &= rows - 1) {
+                const size_t i = static_cast<size_t>(std::countr_zero(rows));
+                const auto k = row_major_row(plane, i);
+                for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
+                  s_pages[offset][i] = dot_rows[offset](k);
+                }
+              }
+            }
+          }
+        }
+      }

@@ -60,35 +60,35 @@ Later decisions by the user (2026-10-14, 19:43 and 21:26 Pacific):
 - 16:54 `/effort ultracode` on. 16:58 The user gave the task. Claude read issue 4934, PR 4901, the three earlier measurement records (pr4-E-cpu, pr4lazy-E-cpu, pr4off-E-cpu), the 3bda rules and the memory notes.
 - 17:09 The understanding workflow launched (8 readers, 8 refuters). The fix worktree was created on branch `jhan-vnnik-5-i4934` at 175b1837b9. The baseline lcheck matrix started.
 - 17:12 Baseline matrix: 22 of 22 cells clean. 17:31 The understanding workflow finished (16 agents, no errors).
-- 17:38 design-v1.md written (four changes). 17:40 The design panel workflow launched (3 lenses, 2 skeptics per finding). 17:43 probe-fix.sh, launch-fix.sh and campaign-fix.sh written for the measurement.
+- 17:38 design-v1.md written (four changes). 17:40 The design panel workflow launched (3 lenses, 2 skeptics per finding). 17:43 probe-fix.sh, launch-fix.sh and campaign-fix.sh written for the measurement. (preserved: artifacts/intel-amx/exec/i4934-20261015/design-v1.md)
 - 17:50 The user asked for status. Claude reported the verified cause budget.
-- 18:17 The design panel finished: 30 findings, no must-change. 18:23 to 18:36 The six commits were applied with exact-text edits (edit.py), each syntax-checked in lcheck cells and clang-formatted.
-- 18:37 The driver launch-fix.sh started on 3bda (pid 3783304). The build began at 01:37 UTC. The memory note issue-4934-fix.md was written.
+- 18:17 The design panel finished: 30 findings, no must-change. 18:23 to 18:36 The six commits were applied with exact-text edits (edit.py), each syntax-checked in lcheck cells and clang-formatted. (preserved: artifacts/intel-amx/exec/i4934-20261015/edit.py)
+- 18:37 The driver launch-fix.sh started on 3bda (pid 3783304). The build began at 01:37 UTC. The memory note issue-4934-fix.md was written. (preserved: artifacts/intel-amx/exec/i4934-20261015/launch-fix.sh)
 - 18:38 A Wade-style review agent was forked. 18:39 The C++ guide check was run by hand: clean.
 - 18:43 The Wade review returned: no must-change, 2 claim sentences to narrow, 5 comment nits. 18:46 Fixups were folded in by autosquash. The head became c30a86f252.
 - 18:47 to 18:51 gen_report.py (the chart page generator) was written with the dataviz skill and test-rendered on the pr4off-E-cpu record.
 - 18:51 The build and all six unit tests passed on 3bda at 7a41c79edd. 19:02 A broad objdump check was stopped. 19:03 runtron.fix was rebuilt in place at c30a86f252. 19:16 It passed the same tests.
 - 19:19 The PR-description skill produced pr-body-v1.md. 19:20 A plain-English check agent was forked. 19:32 It returned 88 violations and pr-body-v2.md.
-- 19:22 identity-fix.sh, launch-identity.sh and smoke-fix.sh were written for the token-identity run.
+- 19:22 identity-fix.sh, launch-identity.sh and smoke-fix.sh were written for the token-identity run. (preserved: artifacts/intel-amx/exec/i4934-20261015/identity-fix.sh)
 - 19:40 The user asked what was needed. 19:43 The user answered the three decisions.
 - 21:26 The user said to run identity and to push once verified. Claude found that the driver had died at 01:52 UTC, right after taking serving down. The exit handler had restored serving within two minutes.
-- 21:31 The bash bug was fixed (a `local` statement that read a sibling assignment). 21:32 A sandbox dry run of the whole chain passed. 21:36 mutations.py, mutate-fix.sh, chain-fix.sh and launch-chain.sh were written. 21:38 The chain was launched on 3bda (pid 3688975), holding for the CI lease.
+- 21:31 The bash bug was fixed (a `local` statement that read a sibling assignment). 21:32 A sandbox dry run of the whole chain passed. 21:36 mutations.py, mutate-fix.sh, chain-fix.sh and launch-chain.sh were written. 21:38 The chain was launched on 3bda (pid 3688975), holding for the CI lease. (preserved: artifacts/intel-amx/exec/i4934-20261015/mutations.py)
 
 2026-10-15
 
 - 09:05 E-cpu finished (54 runs, 0 failed). 09:08 The four Perfetto traces were parsed with trace_spans.py.
-- 09:17 perf-fix.sh written and dry-run. 09:19 Launched on 3bda (pid 923505). 09:22 A fixup commit carried the measured threshold derivation into the k_convert_parallel_min comment.
-- 09:27 ablations.py, abl-build.sh and abl-run.sh written. 09:33 perf2-fix.sh (the FPGA profile driver). 09:36 results-draft.html rendered. 09:39 Interim results were reported to the user: goal not met at one cell.
+- 09:17 perf-fix.sh written and dry-run. 09:19 Launched on 3bda (pid 923505). 09:22 A fixup commit carried the measured threshold derivation into the k_convert_parallel_min comment. (preserved: artifacts/intel-amx/exec/i4934-20261015/perf-fix.sh)
+- 09:27 ablations.py, abl-build.sh and abl-run.sh written. 09:33 perf2-fix.sh (the FPGA profile driver). 09:36 results-draft.html rendered. 09:39 Interim results were reported to the user: goal not met at one cell. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4934/results-draft.html)
 - 09:46 Token identity passed in all three cells. 09:52 The ablation drivers were launched.
 - 10:01 All three mutations were caught. The chain finished. 10:02 The branch was autosquashed to ff42321d52.
-- 10:36 The CPU profile finished. 10:37 perf-report.sh regenerated the reports (the driver's reports were empty). 10:40 trace-head.sh written. 10:41 Launched behind the ablation campaign.
-- 11:13 The FPGA profile finished: fix and PR 4901 decode at the same speed over 2,045 tokens. 11:15 campaign-rot.sh (rotated arm order) written.
+- 10:36 The CPU profile finished. 10:37 perf-report.sh regenerated the reports (the driver's reports were empty). 10:40 trace-head.sh written. 10:41 Launched behind the ablation campaign. (preserved: artifacts/intel-amx/exec/i4934-20261015/perf-report.sh)
+- 11:13 The FPGA profile finished: fix and PR 4901 decode at the same speed over 2,045 tokens. 11:15 campaign-rot.sh (rotated arm order) written. (preserved: artifacts/intel-amx/exec/i4934-20261015/campaign-rot.sh)
 - 11:27 The full perf annotations arrived. 11:33 The cold cache line was found: the per-page read of `k_vnni_blocks_` sits at byte 2,616 of the page object. The member was moved into the first cache line. 11:35 Commit 7 (9b30b2074d) after a clean 22-cell matrix.
-- 11:35 fork-round2.py produced the round-2 chain scripts. 11:37 The round-2 chain was launched (pid 665006), waiting for the comparison traces.
-- 13:12 The ablation campaign finished. 13:18 The decomposition was reported to the user. 13:21 pr_tables.py. 13:22 pr-body-v3.md with marks for the round-2 numbers.
-- 13:44 The comparison traces finished. 13:45 spans_compare.py, 13:46 attn_forward.py. 13:48 The trace comparison was recorded.
+- 11:35 fork-round2.py produced the round-2 chain scripts. 11:37 The round-2 chain was launched (pid 665006), waiting for the comparison traces. (preserved: artifacts/intel-amx/exec/i4934-20261015/fork-round2.py)
+- 13:12 The ablation campaign finished. 13:18 The decomposition was reported to the user. 13:21 pr_tables.py. 13:22 pr-body-v3.md with marks for the round-2 numbers. (preserved: artifacts/intel-amx/exec/i4934-20261015/pr-body-v3.md)
+- 13:44 The comparison traces finished. 13:45 spans_compare.py, 13:46 attn_forward.py. 13:48 The trace comparison was recorded. (preserved: artifacts/intel-amx/exec/i4934-20261015/spans_compare.py)
 - 14:05 The user: another session needs 3bda urgently, give it up and write a handoff. 14:06 The round-2 chain was killed (21:06 UTC). The exit handler restored serving and Bill's marker by 14:11.
-- 14:11 handoff.md written. 14:12 A verify-handoff workflow (facts checker, plain-English checker) ran read-only. 14:20 It found that PR 4901's branch on origin had moved to 4d64013dff.
+- 14:11 handoff.md written. 14:12 A verify-handoff workflow (facts checker, plain-English checker) ran read-only. 14:20 It found that PR 4901's branch on origin had moved to 4d64013dff. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4934/handoff.md)
 - 14:22 `git rebase` was refused by the permission classifier. A read-only `git merge-tree` preview showed one conflict hunk in each of three files. 14:24 handoff.md was rewritten with the findings. 14:25 Final report to the user.
 - 15:20 Context compaction. The transcript ends here. A later session resumed from handoff.md (see Current state).
 
@@ -229,7 +229,7 @@ The fix's extra 163 instructions over PR 3 are the 82-instruction dotter loop an
 - Understanding workflow: 16 agents (8 readers, 8 refuters). Verified cause budget: H2, dotters built on every page visit, about 2 points (measured by the 2026-10-13 lazy probe). H1, two extra layout tests per token, est. 0.4 to 0.6 %. H3, serial forward-end conversion, est. 0.5 to 1 %. H4, the recording loop in save_k, est. 19 to 35 ms per 117 s prefill (dropped).
 - Design panel: 3 critiques, 30 findings, each challenged by 2 skeptics, no must-change.
 - Wade-style review of 175b1837b9..7a41c79edd: no must-change, 2 claim sentences narrowed, 5 comment nits, one doc-comment gap. C++ guide check: clean.
-- Plain-English check of pr-body-v1.md: 88 violations (Rule 1: 45, Rule 2: 12, Rule 3: 5, Rule 4: 4, Rule 6: 4, Rule 7: 4, Rule 8: 14) plus 4 past-tense phrases, all corrected in v2.
+- Plain-English check of pr-body-v1.md: 88 violations (Rule 1: 45, Rule 2: 12, Rule 3: 5, Rule 4: 4, Rule 6: 4, Rule 7: 4, Rule 8: 14) plus 4 past-tense phrases, all corrected in v2. (preserved: artifacts/intel-amx/exec/i4934-20261015/pr-body-v1.md)
 - Handoff verification: 2 agents, one material fact finding (PR 4901's branch moved) and 35 plain-English findings, applied.
 
 ## Artifacts
@@ -240,40 +240,40 @@ Code (git worktree, no commits pushed):
 
 Project folder (claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4934/):
 
-- status.md (60,815 bytes now). The running status log, 18 sections written by this session (through "Round 2 stopped"), 8 more appended by a later session. Report page with measured numbers.
+- status.md (60,815 bytes now). The running status log, 18 sections written by this session (through "Round 2 stopped"), 8 more appended by a later session. Report page with measured numbers. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4934/status.md)
   - generator: none (hand-written)
   - input: the summary.md files under exec/results/i4934-E-cpu, i4934-E-fpga, i4934-abl-cpu, the steps.txt files, the perf and trace reports
-  - input built by: campaign-fix.sh and summarize.py, probe-fix.sh, perf-fix.sh and perf-report.sh, trace_spans.py and spans_compare.py
+  - input built by: campaign-fix.sh and summarize.py, probe-fix.sh, perf-fix.sh and perf-report.sh, trace_spans.py and spans_compare.py (preserved: artifacts/intel-amx/exec/i4934-20261015/probe-fix.sh)
   - sources: the files above
   - regenerate: unavailable (hand-written)
 - handoff.md (22,765 bytes now). The resume handoff written at 14:24 Pacific and verified by the workflow, rewritten by a later session on 2026-10-16. Same lineage as status.md, `generator: none`.
 - results-draft.html (70,044 bytes). The chart page of the round-1 campaign, 8 SVG panels, short version still a placeholder.
-  - generator: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/gen_report.py
-  - input: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/report-config.json, /home/jhan/workspace/intel-AMX/exec/results/i4934-E-cpu/summary.json, /home/jhan/workspace/intel-AMX/exec/results/i4934-E-fpga/summary.json
-  - input built by: campaign-fix.sh with /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py on delphi-3bda
+  - generator: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/gen_report.py (preserved: artifacts/intel-amx/exec/i4934-20261015/gen_report.py)
+  - input: /home/jhan/workspace/intel-AMX/exec/i4934-20261015/report-config.json, /home/jhan/workspace/intel-AMX/exec/results/i4934-E-cpu/summary.json, /home/jhan/workspace/intel-AMX/exec/results/i4934-E-fpga/summary.json (preserved: artifacts/intel-amx/exec/results/i4934-E-cpu/summary.json)
+  - input built by: campaign-fix.sh with /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py on delphi-3bda (preserved: artifacts/intel-amx/exec/i4934-20261015/campaign-fix.sh)
   - sources: the rt records under exec/results/i4934-E-cpu/ and i4934-E-fpga/
-  - regenerate: `python3 -I /home/jhan/workspace/intel-AMX/exec/i4934-20261015/gen_report.py /home/jhan/workspace/intel-AMX/exec/i4934-20261015/report-config.json <OUT>`
+  - regenerate: `python3 -I /home/jhan/workspace/intel-AMX/exec/i4934-20261015/gen_report.py /home/jhan/workspace/intel-AMX/exec/i4934-20261015/report-config.json <OUT>` (preserved: artifacts/intel-amx/exec/i4934-20261015/report-config.json)
 - results-round2.html and tail-bench.html in the same folder were made by a later session and are not this session's artifacts.
 
 Scripts and documents (claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i4934-20261015/):
 
 - design-v1.md (10,328 bytes). The candidate design: four changes, measurement plan, open questions. Hand-written.
-- understand.json (505,640 bytes) and understand-digest.txt (184,456 bytes). The understanding workflow's result and its per-subsystem digest.
-- design-panel.json (276,558 bytes). The design panel's result.
-- wade-review.md (12,418 bytes). The Wade-style review report. cpp-guide-review.md (1,944 bytes). The C++ guide check.
-- edit.py (1,397 bytes) and edits/ (84 files, 48,568 bytes): the exact-text edit tool and the old/new pairs of every commit. msgs/ (8 files, 8,537 bytes): the commit messages. reword-c2.sh (172 bytes), seq-reword-c2.sh (139 bytes): the non-interactive reword helpers.
-- lcheck-c2/ to lcheck-c6/ (20 files, 1,772 bytes), matrix-baseline.log, matrix-head.log, matrix-c7.log (1,241 bytes each): syntax-check logs per commit and the three 22-cell matrix runs. review-c15/ (6 files, 175,361 bytes): the diff, prose and lexicon dump used by the review agent. review-words.txt (2,244 bytes).
-- probe-fix.sh (13,334 bytes), campaign-fix.sh (18,673 bytes), campaign-fix.diff (5,898 bytes), launch-fix.sh (1,963 bytes): the round-1 measurement driver, its campaign runner (a fork of exec/pr4-20261012/campaign-probe.sh) and launcher.
-- identity-fix.sh (6,391 bytes), smoke-fix.sh (7,165 bytes), smoke-fix.diff (2,705 bytes), launch-identity.sh (1,064 bytes): the token-identity driver.
-- mutations.py (3,237 bytes now, modified by a later session), mutate-fix.sh (5,160 bytes), chain-fix.sh (1,760 bytes), launch-chain.sh (2,425 bytes): the mutation driver and the chain launcher.
-- perf-fix.sh (8,578 bytes), perf2-fix.sh (9,549 bytes), launch-perf.sh (1,566 bytes), perf-report.sh (1,855 bytes), perf-annotate.sh (1,255 bytes), perf_compare.py (4,885 bytes), perf_shares.py (2,569 bytes), annot_compare.py (3,588 bytes): the perf drivers and their analysis scripts.
-- trace_spans.py (2,932 bytes), trace-head.sh (5,125 bytes), spans_compare.py (2,128 bytes), attn_forward.py (2,314 bytes): the trace driver and analysis scripts.
-- objdump-loop.sh (1,714 bytes), objdump-loop2.sh (2,097 bytes): the disassembly checks.
-- ablations.py (2,187 bytes), abl-build.sh (5,098 bytes), abl-run.sh (2,829 bytes), launch-abl.sh (2,250 bytes): the ablation builds and campaign.
-- campaign-rot.sh (19,388 bytes), fork-round2.py (3,933 bytes), probe-r2.sh (13,673 bytes), identity-r2.sh (6,732 bytes), mutate-r2.sh (5,499 bytes), chain-r2.sh (2,587 bytes), launch-chain2.sh (2,839 bytes): the round-2 chain.
-- gen_report.py (13,601 bytes), report-config.json (4,203 bytes), report-config-r2.json (7,747 bytes now, modified later), report-test-config.json (783 bytes), report-test.html (26,119 bytes), report-test-panel0.png (23,330 bytes), report-test-panel1.png (19,054 bytes), report-test-panel3.png (22,328 bytes): the chart generator, its configs and the test render on the pr4off-E-cpu record. report-test.html lineage: `generator: gen_report.py`, `input: report-test-config.json and exec/results/pr4off-E-cpu/summary.json`, `input built by: the 2026-10-14 campaign`, `sources: exec/results/pr4off-E-cpu/`, `regenerate: python3 -I gen_report.py report-test-config.json <OUT>`.
-- pr_tables.py (4,949 bytes): prints the PR body's performance tables from a summary.json.
-- pr-body-v1.md (10,421 bytes), pr-body-v1-check.md (30,726 bytes), pr-body-v2.md (14,539 bytes), pr-body-v3.md (14,977 bytes): the PR body drafts and the plain-English check. Report pages with measured numbers, `generator: none` (hand-written from the summary.md files, same lineage as status.md). pr-body-v4.md and v5.md are a later session's.
+- understand.json (505,640 bytes) and understand-digest.txt (184,456 bytes). The understanding workflow's result and its per-subsystem digest. (preserved: artifacts/intel-amx/exec/i4934-20261015/understand.json)
+- design-panel.json (276,558 bytes). The design panel's result. (preserved: artifacts/intel-amx/exec/i4934-20261015/design-panel.json)
+- wade-review.md (12,418 bytes). The Wade-style review report. cpp-guide-review.md (1,944 bytes). The C++ guide check. (preserved: artifacts/intel-amx/exec/i4934-20261015/wade-review.md)
+- edit.py (1,397 bytes) and edits/ (84 files, 48,568 bytes): the exact-text edit tool and the old/new pairs of every commit. msgs/ (8 files, 8,537 bytes): the commit messages. reword-c2.sh (172 bytes), seq-reword-c2.sh (139 bytes): the non-interactive reword helpers. (preserved: artifacts/intel-amx/exec/i4934-20261015/reword-c2.sh)
+- lcheck-c2/ to lcheck-c6/ (20 files, 1,772 bytes), matrix-baseline.log, matrix-head.log, matrix-c7.log (1,241 bytes each): syntax-check logs per commit and the three 22-cell matrix runs. review-c15/ (6 files, 175,361 bytes): the diff, prose and lexicon dump used by the review agent. review-words.txt (2,244 bytes). (preserved: artifacts/intel-amx/exec/i4934-20261015/review-words.txt)
+- probe-fix.sh (13,334 bytes), campaign-fix.sh (18,673 bytes), campaign-fix.diff (5,898 bytes), launch-fix.sh (1,963 bytes): the round-1 measurement driver, its campaign runner (a fork of exec/pr4-20261012/campaign-probe.sh) and launcher. (preserved: artifacts/intel-amx/exec/i4934-20261015/campaign-fix.diff)
+- identity-fix.sh (6,391 bytes), smoke-fix.sh (7,165 bytes), smoke-fix.diff (2,705 bytes), launch-identity.sh (1,064 bytes): the token-identity driver. (preserved: artifacts/intel-amx/exec/i4934-20261015/smoke-fix.diff)
+- mutations.py (3,237 bytes now, modified by a later session), mutate-fix.sh (5,160 bytes), chain-fix.sh (1,760 bytes), launch-chain.sh (2,425 bytes): the mutation driver and the chain launcher. (preserved: artifacts/intel-amx/exec/i4934-20261015/mutate-fix.sh)
+- perf-fix.sh (8,578 bytes), perf2-fix.sh (9,549 bytes), launch-perf.sh (1,566 bytes), perf-report.sh (1,855 bytes), perf-annotate.sh (1,255 bytes), perf_compare.py (4,885 bytes), perf_shares.py (2,569 bytes), annot_compare.py (3,588 bytes): the perf drivers and their analysis scripts. (preserved: artifacts/intel-amx/exec/i4934-20261015/perf2-fix.sh)
+- trace_spans.py (2,932 bytes), trace-head.sh (5,125 bytes), spans_compare.py (2,128 bytes), attn_forward.py (2,314 bytes): the trace driver and analysis scripts. (preserved: artifacts/intel-amx/exec/i4934-20261015/trace_spans.py)
+- objdump-loop.sh (1,714 bytes), objdump-loop2.sh (2,097 bytes): the disassembly checks. (preserved: artifacts/intel-amx/exec/i4934-20261015/objdump-loop.sh)
+- ablations.py (2,187 bytes), abl-build.sh (5,098 bytes), abl-run.sh (2,829 bytes), launch-abl.sh (2,250 bytes): the ablation builds and campaign. (preserved: artifacts/intel-amx/exec/i4934-20261015/ablations.py)
+- campaign-rot.sh (19,388 bytes), fork-round2.py (3,933 bytes), probe-r2.sh (13,673 bytes), identity-r2.sh (6,732 bytes), mutate-r2.sh (5,499 bytes), chain-r2.sh (2,587 bytes), launch-chain2.sh (2,839 bytes): the round-2 chain. (preserved: artifacts/intel-amx/exec/i4934-20261015/probe-r2.sh)
+- gen_report.py (13,601 bytes), report-config.json (4,203 bytes), report-config-r2.json (7,747 bytes now, modified later), report-test-config.json (783 bytes), report-test.html (26,119 bytes), report-test-panel0.png (23,330 bytes), report-test-panel1.png (19,054 bytes), report-test-panel3.png (22,328 bytes): the chart generator, its configs and the test render on the pr4off-E-cpu record. report-test.html lineage: `generator: gen_report.py`, `input: report-test-config.json and exec/results/pr4off-E-cpu/summary.json`, `input built by: the 2026-10-14 campaign`, `sources: exec/results/pr4off-E-cpu/`, `regenerate: python3 -I gen_report.py report-test-config.json <OUT>`. (preserved: artifacts/intel-amx/exec/i4934-20261015/report-config-r2.json)
+- pr_tables.py (4,949 bytes): prints the PR body's performance tables from a summary.json. (preserved: artifacts/intel-amx/exec/i4934-20261015/pr_tables.py)
+- pr-body-v1.md (10,421 bytes), pr-body-v1-check.md (30,726 bytes), pr-body-v2.md (14,539 bytes), pr-body-v3.md (14,977 bytes): the PR body drafts and the plain-English check. Report pages with measured numbers, `generator: none` (hand-written from the summary.md files, same lineage as status.md). pr-body-v4.md and v5.md are a later session's. (preserved: artifacts/intel-amx/exec/i4934-20261015/pr-body-v1-check.md)
 
 Results on the shared NFS (claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/), written by the drivers on delphi-3bda:
 
@@ -291,8 +291,42 @@ Results on the shared NFS (claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/r
 Memory and session store:
 
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue-4934-fix.md (14,991 bytes now). Written at 18:37 on 2026-10-14 and updated through the session, then by a later session. MEMORY.md (24,227 bytes) gained one index line.
-- Workflow scripts under claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4934/9b5fcc46-d98f-439c-aeff-2fceb480c4cd/workflows/scripts/: i4934-understand-wf_f6b538e5-385.js (22,632 bytes), i4934-design-panel-wf_3b44e2c8-581.js (11,744 bytes), verify-handoff-wf_2ac7fb65-074.js (3,895 bytes). Their journals under ../subagents/workflows/: wf_f6b538e5-385/journal.jsonl (497,800 bytes), wf_3b44e2c8-581/journal.jsonl (289,486 bytes), wf_2ac7fb65-074/journal.jsonl (28,034 bytes).
-- Scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4934/9b5fcc46-d98f-439c-aeff-2fceb480c4cd/scratchpad/ (596,968,483 bytes): the sandbox dry-run harnesses dry.sh (6,845 bytes), dry2.sh (7,174), dry-abl.sh (5,040), dry-perf.sh (3,940), dry-perf2.sh (4,211), dry-trace.sh (4,119) with their sandbox trees and outputs, savek_threads.py (1,438), merge-preview.txt (54,317), report-config-test.json and report-test.html (91,243), copies of old headers, and two 294 MB nm dumps from the stopped objdump attempt. May be cleaned up. The tasks/ folder next to it (34 files, 1,046,831 bytes) holds the workflow and background outputs.
+- Workflow scripts under claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4934/9b5fcc46-d98f-439c-aeff-2fceb480c4cd/workflows/scripts/: i4934-understand-wf_f6b538e5-385.js (22,632 bytes), i4934-design-panel-wf_3b44e2c8-581.js (11,744 bytes), verify-handoff-wf_2ac7fb65-074.js (3,895 bytes). Their journals under ../subagents/workflows/: wf_f6b538e5-385/journal.jsonl (497,800 bytes), wf_3b44e2c8-581/journal.jsonl (289,486 bytes), wf_2ac7fb65-074/journal.jsonl (28,034 bytes). (preserved: artifacts/intel-amx/exec/i4934-20261015/i4934-understand-wf_f6b538e5-385.js, relocated to /home/jhan/workspace/intel-AMX/exec/i4934-20261015/i4934-understand-wf_f6b538e5-385.js)
+- Scratchpad claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4934/9b5fcc46-d98f-439c-aeff-2fceb480c4cd/scratchpad/ (596,968,483 bytes): the sandbox dry-run harnesses dry.sh (6,845 bytes), dry2.sh (7,174), dry-abl.sh (5,040), dry-perf.sh (3,940), dry-perf2.sh (4,211), dry-trace.sh (4,119) with their sandbox trees and outputs, savek_threads.py (1,438), merge-preview.txt (54,317), report-config-test.json and report-test.html (91,243), copies of old headers, and two 294 MB nm dumps from the stopped objdump attempt. May be cleaned up. The tasks/ folder next to it (34 files, 1,046,831 bytes) holds the workflow and background outputs. (preserved: artifacts/intel-amx/exec/scratch-relocated/9b5fcc46/dry.sh, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/9b5fcc46/dry.sh)
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/exec/i4934-20261015/` (29 files)
+- `artifacts/intel-amx/exec/i4934-20261015/edits/` (2 files)
+- `artifacts/intel-amx/exec/i4934-20261015/lcheck-c3/` (1 files)
+- `artifacts/intel-amx/exec/i4934-20261015/msgs/` (8 files)
+- `artifacts/intel-amx/exec/i4934-20261015/review-c15/` (4 files)
+- `artifacts/intel-amx/exec/results/i4934-20261015/` (13 files)
+- `artifacts/intel-amx/exec/results/i4934-20261015/head/` (4 files)
+- `artifacts/intel-amx/exec/results/i4934-20261015/objdump/fix/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-20261015/objdump/pr3/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-20261015/objdump/pr4/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-20261015/objdump2/fix/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-20261015/objdump2/pr3/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-20261015/objdump2/pr4/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-E-cpu/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-E-cpu/rt/` (54 files)
+- `artifacts/intel-amx/exec/results/i4934-E-fpga/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-E-fpga/rt/` (18 files)
+- `artifacts/intel-amx/exec/results/i4934-abl/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-abl-cpu/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-abl-cpu/rt/` (24 files)
+- `artifacts/intel-amx/exec/results/i4934-identity/` (1 files)
+- `artifacts/intel-amx/exec/results/i4934-identity/smoke/cpu-p1024/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-identity/smoke/cpu-p8192/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-identity/smoke/fpga-p1024/` (2 files)
+- `artifacts/intel-amx/exec/results/i4934-mutate/` (3 files)
+- `artifacts/intel-amx/exec/results/i4934-perf/` (101 files)
+- `artifacts/intel-amx/exec/results/i4934-perf-fpga/` (33 files)
+- `artifacts/intel-amx/exec/results/i4934-trace2/` (13 files)
+- `artifacts/intel-amx/exec/results/pr4off-E-cpu/` (3 files)
+- `artifacts/intel-amx/exec/results/pr4off-E-cpu/rt/` (36 files)
+- `artifacts/intel-amx/exec/scratch-relocated/9b5fcc46/` (9 files)
 
 ## Current state
 
@@ -308,7 +342,7 @@ Memory and session store:
 As left at session end (a later session has since done the rebase and round 2, see status.md and handoff.md in the project folder):
 
 - Rebase `jhan-vnnik-5-i4934` onto PR 4901's current head. The merge-tree preview showed one conflict hunk in each of model.hpp (the forward-end comment), self_attention.hpp (the dotter construction comment) and t_amx_dispatch_dtype.cpp (the test constants).
-- Relaunch the round-2 chain at the rebased head with `launch-chain2.sh` and `campaign-rot.sh`, with the user's order for the whole-machine steps. Delete the partial i4934-E2-cpu records first.
+- Relaunch the round-2 chain at the rebased head with `launch-chain2.sh` and `campaign-rot.sh`, with the user's order for the whole-machine steps. Delete the partial i4934-E2-cpu records first. (preserved: artifacts/intel-amx/exec/i4934-20261015/launch-chain2.sh)
 - Fill pr-body-v3.md at the «R2» marks from the round-2 summaries, render the chart page from report-config-r2.json, and decide push and PR with the user.
 - Settle whether the 1.2 % "dotter path" at prompt 1024 is real: about -0.6 % after commit 7 means it was an artefact, about -1.2 % means it is real and a 16-row tail-block kernel would be the next change.
 - The 0.6 % at prompt 8192 outside the ablation split is unlocated (suspects: save-path atomics, the conversion).

@@ -1,0 +1,58 @@
+      {
+        // scalar_t is the query buffer's element type: bf16 on every hardware
+        // executor, float on host, fp16 on host_fp16. The dotters and the
+        // reader take q in that type.
+        using scalar_t = typename btensor_t<operation_head_size>::element;
+        for (size_t offset = 0; offset < operation_kv_mul; ++offset)
+          s_pages[offset] = constant<page::page_size>(-1.0f / 0.0f);
+        // The slot's K layout (Note [K VNNI storage] in kv_cache.hpp) decides
+        // how the relevant tokens are scored. A row-major slot scores one
+        // token at a time inside the loop with the dotters. A VNNI slot only
+        // records the relevant tokens in `live` inside the loop, one bit per
+        // page offset. After the loop the page's block mask splits `live` in
+        // two parts. The tokens of VNNI blocks go to the AVX-512 (Advanced
+        // Vector Extensions, 512-bit vectors) reader k_vnni::qk_group in one
+        // call. The tokens of row-major blocks (Note [Row-major tail block]
+        // in h/tron/tensor/k_vnni.hpp) go to the dotters, one row at a time,
+        // through their typed row (row_major_row). The dotters are built only
+        // when such a row exists.
+        constexpr bool k_vnni_on = k_vnni::layout_on<operation_head_size>;
+        // make_dot_q builds one dotter per query head of the group. `dotter`
+        // binds to a view at construction and has no default constructor, so
+        // we can't declare a std::array<dotter,...> and fill it in a loop.
+        // Pack-expand `kv_mul` constructor calls inside the array initializer
+        // instead. Worth the syntax because `kv_mul` is a compile-time
+        // constant and this is the per-page hot path, so we avoid the heap
+        // allocation a std::vector<dotter> would incur. A row-major slot
+        // builds the array before the loop. A VNNI slot builds it after the
+        // loop, and only for a visit with a row-major row: in decode the
+        // newest page of a user, until its block converts at the forward
+        // end; under hardware attention every page that holds rows of runs
+        // shorter than a block (Note [Row-major blocks under hardware
+        // attention] in kv_cache.hpp).
+        auto make_dot_q = [&] {
+          return [&]<size_t... I>(std::index_sequence<I...>) {
+            return std::array{
+                dotter<scalar_t, operation_head_size>(slice<operation_head_size>()(
+                    q, (kv_head * operation_kv_mul + I) * operation_head_size))...};
+          }(std::make_index_sequence<operation_kv_mul>{});
+        };
+        [[maybe_unused]] auto dot_q = [&] {
+          if constexpr (k_vnni_on) {
+            return 0;  // no dotters before the loop: built after it when needed
+          } else {
+            return make_dot_q();
+          }
+        }();
+        [[maybe_unused]] uint64_t live = 0;
+        // The row-major loop reads K through one checked page view, fetched on
+        // the first relevant token. A VNNI slot has no row view (its plane is
+        // fetched after the loop), so `keys` is a placeholder there, like
+        // dot_q.
+        [[maybe_unused]] auto keys = [&] {
+          if constexpr (k_vnni_on) {
+            return 0;  // no row view: the VNNI plane has no contiguous rows
+          } else {
+            return decltype(page.template k<geometry.kv>(slot, kv_head)){};
+          }
+        }();
