@@ -1,0 +1,994 @@
+commit bbc702251ecbeb351180fa9169cf112ba59cb21f
+Author: rbjarnason-positron <rbjarnason@positron.ai>
+Date:   Wed Sep 30 15:02:08 2026 +0000
+
+    Remove the 8-wide chunk-size branches
+
+diff --git a/doc/token_tree_v2.md b/doc/token_tree_v2.md
+index d4df6cd669..ae9c73bb01 100644
+--- a/doc/token_tree_v2.md
++++ b/doc/token_tree_v2.md
+@@ -84,7 +84,7 @@ struct alignas(64) page final {
+ 
+   struct alignas(alignment) kv_block_t {
+     alignas(alignment) bf16s k[page_size][head_size / chunk_size];  // key vectors for 64 entries
+-    alignas(alignment) bf16s v[page_size][head_size / chunk_size];  // value vectors for 64 entries
++    alignas(alignment) bf16s v[page_size / 2][head_size / chunk_size * 2];  // value vectors, interleaved in token pairs
+   };
+ 
+   // Which book am I in?
+diff --git a/h/tron/files/safetensors.hpp b/h/tron/files/safetensors.hpp
+index 858c27ba3d..ce68b4071e 100644
+--- a/h/tron/files/safetensors.hpp
++++ b/h/tron/files/safetensors.hpp
+@@ -305,19 +305,11 @@ struct gptq_view
+         spdlog::warn("gptq_views accessed by chunk, wasted compression");
+         warning_given = true;
+       }
+-#if TRON_CHUNK_SIZE == 8
+-      int4x8 a = gather(i);
+-      int4x8 values = gptq_swizzle_zeros(a);
+-      fp32x8 data = int4s_to_fp32s(values);
+-#elif TRON_CHUNK_SIZE == 16
+       int4x8 a[2];
+       for (int j = 0; j < 2; ++j)
+         a[j] = gather(i * 2 + j);
+       int4x16 ab = gptq_swizzle_zeros((int64_t(a[1]) << 32) | a[0]);
+       fp32x16 data = int4s_to_fp32s(ab);
+-#else
+-      TRON_CHUNK_UNSUPPORTED
+-#endif
+ 
+       float scale = view.scales[i / (gptq_group_size / TRON_CHUNK_SIZE)][row];
+       return data * scale;
+diff --git a/h/tron/hardware/permuted.hpp b/h/tron/hardware/permuted.hpp
+index 1ee95524d9..6aecf327eb 100644
+--- a/h/tron/hardware/permuted.hpp
++++ b/h/tron/hardware/permuted.hpp
+@@ -37,47 +37,23 @@ struct back_permuted : expr<back_permuted<N>, N> {
+ 
+   TRON(nodiscard, inline, pure)
+   fp32s chunk(size_t i) const noexcept {
+-#if TRON_CHUNK_SIZE == 8 /* 8 x 32-bit = 256 */
+-    int32s indices = _mm256_load_si256(perm.indices.begin() + i * TRON_CHUNK_SIZE);
+-    int32s data = _mm256_i32gather_epi32(indices, base, 2);
+-    return _mm256_castsi256_ps(_mm256_slli_epi32(data, 16));
+-#elif TRON_CHUNK_SIZE == 16 /* 16 * 32-bit = 512 */
+     int32s indices = _mm512_load_si512(perm.indices.begin() + i * TRON_CHUNK_SIZE);
+     int32s data = _mm512_i32gather_epi32(indices, base, 2);
+     return _mm512_castsi512_ps(_mm512_slli_epi32(data, 16));
+-#else
+-    TRON_CHUNK_UNSUPPORTED
+-#endif
+   }
+ 
+   TRON(nodiscard, inline, pure)
+   bf16s bf16_chunk(size_t i) const noexcept {
+-#if TRON_CHUNK_SIZE == 8 /* 8 x 32-bit = 256 */
+-    int32s indices = _mm256_load_si256(perm.indices.begin() + i * TRON_CHUNK_SIZE);
+-    int32s data = _mm256_i32gather_epi32(indices, base, 2);
+-    return _mm256_cvtepi32_epi16(data);
+-#elif TRON_CHUNK_SIZE == 16 /* 16 * 32-bit = 512 */
+     int32s indices = _mm512_load_si512(perm.indices.begin() + i * TRON_CHUNK_SIZE);
+     int32s data = _mm512_i32gather_epi32(indices, base, 2);
+     return _mm512_cvtepi32_epi16(data);
+-#else
+-    TRON_CHUNK_UNSUPPORTED
+-#endif
+   }
+ 
+   TRON(nodiscard, inline, pure)
+   fp16s fp16_chunk(size_t i) const noexcept {
+-#if TRON_CHUNK_SIZE == 8 /* 8 x 32-bit = 256 */
+-    int32s indices = _mm256_load_si256(perm.indices.begin() + i * TRON_CHUNK_SIZE);
+-    int32s data = _mm256_i32gather_epi32(indices, base, 2);
+-    return _mm256_cvtepi32_epi16(data);
+-#elif TRON_CHUNK_SIZE == 16 /* 16 * 32-bit = 512 */
+     int32s indices = _mm512_load_si512(perm.indices.begin() + i * TRON_CHUNK_SIZE);
+     int32s data = _mm512_i32gather_epi32(indices, base, 2);
+     return _mm512_cvtepi32_epi16(data);
+-#else
+-    TRON_CHUNK_UNSUPPORTED
+-#endif
+   }
+ 
+   TRON(nodiscard, inline, pure)
+diff --git a/h/tron/hardware/quantization.hpp b/h/tron/hardware/quantization.hpp
+index c0df6af3c8..037c7e270a 100644
+--- a/h/tron/hardware/quantization.hpp
++++ b/h/tron/hardware/quantization.hpp
+@@ -21,22 +21,6 @@ bf16 quantize_group_split(Chunk chunk, uint8x32 (&out)[2]) {
+   fp32s ooscale(recip(scale));
+   bf16 bscale = bf16(scale);  // converting to bf16 in flight
+ 
+-#if TRON_CHUNK_SIZE == 8
+-  uint32x8 swizzle(7, 3, 6, 2, 5, 1, 4, 0);
+-  // low half, high half
+-  for (size_t l = 0; l < 2; ++l) {
+-    int32x8 a = cvt_int32(chunk(4 * l) * ooscale);
+-    int32x8 b = cvt_int32(chunk(4 * l + 1) * ooscale);
+-    int16x16 ab = _mm256_packs_epi32(a, b);  // aaaabbbbaaaabbbb
+-    int32x8 c = cvt_int32(chunk(4 * l + 2) * ooscale);
+-    int32x8 d = cvt_int32(chunk(4 * l + 3) * ooscale);
+-    int16x16 cd = _mm256_packs_epi32(c, d);  // ccccddddccccdddd
+-    // aaaabbbbccccddddaaaabbbbccccdddd -- warning: signed values packed in uint8x32
+-    uint8x32 abcd = _mm256_packs_epi16(ab, cd);
+-    // aaaaaaaabbbbbbbbccccccccdddddddd
+-    out[l] = _mm256_permutevar8x32_epi32(abcd, swizzle);
+-  }
+-#elif TRON_CHUNK_SIZE == 16
+   uint32x16 swizzle(15, 11, 7, 3, 14, 10, 6, 2, 13, 9, 5, 1, 12, 8, 4, 0);
+   // low half, high half
+   int32x16 a = cvt_int32(chunk(0) * ooscale);  // af .. a0
+@@ -54,9 +38,6 @@ bf16 quantize_group_split(Chunk chunk, uint8x32 (&out)[2]) {
+   int8x64 result = _mm512_permutexvar_epi32(swizzle, abcd);
+   out[0] = int8x64_lo(result);
+   out[1] = int8x64_hi(result);
+-#else
+-  TRON_CHUNK_UNSUPPORTED
+-#endif
+   return bscale;
+ }
+ 
+diff --git a/h/tron/kernels/expr.hpp b/h/tron/kernels/expr.hpp
+index def470201e..cb3853b23f 100644
+--- a/h/tron/kernels/expr.hpp
++++ b/h/tron/kernels/expr.hpp
+@@ -239,13 +239,7 @@ block_t block(expr<B, N> const& x, size_t id) noexcept {
+     masked |= masked << 14;  // 0000000a_bcd000ab_cd000abc_d000abcd
+                              // abcd000a_bcd000ab_cd000abc_d0000000
+                              // aXXXXXXX_bXXXXXXX_cXXXXXXX_dXXXXXXX
+-#if TRON_CHUNK_SIZE == 8
+-    packed[i] = _mm256_movemask_epi8(masked << 7);  // abcd
+-#elif TRON_CHUNK_SIZE == 16
+     packed[i] = _mm512_movepi8_mask(masked << 7);  // abcd
+-#else
+-    TRON_CHUNK_UNSUPPORTED
+-#endif
+   }
+   return {_mm256_load_si256(reinterpret_cast<int4x64*>(packed)), scale};
+ }
+@@ -554,16 +548,6 @@ float dot(
+   if constexpr (has_block<L>) {
+     static_assert(N % 64 == 0);
+     if constexpr (has_block<R>) {
+-#if TRON_CHUNK_SIZE == 8
+-      fp32s acc = fp32s();  // 0.0f;
+-      for (size_t i = 0; i < N / 64; ++i) {
+-        auto [xd, xs] = block(l, i);
+-        auto [yd, ys] = block(r, i);
+-        fp32s partial = cvt_fp32(int4x64_unreduced_dot(xd, yd));
+-        fp32s scale(float(xs) * float(ys));
+-        acc = fma(scale, partial, acc);
+-      }
+-#elif TRON_CHUNK_SIZE == 16
+       fp32s acc = fp32s();  // 0.0f;
+       for (size_t i = 0; i < N / 64; i += 2) {
+         auto [xd1, xs1] = block(l, i);
+@@ -575,34 +559,11 @@ float dot(
+         fp32s scale(fp32x8(float(xs1) * float(ys1)), fp32x8(float(xs2) * float(ys2)));
+         acc = fma(scale, partial, acc);
+       }
+-#else
+-      TRON_CHUNK_UNSUPPORTED
+-#endif
+       return reduce_sum(acc);
+     }
+ 
+     // only left is block quantized.
+     fp32s global_acc;  // 0.0f;
+-#if TRON_CHUNK_SIZE == 8
+-    int32x8 ror(0, 7, 6, 5, 4, 3, 2, 1);
+-    for (size_t i = 0; i < N / 64; ++i) {
+-      auto [qblock, si] = block(l, i);
+-      fp32s local_acc = fp32x8();  // 0.0f;
+-      TRON(unroll_full)
+-      for (int j = 0; j < 4; ++j) {
+-        fp32s qlo = int4x64_0_to_fp32s(qblock);
+-        fp32s vlo = bf16s_to_fp32s(v.chunk(8 * i + 2 * j));
+-        qblock = _mm256_permutevar8x32_epi32(qblock, ror);
+-        local_acc = fma(vlo, qlo, local_acc);
+-
+-        fp32s qhi = int4x64_0_to_fp32s(qblock);
+-        fp32s vhi = bf16s_to_fp32s(v.chunk(8 * i + 2 * j + 1));
+-        qblock = _mm256_permutevar8x32_epi32(qblock, ror);
+-        local_acc = fma(vhi, qhi, local_acc);
+-      }
+-      global_acc = fma(local_acc, float(si), global_acc);
+-    }
+-#elif TRON_CHUNK_SIZE == 16
+     int32x8 ror(1, 0, 7, 6, 5, 4, 3, 2);
+     for (size_t i = 0; i < N / 64; ++i) {
+       // qblock : int4x64, si : float
+@@ -617,9 +578,6 @@ float dot(
+       }
+       global_acc = fma(local_acc, float(si), global_acc);
+     }
+-#else
+-    TRON_CHUNK_UNSUPPORTED
+-#endif
+     return reduce_sum(global_acc);
+   }
+ 
+@@ -839,24 +797,14 @@ struct cached_array : expr<cached_array<T, N>, N> {
+ 
+   TRON(nodiscard, inline, pure)
+   fp32s chunk(size_t i) const noexcept {
+-    if constexpr (chunk_size == 8) {
+-      return _mm256_loadu_ps(data + i * 8);
+-    } else {
+-      static_assert(chunk_size == 16);
+-      return _mm512_loadu_ps(data + i * 16);
+-    }
++    return _mm512_loadu_ps(data + i * 16);
+   }
+ 
+   template <size_t M = N>
+     requires leftovers<M>
+   TRON(nodiscard, inline, pure)
+   fp32s last() const noexcept {
+-    if constexpr (chunk_size == 8) {
+-      return mask(fp32s(_mm256_loadu_ps(data + N % 8)), last_mask<N>());
+-    } else {
+-      static_assert(chunk_size == 16);
+-      return mask(fp32s(_mm512_loadu_ps(data + N % 16)), last_mask<N>());
+-    }
++    return mask(fp32s(_mm512_loadu_ps(data + N % 16)), last_mask<N>());
+   }
+ 
+   TRON(nodiscard, inline)
+@@ -873,25 +821,10 @@ struct cached_array : expr<cached_array<T, N>, N> {
+     requires(not std::is_const_v<U>)
+   TRON(inline)
+   cached_array& operator=(const expr<B, N>& x) noexcept {
+-#if TRON_CHUNK_SIZE == 8
+-    for (size_t i = 0; i < N / 8; ++i)
+-      _mm256_storeu_ps(data + i * 8, x.chunk(i));
+-
+-    if constexpr (N % 8 != 0) {
+-      auto mem_addr = data + N / 8 * 8;
+-      __m256 existing_data = _mm256_loadu_ps(mem_addr);
+-      __m256 blended_data = _mm256_blendv_ps(
+-          existing_data, x.last(), _mm256_cast_si256_ps(last_mask<N>()));
+-      _mm256_storeu_ps(mem_addr, blended_data);
+-    }
+-#elif TRON_CHUNK_SIZE == 16
+     for (size_t i = 0; i < N / 16; ++i)
+       _mm512_storeu_ps(data + i * 16, x.chunk(i));
+     if constexpr (N % 16 != 0)
+       _mm512_mask_storeu_ps(data + N / 16 * 16, last_mask<N>(), x.last());
+-#else
+-    TRON_CHUNK_UNSUPPORTED
+-#endif
+     return *this;
+   }
+ };
+@@ -919,15 +852,6 @@ TRON(nodiscard, inline)
+ float quadrance(TRON(noescape) const expr<L, N>& l) noexcept {
+   if constexpr (has_block<L>) {
+     static_assert(N % 64 == 0);
+-#if TRON_CHUNK_SIZE == 8
+-    fp32s acc = fp32s();  // 0.0f;
+-    for (size_t i = 0; i < N / 64; ++i) {
+-      auto [xd, xs] = x.block(i);
+-      fp32s partial = cvt_fp32(int4x64_unreduced_dot(xd, xd));
+-      fp32s scale(float(xs) * float(xs));
+-      acc = fma(scale, partial, acc);
+-    }
+-#elif TRON_CHUNK_SIZE == 16
+     fp32s acc = fp32s();  // 0.0f;
+     for (size_t i = 0; i < N / 64; i += 2) {
+       auto [xd1, xs1] = block(l, i);
+@@ -937,9 +861,6 @@ float quadrance(TRON(noescape) const expr<L, N>& l) noexcept {
+       fp32s scale(fp32x8(float(xs1) * float(xs1)), fp32x8(float(xs2) * float(xs2)));
+       acc = fma(scale, partial, acc);
+     }
+-#else
+-    TRON_CHUNK_UNSUPPORTED
+-#endif
+     return reduce_sum(acc);
+   }
+ 
+@@ -993,43 +914,20 @@ struct alignas(chunk_alignment) aligned_vector : expr<aligned_vector<N>, N> {
+   template <typename B>
+   TRON(inline)
+   aligned_vector(expr<B, N> const& x) noexcept {
+-    if constexpr (chunk_size == 8) {
+-      for (size_t i = 0; i < N / 8; ++i)
+-        _mm256_store_ps(data.data() + i * 8, x.chunk(i));
+-      if constexpr (N % 8 != 0) {
+-        auto mem_addr = data.data() + N / 8 * 8;
+-        __m256 existing_data = _mm256_load_ps(mem_addr);
+-        __m256 blended_data = _mm256_blendv_ps(
+-            existing_data, x.last(), _mm256_cast_si256_ps(last_mask<N>()));
+-        _mm256_store_ps(mem_addr, blended_data);
+-      }
+-    } else {
+-      static_assert(chunk_size == 16);
+-      for (size_t i = 0; i < N / 16; ++i)
+-        _mm512_store_ps(data.data() + i * 16, x.chunk(i));
+-      if constexpr (N % 16 != 0)
+-        _mm512_mask_store_ps(data.data() + N / 16 * 16, last_mask<N>(), x.last());
+-    }
++    for (size_t i = 0; i < N / 16; ++i)
++      _mm512_store_ps(data.data() + i * 16, x.chunk(i));
++    if constexpr (N % 16 != 0)
++      _mm512_mask_store_ps(data.data() + N / 16 * 16, last_mask<N>(), x.last());
+   }
+ 
+   template <typename T = void, typename = std::enable_if_t<N % 8 != 0, T>>
+   TRON(nodiscard, inline, pure)
+   fp32s last() const noexcept {
+-    if constexpr (chunk_size == 8) {
+-      return mask(fp32s(_mm256_load_ps(data.data() + N / 8 * 8)), last_mask<N>());
+-    } else {
+-      static_assert(chunk_size == 16);
+-      return _mm512_mask_load_ps(fp32s(), last_mask<N>(), data.data() + N / 16 * 16);
+-    }
++    return _mm512_mask_load_ps(fp32s(), last_mask<N>(), data.data() + N / 16 * 16);
+   }
+ 
+   fp32s chunk(size_t i) const noexcept {
+-    if constexpr (chunk_size == 8) {
+-      return _mm256_load_ps(data.data() + i * 8);
+-    } else {
+-      static_assert(chunk_size == 16);
+-      return _mm512_load_ps(data.data() + i * 16);
+-    }
++    return _mm512_load_ps(data.data() + i * 16);
+   }
+ 
+   // View conversion methods to allow aligned_vector to be used with dotter
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index 42ac87c768..759ba2fc30 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -1871,11 +1871,9 @@ struct alignas(64) page final {
+   }
+ 
+   // The actual V data for a token in this page.
+-#if TRON_CHUNK_SIZE == 16
+-  // If we know the chunk size, we can play a clever trick to store
+-  // `v` interleaved, for better utilization of the simd registers.
+-  // But this is not compatible with the normal `view` machinery,
+-  // so the API of access to `v` changes a little.
++  // V is stored interleaved in token pairs, for better utilization of the SIMD
++  // registers. That is not compatible with the normal `view` machinery, so
++  // per-token V is written and read through set_v and get_v.
+   TRON(inline)
+   void set_v(kv_slot_id slot, size_t kv_head, size_t i_page, const bf16* vout_ptr)
+     requires(layout_t::uniform_geometry && head_size % 32 == 0);
+@@ -1929,58 +1927,6 @@ struct alignas(64) page final {
+       kv_slot_id slot, size_t kv_head, size_t i_page, bf16* vout_ptr) const noexcept
+     requires(
+         book_t::template declares_geometry<geometry>() && geometry.head_size % 32 == 0);
+-#else  // TRON_CHUNK_SIZE != 16
+-  // Else, `v` is a `view.`
+-  TRON(nodiscard, inline, pure)
+-  auto v(kv_slot_id slot, size_t kv_head, size_t i_page) noexcept
+-      TRON(this_lifetimebound)
+-  requires(layout_t::uniform_geometry) {
+-    return view<bf16, true, false, seq<head_size>>{
+-        reinterpret_cast<bf16*>(kv_block(slot, kv_head).v[i_page])};
+-  }
+-
+-  TRON(nodiscard, inline, pure)
+-  auto v(kv_slot_id slot, size_t kv_head, size_t i_page) const noexcept
+-      TRON(this_lifetimebound)
+-  requires(layout_t::uniform_geometry) {
+-    return const_view<bf16, true, false, seq<head_size>>{
+-        reinterpret_cast<const bf16*>(kv_block(slot, kv_head).v[i_page])};
+-  }
+-
+-  TRON(nodiscard, inline, pure)
+-  bf16* v_ptr(kv_slot_id slot, size_t kv_head, size_t i_page) noexcept
+-    requires(layout_t::uniform_geometry)
+-  {
+-    return v(slot, kv_head, i_page).data;
+-  }
+-
+-  template <kv_geometry geometry>
+-    requires(book_t::template declares_geometry<geometry>())
+-  TRON(nodiscard, inline, pure)
+-  auto v(kv_slot_id slot, size_t kv_head, size_t i_page) noexcept
+-      TRON(this_lifetimebound)
+-  {
+-    return view<bf16, true, false, seq<geometry.head_size>>{
+-        reinterpret_cast<bf16*>(kv_block<geometry>(slot, kv_head).v[i_page])};
+-  }
+-
+-  template <kv_geometry geometry>
+-    requires(book_t::template declares_geometry<geometry>())
+-  TRON(nodiscard, inline, pure)
+-  auto v(kv_slot_id slot, size_t kv_head, size_t i_page) const noexcept
+-      TRON(this_lifetimebound)
+-  {
+-    return const_view<bf16, true, false, seq<geometry.head_size>>{
+-        reinterpret_cast<const bf16*>(kv_block<geometry>(slot, kv_head).v[i_page])};
+-  }
+-
+-  template <kv_geometry geometry>
+-    requires(book_t::template declares_geometry<geometry>())
+-  TRON(nodiscard, inline, pure)
+-  bf16* v_ptr(kv_slot_id slot, size_t kv_head, size_t i_page) noexcept {
+-    return v<geometry>(slot, kv_head, i_page).data;
+-  }
+-#endif
+ 
+   // The useful thing to do with V data in this page, namely compute a
+   // weighted sum of it in SIMD.
+@@ -2121,8 +2067,7 @@ private:
+     return book.template kv_block_at_storage<geometry>(offset, kv_head, pageno());
+   }
+ 
+-#if TRON_CHUNK_SIZE == 16
+-  // Copying has to deal with the interleaving trick as well.
++  // Copying V has to follow the token-pair interleaving.
+   // Even-destination paths zero the odd partner instead of preserving it.
+   // This is safe because append_v is only called via copy_from in append(),
+   // where destinations are always fresh ranges (dst_begin = tok_ct).
+@@ -2179,7 +2124,6 @@ private:
+       }
+     }
+   }
+-#endif
+ 
+   template <kv_geometry geometry>
+   void copy_storage_slot(kv_storage_offset storage_offset,
+@@ -2197,21 +2141,10 @@ private:
+       bf16* dst =
+           kv_block_at_storage<geometry>(storage_offset, kv_head).k_at(dst_begin).data;
+       memcpy(dst, src, count * k_size);
+-#if TRON_CHUNK_SIZE == 16
+       // The .v data is interleaved in token pairs, so we copy individual tokens.
+       for (size_t i = 0; i < count; ++i)
+         append_v<geometry>(
+             storage_offset, kv_head, dst_begin + i, src_page, src_begin + i);
+-#else
+-      // The .v data is also contiguous, so we can simply memcpy each head.
+-      constexpr size_t v_size = geometry.head_size * sizeof(bf16);
+-      const bf16* src_v = reinterpret_cast<const bf16*>(
+-          src_page->template kv_block_at_storage<geometry>(storage_offset, kv_head)
+-              .v[src_begin]);
+-      bf16* dst_v = reinterpret_cast<bf16*>(
+-          kv_block_at_storage<geometry>(storage_offset, kv_head).v[dst_begin]);
+-      memcpy(dst_v, src_v, count * v_size);
+-#endif  // TRON_CHUNK_SIZE == 16
+     }
+   }
+ 
+@@ -2250,7 +2183,7 @@ struct scaled_v_expr final : expr<scaled_v_expr<page_size, head_size>, head_size
+   const bf16s* const data;
+   const size_t count;
+   tensor<head_size>& scratch;
+-#if TRON_CHUNK_SIZE == 16  // in AVX512 use interleaved bf16s
++
+ private:
+   const __m512i hi_16_of_32;
+ 
+@@ -2393,48 +2326,6 @@ public:
+     return _mm512_ternarylogic_epi32(
+         lo_bf16, hi_bf16, hi_16_of_32, _MM_TERNLOG_A | (_MM_TERNLOG_B & _MM_TERNLOG_C));
+   }
+-#else  // in AVX2 use contiguous bf16s
+-  scaled_v_expr(const tensor<page_size>& scales,
+-      const bf16s* data,
+-      const size_t count,
+-      tensor<head_size>& scratch) noexcept
+-    requires(head_size / chunk_size % 8 == 0)
+-  : expr<scaled_v_expr, head_size>()
+-  , scales(scales)
+-  , data(data)
+-  , count(count)
+-  , scratch(scratch) {
+-    // In practice head_size / chunk_size is usually either 8 (for AVX512) or
+-    // 16 (for AVX2). In AVX2 16 YMM registers, so we'll perform two loops
+-    // with 8 registers each, rather than a single loop that would overflow
+-    // the register file.
+-    for (size_t part = 0; part < head_size / chunk_size / 8; ++part) {
+-      // Constructor zero-initializes with *_setzero_ps which is cheaper than writing `=
+-      // 0` to trigger *_set1_ps.
+-      fp32s t0, t1, t2, t3, t4, t5, t6, t7;
+-      for (size_t i = 0; i < count; ++i) {
+-        const fp32s scale = scales[i];
+-        const bf16s* tile = data + i * (head_size / chunk_size) + part * 8;
+-        t0 = fma(bf16s_to_fp32s(tron_mm_load_bf16(tile + 0)), scale, t0);
+-        t1 = fma(bf16s_to_fp32s(tron_mm_load_bf16(tile + 1)), scale, t1);
+-        t2 = fma(bf16s_to_fp32s(tron_mm_load_bf16(tile + 2)), scale, t2);
+-        t3 = fma(bf16s_to_fp32s(tron_mm_load_bf16(tile + 3)), scale, t3);
+-        t4 = fma(bf16s_to_fp32s(tron_mm_load_bf16(tile + 4)), scale, t4);
+-        t5 = fma(bf16s_to_fp32s(tron_mm_load_bf16(tile + 5)), scale, t5);
+-        t6 = fma(bf16s_to_fp32s(tron_mm_load_bf16(tile + 6)), scale, t6);
+-        t7 = fma(bf16s_to_fp32s(tron_mm_load_bf16(tile + 7)), scale, t7);
+-      }
+-      scratch.store_chunk(part * 8 + 0, t0);
+-      scratch.store_chunk(part * 8 + 1, t1);
+-      scratch.store_chunk(part * 8 + 2, t2);
+-      scratch.store_chunk(part * 8 + 3, t3);
+-      scratch.store_chunk(part * 8 + 4, t4);
+-      scratch.store_chunk(part * 8 + 5, t5);
+-      scratch.store_chunk(part * 8 + 6, t6);
+-      scratch.store_chunk(part * 8 + 7, t7);
+-    }
+-  }
+-#endif
+   TRON(nodiscard, inline, pure)
+   fp32s chunk(size_t i) const noexcept {
+     return scratch.chunk(i);
+@@ -2450,14 +2341,9 @@ struct alignas(kv_block_alignment) kv_block {
+   // Letting p index the token within a page, i index into head_size, and writing C
+   // for the SIMD chunk size: k is indexed as [p][i/C][i%C].
+   alignas(kv_block_alignment) bf16s k[page_size][head_size / chunk_size];
+-#if TRON_CHUNK_SIZE == 16
+   // and v is indexed as [p/2][i/C][i%C][p%2].
+   // See Note [Zero-Initialized V Slots] for the interleaved pair invariant.
+   alignas(kv_block_alignment) bf16s v[page_size / 2][head_size / chunk_size * 2];
+-#else
+-  // and v is also indexed as [p][i/C][i%C].
+-  alignas(kv_block_alignment) bf16s v[page_size][head_size / chunk_size];
+-#endif
+   // This ensures scaled_v_expr linearly scans through v data, easing the job
+   // of the hardware prefetcher.
+   static_assert(sizeof(k) == sizeof(v));
+@@ -2536,7 +2422,6 @@ auto page<n_layers, n_kv_heads, head_size, x_bytes, layout_policy_t>::scaled_v(
+   return scaled_v<layout_t::primary_geometry>(slot, kv_head, scales, scratch);
+ }
+ 
+-#if TRON_CHUNK_SIZE == 16
+ template <size_t n_layers,
+     size_t n_kv_heads,
+     size_t head_size,
+@@ -2787,6 +2672,5 @@ void page<n_layers, n_kv_heads, head_size, x_bytes, layout_policy_t>::get_v(
+ {
+   get_v<layout_t::primary_geometry>(slot, kv_head, i_page, vout_ptr);
+ }
+-#endif  // TRON_CHUNK_SIZE == 16
+ 
+ }  // namespace tron
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index d7adc5a990..835f5f365f 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -3114,14 +3114,8 @@ public:
+         int j = pg.offset_in_page(tok_ix);
+ 
+         for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+-#if TRON_CHUNK_SIZE == 16
+           pg.template set_v<geometry.kv>(
+               slot, kv_head, j, &vs[ix][kv_head * geometry.kv.head_size]);
+-#else
+-          pg.template v<geometry.kv>(slot, kv_head, j)
+-              .set(slice<geometry.kv.head_size>()(
+-                  vs[ix].as_view(), kv_head * geometry.kv.head_size));
+-#endif
+         }
+         pg.mark_v_complete(slot, static_cast<size_t>(j));
+         // See Note [GOF dispatch synchronization].
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index d7c7d36699..60aadeb249 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -27,14 +27,6 @@
+ #include "tron/models/kv_cache.hpp"
+ #include "tron/models/ranged_mask.hpp"
+ 
+-#if defined(TRON_AMX_DISPATCH) && TRON_CHUNK_SIZE != 16
+-// The AMX PV kernel (see Note [AMX attention dispatch]) consumes the
+-// pair-interleaved V layout, which only exists when TRON_CHUNK_SIZE == 16
+-// (see kv_cache.hpp). A chunk-8 build would compile but pair wrong tokens -
+-// fail loudly instead.
+-#error "TRON_AMX_DISPATCH requires TRON_CHUNK_SIZE == 16 (pair-interleaved V layout)"
+-#endif
+-
+ // #define DEBUG_HWATTN
+ #ifdef DEBUG_HWATTN
+ #define dbg_hwattn_log(...) spdlog::debug(__VA_ARGS__)
+diff --git a/h/tron/plugins/mock.hpp b/h/tron/plugins/mock.hpp
+index 30b3a73612..543d62ef00 100644
+--- a/h/tron/plugins/mock.hpp
++++ b/h/tron/plugins/mock.hpp
+@@ -84,10 +84,9 @@ struct mock : noncopyable<mock<exe>> {
+   static constexpr size_t n_moe_routers = 0;
+   static constexpr size_t n_heads = 1;
+   static constexpr size_t n_kv_heads = 1;
+-  // The AVX-512 scaled_v_expr path accepts {64, 128, 256, 512}-wide heads.
+-  // The AVX2 path accepts heads whose SIMD chunk count is divisible by eight.
+-  // With n_layers == 0 it never actually runs, but the constructor's constraint
+-  // is checked at template instantiation time. 64 is legal on both paths.
++  // scaled_v_expr accepts {64, 128, 256, 512}-wide heads. With n_layers == 0 it
++  // never actually runs, but the constructor's constraint is checked at template
++  // instantiation time.
+   static constexpr size_t head_size = 64;
+   static constexpr size_t vocab_size = 10;
+ 
+diff --git a/h/tron/scheduler/full.hpp b/h/tron/scheduler/full.hpp
+index c574ff62fb..57eca3e612 100644
+--- a/h/tron/scheduler/full.hpp
++++ b/h/tron/scheduler/full.hpp
+@@ -2751,21 +2751,12 @@ struct full_scheduler : scheduler {
+                               slot, kv_head, off)
+                           .data;
+                     };
+-#if TRON_CHUNK_SIZE == 16
+                     pi.v_head_fn = [pg_ptr, off](kv_slot_id slot, size_t kv_head,
+                                        bf16* dest) -> bf16* {
+                       pg_ptr->template get_v<model_t::hardware_attention_geometry.kv>(
+                           slot, kv_head, off, dest);
+                       return dest;
+                     };
+-#else
+-                    pi.v_head_fn = [pg_ptr, off](kv_slot_id slot, size_t kv_head,
+-                                       bf16*) -> bf16* {
+-                      return pg_ptr
+-                          ->template v_ptr<model_t::hardware_attention_geometry.kv>(
+-                              slot, kv_head, off);
+-                    };
+-#endif
+                   };
+                   size_t gof_base = gof_end - (gof_tokens - 1);
+                   for (size_t k = 0; k < gof_tokens; ++k) {
+diff --git a/h/tron/simd/auto.hpp b/h/tron/simd/auto.hpp
+index 317e7200bf..318a881a67 100644
+--- a/h/tron/simd/auto.hpp
++++ b/h/tron/simd/auto.hpp
+@@ -16,9 +16,6 @@ namespace tron {
+ 
+ #define TRON_CHUNK_SIZE 16
+ 
+-#define TRON_CHUNK_TODO static_assert(false, "TODO");
+-#define TRON_CHUNK_UNSUPPORTED static_assert(false, "unsupported chunk size");
+-
+ using fp32s = fp32x16;
+ using bf16s = bf16x16;
+ using fp16s = fp16x16;
+diff --git a/h/tron/simd/int4.hpp b/h/tron/simd/int4.hpp
+index 44b01d03a7..ccde22653c 100644
+--- a/h/tron/simd/int4.hpp
++++ b/h/tron/simd/int4.hpp
+@@ -101,26 +101,6 @@ int4x64 gptq_swizzle_zeros(int4x64 x) {
+ // reduce_sum(int4x64_unreduced_dot(x,y))
+ TRON(nodiscard, inline, const)
+ int32s int4x64_unreduced_dot(int4x64 x, int4x64 y) noexcept {
+-#if TRON_CHUNK_SIZE == 8
+-  // ~32 cycles
+-  int16x16 x1 = _mm256_slli_epi16(x, 4);  // Shift by 4 bits
+-  int16x16 y1 = _mm256_slli_epi16(y, 4);
+-  int16x16 x2 = _mm256_slli_epi16(x, 8);  // Shift by 8 bits
+-  int16x16 y2 = _mm256_slli_epi16(y, 8);
+-  int16x16 x3 = _mm256_slli_epi16(x, 12);  // Shift by 12 bits
+-  int16x16 y3 = _mm256_slli_epi16(y, 12);
+-  // we skip reducing the scale of x
+-  y = _mm256_srai_epi16(y, 12);
+-  y1 = _mm256_srai_epi16(y1, 12);
+-  y2 = _mm256_srai_epi16(y2, 12);
+-  y3 = _mm256_srai_epi16(y3, 12);
+-  int32x8 zero = _mm256_setzero_si256();
+-  int32x8 acc1 = _mm256_dpwssds_epi32(zero, x, y);
+-  int32x8 acc2 = _mm256_dpwssds_epi32(zero, x1, y1);
+-  acc1 = _mm256_dpwssds_epi32(acc1, x2, y2);
+-  acc2 = _mm256_dpwssds_epi32(acc2, x3, y3);
+-  return _mm256_srai_epi32(acc1 + acc2, 12);  // and reduce it here
+-#elif TRON_CHUNK_SIZE == 16
+   // ~19 cycles
+   int16x16 x4 = _mm256_slli_epi16(x, 4);
+   int16x16 y4 = _mm256_slli_epi16(y, 4);
+@@ -133,9 +113,6 @@ int32s int4x64_unreduced_dot(int4x64 x, int4x64 y) noexcept {
+   y1 = _mm512_srai_epi16(y1, 12);
+   int32x16 acc = _mm512_dpwssds_epi32(zero, x0, y0);
+   return _mm512_srai_epi32(_mm512_dpwssds_epi32(zero, x1, y1), 12);
+-#else
+-  TRON_CHUNK_UNSUPPORTED
+-#endif
+ }
+ 
+ /// \private
+@@ -175,11 +152,6 @@ int32x16 int4x128_unreduced_dot(int4x128 x, int4x128 y) noexcept {
+ // fritz's new dotter approach.
+ TRON(nodiscard, inline, const)
+ fp32s int4s_to_fp32s(int4s dense) noexcept {
+-#if TRON_CHUNK_SIZE == 8
+-  int32x8 dense8 = _mm256_set1_epi32(dense);
+-  int32x8 shifts = _mm256_set_epi32(0, 4, 8, 12, 16, 20, 24, 28);
+-  return _mm256_cvtepi32_ps(_mm256_srai_epi32(_mm256_sllv_epi32(dense8, shifts), 28));
+-#elif TRON_CHUNK_SIZE == 16
+   int32x8 lo = _mm256_set1_epi32(int32_t(uint64_t(dense) & 0xffffffff));
+   int32x8 hi = _mm256_set1_epi32(int32_t(uint64_t(dense) >> 32));
+   int32x16 dense16 = _mm512_inserti64x4(_mm512_castsi256_si512(lo), hi, 1);
+@@ -187,20 +159,12 @@ fp32s int4s_to_fp32s(int4s dense) noexcept {
+       _mm512_set_epi32(0, 4, 8, 12, 16, 20, 24, 28, 0, 4, 8, 12, 16, 20, 24, 28);
+   // Correct?
+   return _mm512_cvtepi32_ps(_mm512_srai_epi32(_mm512_sllv_epi32(dense16, shifts), 28));
+-#else
+-  TRON_CHUNK_UNSUPPORTED
+-#endif
+ }
+ 
+ /// \private
+ // extract the bottom int4s of an int4x64, then scale it to fp32s
+ TRON(nodiscard, inline, const)
+ fp32s int4x64_0_to_fp32s(int4x64 dense) noexcept {
+-#if TRON_CHUNK_SIZE == 8
+-  int32x8 dense8 = _mm256_broadcastd_epi32(_mm256_castsi256_si128(dense));
+-  int32x8 shifts = _mm256_set_epi32(0, 4, 8, 12, 16, 20, 24, 28);
+-  return _mm256_cvtepi32_ps(_mm256_srai_epi32(_mm256_sllv_epi32(dense8, shifts), 28));
+-#elif TRON_CHUNK_SIZE == 16
+   // TODO: revisit this
+   __m128i lo = _mm256_castsi256_si128(dense);
+   __m512i xy = _mm512_cvtepu8_epi64(lo);      // 00 00 00 00 00 00 00 xy
+@@ -210,9 +174,6 @@ fp32s int4x64_0_to_fp32s(int4x64 dense) noexcept {
+   xy = _mm512_or_epi32(x, y);                 // x0 00 00 00 y0 00 00 00
+   xy = _mm512_srai_epi32(xy, 32 - 4);  // 00 00 00 0x 00 00 00 0y (preserving sign)
+   return _mm512_cvtepi32_ps(xy);
+-#else
+-  TRON_CHUNK_UNSUPPORTED
+-#endif
+ }
+ 
+ /// \private
+diff --git a/ingest/src/LoopyCheck.hs b/ingest/src/LoopyCheck.hs
+index 6c573e423a..2d28ab3093 100644
+--- a/ingest/src/LoopyCheck.hs
++++ b/ingest/src/LoopyCheck.hs
+@@ -1570,8 +1570,8 @@ checkRopeLayout layout = emit $ UnsupportedRopeLayout layout
+ -- produce pathological code sizes; cap at 2^14. The Hugging Face layout pairs
+ -- each chunk with the corresponding chunk in the other half of the head. Its
+ -- C++ evaluator therefore requires the represented dimension to be a multiple
+--- of twice the production AVX-512 chunk size: 2 * 16 = 32. The active prefix
+--- only needs to contain whole pairs.
++-- of twice the AVX-512 chunk size: 2 * 16 = 32. The active prefix only needs
++-- to contain whole pairs.
+ ropeRotaryDimUpperBound :: Integer
+ ropeRotaryDimUpperBound = 2 ^ (14 :: Int)
+ 
+diff --git a/t/t_debug.cpp b/t/t_debug.cpp
+index 8b3a188378..553bd39aca 100644
+--- a/t/t_debug.cpp
++++ b/t/t_debug.cpp
+@@ -49,7 +49,6 @@ TEST_CASE("fp32s to hex", "[hex-prints]") {
+                                "5 0x0-81-200000 0x40a00000, "
+                                "6 0x0-81-400000 0x40c00000, "
+                                "7 0x0-81-600000 0x40e00000"
+-#if TRON_CHUNK_SIZE == 16
+                                ", "
+                                "8 0x0-82-000000 0x41000000, "
+                                "9 0x0-82-100000 0x41100000, "
+@@ -59,7 +58,6 @@ TEST_CASE("fp32s to hex", "[hex-prints]") {
+                                "13 0x0-82-500000 0x41500000, "
+                                "14 0x0-82-600000 0x41600000, "
+                                "15 0x0-82-700000 0x41700000"
+-#endif
+                                "]";
+   REQUIRE(expected == vals_and_hex(cached<16>(sixteen).chunk(0)));
+ }
+diff --git a/t/t_fp32.cpp b/t/t_fp32.cpp
+index 1bf3a96e0f..c921e8dda8 100644
+--- a/t/t_fp32.cpp
++++ b/t/t_fp32.cpp
+@@ -180,13 +180,8 @@ TEST_CASE("abs works", "[abs(-cached)==cached]") {
+ }
+ 
+ TEST_CASE("sincos works", "[sincos(fp32s)]") {
+-  alignas(chunk_alignment) float input[chunk_size] = {
+-      0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f
+-#if TRON_CHUNK_SIZE > 8
+-      ,
+-      8.0f, 9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f
+-#endif
+-  };
++  alignas(chunk_alignment) float input[chunk_size] = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f,
++      5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f};
+ 
+   auto [sin_out, cos_out] = sincos(fp32s(input));
+   alignas(chunk_alignment) float sin_output[chunk_size];
+@@ -216,13 +211,8 @@ TEST_CASE("sincos works", "[sincos(fp32s)]") {
+ }
+ 
+ TEST_CASE("expm1 works", "[expm1(fp32s)]") {
+-  alignas(chunk_alignment) float input[chunk_size] = {
+-      0.0f, 1.0f, 0.5f, -0.333f, -1.0f, -0.25f, 0.2f, 2.0f
+-#if TRON_CHUNK_SIZE > 8
+-      ,
+-      3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f
+-#endif
+-  };
++  alignas(chunk_alignment) float input[chunk_size] = {0.0f, 1.0f, 0.5f, -0.333f, -1.0f,
++      -0.25f, 0.2f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f};
+ 
+   fp32s expm1_out = expm1(fp32s(input));
+   alignas(chunk_alignment) float expm1_output[chunk_size];
+@@ -252,13 +242,8 @@ TEST_CASE("expm1 works", "[expm1(fp32s)]") {
+ }
+ 
+ TEST_CASE("exp works", "[exp(fp32s)]") {
+-  alignas(chunk_alignment) float input[chunk_size] = {
+-      0.0f, 1.0f, 0.5f, -0.333f, -1.0f, -0.25f, 0.2f, 2.0f
+-#if TRON_CHUNK_SIZE > 8
+-      ,
+-      3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f
+-#endif
+-  };
++  alignas(chunk_alignment) float input[chunk_size] = {0.0f, 1.0f, 0.5f, -0.333f, -1.0f,
++      -0.25f, 0.2f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f};
+ 
+   fp32s exp_out = exp(fp32s(input));
+   alignas(chunk_alignment) float exp_output[chunk_size];
+@@ -302,13 +287,8 @@ TEST_CASE("tanh works (random)", "[tanh(fp32s)]") {
+ }
+ 
+ TEST_CASE("tanh works", "[tanh(fp32s)]") {
+-  alignas(chunk_alignment) float input[chunk_size] = {
+-      0.0f, 1.0f, 0.5f, -0.333f, -1.0f, -0.25f, 0.2f, 2.0f
+-#if TRON_CHUNK_SIZE > 8
+-      ,
+-      3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f
+-#endif
+-  };
++  alignas(chunk_alignment) float input[chunk_size] = {0.0f, 1.0f, 0.5f, -0.333f, -1.0f,
++      -0.25f, 0.2f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f};
+ 
+   float tol = 2e-5;
+   fp32s tanh_out = tanh(fp32s(input));
+@@ -341,13 +321,8 @@ TEST_CASE("tanh works", "[tanh(fp32s)]") {
+ }
+ 
+ TEST_CASE("exp_horner5 works", "[exp_horner5(fp32s)]") {
+-  alignas(chunk_alignment) float input[chunk_size] = {
+-      0.0f, 1.0f, 0.5f, -0.333f, -1.0f, -0.25f, 0.2f, 2.0f
+-#if TRON_CHUNK_SIZE > 8
+-      ,
+-      3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f
+-#endif
+-  };
++  alignas(chunk_alignment) float input[chunk_size] = {0.0f, 1.0f, 0.5f, -0.333f, -1.0f,
++      -0.25f, 0.2f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f};
+ 
+   fp32s exp_out = exp_horner5(fp32s(input));
+   alignas(chunk_alignment) float exp_output[chunk_size];
+@@ -406,13 +381,8 @@ TEST_CASE("wide exp works", "[wide-exp]") {
+ }
+ 
+ TEST_CASE("swish works", "[swish(fp32s)]") {
+-  alignas(chunk_alignment) float input[chunk_size] = {
+-      0.0f, 1.0f, 0.5f, -0.333f, -1.0f, -0.25f, 0.2f, 2.0f
+-#if TRON_CHUNK_SIZE > 8
+-      ,
+-      3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f
+-#endif
+-  };
++  alignas(chunk_alignment) float input[chunk_size] = {0.0f, 1.0f, 0.5f, -0.333f, -1.0f,
++      -0.25f, 0.2f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f};
+ 
+   fp32s swish_out = swish(fp32s(input));
+   alignas(chunk_alignment) float swish_output[chunk_size];
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index 6e8e9a01f7..51a1ce872f 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -1033,14 +1033,9 @@ TEST_CASE("fixed KV layout addresses each slot geometry", "[kv_data][book append
+       static_cast<bf16>(11.0f);
+   source_page->template k<geometry_128>(kv_slot_id(1), 1, 0)[0] =
+       static_cast<bf16>(22.0f);
+-#if TRON_CHUNK_SIZE == 16
+   alignas(64) std::array<bf16, geometry_128.head_size> source_v;
+   source_v.fill(static_cast<bf16>(33.0f));
+   source_page->template set_v<geometry_128>(kv_slot_id(1), 1, 0, source_v.data());
+-#else
+-  auto source_v = source_page->template v<geometry_128>(kv_slot_id(1), 1, 0);
+-  std::fill_n(source_v.data, geometry_128.head_size, static_cast<bf16>(33.0f));
+-#endif
+   REQUIRE_FALSE(source_page->mark_k_complete(kv_slot_id(1), 0));
+   REQUIRE(source_page->mark_v_complete(kv_slot_id(1), 0));
+ 
+@@ -1057,13 +1052,11 @@ TEST_CASE("fixed KV layout addresses each slot geometry", "[kv_data][book append
+   REQUIRE(float(destination_page->template k<geometry_128>(kv_slot_id(1), 1, 0)[0]) ==
+           22.0f);
+   REQUIRE(destination_page->is_kv_complete(kv_slot_id(1), 0));
+-#if TRON_CHUNK_SIZE == 16
+   alignas(64) std::array<bf16, geometry_128.head_size> destination_v;
+   destination_page->template get_v<geometry_128>(
+       kv_slot_id(1), 1, 0, destination_v.data());
+   for (bf16 element : destination_v)
+     REQUIRE(float(element) == 33.0f);
+-#endif
+   destination_page->set_offset_bound(1);
+   tensor<cache_t::page_size> scales = constant<cache_t::page_size>(0.0f);
+   scales[0] = 1.0f;
+@@ -1792,11 +1785,9 @@ TEMPLATE_TEST_CASE("heterogeneous append preserves pages, V data, and completion
+     REQUIRE_FALSE(page->mark_k_complete(kv_slot_id(0), offset));
+     REQUIRE(page->mark_v_complete(kv_slot_id(0), offset));
+     REQUIRE_FALSE(page->mark_k_complete(kv_slot_id(1), offset));
+-#if TRON_CHUNK_SIZE == 16
+     alignas(64) std::array<bf16, geometry_64.head_size> value;
+     value.fill(static_cast<bf16>(token + 21));
+     page->template set_v<geometry_64>(kv_slot_id(0), 0, offset, value.data());
+-#endif
+   }
+ 
+   destination.append(source);
+@@ -1814,12 +1805,10 @@ TEMPLATE_TEST_CASE("heterogeneous append preserves pages, V data, and completion
+     REQUIRE(page->is_kv_complete(kv_slot_id(0), offset));
+     REQUIRE_FALSE(page->is_kv_complete(kv_slot_id(1), offset));
+     REQUIRE(page->mark_v_complete(kv_slot_id(1), offset));
+-#if TRON_CHUNK_SIZE == 16
+     alignas(64) std::array<bf16, geometry_64.head_size> value;
+     page->template get_v<geometry_64>(kv_slot_id(0), 0, offset, value.data());
+     for (bf16 element : value)
+       REQUIRE(float(element) == source_token + 21);
+-#endif
+   }
+ }
+ 
+@@ -1973,43 +1962,6 @@ TEMPLATE_TEST_CASE("scaled_v",
+     spdlog::warn(
+         "Pattern collisions: {} / {} unique entries", inv_pattern.size(), n_entries);
+ 
+-#if TRON_CHUNK_SIZE != 16
+-  // Count errors in loading.
+-  if constexpr (chunk_size != 16) {
+-    // chunk_size 16 is not interleaved, not contiguous.
+-    size_t errors_total = 0;
+-    std::vector<size_t> errors_by_layer(n_layers, 0);
+-    std::vector<size_t> errors_by_kv_head(n_kv_heads, 0);
+-    std::vector<size_t> errors_by_page_ix(n_tokens, 0);
+-    std::vector<size_t> errors_by_i(head_size, 0);
+-    for (size_t layer = 0; layer < n_layers; ++layer)
+-      for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head)
+-        for (size_t i = 0; i < head_size; ++i)
+-          for (size_t page_ix = 0; page_ix < n_tokens; ++page_ix) {
+-            bf16s a16 =
+-                p->v(test_kv_slot<book_t>(layer), kv_head, page_ix)[i / chunk_size];
+-            fp32s a32 = bf16s_to_fp32s(a16);
+-            float a = a32[i % chunk_size];
+-            if (a != pattern(layer, kv_head, page_ix, i)) {
+-              ++errors_total;
+-              ++errors_by_layer[layer];
+-              ++errors_by_kv_head[kv_head];
+-              ++errors_by_page_ix[page_ix];
+-              ++errors_by_i[i];
+-            }
+-          }
+-    if (errors_total) {
+-      spdlog::error("Found {} loading errors / {} entries", errors_total, n_entries);
+-      spdlog::error("Errors by layer: {}", errors_by_layer);
+-      spdlog::error("Errors by kv_head: {}", errors_by_kv_head);
+-      spdlog::error("Errors by page_ix: {}", errors_by_page_ix);
+-      spdlog::error("Errors by i: {}", errors_by_i);
+-    } else
+-      spdlog::info("No loading errors");
+-    REQUIRE(errors_total == 0);
+-  }
+-#endif
+-
+   // Count errors in scaled_v.
+   size_t errors_total = 0;
+   std::vector<size_t> errors_by_layer(n_layers, 0);
+@@ -2163,11 +2115,7 @@ TEST_CASE(
+   alignas(64) std::array<float, head_size> poison;
+   poison.fill(std::numeric_limits<float>::quiet_NaN());
+   for (size_t i = 0; i < n_tokens; ++i) {
+-#if TRON_CHUNK_SIZE == 16
+     page->set_v(slot, 0, i, poison.data());
+-#else
+-    page->v(slot, 0, i).set(constant<head_size>(poison[0]));
+-#endif
+   }
+   state.save_k<geometry>(consumer, operation, state.plugin_state.kouts);
+   state.save_v<geometry>(consumer, operation, state.plugin_state.vouts);
+diff --git a/t/t_safetensors.cpp b/t/t_safetensors.cpp
+index 2c255d5969..37117d22d0 100644
+--- a/t/t_safetensors.cpp
++++ b/t/t_safetensors.cpp
+@@ -257,12 +257,11 @@ TEST_CASE("neuralmagic-llama-3.1-70b-gptq", "[oproj comparisons]") {
+ /*
+     for (int j=0;j<(64/TRON_CHUNK_SIZE);++j) {
+       if constexpr (std::is_same_v<decltype(wo), gptq_view<4096,4096>>) {
+-#if TRON_CHUNK_SIZE == 16
+         auto & go = *static_cast<gptq_view<4096,4096>*>(&wo);
+         uint32_t a = go.mat[j*2][i];
+         uint32_t b = go.mat[j*2+1][i];
+         spdlog::info("FROM mat: row {} block {} chunk {}{{{:08x}}} {{{:08x}}}", i, 0, j,
+-a, b); #else TRON_UNSUPPORTED_CHUNK #endif
++a, b);
+       }
+       auto c = be.chunk(j);
+       spdlog::info("BY BLOCK row {} block {} chunk {} {{{:>8.4}}}", i, 0, j,

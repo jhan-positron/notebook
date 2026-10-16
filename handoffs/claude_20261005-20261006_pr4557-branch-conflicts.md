@@ -46,34 +46,34 @@ PR 4557 (typed KV-cache tensors) conflicted with main after main removed the 8-w
 2026-10-05
 
 - 12:24 The user asked to resolve the conflicts. Claude read four memory notes. The worktree was clean at c12df586b6. Main had moved from 996f58ec82 to e5fa372c19. A merge-tree preview showed 7 files changed on both sides with 13 conflict hunks.
-- 12:24 to 12:27 `git merge --no-commit --no-ff origin/main`. Six files conflicted: kv_cache.hpp, model.hpp, self_attention.hpp, t_llama_unit.cpp, t_amx_dispatch_dtype.cpp, heterogeneous_scheduler_compile.cpp. resolve.py written and run: the PR's typed V code stays, the chunk-size guards and their 8-lane branches go.
+- 12:24 to 12:27 `git merge --no-commit --no-ff origin/main`. Six files conflicted: kv_cache.hpp, model.hpp, self_attention.hpp, t_llama_unit.cpp, t_amx_dispatch_dtype.cpp, heterogeneous_scheduler_compile.cpp. resolve.py written and run: the PR's typed V code stays, the chunk-size guards and their 8-lane branches go. (preserved: artifacts/intel-amx/exec/scratch-relocated/47209f4c/resolve.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/47209f4c/resolve.py)
 - 12:28 `git diff --check` and clang-format 19.1.7 clean. The notebook rules for delphi-3bda were read. 12:29 v_vnni.hpp comments about the 8-lane build were rewritten (11 comment lines).
-- 12:30 merge-chain.sh written and copied to delphi-3bda as /var/tmp/jhan/tron-issue4525-merge-20261005.sh and launched. 12:30 to 12:31 lcheck of three test files on claude-agentsrv passed, with a negative control.
+- 12:30 merge-chain.sh written and copied to delphi-3bda as /var/tmp/jhan/tron-issue4525-merge-20261005.sh and launched. 12:30 to 12:31 lcheck of three test files on claude-agentsrv passed, with a negative control. (preserved: artifacts/intel-amx/exec/scratch-relocated/47209f4c/merge-chain.sh, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/47209f4c/merge-chain.sh)
 - 12:32 The first chain run failed to evaluate the nix shell because new files under nix/ were untracked in the rsynced worktree. `git add -A` fixed it but also staged three build directories, which were removed from the index. Relaunched.
 - 12:42 The chain finished: lint-notes 0, the AMX-on tree built every target except t_rinzler (main's own BUILD_INGEST_MODELS=OFF defect), the AMX-off tree built, unit tests passed in both trees.
 - 12:43 The packed-bits case was re-run by hand (its name contains commas that the chain escaped wrongly). Merge commit 96a6220ab6 (parents c12df586b6 and e5fa372c19) committed and pushed. The PR body was patched (8-lane glossary row and two sentences, a Status row with the unit-test counts). Memory note pr4557-ben-review-response.md appended.
 - 12:44 PR MERGEABLE, state BLOCKED (review and CI gate). Debian smoke passed, GCP Nix run 37365282778 queued. Report.
 - 19:24 The user asked whether Claude agrees with review comment 4188336250 (NaN and rounding rows in the packed-V bit test). 19:26 Answer: yes, mostly. Drop the NaN-to-infinity row and the rounding-sensitive rows, keep the exact-value rows.
 - 19:30 The user asked what "say so in the description" means in comment 4188336267. 19:31 Answer: the body must stop claiming both planes are type-protected, since native_k_view is only an alias.
-- 20:02 The user asked for the responses page, skipping the thread the user resolved and the two summary items the user answered. 20:03 The 40 review threads were fetched through GraphQL (threads.json). 20:04 The plain-english skill was loaded. 20:07 gen_wade.py written and the page generated, with a word count per reply (longest 98 words). 20:09 Memory note wade-pr4557-review-response.md written. Report: all nine points hold, W4 partly.
+- 20:02 The user asked for the responses page, skipping the thread the user resolved and the two summary items the user answered. 20:03 The 40 review threads were fetched through GraphQL (threads.json). 20:04 The plain-english skill was loaded. 20:07 gen_wade.py written and the page generated, with a word count per reply (longest 98 words). 20:09 Memory note wade-pr4557-review-response.md written. Report: all nine points hold, W4 partly. (preserved: artifacts/intel-amx/exec/scratch-relocated/47209f4c/threads.json, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/47209f4c/threads.json)
 - 21:38 The user asked whether the Short version and Not in this PR sections need updates. 21:39 Yes, one sentence each, from W3.
 - 21:46 The user approved with "VNNI packed V" and "VNNI packed-K" wording and said to apply the rest.
-- 21:47 to 21:50 Test edits applied by test_edits.py (W1, W2, W4, W5, W6: rows dropped, the formula byte comparison moved into t_llama_unit as its own case, ten structure-only checks dropped, the poison section returned to 3 tokens, a section renamed). lcheck of both test files passed.
-- 21:51 to 21:54 The test edits were committed as 1bdd592ff2. The branch was squashed: a three-way squash merge onto origin/main dd6e85226b, one commit c5d44bd86f. The reviewed history (22 commits) was pushed as branch jhan-kv-typed-tensors-pre-squash-20261006. The PR branch was force-moved to c5d44bd86f and pushed with lease protection. The body was patched (patch-body2.py).
-- 21:55 exec/i4557squash-20261006/chain.sh copied to delphi-3bda as /var/tmp/jhan/tron-issue4525-squash-20261006.sh and launched. It waits for the nightly lease.
+- 21:47 to 21:50 Test edits applied by test_edits.py (W1, W2, W4, W5, W6: rows dropped, the formula byte comparison moved into t_llama_unit as its own case, ten structure-only checks dropped, the poison section returned to 3 tokens, a section renamed). lcheck of both test files passed. (preserved: artifacts/intel-amx/exec/scratch-relocated/47209f4c/test_edits.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/47209f4c/test_edits.py)
+- 21:51 to 21:54 The test edits were committed as 1bdd592ff2. The branch was squashed: a three-way squash merge onto origin/main dd6e85226b, one commit c5d44bd86f. The reviewed history (22 commits) was pushed as branch jhan-kv-typed-tensors-pre-squash-20261006. The PR branch was force-moved to c5d44bd86f and pushed with lease protection. The body was patched (patch-body2.py). (preserved: artifacts/intel-amx/exec/scratch-relocated/47209f4c/patch-body2.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/47209f4c/patch-body2.py)
+- 21:55 exec/i4557squash-20261006/chain.sh copied to delphi-3bda as /var/tmp/jhan/tron-issue4525-squash-20261006.sh and launched. It waits for the nightly lease. (preserved: artifacts/intel-amx/3bda-var-tmp/tron-issue4525-squash-20261006.sh)
 - 21:56 Replies posted on the six threads (W1 4191665424, W2 4191665555, W3 4191665706, W4 4191665855, W5 4191665975, W6 4191666160) plus summary comment 6009623448. Review re-requested from Wade. Page updated with an Outcome section. Memory appended.
 - 21:57 Report. Pending: the delphi-3bda re-run.
 
 2026-10-06
 
 - 06:36 The chain's first part finished: unit tests passed in both trees. The build of main failed at configure because PR 4726 removed the cross-avx512 preset.
-- 06:38 chain2.sh written with the native preset (explicit AVX-512 flags, no -march=native) and launched.
+- 06:38 chain2.sh written with the native preset (explicit AVX-512 flags, no -march=native) and launched. (preserved: artifacts/intel-amx/exec/i4557squash-20261006/chain2.sh)
 - 07:14 chain2 finished: main built in 838 s, the squash built in 730 s, token identity CPU in 195 s and FPGA in 79 s, serving restored, claim released.
-- 07:15 The body's Status section was patched with the token-identity paragraph (patch-body3.py). The page was updated. Follow-up comment 6018210827 posted. Report. End of session.
+- 07:15 The body's Status section was patched with the token-identity paragraph (patch-body3.py). The page was updated. Follow-up comment 6018210827 posted. Report. End of session. (preserved: artifacts/intel-amx/exec/scratch-relocated/47209f4c/patch-body3.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/47209f4c/patch-body3.py)
 
 ## Results
 
-Unit tests on delphi-3bda, all passed, both trees unless stated [/var/tmp/jhan/tron-issue4525-merge-20261005.log on delphi-3bda and /home/jhan/workspace/intel-AMX/exec/logs/i4557squash-20261006-chain.log]:
+Unit tests on delphi-3bda, all passed, both trees unless stated [/var/tmp/jhan/tron-issue4525-merge-20261005.log on delphi-3bda and /home/jhan/workspace/intel-AMX/exec/logs/i4557squash-20261006-chain.log]: (preserved: artifacts/intel-amx/exec/logs/i4557squash-20261006-chain.log)
 
 | Test binary or case | At the merge 96a6220ab6 (2026-10-05) | At the squash c5d44bd86f (2026-10-06) |
 |---|---|---|
@@ -104,24 +104,36 @@ GitHub CI at c5d44bd86f: GCP Nix and Debian smoke both passed.
 
 ## Artifacts
 
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/PR4557-respond-Wade-comments.html (34,296 bytes). The responses page: nine points with Wade's quote, the position, the evidence, the proposed reply under 100 words, and after 21:56 an Outcome section with each posted reply next to the proposed one.
-  - generator: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261005/gen_wade.py (30,232 bytes, the replies and outcomes are embedded in it)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/status/PR4557-respond-Wade-comments.html (34,296 bytes). The responses page: nine points with Wade's quote, the position, the evidence, the proposed reply under 100 words, and after 21:56 an Outcome section with each posted reply next to the proposed one. (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/status/PR4557-respond-Wade-comments.html)
+  - generator: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261005/gen_wade.py (30,232 bytes, the replies and outcomes are embedded in it) (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/exec/wade-20261005/gen_wade.py)
   - input: the review threads of PR 4557 (scratchpad threads.json) and the posted replies (scratchpad replies/*.md)
   - input built by: `gh api graphql` on the PR's reviewThreads and `gh api` on the review comments
   - sources: t/t_llama_unit.cpp, t/t_amx_numerics.cpp, h/tron/tensor/v_vnni.hpp, h/tron/tensor/kv_cache_fwd.hpp, AGENTS.md at 96a6220ab6, the chain logs above
   - regenerate: `cd /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525 && python3 exec/wade-20261005/gen_wade.py` (writes `<OUT>` = status/PR4557-respond-Wade-comments.html)
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i4557squash-20261006/chain.sh (7,857 bytes) and chain2.sh (5,750 bytes). The delphi-3bda chain scripts (lease wait, unit tests in both trees, runtron builds, token identity).
-- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557squash-20261006/ (157,092 bytes in all): chain.done, chain-steps.txt (780 bytes), build-main1006.txt and .log, build-squash.txt and .log, binaries.sha256 (228), tests-main1006.txt and tests-squash.txt (empty), smoke/cpu-p1024/ (smoke.txt 3,682 bytes, five arms' logs and .tokens files), smoke/fpga-p1024/ (smoke.txt 1,407 bytes, two arms).
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i4557squash-20261006/chain.sh (7,857 bytes) and chain2.sh (5,750 bytes). The delphi-3bda chain scripts (lease wait, unit tests in both trees, runtron builds, token identity). (preserved: artifacts/intel-amx/exec/i4557squash-20261006/chain.sh)
+- claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i4557squash-20261006/ (157,092 bytes in all): chain.done, chain-steps.txt (780 bytes), build-main1006.txt and .log, build-squash.txt and .log, binaries.sha256 (228), tests-main1006.txt and tests-squash.txt (empty), smoke/cpu-p1024/ (smoke.txt 3,682 bytes, five arms' logs and .tokens files), smoke/fpga-p1024/ (smoke.txt 1,407 bytes, two arms). (preserved: artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/squash-3bda/tests-main1006.txt)
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/i4557squash-20261006-chain.log (15,339 bytes). The chain log with the unit-test lines.
 - claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/evidence/squash-3bda/ (18 files, 486,305 bytes). The per-test logs of both trees at c5d44bd86f (amxon.*.log, amxoff.*.log) and binaries.sha256.
-- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-pr4557-review-response.md (5,790 bytes). Memory note: the review, the nine positions, what was applied and posted.
+- claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-pr4557-review-response.md (5,790 bytes). Memory note: the review, the nine positions, what was applied and posted. (preserved: artifacts/intel-amx/memory/wade-pr4557-review-response.md)
 - claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4557-ben-review-response.md (11,178 bytes). Appended with the merge-of-main record and the nix-shell trap.
-- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/47209f4c-3a78-48b0-a0b7-c216197bcb05/scratchpad/ (scratch, may be cleaned up): resolve.py (5,620 bytes, the conflict resolver), vnni_comments.py (2,148), merge-chain.sh (3,615), merge-msg.txt (814), bbc7.diff (40,687), mt.txt (2,555,412, the merge-tree preview), deleted.txt (27), patch-body.py (2,789), patch-body2.py (4,976), patch-body3.py (2,019), pr-body-live.md to pr-body-live5.md and pr-body-new.md to pr-body-new3.md (the body before and after each patch, 16,843 to 20,019 bytes each), unit-rows.md (982), test_edits.py (10,811), test-edits-msg.txt (927), squash-msg.txt (1,819), squash-chain.sh (7,857), squash-vs-presquash.txt (654), threads.json (9,121), replies/ (w1.md to w6.md and summary.md, 130 to 846 bytes), tok.md (450), followup.md (391).
+- claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/47209f4c-3a78-48b0-a0b7-c216197bcb05/scratchpad/ (scratch, may be cleaned up): resolve.py (5,620 bytes, the conflict resolver), vnni_comments.py (2,148), merge-chain.sh (3,615), merge-msg.txt (814), bbc7.diff (40,687), mt.txt (2,555,412, the merge-tree preview), deleted.txt (27), patch-body.py (2,789), patch-body2.py (4,976), patch-body3.py (2,019), pr-body-live.md to pr-body-live5.md and pr-body-new.md to pr-body-new3.md (the body before and after each patch, 16,843 to 20,019 bytes each), unit-rows.md (982), test_edits.py (10,811), test-edits-msg.txt (927), squash-msg.txt (1,819), squash-chain.sh (7,857), squash-vs-presquash.txt (654), threads.json (9,121), replies/ (w1.md to w6.md and summary.md, 130 to 846 bytes), tok.md (450), followup.md (391). (preserved: artifacts/intel-amx/exec/scratch-relocated/47209f4c/vnni_comments.py, relocated to /home/jhan/workspace/intel-AMX/exec/scratch-relocated/47209f4c/vnni_comments.py)
 - claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-VNNIed-K-in-place-issue4525/47209f4c-3a78-48b0-a0b7-c216197bcb05/tasks/: bosqtsvhq.output (9,617 bytes, first chain attempt), bec1vs536.output (4,685, the merge chain log), bwj9kmt1v.output (2,042, chain part 1), bec1z858c.output (5,240, chain2).
-- delphi-3bda:/var/tmp/jhan/tron-issue4525-merge-20261005.sh (3,615 bytes), tron-issue4525-merge-20261005.log (10,555 bytes), tron-issue4525-merge-20261005.done (5 bytes). The 2026-10-05 chain and its log.
+- delphi-3bda:/var/tmp/jhan/tron-issue4525-merge-20261005.sh (3,615 bytes), tron-issue4525-merge-20261005.log (10,555 bytes), tron-issue4525-merge-20261005.done (5 bytes). The 2026-10-05 chain and its log. (preserved: artifacts/intel-amx/3bda-var-tmp/tron-issue4525-merge-20261005.sh)
 - delphi-3bda:/var/tmp/jhan/tron-issue4525-squash-20261006.sh (7,857 bytes). The 2026-10-06 chain as run.
 - delphi-3bda:/var/tmp/jhan/tron-issue4525 (the rsynced worktree with the gen and gen-amxoff build trees). delphi-3bda:/var/tmp/jhan/tron-main0922/gen/runtron.main1006 and /var/tmp/jhan/tron-i4525rt2/gen/runtron.squash (the runtron binaries, sizes unverified).
 - Code, all pushed: 96a6220ab6 tron jhan-kv-typed-tensors (merge of main e5fa372c19 into c12df586b6), 1bdd592ff2 tron jhan-kv-typed-tensors-pre-squash-20261006 (the test edits, on top of the 22-commit history), c5d44bd86f tron jhan-kv-typed-tensors (the squash, one commit on main dd6e85226b). PR: https://github.com/positron-ai/tron/pull/4557.
+
+
+Preserved by the 2026-10-16 handoff run (files under directories listed above, mirrored at the same relative path):
+- `artifacts/intel-amx/3bda-var-tmp/` (1 files)
+- `artifacts/intel-amx/exec/results/i4557squash-20261006/` (4 files)
+- `artifacts/intel-amx/exec/results/i4557squash-20261006/smoke/cpu-p1024/` (1 files)
+- `artifacts/intel-amx/exec/results/i4557squash-20261006/smoke/fpga-p1024/` (1 files)
+- `artifacts/intel-amx/exec/scratch-relocated/47209f4c/` (16 files)
+- `artifacts/intel-amx/exec/scratch-relocated/47209f4c/replies/` (4 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/squash-3bda/` (5 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/squash-3bda/smoke/cpu-p1024/` (1 files)
+- `artifacts/intel-amx/vnnied-k-in-place/issue4525/evidence/squash-3bda/smoke/fpga-p1024/` (1 files)
 
 ## Current state
 
