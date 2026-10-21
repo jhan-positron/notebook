@@ -1,0 +1,575 @@
+diff --git a/.gitignore b/.gitignore
+index 2cd78ab6e..11d219238 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -70,6 +70,8 @@ for_agent/
+ # Only locally-generated files within it are ignored:
+ .claude/*.local.json
+ .claude/**/.nfs*
++.claude/hooks/
++.claude/worktrees/
+ packaging/tokenize-files/tokenize_py.spec
+ ingest/traces
+ .cursor/
+diff --git a/h/pos/config.hpp b/h/pos/config.hpp
+index ed6d9ae0e..f5b879cb4 100644
+--- a/h/pos/config.hpp
++++ b/h/pos/config.hpp
+@@ -81,3 +81,14 @@ inline constexpr size_t hwkv_pages_per_layer = 512;
+ inline constexpr size_t hwkv_tok_per_page = 128;
+ inline constexpr size_t hwkv_pchannel_page_size_B = 8192;  // 8k per pseudochannel
+ inline constexpr size_t hwkv_min_gofs_for_offload = 32;    // 128 tokens / gof_tokens
++
++namespace tron::hardware {
++
++// HW attention staging-block layout constants.
++inline constexpr size_t HWCACHEBLOCK_BYTES = ::hwkv_pchannel_page_size_B;  // 8192
++inline constexpr size_t HWCACHEBLOCK_ALIGN_BYTES = ::hbm_word_width_B;     // 64
++inline constexpr size_t HWBLOCK_POSITIONS = 4;          // token slots/block
++inline constexpr size_t VBLOCK_ROWS_PER_FETCHER = 4;    // V rows per fetcher
++inline constexpr size_t VBLOCK_CELL_STRIDE_BF16 = 8;    // bf16 per V cell
++
++}  // namespace tron::hardware
+diff --git a/h/pos/dma_tracker.hpp b/h/pos/dma_tracker.hpp
+index a3666385a..f374c9cc2 100644
+--- a/h/pos/dma_tracker.hpp
++++ b/h/pos/dma_tracker.hpp
+@@ -29,9 +29,10 @@ struct pending_xfer {
+   std::shared_ptr<shard> sh;
+   uint32_t gof_in_shard;
+   uint32_t layer;
+-  // Pins the GOF (and its staging buffers) until this xfer's completion is popped,
+-  // and is the decrement target for dma_inflight. Null in unit tests that do not
+-  // exercise eviction. See Note [GOF staging eviction].
++  // Keeps the host-side GOF alive until this xfer's completion is popped. That
++  // preserves its staging/cache object and provides the dma_inflight decrement
++  // target; it does not pin or describe device HBM. Null in unit tests that do
++  // not exercise eviction. See Note [GOF staging eviction].
+   std::shared_ptr<gof> pinned_gof = nullptr;
+ 
+   friend bool operator>(const pending_xfer& lhs, const pending_xfer& rhs) noexcept {
+@@ -54,8 +55,8 @@ using pending_xfer_queue = std::
+ //
+ // Lifetime: ctor and dtor register/deregister `this` in a process- global list
+ // (live_trackers) so pos_shutdown can drain in-flight xfers (and the shared_ptr<shard>
+-// refs they pin) before devices are torn down.  Without that drain, shard::~shard() →
+-// free_kv_weights() would run against dead device state during model-state destruction.
++// refs they hold) before devices are torn down. Without that drain, shard::~shard()
++// -> free_kv_weights() would run against dead device state during model-state destruction.
+ //
+ // FUTURE: per-model-per-device may be needed if shards get replicated across FPGAs for
+ // scheduling flexibility; today the SW-lags-HW usage pattern keeps one-per-model fine.
+@@ -89,7 +90,7 @@ struct dma_tracker {
+ };
+ 
+ // Drain every live tracker.  Called by pos_shutdown before device
+-// teardown so any shard refs still pinned in tracker queues drop
++// teardown so any shard refs still held in tracker queues drop
+ // (and free_kv_weights() runs) while devices are alive.
+ void clear_all_dma_trackers();
+ 
+diff --git a/h/pos/hwattention.hpp b/h/pos/hwattention.hpp
+index 5bff5df33..9c9839847 100644
+--- a/h/pos/hwattention.hpp
++++ b/h/pos/hwattention.hpp
+@@ -129,19 +129,15 @@ inline void shuffle_v_entry(bf16** v_locations_in,
+ 
+ // Note [GOF staging eviction]
+ // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-// A hwcacheblock's `data` is a transient DMA staging buffer, not durable state:
+-// the durable K/V lives in the host KV pages ("the books") and, after transfer,
+-// in device HBM. Story 2814 frees `data` once every in-flight DMA that reads it
+-// has completed (gof::free_staging_if_idle) and reconstructs it on demand
+-// (gof::prepare_for_dma -> reacquire_buffer + populate). Because the positions[][]
+-// tables hold pointers *into* `data`, any (re)allocation must rebuild them
+-// (rebuild_positions); a freed block has data == nullptr.
+-inline constexpr size_t HWCACHEBLOCK_BYTES = hwkv_pchannel_page_size_B;  // 8192
+-inline constexpr size_t HWCACHEBLOCK_ALIGN_BYTES = hbm_word_width_B;     // 64
+-inline constexpr size_t HWBLOCK_POSITIONS = 4;  // token slots/block (== gof_tokens)
+-inline constexpr size_t VBLOCK_ROWS_PER_FETCHER = 4;  // V rows per fetcher
+-inline constexpr size_t VBLOCK_CELL_STRIDE_BF16 = 8;  // bf16 per V cell
+-
++// A hwcacheblock's `data` is host-side DMA staging in the HW/HBM layout, not
++// durable KV state. Durable K/V remains in the host KV pages ("the books");
++// after transfer, HBM has the device copy. Eviction frees only this host-side
++// formatted copy after every in-flight DMA that reads it has completed
++// (gof::free_staging_if_idle). Rebuild reconstructs it from host KV pages
++// (gof::prepare_for_dma -> reacquire_buffer + populate), avoiding PCI/HBM
++// readback. Because positions[][] tables hold pointers *into* `data`, any
++// (re)allocation must rebuild them (build_indexes); a freed block has
++// data == nullptr.
+ struct hwcacheblock {
+   bf16* data = nullptr;
+   uint64_t hw_base_addr = 0;
+@@ -264,7 +260,7 @@ struct k_hwcacheblock : public hwcacheblock {
+   // in k blocks we have a simple structure. the data holds 4 adjacent positions in a
+   // single fetcher. Each position contains 8 heads.
+   bf16* positions[HWBLOCK_POSITIONS][HW_MAX_KV_HEADS];
+-  size_t hw_head_size_ = 0;  // K layout stride; kept for rebuild_positions()
++  size_t hw_head_size_ = 0;  // K layout stride; kept for build_indexes()
+   // when we create a k_hwcacheblock, we ensure that the hwcacheblock constructor is
+   // invoked, and we then fill the positions array with pointers into the data region
+   // that are every head_size * 2 Bytes apart, calculated filling all 8 pointers for the
+@@ -272,13 +268,13 @@ struct k_hwcacheblock : public hwcacheblock {
+ 
+   k_hwcacheblock(size_t head_size)
+   : hw_head_size_(head_size) {
+-    rebuild_positions();
++    build_indexes();
+   }
+ 
+   // Re-derive positions[][] against the current `data` buffer. Must run after every
+   // (re)allocation: positions[][] point into `data`, whose address changes across a
+   // free/reacquire. See Note [GOF staging eviction].
+-  void rebuild_positions() noexcept {
++  void build_indexes() noexcept {
+     // Each position holds HW_MAX_KV_HEADS heads, spaced head_size * POS_DATA_SIZE
+     // bytes apart.
+     for (size_t pos = 0; pos < HWBLOCK_POSITIONS; pos++) {
+@@ -293,7 +289,7 @@ struct k_hwcacheblock : public hwcacheblock {
+   // Re-acquire the staging buffer (if freed) then rebuild the pointer table.
+   void reacquire_buffer() {
+     alloc_buffer();
+-    rebuild_positions();
++    build_indexes();
+   }
+ 
+   /**
+@@ -399,12 +395,12 @@ struct v_hwcacheblock : public hwcacheblock {
+   // that are every elementsize * 8 apart. We fill these incrementing across the rows
+   // for each fetcher.
+   v_hwcacheblock() {
+-    rebuild_positions();
++    build_indexes();
+   }
+ 
+   // Re-derive positions[][][] against the current `data` buffer; see
+   // Note [GOF staging eviction]. V layout is geometry-fixed (no stored head size).
+-  void rebuild_positions() noexcept {
++  void build_indexes() noexcept {
+     size_t element_offset = 0;  // each cell advances by VBLOCK_CELL_STRIDE_BF16
+     for (size_t pch = 0; pch < FETCHERS_PER_DEVICE; pch++) {
+       for (size_t row = 0; row < VBLOCK_ROWS_PER_FETCHER; row++) {
+@@ -419,7 +415,7 @@ struct v_hwcacheblock : public hwcacheblock {
+   // Re-acquire the staging buffer (if freed) then rebuild the pointer table.
+   void reacquire_buffer() {
+     alloc_buffer();
+-    rebuild_positions();
++    build_indexes();
+   }
+ 
+   /**
+diff --git a/h/tron/gof.hpp b/h/tron/gof.hpp
+index 5f5942683..af59b2816 100644
+--- a/h/tron/gof.hpp
++++ b/h/tron/gof.hpp
+@@ -11,9 +11,9 @@
+ #include <atomic>
+ #include <functional>
+ #include <memory>
+-#include <mutex>
+ #include <vector>
+ 
++#include "common/util.hpp"
+ #include "libpos.hpp"
+ #include "pos/hwattention.hpp"
+ 
+@@ -102,14 +102,19 @@ struct page_info {
+ // gof_rodeo_impl produces identical work.
+ struct gof;
+ 
+-// RAII reservation of one gof::dma_inflight credit, taken in prepare_for_dma before
+-// xfer_gof submits descriptors. The destructor rolls the credit back ONLY while that
+-// is still safe -- i.e. before any descriptors exist. Once xfer_gof has submitted,
+-// the caller calls commit() to DISARM rollback; the following dma_tracker::push
+-// installs the pending_xfer that owns the decrement. push() is noexcept, so a
+-// post-submit allocation failure terminates rather than unwinding -- unwinding could
+-// drop the GOF's last owner and free staging under the live DMA. See Note [GOF
+-// staging eviction].
++// RAII owner for one gof::dma_inflight credit.
++//
++// prepare_for_dma() increments dma_inflight before returning this guard. If the
++// caller exits before submitting descriptors, the guard destructor rolls that credit
++// back: no DMA can read staging yet, so rollback is safe. Once shard::xfer_gof() has
++// submitted descriptors, the caller must call commit() to disarm rollback; from that
++// point the following dma_tracker::push installs a pending_xfer that owns the eventual
++// decrement on DMA completion. push() is noexcept, so a post-submit recording failure
++// terminates instead of unwinding and freeing staging under live descriptors.
++//
++// Keep this as a class with a private gof_ pointer so callers can only transfer
++// ownership by calling commit(), not by poking the rollback state directly. See Note
++// [GOF staging eviction].
+ class inflight_guard {
+ public:
+   explicit inflight_guard(gof* g) noexcept
+@@ -157,9 +162,25 @@ struct gof {
+   // dma_tracker::poll_completions. See Note [GOF staging eviction].
+   std::atomic<uint32_t> dma_inflight{0};
+ 
+-  // Serializes staging (re)allocation / free / populate against the dma_inflight
+-  // reservation; dispatch runs on worker threads, free on the poll thread.
+-  std::mutex staging_mutex;
++  // CAS gate for the staging bundle: k/v data, their pointer tables, populated,
++  // and the free-vs-prepare handoff. This deliberately avoids std::mutex while
++  // still protecting the multi-field transition; dma_inflight alone cannot close
++  // the race where free observes 0 just before prepare reserves a new credit.
++  std::atomic<bool> staging_busy{false};
++
++  void lock_staging() noexcept {
++    bool expected = false;
++    while (!staging_busy.compare_exchange_weak(expected, true,
++        std::memory_order_acquire, std::memory_order_relaxed)) {
++      staging_busy.wait(true, std::memory_order_relaxed);
++      expected = false;
++    }
++  }
++
++  void unlock_staging() noexcept {
++    staging_busy.store(false, std::memory_order_release);
++    staging_busy.notify_one();
++  }
+ 
+   // hw_head_size governs K layout pointer spacing; must match populate's hw_hs.
+   explicit gof(size_t hw_head_size)
+@@ -172,10 +193,10 @@ struct gof {
+       PosDevice* dev,
+       const page_info* pages);
+ 
+-  // Ready this GOF for a DMA submission and reserve one in-flight credit, all under
+-  // staging_mutex and BEFORE the caller invokes shard::xfer_gof: reacquire the
+-  // staging buffers if freed, populate from the books if needed, then bump
+-  // dma_inflight. The returned guard rolls the credit back unless commit()ed; the
++  // Ready this GOF for a DMA submission and reserve one in-flight credit BEFORE the
++  // caller invokes shard::xfer_gof: reacquire the staging buffers if freed, populate
++  // from the books if needed, then bump dma_inflight while the staging bundle is
++  // still CAS-owned. The returned guard rolls the credit back unless commit()ed; the
+   // caller commit()s right after xfer_gof (descriptors live), and the following
+   // dma_tracker::push installs the tracker-owned decrement. See Note [GOF staging
+   // eviction].
+@@ -184,7 +205,8 @@ struct gof {
+       size_t layer,
+       PosDevice* dev,
+       const page_info* pages) {
+-    std::lock_guard<std::mutex> lk(staging_mutex);
++    lock_staging();
++    tron::finally unlock([this] { unlock_staging(); });
+     if (!k.is_allocated()) {
+       k.reacquire_buffer();
+     }
+@@ -198,10 +220,12 @@ struct gof {
+     return inflight_guard{this};
+   }
+ 
+-  // Evict the staging buffers iff no in-flight DMA still reads them (re-checked
+-  // under staging_mutex). Returns true if it freed. See Note [GOF staging eviction].
++  // Evict the staging buffers iff no in-flight DMA still reads them. The CAS gate
++  // serializes the idle check with prepare_for_dma's reservation/rebuild path.
++  // Returns true if it freed. See Note [GOF staging eviction].
+   bool free_staging_if_idle() noexcept {
+-    std::lock_guard<std::mutex> lk(staging_mutex);
++    lock_staging();
++    tron::finally unlock([this] { unlock_staging(); });
+     if (dma_inflight.load(std::memory_order_acquire) != 0) {
+       return false;
+     }
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index 3faa05f55..9d14a1e73 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -1875,9 +1875,7 @@ public:
+       auto const& job = gof_jobs_span[job_ix];
+       if (job.shards_getting_gofs.empty()) return;
+ 
+-      // Brackets the GOF dispatch (prepare_for_dma -> xfer_gof -> push) so the
+-      // JIT staging-rebuild cost is visible next to backfill_shard / xfer_gof /
+-      // the nested gof_populate. See Note [GOF staging eviction].
++      // Bracket GOF dispatch so Perfetto shows prepare/populate/xfer/push together.
+       TRACE_EVENT("hwattention", "gof_rodeo", "layer", layer);
+       uint32_t tok_pos = job.tok_position;
+ 
+@@ -1888,7 +1886,8 @@ public:
+           "gof_rodeo: layer {} >= gal gofs size {}", layer, job.gal_ptr->gofs.size());
+       // shared_ptr COPY (not a reference into gal.gofs): keeps the GOF alive across
+       // the whole reacquire/populate/xfer_gof/push submit window, before pending_xfer
+-      // pins it -- a concurrent gal teardown must not dangle this or the guard's gof*.
++      // takes its own host-side GOF reference. A concurrent gal teardown must not
++      // dangle this or the guard's gof*.
+       auto g = job.gal_ptr->gofs[layer];
+       TRON_ASSERT(g, "gof_rodeo: null gof for job {} layer {}", job_ix, layer);
+       PosDevice* dev = job.shards_getting_gofs[0]->dev;
+diff --git a/src/pos/dma_tracker.cpp b/src/pos/dma_tracker.cpp
+index 7eb59bf05..d10217124 100644
+--- a/src/pos/dma_tracker.cpp
++++ b/src/pos/dma_tracker.cpp
+@@ -67,34 +67,50 @@ void dma_tracker::push(uint32_t dev_idx, pending_xfer xfer) noexcept {
+ void dma_tracker::poll_completions() {
+   TRACE_EVENT("scheduler", "poll_dma_completions");
+ 
+-  // Collect GOFs whose last in-flight DMA just completed, then free them AFTER
+-  // releasing `mu`: dispatch takes gof::staging_mutex and then pushes under `mu`, so
+-  // freeing under `mu` would invert that lock order. See Note [GOF staging eviction].
+-  std::vector<std::shared_ptr<gof>> to_free;
++  // Pop one completed xfer at a time, then free staging AFTER releasing `mu`.
++  // This keeps staging release out of the tracker lock and avoids allocating a
++  // side vector after the irreversible dma_inflight decrement. See Note [GOF
++  // staging eviction].
++  size_t attempts_left = 0;
+   {
+     std::lock_guard<std::mutex> lk(mu);
+     for (size_t d = 0; d < get_num_devices(); d++) {
+-      auto& q = queues[d];
+-      while (!q.empty()) {
++      attempts_left += queues[d].size();
++    }
++  }
++
++  while (attempts_left > 0) {
++    --attempts_left;
++    std::shared_ptr<gof> to_free;
++    bool popped = false;
++    {
++      std::lock_guard<std::mutex> lk(mu);
++      for (size_t d = 0; d < get_num_devices(); d++) {
++        auto& q = queues[d];
++        if (q.empty()) continue;
+         auto& top = q.top();
+-        if (!hwcacheblock::isdone(top.sh->dev, top.xfer)) break;
++        if (!hwcacheblock::isdone(top.sh->dev, top.xfer)) continue;
+         auto& gs = top.sh->gof_state[top.gof_in_shard];
+         int done = static_cast<int>(top.layer) + 1;
+         if (done > gs.dma_done) gs.dma_done = done;
+-        // Pop BEFORE the irreversible dma_inflight decrement so a throwing
+-        // to_free.push_back() can't leave a decremented entry queued for
+-        // reprocessing (double-decrement -> underflow).
++        // Pop BEFORE the irreversible dma_inflight decrement so this queued entry
++        // cannot be reprocessed and double-decremented.
+         std::shared_ptr<gof> pinned = top.pinned_gof;
+         q.pop();
++        popped = true;
+         if (pinned &&
+             pinned->dma_inflight.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+-          to_free.push_back(pinned);
++          to_free = std::move(pinned);
+         }
++        break;
+       }
+     }
+-  }
+-  for (auto& g : to_free) {
+-    g->free_staging_if_idle();
++    if (to_free) {
++      to_free->free_staging_if_idle();
++    }
++    if (!popped) {
++      break;
++    }
+   }
+ }
+ 
+@@ -118,8 +134,8 @@ void dma_tracker::await_layer(size_t layer) {
+ 
+ void dma_tracker::clear() {
+   // Abandon path (pos_shutdown): drops queued xfers and their shared_ptr<shard>/<gof>
+-  // pins WITHOUT waiting for completion, so it is not proof of DMA completion and must
+-  // not free GOF staging. See Note [GOF staging eviction].
++  // references WITHOUT waiting for completion, so it is not proof of DMA completion
++  // and must not free GOF staging. See Note [GOF staging eviction].
+   std::lock_guard<std::mutex> lk(mu);
+   for (auto& q : queues) {
+     while (!q.empty())
+diff --git a/src/tron/gof.cpp b/src/tron/gof.cpp
+index ac02ac678..48857d403 100644
+--- a/src/tron/gof.cpp
++++ b/src/tron/gof.cpp
+@@ -135,8 +135,9 @@ void backfill_shard(
+       size_t gof_in_shard = (abs_tok - sh->base_tok_ix) / gof_tokens;
+       for (size_t layer = 0; layer < gl->gofs.size(); ++layer) {
+         if (!params.layer_uses_hw(layer)) continue;
+-        auto g = gl->gofs[layer];  // shared_ptr copy: pins the GOF across the
+-                                   // reacquire/populate/xfer_gof/push submit window.
++        // shared_ptr copy: keeps the host-side GOF alive across the
++        // reacquire/populate/xfer_gof/push submit window.
++        auto g = gl->gofs[layer];
+         if (!g) continue;
+         // Only backfill GOFs where all 4 positions are fully saved (save_k +
+         // save_v per position = 2 * gof_tokens increments). Partially-saved
+@@ -146,8 +147,8 @@ void backfill_shard(
+         if (g->save_count.load(std::memory_order_acquire) < 2 * gof_tokens) continue;
+         // Reacquire freed staging + lazy-populate (gofs whose rodeo bailed with no
+         // live shards never populated; the gal retains page_info), then reserve one
+-        // in-flight credit -- all under staging_mutex before xfer_gof. gof_rodeo_impl
+-        // shares prepare_for_dma, so either site may populate first.
++        // in-flight credit before xfer_gof. gof_rodeo_impl shares prepare_for_dma,
++        // so either site may populate first.
+         // See Note [GOF staging eviction].
+         auto guard = g->prepare_for_dma(
+             params.n_kv_heads, params.kv_head_size, layer, sh->dev, gl->pages);
+diff --git a/t/t_dma_tracker.cpp b/t/t_dma_tracker.cpp
+index 3122b1183..6d4050200 100644
+--- a/t/t_dma_tracker.cpp
++++ b/t/t_dma_tracker.cpp
+@@ -435,10 +435,10 @@ TEST_CASE("concurrent tracker lifecycle vs clear_all", "[dma_tracker][concurrenc
+ }
+ 
+ // ---------------------------------------------------------------------------
+-// Story 2814 — GOF staging eviction (free after HBM transfer, reconstruct on
+-// demand). See Note [GOF staging eviction] (pos/hwattention.hpp). Under
+-// pos_fake, hwcacheblock::isdone always returns true, so every queued xfer is
+-// treated as complete on the next poll.
++// GOF staging eviction (free after HBM transfer, reconstruct on demand). See
++// Note [GOF staging eviction] (pos/hwattention.hpp). Under pos_fake,
++// hwcacheblock::isdone always returns true, so every queued xfer is treated as
++// complete on the next poll.
+ // ---------------------------------------------------------------------------
+ 
+ TEST_CASE("gof allocates both staging buffers on construction", "[gof]") {
+@@ -449,9 +449,7 @@ TEST_CASE("gof allocates both staging buffers on construction", "[gof]") {
+ 
+ TEST_CASE("free_staging_if_idle frees only when no DMA is in flight", "[gof]") {
+   auto g = std::make_shared<gof>(HW_BAKED_HEAD_SIZE);
+-  // A reserved in-flight credit blocks eviction. This also models the poll
+-  // re-arm race: a fresh prepare_for_dma that reserved a credit between poll's
+-  // pop and the free is cancelled by free_staging_if_idle's re-check.
++  // A reserved in-flight credit blocks eviction.
+   g->dma_inflight.store(1);
+   CHECK_FALSE(g->free_staging_if_idle());
+   CHECK(g->k.is_allocated());
+@@ -463,6 +461,31 @@ TEST_CASE("free_staging_if_idle frees only when no DMA is in flight", "[gof]") {
+   CHECK_FALSE(g->free_staging_if_idle());  // already freed -> no-op
+ }
+ 
++TEST_CASE("free_staging_if_idle rechecks after prepare owns staging", "[gof]") {
++  auto g = std::make_shared<gof>(HW_BAKED_HEAD_SIZE);
++
++  // Model the critical handoff without real populate(): prepare_for_dma owns the
++  // staging gate, then reserves the DMA credit before free_staging_if_idle can enter.
++  g->lock_staging();
++  bool freed = true;
++  std::atomic<bool> free_started{false};
++  std::thread t([&] {
++    free_started.store(true, std::memory_order_release);
++    freed = g->free_staging_if_idle();
++  });
++
++  while (!free_started.load(std::memory_order_acquire)) {
++    std::this_thread::yield();
++  }
++  g->dma_inflight.store(1, std::memory_order_release);
++  g->unlock_staging();
++  t.join();
++
++  CHECK_FALSE(freed);
++  CHECK(g->k.is_allocated());
++  CHECK(g->v.is_allocated());
++}
++
+ TEST_CASE("reacquire_buffer rebuilds position tables into the new buffer", "[gof]") {
+   auto g = std::make_shared<gof>(HW_BAKED_HEAD_SIZE);
+   REQUIRE(g->free_staging_if_idle());
+@@ -494,7 +517,7 @@ TEST_CASE("reacquire_buffer rebuilds position tables into the new buffer", "[gof
+ TEST_CASE("inflight_guard rolls back unless committed", "[gof]") {
+   auto g = std::make_shared<gof>(HW_BAKED_HEAD_SIZE);
+   {
+-    // prepare_for_dma increments under the lock, then hands back the guard.
++    // prepare_for_dma reserves a credit, then hands back the guard.
+     g->dma_inflight.fetch_add(1);
+     inflight_guard guard(g.get());
+   }
+@@ -536,14 +559,14 @@ TEST_CASE("clear() drops the gof pin without freeing staging (abandon path)",
+   std::weak_ptr<gof> observer = g;
+   tracker.push(0, pending_xfer{make_xfer(1, 0), sh, 0, /*layer=*/1, g});
+ 
+-  tracker.clear();  // abandon-only: pop entries and drop pins, not completion proof
++  tracker.clear();  // abandon-only: pop entries and drop references, not completion proof
+ 
+   // We still hold `g`, so the gof survives. clear() must not run the free path:
+   // staging stays allocated and the in-flight credit is untouched.
+   CHECK(g->k.is_allocated());
+   CHECK(g->v.is_allocated());
+   CHECK(g->dma_inflight.load() == 1);
+-  // The tracker released its pin: dropping our last ref destroys the gof.
++  // The tracker released its reference: dropping our last ref destroys the gof.
+   g.reset();
+   CHECK(observer.expired());
+ }
+diff --git a/t/t_gof_dma.cpp b/t/t_gof_dma.cpp
+index 17afc1f23..47810522f 100644
+--- a/t/t_gof_dma.cpp
++++ b/t/t_gof_dma.cpp
+@@ -188,11 +188,11 @@ TEST_CASE("GOF V fill + DMA round trip", "[gof][fpga]") {
+ }
+ 
+ // ---------------------------------------------------------------------------
+-// Story 2814: evict staging (free_staging_if_idle), then reconstruct it
+-// (reacquire_buffer), and prove the rebuilt K and V buffers still pack data into
+-// the hardware layout, transfer by DMA, and read back byte-for-byte.
++// Evict staging (free_staging_if_idle), then reconstruct it (reacquire_buffer),
++// and prove the rebuilt K and V buffers still pack data into the hardware layout,
++// transfer by DMA, and read back byte-for-byte.
+ // The reacquired buffer is a different allocation, so this exercises
+-// rebuild_positions() against real hardware.
++// build_indexes() against real hardware.
+ // See Note [GOF staging eviction].
+ // ---------------------------------------------------------------------------
+ 
+@@ -312,9 +312,9 @@ TEST_CASE("GOF free + reacquire + DMA round trip", "[gof][fpga]") {
+ }
+ 
+ // ---------------------------------------------------------------------------
+-// Story 2814: prepare_for_dma() drives the full reconstruct-then-arm path
+-// (reacquire buffers, rebuild positions, populate from the page lambdas, reserve
+-// one dma_inflight credit). It lives here, not in the pos_fake t_dma_tracker,
++// prepare_for_dma() drives the full reconstruct-then-arm path (reacquire buffers,
++// rebuild positions, populate from the page lambdas, reserve one dma_inflight
++// credit). It lives here, not in the pos_fake t_dma_tracker,
+ // because populate -> v.set_position -> shuffle_v_entry indexes the global
+ // devices[] table (devices[fpga_index]->num_fetchers), which only pos_startup
+ // populates. See Note [GOF staging eviction].
+diff --git a/t/t_gof_staging_leaks.cpp b/t/t_gof_staging_leaks.cpp
+index a9b281192..28b8fb06a 100644
+--- a/t/t_gof_staging_leaks.cpp
++++ b/t/t_gof_staging_leaks.cpp
+@@ -1,7 +1,8 @@
+-// Story 2814 — GOF staging-eviction memory-leak tests (real pos / FPGA).
++// GOF staging-eviction memory-leak tests (real pos / FPGA).
+ //
+-// Proves the staging free/reacquire/pin lifecycle leaks neither DMA-heap memory nor
+-// shared_ptr<gof> ownership across the real submit -> track -> complete -> free path.
++// Proves the staging free/reacquire/reference lifecycle leaks neither DMA-heap
++// memory nor shared_ptr<gof> ownership across the real submit -> track -> complete
++// -> free path.
+ // Design: from-codex/memory-leak-test-design.md. Uses real pos_startup + real DMA, so
+ // it is an [fpga] test; run it slice-scoped (SYSTEM_CONFIG) like t_gof_dma.
+ //
+@@ -55,7 +56,7 @@ public:
+     if (pos_list_devices()->empty()) {
+       throw std::runtime_error("t_gof_staging_leaks: no Positron devices");
+     }
+-    // Opt-in Perfetto capture (Story 2814): with TRACE_FILE=/path set, record the
++    // Opt-in Perfetto capture: with TRACE_FILE=/path set, record the
+     // GOF staging path (gof_populate rebuilds, xfer_gof, poll_dma_completions) to
+     // that file in-process. No-op for normal / CI runs (TRACE_FILE unset).
+     if (const char* tf = std::getenv("TRACE_FILE")) {
+@@ -255,7 +256,7 @@ TEST_CASE("real xfer completion frees staging and drops tracker gof pin",
+     g.reset();
+   }
+ 
+-  REQUIRE_FALSE(weak.expired());  // tracker pin owns the GOF while the DMA is live
++  REQUIRE_FALSE(weak.expired());  // tracker reference owns the GOF while DMA is live
+   allocs.expect_delta(2);
+ 
+   poll_until_empty(tracker);
+@@ -364,10 +365,10 @@ TEST_CASE("real clear drops tracker gof pin without retaining allocations",
+   auto last_v = sh->xfer_gof(*g, 0, 0);
+   guard.commit();
+   tracker.push(static_cast<uint32_t>(dev->idx), pending_xfer{last_v, sh, 0, 0, g});
+-  REQUIRE(g.use_count() >= 2);  // local owner + tracker pin
++  REQUIRE(g.use_count() >= 2);  // local owner + tracker reference
+ 
+-  tracker.clear();            // abandon: drops the pin; NOT completion proof
+-  CHECK(g.use_count() == 1);  // tracker pin dropped
++  tracker.clear();            // abandon: drops the reference; NOT completion proof
++  CHECK(g.use_count() == 1);  // tracker reference dropped
+   allocs.expect_delta(2);     // staging remains because the local owner remains
+ 
+   // clear() is not completion proof, so wait for the real DMA before freeing.

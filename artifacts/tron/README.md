@@ -162,3 +162,41 @@ New prefix this batch: `home-tmp/` mirrors `claude-agentsrv:/home/jhan/tmp/` (th
   - regenerate: unavailable (hand-edited after the workflow; the long draft can be rebuilt by re-running the workflow script)
   - regenerate unverified (no generator or generator unavailable)
 - `random/from-claude/platformd-amx-sst-brief-wf_0dd22299-b33.js` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/platformd-amx-sst-brief-wf_0dd22299-b33.js` (23025 bytes). Workflow script. (handoff: [claude_20261005_amx-and-intel-speed-select-in-platformd.md](../../handoffs/claude_20261005_amx-and-intel-speed-select-in-platformd.md))
+
+## story2814-scratch/ (2026-10-21 preservation batch)
+
+Copied on 2026-10-21 from `delphi-3bda:/scratch/jhan/workspace/story2814/`
+(an NFS share, also mounted on claude-agentsrv) just before that directory was
+deleted to free 21 GiB. The directory held the five PR #2906 / Story 2814
+perf-comparison runs of 2026-06-08 to 06-10 (per run: two tron worktrees with
+builds, Perfetto captures, notes, trace queries) and the PR2906 review-note
+folder. Only the notes, queries, logs and PR2906 files were kept (38 files,
+884 KB). The worktrees are rebuildable from git. The 30 `.trace` captures
+(4.8 GiB) were left behind by size and are gone. Paths under
+`story2814-scratch/` mirror the original paths. The canonical copies no longer
+exist, so these repo copies are now the only copies.
+Related handoffs: handoffs/codex_2026-06-08-2026-06-10_pr-2906-perf-test.md
+(the runs) and
+handoffs/codex_2026-06-08-2026-06-16_story-2814-re-populate-hwcache-block-on-demand.md
+(the PR2906 notes). "HW attention" below is the FPGA attention path
+(`USE_HW_ATTN=1`); "TP2" is a two-device tensor-parallel model.
+
+- `story2814-scratch/compare_perf/runs/20260608_parent_vs_tracing/notes/comparison_summary.md` — parent 576843b18 vs tracing commit 1c6d3fc8e, HW attention on, p256/g256/s64/u8, instance 0,2: -0.648 % new tok/s, plus the trace evidence (xfer_gof slice counts).
+- `story2814-scratch/compare_perf/runs/20260609_f5ea3148_dirty_vs_parent/notes/comparison_summary.md` — f5ea3148 plus tracked dirty diff vs parent 576843b18: -0.225 % new tok/s, +1.156 % xfer_gof.
+- `story2814-scratch/compare_perf/runs/20260609_f5ea3148_dirty_vs_parent/notes/candidate_tracked_diff.patch` — the tracked dirty diff (27,751 bytes) applied to the candidate of that run.
+- `story2814-scratch/compare_perf/runs/20260609_f5ea3148_dirty_vs_parent/queries/trace_slices_candidate.csv`, `.../trace_slices_parent.csv` — Perfetto slice count and total time per trace event, the input of the summary's trace table.
+- `story2814-scratch/compare_perf/runs/20260610_tp2_instance_0_4_ffc2d615_dirty_vs_parent/notes/comparison_summary.md` — corrected TP2 comparison with `--instance 0,4` forced in CLI and `SYSTEM_CONFIG` (the earlier runs inherited `--instance 0,2`): -0.144 % new tok/s, +0.147 % TTLT, -1.110 % xfer_gof.
+- `story2814-scratch/compare_perf/runs/20260610_tp2_instance_0_4_ffc2d615_dirty_vs_parent/notes/candidate_tracked_diff.patch` — the dirty diff of that run (`.gitignore` only).
+- `story2814-scratch/compare_perf/runs/20260610_tp2_instance_0_4_ffc2d615_dirty_vs_parent/queries/trace_slices_candidate.csv`, `.../trace_slices_parent.csv` — slice counts for that run.
+- `story2814-scratch/compare_perf/runs/20260610_222324_longctx_p8000_l256_u4_ffc2d6156a_dirty_vs_576843b189/notes/comparison_summary.md` — long-context run (prompt 8000, length 256, 4 users, instance 0,4), `--iterations 3` and `--isolated-iterations 3`: candidate +0.189 % and +0.258 % new tok/s, with the validation checks of all four captures.
+- `story2814-scratch/compare_perf/runs/20260610_222324_longctx_p8000_l256_u4_ffc2d6156a_dirty_vs_576843b189/notes/run_config.txt` — the run parameters (model, lengths, users, instance, iterations, env).
+- `story2814-scratch/compare_perf/runs/20260610_222324_longctx_p8000_l256_u4_ffc2d6156a_dirty_vs_576843b189/notes/source_status.txt`, `.../source_log_oneline.txt`, `.../base_parent_commit.txt`, `.../candidate_commit.txt`, `.../candidate_tracked_diff.patch`, `.../candidate_tracked_diff_name_status.txt` — git state of the source repo at run time: `git status`, recent log, the two commits, the tracked dirty diff and its name-status list.
+- `story2814-scratch/compare_perf/runs/20260610_222324_longctx_p8000_l256_u4_ffc2d6156a_dirty_vs_576843b189/notes/overall_log_metrics.csv`, `.../per_iteration_log_metrics.csv` — the metric tables parsed from the tronperf logs (overall and per iteration).
+- `story2814-scratch/compare_perf/runs/20260610_222324_longctx_p8000_l256_u4_ffc2d6156a_dirty_vs_576843b189/queries/` — 4 `.sql` trace-slice queries (iterations and isolated, parent and candidate) and their 4 `.csv` outputs.
+- `story2814-scratch/compare_perf/runs/20260610_222324_longctx_p8000_l256_u4_ffc2d6156a_dirty_vs_576843b189/logs/runner.log`, `.../build_base_parent.log`, `.../build_candidate.log` — the unattended runner log (1.1 MB) and the two build logs of that run.
+- `story2814-scratch/PR2906/before_gof_rodeo_split.patch`, `.../before_gof_rodeo_split_note.md` — snapshot of the tracked diff after backing out the experimental `gof_rodeo_impl()` prepare-once fanout split, and the note that compares it byte for byte with the perf-run diff.
+- `story2814-scratch/PR2906/gof_rodeo_prepare_once_fanout_note.md` — the prepare-once fanout experiment (Mike's suggestion to split `gof_rodeo_impl()`) and why it was backed out.
+- `story2814-scratch/PR2906/complete_gof_never_transferred.md` — interpretation of Mike's `backfill_shard()` review comment about complete GOFs that were never transferred.
+- `story2814-scratch/PR2906/inflight_guard_struct_style_note.md`, `.../restore_inflight_guard_class_style.patch` — the `inflight_guard` class-to-struct style change (from commit 857be21be) and the patch that restores the class form.
+- `story2814-scratch/PR2906/delete_model_gof_rodeo_trace_comment_note.md`, `.../restore_model_gof_rodeo_trace_comment.patch` — removal of the GOF-rodeo Perfetto comment in `h/tron/models/model.hpp` and the patch that restores it.
+- Not copied: the run `20260608_hwattn_gof` had empty notes, logs and queries folders (the invalid early comparison without HW attention on the base); the `worktrees/` and `captures/` folders of every run.
