@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRON multi-user attention</title>
+<style>
+/* Light theme only, by user rule. No dark-mode block on purpose. */
+:root{
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+  --blue:#2a78d6; --orange:#eb6834; --aqua:#1baf7a; --yellow:#eda100; --violet:#4a3aa7; --red:#e34948; --green:#008300;
+  --blue-100:#cde2fb; --orange-100:#fbe0d3; --aqua-100:#d4f1e5; --yellow-100:#fdf3d9; --violet-100:#e3dff5; --grey-100:#e6e6e0;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+*{box-sizing:border-box}
+html{color-scheme:light}
+body{margin:0;background:var(--page);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.5}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:28px;line-height:1.2;margin:0 0 6px}
+h2{font-size:22px;margin:48px 0 8px;padding-top:8px;border-top:1px solid var(--grid)}
+h3{font-size:17px;margin:22px 0 6px}
+p{margin:8px 0;max-width:78ch}
+ul,ol{max-width:80ch}
+li{margin:4px 0}
+p,li,td,.take,.cav{overflow-wrap:anywhere}
+code,.mono{font-family:var(--mono);font-size:.92em;background:#f0efec;padding:0 4px;border-radius:3px}
+a{color:#184f95}
+.subtle{color:var(--ink2)}
+.short{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--blue);padding:12px 16px;border-radius:6px;margin:16px 0 20px}
+.short p{margin:4px 0}
+nav.toc{font-size:14px;margin:10px 0 24px;display:flex;flex-wrap:wrap;gap:6px 14px}
+nav.toc a{text-decoration:none;color:var(--ink2);border:1px solid var(--grid);border-radius:14px;padding:2px 10px;background:var(--surface)}
+.fig{min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 14px 10px;margin:14px 0}
+.fig .scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:6px}
+.fig .take{margin:10px 0 0;padding-top:8px;border-top:1px solid var(--grid);font-size:15px}
+.fig .take b{font-weight:600}
+.fig .cav{font-size:13px;color:var(--ink2);margin:6px 0 0}
+.fig .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--ink2);margin:8px 0 0}
+.fig .legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid var(--border);vertical-align:middle}
+svg{display:block;font-family:var(--sans)}
+svg text{fill:var(--ink)}
+svg .lbl{font-size:12px}
+svg .lbl2{font-size:11px;fill:var(--ink2)}
+svg .ttl{font-size:13px;font-weight:600}
+svg .mono{font-family:var(--mono);font-size:11px;background:none}
+dl.words{max-width:90ch}
+dl.words dt{font-weight:600;margin-top:8px}
+dl.words dd{margin:0 0 0 0}
+table.src{border-collapse:collapse;width:100%;font-size:13.5px;background:var(--surface)}
+table.src th,table.src td{border:1px solid var(--grid);padding:5px 8px;vertical-align:top;text-align:left}
+table.src th{background:#f0efec;font-weight:600}
+table.src td.c{font-family:var(--mono);font-size:12px;white-space:nowrap}
+.tablewrap{overflow-x:auto}
+.callout{border:1px solid var(--grid);border-radius:8px;padding:10px 14px;margin:12px 0;background:var(--surface);display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.callout>div{min-width:0}
+.callout .bad{border-left:4px solid var(--red);padding-left:10px}
+.callout .good{border-left:4px solid var(--green);padding-left:10px}
+.callout h4{margin:0 0 4px;font-size:14px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink2)}
+@media (max-width:720px){.callout{grid-template-columns:1fr}}
+.steps li{margin:8px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>TRON multi-user attention: how one decode pass spreads every user's attention across CPU cores and FPGA cards</h1>
+<p class="subtle">Answer to a question logged at Ben Gamari's bootcamp talk "103: Why Inference Is Expensive" (16 October 2026), slides 32 to 34. The slide deck is on Google Drive at <a href="https://drive.google.com/file/d/1Ko2_5VUn9z-SGfhBcCCZYZIDDJKpjAIo/view?usp=sharing">drive.google.com/file/d/1Ko2_5VUn9z-SGfhBcCCZYZIDDJKpjAIo</a>. Written by Claude Code on 2026-10-19 from the TRON source at commit <code>e6c53ba7</code> (branch main, 2026-09-23) in <code>~/workspace/tron</code>. Every file reference is relative to that clone. Updated 2026-10-21: slide link added, and section 4 (what a minibatch is) added.</p>
+
+<div class="short">
+<p><b>Short version.</b> TRON never runs attention one user at a time. On the CPU, all users' KV pages form one list per KV head, the planner cuts that list into equal-work pieces for the attention worker threads, and a visibility mask keeps each query on its own user's pages. On the FPGA, each user's context sits in 1,024-token shards spread round-robin over the cards, so different users' attention commands run on different cards at the same time.</p>
+</div>
+
+<nav class="toc">
+<a href="#s1">1 Ben's slide 33</a>
+<a href="#s2">2 What a user is inside a pass</a>
+<a href="#s3">3 CPU path: one page list, cut across workers</a>
+<a href="#s4">4 What a minibatch is</a>
+<a href="#s5">5 Minibatch level</a>
+<a href="#s6">6 FPGA path: shards across cards</a>
+<a href="#s7">7 What is not done</a>
+<a href="#s8">8 Insufficient data</a>
+<a href="#words">Words used here</a>
+<a href="#src">Sources</a>
+</nav>
+
+<h2 id="s1">1. What Ben's slide 33 says, and why the question follows</h2>
+<p>Slide 33 states the two halves of the batching story in one line each. "Weight matmuls: one read of the weights serves every request in the batch." "Attention: each request reads its own KV cache, alone." [slide 33 of the talk]. The deck is on Google Drive [<a href="https://drive.google.com/file/d/1Ko2_5VUn9z-SGfhBcCCZYZIDDJKpjAIo/view?usp=sharing">drive.google.com/file/d/1Ko2_5VUn9z-SGfhBcCCZYZIDDJKpjAIo</a>].</p>
+<p>The projection step multiplies each user's hidden vector by the Q, K and V weight matrices. Stacking four users' vectors as rows lets one weight read serve all four. Attention has no shared operand. User A's query meets user A's keys and values, which no other user needs. So there is nothing to batch, and the only lever left is to spread the work over more hardware. The rest of this page shows where TRON spreads it.</p>
+
+<div class="fig" id="figA">
+<div class="scroll"><svg id="svgA" width="980" height="250" viewBox="0 0 980 250" role="img" aria-label="Projection shares the weights, attention does not"></svg></div>
+<p class="take"><b>Takeaway:</b> the left side has one shared box (the weights). The right side has four separate boxes and nothing between them. That absence is the question.</p>
+</div>
+
+<h2 id="s2">2. What a "user" is inside one decode pass</h2>
+<ul>
+<li>Each active request adds one new token to the pass, so a pass with four decoding users has four queries. The scheduler collects them in one depth-first walk of the token tree [doc/attention-scheduling.md, section 1].</li>
+<li>The walk writes every visited token into one flat list, <code>tokens[]</code>, and every KV page it may read into <code>kv_pages[]</code> [doc/attention-scheduling.md, sections 1.3 and 2.1].</li>
+<li>A ranged mask records, for each range of tokens, the set of queries that may read it [doc/hw-kv-attn-work.md]. Pages on user A's branch carry a bit for A's query only. Pages of a shared prefix carry bits for every user under it.</li>
+<li>The attention kernel never asks "which user". It asks "may query j read this range" [h/tron/models/self_attention.hpp:1503].</li>
+</ul>
+
+<div class="fig" id="figB">
+<div class="scroll"><svg id="svgB" width="1000" height="330" viewBox="0 0 1000 330" role="img" aria-label="Token tree, flat page list, and the visibility mask"></svg></div>
+<div class="legend"><span><i class="sw" style="background:var(--grey-100)"></i>shared prefix S</span><span><i class="sw" style="background:var(--blue-100)"></i>user A</span><span><i class="sw" style="background:var(--orange-100)"></i>user B</span><span><i class="sw" style="background:var(--aqua-100)"></i>user C</span><span><i class="sw" style="background:var(--violet-100)"></i>user D</span><span><i class="sw" style="background:#0b0b0b"></i>mask bit set: the query may read the page</span></div>
+<p class="take"><b>Takeaway:</b> the pass sees 11 pages and 4 queries, not 4 users. The mask is the only place where "user" survives, as a pattern of bits.</p>
+<p class="cav">Mock sizes: 2 shared pages and 2, 4, 1 and 2 private pages. Real pages hold 64 entries each [h/tron/models/kv_cache.hpp:1713]. One KV head is drawn.</p>
+</div>
+
+<h2 id="s3">3. The CPU path: one page list per KV head, cut across workers</h2>
+<p>The design note in the kernel states the plan. The kernel iterates by KV page, not by query, and "processes all the relevant query positions for each KV-cache page". It parallelizes "over KV heads" and "along the KV-page dimension" [h/tron/models/self_attention.hpp:1287-1372]. Five steps turn that into threads.</p>
+<ol class="steps">
+<li><b>One page list per minibatch and per KV head.</b> <code>select_relevant_pages</code> keeps a page when at least one query of the minibatch may read it. It ranks each page by the first query that sees it and sorts by that rank [h/tron/models/model.hpp:2340-2393]. Queries are in walk order, so the sorted list comes out grouped by user: shared pages first, then A's pages, then B's, and so on.</li>
+<li><b>Work per page.</b> <code>estimate_work</code> counts, for every page, the dot products each query needs over it [h/tron/models/model.hpp:2395-2470]. A shared page read by four queries costs four times a private page.</li>
+<li><b>The cut.</b> <code>finish_sw_plan</code> walks KV head by KV head and page by page. It moves to the next worker when the running work total crosses that worker's share [h/tron/models/model.hpp:2719-2790]. The shares come from the measured speed of each worker thread [h/tron/models/model.hpp:2233-2250]. Each worker ends with one or more <code>kv_section</code>s: one KV head plus a run of pages [h/tron/models/common.hpp:696-706].</li>
+<li><b>Run.</b> Each worker loops over its sections [h/tron/models/self_attention.hpp:1098-1121]. For each page it loops over every query of the minibatch and asks the mask whether that query may see the page [h/tron/models/self_attention.hpp:1500-1503]. Only the owner's query, and any shared-prefix readers, pass the gate. The page's K and V bytes then serve each passing query in turn. The four query heads of one GQA group are handled inside that call [h/tron/models/self_attention.hpp:1287-1372].</li>
+<li><b>Join.</b> Each worker holds a partial softmax state (m*, s*, v*) per query and head. The join reduces the partials from every worker into worker 0's scratchpad and writes the output rows. The join is parallel across queries, and each worker joins only the KV heads it computed [h/tron/models/self_attention.hpp:1134-1200].</li>
+</ol>
+
+<div class="fig" id="figC">
+<div class="scroll"><svg id="svgC" width="1120" height="335" viewBox="0 0 1120 335" role="img" aria-label="One page list per KV head cut across four attention workers"></svg></div>
+<div class="legend"><span><i class="sw" style="background:var(--grey-100)"></i>shared S (4 queries read it)</span><span><i class="sw" style="background:var(--blue-100)"></i>A</span><span><i class="sw" style="background:var(--orange-100)"></i>B</span><span><i class="sw" style="background:var(--aqua-100)"></i>C</span><span><i class="sw" style="background:var(--violet-100)"></i>D</span><span>number in a box = work units (queries that read the page)</span></div>
+<p class="take"><b>Takeaway:</b> no worker is "user A's worker". Worker 0 serves four users on head 0 (the shared pages plus A's first page). Worker 1 serves A, B, C and D on head 0. User A's head-0 pages straddle workers 0 and 1, so A's head-0 result is joined from two scratchpads. User parallelism is a by-product of page parallelism, balanced by work, not by user count.</p>
+<p class="cav">Work-weighted cut, schematic. The real planner weights each page by its estimated dot products and the worker's measured speed, and it orders pages that receive new K/V this pass after the ready pages of the same head [h/tron/models/model.hpp:2762-2790]. Four workers of equal speed are drawn.</p>
+</div>
+
+<p>When the FPGA has taken most of the context, or a sliding window has trimmed it, there can be fewer pages than workers. The planner then splits single-page sections by query range, so several workers serve the same page for different queries [h/tron/models/model.hpp:2793-2850].</p>
+
+<div class="callout">
+<div class="bad"><h4>Common picture</h4><p>Each user's attention is a task. TRON hands user A to one thread, user B to another, and so on. With more users than threads, users queue.</p></div>
+<div class="good"><h4>What the code does</h4><p>Each (KV head, run of pages) is a task. Users are invisible below the mask. A long context is cut across several threads. Several short contexts share one thread. The cut follows estimated work.</p></div>
+</div>
+
+<h2 id="s4">4. What a minibatch is</h2>
+<p>A minibatch is a subset of the queries of one pass that moves through the model's layers as one unit. In the code it is one <code>struct batch</code> object, and the list of them is named <code>q_batches</code> for historical reasons [h/tron/models/common.hpp:956-962 and 991]. The design note warns that the word is "not to be confused with numerous other ways in which 'batching' is used in ML" [h/tron/models/common.hpp:938-939]. ML means machine learning.</p>
+<ul>
+<li><b>Not Ben's batch.</b> The slides use "batch" for the set of requests served together. In TRON that set is the whole pass. A minibatch is a cut of that pass.</li>
+<li><b>Not a request.</b> One minibatch can hold several users' queries. One long prompt can be cut across two minibatches.</li>
+<li><b>Why it exists.</b> The FPGA runs the matmuls and the CPU runs attention. With two minibatches the FPGA can run the matmuls of one while the CPU runs the attention of the other [h/tron/models/common.hpp:930-942]. With one minibatch each side waits for the other.</li>
+</ul>
+
+<h3>How a pass is cut into minibatches</h3>
+<ol class="steps">
+<li><b>Label.</b> During the tree walk the scheduler gives every token of the pass a group label. A token whose parent is also computed in this pass inherits the parent's label. Any other token starts a new label [h/tron/scheduler/full.hpp:2387-2389 and 2471-2473]. In a decode pass each user's new token sits under a cached parent, so each user gets its own label. In a prefill pass (the pass that processes a new prompt) one prompt chunk shares one label. The label is a cheap stand-in for "these tokens share KV pages" [h/tron/models/model.hpp:198-203].</li>
+<li><b>Grains.</b> <code>chunk_evenly</code> collects the tokens by label and cuts each group into grains of at most 8 tokens. A grain is never split again [h/tron/models/model.hpp:217-230; h/tron/models/common.hpp:310-315]. One fix follows: the even and odd token offsets of one KV page must stay in the same minibatch, because the V write packs the pair into one SIMD (single instruction, multiple data) register value [h/tron/models/model.hpp:232-237].</li>
+<li><b>Target count.</b> The target is the query count divided by the plugin's cap, rounded up. The cap is 128 queries in the hand-written llama plugin [h/tron/models/model.hpp:240; h/tron/plugins/llama.hpp:184]. A target of 1 is raised to 2 when the pass has more than one label or more than 8 tokens, "to enable FPGA-vs-CPU latency hiding" [h/tron/models/model.hpp:245-249]. The runtime flag <code>--max-minibatches</code> can cap the count, and its default of -1 means no cap [h/tron/models/config.hpp:62; src/runtron.cpp:1034]. Generated (ingested) plugins set a cap of 1 minibatch of up to 1,024 queries [ingest/src/TronCpp.hs:262-263].</li>
+<li><b>Greedy merge.</b> Grains are visited in order. A grain joins the current chunk when the chunk stays under the cap and the new size is at least as close to the target size as the old size. Otherwise the grain starts the next chunk [h/tron/models/model.hpp:250-265]. If one chunk comes out and it holds more than 8 tokens, it is split in half [h/tron/models/model.hpp:267-276].</li>
+<li><b>Objects.</b> <code>batch_evenly</code> turns each chunk into one <code>struct batch</code> whose <code>items</code> are the chunk's token jobs. Each creation is a "Create minibatch" trace event [h/tron/models/model.hpp:344-367].</li>
+</ol>
+
+<div class="fig" id="figM">
+<div class="scroll"><svg id="svgM" width="1000" height="360" viewBox="0 0 1000 360" role="img" aria-label="Two passes cut into minibatches: four decode users, and one 20-token prompt"></svg></div>
+<p class="take"><b>Takeaway:</b> four decode users become two minibatches of two users. One 20-token prompt becomes two minibatches of 8 and 12 tokens. The cut follows labels and grains, not users.</p>
+<p class="cav">Computed with a Python mirror of <code>chunk_evenly</code> (same rules, without the even/odd pair fix), not observed in a TRON run. The fix changes nothing here if the prompt starts at an even page offset. Mirror: <code>TRON-multiuser-attention-chunk-mirror.py</code> next to this page.</p>
+</div>
+
+<h3>Worked examples, computed</h3>
+<p>The table lists what the mirror of <code>chunk_evenly</code> returns for a few passes. The cap is 128 queries and the count is unlimited unless the row says otherwise. These are computed values, not measurements.</p>
+<div class="tablewrap">
+<table class="src">
+<tr><th>Pass</th><th>Queries</th><th>Labels</th><th>Grains</th><th>Target count</th><th>Target size</th><th>Minibatch sizes</th></tr>
+<tr><td>4 decode users</td><td class="c">4</td><td class="c">4</td><td class="c">1, 1, 1, 1</td><td class="c">2</td><td class="c">2</td><td class="c">2, 2</td></tr>
+<tr><td>6 decode users</td><td class="c">6</td><td class="c">6</td><td class="c">6 × 1</td><td class="c">2</td><td class="c">3</td><td class="c">3, 3</td></tr>
+<tr><td>1 decode user (one label, 8 tokens or fewer, so no split)</td><td class="c">1</td><td class="c">1</td><td class="c">1</td><td class="c">1</td><td class="c">1</td><td class="c">1</td></tr>
+<tr><td>200 decode users</td><td class="c">200</td><td class="c">200</td><td class="c">200 × 1</td><td class="c">2</td><td class="c">100</td><td class="c">100, 100</td></tr>
+<tr><td>300 decode users</td><td class="c">300</td><td class="c">300</td><td class="c">300 × 1</td><td class="c">3</td><td class="c">100</td><td class="c">100, 100, 100</td></tr>
+<tr><td>1 prompt of 20 tokens</td><td class="c">20</td><td class="c">1</td><td class="c">8, 8, 4</td><td class="c">2</td><td class="c">10</td><td class="c">8, 12</td></tr>
+<tr><td>1 prompt of 300 tokens</td><td class="c">300</td><td class="c">1</td><td class="c">37 × 8, 4</td><td class="c">3</td><td class="c">100</td><td class="c">104, 104, 92</td></tr>
+<tr><td>1 prompt of 20 tokens + 3 decode users</td><td class="c">23</td><td class="c">4</td><td class="c">8, 8, 4, 1, 1, 1</td><td class="c">2</td><td class="c">12</td><td class="c">16, 7</td></tr>
+<tr><td>4 decode users, generated plugin (count 1, cap 1,024)</td><td class="c">4</td><td class="c">4</td><td class="c">1, 1, 1, 1</td><td class="c">1</td><td class="c">4</td><td class="c">4</td></tr>
+<tr><td>1 prompt of 300 tokens, generated plugin</td><td class="c">300</td><td class="c">1</td><td class="c">37 × 8, 4</td><td class="c">1</td><td class="c">300</td><td class="c">300</td></tr>
+</table>
+</div>
+<p>Two rows show that the merge is greedy, not optimal. The 300-token prompt ends as 104, 104 and 92, because a grain joins while the new size is at least as close to the target as the old size, and 104 ties with 96 at a distance of 4. The prompt plus three users ends as 16 and 7, because the second grain of 8 ties with the first at a distance of 4 from the target of 12 and joins it [h/tron/models/model.hpp:259-262].</p>
+
+<h3>What one minibatch holds</h3>
+<div class="fig" id="figN">
+<div class="scroll"><svg id="svgN" width="1000" height="345" viewBox="0 0 1000 345" role="img" aria-label="Fields of struct batch, the object behind one minibatch"></svg></div>
+<p class="take"><b>Takeaway:</b> a minibatch is more than a list of queries. It carries its own layer counter, its own attention plans and FPGA passes, and the latches that let the main thread and the attention workers hand work to each other.</p>
+</div>
+
+<h3>How minibatches move through the layers</h3>
+<ul>
+<li>Each minibatch carries its own layer counter. The field comment gives the picture: "batch A can compute e.g. attention in layer 2 while batch B computes feed-forwards in layer 1" [h/tron/models/common.hpp:1083-1086].</li>
+<li>The main thread's loop is layer-outer and minibatch-inner. For each layer it visits every minibatch in turn and launches that minibatch's output projection and feed-forward on the FPGA. The code calls this "alternating feed forwards of one q_batch with attention of the next" [h/tron/plugins/llama.hpp:650-659 and 86-95].</li>
+<li>The attention workers loop over attention operations, then over minibatches, then over the tokens of the minibatch [h/tron/plugins/llama.hpp:56-67].</li>
+<li>A query in one minibatch can need a K or V that a token in another minibatch writes in this pass, for example when a prompt is cut into two chunks. Three fields per minibatch track that: which minibatches to notify, how many K/V producers to wait for, and how many have finished [h/tron/models/common.hpp:964-989 and 1143-1154].</li>
+<li>Each minibatch gets its own page list per layer profile and its own attention plan, as section 3 describes [h/tron/models/model.hpp:2340-2393; h/tron/models/common.hpp:1100-1128].</li>
+</ul>
+
+<h2 id="s5">5. Minibatch level: two groups of users take turns on the CPU and the FPGA</h2>
+<ul>
+<li>Section 4 shows the cut. Each decoding user gets its own label, and a pass of 2 to 128 such users is cut into two minibatches of near-equal size [h/tron/models/model.hpp:240-265]. Generated (ingested) plugins pin the count to 1 [ingest/src/TronCpp.hs:262].</li>
+<li>So a hand-written llama-plugin pass with four decoding users runs two minibatches of two users each. While the attention workers compute minibatch 0's attention on the CPU, the main thread and the FPGAs run minibatch 1's matmuls. Then the roles swap [h/tron/models/common.hpp:928-960, Note Mini-batching].</li>
+<li>The attention workers are the last pool threads. Their count is the pool size minus the main helpers [h/tron/models/model.hpp:2233-2250]. The split is pinned at 2/7 of the pool to main helpers when there is one minibatch or in determinism mode, and otherwise autotuned to equalize the predicted CPU attention time and main-thread time [h/tron/models/model.hpp:1977-2016]. At most half the pool goes to main helpers [h/tron/models/model.hpp:76-78].</li>
+</ul>
+
+<div class="fig" id="figD">
+<div class="scroll"><svg id="svgD" width="980" height="210" viewBox="0 0 980 210" role="img" aria-label="Schematic lanes: FPGA matmuls of one minibatch overlap CPU attention of the other"></svg></div>
+<p class="take"><b>Takeaway:</b> this is the second level of multi-user parallelism. Users in minibatch 0 are in attention while users in minibatch 1 are in projection, and then they swap.</p>
+<p class="cav">Schematic only. Block order follows the code. Durations are not measured and are not to scale.</p>
+</div>
+
+<h2 id="s6">6. The FPGA path: shards spread across cards</h2>
+<ul>
+<li>The FPGA attends only on full-causal layers, and only over positions at or above the engagement point, 127 by default. Everything below stays on the CPU [h/tron/models/self_attention.hpp:487-494; h/libpos.hpp:85-91].</li>
+<li>A context's FPGA-eligible K and V are stored in shards of 1,024 tokens. Each shard lives in the HBM of one card [h/tron/shard.hpp:1-30; h/tron/gof.hpp:36]. The scheduler picks the card round-robin when it creates the shard [h/tron/scheduler/full.hpp:1924-1925 and 2545-2583]. Consecutive shards of one context therefore land on different cards.</li>
+<li><code>construct_hw_plan</code> groups a context's shards by card, cuts each card's group into chunks of at most the on-chip memory limit (4 shards, 4,096 tokens), and makes one pass per (card, chunk) [h/tron/models/model.hpp:2486-2612; h/tron/models/common.hpp:742-751]. A pass is one command on one card.</li>
+<li>Several queries share one pass only when they have the identical shard list on that card and their end positions are equal or adjacent, up to 32 queries per pass [h/tron/models/model.hpp:2604 and 2646-2700; h/libpos.hpp:32]. Independent decoding users never meet that test, so each has its own passes. Users that share a prefix can ride one command over the shared shards [h/tron/models/model.hpp:2570-2576].</li>
+<li>One loop launches every pass of the layer. Each card retires its passes in launch order, and the CPU join folds each pass's partial result in as it completes [h/tron/models/self_attention.hpp:676-685; h/tron/models/common.hpp:772-776].</li>
+</ul>
+
+<div class="fig" id="figE">
+<div class="scroll"><svg id="svgE" width="1000" height="380" viewBox="0 0 1000 380" role="img" aria-label="Shards of three users placed round-robin on four cards, and the passes each card runs"></svg></div>
+<div class="legend"><span><i class="sw" style="background:var(--blue-100)"></i>card 0</span><span><i class="sw" style="background:var(--orange-100)"></i>card 1</span><span><i class="sw" style="background:var(--aqua-100)"></i>card 2</span><span><i class="sw" style="background:var(--yellow-100)"></i>card 3</span><span><i class="sw" style="background:#fff;border-style:dashed"></i>CPU: positions below 127 and the newest partial shard</span></div>
+<p class="take"><b>Takeaway:</b> the FPGA parallelism is also not per user. It is per (card, shard chunk). User A's 5 shards become 4 passes on 4 cards. Users B and C add passes that land on the other cards. All passes launch together.</p>
+<p class="cav">Placement is illustrative. The round-robin index advances on every shard creation across all users, so the exact card of a given shard depends on history [h/tron/scheduler/full.hpp:2545-2583]. Three users with 5, 3 and 2 shards are drawn, no shared prefix.</p>
+</div>
+
+<h2 id="s7">7. What TRON does not do, and what that costs</h2>
+<ul>
+<li>There is no cross-user matmul in attention. The projection stacks users as rows of one matmul. Attention never stacks users into one operand, because each user has different K and V.</li>
+<li>The only cross-user sharing is a shared-prefix page or shard. The CPU kernel visits such a page once per worker and serves every query that may read it [h/tron/models/self_attention.hpp:1494-1560]. The FPGA planner can put several users' queries on one command over the shared shards [h/tron/models/model.hpp:2570-2576].</li>
+<li>Total attention work in a pass is the sum over users of context length times KV heads. Parallelism cuts wall time, not bytes. That is slide 34 of the talk: "KV cache reads dominate once batch size × context passes about 10k tokens" [slide 34].</li>
+</ul>
+
+<h2 id="s8">8. Insufficient data</h2>
+<ul>
+<li><b>Attention worker count on a given server.</b> It depends on the thread-pool size and the autotuned split. Resolving measurement: the pool size from <code>app_pool().num_workers()</code> and the main-helper count from a Perfetto trace of one pass on delphi-3bda.</li>
+<li><b>Time per step of a decode pass.</b> No trace was taken for this page. Resolving measurement: a Perfetto trace of one 4-user decode pass [README.perfetto.md].</li>
+<li><b>Concurrency of the four cards' attention passes.</b> The launch is one loop and each card retires in launch order, but the overlap between cards is not measured here. Resolving measurement: per-pass launch and completion timestamps from the same trace.</li>
+<li><b>Minibatch sizes in a real pass.</b> The worked examples in section 4 are computed from a mirror of <code>chunk_evenly</code>, not observed. Resolving measurement: the "Create minibatch" trace events of one pass in a Perfetto trace, one per minibatch [h/tron/models/model.hpp:362], read together with each minibatch's item count.</li>
+<li><b>Shared-prefix savings on the CPU path.</b> Counters exist behind <code>TRON_PAGE_SHARE_COUNTERS</code> [h/tron/models/self_attention.hpp:1431-1571] and were not run.</li>
+</ul>
+
+<h2 id="words">Words used here</h2>
+<dl class="words">
+<dt>TRON</dt><dd>Positron's inference engine. It runs LLM (large language model) forward passes with the host CPU and the Positron FPGA (field-programmable gate array) cards.</dd>
+<dt>decode pass</dt><dd>One forward pass that produces one new token for every active request. One call of <code>full_scheduler::forward()</code>.</dd>
+<dt>user, request</dt><dd>One conversation being served. Inside a pass TRON has no user id. A request is a branch of the token tree.</dd>
+<dt>token tree</dt><dd>The structure that stores every active conversation as a path from a shared root, so a common prompt is stored once.</dd>
+<dt>KV cache page</dt><dd>A block of 64 key/value entries for one layer, held in host memory. The unit the CPU attention kernel works in.</dd>
+<dt>KV head, GQA</dt><dd>One key/value head. With grouped-query attention (GQA) one KV head serves several query heads, 4 in Llama 3 8B.</dd>
+<dt>minibatch</dt><dd>A subset of this pass's queries that moves through the layers together. Not a request and not a training batch. Section 4 explains how it is built.</dd>
+<dt>label, grain, chunk</dt><dd>The three stages of the cut in section 4. A label marks tokens that share KV pages. A grain is a run of up to 8 tokens of one label that is never split. A chunk is a merged run of grains that becomes one minibatch.</dd>
+<dt>attention worker, main helper</dt><dd>Thread-pool threads. Attention workers run CPU attention. Main helpers feed the FPGA matmuls and do the other CPU work.</dd>
+<dt>kv_section</dt><dd>One unit of attention-worker work: one KV head plus a run of pages, and optionally a query sub-range.</dd>
+<dt>ranged mask</dt><dd>A per-pass table saying which queries may read which token ranges. It encodes causality and user isolation.</dd>
+<dt>join</dt><dd>The reduction that merges partial softmax states (running maximum m*, running sum s*, weighted value sum v*) from several workers or FPGA passes into one result per query head.</dd>
+<dt>shard</dt><dd>1,024 consecutive tokens of one context whose K and V live in the HBM (high-bandwidth memory) of one FPGA card.</dd>
+<dt>engagement point</dt><dd>The first sequence position the FPGA may attend over, 127 by default. Positions below it stay on the CPU.</dd>
+<dt>pass (FPGA)</dt><dd>One FPGA attention command: one card, up to 4 of its shards, and the queries that share them.</dd>
+<dt>TP4</dt><dd>Four FPGA cards serving one model, with the weight matrices split among them.</dd>
+<dt>matmul</dt><dd>Matrix multiplication. The projections and the FFN of each layer are matmuls, and TRON runs them on the FPGA.</dd>
+<dt>FFN</dt><dd>Feed-forward network: the matmuls of a layer that follow attention.</dd>
+<dt>prefill pass, decode pass</dt><dd>A prefill pass processes a new prompt, many tokens of one request at once. A decode pass adds one token per request.</dd>
+<dt>Perfetto</dt><dd>The trace format and viewer that TRON's trace events go to [README.perfetto.md].</dd>
+<dt>runtron</dt><dd>The TRON command-line runner, <code>src/runtron.cpp</code>.</dd>
+</dl>
+
+<h2 id="src">Sources</h2>
+<div class="tablewrap">
+<table class="src">
+<tr><th>What it shows</th><th>Where</th></tr>
+<tr><td>Slide 33: weights shared, attention per request. Slide 34: KV reads dominate past about 10k tokens of batch × context.</td><td class="c"><a href="https://drive.google.com/file/d/1Ko2_5VUn9z-SGfhBcCCZYZIDDJKpjAIo/view?usp=sharing">drive.google.com/file/d/1Ko2_5VUn9z-SGfhBcCCZYZIDDJKpjAIo</a> (Bootcamp 2026-10, 103, Ben Gamari)</td></tr>
+<tr><td>Design note: iterate by page, all relevant queries per page, parallel over KV heads and pages.</td><td class="c">h/tron/models/self_attention.hpp:1287-1372</td></tr>
+<tr><td>kv_section: one KV head plus a page run, optional query range.</td><td class="c">h/tron/models/common.hpp:696-706</td></tr>
+<tr><td>Page list per minibatch, ranked by the first query that sees the page.</td><td class="c">h/tron/models/model.hpp:2340-2393</td></tr>
+<tr><td>Work estimate per page.</td><td class="c">h/tron/models/model.hpp:2395-2470</td></tr>
+<tr><td>Cut of pages across workers by cumulative work and worker speed, with the ASCII figure.</td><td class="c">h/tron/models/model.hpp:2719-2790</td></tr>
+<tr><td>Split of single-page sections by query range.</td><td class="c">h/tron/models/model.hpp:2793-2850</td></tr>
+<tr><td>Worker section loop and the per-page query loop with the mask gate.</td><td class="c">h/tron/models/self_attention.hpp:1098-1121, 1494-1560</td></tr>
+<tr><td>Join parallelism scheme.</td><td class="c">h/tron/models/self_attention.hpp:1134-1200</td></tr>
+<tr><td>Attention workers are the last pool workers; speed-weighted plan.</td><td class="c">h/tron/models/model.hpp:2233-2250</td></tr>
+<tr><td>Main-helper versus attention-worker split.</td><td class="c">h/tron/models/model.hpp:76-78, 1977-2016</td></tr>
+<tr><td>chunk_evenly header comment: group kinds, minimize splits, labels as a stand-in for KV affinity.</td><td class="c">h/tron/models/model.hpp:190-203</td></tr>
+<tr><td>chunk_evenly: labels to groups, grains of 8, even/odd pair fix, target count, greedy merge, lone-chunk split.</td><td class="c">h/tron/models/model.hpp:209-276; h/tron/plugins/llama.hpp:183-184; h/tron/scheduler/full.hpp:2387-2389, 2471-2473; ingest/src/TronCpp.hs:262-263</td></tr>
+<tr><td>batch_evenly: one struct batch per chunk, "Create minibatch" trace event.</td><td class="c">h/tron/models/model.hpp:344-367</td></tr>
+<tr><td>Minibatch count flag --max-minibatches, default -1 (no cap).</td><td class="c">h/tron/models/config.hpp:62, 102-109; src/runtron.cpp:1034</td></tr>
+<tr><td>Note Mini-batching: definition, why (FPGA matmuls overlap CPU attention), grouping start, struct batch, the name q_batches.</td><td class="c">h/tron/models/common.hpp:928-962</td></tr>
+<tr><td>struct batch fields: items, layer counter, attention plans, FPGA plan, latches, dependency counters, plugin_batch.</td><td class="c">h/tron/models/common.hpp:991-1163</td></tr>
+<tr><td>Note Minibatch Dependency Tracking: cross-minibatch K/V dependencies.</td><td class="c">h/tron/models/common.hpp:964-989</td></tr>
+<tr><td>llama plugin pseudo-code (attention workers: operation, minibatch, token) and the main loop (layer, minibatch).</td><td class="c">h/tron/plugins/llama.hpp:47-96, 650-659</td></tr>
+<tr><td>Python mirror of chunk_evenly that computed the worked-example table.</td><td class="c">~/workspace/random/from-claude/TRON-multiuser-attention-chunk-mirror.py</td></tr>
+<tr><td>Flat token list, lo/hi visibility, join phase.</td><td class="c">doc/attention-scheduling.md; doc/hw-kv-attn-work.md</td></tr>
+<tr><td>FPGA only on full-causal layers.</td><td class="c">h/tron/models/self_attention.hpp:487-494</td></tr>
+<tr><td>Engagement point 127.</td><td class="c">h/libpos.hpp:85-91; h/tron/models/hw_attn_config.hpp:18-22</td></tr>
+<tr><td>Shard = 1,024 tokens on one card; round-robin card choice.</td><td class="c">h/tron/shard.hpp:1-30; h/tron/gof.hpp:36; h/tron/scheduler/full.hpp:1924-1925, 2545-2583</td></tr>
+<tr><td>FPGA plan: group by card, chunk by shard cap, one pass per (card, chunk); query merge rules; 32-query cap.</td><td class="c">h/tron/models/model.hpp:2486-2700; h/tron/models/common.hpp:742-751; h/libpos.hpp:32</td></tr>
+<tr><td>Launch loop over passes; per-card retirement in launch order.</td><td class="c">h/tron/models/self_attention.hpp:676-685; h/tron/models/common.hpp:772-776</td></tr>
+<tr><td>Earlier concept page (commit 9b11a912) for the token tree, pages, mask and minibatch mock.</td><td class="c">~/workspace/random/from-claude/TRON-concepts-claude.html</td></tr>
+</table>
+</div>
+
+<script>
+(function(){
+const NS='http://www.w3.org/2000/svg';
+const C={S:'#e6e6e0',A:'#cde2fb',B:'#fbe0d3',C:'#d4f1e5',D:'#e3dff5',
+         c0:'#cde2fb',c1:'#fbe0d3',c2:'#d4f1e5',c3:'#fdf3d9'};
+const STROKE={S:'#898781',A:'#2a78d6',B:'#eb6834',C:'#1baf7a',D:'#4a3aa7',
+              c0:'#2a78d6',c1:'#eb6834',c2:'#1baf7a',c3:'#eda100'};
+function el(svg,tag,attrs,text){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;svg.appendChild(e);return e;}
+function box(svg,x,y,w,h,fill,stroke,label,cls){el(svg,'rect',{x,y,width:w,height:h,fill,stroke:stroke||'#c3c2b7',rx:3});if(label!=null)el(svg,'text',{x:x+w/2,y:y+h/2+4,'text-anchor':'middle','class':cls||'lbl'},label);}
+function txt(svg,x,y,s,cls,anchor){el(svg,'text',{x,y,'class':cls||'lbl','text-anchor':anchor||'start'},s);}
+function bracket(svg,x1,x2,y,label,up,color){const d=up?-6:6;el(svg,'path',{d:`M${x1} ${y} v${d} H${x2} v${-d}`,fill:'none',stroke:color||'#52514e','stroke-width':1.2});txt(svg,(x1+x2)/2,up?y-10:y+18,label,'lbl','middle');}
+function arrow(svg,x1,y1,x2,y2,dash){el(svg,'line',{x1,y1,x2,y2,stroke:'#52514e','stroke-width':1.2,'marker-end':'url(#arr)','stroke-dasharray':dash?'4 3':'none'});}
+function defs(svg){const d=el(svg,'defs',{});const m=document.createElementNS(NS,'marker');for(const [k,v] of Object.entries({id:'arr',viewBox:'0 0 10 10',refX:'9',refY:'5',markerWidth:'7',markerHeight:'7',orient:'auto-start-reverse'}))m.setAttribute(k,v);const p=document.createElementNS(NS,'path');p.setAttribute('d','M0 0L10 5L0 10z');p.setAttribute('fill','#52514e');m.appendChild(p);d.appendChild(m);}
+
+/* ---------- Figure A: projection shares the weights, attention does not ---------- */
+(function(){
+const s=document.getElementById('svgA');defs(s);
+txt(s,20,24,'Projection (Q, K, V weights): one matmul, four rows','ttl');
+const users=['A','B','C','D'];
+users.forEach((u,i)=>box(s,30,50+i*34,70,26,C[u],STROKE[u],'h_'+u));
+txt(s,65,195,'hidden vectors','lbl2','middle');
+txt(s,120,120,'×','ttl','middle');
+box(s,140,50,120,130,'#f0efec','#898781','W (shared)');
+txt(s,200,195,'read once','lbl2','middle');
+txt(s,280,120,'=','ttl','middle');
+users.forEach((u,i)=>box(s,300,50+i*34,70,26,C[u],STROKE[u],'q_'+u));
+txt(s,335,195,'queries','lbl2','middle');
+el(s,'line',{x1:470,y1:20,x2:470,y2:230,stroke:'#e1e0d9'});
+txt(s,500,24,'Attention: four separate reads, nothing shared','ttl');
+users.forEach((u,i)=>{const y=50+i*44;box(s,510,y,56,26,C[u],STROKE[u],'q_'+u);arrow(s,570,y+13,600,y+13);box(s,602,y,190,26,C[u],STROKE[u],'K_'+u+', V_'+u+' pages of '+u+' only');arrow(s,796,y+13,826,y+13);box(s,828,y,70,26,C[u],STROKE[u],'o_'+u);});
+txt(s,700,236,'no box is shared between rows','lbl2','middle');
+})();
+
+/* ---------- Figure B: tree -> flat list -> mask ---------- */
+(function(){
+const s=document.getElementById('svgB');defs(s);
+txt(s,20,22,'Token tree (one pass, 4 users)','ttl');
+box(s,60,40,80,26,C.S,STROKE.S,'S: 2 pages');
+const kids=[['A',2],['B',4],['C',1],['D',2]];
+kids.forEach(([u,n],i)=>{const y=90+i*48;arrow(s,100,66,100,y-2);box(s,60,y,80,26,C[u],STROKE[u],u+': '+n+(n>1?' pages':' page'));txt(s,150,y+17,'q_'+u+' (new token)','lbl2');});
+el(s,'line',{x1:290,y1:14,x2:290,y2:320,stroke:'#e1e0d9'});
+txt(s,310,22,'Flat page list kv_pages[] in walk order, one KV head','ttl');
+const pages=[['S',1],['S',2],['A',1],['A',2],['B',1],['B',2],['B',3],['B',4],['C',1],['D',1],['D',2]];
+const x0=380,w=50;
+pages.forEach(([u,k],i)=>box(s,x0+i*(w+4),40,w,26,C[u],STROKE[u],u+k));
+txt(s,x0-6,57,'page','lbl2','end');
+txt(s,310,100,'Ranged mask: which query may read which page','ttl');
+const qs=['A','B','C','D'];
+qs.forEach((u,r)=>{const y=112+r*40;txt(s,x0-6,y+17,'q_'+u,'lbl','end');pages.forEach(([pu,k],i)=>{const on=(pu==='S'||pu===u);box(s,x0+i*(w+4),y,w,26,on?'#0b0b0b':'#fff',on?'#0b0b0b':'#c3c2b7',on?'1':'0',on?'mono':'mono');if(on){s.lastChild.setAttribute('fill','#fff');}});});
+txt(s,x0,296,'Row q_A reads S1, S2, A1, A2 and nothing else. Columns S1 and S2 are the only ones read by every row.','lbl2');
+txt(s,x0,314,'The kernel reads these bits [self_attention.hpp:1503]. It never reads a user id.','lbl2');
+})();
+
+/* ---------- Figure C: one page list per KV head cut across workers ---------- */
+(function(){
+const s=document.getElementById('svgC');defs(s);
+const pages=[['S',1,4],['S',2,4],['A',1,1],['A',2,1],['B',1,1],['B',2,1],['B',3,1],['B',4,1],['C',1,1],['D',1,1],['D',2,1]];
+const w=40,g=3,x0=70,y0=70,h=30;
+txt(s,20,24,'Attention plan for one minibatch (queries q_A, q_B, q_C, q_D): the page list of each KV head, cut across 4 workers by work','ttl');
+// head brackets
+const seqX=i=>x0+i*(w+g);
+bracket(s,seqX(0),seqX(10)+w,y0-8,'KV head 0: 11 pages, 17 work units',true,'#52514e');
+bracket(s,seqX(11),seqX(21)+w,y0-8,'KV head 1: the same 11 pages, 17 work units',true,'#52514e');
+for(let hd=0;hd<2;hd++)pages.forEach(([u,k,wk],i)=>{box(s,seqX(hd*11+i),y0,w,h,C[u],STROKE[u],null);txt(s,seqX(hd*11+i)+w/2,y0+13,u+k,'lbl','middle');txt(s,seqX(hd*11+i)+w/2,y0+26,'×'+wk,'lbl2','middle');});
+txt(s,x0-6,y0+19,'pages','lbl2','end');
+// worker brackets: w0: h0 S1 S2 A1 (9) ; w1: h0 A2..D2 (8) ; w2: h1 S1 S2 A1 (9); w3: h1 rest (8)
+const cuts=[[0,2,'worker 0: 9 units','#2a78d6'],[3,10,'worker 1: 8 units','#2a78d6'],[11,13,'worker 2: 9 units','#2a78d6'],[14,21,'worker 3: 8 units','#2a78d6']];
+cuts.forEach(([a,b,l,c])=>bracket(s,seqX(a),seqX(b)+w,y0+h+8,l,false,c));
+// sections list
+const ly=y0+h+56;
+txt(s,20,ly,'Sections each worker receives (kv_section = one KV head + a run of pages) [common.hpp:696]','ttl');
+const rows=[
+ ['worker 0','head 0: S1 S2 A1','serves q_A q_B q_C q_D on S1, S2 and q_A on A1'],
+ ['worker 1','head 0: A2 B1 B2 B3 B4 C1 D1 D2','serves q_A on A2, q_B on B1..B4, q_C on C1, q_D on D1, D2'],
+ ['worker 2','head 1: S1 S2 A1','same as worker 0, for KV head 1'],
+ ['worker 3','head 1: A2 B1 B2 B3 B4 C1 D1 D2','same as worker 1, for KV head 1']];
+rows.forEach((r,i)=>{const y=ly+22+i*22;txt(s,30,y,r[0],'lbl');txt(s,110,y,r[1],'mono');txt(s,360,y,r[2],'lbl2');});
+// join note
+const jy=ly+22+4*22+6;
+txt(s,20,jy,'Join [self_attention.hpp:1134]: q_A head 0 = merge(worker 0 partial over S1 S2 A1, worker 1 partial over A2). Every other (query, head) pair has one producer and merges only with the identity.','lbl2');
+txt(s,20,jy+18,'Inside a worker the loop is: for each page, for each query of the minibatch, mask gate, then dot products [self_attention.hpp:1500-1503]. On A2 the gate passes q_A only.','lbl2');
+txt(s,20,jy+36,'Real constants: 64 entries per page, minibatch cap 128 queries, 8 KV heads in Llama 3 8B. Mock constants are scaled down so the strip fits on a screen.','lbl2');
+})();
+
+/* ---------- Figure M: how chunk_evenly cuts a pass ---------- */
+(function(){
+const s=document.getElementById('svgM');defs(s);
+const cols=[[20,'1. tokens of the pass'],[250,'2. groups by label'],[480,'3. grains (8 tokens or fewer)'],[720,'4. greedy merge into minibatches']];
+cols.forEach(([x,t])=>txt(s,x,22,t,'ttl'));
+txt(s,20,44,'lane 1: decode pass, 4 users, 1 new token each','lbl2');
+const U=['A','B','C','D'];
+U.forEach((u,i)=>{const y=54+i*30;box(s,20,y,90,24,C[u],STROKE[u],'q_'+u);box(s,250,y,130,24,C[u],STROKE[u],'label '+i+': q_'+u);box(s,480,y,130,24,C[u],STROKE[u],'grain: q_'+u+' (1)');});
+arrow(s,114,111,246,111);arrow(s,384,111,476,111);arrow(s,614,111,716,111);
+box(s,720,66,250,38,'#f0efec','#898781',null);txt(s,845,82,'MB0: q_A q_B','lbl','middle');txt(s,845,97,'2 queries','lbl2','middle');
+box(s,720,118,250,38,'#f0efec','#898781',null);txt(s,845,134,'MB1: q_C q_D','lbl','middle');txt(s,845,149,'2 queries','lbl2','middle');
+txt(s,20,188,'lane 1: target count = max(ceil(4 / 128), 2) = 2 and target size = 2, so q_A and q_B fill MB0, and q_C and q_D fill MB1.','lbl2');
+el(s,'line',{x1:20,y1:200,x2:980,y2:200,stroke:'#e1e0d9'});
+txt(s,20,218,'lane 2: prefill pass, one prompt P of 20 tokens','lbl2');
+box(s,20,228,200,24,C.S,STROKE.S,'P: tokens 0..19 (20)');
+box(s,250,228,130,24,C.S,STROKE.S,'label 0: P (20)');
+[['0..7',8],['8..15',8],['16..19',4]].forEach(([r,n],i)=>box(s,480,228+i*30,130,24,C.S,STROKE.S,'P'+r+' ('+n+')'));
+arrow(s,224,240,246,240);arrow(s,384,240,476,240);arrow(s,614,258,716,258);
+box(s,720,228,250,24,'#f0efec','#898781','MB0: P0..7 (8)');
+box(s,720,258,250,24,'#f0efec','#898781','MB1: P8..15 + P16..19 (12)');
+txt(s,20,330,'lane 2: target count = 2 (one label, more than 8 tokens) and target size = 10. 8 + 8 = 16 is farther from 10 than 8 is, so the second grain starts MB1.','lbl2');
+txt(s,20,346,'The grain of 4 then joins MB1: 12 is as close to 10 as 8 is, and a tie joins [model.hpp:259-262].','lbl2');
+})();
+
+/* ---------- Figure N: what one minibatch holds ---------- */
+(function(){
+const s=document.getElementById('svgN');defs(s);
+box(s,20,150,200,44,'#f0efec','#898781',null);txt(s,120,168,'struct batch','ttl','middle');txt(s,120,184,'one minibatch [common.hpp:991]','lbl2','middle');
+const rows=[
+ ['items[], items_mask','the token jobs of this minibatch, and the same set as mask bits [common.hpp:1076-1081]'],
+ ['_layer','the layer this minibatch is on, advanced one layer at a time [common.hpp:1083-1086]'],
+ ['plans[profile]','one attention plan per layer profile: page runs per worker, work estimate, join masks [common.hpp:1100-1128]'],
+ ['hw_plan, attn_launchers','the FPGA attention passes of this minibatch and their launchers [common.hpp:1088-1093]'],
+ ['downstream_minibatches, kvs_needed, upstream_kvs_ready','cross-minibatch K/V dependency counters [common.hpp:1143-1154]'],
+ ['attn_done_barrier, layer_done, free_scratchpads_barrier','latches between the main thread and the attention workers [common.hpp:1130-1135, 1156-1157]'],
+ ['id, ix','Perfetto flow id, and the index into per-minibatch arrays [common.hpp:1137-1141]'],
+ ['plugin_batch','model-specific state: the Q, K, V and FFN channels of the llama plugin [common.hpp:1159-1162]']];
+rows.forEach(([n,d],i)=>{const y=12+i*41;el(s,'line',{x1:220,y1:172,x2:300,y2:y+17,stroke:'#c3c2b7'});box(s,300,y,680,34,'#fff','#c3c2b7',null);txt(s,308,y+14,n,'mono');txt(s,308,y+28,d,'lbl2');});
+})();
+
+/* ---------- Figure D: schematic lanes ---------- */
+(function(){
+const s=document.getElementById('svgD');defs(s);
+txt(s,20,22,'One layer of a decode pass with two minibatches (schematic, not to scale)','ttl');
+const L=[['FPGA + main thread: matmuls',60],['attention workers: CPU attention',120]];
+L.forEach(([n,y])=>{txt(s,20,y+18,n,'lbl');el(s,'line',{x1:260,y1:y+40,x2:960,y2:y+40,stroke:'#e1e0d9'});});
+const blocks=[
+ [0,260,110,'MB0 QKV proj','A'],[0,380,110,'MB1 QKV proj','B'],[0,500,130,'MB0 Wo + FFN','A'],[0,640,130,'MB1 Wo + FFN','B'],
+ [1,380,110,'MB0 attention','A'],[1,500,130,'MB1 attention','B']];
+blocks.forEach(([lane,x,w,l,u])=>box(s,x,L[lane][1]+6,w,28,C[u],STROKE[u],l));
+el(s,'rect',{x:260,y:L[1][1]+6,width:110,height:28,fill:'none',stroke:'#c3c2b7','stroke-dasharray':'4 3',rx:3});txt(s,315,L[1][1]+24,'idle','lbl2','middle');
+el(s,'rect',{x:640,y:L[1][1]+6,width:130,height:28,fill:'none',stroke:'#c3c2b7','stroke-dasharray':'4 3',rx:3});txt(s,705,L[1][1]+24,'idle','lbl2','middle');
+arrow(s,260,185,960,185);txt(s,610,200,'time (order from the code, durations not measured)','lbl2','middle');
+txt(s,790,L[0][1]+24,'next layer →','lbl2');
+})();
+
+/* ---------- Figure E: shards across cards ---------- */
+(function(){
+const s=document.getElementById('svgE');defs(s);
+txt(s,20,22,'Three users’ contexts on the FPGA path: 1,024-token shards placed round-robin on 4 cards','ttl');
+const users=[['A',5],['B',3],['C',2]];
+const order=[];users.forEach(([u,n])=>{for(let k=1;k<=n;k++)order.push([u,k]);});
+const cardOf={};order.forEach(([u,k],i)=>cardOf[u+k]='c'+(i%4));
+const x0=190,w=70,g=6;
+users.forEach(([u,n],r)=>{const y=44+r*44;txt(s,20,y+19,'user '+u+' ('+n+' shards)','lbl');
+ el(s,'rect',{x:x0-48,y:y+2,width:40,height:26,fill:'#fff',stroke:'#c3c2b7','stroke-dasharray':'4 3',rx:3});txt(s,x0-28,y+19,'<127','lbl2','middle');
+ for(let k=1;k<=n;k++){const c=cardOf[u+k];box(s,x0+(k-1)*(w+g),y+2,w,26,C[c],STROKE[c],null);txt(s,x0+(k-1)*(w+g)+w/2,y+14,u+k,'lbl','middle');txt(s,x0+(k-1)*(w+g)+w/2,y+25,'card '+c[1],'lbl2','middle');}
+ el(s,'rect',{x:x0+n*(w+g),y:y+2,width:40,height:26,fill:'#fff',stroke:'#c3c2b7','stroke-dasharray':'4 3',rx:3});txt(s,x0+n*(w+g)+20,y+19,'tail','lbl2','middle');});
+txt(s,20,184,'Passes per card for this layer [model.hpp:2486-2612]','ttl');txt(s,20,199,'one command each: one card, its shards of one context, and the queries that may read them','lbl2');
+const cards=['c0','c1','c2','c3'];
+const passes={c0:[],c1:[],c2:[],c3:[]};
+users.forEach(([u,n])=>{const by={};for(let k=1;k<=n;k++){const c=cardOf[u+k];(by[c]=by[c]||[]).push(u+k);}for(const c in by)passes[c].push('q_'+u+' over '+by[c].join(' '));});
+cards.forEach((c,i)=>{const x=20+i*240;box(s,x,205,220,24,C[c],STROKE[c],'card '+c[1]+': '+passes[c].length+' passes','ttl');passes[c].forEach((p,j)=>{box(s,x,236+j*30,220,24,'#fff',STROKE[c],null);txt(s,x+8,236+j*30+16,p,'mono');});});
+txt(s,20,348,'All 10 passes launch in one loop [self_attention.hpp:676-685]. A card retires its passes in launch order [common.hpp:772-776].','lbl2');txt(s,20,366,'Each pass returns a partial (m*, s*, v*) that the CPU join merges with the CPU partials [self_attention.hpp:1134].','lbl2');
+})();
+})();
+</script>
+</main>
+</body>
+</html>
