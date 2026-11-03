@@ -100,3 +100,6 @@ Bill: "create a file /bill-has-instance-0,2? I'll tell my agent to avoid using i
 
 
 Index detail moved here 2026-09-18 (was only in MEMORY.md): 2026-09-15 MARKER PROTOCOL: /bill-has-instance-0,2 present = Bill may use first half; exec/bill-share.sh status|take|release (take refused while other_user_active says bill ACTIVE; jhan decides whole-machine; we re-create after); marker not yet created (3bda down). NEW SCHEME 2026-09-06: half split (Bill cards 10/13/38/3b + socket 0; jhan cards 90/93/b9/bc + socket 1 = --instance 1,2); GUARD_EXCLUDE_USERS includes bill (applied); bench = whole-machine -> only when Bill idle; 30 campaign scripts still pin Bill's cards; never run a real-driver tron without --instance (deletes unlocked slice files)
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): marker /bill-has-instance-0,2 = Bill may use the first half (cards 10/13/38/3b, socket 0); ours

@@ -96,3 +96,6 @@ line is reused by campaign-gen/attr for their own loops; another session's build
 **How to apply:** relaunch campaign.sh with REPS=5 to add repetitions (idempotent per run); never edit it while
 running. Related: [[vnnik6-kvmul8-campaign]], [[more-testing-round1]], [[3bda-shared-with-bill]],
 [[pr4424-description-on-github]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-17: 12 nightly perf configs, base eb2de02

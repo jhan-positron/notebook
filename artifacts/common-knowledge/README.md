@@ -69,3 +69,35 @@ Files left behind are enumerated in `logs/codex-handoff-20261016-artifacts.json`
 
 
 - humanfia-guide: [codex_20261007-20261008_assess-humanfia-for-pr-4424.md](../../handoffs/codex_20261007-20261008_assess-humanfia-for-pr-4424.md).
+
+## Codex handoff preservation — 2026-11-02
+
+Prepared from the active Codex home on claude-agentsrv. The review report records the approval decision for this batch. Copied current source files can postdate the historical review conclusions.
+
+This approved topic contains 8 files, 0.091 MiB. The report and companion inventories list every left-behind file. Files above 5 MiB remain at their original locations unless separately approved.
+
+- `random/html-editor.html` -> `claude-agentsrv:/home/jhan/workspace/random/html-editor.html` (33264 bytes). application / browser test.
+  Related handoffs: [codex_20261030_build-browser-html-editor.md](../../handoffs/codex_20261030_build-browser-html-editor.md).
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/common-knowledge/random/html-editor.html
+- `random/html-editor/tests/test_editor.py` -> `claude-agentsrv:/home/jhan/workspace/random/html-editor/tests/test_editor.py` (16370 bytes). application / browser test.
+  Related handoffs: [codex_20261030_build-browser-html-editor.md](../../handoffs/codex_20261030_build-browser-html-editor.md).
+- `random/phoenix-crb-action-plan.html` -> `claude-agentsrv:/home/jhan/workspace/random/phoenix-crb-action-plan.html` (33825 bytes). report.
+  Related handoffs: [codex_20261020-20261021_plan-phoenix-crb-testing.md](../../handoffs/codex_20261020-20261021_plan-phoenix-crb-testing.md), [codex_20261030_build-browser-html-editor.md](../../handoffs/codex_20261030_build-browser-html-editor.md).
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/common-knowledge/random/phoenix-crb-action-plan.html
+  - generator: none
+  - input: none
+  - input built by: none
+  - sources: `claude-agentsrv:/tmp/jeremy-tasks-20261021/snapshot.json` (preservation decisions in companion inventory). Inventory: `artifacts/common-knowledge/random/phoenix-crb-action-plan.html.lineage.md`.
+  - regenerate: none
+  - regenerate unverified (agent-authored plan; inspection values, no performance measurements)
+  - `sources:` per-file status: 8 preserved.
+- `random/phoenix-positron-perf-setup.sh` -> `claude-agentsrv:/home/jhan/workspace/random/phoenix-positron-perf-setup.sh` (3652 bytes). access script.
+  Related handoffs: [codex_20261020-20261021_plan-phoenix-crb-testing.md](../../handoffs/codex_20261020-20261021_plan-phoenix-crb-testing.md).
+- `random/setup-phoenix-access.ps1` -> `claude-agentsrv:/home/jhan/workspace/random/setup-phoenix-access.ps1` (2870 bytes). access script.
+  Related handoffs: [codex_20261020-20261021_plan-phoenix-crb-testing.md](../../handoffs/codex_20261020-20261021_plan-phoenix-crb-testing.md).
+- `random/setup-phoenix-access.sh` -> `claude-agentsrv:/home/jhan/workspace/random/setup-phoenix-access.sh` (2311 bytes). access script.
+  Related handoffs: [codex_20261020-20261021_plan-phoenix-crb-testing.md](../../handoffs/codex_20261020-20261021_plan-phoenix-crb-testing.md).
+- `random/verify-phoenix-access.ps1` -> `claude-agentsrv:/home/jhan/workspace/random/verify-phoenix-access.ps1` (1291 bytes). access script.
+  Related handoffs: [codex_20261020-20261021_plan-phoenix-crb-testing.md](../../handoffs/codex_20261020-20261021_plan-phoenix-crb-testing.md).
+- `random/verify-phoenix-access.sh` -> `claude-agentsrv:/home/jhan/workspace/random/verify-phoenix-access.sh` (1002 bytes). access script.
+  Related handoffs: [codex_20261020-20261021_plan-phoenix-crb-testing.md](../../handoffs/codex_20261020-20261021_plan-phoenix-crb-testing.md).

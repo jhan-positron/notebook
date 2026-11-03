@@ -64,3 +64,6 @@ achievable bandwidth, per-core L2/L3 bandwidth on Redwood Cove, VDPBF16PS timing
 pre-implementation measurements: Intel MLC + a one-core kernel loop. Related:
 [[single-attention-measurement]], [[amx-vs-avx-sense]], [[attn-worker-lane-facts]],
 [[notion-questions-keep-verbatim]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-02/03 verified kernel tile counts, Table 20-2 rates, floors and brackets vs measured;

@@ -21,3 +21,6 @@ check ON THE BUILD HOST and require the edit to be visible (grep for the new tex
 edit on the build host itself; add a runtime verification of the edit's effect (the fence
 campaign's smoke gate caught this - keep such gates). Related: [[claude-box-tron-build-env]],
 [[delphi-3bda-hardware]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): cross-host edit + immediate build on 3bda compiles stale content while ninja rebuilds; v

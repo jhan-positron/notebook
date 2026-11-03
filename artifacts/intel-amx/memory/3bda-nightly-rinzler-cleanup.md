@@ -57,3 +57,6 @@ teardown; that was wrong and cost Rhys an investigation.
 **How to apply:** never attribute leftover rinzlers to CI; check the sudo
 journal (`journalctl _COMM=sudo | grep "systemctl stop rinzler"`) and our logs
 first. See [[delphi-3bda-hardware]] and [[3bda-shared-with-bill]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-15: CI never stops rinzler@N (Rhys); OUR whole-machine campaign stops them

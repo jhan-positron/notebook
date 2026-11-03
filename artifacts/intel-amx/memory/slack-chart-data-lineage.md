@@ -18,3 +18,6 @@ Raw-data package for Jeremy: tmp/amx-raw-data/ (CSV + raw logs + README). Not ye
 
 **Why:** Jeremy asked for the raw numbers; any follow-up must cite the right file per series.
 **How to apply:** when quoting mirror prefill gains, say which binary; prefer arena numbers for the opt-in config. See [[amx-tron-softattn-project]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-08-21 qwen charts: decode mirror = p2-inc3-arena, prefill mirror = inc2 mirror-amx (n

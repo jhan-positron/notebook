@@ -22,3 +22,6 @@ How to recognize it in a job log (`gh run view <run> --job <job> --log`, NOT `gh
 2026-09-24 check for PR #4557 head c73e7fb2f9 (run 36040048427): both failures = this signature (andoria-14, slot 2,
 39.4 s); #4557 changes no config/ file; the older head fcdbfff8e4 hit it too, 633cb88896 passed on delphi-3bd6.
 Remedy used: `gh run rerun <run> --failed` (runner is random). [[pr4587-alloc-creates-blocks]]
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): GCP Nix "Test host"+"Test" red with t_generate_host_2-fast after "runner shutdown signal" on

@@ -109,3 +109,6 @@ Side effect of the push: GitHub marked PR #4774 MERGED by itself (its head f52d6
 APPLIED 2026-10-08 22:30:38Z (jhan: "go ahead to update PR description as proposed"): the 15 edits PATCHED onto the PR
 #4424 body (live re-fetched first = my copy; 7 lines changed; protected lines 1-27 byte-identical; re-fetch == intended;
 0 save_k_helper mentions left). Diff in session scratchpad body.diff.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): MERGED 2026-10-08: jhan-amx-vnniK fast-forwarded 6b939d25d2 -> ba69cb513e (fold 45e6bb266d + comment fix); PR 4812 closed by jhan; descripti...

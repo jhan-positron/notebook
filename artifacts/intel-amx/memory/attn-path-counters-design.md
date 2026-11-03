@@ -95,3 +95,6 @@ compare. Artifact BDw6g8QYbCUKdZkGAmbdMQ NOT republished after the move or after
 other session did).
 
 UPDATE 2026-09-25 ~06:00 UTC (AoF-question session): artifact BDw6g8QYbCUKdZkGAmbdMQ REPUBLISHED as Version 5 with sections 2.2/2.3 + 13.1 + the relabelled Table 1 (STEPS = 255); details in [[aof-amx-question-20260925]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): counter.html NOW at PR3879/new-PRs/new-counters/ (moved 2026-09-24); 2026-09-22 des

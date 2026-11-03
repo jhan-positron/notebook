@@ -45,3 +45,6 @@ reference.
 context_sections.py (it reuses their data); keep the count under 3000 by its own
 definition; publish with the artifact url above. Related: [[shared-save-animation-page]],
 [[block-store-animation-page]], [[vnni-k-terminology]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-21 status/shared-save-animation-distilled.html = artifact NgSY2o6p7LkLQjpERc5o

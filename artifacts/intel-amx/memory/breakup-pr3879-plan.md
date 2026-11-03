@@ -74,3 +74,6 @@ bake in) and 8; check #intel-amx, Ben's DM (D0B7WC0FZLY) and the PR for newer me
 supersedes the 3-PR-stack recommendation in [[ben-split-request-pr3879]]. Related:
 [[more-testing-round1]], [[mirror-naming-convention]], [[debug-code-new-branch]],
 [[pal-bridge]] (PAL file budget ~269K tokens: attach docs + diff, not the big headers).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-04/05: A+C with gate 2026-09-16 (PR0 counters, PR1 canonical #3879, PR2 mirror = reference d

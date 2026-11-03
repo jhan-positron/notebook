@@ -19,3 +19,6 @@ verdict/fix/tests/verification in PR3879-codex/claude-report.md (one section per
 **How to apply:** keep a Monitor on PR3879-codex/review.md; one commit per finding, fix and
 tests separated when the repo's small-commit style calls for it. Related:
 [[claude-box-tron-build-env]], [[amx-tron-softattn-project]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): codex appends findings to PR3879-codex/review.md; its tests live in tron-pr3879-codex/; verify→fix→test→

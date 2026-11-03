@@ -47,3 +47,6 @@ UPDATE 2026-10-02 (jhan, PR #4737, second exception): `return true;` in the row-
 Reading of both exceptions: a literal whose only meaning is "the trivial value of this expression" (a shift's 1, a
 subtraction's 1, a gate that is always open) is not named; a literal that encodes a choice or a flag (view aligned/dma,
 support_eagle, repeat, record_rows, converted) is named. Confirm with jhan before extending this reading to new cases.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): named-value rule covers bool and 0/1 literals; pass the guide verbat

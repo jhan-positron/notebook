@@ -20,3 +20,6 @@ scatter; section "Use shared block in saving K" cases 2 and 3 likewise; section 
 with the proposed text available on request, until jhan says to stop. Never apply it to the body unasked.
 The proposal text: see [[merge-4737-into-4424]] (file protected-proposal.md in that session's scratchpad; the
 same text is reproduced in the 2026-10-09 22:1x UTC chat message).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-10-09: remind in every PR 4424 reply until told to stop; never apply unasked

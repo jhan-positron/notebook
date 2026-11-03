@@ -64,3 +64,6 @@ changes after 2026-09-28; when citing commits of PR #4424, use the rebased ids. 
 (E8czhhjwBmC2qqPvVKPthD) does NOT carry section 0 yet. Related: [[vnnied-k-in-place-project]],
 [[issue-4500-root-cause-campaign]], [[issue4525-implementation]], [[attn-stats-pr-implementation]],
 [[pr4424-description-on-github]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-28 section 0 = one-page VNNI-K status; verified GitHub facts + traps in the file

@@ -97,3 +97,6 @@ decides SK vs PR 2; nothing else in the plan needs the whole machine except cost
 **How to apply:** check exec/logs/g1-20260908.status and summary.md; fold numbers into
 Tuesday-plan.html and the gate decision (2026-09-16). Related: [[breakup-pr3879-plan]],
 [[more-testing-round1]], [[pr3879-split-progress]], [[3bda-shared-with-bill]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-08: whole-machine G1 gate campaign queued (exec/g1-20260908/, probe fceeddc529 on jhan

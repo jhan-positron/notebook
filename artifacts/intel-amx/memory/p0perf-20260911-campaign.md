@@ -70,3 +70,6 @@ week; these abort-path traps recur in every fork.
 **How to apply:** fork exec/p0perf-20260911/ (not G1) for the next our-half campaign; the
 report generator gen_report.py reads summary.json and draws per-test dumbbell panels.
 Related: [[more-testing-round1]], [[3bda-shared-with-bill]], [[g1-store-cost-campaign]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-11: AMX-off/on qwen tp2/tp4 8u prompt-1024 on our half

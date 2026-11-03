@@ -96,3 +96,6 @@ restoring the pair_base assert makes PR body line 102 ("Instruction-identical: t
 together. 3bda bench needs the whole machine (serving down, bill-share take) -> jhan runs the marker commands.
 Related: [[wade-pr4557-review-response]], [[pr4557-ben-review-response]], [[value-suffix-names-shared-files]],
 [[issue4525-implementation]], [[pr4587-alloc-creates-blocks]], [[issue-4588-non-iso-kv-reads]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-06 third reviewer, 8 inline all hold, page status/respond-2-runar-PR4557.html; nothing applied/posted; d9e7645fee still on side bran...

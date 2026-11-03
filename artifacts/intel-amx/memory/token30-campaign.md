@@ -89,3 +89,6 @@ control (r3c vs r3a) 0.00202. Rounding dominates locally ~30x and equals the acc
 size; end-to-end both saturate (trunc ratio 0.89). Refines the earlier "rounding not dominant"
 (that was the end-to-end statement). dd_report.py now computes this row (wo_layer0_stats).
 Keep-RNE decision stands: truncation would buy no sameness and is the biased rounding.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-08-30: verdict = exact bf16 tie flipped by admissible numerics (no AMX bug); add-order control

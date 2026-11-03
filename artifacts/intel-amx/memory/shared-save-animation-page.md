@@ -58,3 +58,6 @@ revisions 1-4 (and the report) used the decode thread split for tp4.
 15 / 40 and decode 8 / 47; the report's section 1 words table and its 4.3 reading still
 say 8 / 47 for tp4 (offer the fix to jhan). Related: [[block-store-animation-page]],
 [[vnnied-k-in-place-project]], [[vnni-k-terminology]] (say "shared block save").
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): status/shared-save-animation.html = artifact 9F8pqRrgZJjTbzQpFJg7eR; rev 5 (2026-09-18

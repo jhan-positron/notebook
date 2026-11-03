@@ -9,3 +9,6 @@ On 2026-09-01 the user reorganized /home/jhan/workspace: Claude-created entries 
 
 **Why:** the user wants their own folders separated from agent-created ones at the workspace top level.
 **How to apply:** never create files or folders directly at /home/jhan/workspace — put new worktrees, clones, scratch dirs, and report files under /home/jhan/workspace/ai-runs/ (or inside an existing project folder). Absolute paths recorded before 2026-09-01 to the moved entries are stale; resolve them via ~/workspace/ai-runs/<name>.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-01 move of Claude-created folders to ~/workspace/ai-runs/; never create directly at ~/workspace

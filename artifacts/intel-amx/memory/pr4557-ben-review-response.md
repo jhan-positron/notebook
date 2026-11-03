@@ -110,3 +110,6 @@ evaluate when a rsynced NEW file under nix/ is untracked ("Path 'nix/perfetto-co
 `git rm -r --cached gen-amxoff gen-avx2 gen-debug`, which -A also picked up); check for a BUILD-* EXIT line before
 trusting test lines. (2) the packed-bits Catch2 case is now named "...set_v\, get_v and at()" (renamed in c12df586b6);
 the old filter exits 2 with empty output.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-05 main MERGED into the branch (96a6220ab6, conflicts = main's chunk-8 remova

@@ -8555,3 +8555,227 @@ Related: [claude_20261016_pr-4424-and-4901-tps-ttft-benchmarks.md](../../handoff
 - `pr3879/split-4424/exec/perf-latest-20261016/collect.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/collect.py` (5058 bytes)
 - `pr3879/split-4424/exec/perf-latest-20261016/data.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/split-4424/exec/perf-latest-20261016/data.json` (12908 bytes)
 
+## Codex handoff preservation — 2026-11-02
+
+Prepared from the active Codex home on claude-agentsrv. The review report records the approval decision for this batch. Copied current source files can postdate the historical review conclusions.
+
+This approved topic contains 169 files, 3.042 MiB. The report and companion inventories list every left-behind file. Files above 5 MiB remain at their original locations unless separately approved.
+
+Left behind in this batch:
+
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/operand-B.html`: left behind (content conflict: retain repository contents section from 71fc29c pending user decision), 76093 bytes.
+- `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/bin/ci/benchmark_info.py`: left behind (no value used), 26485 bytes.
+- `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/bin/ci/benchmark_lib.py`: left behind (no value used), 41649 bytes.
+
+- `exec/logs/bill-share.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/bill-share.log` (13504 bytes). registered artifact.
+- `memory/3bda-nightly-rinzler-cleanup.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/3bda-nightly-rinzler-cleanup.md` (3937 bytes). registered artifact.
+- `memory/3bda-shared-with-bill.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/3bda-shared-with-bill.md` (10243 bytes). registered artifact.
+- `memory/MEMORY.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md` (23603 bytes). registered artifact.
+- `memory/amd-amx-fallback-test.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amd-amx-fallback-test.md` (2706 bytes). registered artifact.
+- `memory/amx-busy-perf-counter.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-busy-perf-counter.md` (2626 bytes). registered artifact.
+- `memory/amx-ci-coverage-facts.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-ci-coverage-facts.md` (3694 bytes). registered artifact.
+- `memory/amx-iface-comment-flags.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-iface-comment-flags.md` (2675 bytes). registered artifact.
+- `memory/amx-mirror-aware-cache-unpack.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-mirror-aware-cache-unpack.md` (3073 bytes). registered artifact.
+- `memory/amx-options-notion-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-options-notion-page.md` (3386 bytes). registered artifact.
+- `memory/amx-vnni-pseudocode-check-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-vnni-pseudocode-check-page.md` (2191 bytes). registered artifact.
+- `memory/amx-vs-avx-sense.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/amx-vs-avx-sense.md` (11304 bytes). registered artifact.
+- `memory/aof-amx-question-20260925.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/aof-amx-question-20260925.md` (8481 bytes). registered artifact.
+- `memory/artifact-utf8-mojibake-trap.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/artifact-utf8-mojibake-trap.md` (1968 bytes). registered artifact.
+- `memory/attention-stats-claude-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attention-stats-claude-page.md` (3449 bytes). registered artifact.
+- `memory/attn-path-counters-design.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attn-path-counters-design.md` (8740 bytes). registered artifact.
+- `memory/attn-stats-pr-implementation.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attn-stats-pr-implementation.md` (41052 bytes). registered artifact.
+- `memory/attn-stats-why-not-fuse.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attn-stats-why-not-fuse.md` (4470 bytes). registered artifact.
+- `memory/attn-worker-lane-facts.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attn-worker-lane-facts.md` (3531 bytes). registered artifact.
+- `memory/attnstats-20261002-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/attnstats-20261002-campaign.md` (10366 bytes). registered artifact.
+- `memory/baseline-vs-mirror-sketch.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/baseline-vs-mirror-sketch.md` (6005 bytes). registered artifact.
+- `memory/bash-local-expansion-trap.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/bash-local-expansion-trap.md` (2035 bytes). registered artifact.
+- `memory/ben-split-request-pr3879.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ben-split-request-pr3879.md` (4118 bytes). registered artifact.
+- `memory/bill-claude-review-response.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/bill-claude-review-response.md` (7171 bytes). registered artifact.
+- `memory/block-store-animation-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/block-store-animation-page.md` (2873 bytes). registered artifact.
+- `memory/breakup-pr3879-plan.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/breakup-pr3879-plan.md` (5857 bytes). registered artifact.
+- `memory/canon-ci-20260918-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/canon-ci-20260918-campaign.md` (8550 bytes). registered artifact.
+- `memory/ci-amx-row-20260923.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ci-amx-row-20260923.md` (5344 bytes). registered artifact.
+- `memory/ci-amx-test-shapes-recommendation.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ci-amx-test-shapes-recommendation.md` (7664 bytes). registered artifact.
+- `memory/ci-enable-20260917-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ci-enable-20260917-campaign.md` (8284 bytes). registered artifact.
+- `memory/ci-mimic-20260918-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ci-mimic-20260918-campaign.md` (18386 bytes). registered artifact.
+- `memory/ci-test-host-oom-4593.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ci-test-host-oom-4593.md` (1853 bytes). registered artifact.
+- `memory/claude-box-pid-exhaustion.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/claude-box-pid-exhaustion.md` (3400 bytes). registered artifact.
+- `memory/claude-box-tron-build-env.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/claude-box-tron-build-env.md` (6328 bytes). registered artifact.
+- `memory/codex-review-loop.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/codex-review-loop.md` (1493 bytes). registered artifact.
+- `memory/cpp-guide-literals-include-bools.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/cpp-guide-literals-include-bools.md` (3693 bytes). registered artifact.
+- `memory/debug-code-new-branch.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/debug-code-new-branch.md` (1411 bytes). registered artifact.
+- `memory/f9b678e-unpack.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/f9b678e-unpack.md` (1681 bytes). registered artifact.
+- `memory/first-ci-amx-row-20260922.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/first-ci-amx-row-20260922.md` (5655 bytes). registered artifact.
+- `memory/flag-only-decision-changing-facts.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/flag-only-decision-changing-facts.md` (1512 bytes). registered artifact.
+- `memory/fpga-path-under-vnni-k.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/fpga-path-under-vnni-k.md` (3404 bytes). registered artifact.
+- `memory/g1-store-cost-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/g1-store-cost-campaign.md` (9331 bytes). registered artifact.
+- `memory/git-rebase-traps.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/git-rebase-traps.md` (4845 bytes). registered artifact.
+- `memory/i4500b-policy-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/i4500b-policy-campaign.md` (10056 bytes). registered artifact.
+- `memory/i4525-first-3bda-test-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/i4525-first-3bda-test-campaign.md` (6357 bytes). registered artifact.
+- `memory/intel-doc-amx-estimate.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/intel-doc-amx-estimate.md` (5381 bytes). registered artifact.
+- `memory/issue-4500-fix-implementation.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue-4500-fix-implementation.md` (14340 bytes). registered artifact.
+- `memory/issue-4500-fpga-attention-vnni-tps.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue-4500-fpga-attention-vnni-tps.md` (2023 bytes). registered artifact.
+- `memory/issue-4500-root-cause-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue-4500-root-cause-campaign.md` (11295 bytes). registered artifact.
+- `memory/issue-4588-non-iso-kv-reads.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue-4588-non-iso-kv-reads.md` (4513 bytes). registered artifact.
+- `memory/issue-4934-fix.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue-4934-fix.md` (15232 bytes). registered artifact.
+- `memory/issue4525-design-review.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue4525-design-review.md` (9103 bytes). registered artifact.
+- `memory/issue4525-implementation.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue4525-implementation.md` (23651 bytes). registered artifact.
+- `memory/jeremy-comments-replies.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/jeremy-comments-replies.md` (2569 bytes). registered artifact.
+- `memory/l8b-8u4k-20260920-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/l8b-8u4k-20260920-campaign.md` (8717 bytes). registered artifact.
+- `memory/l8b-levers-20260919-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/l8b-levers-20260919-campaign.md` (8180 bytes). registered artifact.
+- `memory/l8bload-20260918-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/l8bload-20260918-campaign.md` (5131 bytes). registered artifact.
+- `memory/libstdcxx-assertions-memorder-guard.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/libstdcxx-assertions-memorder-guard.md` (3844 bytes). registered artifact.
+- `memory/merge-4737-into-4424.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/merge-4737-into-4424.md` (16082 bytes). registered artifact.
+- `memory/mirror-vs-vnnik-page-data-provenance.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/mirror-vs-vnnik-page-data-provenance.md` (2355 bytes). registered artifact.
+- `memory/mirror-write-ok-unpack.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/mirror-write-ok-unpack.md` (2975 bytes). registered artifact.
+- `memory/more-testing-round1.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/more-testing-round1.md` (6131 bytes). registered artifact.
+- `memory/muse-glimmer-amx.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/muse-glimmer-amx.md` (3318 bytes). registered artifact.
+- `memory/nfs-attr-cache-build-trap.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/nfs-attr-cache-build-trap.md` (1681 bytes). registered artifact.
+- `memory/nfs-running-script-stale-handle-trap.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/nfs-running-script-stale-handle-trap.md` (2063 bytes). registered artifact.
+- `memory/nightly-amx-check-20260916.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/nightly-amx-check-20260916.md` (7460 bytes). registered artifact.
+- `memory/nightly-vs-ours-tps-context.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/nightly-vs-ours-tps-context.md` (3618 bytes). registered artifact.
+- `memory/no-names-in-github-issues.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/no-names-in-github-issues.md` (1282 bytes). registered artifact.
+- `memory/notebook-preservation-convention.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/notebook-preservation-convention.md` (2571 bytes). registered artifact.
+- `memory/notion-memory-placement-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/notion-memory-placement-page.md` (2001 bytes). registered artifact.
+- `memory/notion-questions-keep-verbatim.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/notion-questions-keep-verbatim.md` (1651 bytes). registered artifact.
+- `memory/p0perf-20260911-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/p0perf-20260911-campaign.md` (5674 bytes). registered artifact.
+- `memory/p0perf-20260913-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/p0perf-20260913-campaign.md` (6252 bytes). registered artifact.
+- `memory/pending-move-amx-worktrees.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pending-move-amx-worktrees.md` (1893 bytes). registered artifact.
+- `memory/perf-model-artifact.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/perf-model-artifact.md` (1988 bytes). registered artifact.
+- `memory/perf-model-project.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/perf-model-project.md` (14464 bytes). registered artifact.
+- `memory/perf-round-20260830.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/perf-round-20260830.md` (3818 bytes). registered artifact.
+- `memory/plain-english-default.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/plain-english-default.md` (2553 bytes). registered artifact.
+- `memory/plain-words-comment-register.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/plain-words-comment-register.md` (1805 bytes). registered artifact.
+- `memory/platformd-011-restarts-stopped-units.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/platformd-011-restarts-stopped-units.md` (2280 bytes). registered artifact.
+- `memory/pr-body-pending-measurement-subsection.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr-body-pending-measurement-subsection.md` (1423 bytes). registered artifact.
+- `memory/pr-body-refetch-before-edit.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr-body-refetch-before-edit.md` (2692 bytes). registered artifact.
+- `memory/pr-description-no-history.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr-description-no-history.md` (3749 bytes). registered artifact.
+- `memory/pr-item-register.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr-item-register.md` (1701 bytes). registered artifact.
+- `memory/pr221-rhys-amx-benchmark-review.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr221-rhys-amx-benchmark-review.md` (3937 bytes). registered artifact.
+- `memory/pr3879-open-comments-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr3879-open-comments-page.md` (4821 bytes). registered artifact.
+- `memory/pr3879-split-progress.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr3879-split-progress.md` (50326 bytes). registered artifact.
+- `memory/pr4424-description-on-github.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4424-description-on-github.md` (2508 bytes). registered artifact.
+- `memory/pr4424-diagram-pages.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4424-diagram-pages.md` (6255 bytes). registered artifact.
+- `memory/pr4424-short-version-no-tensor-type.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4424-short-version-no-tensor-type.md` (1220 bytes). registered artifact.
+- `memory/pr4557-ben-review-response.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4557-ben-review-response.md` (11361 bytes). registered artifact.
+- `memory/pr4587-alloc-creates-blocks.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4587-alloc-creates-blocks.md` (6986 bytes). registered artifact.
+- `memory/pr4596-claude-review-20260929.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4596-claude-review-20260929.md` (3730 bytes). registered artifact.
+- `memory/pr4737-kvcache-diagram-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4737-kvcache-diagram-page.md` (3353 bytes). registered artifact.
+- `memory/pr4737-review-response.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4737-review-response.md` (8518 bytes). registered artifact.
+- `memory/pr4812-merge-4774-onto-4424-head.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4812-merge-4774-onto-4424-head.md` (10828 bytes). registered artifact.
+- `memory/prefill-amx-vs-fpga-qwen3-4b.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/prefill-amx-vs-fpga-qwen3-4b.md` (10354 bytes). registered artifact.
+- `memory/primer-one-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/primer-one-page.md` (4344 bytes). registered artifact.
+- `memory/prompt-not-ctx.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/prompt-not-ctx.md` (1862 bytes). registered artifact.
+- `memory/q4b-fpga-20260921-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/q4b-fpga-20260921-campaign.md` (7924 bytes). registered artifact.
+- `memory/q4b-swattn-20260919-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/q4b-swattn-20260919-campaign.md` (6890 bytes). registered artifact.
+- `memory/q4b-swattn-20260919-plan.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/q4b-swattn-20260919-plan.md` (3177 bytes). registered artifact.
+- `memory/qk-tile-animation-pages.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/qk-tile-animation-pages.md` (6010 bytes). registered artifact.
+- `memory/qpack-attn-accum-investigation.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/qpack-attn-accum-investigation.md` (4162 bytes). registered artifact.
+- `memory/range-hint-audit.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/range-hint-audit.md` (4878 bytes). registered artifact.
+- `memory/remind-protected-section-proposal.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/remind-protected-section-proposal.md` (1679 bytes). registered artifact.
+- `memory/review-body-format.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/review-body-format.md` (1783 bytes). registered artifact.
+- `memory/reviewer-personas.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/reviewer-personas.md` (17104 bytes). registered artifact.
+- `memory/rinzler-unit-expert-replicas-750.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/rinzler-unit-expert-replicas-750.md` (11471 bytes). registered artifact.
+- `memory/runar-pr4557-review-response.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/runar-pr4557-review-response.md` (10271 bytes). registered artifact.
+- `memory/runtron-determinism-recipe.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/runtron-determinism-recipe.md` (5295 bytes). registered artifact.
+- `memory/savek-worker-fold.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/savek-worker-fold.md` (5792 bytes). registered artifact.
+- `memory/shared-save-animation-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/shared-save-animation-page.md` (4566 bytes). registered artifact.
+- `memory/shared-save-distilled-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/shared-save-distilled-page.md` (3258 bytes). registered artifact.
+- `memory/single-attention-measurement.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/single-attention-measurement.md` (4802 bytes). registered artifact.
+- `memory/slack-chart-data-lineage.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/slack-chart-data-lineage.md` (1431 bytes). registered artifact.
+- `memory/split-4424-plan.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/split-4424-plan.md` (11055 bytes). registered artifact.
+- `memory/store-remedies-catchup-0928.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/store-remedies-catchup-0928.md` (6313 bytes). registered artifact.
+- `memory/svg-render-check.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/svg-render-check.md` (2437 bytes). registered artifact.
+- `memory/sync-4424-main-20261007.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/sync-4424-main-20261007.md` (16063 bytes). registered artifact.
+- `memory/sync-4557-into-4424.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/sync-4557-into-4424.md` (9926 bytes). registered artifact.
+- `memory/token30-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/token30-campaign.md` (7570 bytes). registered artifact.
+- `memory/tron-intuition-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/tron-intuition-page.md` (4282 bytes). registered artifact.
+- `memory/tron-tsc-timing-infra.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/tron-tsc-timing-infra.md` (5089 bytes). registered artifact.
+- `memory/value-suffix-names-shared-files.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/value-suffix-names-shared-files.md` (2534 bytes). registered artifact.
+- `memory/vnni-k-terminology.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/vnni-k-terminology.md` (2490 bytes). registered artifact.
+- `memory/vnnied-k-in-place-project.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/vnnied-k-in-place-project.md` (36729 bytes). registered artifact.
+- `memory/vnnik6-kvmul8-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/vnnik6-kvmul8-campaign.md` (10660 bytes). registered artifact.
+- `memory/wade-code-review-skill.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-code-review-skill.md` (4502 bytes). registered artifact.
+- `memory/wade-fuse-question-pr4267.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-fuse-question-pr4267.md` (4340 bytes). registered artifact.
+- `memory/wade-move-test-question-pr4265.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-move-test-question-pr4265.md` (7444 bytes). registered artifact.
+- `memory/wade-pr4557-review-response.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-pr4557-review-response.md` (5971 bytes). registered artifact.
+- `memory/wade-pr4596-review-response.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-pr4596-review-response.md` (10410 bytes). registered artifact.
+- `memory/wade-pr4596-round5-response.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-pr4596-round5-response.md` (7520 bytes). registered artifact.
+- `memory/wedperf-20260916-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wedperf-20260916-campaign.md` (10651 bytes). registered artifact.
+- `memory/workflow-journal-reconstruction-trap.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/workflow-journal-reconstruction-trap.md` (2252 bytes). registered artifact.
+- `memory/workspace-ai-runs-layout.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/workspace-ai-runs-layout.md` (1519 bytes). registered artifact.
+- `memory/worktree-prune-nfs-trap.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/worktree-prune-nfs-trap.md` (1423 bytes). registered artifact.
+- `random/2026-10-20-pr-5047-line-by-line.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/random/2026-10-20-pr-5047-line-by-line.html` (399465 bytes). report.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/random/2026-10-20-pr-5047-line-by-line.html
+  - generator: `claude-agentsrv:/tmp/2026-10-20-pr5047-update/build_update.py`
+  - input: `claude-agentsrv:/tmp/2026-10-20-pr5047-update/notes.py`; `claude-agentsrv:/tmp/2026-10-20-pr5047-update/records.json`; `claude-agentsrv:/tmp/2026-10-20-pr5047-update/second.json`; `claude-agentsrv:/tmp/2026-10-20-pr5047-update/files.json`; `claude-agentsrv:/tmp/2026-10-20-pr5047-update/original.html`; `claude-agentsrv:/tmp/2026-10-20-pr5047-update/latest.html`; `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/h/tron/models/self_attention.hpp`
+  - input built by: none (agent-built source annotations from pinned GitHub diffs)
+  - sources: `claude-agentsrv:/tmp/2026-10-20-pr5047-update/benchmark.json` (preservation decisions in companion inventory); `claude-agentsrv:/tmp/2026-10-20-pr5047-update/comparison.json` (preservation decisions in companion inventory); `claude-agentsrv:/tmp/2026-10-20-pr5047-update/commits.json` (preservation decisions in companion inventory). Inventory: `artifacts/intel-amx/random/2026-10-20-pr-5047-line-by-line.html.lineage.md`.
+  - regenerate: unavailable (generator writes a fixed canonical output path)
+  - regenerate unverified (fixed canonical output path; fetched benchmark comment is the available measurement source)
+  - `sources:` per-file status: 26 preserved, 2 left behind (no value used).
+- `review-scratch/2026-10-20-pr5047-update/base.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/base.json` (527078 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/benchmark.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/benchmark.json` (9195 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/build_update.py` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/build_update.py` (24703 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/check_browser.cjs` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/check_browser.cjs` (10654 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/commits.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/commits.json` (7951 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/comparison.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/comparison.json` (12423 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/files.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/files.json` (55176 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/h/tron/kernels/amx_attn_iface.hpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/h/tron/kernels/amx_attn_iface.hpp` (13825 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/h/tron/models/kv_cache.hpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/h/tron/models/kv_cache.hpp` (112128 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/h/tron/models/model.hpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/h/tron/models/model.hpp` (173717 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/h/tron/models/self_attention.hpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/h/tron/models/self_attention.hpp` (102577 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/h/tron/scheduler/full.hpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/h/tron/scheduler/full.hpp` (167933 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/h/tron/tensor/k_vnni.hpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/h/tron/tensor/k_vnni.hpp` (12958 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/t/heterogeneous_scheduler_compile.cpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/t/heterogeneous_scheduler_compile.cpp` (55514 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/t/kv_cache_helpers.hpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/t/kv_cache_helpers.hpp` (825 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/t/t_amx_dispatch_dtype.cpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/t/t_amx_dispatch_dtype.cpp` (12596 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/head/t/t_llama_unit.cpp` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/head/t/t_llama_unit.cpp` (199022 bytes). source / supporting file.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/latest.html` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/latest.html` (16471 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/review-scratch/2026-10-20-pr5047-update/latest.html
+- `review-scratch/2026-10-20-pr5047-update/measured_merge.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/measured_merge.json` (10685 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/notes.py` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/notes.py` (28700 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/original.html` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/original.html` (96767 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/review-scratch/2026-10-20-pr5047-update/original.html
+- `review-scratch/2026-10-20-pr5047-update/parent-comments.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/parent-comments.json` (6373 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/pr.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/pr.json` (1482 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/records.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/records.json` (123045 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/2026-10-20-pr5047-update/second.json` -> `claude-agentsrv:/tmp/2026-10-20-pr5047-update/second.json` (57693 bytes). report input / validation.
+  Related handoffs: [codex_20261020_explain-pr-5047-line-by-line.md](../../handoffs/codex_20261020_explain-pr-5047-line-by-line.md).
+- `review-scratch/pr5015-replacement-body.md` -> `claude-agentsrv:/tmp/pr5015-replacement-body.md` (11339 bytes). document.
+  Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).
+- `review-scratch/pr5015-replacement-new-final.json` -> `claude-agentsrv:/tmp/pr5015-replacement-new-final.json` (12086 bytes). document.
+  Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).
+- `review-scratch/pr5015-replacement-updates.json` -> `claude-agentsrv:/tmp/pr5015-replacement-updates.json` (964 bytes). document.
+  Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).
+- `review-scratch/pr5015-replies/verification.json` -> `claude-agentsrv:/tmp/pr5015-replies/verification.json` (200 bytes). document.
+  Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).
+- `review-scratch/pr5015-review-codex/transpose_probe.cpp` -> `claude-agentsrv:/tmp/pr5015-review-codex/transpose_probe.cpp` (3788 bytes). document.
+  Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).
+
+`rampup/operand-B.html` is withheld from refresh. Its registered original lacks the contents section added in notebook commit `71fc29c`. The existing repository version remains pending a source-of-truth decision.

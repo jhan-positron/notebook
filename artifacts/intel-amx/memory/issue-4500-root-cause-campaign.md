@@ -99,3 +99,6 @@ launch-phase switch (cheapest discriminator), kill-switch arm, sudo perf, early 
 **How to apply:** when 3bda is free, check exec/logs/issue4500-20260918.{status,log}; after m3 copy traces and run
 trace_analyze.py here; regenerate the page (gen_design.py reads summary.json); comment on issue #4500 with the split.
 Related: [[issue-4500-fpga-attention-vnni-tps]], [[fpga-path-under-vnni-k]], [[ci-mimic-20260918-campaign]], [[vnnied-k-in-place-project]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-19: cause = VNNI per-token column layout (64 lines/row paid 3x:

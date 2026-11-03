@@ -16,3 +16,6 @@ measured effect). The typed tensors are an implementation detail inherited from 
 **How to apply:** the four protected sections of the PR 4424 body (Short version, Background, "Remove the
 Score transpose...", "Use shared block in saving K") are final; do not propose typed-tensor wording there
 again. Related: [[sync-4424-main-20261007]], [[pr-description-no-history]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-10-08: protected sections final; typed tensors are a detail for "The changes" only

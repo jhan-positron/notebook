@@ -31,3 +31,6 @@ the header comment lets anyone opening the source find the rendered view.
 **How to apply:** whenever jhan says "update the HTML to <notebook url>" or "preserve", follow
 the five steps. Related: [[artifact-utf8-mojibake-trap]] (pages must be pure ASCII first),
 [[workspace-ai-runs-layout]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): how pages go into github.com/jhan-positron/notebook artifacts/intel-amx/pr

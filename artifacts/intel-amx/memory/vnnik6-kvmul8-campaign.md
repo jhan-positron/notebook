@@ -106,3 +106,6 @@ is there, not on 3bda), write sections/*.html from the workflow results, run gen
 with cairosvg and inspect, plain-English check, then update PR #4424's open item. Related:
 [[vnnied-k-in-place-project]], [[pr4424-description-on-github]], [[3bda-nightly-rinzler-cleanup]],
 [[3bda-shared-with-bill]], [[runtron-determinism-recipe]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-16: arms base(main c7844ca2ce)/headoff(PR head, TRON_K_VNNI off)

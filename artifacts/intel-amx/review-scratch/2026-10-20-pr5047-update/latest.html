@@ -1,0 +1,127 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/review-scratch/2026-10-20-pr5047-update/latest.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/review-scratch/2026-10-20-pr5047-update/latest.html
+-->
+<section id="latest-code">
+<h2>Current code: selection in attention, scoring in the cache</h2>
+<pre><code>@@LATEST_CALL@@</code></pre>
+<p>The final attention call passes the selected-token mask to <code>page::score_k</code>, the cache’s new raw-score operation. The cache chooses its own storage reader. [<a href="@@LATEST_SELF@@#L1917-L1918">Current attention call</a>, <a href="@@LATEST_CACHE@@#L1973-L2006">Current scoring implementation</a>]</p>
+<div class="flow">
+<div class="box"><strong>Attention selects</strong>Visibility and window checks produce <code>live</code>, one bit per selected page offset.</div><span class="arrow" aria-hidden="true">→</span>
+<div class="box emphasis"><strong>The cache scores</strong><code>score_k</code> uses its packed reader or its row-major dot-product helpers.</div><span class="arrow" aria-hidden="true">→</span>
+<div class="box"><strong>Attention continues</strong>Scale scores, normalize weights, and combine the cached values.</div>
+</div>
+<p class="caption">Responsibility diagram. Box widths do not represent execution time.</p>
+<div class="scroll"><table>
+<thead><tr><th>Revision</th><th>What it changes</th><th>Walkthrough</th></tr></thead>
+<tbody>
+<tr><td><a href="@@COMMIT1@@"><code>e17a12ff09ea</code></a><br>First commit</td><td>Separates token selection from scoring in attention. One file, +25/−43 lines.</td><td><a href="#commit1">Original explanation, preserved below</a></td></tr>
+<tr><td><a href="@@COMMIT2@@"><code>ade89a9d9c83</code></a><br>Second commit / current head</td><td>Moves key scoring, expression conversion, and layout decisions into cache operations. Nine files, +235/−284 lines.</td><td><a href="#commit2">Every changed line in the new commit</a></td></tr>
+</tbody></table></div>
+<p>The complete PR now changes nine files, with 240 added lines and 307 deleted lines relative to its base. Per-commit counts differ from the final diff because the second commit moves code introduced by the first. [<a href="https://github.com/positron-ai/tron/compare/a5697f86d318e6a87badd4a751a005da52a9c25c...ade89a9d9c83f887270c89d6ae6c02bced3f037e">Pinned full comparison</a>]</p>
+<details><summary>How this relates to PR 4868</summary>
+<p>PR 5047 builds on the packed-key work from the branch used by PR 4868. PR 4956 replaced that earlier PR. PR 5047 targets that work’s branch, <code>jhan-vnnik-1-layout</code>, with base <code>a5697f86d318</code>. It reorganizes selection and cache access around the existing packed-key implementation. It does not add GPT-OSS support to the 128×4 AMX kernel. [<a href="https://github.com/positron-ai/tron/pull/4868">PR 4868</a>, <a href="https://github.com/positron-ai/tron/pull/4956">PR 4956</a>, <a href="https://github.com/positron-ai/tron/pull/5047">PR 5047 target branch</a>, <a href="@@COMMIT1@@">First commit</a>, <a href="@@COMMIT2@@">Second commit</a>]</p>
+</details>
+</section>
+
+<section id="gptoss">
+<h2>Why can GPT-OSS improve without 128×4 AMX support?</h2>
+<div class="callout"><strong>Your shape observation is correct.</strong> GPT-OSS-120B has 64 elements per attention head and eight query heads per key/value head. It does not pass the AMX attention gate. The first commit also changes the ordinary CPU scoring loop used by row-major keys. That creates a possible performance effect without AMX. The posted +7.18% does not establish how much came from this PR. [<a href="https://huggingface.co/openai/gpt-oss-120b/blob/main/config.json">Official model configuration</a>, <a href="@@AMX@@#L148-L167">AMX gate</a>, <a href="@@FIRST_SELF@@#L1936-L1954">Changed row-major reader</a>, <a href="@@BENCH@@">Benchmark</a>]</div>
+
+<h3>1. The posted result is a generation gain</h3>
+<p>The relevant row is <code>ingested-gpt-oss-120b (tp4)</code> on <code>andoria-09</code>, the host labeled “2 x 96core.” It reports 2,047 prompt tokens, 514 generated tokens, eight users, and two model instances. <code>tp4</code> is the four-way tensor-parallel configuration. [<a href="@@BENCH@@">Posted run configuration</a>]</p>
+<figure class="perf-figure">
+@@PERF_CHART@@
+<figcaption><strong>Generation improves by 7.18%. Prompt parsing stays near zero change.</strong> Dots show the reported changes. Whiskers show the reported bootstrap change intervals. This is a comparison with a historical baseline. [<a href="@@BENCH@@">Benchmark comment</a>]</figcaption>
+</figure>
+<div class="scroll"><table id="perf-values">
+<caption>Exact reported throughput and changes for GPT-OSS-120B</caption>
+<thead><tr><th>Phase</th><th>Candidate throughput<br>tokens/s/user</th><th>Candidate total<br>tokens/s</th><th>Change</th><th>Reported classification</th></tr></thead>
+<tbody>
+<tr><td>Generation / decode<br>Produce the output tokens</td><td>143</td><td>1,141</td><td>+7.18%</td><td>Improvement, 3/3 methods</td></tr>
+<tr><td>Prompt parsing / prefill<br>Process the input tokens</td><td>768</td><td>6,144</td><td>−0.47%</td><td>No change, 0/3 methods</td></tr>
+</tbody></table></div>
+<p class="caption">Throughput values are rounded as posted. The baseline throughput is not reconstructed from those rounded numbers.</p>
+<details><summary>Statistical details: what “3/3” and “n=20” mean</summary>
+<p>The candidate used one repeat of ten iterations across two instances. The 20 samples are per-instance iteration means. Parallel prompts within an iteration are aggregated before statistics. “3/3” means three analysis methods agree on the direction. It does not mean three independent benchmark experiments. [<a href="@@BENCH@@">Sample definition and method legend</a>]</p>
+<div class="scroll"><table>
+<thead><tr><th>Method</th><th>Meaning in this report</th><th>Generation change range</th><th>Parsing change range</th></tr></thead>
+<tbody>
+<tr><td>IQR</td><td>Interquartile range: the historical method uses the 25th–75th percentile bounds of iteration samples.</td><td>+6.60% to +7.72%</td><td>−1.73% to +0.50%</td></tr>
+<tr><td>Bootstrap</td><td>Resamples iteration samples to form an interval around the harmonic-mean estimate.</td><td>+6.96% to +7.41%</td><td>−1.02% to +0.06%</td></tr>
+<tr><td>t-interval</td><td>Uses a t interval after transforming sample values to logarithms.</td><td>+6.98% to +7.44%</td><td>−1.02% to +0.06%</td></tr>
+</tbody></table></div>
+<p>All three generation ranges exclude zero. All three parsing ranges include zero. This supports the reported classification against the listed baseline. It does not isolate the cause of the change. [<a href="@@BENCH@@">Reported ranges and classification rule</a>]</p>
+</details>
+
+<h3>2. GPT-OSS reaches code that this PR changes</h3>
+<pre><code>// Existing AMX shape gate, unchanged by PR 5047:
+return model_head_size == 128 &amp;&amp; model_kv_mul == 4;
+
+// GPT-OSS-120B configuration:
+head_size = 64;
+kv_mul = 64 query heads / 8 key-value heads = 8;
+// shape_ok(64, 8) is false.</code></pre>
+<p class="caption">The gate is shown with its named constants expanded. The model values come from the official configuration. The actual gate also requires bf16 queries and runtime AMX availability. [<a href="@@AMX@@#L148-L174">Gate and prerequisites</a>, <a href="https://huggingface.co/openai/gpt-oss-120b/blob/main/config.json">Model configuration</a>]</p>
+<div class="flow">
+<div class="box"><strong>GPT-OSS: 64 × 8</strong>64 elements per head<br>8 query heads per KV head</div><span class="arrow" aria-hidden="true">→</span>
+<div class="box"><strong>AMX shape test fails</strong>The 128 × 4 attention kernel is unavailable for this geometry.</div><span class="arrow" aria-hidden="true">→</span>
+<div class="box emphasis"><strong>Ordinary CPU scoring</strong>Software-assigned page work reaches the row-major dotter path changed by commit 1.</div>
+</div>
+<p>The packed-key layout also requires a head size of 128 elements. GPT-OSS’s 64-element heads use row-major storage with either setting of <code>TRON_K_VNNI</code>, the packed-key build option. These are separate restrictions: packed-key storage does not itself imply AMX execution. [<a href="@@FIRST_LAYOUT@@#L86-L95">Packed-layout gate</a>, <a href="@@FIRST_SELF@@#L1874-L1901">AMX dispatch before software scoring</a>]</p>
+
+<h3>3. What actually changes on that ordinary CPU path?</h3>
+<div class="cols">
+<div class="box"><strong>Before commit 1</strong><ol><li>Prepare one dotter for each query head.</li><li>Scan visibility ranges and the sliding window.</li><li>For each accepted token, check the key view and score immediately.</li></ol></div>
+<div class="box emphasis"><strong>After commit 1</strong><ol><li>Scan the same filters and build the selected-token mask.</li><li>If the mask is nonempty, prepare the query dotters and obtain the key view.</li><li>Visit selected bits and score the corresponding key rows.</li></ol></div>
+</div>
+<p>The source changes are concrete: setup moves after selection, a per-accepted-token view-validity check disappears, and selection is separated from dot products. Mask construction and bit iteration add work too. The dot-product kernel is unchanged. [<a href="@@BASE_SELF@@#L1916-L1961">Before</a>, <a href="@@FIRST_SELF@@#L1910-L1954">After</a>]</p>
+<p><strong>Hypothesis: compiler output may improve.</strong> Preparing queries after range selection can shorten the time their prepared values must stay live. That can change register allocation, memory spills, or instruction scheduling. The exact build’s generated instructions and a CPU profile are needed to test this explanation. The source diff alone cannot assign a percentage to it.</p>
+<p><strong>Conditional saving: empty visits skip query setup.</strong> This applies only when execution reaches the changed block with no selected tokens. Many whole-page rejections already happen in the caller. GPT-OSS’s alternating sliding and full attention layers do not establish how often this particular saving occurs. Count empty visits that reach this block before treating them as the cause. [<a href="@@FIRST_SELF@@#L1590-L1625">Earlier page rejection</a>, <a href="@@FIRST_SELF@@#L1930-L1959">Nonempty guard</a>, <a href="https://huggingface.co/openai/gpt-oss-120b/blob/main/config.json">Layer configuration</a>]</p>
+
+<h3>4. The benchmark is not a base-versus-PR comparison</h3>
+<div class="flow">
+<div class="box"><strong>Reported baseline</strong><code>58e8c54011b0</code><br>Historical result for andoria-09</div><span class="arrow" aria-hidden="true">→</span>
+<div class="box emphasis"><strong>83 commits ahead</strong>The candidate includes many changes beyond PR 5047.<br>61 files differ in this comparison.</div><span class="arrow" aria-hidden="true">→</span>
+<div class="box"><strong>Reported candidate</strong><code>251529f0d865</code><br>Merge containing commit 1</div>
+</div>
+<p>The benchmark comment lists <code>58e8c54</code> as the baseline for this host. GitHub’s comparison reports 83 commits and 61 changed files between that baseline and the tested merge. The other baseline hashes in the comment apply to other hosts. [<a href="@@BENCH@@">Baseline-to-host mapping</a>, <a href="@@COMPARE@@">Exact baseline-to-candidate comparison</a>]</p>
+<p>The tested merge’s parents are the PR base <code>a5697f86d318</code> and first commit <code>e17a12ff09ea</code>. Its Git tree identifier—the identifier of all tracked source contents—is identical to the first commit’s tree: <code>d677921fb74e761a872633c3d466d98cc3c39325</code>. The second commit, <code>ade89a9d9c83</code>, is absent from this result. [<a href="https://api.github.com/repos/positron-ai/tron/commits/251529f0d865b87aad0673810a5603b4ec339f4d">Tested merge metadata</a>, <a href="https://api.github.com/repos/positron-ai/tron/commits/e17a12ff09ea284ebd2616d1bf0531d7502e118d">First-commit metadata</a>]</p>
+<div class="callout caution"><strong>Insufficient data: the fraction of +7.18% caused by PR 5047.</strong> The result shows a resolved generation improvement against that historical baseline. It does not show whether PR 5047 caused all, some, or none of it. Other commits in the comparison and differences between historical and candidate runs remain possible contributors.</div>
+<div class="scroll"><table>
+<thead><tr><th>Question to resolve</th><th>Required comparison or measurement</th></tr></thead>
+<tbody>
+<tr><td>Did the first commit improve GPT-OSS generation?</td><td>Measure <code>a5697f86d318</code> versus <code>e17a12ff09ea</code> with the same hardware, build options, model artifacts, prompt workload, and repetition scheme.</td></tr>
+<tr><td>What caused any improvement in that pair?</td><td>Profile time in software selection/scoring. Count empty visits reaching the changed block. Inspect generated code for query setup, branches, and register spills.</td></tr>
+<tr><td>What does the second commit change in performance?</td><td>Measure <code>e17a12ff09ea</code> versus <code>ade89a9d9c83</code>. Include the row-major staging-copy path when the workload uses it.</td></tr>
+</tbody></table></div>
+<p class="caption">These are the measurements needed to establish cause. No new inference benchmark was run for this report.</p>
+</section>
+
+<section id="second-overview">
+<h2>What the new commit adds</h2>
+<p>The second commit makes callers ask the cache for scores or logical rows. Callers no longer inspect the stored key layout. [<a href="@@COMMIT2@@">Full second-commit diff</a>]</p>
+<div class="scroll"><table>
+<thead><tr><th>Caller need</th><th>Final operation</th><th>Behavior to preserve or check</th></tr></thead>
+<tbody>
+<tr><td>Score selected keys</td><td><code>page::score_k</code></td><td>Skip storage access for an empty mask. Otherwise select the packed reader or row-major dotters internally. Write only selected score entries.</td></tr>
+<tr><td>Attempt the dense AMX path</td><td><code>page::try_score_k_amx</code></td><td>Return false for packed storage before touching scores or storage. Attention falls back to software scoring. Existing shape and query-type checks remain in attention.</td></tr>
+<tr><td>Save a key expression</td><td>New <code>set_k_row</code> expression overload</td><td>Evaluate directly into a row-major row. For packed keys, evaluate into a temporary bf16 row, then store that row.</td></tr>
+<tr><td>Stage a key row for hardware</td><td>Existing <code>get_k_row</code> used for both layouts</td><td>Load into caller scratch and return that buffer. Row-major storage now uses a copy where the caller previously returned a cache pointer.</td></tr>
+<tr><td>Mark rows in allocation/copy tests</td><td>New <code>test::set_k_tag</code> and <code>test::k_tag</code></td><td>Write/read an identifying value in element zero through logical row operations. Full row round-trip tests cover both storage layouts.</td></tr>
+</tbody></table></div>
+<p class="caption">Sources: <a href="@@LATEST_CACHE@@#L1973-L2083">Cache operations</a>, <a href="@@LATEST_SELF@@#L1734-L1805">AMX success/refusal handling</a>, <a href="@@LATEST_SELF@@#L1866-L1890">Dispatch conditions</a>, <a href="@@LATEST_SCHED@@#L2745-L2754">Hardware staging caller</a>, <a href="@@LATEST_TEST@@#L1087-L1129">Row round-trip test</a>.</p>
+<div class="callout caution"><strong>Do not assume this is performance-neutral.</strong> The row-major staging caller gains a row copy. Packed expression saves now pass through a temporary row, including expressions whose input is already bf16. Whether the compiler removes any added work depends on the build. Neither change was present in the linked benchmark. [<a href="@@COMMIT2@@">Second-commit diff</a>, <a href="@@LATEST_CACHE@@#L2048-L2083">Conversion and row copying</a>]</div>
+<details><summary>Why the AMX fallback remains safe</summary>
+<ol>
+<li>The caller still excludes unsupported head shapes and query scalar types at compile time.</li>
+<li>It still requires the existing packed query pointer and a dense page before attempting this path.</li>
+<li>The cache returns false for packed keys before modifying the score array.</li>
+<li>The attention wrapper returns false before changing normalization or value accumulators.</li>
+<li>The caller returns from the AMX branch only on success. Refusal continues into ordinary scoring.</li>
+</ol>
+<p>This is the control-flow contract visible in the code. It is not a new test result. [<a href="@@LATEST_SELF@@#L1866-L1890">Caller</a>, <a href="@@LATEST_CACHE@@#L2008-L2029">Cache attempt</a>, <a href="@@LATEST_SELF@@#L1748-L1765">Early refusal before accumulation</a>]</p>
+</details>
+</section>

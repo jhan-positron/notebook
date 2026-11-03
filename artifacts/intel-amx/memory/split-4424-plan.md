@@ -107,3 +107,6 @@ D9 Run CI label on drafts, D10 PR-3 form (a recommended). Delete the probe workt
 Related: [[merge-4737-into-4424]], [[pr4812-merge-4774-onto-4424-head]], [[savek-worker-fold]],
 [[issue-4500-fix-implementation]], [[breakup-pr3879-plan]], [[remind-protected-section-proposal]],
 [[claude-box-tron-build-env]] (lcheck usage).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-10 4-PR stack; plan + handoff + codex loops done (split-plan.md U1/U2, split-handoff.md, split-handoff-update1.md); probe branches j...

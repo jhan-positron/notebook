@@ -134,3 +134,6 @@ K rows first so both builds score one instance (the other instance missed the v_
 consistent with scaled_v's bf16 weight truncation, issue #4600, hypothesis). Product code differs from the measured package
 98a5accb8b only by the lazy state read. Report: VNNIed-K-in-place/issue4500/fix-results.html (gen_report.py; chart checked with
 cairosvg). Branch NOT pushed; PR 4424 untouched; issue #4500 has no comment yet (jhan decides).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-29 chain DONE at 617cb8333f (recovers ~1/3 of the qwen loss, ll

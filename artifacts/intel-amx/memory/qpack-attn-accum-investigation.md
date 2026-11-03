@@ -45,3 +45,6 @@ accum and provide reasoning if it cannot"; the answer is yes, so PR 1 needs the 
 **How to apply:** remaining outward steps for jhan (or on his say-so): push jhan-amx-p0 (752e9f571a, fast-forward),
 post amx_qpack-reply.post.md on r3973410716, edit thread-map comment 5578693039 row 3, resolve the thread. Related:
 [[pr3879-split-progress]], [[breakup-pr3879-plan]], [[debug-code-new-branch]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-10: Ben is right; jhan chose B; commit 752e9f571a on jhan-amx-p0 LO

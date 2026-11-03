@@ -46,3 +46,6 @@ adversarial check (journal in session 0547e267, workflow wf_01d21805-c56):
 **How to apply:** say "same 8 users, different users per engine"; cite the two-level Done
 lines as the evidence for even spread; point at the fpga arm of [[p0perf-20260913-campaign]]
 for the same-binary link. Related: [[p0perf-20260911-campaign]], [[more-testing-round1]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-11/13: same 8 users, 4/2 engines behind Caddy (2/4 users per engine) + FPGA

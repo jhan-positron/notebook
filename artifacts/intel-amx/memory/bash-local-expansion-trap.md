@@ -20,3 +20,6 @@ launching a 3bda driver, run it once in a sandbox: copy the scripts with their p
 /var/tmp/jhan, /dev/hugepages, the nix path), stub runtron, build2.sh, lib-guard.sh, bill-share.sh, dut.sh, systemctl and
 nix with tiny scripts, and check that every step line and done file appears (pattern: the session scratchpad dry.sh of
 2026-10-15, described in VNNIed-K-in-place/issue4934/status.md). Related: [[issue-4934-fix]], [[nfs-running-script-stale-handle-trap]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): `local a=$1 b="$a"` expands before assigning (set -u abort); dry-run every 3bda driver in a stub sandbox before launch

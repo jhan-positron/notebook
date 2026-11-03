@@ -24,3 +24,6 @@ check in the SVG render step ([[svg-render-check]]). Applies to every HTML the u
 "HTML is default" produces when it goes through the Artifact tool.
 
 Addendum (same day): inside inline SVG do not use superscript tspans either (baseline-shift and dy variants both mis-render under text-anchor="middle" in cairosvg, and browser support for baseline-shift varies); write S^T as plain text, the notation the tron code comments already use. <sup>T</sup> is fine in HTML text.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-13: published artifact showed Latin-1 mojibake for a valid UTF-8 file; alwa

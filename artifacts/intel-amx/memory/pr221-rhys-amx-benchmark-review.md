@@ -40,3 +40,6 @@ FYI items: the genoa (AMD) nightly also runs the row and prints "(AMX benchmark)
 **How to apply:** when the row appears in Slack, remember 0.0 TPS = crash, not a measurement; when setting thresholds use
 [[l8b-8u4k-20260920-campaign]] numbers. Related: [[ci-enable-20260917-campaign]], [[ci-amx-test-shapes-recommendation]],
 [[l8b-levers-20260919-campaign]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-22 verdict ACCEPTABLE (32u x 4096 "AMX benchmark" row, informationa

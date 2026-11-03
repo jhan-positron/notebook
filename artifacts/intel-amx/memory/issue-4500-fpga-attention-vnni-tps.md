@@ -22,3 +22,6 @@ body only had the -1.4 % n=1 number and no open item for it.
 
 **How to apply:** cite #4500 in PR 4424 discussions and reports; when the perfetto measurement or a fix lands, update the
 issue rather than a new one. Related: [[vnnied-k-in-place-project]], [[fpga-path-under-vnni-k]], [[ci-mimic-20260918-campaign]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): filed 2026-09-18, assigned jhan; qwen-3-4b -5/-11 % tp2/

@@ -95,3 +95,6 @@ outside the critical path (two minibatches per forward, max_minibatches=-1 llama
 (6) T4/T1 = 83-96 % (not 88-95 everywhere). TRAP: assemble.py replaced a literal "GEN_TABLE_1" inside section 9 prose -> now
 whole-line placeholders only. Short version cut to 3 sentences + a detail list (rule 5). Files: attn-stats-compare.md (final),
 .gen-v1.bak (generator only); prose source final_prose.md (+ .rev2 = before pass 2).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): queued for 2026-10-02 after the nightly (NOT_

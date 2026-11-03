@@ -22,3 +22,6 @@ boundary (what is not affected) and the precedent. Name the decision owner in th
 heading ("reviewers decide"). Do this before posting, not after a follow-up question.
 Related: [[plain-words-comment-register]], [[plain-english-default]],
 [[pr4424-description-on-github]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-09-16: write PR items at the mechanism level (job -> command/flags -> what is measured, what is

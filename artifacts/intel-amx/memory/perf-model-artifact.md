@@ -25,3 +25,6 @@ regenerate perf-model/index.html, then publish the stripped copy. First comment 
 (2026-09-03, THP glossary item) answered by adding the section-10 block "Page sizes and THP".
 
 Publish gate (2026-09-03): a publish with `url` is refused until this conversation has read the live artifact: run action "read" (it saves the live HTML to tool-results/) and Read EVERY line of that saved file (385 lines, ~56k tokens, 3 Read calls) before publishing. Check first with a bash diff that the live body equals the last stripped copy, so no outside edit is lost.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-03 published perf-model/index.html at claude.ai/code/artifact/a851731a-...; jhan comm

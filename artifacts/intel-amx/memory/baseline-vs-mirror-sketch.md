@@ -69,3 +69,6 @@ sketch's softmax tail and the "0.37 us per unit" shorthand are the two traps.
 quote 0.37 us as "QK phase" and 0.22 us as "per unit"; write GiB for arena sizes. Related:
 [[single-attention-measurement]], [[more-testing-round1]], [[g1-store-cost-campaign]],
 [[mirror-naming-convention]], [[breakup-pr3879-plan]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-13/14 jhan sketch vs code 60d66d9c04, page PR3879/baseline-vs-mirror-ske

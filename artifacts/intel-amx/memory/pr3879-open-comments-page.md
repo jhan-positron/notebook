@@ -48,3 +48,6 @@ answered at the current head with consistent line numbers.
 **How to apply:** follow the page's "Suggested order of work" (resolve 7,4,6,8 first; 3 keep open; 2 and 1
 need decisions; 9-13 go into one PR comment). Trap: shared facts files go stale mid-session (PR 4265
 merged while agents ran); re-check PR states with gh before posting. Related: [[pr3879-split-progress]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-10/11 PR3879/PR-open-comments.html; PR1 head 4290402491 (pushed 09-11 02:3x UTC:

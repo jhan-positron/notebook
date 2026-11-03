@@ -22,3 +22,6 @@ Facts established while building it (delphi-3bda, 2026-08-26):
 - tron: KV books, embedding table (q_tokens btensor), DMA buffers live in the pos hugepage heap; quantized weights only pass through to HBM; K-mirror arena is operator new (4 KB pages).
 
 Figure-building method that worked: SVG generator in Python, measure text with PIL + DejaVu (cairosvg's fallback font, wider than system fonts) and fail on overflow; upload HTML via notion-create-file-upload + curl; embed with `<embed src="file-upload://...">caption</embed>`. Related: [[svg-render-check]], [[amx-tron-softattn-project]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-08-26 sub-page: TLB/caches/page tables/pages/hugepage pool in core/SRAM/RAM +

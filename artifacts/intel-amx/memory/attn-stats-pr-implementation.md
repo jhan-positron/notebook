@@ -365,3 +365,6 @@ counter.html regeneration.
 
 
 UPDATE 2026-09-30 ~23:55 UTC: PR #4596 APPROVED by Wade at 441e81178b; conflicts with main resolved by MERGING main (merge commit 8c95514924 = new PR head, pushed); details and the merge recipe in [[wade-pr4596-round5-response]] and [[git-rebase-traps]] item 6.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): PR #4596 implementation log (worktree ai-runs/tron-attn-stats); head 8c95514924

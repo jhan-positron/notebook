@@ -17,12 +17,24 @@ Apply these rules to code you write or modify. When reviewing code, flag violati
 - Append the variable's value to its name, separated by an underscore.
 - For values containing punctuation or spaces, use an uppercase representation valid in a C++ identifier.
 - When editing a value in source code, rename the variable and update its uses so the suffix matches the new value.
-- Keep other literals, including `1`, `true`, and `false`, in named declarations and refer to them by name. List any further exceptions explicitly.
+- Keep other literals, including `1`, in named declarations and refer to them by name. List any further exceptions explicitly.
+- Use a named `constexpr bool` only where a bool is passed as an argument in a function call or constructor call or template argument. The reason is, at call site a bare `true` or `false` does not say what it means.
 
 ```cpp
 constexpr int DAYS_PER_WEEK_7 = 7;
 constexpr int MAX_RETRIES_3 = 3;
-bool ROW_ALIGNED_TRUE = true;
+
+// A named bool only at a call site: a bare
+// literal does not say what it means.
+constexpr bool ROW_ALIGNED_TRUE = true;
+void pack(const rows_t& rows, bool row_aligned = true);
+pack(rows, ROW_ALIGNED_TRUE);
+
+// A literal bool in a return, an initialization, an assignment, or a
+// comparison.
+bool converted = false;
+if (all_rows_saved) converted = true;
+return converted;
 ```
 
 ## Braces

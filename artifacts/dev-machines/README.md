@@ -108,3 +108,15 @@ New prefix this batch: `herdr-config/` mirrors `claude-agentsrv:/home/jhan/.conf
 - `herdr-config/config.toml.bak-20261004` -> `claude-agentsrv:/home/jhan/.config/herdr/config.toml.bak-20261004` (45 bytes). herdr configuration (shell prompt fix of 2026-10-04). (handoff: [claude_20261004_herdr-shell-prompt-and-tab-completion.md](../../handoffs/claude_20261004_herdr-shell-prompt-and-tab-completion.md))
 - `herdr-config/session.json` -> `claude-agentsrv:/home/jhan/.config/herdr/session.json` (2943 bytes). herdr session record. (handoff: [claude_20261003_duplicate-herdr-server-processes.md](../../handoffs/claude_20261003_duplicate-herdr-server-processes.md))
 - `herdr-config/sessions/claude-agentsrv/session.json` -> `claude-agentsrv:/home/jhan/.config/herdr/sessions/claude-agentsrv/session.json` (10576 bytes). herdr session record. (handoff: [claude_20261003_duplicate-herdr-server-processes.md](../../handoffs/claude_20261003_duplicate-herdr-server-processes.md))
+
+## Codex handoff preservation — 2026-11-02
+
+Prepared from the active Codex home on claude-agentsrv. The review report records the approval decision for this batch. Copied current source files can postdate the historical review conclusions.
+
+This approved topic contains 1 files, 0.015 MiB. The report and companion inventories list every left-behind file. Files above 5 MiB remain at their original locations unless separately approved.
+
+Left behind in this batch:
+
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/operand-B.html`: left behind (content conflict: retain repository contents section from 71fc29c pending user decision), 76093 bytes.
+
+- `herdr-config/sessions/claude-agentsrv/session.json` -> `claude-agentsrv:/home/jhan/.config/herdr/sessions/claude-agentsrv/session.json` (15562 bytes). registered artifact.

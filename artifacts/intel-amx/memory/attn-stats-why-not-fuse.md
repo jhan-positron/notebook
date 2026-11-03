@@ -50,3 +50,6 @@ reason (nlohmann::json exists in h/common/json.hpp).
 **How to apply:** answer with "publication vs store"; cite fuse_sysfs.cpp:917 and the 2-set_value grep;
 never cite unmount order for runtron. Related: [[attn-stats-pr-implementation]],
 [[attn-path-counters-design]], [[wade-fuse-question-pr4267]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-24 verified: attn_stats.hpp publishes THROUGH the FUSE layer (4 calls); the layer st

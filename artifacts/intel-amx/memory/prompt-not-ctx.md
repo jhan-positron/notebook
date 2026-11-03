@@ -25,3 +25,6 @@ archived figure SVGs). Scripts under exec/ and result-file headers ("### arm=...
 still use ctx= as a raw-data identifier; quote them verbatim when citing raw files, but translate in
 prose. Rule also recorded in intel-AMX/CLAUDE.md. Related: [[plain-english-default]],
 [[amx-vs-avx-sense]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-09-01: label cells "prompt 8192", never "ctx 8192"; ctx is our script variable, not a tron term; tot

@@ -45,3 +45,6 @@ notion-get-file-download-urls, read as an image).
 kernel-eligible visits -> price with 0.50/0.66/0.75 us per visit at prompt 256/2048/8192 -> pass fraction ->
 anchor) and cite Table 1 / Table 3 of the page. Related: [[attnstats-20261002-campaign]], [[single-attention-measurement]],
 [[perf-model-project]], [[aof-amx-question-20260925]], [[l8b-levers-20260919-campaign]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-07 new-counters/tron-intuition-claude.html + generator exec/tron-intuition-20261007/: six-step manual estimate, per-layer T1-T5 budg...

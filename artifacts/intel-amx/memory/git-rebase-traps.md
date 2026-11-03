@@ -56,3 +56,6 @@ Related: [[pr3879-split-progress]], [[nfs-attr-cache-build-trap]].
    tracked by Git"); the build steps then silently do nothing and the chain runs stale test binaries. Run
    `git add -A .` in /var/tmp/jhan/tron-issue4525 first (then `git rm -r --cached gen-amxoff gen-avx2 gen-debug`),
    and always require a BUILD-* EXIT line plus fresh binary mtimes before reading test lines.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): rebase strips #-leading message lines; clean rebase can still fail to compile (main's new callers / siblin

@@ -64,3 +64,6 @@ corrections = TPS ceiling is k-1 (+26 %), not 1-1/k (21 %); the 8-user qwen 'pla
 one minibatch); the +16.0 % perf-round figure is a cross-day ratio (est.); prune fails 39/80 at 2048 (not 'most'); 5 convs >= 8192.
 Related: [[canon-ci-20260918-campaign]], [[l8bload-20260918-campaign]], [[amx-vs-avx-sense]], [[wedperf-20260916-campaign]],
 [[amx-ci-coverage-facts]], [[attn-worker-lane-facts]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): v2 2026-09-19 page PR1/CI-AMX-test-shapes.html: 32-user llama-8b shape s

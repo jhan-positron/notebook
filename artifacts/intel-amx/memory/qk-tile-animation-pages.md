@@ -50,3 +50,6 @@ against tron dd0f942c75 + exit reports. Facts worth reusing:
   cell measures the 8,064 pending-page base (16,515,072 / 2,048) but also has 16,384 ready AVX keys/unit (report section 8, unexplained).
   Final page: section 3 inserted 2026-10-04, old section 3 -> 4; backup attn-stats-compare-QA.html.bak-20261004-before-section3; fragment
   versions v1-v4 only in the session scratchpad (not kept).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-04 new-counters/attn-stats-compare-QA.html (sections 1-2: x = 64, closed f

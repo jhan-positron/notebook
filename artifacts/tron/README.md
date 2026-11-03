@@ -208,3 +208,15 @@ Registered by hand on 2026-10-21 from the Claude Code session that wrote the pag
 - `random/from-claude/TRON-multiuser-attention-claude.html` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/TRON-multiuser-attention-claude.html` (49512 bytes). Document: answer to a question logged at Ben Gamari's bootcamp talk "103: Why Inference Is Expensive" (2026-10-16, slides 32 to 34, https://drive.google.com/file/d/1Ko2_5VUn9z-SGfhBcCCZYZIDDJKpjAIo/view?usp=sharing): how one TRON decode pass spreads every user's attention across the CPU attention workers (one page list per KV head cut by work) and the FPGA cards (1,024-token shards placed round-robin), plus section 4 on what a minibatch is and how `chunk_evenly` builds it. Source: tron commit e6c53ba7 (main, 2026-09-23). Written 2026-10-19, updated 2026-10-21 (slide link, minibatch section). Render-checked headless at 360, 768 and 1200 px.
   Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/tron/random/from-claude/TRON-multiuser-attention-claude.html
 - `random/from-claude/TRON-multiuser-attention-chunk-mirror.py` -> `claude-agentsrv:/home/jhan/workspace/random/from-claude/TRON-multiuser-attention-chunk-mirror.py` (3258 bytes). Python mirror of `chunk_evenly` (h/tron/models/model.hpp:209-276) that computed the worked-example table in section 4 of the page. Computed values, not measurements.
+
+## Codex handoff preservation — 2026-11-02
+
+Prepared from the active Codex home on claude-agentsrv. The review report records the approval decision for this batch. Copied current source files can postdate the historical review conclusions.
+
+This approved topic contains 1 files, 0.005 MiB. The report and companion inventories list every left-behind file. Files above 5 MiB remain at their original locations unless separately approved.
+
+Left behind in this batch:
+
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/operand-B.html`: left behind (content conflict: retain repository contents section from 71fc29c pending user decision), 76093 bytes.
+
+- `memory/MEMORY.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/MEMORY.md` (4788 bytes). registered artifact.

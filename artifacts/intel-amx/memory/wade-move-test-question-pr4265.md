@@ -86,3 +86,6 @@ reply, then jhan decides move vs keep. Related: [[pr3879-split-progress]],
 
 Wording (jhan 2026-09-09): say "move the test into t_llama_unit", not "fold"; "fold" is not a tron term
 and was undefined shorthand. Files: PR0b/wade-reply.md, PR0b/move-test-commit-messages.md.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-09/10: Wade asks to move t_kv_footprint_memorder into t_llama_unit ("m

@@ -135,3 +135,6 @@ commit in the results header. 3bda lock free; nothing of mine queued.
 "bandwidth-bound" without IMC bytes (Sol correction). **How to apply:** numbers above are the
 2026-08-31 state; re-check exec/results for newer rounds first. Related:
 [[amx-tron-softattn-project]], [[pal-bridge]], [[delphi-3bda-hardware]], [[slack-chart-data-lineage]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-08-31 boost-vs-ctx numbers + denominator trap (kill-switch 2-5pp slow = retired August layout

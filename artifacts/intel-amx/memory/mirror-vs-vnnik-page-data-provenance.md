@@ -27,3 +27,6 @@ intel-AMX is NOT a git repo, so rows.json exists in one copy (plus the session w
 **How to apply:** to make the page fully regenerable, preserve mirror-vs-vnni-rows.json (0.52 MiB) and
 the workflow script; to make every row re-derivable, add the ~1 MiB minimal numeric set (aggregate
 txt/json/md + CI perf.json). Follow [[notebook-preservation-convention]]. Related: [[vnnied-k-in-place-project]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-19: write-up VNNIed-K-in-place/status/mirror-vs-VNNI-K-da

@@ -19,3 +19,6 @@ question in chat, not on the PR ([[wade-fuse-question-pr4267]]).
 **How to apply:** before posting any issue or PR text, grep the body for "@"
 and for teammate first names; replace with roles and links. Ask only if a role
 description would be ambiguous.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-09-09: never @-mention or name people in issues Claude drafts; roles + review links only

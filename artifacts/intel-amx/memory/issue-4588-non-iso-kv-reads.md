@@ -48,3 +48,6 @@ comment" options became "keep the code as is, with this issue as the record". Sa
 **How to apply:** cite #4588 when the reads are discussed on #4557/#4587; when a fix lands, update the issue, not a
 new one. The comment IS still in kv_cache.hpp at c73e7fb2f9 (:1459-1462) until #4698 lands; line numbers after 1458 shift once it is gone.
 Related: [[pr4587-alloc-creates-blocks]], [[issue4525-implementation]], [[no-names-in-github-issues]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): filed 2026-09-24 for the PR 4587 Note comment: scaled_v_expr / fill_storage_s

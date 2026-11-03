@@ -1,6 +1,6 @@
 ---
 name: muse-glimmer-amx
-description: "2026-10-16 report muse-glimmer-amx.html (intel-AMX top level): Muse Glimmer 30B = production ingested plugin, shape 32 q heads / 2 KV heads / head 128 = kv_mul 16; 39 of 52 layers are sliding-window (2048) and ingest marks them software_only -> CPU AVX always, only 13 full layers go to the FPGA; AMX support = generalize the 128x4 kernels to 16 live tile columns"
+description: "2026-10-16 report intel-AMX/muse-glimmer/muse-glimmer-amx.html (artifact HQTjCMpkvb1enKbuAHt4Sb): Muse Glimmer 30B = production ingested plugin, shape 32 q heads / 2 KV heads / head 128 = kv_mul 16; 39 of 52 layers are sliding-window (2048) and ingest marks them software_only -> CPU AVX always, only 13 full layers go to the FPGA; AMX support = generalize the 128x4 kernels to 16 live tile columns"
 metadata:
   node_type: memory
   type: project
@@ -34,3 +34,6 @@ recur for every sliding-window ingested model.
 **How to apply:** next step = measure the attention share (runtron Glimmer tp2 8u prompt 2048, TRON_ATTN_STATS=1 +
 perfetto) before implementing the 128x16 shape; then A/B with TRON_AMX_DISABLE=1. Related: [[vnnik6-kvmul8-campaign]],
 [[aof-amx-question-20260925]], [[single-attention-measurement]], [[amx-ci-coverage-facts]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-16: production ingested plugin, 128x16 shape (kv_mul 16); 39/52 layers sliding-window = software_only CPU always, 13 full on FPGA; A...

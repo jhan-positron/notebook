@@ -53,3 +53,6 @@ decisions; check #intel-amx, the DM with Ben, and the PR for newer messages; kee
 "mirror" lineage note ([[mirror-naming-convention]]); use [[debug-code-new-branch]]
 (jhan-dd-debug) for the parked logit tool. Related: [[amx-tron-softattn-project]],
 [[more-testing-round1]], [[jeremy-comments-replies]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-04 Ben DM order: counters -> AMX kernel w/o mirror -> K mirror, plus topical commi

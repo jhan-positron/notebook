@@ -319,3 +319,6 @@ Index detail moved here 2026-09-18 (was only in MEMORY.md): 2026-09-14/15: branc
 NOTE 2026-09-25: the flipped-orientation paragraph at the end of Note [QK orientation] (h/tron/kernels/amx_attn_iface.hpp:214-223)
 STAYS. A request to move it into the PR 4424 description was pasted by mistake (jhan: "please ignore"); the move was done and fully
 reverted (branch back at 30c4ac82cb, PR body restored byte-identical). Do not redo it.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): PR #4424 (branch jhan-amx-vnniK, worktree VNNIed-K-in-place/tron-VNNIed-K), rebased onto

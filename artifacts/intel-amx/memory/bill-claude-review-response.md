@@ -72,3 +72,6 @@ product compiled with AMX ON, runs on hosts with and without AMX. Page has a fin
 head, block by block" (build_f10_extra.py reads self_attention.hpp from git at 47f6f2dceb; six blocks + #error = 225 of
 1827 lines; code map SVG). Positions confirmed with jhan: 6 = disagree, keep fakes; 7 = comment-only in this PR; 13 = agree on
 the problem, differ on the fix location, low severity; 10 = design step, follow-up with the seam.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-10 page PR3879/Bill-claude-review-response.html answering the 14 findings (o

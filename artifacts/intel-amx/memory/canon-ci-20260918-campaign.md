@@ -81,3 +81,6 @@ when PR 4424 is added (target vs canon -5.1/-8.6 %); repeat run needed for gpt-o
 target-vs-canon -5.1 % (candidate PR 4424 regression, target ran at client PSI 99 % but only 3 anomalous samples).
 NOT done: notebook preservation (github notebook), PR/issue comments, repeat run, mixtral probe. Bill's half taken 22:43:44 by launch.sh
 (Bill idle, take refuses otherwise), marker re-created 00:22:02; jhan was told in the final summary.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-19: main 3faba6d0fd + deb preset AMX

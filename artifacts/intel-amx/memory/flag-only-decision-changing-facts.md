@@ -17,3 +17,6 @@ noise mark on a delta that was already small, in a table they can read themselve
 jhan decides or does? If not, it is at most one clause in a sentence, or nothing. Band marks, rounding, re-labelled
 cells and other presentation consequences of an edit belong in the diff, not in the summary. Related:
 [[plain-english-default]], [[pr-description-no-history]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-10-08: no headline callouts for trivial facts (band marks, small deltas); one clause or nothing

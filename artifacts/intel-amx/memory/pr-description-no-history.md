@@ -39,3 +39,6 @@ data, keep the backing table with commit + date provenance and tell jhan the dep
 
 
 UPDATE 2026-10-08 (reviewer agent on PR 4812, applying the wade-code-review PR-description check): in the Test section keep the date, commit ids, build settings, pass/skip results and exact test counts; remove clock times (start/end hours, time in the status line), paths into the author's workspace (scripts, results directories), and comparisons with another head's assertion counts ("192 more than the comparator"). Related: [[pr4812-merge-4774-onto-4424-head]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-09-30/10-08: present tense, no change narration; perf data = FINAL head vs LATEST main only (no previous-head/headm/attribution se...

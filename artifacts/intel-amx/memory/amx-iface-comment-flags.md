@@ -37,3 +37,6 @@ fixes not yet applied. **How to apply:** if asked to edit either note, re-check 
 against the current tree first, then fix the flagged sentences. Rewrites in the plain
 register are in the published page "amx_attn_iface Notes, Unpacked" (2026-08-27).
 Related: [[plain-words-comment-register]], [[mirror-naming-convention]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-08-27 verified inaccuracies in the numerics-contract paragraph and Note [Mirror or

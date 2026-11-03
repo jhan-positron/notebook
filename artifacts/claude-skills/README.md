@@ -27,3 +27,16 @@ Registered by the 2026-10-16 `SCOPE: auto` handoff run of claude-handoff-generat
 - `Wade-code-review/references/wade-style.md` -> `claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/wade-style.md` (27917 bytes). Installed personal skill (Wade-code-review). (handoff: [claude_20261006-20261007_wade-code-review-skill-from-wades-pr-reviews.md](../../handoffs/claude_20261006-20261007_wade-code-review-skill-from-wades-pr-reviews.md))
 - `cpp-coding-guide/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/cpp-coding-guide/SKILL.md` (2577 bytes). Installed personal skill (cpp-coding-guide). (handoff: [claude_20261014_pr4901-questions-txt-directives.md](../../handoffs/claude_20261014_pr4901-questions-txt-directives.md))
 - `simplify-cpp-comments/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/simplify-cpp-comments/SKILL.md` (4903 bytes). Installed personal skill (simplify-cpp-comments). (handoff: [claude_20261014_pr4901-questions-txt-directives.md](../../handoffs/claude_20261014_pr4901-questions-txt-directives.md))
+
+## Codex handoff preservation — 2026-11-02
+
+Prepared from the active Codex home on claude-agentsrv. The review report records the approval decision for this batch. Copied current source files can postdate the historical review conclusions.
+
+This approved topic contains 1 files, 0.012 MiB. The report and companion inventories list every left-behind file. Files above 5 MiB remain at their original locations unless separately approved.
+
+Left behind in this batch:
+
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/operand-B.html`: left behind (content conflict: retain repository contents section from 71fc29c pending user decision), 76093 bytes.
+
+- `PR-description/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/PR-description/SKILL.md` (12139 bytes). registered artifact.
+  Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).

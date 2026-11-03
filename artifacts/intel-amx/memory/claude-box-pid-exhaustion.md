@@ -39,3 +39,6 @@ survives crashes (transcript .jsonl + memory + QUEUE.md); recovery = read transc
 sequentially. The [[pal-bridge]] workaround that survives it: pal_client_local.py execs the
 cached server binary DIRECTLY (/home/jhan/.cache/uv/archive-v0/uXL0551w1VRkH8c-/bin/pal-mcp-server),
 no uvx/git forks; earlier "FATAL: no initialize response" failures were this same fork pressure.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): - [claude-box pid exhaustion](claude-box-pid-exhaustion.md) - sleep-infinity PID 1 never reaps; pids.max 2048; host fix (NO sudo, rootless podman) = podman update --pids-limit 8192 claude-box

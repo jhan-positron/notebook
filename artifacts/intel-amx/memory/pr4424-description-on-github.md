@@ -31,3 +31,6 @@ only (a re-fetch showed 0 CR), so compare bodies after normalizing line endings,
 byte-exactly, or a benign mismatch will block the next PATCH. Update the title too when it
 carries the same term. See [[vnni-k-terminology]] and
 [[vnnied-k-in-place-project]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): VNNI-K PR = positron-ai/tron #4424 (jhan-amx-vnniK -> MAIN since 2026-09-16

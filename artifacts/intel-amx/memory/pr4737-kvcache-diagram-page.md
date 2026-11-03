@@ -36,3 +36,6 @@ them or every row gets an empty line; 140 px lane-label gutter needs 2-line labe
 as an artifact (jhan asked for the file). Related: [[pr4737-review-response]],
 [[issue-4500-fix-implementation]], [[i4500b-policy-campaign]], [[svg-render-check]],
 [[plain-english-default]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-01 issue4500/diagramming-code-changes.html + generator exec/pr4737-dia

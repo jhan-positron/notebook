@@ -49,3 +49,6 @@ bit or nearly bit this campaign.
 **How to apply:** for the next perf round, copy p2-perf-round-20260830.sh (it has all review
 fixes) and compare against THIS round's txt as the new reference.
 Related: [[amx-tron-softattn-project]], [[delphi-3bda-hardware]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE: head 1d158249e = Aug-25 refs within noise, gpt-oss-120b parity + 0 GB arena verified live; P

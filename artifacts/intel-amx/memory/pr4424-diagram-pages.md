@@ -65,3 +65,6 @@ present) + XREF/METHOD legends. Workflow wf_e8254699-076 (44 agents) declared le
 and fixed them (kv_cache 42 findings applied). B1a = figs/base_k_vnni_b1a.py (own module; spec_builder resolves
 base_<key>_<name>), 5 levels + index-formula travel + row-major-form note; worked example token 37 / dim 70.
 Final: check_page + check_legend 0 problems on all three pages (26 / 24 / 15 figures).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-09 three diagramming-code-changes-<file>.hpp.html pages (kv_cache / tensor k_vnni / model) in merge-4737-2-4424/; generator exec/pr4...

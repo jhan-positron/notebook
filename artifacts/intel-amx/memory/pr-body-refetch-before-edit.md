@@ -21,3 +21,9 @@ their changes.
 - Deliverables jhan asked for: ~/tmp/pr-desc.md (their version) and ~/tmp/update.md (my change as a unified diff against
   the version before their edit), so they can merge by hand. Do not rewrite the live body afterwards unless asked.
 Related: [[attn-stats-pr-implementation]], [[pr4424-description-on-github]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-25 overwrote jhan's GitHub edit of the PR 4596 body; patch onto t
+
+## 2026-10-21 repeat (PR #5098)
+The compare ran (`diff -q -B -Z`) and printed "LIVE BODY DIFFERS", but the script continued to `gh pr edit` in the same command and overwrote jhan's edits (the Short version trimmed, two Words rows removed). Restored within 2 minutes by re-applying only the new changes onto the saved live copy. Rule: the compare and the edit NEVER go in one command. Run the compare alone, read it, merge onto the live copy, then edit. Jhan's deletions here: the "Two comments describe..." sentence and the diff-size sentence in the Short version, and the "syntax matrix" and "3bda" rows of Words used here. Keep them deleted.

@@ -19,3 +19,6 @@ right-hand column's register: name the mechanism ("has no 'store only 4 rows' mo
 operand)"), keep source identifiers exact, no test-file references in headers. Still run a fact-check panel: plain
 rewording tends to re-generalize (see [[reviewer-personas]] round-6d). Length is acceptable (7 -> 20 lines) when
 every sentence carries a distinct fact. Related: [[english-banned-words]], [[review-body-format]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan wants dense comments explained via a "comment says | in plain words" table an

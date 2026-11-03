@@ -54,3 +54,6 @@ Deliverables: report issue4525/status/first-3bda-test-results.html = artifact ht
 gen_report.py at the same path; Step E dot plot = delta vs band per comparison), evidence dir, plan section 7 by the peer. Scripts: exec/i4525-20260922/{chain4.sh (driver), build2.sh, smoke.sh,
 campaign.sh, summarize.py, stepc-base.sh, gen_report.py, README.md}; chain.sh/chain2/chain3/build.sh/host-suite.sh are the
 superseded versions (kept). Related: [[issue4525-design-review]], [[platformd-011-restarts-stopped-units]], [[3bda-shared-with-bill]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-22: Step D identical tokens, Step E 12/12 inside band, Step

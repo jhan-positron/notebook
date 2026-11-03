@@ -35,3 +35,6 @@ fig2.svg in PR3879/unpack-mirror-write-ok/). Facts verified at tron-amx 1d158249
 [[amx-mirror-aware-cache-unpack]]); if asked to apply one of these, re-check line numbers and keep
 the t_llama_unit.cpp:908-913 STATIC_REQUIREs green. Related: [[plain-words-comment-register]],
 [[codex-review-loop]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-08-28 verified facts for the save_k write gate comment + Note bullet; replacement options

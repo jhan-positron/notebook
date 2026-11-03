@@ -83,3 +83,6 @@ Facts learned:
 - Tag (release) builds use the same deb preset -> release packages get the kernels too (channel testing per resolve-apt-channel.sh).
 - Probe code lines on main: detect_and_request() amx_attn.cpp:58-72, available() 76-86 (static at 84); README.ci.md option paragraph at 563.
 NOT done: notebook preservation of the body; PR comment/Slack announcement (jhan decides); repeat run for the two unresolved canon drops.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): PR #4505 (AMX in the deb preset) opened 2026-09-21; Rhys AMD test table has swappe

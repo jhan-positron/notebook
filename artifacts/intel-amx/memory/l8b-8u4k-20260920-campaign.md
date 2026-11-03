@@ -83,3 +83,6 @@ config.env 0 bytes, no lease, no sleep holders.
 **How to apply:** for another single-cell run copy exec/l8b-8u4k-20260920/ (it already carries the one-config fix); see
 [[l8b-levers-20260919-campaign]] for the driver's traps and Saturday numbers, [[3bda-shared-with-bill]] for the marker protocol,
 [[canon-ci-20260918-campaign]] for the arms, [[ci-amx-test-shapes-recommendation]] for the page that now carries source I.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE: llama-8b 8 users/engine x prompt 4096 = +14.0 % TPS, inside band; report + com

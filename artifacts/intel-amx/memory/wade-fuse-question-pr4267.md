@@ -52,3 +52,6 @@ that changed from the assessment: the getenv static must be in a non-template fu
 is a template); four comments describe the compile-time gate (header, test file, t/CMakeLists.txt,
 include line); the monotonic-counter rule applies only to exported leaves; Decision 4 = one leaf per
 value vs one summary JSON leaf. Nothing posted on the PR itself.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-09 Wade APPROVED PR0 #4267 (ef13273ba9) + asked for FUSE/env-var live counters;

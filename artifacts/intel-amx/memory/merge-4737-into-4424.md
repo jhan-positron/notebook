@@ -147,3 +147,6 @@ TRON_AMX_DISPATCH + README.ci.md paragraph (deb preset sets it; layout independe
 PR 4424 head 0a5334ccb6 MERGEABLE. PR body patched (new-body-4.md): setup sentence names the preset line, CMake bullet
 mentions the deb preset, the deb-preset open item removed, Verification provenance "head 0a5334ccb6 adds the preset line".
 STANDING REMINDER: the protected-section wording proposal (see [[remind-protected-section-proposal]]).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-10-09: merge 9d5c7a389b pushed (PR 4424 head, PR 4737 merged); nightly-config campaign done (llama-8b 32u@4096 +4.8 %, qwen sw8k +...

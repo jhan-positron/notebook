@@ -54,3 +54,6 @@ DONE 2026-10-06 14:12 UTC: chain2 ok (runtron.main1006 = main dd6e85226b in tron
 native preset); Step D cpu p1024 base/head/head2/baseoff/headoff + fpga p1024 base/head = ONE identical 256-token file (sha aa272c0e...);
 serving restored, claim released. PR body Status now = c5d44bd86f rows only (unit tests + token identity, 2026-10-06); follow-up PR comment
 posted. Results exec/results/i4557squash-20261006/, evidence issue4525/evidence/squash-3bda/. Open: Wade's re-review.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-10-06: round 6 applied, squashed to c5d44bd86f (one commit on main dd6e85

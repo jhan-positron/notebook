@@ -42,3 +42,6 @@ never "arm" (say configuration/binary); label cache-behaviour statements as
 model or hypothesis; store ORDER is program order of the loops, a final-state
 check cannot observe it; a fixed-width "overview" strip must be computed with
 gaps + padding + borders (use a fluid flex strip instead).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): status/block-store-animation.html = artifact Mr7Vu2qJcA1uVdxP6kFiUh; generator + compi

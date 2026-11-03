@@ -88,3 +88,6 @@ the prefill side is equal at 1024 and the FPGA wins from 1536 up (1.9x at a cold
   Nightly = cold for qwen3-4b (1.2 % hit; fresh engines per model; distinct seeds per user x round); warm only llama-3.2-3b
   shared prefix (14 %) and the 2nd llama-70b tp2 config (18-42 %). Generators: gen_page.py + fpga_section.py + rt8u_section.py
   + hbm_cells.py (shards_new_est from uncached tokens; free_before fields).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): v9 2026-09-22: FPGA 1.8-1.9x vs CPU AMX at 8192, AMX 2.3x vs AVX; "0 new warnin

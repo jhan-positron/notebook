@@ -22,3 +22,6 @@ dut.sh serving-down/serving-up (exec/q4b-fpga-20260921/) already used the platfo
 back with POST /api/inference/up (dut.sh serving-up). Also: the auto-mode classifier denied `ssh delphi-3bda ... nohup bash
 campaign.sh &` launches at 16:4x UTC ("Modify Shared Resources") although the 07:00 UTC launch had been allowed; when denied,
 hand jhan the exact one-line command for `! ssh ...`. Related: [[3bda-nightly-rinzler-cleanup]], [[q4b-fpga-20260921-campaign]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-22: systemctl stop rinzler@N is undone by platformd withi

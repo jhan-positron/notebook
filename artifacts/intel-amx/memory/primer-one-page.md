@@ -54,3 +54,6 @@ three programs), so the wording rules above must survive future edits.
 **How to apply:** edit perf-model/primer/final.md, re-run a4sim.py, re-upload fig.png only if fig.py
 changed, then update the Notion page with notion-update-page (page id above). Related:
 [[perf-model-project]], [[perf-model-artifact]], [[notion-questions-keep-verbatim]], [[prompt-not-ctx]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-04 Notion sub page "Predicting the AMX Decode Boost" (3d1d132d3cfd8124bba6d3940f68913b); source perf

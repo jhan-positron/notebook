@@ -20,3 +20,6 @@ publishing and again after, and handle new markers in the same turn. Notion fetc
 are cached for a few minutes; a fetch by a different URL form (ID with dashes, full URL,
 ?pvs=204) returns fresh content. Related: [[deleted-comments-stay-deleted]],
 [[plain-english-default]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-09-02: never remove a QUESTION marker; open answers with "Answer to

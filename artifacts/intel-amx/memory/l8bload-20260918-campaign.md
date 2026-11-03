@@ -55,3 +55,6 @@ stated as fact, chart-2 caption trend inverted [share recovered falls 26 % -> 13
 stale ANOMALY counts, semicolons); all applied in gen_report.py (page section rewritten). ANOMALY evidence saved:
 cells/2u__on__rep3/journal-2042-2045.txt (only other event: tailscaled reconfig + DNS cache flush 20:44:36 UTC, 10 s after
 round 9 began; relation unknown). Second verification pass wf_9dd184c5-0a5.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE: AMX gain on llama-8b vs users per engine (rinzler + CI harness, our half, same b

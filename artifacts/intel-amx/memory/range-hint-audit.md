@@ -68,3 +68,6 @@ the gate still implies "no boundary inside the page" before trusting the
 unchanged-hint return; proposed host test (not written): two ranges over one
 full page in t_amx_dispatch_dtype.cpp, expect 0 kernel calls. See
 [[pr3879-split-progress]], [[amx-vs-avx-sense]] (section 7.7 of that page).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-10: Ben's r3973407196; AMX path returns the hint unchanged = dotter's value (dense page has no bou

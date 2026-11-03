@@ -22,3 +22,6 @@ threads below without ids, and one dense paragraph in his voice (the 2026 Alexey
 lines; gen_review6.py's render_body() turns them into <p>/<ul> in HTML (Markdown renders them natively). Keep his
 voice inside each paragraph; note the format deviation from the persona once in the Method section. Apply the same
 to any future reviewer persona's verdict body. See [[reviewer-personas]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): verdict body in paragraphs + bullet list naming comment ids (R1-10 ...), never one prose blob; jhan feedback 2026-08-26

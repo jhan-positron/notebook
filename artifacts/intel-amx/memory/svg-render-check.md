@@ -31,3 +31,6 @@ need `style="fill:..."`. (3) `marker-end` set in a CSS class points at one id fo
 give each figure its own marker id and set `marker-end` as an attribute per arrow, or cairosvg
 crashes on the figures whose marker id is missing. (4) Inject the page's `svg .class` rules as a
 `<style>` inside the extracted SVG, otherwise the render shows unstyled shapes.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): render inline SVGs with cairosvg and inspect before delivering; gutter >=140px, no labels in arrow corridors

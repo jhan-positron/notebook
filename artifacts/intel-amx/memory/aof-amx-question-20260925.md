@@ -83,3 +83,6 @@ generator v8 reads exit-reports.txt and asserts Table 3 predictions; artifact re
 - 2026-09-17 57 % still unexplained: candidates 5c (needs rinzler at temperature 0 + counters) and 5b.
 - open oddities: path set "amx" alone (no AVX) for 7 jobs per warm iteration; the 'fpga' alone set = re-score queries of a token
   already on the card.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): counter.html 2.2-2.4: steady state MEASURED 0 AMX; states 1/2 exact, state 5 ~3 %, state 8 zero refuted

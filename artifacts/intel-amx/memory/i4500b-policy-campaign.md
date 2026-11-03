@@ -89,3 +89,6 @@ report VNNIed-K-in-place/issue4500/policy-4500.html from exec/i4500b-20260930/ge
   the filtered thread (--tid), paired t sign turned so positive = better, tracing overhead source = 09-19 rt-results (124.9 vs 113.5 TPS),
   analysis.md means include a 0-ms final forward (use passes.json), the wait is TSX xbegin+tpause (mwaitx name is historical), 25/50 workers.
   TRAP: cairosvg renders blank when the inline svg style has height:auto (put it in CSS); SVG text is not reflowed at phone width.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-30 commit 452b2052c9, n=4: qwen TPS not wors

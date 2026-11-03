@@ -56,3 +56,6 @@ another session ("tron PR #3879 AMX K mirror comment") shares the fence worktree
 never commit/edit the worktree while its markers are pending; message it before touching gen/ or the
 page; patch-gen-stamps.py v2 must keep the "site 760x" markers. Related: [[amx-vs-avx-sense]],
 [[nfs-attr-cache-build-trap]], [[debug-code-new-branch]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-01: per-unit AVX 3.64 / canon 2.89 / mirror 2.66 us at 8K (1.37x/1.26

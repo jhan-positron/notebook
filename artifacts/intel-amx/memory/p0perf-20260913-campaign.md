@@ -66,3 +66,6 @@ the same-binary link between today's CI numbers (185.4 / 147.2) and post-merge A
 then on-vs-fpga = predicted CI change, on-vs-off = AMX gain, runtron vs CI = the ratio jhan
 asked for. Related: [[nightly-vs-ours-tps-context]], [[p0perf-20260911-campaign]],
 [[3bda-shared-with-bill]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-13: fpga arm reproduces nightly (+3.6/+4.6%); CPU a

@@ -26,3 +26,6 @@ Durable verified facts:
   truth; the log-line channel is exercised but never asserted (its own comment
   over-claims "the three numbers").
 Related: [[amx-iface-comment-flags]], [[amx-tron-softattn-project]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): PR3879/f9b678e.html + facts/verdicts archive; nothing obsolete at head; iface:182 comment "read by the log lin

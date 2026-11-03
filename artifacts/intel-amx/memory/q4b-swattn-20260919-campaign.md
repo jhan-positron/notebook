@@ -61,3 +61,6 @@ Verified facts (2026-09-19 evening):
 **How to apply:** check .done-check / .done markers and RUNBOOK.md before touching the machine; never edit the scripts while a
 run is active; see [[l8b-levers-20260919-campaign]] for the driver's traps, [[q4b-swattn-20260919-plan]] for the plan facts,
 [[3bda-shared-with-bill]] for the marker protocol.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): two launches (Sat-night check cell, Sunday passes with NOT_BEFORE);

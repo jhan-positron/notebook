@@ -22,3 +22,6 @@ from their new gen/ (RUNPATH is $ORIGIN-relative).
 **How to apply:** use the ai-runs paths everywhere; if jhan asks to move tron-amx, repeat the same
 steps (verify no runtron/build/lock, git worktree move, repoint exec/ + memory paths, notify any peer
 session sharing the tree). Related: [[debug-code-new-branch]], [[single-attention-measurement]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-01: tron-dd + tron-fence-amx MOVED to ~/workspace/ai-runs/ (exec scripts re

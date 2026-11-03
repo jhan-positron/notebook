@@ -86,3 +86,6 @@ RESULTS (round 1, 17:56-01:39Z, all cells done; PR3879/more-testing/round-1/stat
 **How to apply:** for round 2, reuse exec/more-testing-r1.sh + helpers; compare
 against round-1 status.md and ci-reference json. Related:
 [[amx-tron-softattn-project]], [[delphi-3bda-hardware]], [[perf-round-20260830]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-05: nightly systems_test CI tests (functional/perf/MMLU Pro/soak)

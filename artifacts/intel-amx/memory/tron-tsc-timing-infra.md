@@ -59,3 +59,6 @@ shape mismatch), TRON_CHECKPOINT (no layer/worker axis) or TRACE_EVENT (needs a 
 **How to apply:** say TRACE_EVENT for spans, TRON_CHECKPOINT for token-stream records; cite
 llama.hpp:660/694 for the idiom. Related: [[attn-stats-pr-implementation]], [[attn-stats-why-not-fuse]],
 [[attn-path-counters-design]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-25 verified: rdtsc() inline fn + cycles_to_ns (Q3.61, 50 ms calibration); macros = perfe

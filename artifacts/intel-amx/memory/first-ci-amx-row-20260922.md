@@ -51,3 +51,6 @@ Re-run parse_row.py on `gh run view <id> --log` to get the row statistics. Relat
 [[ci-enable-20260917-campaign]], [[nightly-amx-check-20260916]], [[pr221-rhys-amx-benchmark-review]].
 
 FOLLOW-UP 2026-09-23: the first night WITH kernels (package 2026.09.23-5cf65b92) read 32.494 TPS; see [[ci-amx-row-20260923]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 28.3 TPS = our no-AMX base (package had 0 AMX code); "AMX-off" = kill switch

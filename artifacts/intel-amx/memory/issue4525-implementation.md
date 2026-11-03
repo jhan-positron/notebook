@@ -242,3 +242,6 @@ from the repo root there; commit on claude-box in the NFS worktree. Related:
   disassembly identical on 3bda). TRAP: named tile constants work only with clang (GCC's AMX headers stringize the
   tile arg into asm). Left: literal "+ 0"/"0 *"/64,16,32,48 offsets on main's lines in amx_attn.cpp.
 - 2026-09-24: 633cb88896 = PR HEAD: Note [KV block lifetime] rewritten to jhan's approved text (per-geometry details dropped by jhan's choice).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): PR #4557 head 633cb88896 (Note [KV block lifetime] rewrite 2026-09-24); 0/1 literals ope

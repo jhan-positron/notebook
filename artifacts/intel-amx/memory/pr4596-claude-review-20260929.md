@@ -42,3 +42,6 @@ the data JSON; overlapping edits leave ~10 % unmatched -> run a second pass.
 **Why:** next steps (PR body refresh, T3 count decision, reviewer replies) start from this state.
 **How to apply:** regenerate the page from exec/review-20260929/ (python3 gen_review.py out.html with data/
 beside it); line numbers in findings are of 04da001cb5 for h/ files and shift for t/ files after the push.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): approve with nits (0 must-fix, 7 should-fix); claude-review.html + exec/revie

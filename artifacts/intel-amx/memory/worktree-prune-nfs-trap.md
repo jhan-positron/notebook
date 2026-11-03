@@ -21,3 +21,6 @@ tron-split-PR2-on). `git worktree repair` cannot recreate a missing admin dir.
 sha, commondir = ../..}` then `git -C /var/tmp/jhan/<w> reset -q` to rebuild
 the index (working files untouched). A short sha in HEAD does not work. See
 [[nfs-attr-cache-build-trap]] for the sibling cross-host trap.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): never `git worktree prune` the shared tron repo from claude-box; 3bda /var/tmp/jhan worktree

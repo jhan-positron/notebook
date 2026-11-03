@@ -42,3 +42,6 @@ the target, 7a7699b338 cost data 0.7 s / 8 MB); the project chain proved pass-on
 (lefthook regex) is NOT added; it can only land with or after PR 0b. Trap seen: Catch2's signal handler also fires
 inside the forked child (a "SIGABRT" FAILED line at the fork helper), the real assertion is the parent's REQUIRE.
 Related: [[pr3879-split-progress]], [[breakup-pr3879-plan]], [[claude-box-tron-build-env]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-08: only -D_GLIBCXX_ASSERTIONS catches the release-load

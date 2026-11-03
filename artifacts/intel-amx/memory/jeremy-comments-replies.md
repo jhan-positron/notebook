@@ -38,3 +38,6 @@ Campaign traps learned (fold into next perf round):
 - rinzler serving on 3bda was stopped per policy at ~12:19Z on 2026-08-31 and
   NOT restarted (jhan's never-restart rule).
 Related: [[reviewer-personas]], [[amx-tron-softattn-project]], [[perf-round-20260830]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): CLOSED 2026-08-31: 60d66d9c04 pushed (new PR3879 head), replies posted (r3896108314 data-clo

@@ -105,3 +105,6 @@ the 09-25 page has no "option F" (the alternative is the work-shape class under 
 assertion_signal twin at t/t_compute_attention_unit.cpp:22-34; compile_generated_attention_calls (hetero :163-215) never runs;
 decide.py parser lines are :63/:74 (not :167); const fpga_at overload (:345-347) also lacks asserts (W4 detail).
 W2 IMPLEMENTED (c612b82a84, 3bda green). W3/W4/W5 still pending jhan's reading.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-28 W1-W5 analysis page respond-Wade-comments.html; all five hold, fixed in round 4

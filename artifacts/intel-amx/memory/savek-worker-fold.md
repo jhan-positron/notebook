@@ -57,3 +57,6 @@ after the chain ends (chain measures 19ae84d95a; identical runtron code).
   NFS-shared worktree: check `git branch --show-current` and compare HEAD with the branch before pushing.
   Open for jhan: review/merge of #4774 into jhan-amx-vnniK; then PR #4737 and PR #4746 need the same fold; PR #4424
   body still names save_k_helper (4 places); reply to Ben's thread r4065141577 (not posted by Claude).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-06 branch jhan-amx-vnniK-savek-worker 19ae84d95a; chain exec/savek-20261006/;

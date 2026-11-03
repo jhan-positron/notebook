@@ -17,3 +17,6 @@ performance paragraph is lost, and the result rows would have nowhere to go.
 **How to apply:** whenever a PR body (or report) carries a measurement that is still running or that
 attributes a difference, give it a subsection with those six parts; fill the table in place when the
 result lands. Related: [[sync-4424-main-20261007]], [[pr-description-no-history]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-10-08: question, comparator, cells, verdict rule, status, table; never a sentence inside another section...

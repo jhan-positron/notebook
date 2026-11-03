@@ -82,3 +82,6 @@ restored 89/1/0 (= PR 4424 reference). Posted on the C1 thread and RESOLVED it (
 wrote "ok" when test-host failed, because grep 'test-host rc=0' matched the line "build-test-host rc=0" (anchored with ^ now;
 read the rc lines, not the .done file, for runs before 2026-10-02). TRAP: start a host suite a few minutes after the lease
 clears, or clean /dev/hugepages/slice-*-of-8 first (i4500b/lib.sh has a cleanup) to avoid heap_setup failures.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-10-01: Codex review of the i4500 PR answered; head bb32a80774 pushed (k_storage_ref

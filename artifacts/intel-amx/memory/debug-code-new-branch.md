@@ -20,3 +20,6 @@ PR #3879 must stay a clean review target.
 **How to apply:** never `git commit` debug code on jhan-amx-p0; if a debug patch turns out to be
 production-worthy (e.g. an AMX engagement counter), propose it separately. Related:
 [[runtron-determinism-recipe]], [[amx-tron-softattn-project]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-08-30: debug-only changes go on jhan-dd-debug (~/workspace/ai-runs/tron-dd), never on jhan-amx-p0

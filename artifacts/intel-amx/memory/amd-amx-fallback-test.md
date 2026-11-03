@@ -33,3 +33,6 @@ Method facts that cost time:
 **Why:** the probe is the only observable of available(); no log/counter exists.
 **How to apply:** reuse the shim for any "did AMX engage" question on any host; pair every AMD
 negative with an Intel positive control. See [[runtron-determinism-recipe]], [[amx-ci-coverage-facts]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-11: andoria-06 AMX build takes the AVX path (no arch_prctl(0x1023); Intel control s

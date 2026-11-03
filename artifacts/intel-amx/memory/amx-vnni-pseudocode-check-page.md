@@ -34,3 +34,6 @@ is the reference for future explanations of the AMX/VNNI-K decision chain.
 **How to apply:** when explaining or re-checking the AMX/VNNI decision tree,
 start from this page's corrected pseudocode (section 2) instead of re-deriving;
 cite ff680c8020 lines only after re-verifying on the current head.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-16 Notion sub-page 3ddd132d3cfd8121ae4aff7138318a8d under the AMX opti

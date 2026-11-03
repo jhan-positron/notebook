@@ -21,10 +21,12 @@ Page: PR3879/new-PRs/PR1/Hannah-AMX-CI.html (2026-09-11), for Hannah Van Eenoo (
   35 skipped; test-fpga Intel 9 / AMD 3 / 35 skipped; build compiled 13 of 48.
 - Benchmarks: per-commit `benchmark` job AMD-only (oci 2x72core commented out: lab breaker trips);
   nightly benchmark-golden.yml DOES run on Intel hosts but builds main without the flag.
-- Skip semantics: t_amx_numerics QK/PV cases WARN+return when available() is false
-  (t_amx_numerics.cpp:145-148, 189-192); WARN goes to slice's per-test log, uploaded only on
-  failure. Catch2 SKIP() exits 4 = failure in slice unless label skip_return_code_4 -> use an env
-  var (TRON_CI_REQUIRE_AMX=1 -> FAIL) instead. slice copies the parent env to tests.
+- Skip semantics (updated 2026-10-18, PR 5015 round 3): the QK/PV cases now use Catch2 SKIP();
+  Catch2 3.7.1 returns exit code 4 only when EVERY case of the binary is skipped, so with the gate
+  and pack cases still running the binary exits 0 (measured on 3bda under TRON_AMX_DISABLE=1:
+  "test cases: 4 | 2 passed | 2 skipped", rc 0). The old WARN+return made the cases count as
+  passed. An env var (TRON_CI_REQUIRE_AMX=1 -> FAIL) is still the way to make a skip fatal in
+  slice. slice copies the parent env to tests.
 - Proposal: new job test-amx, runs-on [self-hosted, fpga, test, intel, avx512], needs build,
   restores artifact, runs ./gen/t_amx_numerics + ./gen/t_amx_dispatch_dtype directly (slice has no
   per-test filter; restored tree has no CTest registry), add to `test` fan-in needs + assertion.
@@ -42,3 +44,6 @@ Page: PR3879/new-PRs/PR1/Hannah-AMX-CI.html (2026-09-11), for Hannah Van Eenoo (
 **How to apply:** reuse for the test-amx PR, the #3997 close-out, and any CI discussion; recount
 the job table before quoting numbers older than a week. See [[pr3879-split-progress]],
 [[more-testing-round1]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-11 verified: PR1 compiles AMX in the CMake lane only; execution needs Intel runner AND t

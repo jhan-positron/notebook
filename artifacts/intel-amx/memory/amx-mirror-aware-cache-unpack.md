@@ -38,3 +38,6 @@ The comment was replaced on 2026-08-28 by a 7-line "why"-only question-form vers
 claims (C9, C10, C11, C12, L7 in the verdicts file). **How to apply:** re-check line numbers
 against the current tree before quoting; reuse the probe files for any concept change. Related:
 [[plain-words-comment-register]], [[amx-iface-comment-flags]], [[codex-review-loop]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-08-28 verified facts for the kv_cache.hpp:1433-1461 comment (only book is a

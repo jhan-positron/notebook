@@ -48,3 +48,6 @@ generator reproduced the page byte-for-byte before the edit, check that first.
 Related: [[amx-tron-softattn-project]], [[single-attention-measurement]],
 [[svg-render-check]] (cairosvg's fallback font is ~15% wider than system-ui and lacks
 circled digits 11+; use plain numbers).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-02 verified 12-step per-layer sequence of one CPU attention worker (3 barriers, s

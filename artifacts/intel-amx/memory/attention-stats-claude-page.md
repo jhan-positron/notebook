@@ -30,3 +30,6 @@ Traps:
 - Verify lenses churn on ", so" splitting; 3 rounds went 41 -> 22 -> 20 high/medium findings, mostly style. Read the page yourself for the final pass.
 
 Related: [[attn-stats-pr-implementation]], [[wade-pr4596-review-response]], [[attn-path-counters-design]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-29 new-counters/attention-stats-claude.html + check script (72 closed-form

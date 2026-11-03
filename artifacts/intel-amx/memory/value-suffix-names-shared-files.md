@@ -33,3 +33,6 @@ STATUS 2026-10-06: revert IMPLEMENTED as draft PR #4775 (branch jhan-kv-typed-te
 425a0e8239, base jhan-kv-typed-tensors); libtron.a disassembly identical, 4 tests green on 3bda;
 worktrees ai-runs/tron-i4525-style (claude-box) and /var/tmp/jhan/tron-i4525-style (3bda).
 Trap: `bin/lint-notes` with no file args exits 1 (usage); the hook runs `make lint-notes`.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-10-06 Wade nit PR 4557: NAME_<value> only in AMX-owned files; shared f

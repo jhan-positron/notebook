@@ -69,3 +69,6 @@ runs, /bill-has-instance-0,2 marker). Scripts + logs: scratchpad merge-build/run
 Still open for jhan: the four reply drafts to W6-W9 not posted; live PR body still says 12 t_attn_stats cases (now 17).
 
 UPDATE 2026-10-01 ~00:3x UTC: GitHub CI green on 8c95514924 (Build Tron, Lint, Test host, Test FPGA 13m27s, Cursor Bugbot all pass; the two Benchmark jobs are skipped, not required). PR 4596 state = MERGEABLE / CLEAN / APPROVED, ready for the merge queue; merging is jhan's call.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-30: 441e81178b pushed, Wade APPROVED, main merged (8c95514924 = PR hea

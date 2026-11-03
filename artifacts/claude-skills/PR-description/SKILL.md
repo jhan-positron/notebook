@@ -69,11 +69,11 @@ This section answers one question: does the head build and pass in every configu
 
 Open with one paragraph that says where every result in the section comes from: the head and the base commit ids, the machine, the date, the build settings (environment, compiler, preset, build type), and the binaries or configurations compared, each with the short name the tables use. Why: every table below is read against this paragraph. A reviewer who finds these facts stated twice looks for the difference between the two.
 
-Then subsections, each one table with at most two sentences around it:
+Use the following subsections and tables. Keep setup text to at most two sentences per table. When interpreting test results, including token-identity and performance tables, write `What the table says:` on its own line. Follow it with a blank line and a bulleted list. Use one finding per bullet. Keep supporting numbers and any related decision with that finding.
 
 - **Builds and tests.** One row per configuration (the options on or off) with what was built and the test results as assertions and cases. The checks that must be clean (format, whitespace, prohibited headers, a syntax-only compile across configurations) take one sentence each. A deliberate break that a test must catch (a mutation check) takes one sentence: what was changed, which case failed. A skipped or failed test carries its reason, never a summary such as "all pass".
 - **Token identity.** One row per cell (model, attention, prompt length) with the result: "identical, N of N tokens" or "first difference at generated token K". Say which pairs must be identical (a repeat of the same binary, the kill switch against the same binary) and which comparison is informational (against the base).
-- **Performance** (when the second question applies). The cells, the decision rule (for example, a band of twice the larger standard deviation and the paired t statistic over the repetitions), one table per binary with the standard deviation, one table per pair with the difference and whether it is inside or beyond the band. Then "what the tables say" in a few sentences: the size of the change and the mechanism that explains it, with a decomposition when more than one mechanism is in play. A loss at this head is stated here.
+- **Performance** (when the second question applies). The cells, the decision rule (for example, a band of twice the larger standard deviation and the paired t statistic over the repetitions), one table per binary with the standard deviation, one table per pair with the difference and whether it is inside or beyond the band. Use the bullet format above to explain the size of the change and its mechanism. Use separate bullets for distinct mechanisms. A loss at this head is stated here.
 
 Keep out: wall-clock times, paths into the author's workspace, reconciliations of counts against another head, and setup lists that a script or result file already records (name the file instead). Why: those go stale at the next head, and the reviewer checklist deletes them on sight.
 
@@ -118,6 +118,7 @@ To be added.
 - [ ] No "pull request". No section pointer in the Short version. Every open item with an issue is one sentence.
 - [ ] No file inventory anywhere.
 - [ ] Section 5 says once, at its top, where its results come from. Every table names its configuration, and every skipped or failed test carries its reason.
+- [ ] Test-result table interpretations use `What the table says:`, a blank line, and one finding per bullet, including performance tables.
 - [ ] If the PR claims or costs performance, the Performance subsection has the decision rule, the tables, and the mechanism.
 - [ ] Present tense, no history, no clock times, no workspace paths, no names of people.
 - [ ] plain-english Check run and applied.

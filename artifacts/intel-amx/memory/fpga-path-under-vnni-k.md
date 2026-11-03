@@ -38,3 +38,6 @@ Verified facts (300-agent trace + 3-lens adversarial verify, head ff680c8020, ba
 **Why:** jhan asked; likely reviewer question. **How to apply:** cite these facts; to close, run FPGA
 cells base(main) vs head with >=3 paired reps + token compare + perfetto spans; add a staged-bytes test.
 Related: [[vnnied-k-in-place-project]], [[vnnik6-kvmul8-campaign]], [[amx-ci-coverage-facts]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-16 verified: FPGA reads K only via gof::populate (made layout-aware); one FPGA run ide

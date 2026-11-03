@@ -118,3 +118,17 @@ Files left behind are enumerated in `logs/codex-handoff-20261016-artifacts.json`
 ### Related handoffs by file group
 
 - installed-wade-skill: [codex_20261005_analyze-pr4557-review-misses.md](../../handoffs/codex_20261005_analyze-pr4557-review-misses.md), [codex_20261006_update-wade-code-review-skill.md](../../handoffs/codex_20261006_update-wade-code-review-skill.md).
+
+## Codex handoff preservation — 2026-11-02
+
+Prepared from the active Codex home on claude-agentsrv. The review report records the approval decision for this batch. Copied current source files can postdate the historical review conclusions.
+
+This approved topic contains 2 files, 0.014 MiB. The report and companion inventories list every left-behind file. Files above 5 MiB remain at their original locations unless separately approved.
+
+Left behind in this batch:
+
+- `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/operand-B.html`: left behind (content conflict: retain repository contents section from 71fc29c pending user decision), 76093 bytes.
+
+- `skills/PR-description/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/PR-description/SKILL.md` (12139 bytes). document.
+  Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).
+- `skills/cpp-coding-guide/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/cpp-coding-guide/SKILL.md` (2577 bytes). registered artifact.

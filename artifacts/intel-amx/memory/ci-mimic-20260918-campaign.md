@@ -181,3 +181,6 @@ FOLLOW-UP 2026-09-18 (jhan asked whether AMX ran for llama-8b and whether to set
   Untested: llama-8b CI-harness cells on our half, AMX on vs TRON_AMX_DISABLE=1, at 2 and 4 users per engine.
 
 FOLLOW-UP campaign l8bload-20260918 (same day, 19:55-21:08 UTC) tested the 2-users-per-engine hypothesis: AMX gain +0.2 % at 2, +3.9 % at 4, +12.9 % at 8 users per engine -> confirmed; see [[l8bload-20260918-campaign]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE: nightly perf phase by hand on whole 3bda, base (nightly deb) vs AMX+VNNI-K deb

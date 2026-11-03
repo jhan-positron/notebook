@@ -38,3 +38,6 @@ Verified code facts worth reusing (all at ff680c8020):
 say "a pair that software attention scores". Re-fetch the Notion page before editing (cache trap,
 [[notion-questions-keep-verbatim]]). Related: [[vnnied-k-in-place-project]], [[pr3879-split-progress]],
 [[amx-ci-coverage-facts]], [[runtron-determinism-recipe]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-16 sub-page 3ddd132d3cfd81ec8b97f46aec9ebbe9 under Daily notes: all AMX/VNNI build+r

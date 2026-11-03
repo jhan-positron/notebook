@@ -433,3 +433,6 @@ from ~/workspace/tron-amx; the classifier did NOT block the push this time). App
 Index details moved here 2026-09-18 (were only in MEMORY.md): PR1 #3879 head 4290402491 pushed 2026-09-11 02:3x UTC
 (s_pages static_assert + tron::finally region guard [&] + default arg removed; 3bda green). Traps list also included
 "PAL scratchpad paths" (PAL bridge writes to its own scratchpad; pass absolute paths).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): MERGED 2026-09-15 22:54Z via merge queue (main 3fd5edaa66, head 85fc8ff4de); follow-ups: #4424 r

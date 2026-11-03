@@ -159,3 +159,6 @@ only 4 rows" is false for qk_canonical_128x4's stored tiles - its padding is in 
 passes it" was a test reference in a header (production s_pages is 4 rows too); "transposed there" misdescribed the data
 path; "packed Q rows" collides with q_packed. The review files (alexey-review.html / -6.md) predate both commits -
 regenerate before the next round (R1-10 -> fixed; amx_attn.cpp line numbers shifted: stores now :143-146/:225-228/:264-267).
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): ~/workspace/reviewers/<name>.md = persona specs for mock reviews of jhan PRs; verify->find->refute recip

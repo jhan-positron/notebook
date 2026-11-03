@@ -81,3 +81,6 @@ minor, major only with M01/N61) -> always read votes before grading; (7) round-4
 text carried a suggestion (copy_plane, F13) that its own verifiers withdrew and codex implemented
 it -> put verifier corrections INTO the recommendation text next time.
 See [[vnnied-k-in-place-project]], [[pr4424-description-on-github]], [[no-names-in-github-issues]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 4 rounds 2026-09-22, verdict accept with minor edits; traps: keep every id anchor, archive

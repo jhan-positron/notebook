@@ -72,3 +72,6 @@ proposed, on the new platformd.
 **How to apply:** never edit campaign.sh/dut.sh/st_ci_perf.py while a pass runs; stop with kill -TERM <pid> (restore path);
 RECOVERY sequence in campaign.sh header. Related: [[prefill-amx-vs-fpga-qwen3-4b]], [[q4b-swattn-20260919-campaign]],
 [[3bda-shared-with-bill]], [[3bda-nightly-rinzler-cleanup]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): harness updated for platform

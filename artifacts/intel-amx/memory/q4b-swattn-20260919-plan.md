@@ -31,3 +31,6 @@ Verified facts (2026-09-19):
 **Why:** jhan wants definitive apple-to-apple AMX data on qwen3-4b; the nightly's FPGA attention hides the kernel.
 **How to apply:** the executing agent follows the plan's section 2a without asking; jhan can override the two corrections
 before launch. Related: [[l8b-levers-20260919-campaign]], [[p0perf-20260913-campaign]], [[canon-ci-20260918-campaign]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): CI-test/status/qwen3-4b-Saturday-plan.md: nightly deb vs canon deb with

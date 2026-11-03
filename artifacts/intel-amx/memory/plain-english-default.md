@@ -33,3 +33,6 @@ any undefined abbreviation or internal name. Rules 1-3 apply to every unit a rea
 alone: a table cell, a figure caption, a commit message. In sessions that span days, re-read
 ~/.claude/CLAUDE.md whenever jhan says he changed it. Related: [[plain-words-comment-register]],
 [[english-banned-words]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-08-30: plain English always (no switch word); rules codified in ~/.claude/CLA

@@ -36,3 +36,6 @@ the merge-base text; verified byte-identical, clang-format clean, no code change
 Detection script: scratchpad find_dim_renames.py (normalize -/+ hunk text, apply
 dim->dimension, compare). General rule: never touch a main line only to change
 a word.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): jhan 2026-09-15: 'shared block save' not 'striped block store'; 'binary' not 'arm' in results tables;

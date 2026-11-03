@@ -63,3 +63,6 @@ source read to establish and several contradict help text or QUEUE.md wording.
 definitive-decode/index.html's recipe; never use -u with token-file prompts; treat identical
 ON-vs-OFF as a hollow-A/B suspect until engagement is proven. Related: [[amx-router-p0-results]]
 (older one-line recipe: its "-s 42" is inert at temperature 0), [[amx-tron-softattn-project]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-08-29 verified: pay-for-determinism + temp 0 + USE_HW_ATTN=0 + one prompt (NEVER

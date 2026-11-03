@@ -72,3 +72,6 @@ issue4525/evidence/pr4587-3bda/runtron/.
   132 of 135 functions, t_heap_v2 also calls the factory, main comparison, A/A only at p1024). Body had CRLF; now LF.
 - Maintainer question (allocation call vs "the page arena must construct the actual storage type") explained to jhan in
   plain English; NOT posted. Recommended: add as Q5 (Proposed) in the #4557 Decisions record; waiting for jhan.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-24: #4587 (tagged DMA operator new[] creates kv_blocks, launder, k

@@ -19,3 +19,6 @@ jhan (2026-10-05): "Analyze his comments, how come we had not spotted the proble
 
 **How to apply:** run the skill at the FINAL head after every review round (full files + body + log + CI yml), and run it on Wade's own comments before replying. Code checks first (144 of 238 review comments), tests second. Never emit CHANGES_REQUESTED or LGTM in his name. Quote him only from corpus.json ids; author replies carry other ids.
 Related: [[wade-pr4557-review-response]], [[reviewer-personas]], [[cpp-guide-literals-include-bools]], [[pr-description-no-history]], [[artifact-utf8-mojibake-trap]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): v2 2026-10-06: 35 checks from all 115 Wade-reviewed PRs (v1 = 13 from PR 4557); codex copy = same v2 since 2026-10-07 (lowercased name); rep...

@@ -166,3 +166,6 @@ Provenance: exec/results/expert-replicas-20260917/ (verifier-verdicts.json,
 4 adversarial agents, workflow wf_4d6dee24-618). Related: [[3bda-nightly-rinzler-cleanup]],
 [[3bda-shared-with-bill]], [[amx-router-project]] (Note [Expert matmuls],
 worker-0 expert dispatch), [[nightly-vs-ours-tps-context]], [[nightly-amx-check-20260916]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-17 hand edit of rinzler@.service on 3bda,

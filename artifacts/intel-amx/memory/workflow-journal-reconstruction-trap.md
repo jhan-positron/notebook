@@ -27,3 +27,6 @@ Facts learned during the PR 4596 review (session 2026-09-29/30, workflow wf_9d1f
 **Why:** these four cost about two hours of wall time in one session.
 **How to apply:** for any review workflow, write the reconstruction script up front (script-order
 ids), keep every agent's output under ~20k tokens, and pass file paths for large inputs.
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): ids follow the script parallel() order, not journal order; big re-

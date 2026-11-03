@@ -34,3 +34,6 @@ that permission was requested once per process.
 control arm of the same binary and an idle window; `perf list` shows no amx events here, so use
 the raw encoding; read the FIRST CSV column. See [[amd-amx-fallback-test]] (probe shim),
 [[nightly-amx-check-20260916]] (binary checks), [[ci-enable-20260917-campaign]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-17 validated raw event cpu/event=0xb7,umask=0x02 (per-process on the engine pid + ki

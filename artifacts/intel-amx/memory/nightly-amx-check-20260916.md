@@ -83,3 +83,6 @@ preset (or -D in the gen-deb rule); the kernel TU carries its own -mamx flags an
 CPUID at runtime (AMD falls back, see [[amd-amx-fallback-test]]). Always attribute a Slack
 line to its machine by the threshold first. See [[amx-ci-coverage-facts]],
 [[nightly-vs-ours-tps-context]], [[p0perf-20260913-campaign]], [[wedperf-20260916-campaign]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): nightly deb (preset deb) never sets TRON_AMX_DISPATCH -> tron 2026.09.16-f46e48ba ha

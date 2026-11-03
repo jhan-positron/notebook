@@ -77,3 +77,6 @@ scripts); the nightly's own checkout is untouched.
 **How to apply:** for any later campaign on 3bda reuse the FUSE counters, the restart-after-switch rule and the driver
 copies here; check the plan file's section 2a before deviating. Related: [[canon-ci-20260918-campaign]], [[ci-amx-test-shapes-recommendation]],
 [[3bda-shared-with-bill]], [[nfs-attr-cache-build-trap]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): DONE 2026-09-19 17:50 UTC: 7 ce

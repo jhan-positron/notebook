@@ -22,3 +22,6 @@ scripts, lib-guard.sh, dut.sh). Fix bugs in a COPY with a new name (build2.sh, c
 launch or reference the copy; a driver that calls `bash "$C/smoke.sh"` per step must be killed and relaunched
 as a new file if smoke.sh has to change. Python files are read whole at start and can be edited between runs.
 Data files (logs, smoke.txt) are safe to append to. Related: [[worktree-prune-nfs-trap]], [[nfs-attr-cache-build-trap]].
+
+
+Former index hook (moved from MEMORY.md on 2026-10-21 to keep the index under its size limit): 2026-09-22: never replace (sed -i, mv, save) a script that a 3bda
