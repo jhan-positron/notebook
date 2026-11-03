@@ -220,3 +220,27 @@ Left behind in this batch:
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/operand-B.html`: left behind (content conflict: retain repository contents section from 71fc29c pending user decision), 76093 bytes.
 
 - `memory/MEMORY.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/MEMORY.md` (4788 bytes). registered artifact.
+
+## Batch: 2026-11-02 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-11-02 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory, same files). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first. `random/` mirrors `claude-agentsrv:/home/jhan/workspace/random/` and `memory/` mirrors the memory folder of the `-home-jhan-workspace-random` project (the canonical stays in the session store because Claude Code edits it in place). Relocated scratchpad files of the TRON multi-user attention session go to `claude-agentsrv:/home/jhan/workspace/random/exec/scratch-relocated/<session id prefix>/` and are mirrored under `random/exec/scratch-relocated/` (new prefix).
+
+Covers 1 handoff(s) of 2026-10-16 to 2026-11-02 (see "Related" on each entry). Preserved: 6 files, 0.03 MiB in this topic. Left behind by rule 4 of the prompt for the handoffs of this topic, one reason per file (full per-file inventories in the `.lineage.md` companions named under each report page):
+
+- (regenerable: render check PNG): 14 files
+- (provenance: workflow journal or tool output): 1 files
+- `no value used` = files under `leaves/` result trees. `scratch directory >60 files` = agent batch trees under session scratchpads. `provenance` = server logs, client streams, .done markers, binaries, raw workflow outputs, subagent journals. `size` = files above 5 MiB. `regenerable: render check PNG` = PNG renders of inline-SVG pages. `scratchpad file not named in the handoff` = files of directory-listed session scratchpads that no handoff names individually. `duplicate` = a copy already held elsewhere (named). `pdftotext extract of a vendor manual`, `text dump of a preserved page`, `directory listing` = rebuilt in minutes from the PDF, the page, or the tree.
+
+### All files of this batch
+
+Repo path -> canonical path (bytes). `origin:` = the session-store or scratchpad path a relocated file was copied from (history only, never fetched again).
+
+Related: [claude_20261019-20261021_tron-multi-user-attention-parallelization.md](../../handoffs/claude_20261019-20261021_tron-multi-user-attention-parallelization.md)
+
+- `memory/tron-multiuser-attention-page-2026-10-19.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/tron-multiuser-attention-page-2026-10-19.md` (2593 bytes)
+- `random/exec/scratch-relocated/c7307c1a/chunk_mock.py` -> `claude-agentsrv:/home/jhan/workspace/random/exec/scratch-relocated/c7307c1a/chunk_mock.py` (2054 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c7307c1a-67f7-4d1c-84cb-a3f1f85af7a0/scratchpad/chunk_mock.py`
+- `random/exec/scratch-relocated/c7307c1a/edit_page.py` -> `claude-agentsrv:/home/jhan/workspace/random/exec/scratch-relocated/c7307c1a/edit_page.py` (19584 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c7307c1a-67f7-4d1c-84cb-a3f1f85af7a0/scratchpad/edit_page.py`
+- `random/exec/scratch-relocated/c7307c1a/edit_terms.py` -> `claude-agentsrv:/home/jhan/workspace/random/exec/scratch-relocated/c7307c1a/edit_terms.py` (1634 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c7307c1a-67f7-4d1c-84cb-a3f1f85af7a0/scratchpad/edit_terms.py`
+- `random/exec/scratch-relocated/c7307c1a/render_check.py` -> `claude-agentsrv:/home/jhan/workspace/random/exec/scratch-relocated/c7307c1a/render_check.py` (1641 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c7307c1a-67f7-4d1c-84cb-a3f1f85af7a0/scratchpad/render_check.py`
+- `random/exec/scratch-relocated/c7307c1a/render_check2.py` -> `claude-agentsrv:/home/jhan/workspace/random/exec/scratch-relocated/c7307c1a/render_check2.py` (1678 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c7307c1a-67f7-4d1c-84cb-a3f1f85af7a0/scratchpad/render_check2.py`
+
