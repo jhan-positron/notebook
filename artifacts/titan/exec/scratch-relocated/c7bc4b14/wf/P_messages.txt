@@ -1,0 +1,334 @@
+[
+ {
+  "id": "message-1",
+  "title": "Original request (undated, 'no rush'): three SDK jobs, host requirements, an account or a script",
+  "plain_english_bullets": [
+   "The sender is Jeremy's Claude (an AI assistant writing for Jeremy, the SDK-side engineer). The message is addressed to Jibin. It says there is no rush.",
+   "Jeremy's team wants to run SDK tests on phoenix-crb. SDK means Positron's software development kit: the runtime, compiler and test tools, staged on the host at ~/positron/src/phoenix-int. phoenix-crb is the Arm server at 192.168.2.45 (Linux hostname 'ubuntu', firmware name 'Phoenix Reference Server').",
+   "The tests use only the host CPU. No Asimov card (Positron's accelerator board) needs to be attached. None is attached today [phoenix-crb-inspection.txt, section devices: the line '--- lspci positron/accelerator match' is followed by nothing].",
+   "They will run one job at a time. This is a promise about load, not a request for a host-side lock.",
+   "Job 1 is a timing test. The runtime drives a fake device (the SDK's null_timing backend: a device thread posts each pass's completion at a modelled time and computes nothing). The test measures the time the host software adds to each step (one forward pass of the model), to the gaps between tokens, to time to first token (TTFT) and to waking a waiting reader (a thread that sleeps until a result is posted).",
+   "Job 2 is the SDK's sampling unit tests (tests of the code that picks the next token from model outputs), built and run natively on Arm (aarch64, the host's architecture).",
+   "Job 3 is a timed compile of a small model. The SDK's gate list names this 'compile-0.8b', the wall time of the Qwen3.5-0.8B compile [tools/conformance/README.md line 16, read on the host 2026-10-22].",
+   "Host need 1: at least one core, better two, isolated with isolcpus (a kernel boot parameter that removes CPUs from the scheduler's load balancing) and nohz_full (a kernel feature that stops the periodic timer tick on a CPU that runs one task), ideally with rcu_nocbs (a boot parameter that moves RCU callback work, kernel bookkeeping, off those CPUs), and with IRQs (hardware interrupts) kept off them. The other cores stay with the OS and the SDK's worker threads.",
+   "Host need 2: a fixed CPU clock, meaning the performance cpufreq governor (the kernel policy that always requests the highest clock) and no boost (no clock above the nominal maximum), if the board allows it.",
+   "Host need 3: nothing else running during a timed run. A nightly window (a reserved period at night) is acceptable.",
+   "Host need 4: clang 18 (a C and C++ compiler), CMake 3.25 or newer (a build configurator), Ninja (a build runner) and Python 3.11 or newer with development headers. Jeremy says Ubuntu 24.04's packages cover these.",
+   "Host need 5: about 100 GB of disk. The account needs no sudo (administrator rights) and no outbound network. Jeremy says his side copies everything in.",
+   "Ask A: a local account named positron-perf with SSH key login (login by cryptographic key, no password), reachable from Jeremy's laptop directly or through sw-dev-01 (the SDK team's development host; DNS on Jibin's workstation gives it the LAN address 192.168.2.39 and the Tailscale address 100.124.2.53).",
+   "Ask B, the alternative: if Jibin would rather not hand out an account, Jibin runs a script that Jeremy sends."
+  ],
+  "asks": [
+   {
+    "ask": "Run SDK tests on phoenix-crb, host CPU only, no Asimov card attached",
+    "status": "done",
+    "status_evidence": "A job has already run under the account: phoenix-crb-round4.txt, section churn_r1_job_log: '== 2026-10-21T18:32:09Z host=ubuntu head=ead1e9ab...' and '== label rc=3 (168 s)'. No accelerator is attached: phoenix-crb-inspection.txt, section devices, '--- lspci positron/accelerator match' prints nothing.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "One job at a time (implicit serialization rule)",
+    "status": "partly-done",
+    "status_evidence": "No host-side mechanism enforces it: phoenix-crb-inspection.txt, section background: 'LSF_ENVDIR=unset', 'lsfd=inactive', 'docker ... No such file or directory'. The SDK's perf lane holds a lock while its job runs: phoenix-crb-round5.txt, section 'perf_lane.py header': '3. takes the lane's lock and starts one detached job that holds it (tools/perf/perf_job.sh)'. Jeremy's churn job script has no lock: phoenix-crb-round3.txt, section runs_and_checks, ev3-churn-job.sh runs 'taskset -c 120-127 prlimit ... bash tools/ci/run_scheduled_gate.sh churn' directly. Serialization today is by convention only.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "He must say whether every job on his side goes through a lane lock, or whether Jibin should add a host-side reservation rule (a calendar or a lock file). The host has two other users: arm on the tty1 console and the machine 'alpha' at 192.168.1.200 (section logins)."
+   },
+   {
+    "ask": "Job 1: the timing test on the fake device (per-step overhead, inter-token gaps, TTFT, reader wake-up)",
+    "status": "partly-done",
+    "status_evidence": "One run exists and produced no valid measurement: phoenix-crb-round4.txt, section rejudge_summary: 'verdict = \"INFRA\"', 'problems = [\"the fake device's lateness voids the record\", ...]'. The void criterion is the MEAN lateness: docs/null-timing.md line 87 (read on the host 2026-10-22): '`void`, true when the mean lateness passes the band'; backends/null_timing/record.h line 45: 'a run whose mean lateness passes this share of the cohort period is void'. The numbers: phoenix-crb-round3.txt, section runs_and_checks, r1-run.rec_bind.check.txt: 'late_mean_s': 6.246e-06, 'late_max_s': 0.000220151, 'lateness_band_s': 2.502e-06, 'void': True (mean 6.2 us against a 2.5 us band, 2.5 times over; maximum 220 us). The device thread is not pinned: a grep of backends/ for setaffinity, pthread_setaffinity, sched_setscheduler and leave_pass_cpu returned nothing (host 2026-10-22). It runs among CPUs 120-126, which sat at the minimum clock for the whole run: ~/positron/runs/churn-r1/isol.samples.jsonl (34 samples over 168 s, read on the host 2026-10-22) shows cpu124 and cpu125 at 1,600,000 kHz in 34 of 34 samples, cpu120 and cpu126 in 33 of 34, cpu121 and cpu123 in 31 of 34, cpu122 in 29 of 34, while cpu127 (the pass core) was at 2,800,000 kHz in 26 of 34. Hypothesis, not proven: the 1.6 GHz clock on the device thread's CPU causes the lateness; the measurement is a re-run of ~/positron/runs/ev3-churn-job.sh after the performance governor is set, reading late_mean_s.",
+    "needs_root": true,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "Where the fake device thread runs and whether to pin it is harness code on his side. He should also say whether a run with the performance governor alone (before the reboot) would count, so the governor effect can be separated from the isolcpus effect."
+   },
+   {
+    "ask": "Job 2: the sampling unit tests, natively on Arm",
+    "status": "unknown",
+    "status_evidence": "No test run is recorded on the host. The three build logs under ~/positron/runs/build-*/build.log contain no ctest or pytest output; 'sampling' matches only compile lines such as '[14/334] Building CXX object runtime/sampling/CMakeFiles/positron_rt_sampling.dir/contract_exp.cpp.o' (host grep 2026-10-22). The build job built only three targets: phoenix-crb-round3.txt, section runs_and_checks, ev2-build-job.sh: '--target _positron_core positron-harness positron-cpuref'. No file named *ctest*, *pytest*, LastTest.log or *unit* exists under ~/positron/runs, ~/positron/work or ~/positron/check (host find 2026-10-22). A ctest or pytest log, or Jeremy's word, would decide it.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "He must say whether these tests were run (perhaps interactively, without a log) and whether they need a scheduled slot."
+   },
+   {
+    "ask": "Job 3: a timed compile of a small model",
+    "status": "not-done",
+    "status_evidence": "The SDK's gate list says the compile-timing gate is not run yet: tools/conformance/README.md line 16 (host 2026-10-22): 'compile-0.8b | wall time of the Qwen3.5-0.8B compile, against a budget registered after the first measuring runs; registered uncalibrated | the perf lane, on the perf host (spec §12.2), which does not run it yet; no hosted runner or shared LSF worker times it'. The churn job did build the 0.8B fixture (phoenix-crb-round4.txt, section fixture_dense_log: 'P-TP1, S=4, max_context_tokens=2048; 128 fragments') and priced its table ('priced in 2.7 s', ~/positron/runs/churn-r1/record/table-dense.log, host 2026-10-22), but no file records a compile wall time as a result.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "He must say which compile counts and when it runs. If it is the compile-0.8b gate of the perf lane, the perf lane's host rule (isolcpus plus nohz_full) applies."
+   },
+   {
+    "ask": "At least one core (two better) isolated with isolcpus",
+    "status": "not-done",
+    "status_evidence": "phoenix-crb-inspection.txt, section cpu_summary: 'isolated: ' (empty). Section identity: 'cmdline: BOOT_IMAGE=/vmlinuz-7.1.3-arm-agi-... root=UUID=... ro console=tty1 console=ttyAMA0' (no isolcpus). The running kernel supports it: section kernel_config 'CONFIG_CPU_ISOLATION=y'. It is a boot parameter, so root must edit GRUB and reboot: section boot_and_kernels: '/boot/grub/grub.cfg: Permission denied' for the account, and the drop-in '/etc/default/grub.d/50-cloudimg-settings.cfg' sets 'GRUB_CMDLINE_LINUX_DEFAULT=\"console=tty1 console=ttyAMA0\"', so a new drop-in that sets GRUB_CMDLINE_LINUX plus update-grub is the clean route. Kernel docs (kernel.org admin-guide/kernel-parameters, isolcpus= 'domain', read 2026-10-22): a CPU isolated this way cannot be returned to the scheduling domains at runtime; cpusets are recommended for dynamic setups.",
+    "needs_root": true,
+    "needs_reboot": true,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "Message 1 asks for one or two cores, message 2 for one, message 3 for cores 120-127 (eight). His churn job pins the pass thread to CPU 127 and lets five other threads float over 120-126 (isol.samples.jsonl, host 2026-10-22: 'positron-harnes' seen on every CPU 120 to 126, 'positron-scrub' on 123, 124 and 126, allowed mask '120-126'). On isolcpus CPUs the scheduler does no load balancing, so those threads would stop moving. He must choose: isolate only the pass core(s), or all eight and pin each thread."
+   },
+   {
+    "ask": "nohz_full on the isolated cores",
+    "status": "not-possible-on-current-kernel",
+    "status_evidence": "phoenix-crb-inspection.txt, section kernel_config: '# CONFIG_NO_HZ_FULL is not set'. Section cpu_summary: 'nohz_full: cat: /sys/devices/system/cpu/nohz_full: No such file or directory'; that sysfs file exists only under CONFIG_NO_HZ_FULL (torvalds master drivers/base/cpu.c: nohz_full_show() and its attribute entry are inside '#ifdef CONFIG_NO_HZ_FULL', read 2026-10-22). On such a kernel the boot parameter is parsed and then dropped: torvalds master kernel/sched/isolation.c, housekeeping_setup(): 'if (!IS_ENABLED(CONFIG_NO_HZ_FULL))' then 'pr_warn(\"Housekeeping: nohz unsupported.\" \" Build with CONFIG_NO_HZ_FULL\\n\")' and 'return 0'. Measured tick today: phoenix-crb-round3.txt, section residual_tick_under_load: 'busy 5 s: arch_timer=1261 IPIs=1 all_irqs=1264 (HZ=250 would give 1250 ticks in 5 s)', one timer interrupt every 4 ms on a busy CPU. A kernel with CONFIG_NO_HZ_FULL=y is needed. The installed stock kernel has it ('/boot/config-6.8.0-147-generic: CONFIG_NO_HZ_FULL=y', section kernel_config) but has never booted on this board (section logins: all five 'system boot' lines say '7.1.3-arm-agi-20'), and the vendor kernel carries silicon workarounds (phoenix-crb-followup.txt, section dmesg_greps: 'GICv3: Arm AGI CPU A0 detected, enabling GIC erratum workaround', 'CPU features: detected: Broken broadcast TLBI completion'). The vendor kernel source is not on the host: /usr/src/linux-headers-7.1.3-arm-agi-... holds only 'Makefile Module.symvers arch include scripts', no kernel/ directory, 36 .c files (host 2026-10-22). Secure Boot is off (efivar SecureBoot data byte 0, host 2026-10-22), so a locally built kernel needs no signature.",
+    "needs_root": true,
+    "needs_reboot": true,
+    "needs_kernel_change": true,
+    "needs_jeremy_input": true,
+    "why_jeremy": "He must say whether the counted numbers need nohz_full before 5 Nov. tools/perf refuses a host without it (phoenix-crb-round5.txt, records.py: 'no online core is in both isolcpus and nohz_full (§12.2 l.2049)'); the latency judge does not check it (latency_judge.py isolated(), lines 1166-1169 on the host 2026-10-22, only requires pass_thread_core to be an integer). Message 2 already allows 'the rest of the list' to follow later."
+   },
+   {
+    "ask": "rcu_nocbs on the isolated cores (ideally)",
+    "status": "not-possible-on-current-kernel",
+    "status_evidence": "phoenix-crb-inspection.txt, section kernel_config: '# CONFIG_RCU_EXPERT is not set' and no CONFIG_RCU_NOCB_CPU line at all (the grep pattern in inspect.sh line 29 includes RCU_NOCB). torvalds master kernel/rcu/Kconfig (read 2026-10-22): RCU_NOCB_CPU 'depends on TREE_RCU' and 'depends on RCU_EXPERT || NO_HZ_FULL', so the option does not exist on this kernel and rcu_nocbs= would be an unknown parameter. kernel/time/Kconfig: NO_HZ_FULL 'select RCU_NOCB_CPU', and the kernel-parameters doc says nohz_full CPUs get 'their RCU callbacks offloaded' automatically. So this ask is covered by the nohz_full ask.",
+    "needs_root": true,
+    "needs_reboot": true,
+    "needs_kernel_change": true,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "IRQs kept off the isolated cores",
+    "status": "partly-done",
+    "status_evidence": "Today only the per-CPU NVMe queue interrupts reach CPUs 120-127: phoenix-crb-inspection.txt, section interrupts: 'TOTAL irq dirs parsed: 452 with effective affinity touching 120-127: 16', all named nvme0q119-126 and nvme1q119-126, one per CPU (for example '311 127 affinity_hint,nvme0q126,'). The 64 network queues sit on CPUs 0-63 and 196 other IRQs have effective affinity CPU 0. Nothing enforces this: 'default_smp_affinity: ffffffff,ffffffff,ffffffff,ffffffff' (all 128 CPUs). Timer and IPIs still land there: '12 total=23272572 on120_127=5327444 GICv3 26 Level arch_timer' and 'IPI1 total=3505125 on120_127=123695 Function call interrupts' since boot. The NVMe queues cannot be moved: they are managed interrupts, and the kernel-parameters doc (isolcpus= managed_irq, read 2026-10-22) says their affinity 'cannot be changed via the /proc/irq/* interfaces', that when 'a queue's affinity mask contains only isolated CPUs then this parameter has no effect on the interrupt routing decision', and that such interrupts 'are only delivered when tasks running on those isolated CPUs submit IO'. Movable IRQs can be set live by root: /proc/irq/default_smp_affinity is '-rw-r--r-- 1 root root' (host 2026-10-22); the irqaffinity= boot parameter only makes that persistent. The tick and IPIs need nohz_full, a kernel change.",
+    "needs_root": true,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "Fixed clock: performance cpufreq governor",
+    "status": "not-done",
+    "status_evidence": "phoenix-crb-inspection.txt, section cpufreq: 'governors: 128 schedutil;', 'avail governors: ondemand userspace performance schedutil', 'drivers: 128 cppc_cpufreq;', 'related/affected 120: 120 / 120' (each CPU is its own policy), 'perms: ... -rw-r--r-- 1 root root 4096 Oct 21 18:31 /sys/devices/system/cpu/cpufreq/policy120/scaling_governor' (policy0 and policy127 are the same mode, host 2026-10-22). Root can write 'performance' live; no reboot. A live write does not survive a reboot: section kernel_config 'CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y', so persistence needs 'cpufreq.default_governor=performance' on the kernel command line or a boot-time unit. Why it matters: under schedutil a sleep-then-spin thread stays at the minimum clock (phoenix-crb-round4.txt, section freq_files: 'freq.sleep.txt: 89 1600000 1 1711718'), and during churn-r1 CPUs 120-126 were at 1,600,000 kHz in 29 to 34 of 34 samples while CPU 127 was at 2,800,000 kHz in 26 of 34 (isol.samples.jsonl, host 2026-10-22). A busy CPU does reach the top clock: phoenix-crb-followup.txt, section cpufreq_extra: 'delivered perf = 139.8 units -> est. 2796 MHz' over a 3.01 s pinned spin. Scope: under churn the run's other threads and the fake device thread use CPUs 120-126, under the perf lane they use CPUs 0-119 (phoenix-crb-round5.txt, records.py choose_cores: housekeeping cores plus one isolated core), so host-wide performance is the one setting that fits both.",
+    "needs_root": true,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": "Not needed to apply it. The acceptance rule for 'fixed' (what spread of delivered MHz over a full run) is a separate question for him; the account can measure the delivered clock without root from acpi_cppc/feedback_ctrs (mode 0444, phoenix-crb-followup.txt, section cpufreq_extra)."
+   },
+   {
+    "ask": "Fixed clock: no boost",
+    "status": "done",
+    "status_evidence": "phoenix-crb-inspection.txt, section cpufreq: 'global boost: 0', 'policy120 boost: 0', 'highest_perf=140', 'nominal_perf=140', 'nominal_freq=2800' (highest equals nominal, so no clock above 2.8 GHz exists on this firmware). Section cpu_summary: 'Frequency boost: disabled'.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "Nothing else running during a timed run; a nightly window is fine",
+    "status": "partly-done",
+    "status_evidence": "The host is near idle: phoenix-crb-inspection.txt, section cpu_activity: 'cpu120 idle=100.0%' through 'cpu127 idle=100.0%' over 5 s; section identity: 'load average: 0.00, 0.00, 0.00'. During churn-r1 the rest of the host was idle: phoenix-crb-round4.txt, section churn_r1_job_log: '\"busy_share_cpus_0_119\": 0.0002'. Periodic work remains: section background: running services include 'netperf.service', 'unattended-upgrades.service', 'cron.service', 'smartmontools.service'; phoenix-crb-followup.txt, section services_detail: apt timers 'OnCalendar=*-*-* 6,18:00' with 'RandomizedDelaySec=12h' (so apt-daily can fire at any hour; last run 'Wed 2026-10-21 21:57:44 UTC'), sysstat from both the timer 'OnCalendar=*:00/10' and cron '5-55/10 * * * * root ... debian-sa1 1 1', fstrim next 'Mon 2026-10-26 00:27:20 UTC', logrotate and dpkg-db-backup at '00:00:00 UTC'. Other users: section logins 'arm tty1 Oct 20 19:31' (console session still open) and arm sessions from 192.168.1.200 ('alpha.positron.internal' per DNS on Jibin's workstation) of 2 to 4 h on 20-21 Oct. The SDK's own quiet rule is narrower than 'nothing running': tools/perf/host_facts.sh (host 2026-10-22) flags other users' processes at '$4 + 0 >= 5.0' percent CPU and a CI runner process, and records.py has 'LOAD_MAX = 0.5' for the one-minute load. Pausing timers and services needs root; no reboot.",
+    "needs_root": true,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "He must give the run windows with a timezone. The host runs UTC (section identity 'Time zone: Etc/UTC'), Jibin is at UTC-7 (PDT), Jeremy at UTC-4 (EDT, from his commit's '-0400' in phoenix-crb-round4.txt, section git_state); after 2026-11-01 the US offsets become UTC-8 and UTC-5."
+   },
+   {
+    "ask": "clang 18, CMake 3.25 or newer, Ninja, Python 3.11 or newer with dev headers",
+    "status": "done",
+    "status_evidence": "Met at user level by the SDK side: phoenix-crb-round3.txt, section toolchain_readme: '~/positron/toolchains/sdk-ci-2026-10/ | conda-forge environment: gcc/g++ 13.3.0, clang/clang++ 18.1.8, CMake 3.31.6, Ninja 1.13.2' and 'venv on /usr/bin/python3.12 (3.12.3)'; '--- toolchain env binaries': 'clang: clang version 18.1.8', 'ninja: 1.13.2', 'cmake: cmake version 3.31.6'. phoenix-crb-inspection.txt, section tools: 'Python 3.12.3', 'Python.h=/usr/include/python3.12/Python.h', 'libpython3.12-dev:arm64 3.12.3-1ubuntu0.17'. System-wide: 'clang-18 not in PATH', 'ninja not in PATH', 'cmake version 3.28.3'. No root action is required. The README's 'approved by Jeremy that day' is the SDK side's own note, not evidence from Jeremy.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "About 100 GB of disk",
+    "status": "done",
+    "status_evidence": "phoenix-crb-inspection.txt, section storage: '/dev/nvme0n1p1 ext4 1.7T 41G 1.7T 3% /' (/home is on it; 1.7 TB free), 'home usage: 7.7G', 'quota: ... No such file or directory' (no quota tool, so no limit).",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "No sudo for the account (a statement of need, not a request to act)",
+    "status": "done",
+    "status_evidence": "phoenix-crb-inspection.txt, section network_access: '--- sudo: sudo: a password is required', 'sudo -l: sudo: a password is required', 'groups: positron-perf users'; section logins: 'sudo:x:27:arm' (only arm is in the sudo group). phoenix-crb-followup.txt, section services_detail: 'positron-perf L 2026-10-21 0 99999 7 -1' (password locked); '/etc/sudoers.d/positron-perf-setup' is 49 bytes, mode '-r--r----- 1 root root', and reading it gives 'Permission denied' (host 2026-10-22), so its content is unknown. Related limit: real-time scheduling is refused ('chrt -f 1 test: chrt: failed to set pid 0's policy: Operation not permitted', 'rtprio hard limit: 0', section perf_rt_checks). The runtime does not use SCHED_FIFO today (phoenix-crb-round5.txt, section 'runtime C++: scheduling policy / affinity / mlock use' lists only sched_setaffinity and pthread_setaffinity_np), but the design spec mentions SCHED_FIFO for the interpreter core (section 'docs: isolation / governor / nohz mentions', design-12-repository.md line 182).",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "No outbound network needed ('we copy everything in'; a statement of need)",
+    "status": "done",
+    "status_evidence": "No action is needed: the host has outbound internet (phoenix-crb-inspection.txt, section network_access: 'https pypi: 200', 'https ubuntu archive: 200', 'tcp 140.82.112.3:443 (github ip) reachable'). The SDK side's staging used it: phoenix-crb-round3.txt, section src_work_venvs, work/venv-setup/pip-install.log: 'Downloading numpy-2.5.3-cp312-cp312-manylinux_2_27_aarch64...whl (15.7 MB)' at '44.8 MB/s'; work/toolchain-setup/create.log: 'Using Cached Shard Index for conda-forge/linux-aarch64'. If outbound were blocked to match the sentence, re-creating the toolchain from the lockfile would fail.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "Local account positron-perf with SSH key login, reachable from Jeremy's laptop directly or through sw-dev-01",
+    "status": "done",
+    "status_evidence": "Account: phoenix-crb-inspection.txt, section identity: 'uid=1001(positron-perf) gid=1001(positron-perf) groups=1001(positron-perf),100(users)'. Keys: phoenix-crb-round3.txt, section authorized_key_fingerprints: 'jeremy@sw-dev-01 (ED25519)', 'jeremy@DESKTOP-V2B1166 (ED25519)' and Jibin's 'positron-perf@phoenix (ED25519)'; the file's mtime is 16:53 UTC on 21 Oct (section network_access), written during positron-perf sessions from 192.168.2.136 (Jibin's workstation claude-agentsrv) at 16:52-16:53 UTC. Logins by the SDK side happened: the system journal, read as the account on 2026-10-22, shows 'sshd[7790]: Disconnected from user positron-perf 192.168.2.39 port 46146' at 17:07:35 UTC and three more sessions from 192.168.2.39 at 18:22, 18:23 and 18:27 UTC, plus about 50 sessions from 192.168.1.200 between 17:07 and 18:32 UTC, for example 'sshd[8158]: Disconnected from user positron-perf 192.168.1.200 port 55041' at 18:11:12 UTC, the minute ~/positron was created (phoenix-crb-followup.txt, section home_positron). DNS on Jibin's workstation (search domains porgy-gecko.ts.net and positron.internal) resolves 192.168.2.39 to 'sw-dev-01.positron.internal' (and sw-dev-01 also to the Tailscale address 100.124.2.53) and 192.168.1.200 to 'alpha.positron.internal'. So the sw-dev-01 path works (draft gap G2 closed). Which key each session used is not visible to the account (sshd's 'Accepted publickey' lines are root-only; the grep returned none), and who operates 'alpha' is unknown (draft gap G6 half closed).",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "Only to confirm that his laptop path (the DESKTOP-V2B1166 key) also works and to say which machine 'alpha' (192.168.1.200) is. Nothing blocks on it."
+   },
+   {
+    "ask": "Alternative: Jibin runs a script that Jeremy sends",
+    "status": "not-done",
+    "status_evidence": "Superseded: the account exists and has been used (phoenix-crb-followup.txt, section home_positron: ~/positron, 7.7 GB, created 2026-10-21 18:11 to 18:57 UTC; phoenix-crb-round4.txt, section churn_r1_job_log: a job ran at 18:32 UTC). No action is needed.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   }
+  ]
+ },
+ {
+  "id": "message-2",
+  "title": "Follow-up (undated): account and one isolated core by Friday 2026-10-23, counted runs from Monday 2026-10-26, for the 5 November demo",
+  "plain_english_bullets": [
+   "The sender is again Jeremy's Claude. It thanks Jibin and gives 'one update since this morning'. Which message that morning refers to is not stated, so the order of messages 2 and 3 is uncertain [requests.txt header: 'Order as supplied: original (undated, no rush), follow-up (dated deadline), latest (21 Oct 2026 morning)'].",
+   "There is now a date. The per-user latency runs (runs graded by the SDK's latency judge, tools/conformance/latency_judge.py, against the gate 'per-user-latency.qwen3_5_0_8b.P-TP1') for the 5 November demo need a quiet host.",
+   "The shared LSF workers are too noisy for those runs. LSF is IBM's batch job scheduler; the SDK's dev lane submits jobs to it from sw-dev-01. This host runs no LSF [phoenix-crb-inspection.txt, section background: 'LSF_ENVDIR=unset', 'lsfd=inactive'].",
+   "Deadline 1: the positron-perf account and one isolated core should be ready by Friday 2026-10-23.",
+   "Deadline 2: counted runs should start Monday 2026-10-26. 'Counted' matches the SDK's rule that timings count only from the perf host, and phoenix-crb is that host [tools/conformance/README.md line 225, read on the host 2026-10-22: 'the lane's timings count only from the perf host'].",
+   "The rest of message 1's list can follow later. This already permits a Friday setup without nohz_full and rcu_nocbs.",
+   "If any step is a problem, for example the reboot that isolcpus needs, Jeremy wants to be told, and the two sides will agree a workaround. This is an implicit request for a status reply, not a pre-approval of any particular workaround."
+  ],
+  "asks": [
+   {
+    "ask": "positron-perf account ready by Friday 2026-10-23",
+    "status": "done",
+    "status_evidence": "Same evidence as message 1's account ask: phoenix-crb-inspection.txt, section identity 'uid=1001(positron-perf)'; three authorized keys (phoenix-crb-round3.txt, section authorized_key_fingerprints); sessions from sw-dev-01 (192.168.2.39) and alpha (192.168.1.200) on 2026-10-21 (system journal, host 2026-10-22); 7.7 GB staged (phoenix-crb-followup.txt, section home_positron); a job ran at 18:32 UTC (phoenix-crb-round4.txt, section churn_r1_job_log).",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "One isolated core ready by Friday 2026-10-23",
+    "status": "not-done",
+    "status_evidence": "phoenix-crb-inspection.txt, section cpu_summary: 'isolated: ' (empty). Jeremy's own snapshot at job time agrees: phoenix-crb-round4.txt, section isol_before_summary: 'isolated: \"\"', 'nohz_full: \"(no file)\"', 'governors: {\"schedutil\": \"128 cpus\"}'; section rejudge_summary: '\"core_isolated\": false, ... \"isolated_cpus\": []'. Two routes. (a) isolcpus on the kernel command line: root plus one reboot on the current kernel ('CONFIG_CPU_ISOLATION=y', section kernel_config). (b) A cgroup v2 cpuset 'isolated' partition: root, no reboot, but the cpuset controller is not enabled below the root ('subtree_control: cpu memory pids', section cgroups; the file is '-rw-r--r-- 1 root root', host 2026-10-22), the job's processes must be placed in that cgroup by root, nothing persists across a reboot, and /sys/devices/system/cpu/isolated stays empty, because torvalds master drivers/base/cpu.c print_cpus_isolated() (read 2026-10-22) prints the complement of 'housekeeping_cpumask(HK_TYPE_DOMAIN_BOOT)', the boot-time set only. So churn.py would record core_isolated=false (phoenix-crb-round5.txt, placement(): 'isolated = sorted(_cpus(CPU_SYSFS / \"isolated\"))', '\"core_isolated\": core in isolated'), and so would demo_d17.py (lines 1366-1380, host 2026-10-22).",
+    "needs_root": true,
+    "needs_reboot": true,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "He must accept isolcpus without nohz_full for Friday (message 2 allows the rest later), name the core(s), and, if the reboot cannot happen by Friday, say whether route (b) with core_isolated=false is acceptable. The latency judge itself does not require core_isolated=true: latency_judge.py isolated() (lines 1166-1169, host 2026-10-22) returns true whenever pass_thread_core is an integer."
+   },
+   {
+    "ask": "Counted runs can start Monday 2026-10-26",
+    "status": "not-done",
+    "status_evidence": "Three things stand between the host and a counted run. (1) The only run so far was voided by the fake device's mean lateness, not by missing isolation: phoenix-crb-round4.txt, section churn_r1_log_txt: 'INFRA: latency judge: the fake device's lateness voids the record'; phoenix-crb-round3.txt, section runs_and_checks: 'late_mean_s': 6.246e-06 ... 'lateness_band_s': 2.502e-06, 'void': True (6.2 us mean against a 2.5 us band); the void rule is on the mean (docs/null-timing.md line 87, host 2026-10-22). Whether the performance governor plus isolcpus brings the mean under 2.5 us is unmeasured; the sample file shows the device thread's CPUs 120-126 at 1,600,000 kHz in 29 to 34 of 34 samples during the run (isol.samples.jsonl, host 2026-10-22). (2) No reservation or timer pause exists (see the quiet-host ask); fstrim fires 'Mon 2026-10-26 00:27:20 UTC' (phoenix-crb-followup.txt, section services_detail), which is Sunday 17:27 PDT. (3) If the counted tool is tools/perf, the current kernel never passes: phoenix-crb-round5.txt, records.py: 'problems.append(\"no online core is in both isolcpus and nohz_full (§12.2 l.2049)\")'; the latency judge and the D17 lane only record isolation (latency_judge.py isolated(); demo_d17.py lines 1366-1380 record 'core_isolated' as a fact; host 2026-10-22).",
+    "needs_root": true,
+    "needs_reboot": true,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "He must say which tool produces the counted numbers (latency judge or D17 lane versus tools/perf; the latter needs a NO_HZ_FULL kernel), accept or reject a host without nohz_full for 26 Oct, and decide the fake device thread's placement in his harness, since its mean lateness is what voids a record."
+   },
+   {
+    "ask": "A quiet host for the per-user latency runs",
+    "status": "partly-done",
+    "status_evidence": "Same ask as message 1's 'nothing else running'; evidence is there. Specific to this message: during churn-r1 the rest of the host was idle ('\"busy_share_cpus_0_119\": 0.0002', phoenix-crb-round4.txt, section churn_r1_job_log), and the only processes seen on CPUs 120-127 besides the harness were the job's own python processes (isol.samples.jsonl 'foreign_running_on_watch': pids 14593, 14702, 14711, 14894, comm 'python', on CPUs 122-123, in 6 of 34 samples; host 2026-10-22). Timers, services and other users remain.",
+    "needs_root": true,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "Run windows with a timezone (see message 1)."
+   },
+   {
+    "ask": "Tell Jeremy about any problem step (for example the reboot) so a workaround can be agreed",
+    "status": "unknown",
+    "status_evidence": "The files hold Jeremy's messages but no reply from Jibin. The problem steps to report: nohz_full and rcu_nocbs need a different kernel, not only a reboot ('# CONFIG_NO_HZ_FULL is not set', phoenix-crb-inspection.txt, section kernel_config); isolcpus needs a reboot; the governor needs root only; the NVMe interrupts on 120-127 cannot be moved; the first run was voided by the fake device's mean lateness.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "The message asks for the report and a joint decision on the workaround."
+   }
+  ]
+ },
+ {
+  "id": "message-3",
+  "title": "Latest request, 21 October 2026 (morning): isolate cores 120-127 and set the performance governor",
+  "plain_english_bullets": [
+   "Jeremy wants Phoenix (phoenix-crb) usable for the SDK's latency runs.",
+   "He asks for a few isolated cores for the runtime's pass thread. The pass thread is the one thread per runtime, named 'positron-pass', that plans and binds each forward pass; the SDK pins it to one core [phoenix-crb-round5.txt, section 'docs: isolation / governor / nohz mentions', docs/runtime-v2.md line 304].",
+   "His example is isolcpus, nohz_full and rcu_nocbs on cores 120-127. That is eight cores; messages 1 and 2 asked for one or two.",
+   "He asks for the performance cpufreq governor so the clock stays fixed.",
+   "He states that both changes need root and a reboot. That is wrong for the governor and incomplete for nohz_full and rcu_nocbs (see corrections).",
+   "He states that today the governor is schedutil (the policy that scales the clock with load) and no cores are isolated. That is accurate [phoenix-crb-inspection.txt, section cpufreq: 'governors: 128 schedutil;'; section cpu_summary: 'isolated: ' empty].",
+   "The phrase 'whenever you have a moment' signals no hard deadline. It conflicts with message 2's Friday deadline unless message 2 was written after this one."
+  ],
+  "asks": [
+   {
+    "ask": "isolcpus on cores 120-127",
+    "status": "not-done",
+    "status_evidence": "phoenix-crb-inspection.txt, section cpu_summary: 'isolated: ' (empty); section kernel_config: 'CONFIG_CPU_ISOLATION=y'. GRUB keeps the vendor kernel as the default entry (section boot_and_kernels: 'GRUB_DEFAULT=saved', 'saved_entry=Advanced options for Ubuntu>Ubuntu, with Linux 7.1.3-arm-agi-...'). CPUs 120-127 are eight separate cores with no SMT siblings (section topology_120_127: 'cpu127 ... siblings=127'). Jeremy's job already uses exactly these CPUs: phoenix-crb-round3.txt, section runs_and_checks, ev3-churn-job.sh: 'taskset -c 120-127 ... run_scheduled_gate.sh churn', with 'pass_thread_core': 127 and 'run_cpus': [120..126] (phoenix-crb-round4.txt, section rejudge_summary). Command-line warning: the 'nohz' flag of isolcpus must not be used on this kernel, because torvalds master kernel/sched/isolation.c housekeeping_isolcpus_setup() maps 'nohz,' to the same flag as nohz_full and housekeeping_setup() then drops the whole isolcpus parameter ('return 0' after 'Housekeeping: nohz unsupported'; read 2026-10-22). The 'domain' flag also removes the CPUs from unbound workqueues: torvalds master kernel/workqueue.c workqueue_init_early(): 'restrict_unbound_cpumask(\"HK_TYPE_DOMAIN\", housekeeping_cpumask(HK_TYPE_DOMAIN))'.",
+    "needs_root": true,
+    "needs_reboot": true,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "Isolating all eight removes load balancing among them. In churn-r1 his harness threads moved across all of 120-126 (isol.samples.jsonl, host 2026-10-22: 'positron-harnes' sampled on CPUs 120, 121, 122, 123, 124, 125 and 126; 'positron-scrub' on 123, 124 and 126; allowed mask '120-126'), and churn.py sets that mask for them (phoenix-crb-round5.txt, placement() body: 'os.sched_setaffinity(0, cpus)'). The perf lane instead puts workers on non-isolated cores (records.py choose_cores: housekeeping cores plus the first isolated nohz_full core). He must choose: isolate only the pass core(s), which fits churn's taskset, or all eight, which fits the perf lane, and then pin each thread."
+   },
+   {
+    "ask": "nohz_full on cores 120-127",
+    "status": "not-possible-on-current-kernel",
+    "status_evidence": "Same evidence as message 1's nohz_full ask: '# CONFIG_NO_HZ_FULL is not set' (phoenix-crb-inspection.txt, section kernel_config), '/sys/devices/system/cpu/nohz_full: No such file or directory' (section cpu_summary), and the parameter is dropped at boot on such a kernel (torvalds master kernel/sched/isolation.c, 'Housekeeping: nohz unsupported. Build with CONFIG_NO_HZ_FULL'). A kernel with CONFIG_NO_HZ_FULL=y is needed: a rebuilt vendor kernel (source not on the host; it was built by 'avadnaik@2paltra-216' with 'gcc-14 (Ubuntu 14.3.0-12ubuntu1~24~ppa1)', phoenix-crb-inspection.txt, section boot_and_kernels, uname version string) or the stock 6.8.0-147-generic, which has never booted on this board.",
+    "needs_root": true,
+    "needs_reboot": true,
+    "needs_kernel_change": true,
+    "needs_jeremy_input": true,
+    "why_jeremy": "Whether the counted runs can wait for a rebuilt kernel or proceed without nohz_full (accepting the 250 Hz tick on busy isolated cores)."
+   },
+   {
+    "ask": "rcu_nocbs on cores 120-127",
+    "status": "not-possible-on-current-kernel",
+    "status_evidence": "phoenix-crb-inspection.txt, section kernel_config: no CONFIG_RCU_NOCB_CPU line and '# CONFIG_RCU_EXPERT is not set'. torvalds master kernel/rcu/Kconfig: RCU_NOCB_CPU 'depends on RCU_EXPERT || NO_HZ_FULL'. A NO_HZ_FULL kernel brings it automatically (kernel/time/Kconfig: NO_HZ_FULL 'select RCU_NOCB_CPU').",
+    "needs_root": true,
+    "needs_reboot": true,
+    "needs_kernel_change": true,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "performance cpufreq governor so the clock stays fixed",
+    "status": "not-done",
+    "status_evidence": "Same evidence as message 1's governor ask: 'governors: 128 schedutil;', 'avail governors: ondemand userspace performance schedutil', scaling_governor is '-rw-r--r-- 1 root root' (phoenix-crb-inspection.txt, section cpufreq); root writes it live, no reboot, no kernel change; persistence needs 'cpufreq.default_governor=performance' or a boot unit because 'CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y' (section kernel_config). The governor only requests the highest clock; the delivered clock over a full run is unmeasured (only a 3.01 s spin: 'delivered perf = 139.8 units -> est. 2796 MHz', phoenix-crb-followup.txt, section cpufreq_extra). No thermal zone exists ('thermal_zone*: ... No such file or directory', section cpufreq), so throttling cannot be read from sysfs; acpi_cppc/feedback_ctrs (mode 0444) give the delivered clock to any user.",
+    "needs_root": true,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": false,
+    "why_jeremy": ""
+   },
+   {
+    "ask": "'whenever you have a moment': confirm whether the Friday 2026-10-23 deadline of message 2 still stands",
+    "status": "unknown",
+    "status_evidence": "Insufficient data. requests.txt gives only the supplied order ('original, follow-up, latest'); message 2's 'one update since this morning' may refer to message 3 (dated '21 October 2026 (morning)') or to message 1. Only Jeremy can say.",
+    "needs_root": false,
+    "needs_reboot": false,
+    "needs_kernel_change": false,
+    "needs_jeremy_input": true,
+    "why_jeremy": "He must confirm which message is the latest and whether Friday 2026-10-23 still holds."
+   }
+  ]
+ }
+]

@@ -1,0 +1,34 @@
+---
+name: crb-hierarchy-findings
+description: Non-obvious CRB measurement findings (2026-10-30): pointer-chase learned by the core, core pairs share a mesh port, compiled loops halve L1 bandwidth
+metadata:
+  type: project
+---
+
+Findings from the 2026-10-30 CRB sweep (report: ~/workspace/titan/cache-perf/crb/crb-memory-hierarchy.html, data under crb/results/):
+- A repeated random pointer chase is learned by the core: at 8-56 MiB it reports 5.4-6.8 ns while every load misses L2. A single pass over an unseen chain ("fresh chain", latency.c --fresh) gives the true 26-31 ns mesh-cache latency. Use --fresh for any level beyond L2 on this core.
+- Cores 2k and 2k+1 share one path to the mesh (~80 GB/s read for the pair); L2 is private. Place one heavy thread per pair (bandwidth.c --cpus 0-118:2) for peak mesh/DRAM bandwidth: DRAM read 523 GB/s that way vs 424 GB/s with all cores.
+- gcc's -O3 NEON read loop reaches only 24 B/cycle; the inline-asm ldp/stp kernels (bandwidth.c --kernel asmall) reach 3 loads + 2 stores of 16 B per cycle. Use asm kernels for per-core ceilings.
+- Levels: L1 1.43 ns, L2 3.75 ns, mesh cache ~30 ns, DRAM 148 ns; DRAM write bandwidth collapses above 64 threads (cause unknown).
+
+**Why:** These effects would silently distort any future cache benchmark on CRB or on a sibling Neoverse V3-class part (Asimov's C1-Nano may differ).
+**How to apply:** Reuse ~/workspace/titan/cache-perf/bench on similar machines; check for the learned-chase effect with --fresh before trusting latencies above L2. See [[crb-machine-access]].
+- Mesh (CMN) counters 2026-10-30: the sysfs L3 is the CMN system-level cache (1.03 accesses/load, <1.5% misses at 8-48 MiB). A single buffer misses from 64 MiB on (81% at 96 MiB) and is homed ~99% in arm_cmn_0 up to 96 MiB: the SLC behaves as two 64 MiB halves, one per mesh (hypothesis). The 3 MiB x 40-thread run: 0.45 mesh accesses per line, so mesh-served read >= 620 GB/s; write streams count as mesh misses (go to DRAM).
+- DRAM: 10 x Micron 32 GB DDR5-8000 RDIMM, one per channel = 640 GB/s peak; measured read 523 (82%), write 398 (62%).
+
+2026-10-31 follow-up (results/followup2-20261031T073513Z): DRAM write best is placement-limited: 447 GB/s with 16 threads spread 8 cores apart over both chiplets (70 % of 640), vs 204 GB/s adjacent and 398 GB/s even cores. Read best 533 GB/s with 30 threads spread 4 apart. One chiplet alone (cores 0-60) reads 357 GB/s. Cross-chiplet chase (chain built on core 3, chased from 67/119, fresh chains, 16-32 MiB) costs only 2-7 ns extra (32-37 ns vs 29-30 ns), NOT Bill's 81-88 ns; hypothesis: his lines were dirty in a remote L2. Bill's board (192.168.2.46, 12 DIMMs?) vs ours (192.168.2.45, 10 DIMMs) is unresolved. latency.c now has --build-cpu.
+
+Mesh map read by Jibin 2026-11-01 (crb/results/cmn-map.txt): both meshes identical, 9 x 8 = 72 XPs. 64 HN-S per mesh (2 per XP on port 0 of 32 XPs, rows 1-5 cols 1-7; XPs (1,5),(4,5),(7,5) have the port but no node), so 128 slices total, 1 MiB each (est. 128 MiB / 128), 64 MiB per mesh = the measured 64 MiB effective capacity. 35 RN-F core ports per mesh (no ids printed), so 64 cores need >= 29 ports with 2 cores. 12 SN-F memory ports per mesh (cols 0 and 8, rows 1-6), 8 CCG chip links, rows 0/6/7 are I/O. Earlier "32 home nodes" estimate was wrong (assumed 4 MiB max per node). Open: core-to-XP and address-to-home mapping need root CMN counters.
+
+2026-11-02 follow-up (results/followup3-20261102T031936Z): DRAM write collapse is a placement effect: 64 writers on one mesh 394 GB/s, 32+32 across meshes 173 GB/s, 16+16 346; reads do not collapse. Per-core fresh 16 MiB latency 25.4 (CPU 94) to 30.5 ns (CPU 56), partners equal, repeatable 0.2 ns; 1-thread asmread 66-72 GB/s.
+homelat (bench/homelat.c, root): the V3AE temporal prefetcher learns ANY repeated miss sequence, including a fixed-order evictor; use a new random order per repeat for fill and evictor, time each chain once. Sequential 8 MiB reads do not replace L2 lines.
+
+Root run 2026-11-02 04:20 UTC (crb/results/sudo-20261102T040631Z, tool bench/homelat.c): latency from every core to every slice. Nearest slice 18.6-22 ns, 2.6 ns per mesh hop, farthest 33-44 ns. Cores 0-63 on arm_cmn_0, 64-119 on arm_cmn_1, pairs share a crosspoint, numbering column by column bottom-up (core pair -> crosspoint table in core-positions.json). A buffer is interleaved line by line 50/50 over both meshes; remote-homed lines are served by a local proxy (LCN role, roughly the mirror position), so a core's whole working set lives on its own mesh: that is the 64 MiB knee. Streaming writes are not allocated in the SLC (fills 0.01/line, memory requests 1/line): the "mesh-cache write" number is DRAM-path. Cross-mesh write collapse: no retries/throttle at home nodes; bottleneck elsewhere. Method lessons: probe on the PMU cpu (reads from other cpus are IPIs), group reads, 256 loads per probe, hbt filter (read filter double-counts at the proxy), perf group reads return the leader first.
+
+Analysis scripts (2026-11-02): bench/fitpos.py fits each core's crosspoint over all 35 core-port positions (cores 34,35,98,99 at (4,5)); bench/subtract.py is the strict short/long counter analysis (exit 1 on missing counters, multiplexing or missing idle control). Codex reviewed the plan three times (crb/codex-review-plan-2026-11-02.md); its catches were real each time: group reads return the leader first, sampling with replacement breaks single-walk chains, whole-process perf stat mixes setup into counts.
+
+Final root-run set 2026-11-02 05:49-06:04 UTC: crb/results/sudo-20261102T054936Z (all 4 parts, idle controls, strict checks pass). Report cites it; 04:06 set kept as cross-check (0.2 ns median per-row difference). Brief for Bill: crb/crb-memory-hierarchy-brief.html, generated by crb/make-brief.py <results dir>, 2 A4 pages (check with chrome --print-to-pdf + PyMuPDF page count).
+
+Correction 2026-11-02 (Jibin's question): the cross-chiplet chase (results/followup2-20261031T073513Z/cross.csv) has fresh1 85-88.5 ns per load at 16 MiB when the lines sit in the other chiplet, fresh2 31.7-33.2 ns, same-chiplet 29 ns. The report had quoted the "best" (fresh2) and claimed 2-5 ns extra; now corrected to about 56-59 ns extra on first access. Bill's 81-88 ns "L3, other domain" is corroborated. Lesson: never take best-of-N for a first-touch test; report each walk.
+
+Part 5 (2026-11-02 21:11 UTC, results/sudo-20261102T211150Z, analyze_writepath.py): single-writer 73 GB/s limit is inside the core: zero L1/L2 refills-for-write and write-backs (write streaming confirmed), no crosspoint credit stalls, partner on same port 82 GB/s total, 2 ports 122, 4 ports 229. dtc_cycles is NOT a mesh clock through perf here (~6.5e3/s); occupancy events unusable for Little's law. sudo on CRB is now passwordless for jhan (Jibin set it 2026-11-02).

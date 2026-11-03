@@ -1,0 +1,73 @@
+# Lineage inventory: artifacts/titan/cache-perf/crb/crb-cross-check-bill.html
+
+Written by the 2026-11-02 handoff run. One line per file under the inputs and sources the page's lineage names (handoff: claude_20261030-20261102_crb-cache-latency-and-bandwidth.md). Repo path = preserved at that path; otherwise the left-behind reason.
+
+| canonical | repo path or reason | bytes |
+|---|---|---|
+| `agentsrv:/home/jhan/tmp/WRITEUP-phoenix-crb-evaluation.md` | artifacts/titan/home-tmp/WRITEUP-phoenix-crb-evaluation.md | 12933 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/bandwidth.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/bandwidth.csv | 24989 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1.5M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1.5M-long.csv | 347 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1.5M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1.5M-short.csv | 320 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-128K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-128K-long.csv | 344 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-128K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-128K-short.csv | 316 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-128M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-128M-long.csv | 354 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-128M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-128M-short.csv | 347 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-16K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-16K-long.csv | 340 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-16K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-16K-short.csv | 314 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-16M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-16M-long.csv | 352 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-16M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-16M-short.csv | 331 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-192M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-192M-long.csv | 355 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-192M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-192M-short.csv | 347 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1G-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1G-long.csv | 367 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1G-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1G-short.csv | 359 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1M-long.csv | 345 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-1M-short.csv | 319 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-256K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-256K-long.csv | 345 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-256K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-256K-short.csv | 316 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-256M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-256M-long.csv | 356 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-256M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-256M-short.csv | 356 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-2G-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-2G-long.csv | 369 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-2G-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-2G-short.csv | 368 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-2M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-2M-long.csv | 350 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-2M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-2M-short.csv | 320 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-32K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-32K-long.csv | 340 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-32K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-32K-short.csv | 314 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-32M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-32M-long.csv | 352 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-32M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-32M-short.csv | 333 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-3M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-3M-long.csv | 350 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-3M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-3M-short.csv | 321 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-48K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-48K-long.csv | 341 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-48K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-48K-short.csv | 314 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-4K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-4K-long.csv | 340 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-4K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-4K-short.csv | 315 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-4M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-4M-long.csv | 351 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-4M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-4M-short.csv | 329 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-512K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-512K-long.csv | 344 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-512K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-512K-short.csv | 316 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-512M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-512M-long.csv | 358 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-512M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-512M-short.csv | 357 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-64K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-64K-long.csv | 341 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-64K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-64K-short.csv | 314 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-64M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-64M-long.csv | 354 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-64M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-64M-short.csv | 343 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-8K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-8K-long.csv | 340 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-8K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-8K-short.csv | 314 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-8M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-8M-long.csv | 351 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-8M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-8M-short.csv | 329 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-96K-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-96K-long.csv | 344 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-96K-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-96K-short.csv | 315 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-96M-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-96M-long.csv | 354 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-96M-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perf-96M-short.csv | 345 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perfrun-long.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perfrun-long.csv | 6270 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency-perfrun-short.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency-perfrun-short.csv | 6108 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/latency.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/latency.csv | 7552 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/log.txt` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/log.txt | 1556 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/sysinfo.txt` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/sysinfo.txt | 667783 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/asm.csv` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/asm.csv | 28347 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/dram.csv` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/dram.csv | 6196 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/latency-bycpu.csv` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/latency-bycpu.csv | 3435 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/latency-fresh.csv` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/latency-fresh.csv | 10266 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/log.txt` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/log.txt | 673 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/pair.csv` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/pair.csv | 5738 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup2-20261031T073513Z/cross.csv` | artifacts/titan/cache-perf/crb/results/followup2-20261031T073513Z/cross.csv | 3535 |
+| `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup2-20261031T073513Z/spread.csv` | artifacts/titan/cache-perf/crb/results/followup2-20261031T073513Z/spread.csv | 4839 |

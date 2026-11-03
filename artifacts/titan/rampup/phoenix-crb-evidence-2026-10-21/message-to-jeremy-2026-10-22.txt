@@ -1,0 +1,60 @@
+Jeremy, status on phoenix-crb (the Phoenix CRB, 192.168.2.45), 22 Oct:
+
+1. Your account, keys, toolchain and disk are in place, and your logins from the laptop and from sw-dev-01
+   worked. I take the 21 Oct sessions from alpha (192.168.1.200), and the run of the churn latency label they
+   made (record directory ~/positron/runs/churn-r1), to be yours as well. Tell me if not.
+2. Done 22 Oct 05:30-05:36 UTC (21 Oct 22:30-22:36 PDT, 22 Oct 01:30-01:36 EDT): the performance governor on
+   all 128 CPUs, the housekeeping timers paused until 6 Nov (apt, fstrim, fwupd, man-db, motd, logrotate and
+   the rest), the netperf server stopped, and rcu_normal=1 (removes the expedited-RCU cross-CPU interrupts
+   that service starts send to busy cores).
+3. Done 22 Oct 05:43 UTC (21 Oct 22:43 PDT, 22 Oct 01:43 EDT): one reboot with cores 126-127 isolated
+   (isolcpus=domain,managed_irq,126-127), default device interrupts kept off cores 120-127 (irqaffinity=0-119),
+   and the governor fixed on the boot line. Cores 120-125 are not isolated, so your harness's other threads
+   still get load-balanced across them. Since the reboot every login shell starts with CPU affinity 0-119
+   (a systemd setting that keeps services and admin sessions off 120-127). Your taskset calls still place
+   threads on 120-127. The per-CPU NVMe completion interrupts stay and fire only for disk I/O issued from
+   those cores. Check from your account:
+     cat /sys/devices/system/cpu/isolated                              -> 126-127
+     cat /sys/devices/system/cpu/cpufreq/policy127/scaling_governor    -> performance
+     cat /proc/cmdline                                                 -> carries the arguments above
+   I verified these at 05:44 UTC (22:44 PDT, 01:44 EDT), right after the reboot.
+4. nohz_full and rcu_nocbs are not possible on the running kernel (built without CONFIG_NO_HZ_FULL). We need to
+   rebuild the custom kernel. Dan requested ARM to grant me access to their github. Until we rebuild a new
+   kernel, a busy isolated core keeps the 250 Hz timer tick (one interrupt every 4 ms, about 1-2 us each).
+5. That 21 Oct run did not count: your tool marked it void because the fake device thread was late by
+   6.25 us on average, above the 2.5 us limit. Missing isolation was not the cause. The host clock alone does
+   not explain it either: your hiccup probe in sleep mode on an idle core under schedutil was late by only
+   0.02 us on average (0 of 2000 cycles over 2.5 us). During that run the device thread shared cores 120-126
+   with the other threads, those cores ran at 1.6 GHz, and they took 1,300-7,700 interrupts/s (the threads'
+   own timed sleeps). So the host changes above may not make Monday's runs count by themselves. See Q4.
+6. The host has outbound internet, and your pip install used it (wheels downloaded on the host). I will keep it.
+7. The host is shared: other engineers use it through the arm account. The rule in Q5 keeps them off the
+   host while one of your runs is in progress.
+
+Needed change to your launch line, now that 126-127 are isolated: isolated cores get no load balancing, so a
+process that lands on one stays there. Run the label with the CPU set 120-125,127 and start it as
+  taskset -c 120-125 taskset -c 120-125,127 prlimit ... bash tools/ci/run_scheduled_gate.sh churn ...
+so that the shell and Python never land on 126 or 127. churn.py then pins the pass thread to 127 (the last CPU
+of the set), and 126 stays free for a pinned device thread.
+
+Questions (one line each is enough). Defaults apply if I hear nothing by Fri 23 Oct 12:00 EDT (09:00 PDT, 16:00 UTC):
+Q1 Is a host WITHOUT nohz_full and rcu_nocbs acceptable for Monday's counted runs? Default: yes.
+Q2 Which path produces the numbers that count on 5 Nov: the churn label + latency judge (runs on the current
+   kernel, needs only a pinned pass thread) or tools/perf (refuses any host without isolcpus AND nohz_full)?
+   Default: the judge. If tools/perf, the rebuilt kernel is on the critical path and Arm's date decides.
+Q3 Cores: I isolated 126-127 (127 for the pass thread, 126 free for a pinned device thread). If you want 127
+   only, or all of 120-127 (only if you pin every thread), say so and I reboot again while the host is idle.
+   Default: keep 126-127 with the launch-line change above.
+Q4 Will you pin the fake device thread to its own core (126) and give it a 1 us timer slack, as the waker has,
+   before Monday? Has any churn run ever recorded device.void=false, and with what late_mean? Default: you
+   decide; 126 stays free.
+Q5 A timed run needs the host to itself: any other activity, even a login, disturbs it (a login sends two
+   interrupts to every core, measured). Other engineers use this host too, so I propose this rule: you run
+   Mon-Fri 13:00-21:00 UTC (06:00-14:00 PDT, 09:00-17:00 EDT until 31 Oct, then 05:00-13:00 PST, 08:00-16:00
+   EST after the US clock change on Sun 1 Nov), you announce each counted run 2 h ahead, your job writes
+   /tmp/positron-perf.RUNNING (start, end, pid, tag) while it runs and removes it at the end, and nobody else
+   touches the host while that file exists. I will give the other users the same rule. Default: accepted.
+Nice to have: is this clock pass rule acceptable: delivered clock >= 2772 MHz from one CPPC counter pair read
+before and after the run on core 127 (no polling during a run)? Status of the sampling tests and the timed
+compile. If tools/perf is your path: clang and ninja are not on the account's non-interactive PATH, and
+~/positron/fetchcontent, artifacts and work/sdk-v2 do not exist yet.

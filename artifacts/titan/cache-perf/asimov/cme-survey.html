@@ -1,0 +1,242 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/asimov/cme-survey.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/titan/cache-perf/asimov/cme-survey.html
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asimov CME survey</title>
+<style>
+  :root { --ink:#1f2328; --muted:#59636e; --line:#d0d7de; --bg:#ffffff; --panel:#f6f8fa; --blue:#0b5fff; --orange:#d9731a; --teal:#0d8a8a; --red:#c0392b; --grey:#9aa4ae; }
+  html,body { background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; margin:0; }
+  main { max-width:960px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:26px; margin:0 0 4px; } h2 { font-size:20px; margin:36px 0 10px; border-bottom:1px solid var(--line); padding-bottom:4px; } h3 { font-size:16px; margin:22px 0 6px; }
+  p { margin:8px 0; } ul { margin:6px 0 6px 22px; padding:0; } li { margin:3px 0; }
+  .short { background:var(--panel); border-left:4px solid var(--blue); padding:10px 14px; margin:14px 0 20px; }
+  .note { background:#fff7e6; border-left:4px solid var(--orange); padding:8px 14px; margin:12px 0; }
+  .warn { background:#fdecea; border-left:4px solid var(--red); padding:8px 14px; margin:12px 0; }
+  table { border-collapse:collapse; width:100%; margin:10px 0 14px; font-size:14px; }
+  th,td { border:1px solid var(--line); padding:5px 8px; text-align:left; vertical-align:top; } th { background:var(--panel); }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  code { background:var(--panel); padding:1px 4px; border-radius:3px; font-size:13px; }
+  pre { background:var(--panel); padding:10px; overflow:auto; font-size:13px; border:1px solid var(--line); }
+  figure { margin:14px 0; } figcaption { color:var(--muted); font-size:13px; margin-top:4px; }
+  .small { color:var(--muted); font-size:13px; }
+  dl { display:grid; grid-template-columns:max-content 1fr; gap:4px 14px; margin:8px 0; } dt { font-weight:600; } dd { margin:0; }
+  @media (max-width:600px){ dl { grid-template-columns:1fr; } }
+</style>
+</head>
+<body><main>
+
+<h1>Asimov C1-Nano CME: what Positron has, what is measured, what to measure next</h1>
+<p class="small">Survey written 2026-11-02 from the RTL repo, the Arm documents in the Arm IP delivery, the public Arm guides, the firmware repos and the asimov-bench measurements. Every number cites its file.</p>
+
+<div class="short">
+<b>Short version.</b> The CME is Arm's C1-SME2 unit (Arm code name Griffin), one per DSU, shared by the DSU's two C1-Nano cores, built in the half-rate matrix configuration with a 512-bit streaming vector length. Positron's asimov-bench team already measured its peak on the emulator in October 2026: one FMOPA every 2.04 cycles (251 MAC/ns FP32, 502 MAC/ns BF16), which is 98 % of the half-rate ceiling. What is still unmeasured is the part that matters for a kernel: int8 rates, operands from the SLC, OCM and DRAM under load, two cores with memory operands, all five DSUs at once, and a real matrix multiply.
+</div>
+
+<h2>1. Words used here</h2>
+<dl>
+<dt>CME</dt><dd>Compute Matrix Engine. Positron's name (and Arm's register-level name) for the Arm C1-SME2 unit, the block that executes SME and SME2 instructions. Arm code name: Griffin.</dd>
+<dt>SME, SME2</dt><dd>Scalable Matrix Extension, versions 1 and 2. Arm instructions for outer products into a tile register (ZA) and multi-vector operations.</dd>
+<dt>Streaming mode</dt><dd>The CPU state (PSTATE.SM = 1, entered with SMSTART) in which SVE instructions run on the CME at the streaming vector length instead of on the core's own vector unit.</dd>
+<dt>SVL</dt><dd>Streaming vector length: the vector width in streaming mode. 512 bits (64 bytes) on Asimov. The core's own SVE length is 128 bits.</dd>
+<dt>ZA</dt><dd>The CME's tile storage: SVL x SVL bits = 4 KiB, viewed as four 16 x 16 FP32 tiles (ZA0 to ZA3).</dd>
+<dt>FMOPA, BFMOPA, UMOPA, SMOPA</dt><dd>Outer-product-and-accumulate instructions: FP32 in, FP16 or BF16 in (FP32 out), unsigned int8 in, signed int8 or int16 in (int32 out).</dd>
+<dt>MAC</dt><dd>One multiply-accumulate. One FP32 FMOPA at SVL 512 is 16 x 16 = 256 MACs; BF16 or FP16 input is 512 MACs; int8 input is 1,024 MACs.</dd>
+<dt>MMDP</dt><dd>Matrix multiply data path. The CME PMU event CME_OP_MMDP_ISSUE counts outer-product issues to it.</dd>
+<dt>Half matmul</dt><dd>The Arm build option FULL_MATMUL = FALSE. Arm's own test comments give the rate: half matmul executes one FMOPA per 2 cycles, full matmul one per cycle.</dd>
+<dt>DSU</dt><dd>Arm DynamIQ Shared Unit, the two-core cluster (code name Pilatus) with its L2, L3 and one CME. Asimov has five per hemisphere.</dd>
+<dt>Nevis, Pilatus, Griffin</dt><dd>Arm code names for the C1-Nano core complex, the C1-DSU and the C1-SME2 unit, as used in the RTL folder names.</dd>
+<dt>PPU</dt><dd>Power Policy Unit. Each CME has one. It must be set to dynamic mode by the SCP firmware before any streaming instruction, or the issuing core stalls forever.</dd>
+<dt>SOG</dt><dd>Arm Software Optimization Guide: the public document with per-instruction latency and throughput.</dd>
+<dt>llvm-mca</dt><dd>LLVM's machine code analyzer. Its C1-Nano model (public) encodes the CME pipelines and throughputs that Arm gave LLVM.</dd>
+<dt>Boot M2, boot M3, Spokane request 1504/1511</dt><dd>Names of the October 2026 emulator runs of the asimov-bench team that measured the CME.</dd>
+<dt>Emulator</dt><dd>The Palladium model hemi_rtws_tlm that Jesse Zhang runs: real C1 and CME RTL, 2 GHz core clock, about 2,779 wall seconds per chip second.</dd>
+</dl>
+
+<h2>2. What the CME is on Asimov</h2>
+
+<figure>
+<svg viewBox="0 0 900 250" width="100%" role="img" aria-label="One DSU: two C1-Nano cores share one vector unit and one CME; the DSU has an L2, an L3 and one mesh port">
+  <rect x="10" y="10" width="880" height="230" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="24" y="34" font-size="15" font-weight="600">One DSU (Pilatus), five per hemisphere</text>
+  <rect x="30" y="56" width="150" height="60" rx="6" fill="#fff" stroke="#0b5fff"/><text x="105" y="81" text-anchor="middle" font-size="13">C1-Nano core 0</text><text x="105" y="100" text-anchor="middle" font-size="12" fill="#59636e">L1 32K + 32K, in-order</text>
+  <rect x="30" y="140" width="150" height="60" rx="6" fill="#fff" stroke="#0b5fff"/><text x="105" y="165" text-anchor="middle" font-size="13">C1-Nano core 1</text><text x="105" y="184" text-anchor="middle" font-size="12" fill="#59636e">L1 32K + 32K, in-order</text>
+  <rect x="230" y="56" width="130" height="60" rx="6" fill="#fff" stroke="#9aa4ae"/><text x="295" y="81" text-anchor="middle" font-size="13">shared VPU</text><text x="295" y="100" text-anchor="middle" font-size="12" fill="#59636e">2 x 128-bit SVE</text>
+  <rect x="230" y="140" width="130" height="60" rx="6" fill="#fff" stroke="#9aa4ae"/><text x="295" y="165" text-anchor="middle" font-size="13">L2 128 KiB</text><text x="295" y="184" text-anchor="middle" font-size="12" fill="#59636e">shared L2 TLB</text>
+  <rect x="420" y="56" width="200" height="144" rx="6" fill="#fff7e6" stroke="#d9731a" stroke-width="2"/>
+  <text x="520" y="82" text-anchor="middle" font-size="14" font-weight="600">CME (Griffin, C1-SME2)</text>
+  <text x="520" y="104" text-anchor="middle" font-size="12">SVL 512 bits, ZA 4 KiB</text>
+  <text x="520" y="122" text-anchor="middle" font-size="12">half matmul: 1 FMOPA / 2 cycles</text>
+  <text x="520" y="140" text-anchor="middle" font-size="12">own L1 and TLB, own PMU (31 ctrs)</text>
+  <text x="520" y="158" text-anchor="middle" font-size="12">own PPU (must be dynamic)</text>
+  <text x="520" y="186" text-anchor="middle" font-size="12" fill="#59636e">up to 3 instr / cycle from each core</text>
+  <rect x="680" y="56" width="190" height="60" rx="6" fill="#fff" stroke="#9aa4ae"/><text x="775" y="81" text-anchor="middle" font-size="13">L3 256 KiB, one slice</text><text x="775" y="100" text-anchor="middle" font-size="12" fill="#59636e">snoop filter, DSU level</text>
+  <rect x="680" y="140" width="190" height="60" rx="6" fill="#fff" stroke="#9aa4ae"/><text x="775" y="165" text-anchor="middle" font-size="13">mesh port (CHI)</text><text x="775" y="184" text-anchor="middle" font-size="12" fill="#59636e">to SLC / OCM / DRAM / SPM</text>
+  <g stroke="#1f2328" stroke-width="1.5" fill="none">
+    <path d="M180 86 H230"/><path d="M180 170 H230"/>
+    <path d="M180 76 C 300 40, 360 40, 420 100"/><path d="M180 180 C 300 220, 360 220, 420 160"/>
+    <path d="M360 170 H680"/><path d="M620 128 C 650 128, 650 170, 680 170"/>
+  </g>
+  <text x="300" y="44" font-size="11" fill="#59636e">SME instructions (decoded on the core, issued to the CME)</text>
+  <text x="400" y="230" font-size="11" fill="#59636e">CME loads and stores go through the DSU memory system; the two cores time-share one CME.</text>
+</svg>
+<figcaption>Block layout from the DSU configuration file and the Arm C1-Nano SOG. Connections are schematic, not to scale.</figcaption>
+</figure>
+
+<p>Facts, each with its source:</p>
+<ul>
+<li><b>One CME per DSU, two C1-Nano cores per DSU.</b> NUM_CORES 2, NUM_CME 1 [ip/c1/logical/C1_DSU_DynamIQ_Cluster_1/pilatus/logical/config/C1_DSU_DynamIQ_Cluster_1.yaml:29,33 in Positron-AI-TSMC/asimov at 0d9e214, the RTL of the run 1 image]. CME_NUM_CPUS 2 [griffin0_cme_channels_pkg.sv].</li>
+<li><b>Half matmul.</b> FULL_MATMUL: FALSE [same yaml:473]. Arm's max-power test selects the half-matmul loop when IMP_CMECFR_EL1 bit 2 is 0 and comments the rates: full "4 iterations of 4 FMOPA per cycle: target 16 cycles", half "2 iterations of 4 FMOPA each, each executing in 2 cycles: target 16 cycles" [griffin/logical/testbench/execution_tb/tests/aarch64/maxpwr_cme/maxpwr_cme_asm.s:175-189,277]. The Arm floorplan example in the delivered guide is "Griffin 9cpus, half matmul" [arm_c1_sme2_iBEP_User_Guide.pdf p11].</li>
+<li><b>SVL 512 bits.</b> CME_SVL 512, CME_SVLB 64 [griffin0_cme_channels_pkg.sv]; firmware boot spec 7.3.3 says the same; the October probe read 64 B with RDSVL [asimov-bench engines/cme.py docstring].</li>
+<li><b>Supported element types</b> (ID_AA64SMFR0_EL1 read on the emulator): F32F32, B16F32, F16F32, I8I32, I16I32 present; F64F64, I16I64, B16B16, F16F16 absent; FA64 absent, so no Advanced SIMD in streaming mode [engines/cme.py docstring; run 1 cpuinfo shows the same hwcaps: sme smei8i32 smei16i32 smef16f32 smeb16f32 smef32f32 smebi32i32].</li>
+<li><b>Version.</b> C1-SME2 r1p3-00rel0 [griffin0_cme_channels_pkg.sv header]. Core: C1-Nano, CPU part 0xd8a revision 3 [run 1 sysinfo.txt].</li>
+<li><b>The emulator contains the real CME RTL.</b> The hemisphere build's setup script swaps the Griffin clock-gate cells, which only matters if Griffin is compiled in [emu/hemi_tlm/scripts/setup_tree.sh:967-969]; the DSU file list includes 455 griffin files [design/css/cmn/cdc/qualified/C1_DSU_DynamIQ_Cluster_1.f].</li>
+<li><b>Own PMU.</b> The CME has 31 counters, 16-bit event numbers [CME_PMU_CNT_NUM, CME_PMU_EVENT_WIDTH in griffin0_cme_channels_pkg.sv]. Linux reaches CME events through the core PMU with raw event numbers (section 5).</li>
+<li><b>Issue bandwidth from the core.</b> "The CPU has a maximum bandwidth of three instructions to the C1-SME2 unit. With the use of MOVPRFX fusion this can be increased to four." Loads and stores: two per cycle. SMSTART and SMSTOP are single-issue [Arm C1-Nano SOG 109590_0001_04 section 2.33].</li>
+</ul>
+
+<div class="warn"><b>Safety rule for every SME test.</b> The CME PPU resets in static mode. "A core issuing SSVE against a static/off CME PPU stalls until the PPU is reprogrammed" and there is no rescue path on the SoC [firmware_boot_spec.md, "CME (SME2 unit) PPU" section]. The SCP firmware arms the PPU on every core-ON [asimov-scp-firmware mod_asimov_system.c, asimov_system_enable_cme_dynamic, commit 32658a4c of 2026-07-06]. That function is present in scp-v0.34.0, the firmware of run 1 [checked at the tag; run 1 README line 19]. The asimov-bench CME runs on this emulator confirm it works. Any image with older SCP firmware would hang on the first SMSTART.</div>
+
+<h2>3. Where the sources are</h2>
+<table>
+<tr><th>Item</th><th>Location</th><th>Status</th></tr>
+<tr><td>CME RTL (Arm delivery)</td><td>GitHub Positron-AI-TSMC/asimov, ip/c1/logical/C1_DSU_DynamIQ_Cluster_1/griffin/ (621 files; matmul datapath in griffin0_matmul/, channels in griffin0_cme_channels/). Mirror: positron-ai/asimov_arm_ip, c1/. Run 1 image = commit 0d9e214.</td><td>Read</td></tr>
+<tr><td>C1-Nano core and DSU RTL</td><td>same tree, nevis/ (766 files) and pilatus/ (917 files); configuration yaml under pilatus/logical/config/</td><td>Read the config</td></tr>
+<tr><td>Arm test programs for the CME</td><td>griffin/logical/testbench/execution_tb/tests/aarch64/: maxpwr_cme (full and half-matmul loops, 855-line assembly), gemm_bf16_sme2, gemm_fp32_sme2, gemm_uint8_sme2 (only Makefile.inc checked in), cache_miss_cme, wfi_cme, di_dt_*_cme</td><td>maxpwr read; gemm sources absent from the tree</td></tr>
+<tr><td>Arm PDF in the delivery</td><td>griffin/iBEP/arm_c1_sme2_iBEP_User_Guide.pdf (109466, 12 pages): synthesis and floorplan guidance only, no performance content</td><td>Read</td></tr>
+<tr><td>Arm C1-Nano Core SOG 109590_0001_04</td><td>public, documentation-service.arm.com/static/68c946f08a337a2bc66460c8 (copy in this session's scratchpad refs/)</td><td>Read section 2.33 (SME), 3.11, 3.12</td></tr>
+<tr><td>Arm C1-Pro Core SOG 109879_0102_05</td><td>public, documentation-service.arm.com/static/68c2ee168a337a2bc6645d3e</td><td>Read tables 2-45 to 2-47: throughput 4 per cycle for SME processing, 3 for SME loads, 2 for SME stores, latency "NA" (executed on the CME). The C1-Pro core, not the Nano, but the CME tables are the same unit.</td></tr>
+<tr><td>Arm C1-SME2 TRM 107831, C1-SME2 CIM 107832, C1-DSU TRM 107804, SME SWOG 111048 ("CME SWOG")</td><td>Named in the SOGs and the boot spec. Not in any Positron repo; developer.arm.com pages render by script and cannot be fetched here.</td><td><b>Missing.</b> Ask the design team for the delivered copies (the CIM and TRM come with the IP).</td></tr>
+<tr><td>LLVM C1-Nano scheduling model</td><td>llvm-project llvm/lib/Target/AArch64/AArch64SchedC1Nano.td (CME pipes added 2026-08-11, commit ee94bd9a, "latency derived from the SME SWOG") and the llvm-mca tests Cortex/C1Nano-streaming-sme-only-instructions.s</td><td>Read; numbers in section 4</td></tr>
+<tr><td>Firmware and OS chain</td><td>asimovsw-docs architecture/firmware_boot/firmware_boot_spec.md section 7.3.3; asimov-scp-firmware mod_asimov_system.c; asimov-tfa platform.mk (ENABLE_SME_FOR_NS 2, ENABLE_SME2_FOR_NS 2); asimov-os kernel.config (CONFIG_ARM64_SME=y)</td><td>Read and verified</td></tr>
+<tr><td>Existing CME measurements</td><td>positron-ai/asimov-bench: presilicon-perf/asimov-latency/src/asimov_latency/engines/cme.py, presilicon-perf/results/latency-model-and-gaps.md; dpa/stress (k_cme.S, kernels.h, counters.c, FORMAT.md section 6)</td><td>Read; numbers in section 4</td></tr>
+<tr><td>Earlier Positron SME2 work</td><td>positron-ai/SME2-dev-investigations (Arm learning-path matmul on an Apple M4 and an Oppo phone; not Asimov)</td><td>Skimmed</td></tr>
+<tr><td>Plan page</td><td>Notion "Asimov pre-silicon performance characterization": items "Test CME pre-fetch performance" (concern: 80 cycles core-to-memory latency) and "CME GDN kernel throughput" are the two open CME items</td><td>Read</td></tr>
+</table>
+
+<h2>4. What is already measured</h2>
+
+<h3>4.1 Published Arm throughput (documents and the LLVM model)</h3>
+<table>
+<tr><th>Instruction (SVL 512)</th><th class="num">Latency, cycles</th><th class="num">Cycles per instruction</th><th>Source</th></tr>
+<tr><td>FMOPA (FP32 or FP16 in), BFMOPA</td><td class="num">4</td><td class="num">2.00</td><td>llvm-mca C1-Nano test</td></tr>
+<tr><td>SMOPA, UMOPA, SUMOPA, USMOPA (int8 or int16 in)</td><td class="num">2</td><td class="num">2.00</td><td>llvm-mca C1-Nano test</td></tr>
+<tr><td>FMLA, BFMLA, FDOT, BFDOT, SDOT, UDOT with vgx2 (two vectors)</td><td class="num">4 (int: 2)</td><td class="num">1.00</td><td>llvm-mca C1-Nano test</td></tr>
+<tr><td>the same with vgx4 (four vectors)</td><td class="num">4 (int: 2)</td><td class="num">2.00</td><td>llvm-mca C1-Nano test</td></tr>
+<tr><td>LD1W into a ZA slice; STR/ST1W of a ZA slice</td><td class="num">7; 11</td><td class="num">1.00</td><td>llvm-mca C1-Nano test</td></tr>
+<tr><td>LD1B of 2 or 4 Z vectors; ST1B of 2 or 4</td><td class="num">2</td><td class="num">1.00 / 2.00</td><td>llvm-mca C1-Nano test</td></tr>
+<tr><td>SME processing instructions (all)</td><td class="num">NA</td><td class="num">0.25 (core side, "4 per cycle")</td><td>Arm C1-Pro SOG table 2-45</td></tr>
+</table>
+<p class="small">The llvm-mca numbers come from the SME SWOG through Arm's LLVM contribution. They do not say whether they describe the full or the half matmul configuration. The measured 2.04 cycles per FMOPA below matches the 2.00 row, and Arm's half-matmul comment says 2 cycles, so the model most likely describes the half configuration. The C1-Pro "4 per cycle" is the core's dispatch rate to the CME, not the CME's execution rate.</p>
+
+<h3>4.2 Measured on the emulator by the asimov-bench team (October 2026)</h3>
+<p>Boots M2 and M3 on 2026-10-12, RTL 6da3026, model hemi_rtws_tlm, SCP 4148207, CPUs 0 to 2 [asimov-bench presilicon-perf/asimov-latency/src/asimov_latency/engines/cme.py, with the UART log lines cited there]. The CME and C1 RTL are unchanged between 6da3026 and the run 1 image 0d9e214 [run 1 README line 42].</p>
+
+<table>
+<tr><th>Measurement</th><th class="num">Value</th><th>Meaning</th></tr>
+<tr><td>4,096 FMOPA FP32, operands in registers, one core</td><td class="num">4,173 ns</td><td>1.019 ns = 2.04 cycles per FMOPA; 251 MAC/ns, 98 % of the half-matmul ceiling of 256 MAC/ns</td></tr>
+<tr><td>4,096 BFMOPA BF16, one core</td><td class="num">4,174 ns</td><td>502 MAC/ns (512 MACs per instruction, same instruction rate)</td></tr>
+<tr><td>4,096 FMLA vgx4 FP32, one core</td><td class="num">4,174 ns</td><td>same instruction rate; 62.8 MAC/ns because one vgx4 FMLA is 64 MACs</td></tr>
+<tr><td>2 x 4,096 FMOPA, both cores of DSU0 at once</td><td class="num">8,909 ns</td><td>1.088 ns per FMOPA: the two cores share one CME and get no more than one core does (6.7 % slower per instruction)</td></tr>
+<tr><td>Store of the four ZA tiles (64 slices of 64 B) + DSB SY</td><td class="num">179 ns</td><td>44.75 ns per tile</td></tr>
+<tr><td>SMSTART; SMSTOP</td><td class="num">0 to 1 ns; 3 ns</td><td>after the first SMSTART of a thread, which traps to the kernel once</td></tr>
+</table>
+
+<figure>
+<svg viewBox="0 0 900 300" width="100%" role="img" aria-label="Bar chart: nanoseconds per FMOPA with one 64-byte operand load per instruction, by where the operands sit">
+  <text x="20" y="24" font-size="14" font-weight="600">Time per FMOPA when each instruction also loads 64 B of operands (boot M3, one core, linear sweep)</text>
+  <g font-size="12">
+    <line x1="200" y1="50" x2="200" y2="250" stroke="#d0d7de"/>
+    <g>
+      <text x="190" y="80" text-anchor="end">registers only (M2)</text><rect x="200" y="66" width="326" height="22" fill="#9aa4ae"/><text x="532" y="82">1.019 ns (2.04 cycles)</text>
+      <text x="190" y="118" text-anchor="end">L1, 16 KiB buffer</text><rect x="200" y="104" width="325" height="22" fill="#0b5fff"/><text x="531" y="120">1.017 ns (2.03 cycles), 31.5 B/cycle</text>
+      <text x="190" y="156" text-anchor="end">L2, 96 KiB buffer</text><rect x="200" y="142" width="380" height="22" fill="#0b5fff"/><text x="586" y="158">1.186 ns (2.37 cycles), 27.0 B/cycle</text>
+      <text x="190" y="194" text-anchor="end">L3, 192 KiB buffer</text><rect x="200" y="180" width="505" height="22" fill="#0b5fff"/><text x="711" y="196">1.578 ns (3.16 cycles), 20.3 B/cycle</text>
+      <text x="190" y="232" text-anchor="end">DRAM (host model), 8 MiB</text><rect x="200" y="218" width="558" height="22" fill="#d9731a"/><text x="764" y="234">1.745 ns (3.49 cycles)</text>
+    </g>
+    <line x1="200" y1="250" x2="860" y2="250" stroke="#1f2328"/>
+    <g fill="#59636e"><text x="200" y="266" text-anchor="middle">0</text><text x="360" y="266" text-anchor="middle">0.5</text><text x="520" y="266" text-anchor="middle">1.0</text><text x="680" y="266" text-anchor="middle">1.5</text><text x="840" y="266" text-anchor="middle">2.0 ns per FMOPA</text></g>
+    <line x1="520" y1="50" x2="520" y2="250" stroke="#c0392b" stroke-dasharray="4 3"/><text x="524" y="60" fill="#c0392b">1.0 ns = half-matmul ceiling (2 cycles)</text>
+  </g>
+  <text x="20" y="290" font-size="12" fill="#59636e">Only the operand location changed. From L1 the loads are free; from L3 the CME waits 1.1 cycles per instruction; DRAM here is an emulator memory model, not LPDDR5X.</text>
+</svg>
+<figcaption>Values: (median - 25 ns timer pair) / instructions, from engines/cme.py MEM table (L1 4,190 ns and L2 4,884 ns and L3 6,489 ns over 4,096 products; DRAM 228,765 ns over 131,072). Bytes per cycle = 64 B / cycles per instruction.</figcaption>
+</figure>
+
+<h3>4.3 Measured with the CME counters (dpa/stress, Palladium, 2026-10-14 and 15)</h3>
+<ul>
+<li>Arm's half-matmul max-power loop ported verbatim to user space: CME_OP_MMDP_ISSUE / CME_CYCLES = 0.3455 on all 5 workers [FORMAT.md section 6.4, Spokane request 1504]. That is 69 % of the 0.5 ceiling. The bench authors attribute the gap to the in-order C1-Nano front end: about 44 instructions per 8 FMOPA at an IPC of 1.9 [kernels.h, cme_fmopa_fit comment].</li>
+<li>The same loop re-balanced for the front end (8 FMOPA + 8 LD1B + 12 FMLA per loop): 0.4916 to 0.4922, 98 % of the ceiling [request 1511].</li>
+<li>CME_CYCLES / CPU_CYCLES = 0.9993: the CME stays allocated to the core for the whole window.</li>
+</ul>
+<p>So two independent methods (timer and counters) agree: a single core can keep the half-rate CME at 98 % of its ceiling with register operands or L1 operands, if the instruction stream is arranged for the in-order front end.</p>
+
+<h3>4.4 Peak rates that follow (derived, at 2.0 GHz, one FMOPA per 2 cycles)</h3>
+<table>
+<tr><th>Input type</th><th class="num">MACs per instruction</th><th class="num">Per CME</th><th class="num">Five CMEs per hemisphere</th><th>Basis</th></tr>
+<tr><td>FP32 (FMOPA)</td><td class="num">256</td><td class="num">256 GMAC/s = 0.51 TFLOP/s</td><td class="num">2.6 TFLOP/s</td><td>measured 251 GMAC/s on one DSU; x5 is an estimate (est.)</td></tr>
+<tr><td>BF16 or FP16 in, FP32 out</td><td class="num">512</td><td class="num">512 GMAC/s = 1.02 TFLOP/s</td><td class="num">5.1 TFLOP/s</td><td>measured 502 GMAC/s; x5 est.</td></tr>
+<tr><td>int8 in, int32 out (UMOPA, SMOPA)</td><td class="num">1,024</td><td class="num">1,024 GMAC/s = 2.05 TOPS</td><td class="num">10.2 TOPS</td><td>est. from the llvm-mca rate (2 cycles); not measured</td></tr>
+</table>
+<p class="small">For scale: the measured C1-Nano core-side SVE unit peaks at 0.15 to 1.0 FMLA per cycle on 128-bit vectors [FORMAT.md 6.4], so one CME at BF16 is about 30 to 60 times one core's own vector unit.</p>
+
+<h2>5. How to measure: the method that already works on this emulator</h2>
+<ul>
+<li><b>Build.</b> Hand-written assembly with <code>.arch armv9.3-a+sve2+sme+sme2</code> in its own file, called from C compiled with Jesse's flags (-O2 -mcpu=cortex-a520 -static, GCC 14.2 of the asimov-os SDK). The bench team did exactly this [dpa/stress/src/kernels/k_cme.S]. Keeping SME out of the C files avoids the compiler emitting streaming instructions in code that runs before SME is enabled. The CRB (gcc 14.2) can compile-check the binary; it cannot run it (Neoverse V3AE has no SME).</li>
+<li><b>Timing.</b> CNTVCT (1 ns per tick, 2 cycles) around 4,096-instruction loops; median of 5 repetitions; subtract the 25 ns empty timer pair [engines/cme.py, MEM_LOOP].</li>
+<li><b>Counters.</b> perf_event_open on the core PMU with raw event numbers (12 fit in one group; the RTL has 20 core counters): 0x11 CPU_CYCLES, 0x08 INST_RETIRED, 0x3246 CME_CYCLES, 0x3264 CME_OP_MMDP_ISSUE, 0x3261 CME_OP_MAC_ISSUE, 0x324B and 0x324C CME_STALL_FRONTEND_*, 0x3213 CYCLES_CME_ALLOC, 0x835E SME_INST_SPEC, 0x8376 SME_FP_MOPA_SPEC, 0x837E SME_INT_MOPA_SPEC, 0x32A8 SSVE_CONTEXT_SWITCH [dpa/stress/src/counters.c:33-35; names in FORMAT.md section 6.2]. Our cache-mem-perf common.h already has perf_open for the core PMU; it needs only the event list.</li>
+<li><b>Rules inside a timed region.</b> No system call and no signal (a syscall clears PSTATE.SM, a signal handler runs with SM = 0 and ZA = 0) [dpa/stress/src/sme_ctx.S header, citing Linux Documentation/arch/arm64/sme.rst]. No Advanced SIMD (FA64 absent). The first SMSTART of a thread traps once; run one untimed pass. Save d8 to d15 and FPCR around SMSTART/SMSTOP (they zero the vector state). A CME test on one core of a pair while the partner core runs SVE code shares the VPU but not the CME; two SME cores on one DSU share the CME.</li>
+<li><b>Cost.</b> One 4,096-instruction row is about 4.2 us of chip time; one thousand rows are 4.2 ms, or about 12 s of wall time at 2,779x. A full CME sweep is far cheaper than the cache benchmarks (run 1 used 1.24 s of chip time).</li>
+<li><b>Configuration check in the program.</b> RDSVL must return 64; print ID_AA64SMFR0_EL1 (Linux emulates the read at EL0). IMP_CMECFR_EL1 (full or half) is not readable at EL0; rely on the RTL yaml.</li>
+</ul>
+
+<h2>6. What is not measured yet, and the proposed rows</h2>
+<p>The bench team lists its own gaps: "memory operands on two cores, operands in the SLC, software prefetch (PRFM), other operand orders, DSU2 to DSU4" [latency-model-and-gaps.md line 84]. Adding the Notion items and what a kernel writer needs:</p>
+<table>
+<tr><th>#</th><th>Row</th><th>Question it answers</th><th class="num">Chip time, est.</th></tr>
+<tr><td>1</td><td>Peak per input type: FMOPA FP32, FMOPA FP16, BFMOPA, SMOPA/UMOPA int8, SMOPA int16, plus SME2 multi-vector SDOT/UDOT/FDOT/BFDOT vgx2 and vgx4, register operands, one core</td><td>Does int8 run at the same 2 cycles per instruction (then 2.05 TOPS per CME)? Do vgx2 forms reach 1 per cycle as the LLVM model says?</td><td class="num">0.1 ms</td></tr>
+<tr><td>2</td><td>Operand streaming by location, extending boot M3: L1, L2, L3, SLC (fresh, 512 KiB to 3 MiB), OCM region 1 (1 hop) and region 3 (3 hops), DRAM; sequential and strided; with and without PRFM; LD1W vs LD1B of 2 and 4 vectors</td><td>The Notion "pre-fetch" item: can the CME's loads hide the mesh latency, and at what bytes per cycle? Where does the half-rate CME become memory bound?</td><td class="num">5 ms</td></tr>
+<tr><td>3</td><td>Two cores of one DSU with memory operands (each its own buffer) at the same locations as row 2</td><td>Whether the second core helps hide load latency when the CME is shared, which is the real-kernel case</td><td class="num">5 ms</td></tr>
+<tr><td>4</td><td>All five DSUs at once (CPUs 2, 4, 6, 8 and both cores of DSU0 if Jesse allows), operands from the SLC and DRAM</td><td>Hemisphere total and the mesh's share: five CMEs streaming operands at 20 to 30 B/cycle each is 200 to 300 GB/s, near the measured 8-core read bandwidth of 67 GB/s from run 1, so DRAM-resident operands cannot feed five CMEs</td><td class="num">10 ms</td></tr>
+<tr><td>5</td><td>Result path: ST1W and STR of ZA slices to L1, L2, OCM and DRAM; MOVA from ZA to Z then ST1; bytes per cycle</td><td>Cost of draining the 4 KiB tile, which boot M3 timed only to core memory (179 ns per four tiles)</td><td class="num">1 ms</td></tr>
+<tr><td>6</td><td>A complete matrix multiply: C(MxN) += A(MxK) x B(KxN) in BF16 with FP32 accumulate, tiled over the four ZA tiles, for sizes that fit L1, L2, L3, SLC and DRAM; one core, then two cores of a DSU, then five DSUs</td><td>The Notion "CME GDN kernel throughput" item: achieved fraction of the 1.02 TFLOP/s peak as a function of size and placement. Arm's gemm_bf16_sme2 testbench kernel and the Arm learning-path matmul (already in positron-ai/SME2-dev-investigations) are starting points</td><td class="num">20 ms</td></tr>
+<tr><td>7</td><td>Mode switches: SMSTART/SMSTOP pairs, ZA on and off, a context switch with live ZA (SSVE_CONTEXT_SWITCH), the first-use trap</td><td>Overhead of mixing streaming and normal code in a kernel; boot M2 measured 3 ns for SMSTOP but not the ZA save and restore paths</td><td class="num">0.5 ms</td></tr>
+</table>
+<p>Total about 40 ms of chip time, or under 2 minutes of emulator time plus boot; the whole sweep fits in one run with the run 2 cache tests.</p>
+
+<h2>7. Open questions for the design team and Jesse</h2>
+<ol>
+<li>Where are the delivered Arm C1-SME2 TRM (107831), the CIM (107832), the C1-DSU TRM (107804) and the SME SWOG (111048)? They are not in any repo I can read. The SWOG is the source of the per-instruction CME numbers, the TRM lists the CME PMU events, and the CIM defines what FULL_MATMUL changes.</li>
+<li>Is half matmul final for silicon? The config file, the firmware spec and the SW architecture notes all say half rate; this doubles or halves every peak number.</li>
+<li>Can the gemm_bf16_sme2 testbench sources be checked in or shared? Only their Makefile.inc is in the tree.</li>
+<li>For row 4, may both cores of DSU0 (CPUs 0 and 1, the kernel's cores) run a worker, or do we stay on CPUs 2 to 9? Run 1 isolated CPUs 2 to 9 only.</li>
+<li>Is any kernel planned to run on the CME at all? The bench notes say "No flown Program uses it." If the answer is no, rows 1, 2 and 6 are enough to document the engine.</li>
+</ol>
+
+<h2>8. Consultation record</h2>
+<p>The peer session asimov-04 (the cache and memory session in this folder) answered on 2026-11-02 with the environment facts it holds: run 1 cpuinfo, Jesse's build flags, the run request process and the core PMU events it verified. It had not seen the CME RTL or Arm documents; its "no RTL files mention CME" and "no C1-Nano SOG on this machine" statements were correct for the local disk and are superseded by the GitHub and Arm-site sources above. I sent it the pointers; it wrote them to the shared memory folder, and I replaced that note with the verified version (memory file asimov-c1-cme-sources.md).</p>
+<p>Jesse's Slack pointers (firmware boot spec 7.1.5, CMN_uArch_Spec v0.10, cmns3_12_1.yml, cmn_hns_l3_tagpipe.sv) concern the OCM and the mesh, not the CME. Their value here is the RTL commit they name, 0d9e214, which is the run 1 image; the CME configuration above was checked at that commit.</p>
+
+<h2>9. Update, 2026-11-02 evening: Jacob Geldbach's package and the Arm manuals</h2>
+<p>Jacob Geldbach (Slack, 2026-11-02) sent a starter package at /scratch/jgeldbach/cme-perf-for-jibin/ with his team's CME measurements, his bench and the manual locations. It changes section 3 and section 4 as follows.</p>
+<ul>
+<li><b>The Arm manuals exist on the shared home.</b> C1-SME2 TRM 107831 (issue 0103_07), C1-DSU TRM 107804, C1-Nano TRM 107753, the C1-SME2 telemetry spec 109821 and two Arm CME slide decks are in /home/jgeldbach/dev/docs/ARM/ARM_IP/C1/ on sw-dev-01 (not mounted on this agent host). Text extracts are at /scratch/jhan/arm-txt/ on sw-dev-01. The TRM confirms: half-matmul "performs one outer product operation every other cycle", full-matmul one per cycle [107831 section 2.1]; the CME L1 data cache is 64 KB, 4-way, 64 B lines, with a 128-stream hardware prefetcher that fills the CME L1 and the DSU L3 [section 6]; PRFM and PRFB/H/W/D are NOPs in streaming mode, only RPRFM (at most 1,024 B) is executed [section 6.3]. The Arm slide "CME: PPA Estimates" gives half-matmul rates of 512 (int8), 256 (FP16, BF16) and 128 (FP32) MACs per cycle, which matches section 4.4.</li>
+<li><b>Jacob's team measured the CME on GA13 in October (RTL a10181848, hemi_rtws_tlm, one CME unless noted).</b> Dependent-load chase through the CME: 21.56 ns from the CME L1, 26.60 ns from the DSU L3, 34.8 ns from OCM idle, 46.1 ns from OCM with three other CMEs streaming [his 02-results-so-far.md, run 3969]. One CME streaming reads: 34.5 GB/s from DRAM with the hardware prefetcher alone, 36.9 GB/s with RPRFM 1 KiB ahead, 22.1 GB/s from its OCM window, 14.6 GB/s from SPM; five CMEs together 95.8 GB/s [runs 4045, 4065]. Per instruction on the CME: fmopa 2.0 cycles, fdot and fmlal x4 2.0, ld1h x4 2.03, mova 2.0, fcvtn 1.0, fadd 0.5, and back-to-back st1h x2 3.0 cycles where the RTL reading says 1, an open anomaly [run 4007].</li>
+<li><b>His bench</b> is asimov-bench presilicon-perf/cme-perf on branch feature/cme-perf-pr3 (draft PRs 107 to 109): modes chase, stream, decode, isa and a five-CME sync mode. Its chase.S (LD1D then LASTB) and stream.S (LD1B of four vectors) are the models for the kernels written here.</li>
+<li><b>What Bill asked for is still open.</b> Bill wants the C1-Nano cache statistics repeated with the CME doing the loads and stores, on one core. Jacob's numbers cover a 16 KiB and a 128 KiB chase, OCM, and a DRAM read stream; they do not cover the footprint sweep, CME stores to cacheable memory, copy, or a side-by-side with the core's own numbers at the same footprints.</li>
+</ul>
+<h3>9.1 Test code written (not yet run on the emulator)</h3>
+<p>Phase F of cache-mem-perf repeats the phase A, B and D rows through the CME from CPU 2 with the same chains, footprints and flush rules, so each CSV row has a C1-Nano twin:</p>
+<ul>
+<li>cme_kern.S: streaming-mode chase (LD1D + LASTB), a register round trip with no memory access (DUP + LASTB, the floor under every CME hop), read, write and copy with LD1B/ST1B of four vectors (256 B per instruction) and of one vector (64 B).</li>
+<li>latency --cme and bandwidth --cme switch the engine; --perf with --cme counts CME_CYCLES, CME L1D refills on read and CME bus reads through the core PMU.</li>
+<li>cme_test.c checks every kernel against a scalar reference. It passes under QEMU 11.1.3 user mode with SME2 (SVL 64 B); the first run caught a partial-fold bug in the read kernels, since fixed. The programs build with Jesse's flags on the CRB (GCC 14.2) and refuse to run where SME2 is absent.</li>
+<li>Chip time of phase F: about 0.4 s (est.), dominated by the chase rows at about 22 ns per hop.</li>
+</ul>
+</main></body></html>

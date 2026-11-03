@@ -1,0 +1,30 @@
+export const meta = {
+  name: 'verify-hierarchy-page',
+  description: 'Adversarially verify the numbers, topology and prose of asimov-memory-hierarchy.html against the raw CSV files',
+  phases: [{ title: 'Find', detail: 'three independent checkers' }, { title: 'Verify', detail: 'one refuter per checker' }],
+}
+const PAGE = '/home/jhan/workspace/titan/cache-perf/asimov/asimov-memory-hierarchy.html'
+const GEN = '/home/jhan/workspace/titan/cache-perf/asimov/gen_hierarchy.py'
+const R2 = '/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-002/results/19700101T000000Z/'
+const R1 = '/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-001/results/19700101T000000Z/'
+const README = '/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-002/README.md'
+const FINDINGS = { type: 'object', properties: { findings: { type: 'array', items: { type: 'object', properties: { where: { type: 'string' }, page_text: { type: 'string' }, problem: { type: 'string' }, evidence: { type: 'string' }, fix: { type: 'string' }, severity: { type: 'string', enum: ['wrong', 'misleading', 'style'] } }, required: ['where', 'page_text', 'problem', 'evidence', 'fix', 'severity'] } } }, required: ['findings'] }
+const VERDICT = { type: 'object', properties: { verdicts: { type: 'array', items: { type: 'object', properties: { where: { type: 'string' }, holds: { type: 'boolean' }, reason: { type: 'string' } }, required: ['where', 'holds', 'reason'] } } }, required: ['verdicts'] }
+const common = `The page ${PAGE} reports run 2 of a cache benchmark on the Asimov emulator. Raw data: run 2 CSV files in ${R2} (latency-*.csv, bandwidth-*.csv, cmn-counts.csv, sysinfo.txt, log.txt), run 1 in ${R1}, and Jesse Zhang's README at ${README}. Do NOT trust ${GEN}; recompute from the CSV files with your own python3 -I script (read the CSV headers: latency rows are mem,size_bytes,mode,rep,loads,ns_per_load,cycles,l1,l2,l3 refills per load with 'best' rows; bandwidth rows have aggregate_GBps and a 'best' rep; cmn-counts.csv has label,event,nodeid,count,enabled_ns,running_ns,scaled_count). Read the page's HTML directly (tables are static HTML; the figures are drawn by the inline script from the JSON in 'const D ='). Report only concrete defects with the exact page text, your recomputed value or the source line, and a fix. Do not report things that are correct. Return the JSON findings; an empty list is a valid answer.`
+const CHECKS = [
+  { key: 'numbers', prompt: common + ` Your scope: every number in the Short version, tables 3.1 to 3.9, section 11 and section 12, and every <figcaption>. Recompute each from the CSVs (best rows, refills of the best pass, run-1 to run-2 percent changes, per-distance means over the 20 per-region OCM rows using distances |dx|+|dy| between DSU ports (2,3),(3,2),(4,3),(5,2) for CPUs 2,4,6,8 and home nodes 88:(1,3) 160:(2,4) 216:(3,3) 288:(4,4) 344:(5,3), the cmn-counts attribution test, the timing rows, the helper wall time from the log's [uptime x.xx] stamps). Flag any number on the page that does not match your recomputation, any rounding that changes a conclusion, and any count (rows compared, commands, files) that is off.` },
+  { key: 'topology', prompt: common + ` Your scope: the hemisphere map and the figure labels. Check against sysinfo.txt's '## arm-cmn mesh map' section that the page's node placements (HN-S logical ids at crosspoints, RN-F cells, SBSX cells, 'other' nodes), the node-id-to-crosspoint decoding (x = bits 8..6, y = bits 5..3 of the node id), the distances shown per CPU and region, and the mean distances (1.8, 2.6, 1.8, 3.4) are right. Check every statement the page attributes to Jesse's README (firmware versions, chip time, 2,779 wall s per chip s, 63 commands, 57 files, the logical-id to node-id mapping, 38 extra sysfs reads) against the README text. Check the JSON 'const D' values used by each figure (ocm, all5, slc, onecore, perdsu, all8, placement, ocmbw, cmn) against the CSVs for a sample of at least 15 values spread over the groups.` },
+  { key: 'prose', prompt: common + ` Your scope: the prose (not the numbers). Rules: every claim is tied to a measurement (a file in brackets after the sentence) or labelled as a hypothesis, estimate ('est.') or 'insufficient data'; a 'Short version' of at most three sentences opens the page; every code name, acronym and metric is defined at first use or in 'Words used here'; one claim per sentence (split on 'because', 'since', 'which means', 'so that', semicolons); numbers carry units; no idioms or metaphors; no semicolons joining clauses. Also check that each figcaption's bold takeaway is supported by the table it cites and that nothing presents an estimate where a measurement exists on the page. Report each violation with the exact phrase and a corrected sentence. Limit yourself to the 12 most important findings.` },
+]
+const results = await pipeline(
+  CHECKS,
+  c => agent(c.prompt, { label: 'find:' + c.key, phase: 'Find', schema: FINDINGS }),
+  (r, c) => {
+    const fs = (r && r.findings) ? r.findings : []
+    if (!fs.length) return { key: c.key, findings: [], verdicts: [] }
+    return agent(common + ` A checker reported these findings about the page:\n${JSON.stringify(fs, null, 1)}\nFor EACH finding, try to refute it: re-derive the value or re-read the page text and source yourself. A finding holds only if the page really says what is quoted and the problem is real. Return one verdict per finding, in the same order, with the reason and the correct value if the finding holds.`, { label: 'verify:' + c.key, phase: 'Verify', schema: VERDICT }).then(v => ({ key: c.key, findings: fs, verdicts: (v && v.verdicts) ? v.verdicts : [] }))
+  }
+)
+const out = results.filter(Boolean).map(r => ({ key: r.key, confirmed: r.findings.filter((f, i) => !r.verdicts[i] || r.verdicts[i].holds).map((f, i) => ({ ...f, verdict: (r.verdicts[i] || {}).reason })), refuted: r.findings.filter((f, i) => r.verdicts[i] && !r.verdicts[i].holds).map(f => f.where) }))
+log(out.map(o => `${o.key}: ${o.confirmed.length} confirmed, ${o.refuted.length} refuted`).join('; '))
+return out

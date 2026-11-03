@@ -1,0 +1,6 @@
+- [CRB machine access](crb-machine-access.md) — Arm Phoenix Reference Server at 192.168.2.45, cache sizes, sudo needs password, CPUs 0-119, Jeremy block rules (RUNNING file, 13-21 UTC weekdays)
+- [Asimov topology and run setup](asimov-cache-topology-conflict.md) — 5 DSU × 2 C1-Nano, L1 private, L2/L3 shared per DSU; Jesse runs our C code as PID 1 on the emulator, ≤5 free cores
+- [CRB hierarchy findings](crb-hierarchy-findings.md) — learned pointer chase, core-pair mesh port, asm kernels needed for per-core ceilings, level numbers
+- [Asimov emulator run facts](asimov-emulator-run-facts.md) — Jesse 10/30: 2 GHz, 1 s chip = 46 min wall, 32K L1 / 128K L2 / 256K L3 per DSU, OCM = 5×256 KiB locked SLC ways via /dev/ocm, no THP, -mcpu=cortex-a520 -static
+- [Review by edited copy](review-by-edited-copy.md) — Jibin reviews HTML by saving <name>-edited.html with "Jibin:" notes; regenerate the source, render with headless Chromium, republish
+- [CRB Arm documents](crb-arm-docs.md) — V3AE r0p2 SOG and CMN S3 TRM PDFs in crb/refs/, cited tables and pages, what sysfs vs documents confirm

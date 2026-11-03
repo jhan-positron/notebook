@@ -1,0 +1,1 @@
+- [perf-measurement-tech doc](perf-measurement-tech-doc.md) — crb/perf-measurement-tech.html built 2026-11-02 from bench/bandwidth.c + run_sudo.sh; verbatim-snippet check; no headless browser on this machine; run_sudo.sh:5 "512-line" comment is stale

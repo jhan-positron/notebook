@@ -1,0 +1,234 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/asimov/ocm-interpretation.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/titan/cache-perf/asimov/ocm-interpretation.html
+-->
+<title>Asimov OCM Interpretation</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#fbfaf7; --fg:#1d1f22; --muted:#5a6068; --rule:#dcd9d1; --card:#ffffff;
+  --blue:#2a78d6; --orange:#eb6834; --green:#1baf7a;
+  --blue-soft:#e3eefb; --orange-soft:#fdeae1; --green-soft:#e0f5ec; --gray-soft:#f0eee8;
+  color-scheme:light;
+}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 "IBM Plex Sans",system-ui,sans-serif;margin:0;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+main{max-width:980px;margin:0 auto}
+h1{font-size:30px;line-height:1.2;margin:0 0 6px;text-wrap:balance}
+h2{font-size:21px;margin:40px 0 10px;text-wrap:balance}
+h3{font-size:17px;margin:22px 0 6px}
+p{max-width:72ch;margin:8px 0}
+.sub{color:var(--muted);margin-bottom:22px}
+.short{background:var(--card);border:1px solid var(--rule);border-left:4px solid var(--blue);padding:14px 18px;border-radius:6px;margin:18px 0}
+.short p{max-width:none}
+ul{max-width:76ch;padding-left:22px}li{margin:4px 0}
+code{font:14px "IBM Plex Mono",monospace;background:var(--gray-soft);padding:1px 5px;border-radius:3px}
+pre{font:14px/1.5 "IBM Plex Mono",monospace;background:var(--gray-soft);padding:12px 14px;border-radius:6px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:15px;margin:10px 0}
+th,td{border-bottom:1px solid var(--rule);padding:7px 10px;text-align:left;vertical-align:top}
+th{font-weight:600;background:var(--gray-soft)}
+.wrap{overflow-x:auto}
+figure{margin:16px 0 8px;background:var(--card);border:1px solid var(--rule);border-radius:6px;padding:12px}
+figure svg{width:100%;height:auto;display:block;font-family:"IBM Plex Sans",system-ui,sans-serif}
+figcaption{font-size:14px;color:var(--muted);margin-top:8px}
+.take{font-weight:500;margin-top:10px}
+.tag{display:inline-block;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:1px 7px;border-radius:3px;margin-right:6px}
+.tag.hyp{background:var(--orange-soft);color:#9a3b12}
+.tag.src{background:var(--blue-soft);color:#1b4f90}
+dl{max-width:76ch}dt{font-weight:600;margin-top:8px}dd{margin:0 0 4px}
+</style>
+
+<main>
+<h1>Asimov OCM Interpretation</h1>
+<p class="sub">How I read Jesse Zhang's description of the Asimov on-chip memory, where it differs from Jibin's, and what the test would measure. Written 2026-10-30 from the Slack DM replies of 18:59 and 20:50 PDT and the notebook spec-study notes.</p>
+
+<div class="short">
+<strong>Short version.</strong>
+<p>Jesse's OCM is 1.25 MiB of the mesh cache (SLC) that firmware locks at boot: 4 of the 16 ways in each of the 5 home nodes, one 256 KiB region per home node, shared by every core on the chip and reached through a <code>/dev/ocm</code> driver. Jibin's description was a separate SRAM per DSU acting as an L4 for that DSU's two cores. Jesse's second reply explains the difference: Jibin's picture matches the March 2026 architecture spec v1.7, which put a home node on each DSU's crosspoint, and the current RTL moved to five home nodes shared by all cores. Each DSU still has a nearest region, one mesh hop from its port, so OCM1 should be the fastest region for our test core CPU 2.</p>
+</div>
+
+<h2>Words used here</h2>
+<dl>
+<dt>DSU</dt><dd>DynamIQ Shared Unit. One cluster of 2 C1-Nano cores with their shared L2 and L3. Asimov has 5 per hemisphere.</dd>
+<dt>CMN</dt><dd>Arm's Coherent Mesh Network. The on-chip interconnect between the DSUs, the memory controller and the accelerator blocks.</dd>
+<dt>Home node (HN)</dt><dd>A mesh node that owns a slice of the physical address space and holds that slice's share of the SLC. Asimov has 5.</dd>
+<dt>SLC</dt><dd>System Level Cache. The cache inside the CMN, 5 MiB in total, 1 MiB per home node, 16 ways per home node.</dd>
+<dt>Line (cache line)</dt><dd>The 64-byte block of memory that every cache on Asimov stores and moves as one unit. Every address belongs to exactly one line.</dd>
+<dt>Way</dt><dd>One of the 16 parallel slots a cache line can occupy in a set. Locking a way means the hardware never evicts lines placed in it.</dd>
+<dt>OCM</dt><dd>On-Chip Memory. In Jesse's description: the locked SLC ways, exposed as plain memory at fixed physical addresses.</dd>
+<dt>SPM</dt><dd>Scratchpad Memory. A separate 16 MiB data memory on the mesh, reached through AXI slave ports. Jesse says it has different rules. Not covered here.</dd>
+<dt>ACP</dt><dd>Accelerator Coherency Port. A side port into a core's cache. SPM pushes 46-byte metadata records through it. The notebook notes mention per-core OCM base registers for this path.</dd>
+<dt>PA</dt><dd>Physical address.</dd>
+<dt><code>/dev/ocm</code></dt><dd>A small Linux driver Jesse will add. <code>mmap</code> on it maps one 256 KiB OCM region into the process as normal cacheable memory.</dd>
+</dl>
+
+<h2>1. What Jesse described</h2>
+<p><span class="tag src">source</span>Jesse's reply comes from the image's RTL, firmware and kernel sources. Nothing has been measured yet. He will send real command output after the first boot.</p>
+<figure>
+<svg viewBox="0 0 960 545" role="img" aria-label="Five DSUs connect to a mesh with five home nodes; each home node holds a 1 MiB SLC slice of which 4 ways are locked as an OCM region; the mesh connects to DRAM">
+  <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5 0 10z" fill="#5a6068"/></marker></defs>
+  <text x="20" y="22" font-size="14" font-weight="600" fill="#1d1f22">5 DSUs (one hemisphere)</text>
+  <g font-size="12" fill="#1d1f22">
+    <g><rect x="20" y="34" width="300" height="66" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="30" y="54" font-weight="600">DSU 0 · cores 0, 1 (kernel)</text><text x="30" y="72">L1D 32 KiB per core (private)</text><text x="30" y="88">L2 128 KiB + L3 256 KiB, shared by both cores</text></g>
+    <g><rect x="20" y="112" width="300" height="66" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="30" y="132" font-weight="600">DSU 1 · cores 2, 3 (our test: CPU 2)</text><text x="30" y="150">L1D 32 KiB per core (private)</text><text x="30" y="166">L2 128 KiB + L3 256 KiB, shared by both cores</text></g>
+    <g><rect x="20" y="190" width="300" height="66" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="30" y="210" font-weight="600">DSU 2 · cores 4, 5</text><text x="30" y="228">L1D 32 KiB per core (private)</text><text x="30" y="244">L2 128 KiB + L3 256 KiB, shared by both cores</text></g>
+    <g><rect x="20" y="268" width="300" height="66" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="30" y="288" font-weight="600">DSU 3 · cores 6, 7</text><text x="30" y="306">L1D 32 KiB per core (private)</text><text x="30" y="322">L2 128 KiB + L3 256 KiB, shared by both cores</text></g>
+    <g><rect x="20" y="346" width="300" height="66" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="30" y="366" font-weight="600">DSU 4 · cores 8, 9</text><text x="30" y="384">L1D 32 KiB per core (private)</text><text x="30" y="400">L2 128 KiB + L3 256 KiB, shared by both cores</text></g>
+  </g>
+  <line x1="320" y1="255" x2="372" y2="255" stroke="#5a6068" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="326" y="244" font-size="11" fill="#5a6068">any core →</text>
+  <text x="326" y="272" font-size="11" fill="#5a6068">any home node</text>
+  <rect x="378" y="10" width="400" height="490" rx="8" fill="none" stroke="#5a6068" stroke-dasharray="5 4"/>
+  <text x="390" y="28" font-size="14" font-weight="600" fill="#1d1f22">CMN mesh · SLC 5 MiB total</text>
+  <g font-size="12" fill="#1d1f22">
+    <g><rect x="390" y="40" width="376" height="82" rx="5" fill="#ffffff" stroke="#5a6068"/><text x="398" y="57" font-weight="600">Home node 0 · SLC slice 1 MiB = 16 ways</text>
+      <rect x="398" y="66" width="270" height="48" fill="#f0eee8" stroke="#5a6068"/><text x="406" y="94">12 ways · 768 KiB · normal SLC, not OCM</text>
+      <rect x="668" y="66" width="90" height="48" fill="#eb6834" stroke="#9a3b12"/><text x="674" y="80" fill="#fff" font-weight="600">4 ways locked</text><text x="674" y="93" fill="#fff">OCM region 0</text><text x="674" y="106" fill="#fff" font-weight="600">256 KiB</text></g>
+    <g><rect x="390" y="132" width="376" height="82" rx="5" fill="#ffffff" stroke="#5a6068"/><text x="398" y="149" font-weight="600">Home node 1</text>
+      <rect x="398" y="158" width="270" height="48" fill="#f0eee8" stroke="#5a6068"/><text x="406" y="186">12 ways · normal SLC, not OCM</text>
+      <rect x="668" y="158" width="90" height="48" fill="#eb6834" stroke="#9a3b12"/><text x="674" y="172" fill="#fff" font-weight="600">4 ways locked</text><text x="674" y="185" fill="#fff">OCM region 1</text><text x="674" y="198" fill="#fff" font-weight="600">256 KiB</text></g>
+    <g><rect x="390" y="224" width="376" height="82" rx="5" fill="#ffffff" stroke="#5a6068"/><text x="398" y="241" font-weight="600">Home node 2</text>
+      <rect x="398" y="250" width="270" height="48" fill="#f0eee8" stroke="#5a6068"/><text x="406" y="278">12 ways · normal SLC, not OCM</text>
+      <rect x="668" y="250" width="90" height="48" fill="#eb6834" stroke="#9a3b12"/><text x="674" y="264" fill="#fff" font-weight="600">4 ways locked</text><text x="674" y="277" fill="#fff">OCM region 2</text><text x="674" y="290" fill="#fff" font-weight="600">256 KiB</text></g>
+    <g><rect x="390" y="316" width="376" height="82" rx="5" fill="#ffffff" stroke="#5a6068"/><text x="398" y="333" font-weight="600">Home node 3</text>
+      <rect x="398" y="342" width="270" height="48" fill="#f0eee8" stroke="#5a6068"/><text x="406" y="370">12 ways · normal SLC, not OCM</text>
+      <rect x="668" y="342" width="90" height="48" fill="#eb6834" stroke="#9a3b12"/><text x="674" y="356" fill="#fff" font-weight="600">4 ways locked</text><text x="674" y="369" fill="#fff">OCM region 3</text><text x="674" y="382" fill="#fff" font-weight="600">256 KiB</text></g>
+    <g><rect x="390" y="408" width="376" height="82" rx="5" fill="#ffffff" stroke="#5a6068"/><text x="398" y="425" font-weight="600">Home node 4</text>
+      <rect x="398" y="434" width="270" height="48" fill="#f0eee8" stroke="#5a6068"/><text x="406" y="462">12 ways · normal SLC, not OCM</text>
+      <rect x="668" y="434" width="90" height="48" fill="#eb6834" stroke="#9a3b12"/><text x="674" y="448" fill="#fff" font-weight="600">4 ways locked</text><text x="674" y="461" fill="#fff">OCM region 4</text><text x="674" y="474" fill="#fff" font-weight="600">256 KiB</text></g>
+  </g>
+  <line x1="778" y1="255" x2="828" y2="255" stroke="#5a6068" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="834" y="202" width="116" height="106" rx="5" fill="#f0eee8" stroke="#5a6068"/>
+  <text x="842" y="224" font-size="13" font-weight="600" fill="#1d1f22">AP DRAM</text>
+  <text x="842" y="242" font-size="12" fill="#1d1f22">about 2 GiB</text>
+  <text x="842" y="290" font-size="12" fill="#1d1f22">PA 0xC0_0000_0000</text>
+  <text x="842" y="276" font-size="11" fill="#5a6068">host memory</text>
+  <text x="842" y="258" font-size="11" fill="#5a6068">model, not</text>
+  <text x="842" y="304" font-size="11" fill="#5a6068">LPDDR5X</text>
+  <text x="20" y="532" font-size="12" font-weight="600" fill="#9a3b12">The physical address of a 64-byte cache line picks its home node. Every DSU uses all five home nodes, grey and orange. Nothing here is private to a DSU.</text>
+</svg>
+<figcaption>Jesse's description. OCM is the orange part: 4 locked ways in each home node, 256 KiB per home node, 1.25 MiB in total, shared by all 10 cores. The remaining 12 ways (3.75 MiB) keep caching DRAM. The grey ways are not OCM: they are the normal mesh cache and hold DRAM lines for every core. Sizes from Jesse's reply; the mesh layout is schematic.</figcaption>
+</figure>
+<p class="take">Takeaway: OCM is not a separate memory block. It is part of the mesh cache with eviction switched off, so every core reaches every region through the same mesh path.</p>
+
+<ul>
+<li>Five regions, each 256 KiB, at PA 0xE0000000, 0xE0100000, 0xE0200000, 0xE0300000, 0xE0400000. Only the first 256 KiB of each 1 MiB slot has storage behind it. The other 768 KiB are addresses with nothing behind them. Those empty addresses are unrelated to the 12 grey ways in the diagram, which hold DRAM lines. The equal size is a coincidence of 1 MiB minus 256 KiB.</li>
+<li>Each region lives in a different home node, so latency may differ by region (distance across the mesh).</li>
+<li>OCM must be mapped Normal write-back (cacheable). Device and non-cacheable mappings are not supported.</li>
+<li>It has ECC and no reset initialisation. A range must be written before it is read.</li>
+<li>Because it is cacheable, OCM lines also fill L1, L2 and L3. To time OCM itself the footprint must exceed L2 plus L3 (384 KiB), or the lines must be flushed with <code>DC CIVAC</code> first.</li>
+<li>Linux does not list it. Jesse will add a <code>/dev/ocm</code> driver; one <code>mmap</code> per region, offset equal to the region's physical base.</li>
+<li>The interpreter does not use OCM. Only firmware sets it up.</li>
+</ul>
+
+<h2>2. What Jibin described</h2>
+<figure>
+<svg viewBox="0 0 960 210" role="img" aria-label="Five DSUs in a row, each with two cores, private L1, shared L2 and L3, and its own OCM box acting as L4">
+  <g font-size="12" fill="#1d1f22">
+    <g transform="translate(10,20)"><rect width="176" height="110" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="8" y="18" font-weight="600">DSU 0</text><text x="8" y="36">core 0 · L1   core 1 · L1</text><text x="8" y="56">L2 shared</text><text x="8" y="74">L3 shared</text><line x1="88" y1="110" x2="88" y2="138" stroke="#5a6068" stroke-width="2"/><rect y="138" width="176" height="44" rx="5" fill="#fdeae1" stroke="#eb6834"/><text x="8" y="156" font-weight="600">OCM (L4 for this DSU)</text><text x="8" y="173">SRAM outside the DSU</text></g>
+    <g transform="translate(202,20)"><rect width="176" height="110" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="8" y="18" font-weight="600">DSU 1</text><text x="8" y="36">core 2 · L1   core 3 · L1</text><text x="8" y="56">L2 shared</text><text x="8" y="74">L3 shared</text><line x1="88" y1="110" x2="88" y2="138" stroke="#5a6068" stroke-width="2"/><rect y="138" width="176" height="44" rx="5" fill="#fdeae1" stroke="#eb6834"/><text x="8" y="156" font-weight="600">OCM (L4 for this DSU)</text><text x="8" y="173">SRAM outside the DSU</text></g>
+    <g transform="translate(394,20)"><rect width="176" height="110" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="8" y="18" font-weight="600">DSU 2</text><text x="8" y="36">core 4 · L1   core 5 · L1</text><text x="8" y="56">L2 shared</text><text x="8" y="74">L3 shared</text><line x1="88" y1="110" x2="88" y2="138" stroke="#5a6068" stroke-width="2"/><rect y="138" width="176" height="44" rx="5" fill="#fdeae1" stroke="#eb6834"/><text x="8" y="156" font-weight="600">OCM (L4 for this DSU)</text><text x="8" y="173">SRAM outside the DSU</text></g>
+    <g transform="translate(586,20)"><rect width="176" height="110" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="8" y="18" font-weight="600">DSU 3</text><text x="8" y="36">core 6 · L1   core 7 · L1</text><text x="8" y="56">L2 shared</text><text x="8" y="74">L3 shared</text><line x1="88" y1="110" x2="88" y2="138" stroke="#5a6068" stroke-width="2"/><rect y="138" width="176" height="44" rx="5" fill="#fdeae1" stroke="#eb6834"/><text x="8" y="156" font-weight="600">OCM (L4 for this DSU)</text><text x="8" y="173">SRAM outside the DSU</text></g>
+    <g transform="translate(778,20)"><rect width="176" height="110" rx="5" fill="#e3eefb" stroke="#2a78d6"/><text x="8" y="18" font-weight="600">DSU 4</text><text x="8" y="36">core 8 · L1   core 9 · L1</text><text x="8" y="74">L3 shared</text><text x="8" y="56">L2 shared</text><line x1="88" y1="110" x2="88" y2="138" stroke="#5a6068" stroke-width="2"/><rect y="138" width="176" height="44" rx="5" fill="#fdeae1" stroke="#eb6834"/><text x="8" y="156" font-weight="600">OCM (L4 for this DSU)</text><text x="8" y="173">SRAM outside the DSU</text></g>
+  </g>
+</svg>
+<figcaption>Jibin's description from the 2026-10-30 chat: one OCM per DSU, outside the DSU, used as an L4 by that DSU's two cores. Five independent memories.</figcaption>
+</figure>
+
+<h2>3. Where the two descriptions differ</h2>
+<div class="wrap">
+<table>
+<tr><th>Property</th><th>Jesse (RTL and firmware)</th><th>Jibin (chat)</th></tr>
+<tr><td>Where it sits</td><td>Inside the CMN home nodes, as locked SLC ways</td><td>A separate SRAM attached to each DSU</td></tr>
+<tr><td>How many</td><td>5 regions, one per home node</td><td>5 memories, one per DSU</td></tr>
+<tr><td>Who can reach it</td><td>Every core on the chip, every region</td><td>Only the 2 cores of its DSU</td></tr>
+<tr><td>Size</td><td>256 KiB per region, 1.25 MiB total</td><td>Not stated</td></tr>
+<tr><td>Address</td><td>Fixed PAs at 0xE0000000 and up</td><td>Not stated</td></tr>
+<tr><td>Path from a core</td><td>L1 → L2 → L3 → mesh → home node</td><td>L1 → L2 → L3 → OCM, no mesh</td></tr>
+<tr><td>Latency it equals</td><td>An SLC hit (same path), hypothesis</td><td>Something between L3 and the mesh</td></tr>
+<tr><td>Linux access</td><td><code>/dev/ocm</code> driver, <code>mmap</code> per region</td><td>Not stated</td></tr>
+</table>
+</div>
+<p>The two agree on one point: the count is five. They disagree on whether the five are tied to DSUs or to home nodes, and on whether the memory is private to a DSU or shared by the chip.</p>
+
+<h2>4. Why the two descriptions differ</h2>
+<p><span class="tag src">source</span>Jesse's second reply, 20:50 PDT, answers this directly.</p>
+<ul>
+<li>Jibin's picture is close to the March 2026 architecture spec v1.7. That version put a home node on each DSU's crosspoint, so each DSU had a home node, and its OCM, next to it.</li>
+<li>The current RTL has five "super home nodes" (HN-S) that house the SLC and the OCM. They are mesh nodes, not DSU nodes, and every core reaches every one of them.</li>
+<li>Each DSU still has a nearest region. DSU n's port sits one crosspoint from the home node holding OCM n. The RTL mesh config places DSU ports at crosspoints 12, 23, 32, 43, 52 and home nodes at 13, 24, 33, 44, 53. So CPU 2 (DSU 1) is one hop from OCM 1 at 0xE0100000, and that region should be the fastest for our test.</li>
+<li>Region size is a firmware choice. Firmware may lock 1, 2, 4, 8 or 12 ways, so a region can be up to 768 KiB. The stock firmware locks 4 ways, which gives the 256 KiB per region in section 1. The 1 MiB Jibin remembers is the size of the address slot and of each home node's whole SLC slice.</li>
+</ul>
+<p>Where this is specified, per Jesse: the firmware boot spec section 7.1.5 "OCM cold-boot policy" in the asimovsw-docs repository, the CMN micro-architecture spec v0.10 node table, and the RTL files cmns3_12_1.yml (mesh config) and cmn_hns_l3_tagpipe.sv (lock decoder) in the asimov repository.</p>
+<p>The notebook's per-core <code>cfg_acp_ocm_base</code> registers [notebook: artifacts/asimov-spec-study/spm-meta-data-model.md:146-150] are a separate matter: they tell the SPM metadata path where to push records for each core. They do not partition the OCM.</p>
+<h2>5. Physical address map of the OCM regions</h2>
+<figure>
+<svg viewBox="0 0 960 130" role="img" aria-label="Address bar from 0xE0000000 to 0xE0500000 in five 1 MiB slots; the first 256 KiB of each slot has storage behind it">
+  <g font-size="12" fill="#1d1f22">
+    <text x="20" y="20" font-size="13" font-weight="600">PA 0xE0000000 to 0xE04FFFFF · five 1 MiB slots · only the first 256 KiB of each slot has storage behind it</text>
+    <rect x="20" y="34" width="168" height="40" fill="#f0eee8" stroke="#5a6068"/><rect x="20" y="34" width="42" height="40" fill="#eb6834" stroke="#9a3b12"/><text x="68" y="58" fill="#5a6068">no storage (768 KiB)</text><text x="20" y="92" font-family="IBM Plex Mono,monospace" font-size="11">0xE0000000</text><text x="20" y="108" font-size="11">region 0 · HN 0</text>
+    <rect x="204" y="34" width="168" height="40" fill="#f0eee8" stroke="#5a6068"/><rect x="204" y="34" width="42" height="40" fill="#eb6834" stroke="#9a3b12"/><text x="252" y="58" fill="#5a6068">no storage</text><text x="204" y="92" font-family="IBM Plex Mono,monospace" font-size="11">0xE0100000</text><text x="204" y="108" font-size="11">region 1 · HN 1</text>
+    <rect x="388" y="34" width="168" height="40" fill="#f0eee8" stroke="#5a6068"/><rect x="388" y="34" width="42" height="40" fill="#eb6834" stroke="#9a3b12"/><text x="436" y="58" fill="#5a6068">no storage</text><text x="388" y="92" font-family="IBM Plex Mono,monospace" font-size="11">0xE0200000</text><text x="388" y="108" font-size="11">region 2 · HN 2</text>
+    <rect x="572" y="34" width="168" height="40" fill="#f0eee8" stroke="#5a6068"/><rect x="572" y="34" width="42" height="40" fill="#eb6834" stroke="#9a3b12"/><text x="620" y="58" fill="#5a6068">no storage</text><text x="572" y="92" font-family="IBM Plex Mono,monospace" font-size="11">0xE0300000</text><text x="572" y="108" font-size="11">region 3 · HN 3</text>
+    <rect x="756" y="34" width="168" height="40" fill="#f0eee8" stroke="#5a6068"/><rect x="756" y="34" width="42" height="40" fill="#eb6834" stroke="#9a3b12"/><text x="804" y="58" fill="#5a6068">no storage</text><text x="756" y="92" font-family="IBM Plex Mono,monospace" font-size="11">0xE0400000</text><text x="756" y="108" font-size="11">region 4 · HN 4</text>
+    <text x="930" y="58" font-size="11" fill="#5a6068">…</text>
+  </g>
+</svg>
+<figcaption>Orange is the usable 256 KiB of each slot. The test must stay inside the orange parts. Widths to scale within one slot.</figcaption>
+</figure>
+
+<h2>6. What a test would measure</h2>
+<figure>
+<svg viewBox="0 0 960 250" role="img" aria-label="Two load paths: an OCM load always hits in the locked way at the home node; a DRAM load may miss the SLC and go to DRAM">
+  <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5 0 10z" fill="#5a6068"/></marker></defs>
+  <g font-size="12" fill="#1d1f22">
+    <text x="20" y="24" font-size="13" font-weight="600">Load from an OCM page (mapped through /dev/ocm)</text>
+    <rect x="20" y="36" width="70" height="40" rx="4" fill="#ffffff" stroke="#5a6068"/><text x="36" y="60">core</text>
+    <rect x="110" y="36" width="80" height="40" rx="4" fill="#e3eefb" stroke="#2a78d6"/><text x="120" y="52">L1D 32K</text><text x="120" y="68">miss</text>
+    <rect x="210" y="36" width="80" height="40" rx="4" fill="#e3eefb" stroke="#2a78d6"/><text x="220" y="52">L2 128K</text><text x="220" y="68">miss</text>
+    <rect x="310" y="36" width="80" height="40" rx="4" fill="#e3eefb" stroke="#2a78d6"/><text x="320" y="52">L3 256K</text><text x="320" y="68">miss</text>
+    <rect x="410" y="36" width="90" height="40" rx="4" fill="#ffffff" stroke="#5a6068" stroke-dasharray="4 3"/><text x="420" y="60">mesh hops</text>
+    <rect x="520" y="36" width="200" height="40" rx="4" fill="#fdeae1" stroke="#eb6834"/><text x="530" y="52" font-weight="600">home node, locked way</text><text x="530" y="68">always a hit after first write</text>
+    <line x1="90" y1="56" x2="108" y2="56" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/><line x1="190" y1="56" x2="208" y2="56" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/><line x1="290" y1="56" x2="308" y2="56" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/><line x1="390" y1="56" x2="408" y2="56" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/><line x1="500" y1="56" x2="518" y2="56" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/>
+    <text x="740" y="60" font-size="12" fill="#9a3b12" font-weight="600">← latency reported as "OCM"</text>
+
+    <text x="20" y="134" font-size="13" font-weight="600">Load from an ordinary DRAM page (same buffer sizes, for comparison)</text>
+    <rect x="20" y="146" width="70" height="40" rx="4" fill="#ffffff" stroke="#5a6068"/><text x="36" y="170">core</text>
+    <rect x="110" y="146" width="80" height="40" rx="4" fill="#e3eefb" stroke="#2a78d6"/><text x="120" y="162">L1D 32K</text><text x="120" y="178">miss</text>
+    <rect x="210" y="146" width="80" height="40" rx="4" fill="#e3eefb" stroke="#2a78d6"/><text x="220" y="162">L2 128K</text><text x="220" y="178">miss</text>
+    <rect x="310" y="146" width="80" height="40" rx="4" fill="#e3eefb" stroke="#2a78d6"/><text x="320" y="162">L3 256K</text><text x="320" y="178">miss</text>
+    <rect x="410" y="146" width="90" height="40" rx="4" fill="#ffffff" stroke="#5a6068" stroke-dasharray="4 3"/><text x="420" y="170">mesh hops</text>
+    <rect x="520" y="146" width="200" height="40" rx="4" fill="#f0eee8" stroke="#5a6068"/><text x="530" y="162" font-weight="600">home node, 12 normal ways</text><text x="530" y="178">hit if footprint ≤ 3.75 MiB</text>
+    <rect x="760" y="146" width="100" height="40" rx="4" fill="#f0eee8" stroke="#5a6068"/><text x="770" y="162" font-weight="600">DRAM</text><text x="770" y="178">on SLC miss</text>
+    <line x1="90" y1="166" x2="108" y2="166" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/><line x1="190" y1="166" x2="208" y2="166" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/><line x1="290" y1="166" x2="308" y2="166" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/><line x1="390" y1="166" x2="408" y2="166" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/><line x1="500" y1="166" x2="518" y2="166" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/><line x1="720" y1="166" x2="758" y2="166" stroke="#5a6068" stroke-width="2" marker-end="url(#arr2)"/>
+    <text x="20" y="228" font-size="12" fill="#5a6068">Both paths are identical up to the home node. The only difference is that the OCM line can never be evicted.</text>
+  </g>
+</svg>
+<figcaption>The dependent-load chase sees the first level that holds the line. For OCM that is the locked way, so the footprint must be larger than L2 plus L3 (384 KiB), which means at least two regions chained together, or an explicit cache flush before each pass.</figcaption>
+</figure>
+<p class="take">Expected result, as a hypothesis: OCM latency equals SLC-hit latency on the same home node, and OCM bandwidth equals SLC-hit bandwidth. The run confirms or rejects this by chasing a 512 KiB to 1.25 MiB OCM buffer and a 1 MiB to 3 MiB buffer in ordinary DRAM pages (which fits in the 12 normal ways) and comparing the two.</p>
+
+<h3>Tests the OCM part of the plan would include</h3>
+<ul>
+<li>Latency chase across 2, 3, 4 and 5 regions (512 KiB to 1.25 MiB), one core, CPU 2.</li>
+<li>Latency per single region with the cache flushed before each pass, to see whether the five home nodes differ by mesh distance.</li>
+<li>Read and write bandwidth of one core over all five regions, with the same inline-assembly kernels used on CRB.</li>
+<li>The same chase and bandwidth over a buffer of 1 to 3 MiB in ordinary DRAM pages, as the SLC-hit reference.</li>
+<li>Every region is written once before any read, as Jesse requires.</li>
+</ul>
+
+<h2>7. Open questions</h2>
+<ul>
+<li><strong>For Bill or Jibin:</strong> Jesse points out that the architecture spec's "On-Chip Memory" means all on-chip SRAMs, including the 16 MB scratchpad (SPM), not only the CMN OCM. He offers a scratchpad pass in the same run at little cost. The SPM is reachable through <code>/dev/asimov-spm</code>, non-cacheable, with aligned 8, 16 or 32-byte loads and stores only. Should the run include it?</li>
+<li><strong>Settled by Jesse's second reply:</strong> the per-DSU model is the old spec v1.7; <code>DC CIVAC</code> flushing from user space is allowed and will be confirmed on first boot; OCM is an SLC hit at a fixed home node, so latencies near SLC hits are expected.</li>
+</ul>
+<h2>Sources</h2>
+<ul>
+<li>Jesse Zhang, Slack DM to Jibin Han, 2026-10-30 18:59 and 20:50 PDT. Facts from RTL, firmware and kernel sources, not yet measured.</li>
+<li>Jibin Han, chat with Claude, 2026-10-30: "OCM is conceptually L4 cache for the 2 cores of one DSU, and each DSU has its own OCM."</li>
+<li>Notebook, artifacts/asimov-spec-study/spm-meta-data-model.md lines 146 to 150 (per-core ACP OCM and DRAM base registers) and spm-c1nano-software-view.html (SPM 16 MiB data memory on the mesh, SLC 5 MiB).</li>
+</ul>
+</main>

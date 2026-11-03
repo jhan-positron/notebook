@@ -1,0 +1,305 @@
+=== date ===
+Thu Oct 22 00:03:44 UTC 2026
+=== churn.py pinning (tools/conformance/churn.py)
+51:      A run's positron.churn.summary.v1, with no isolation: only `run` knows where it ran.
+53:      [--warmup N] [--pass-thread-core N] [--timeout S]
+59:      the run's summary, each in DIR. With --pass-thread-core the run and its fault-timing run pin
+60:      their pass thread to core N, every other thread of the runs on this job's other CPUs but N's
+61:      SMT siblings, which they leave alone, and the summary records that isolation (`placement`),
+1043:              record: Mapping[str, JsonValue], isolation: JsonObject | None = None) -> JsonObject:
+1046:    the window's passes, each hemi's η and the run's `isolation` (`placement`), null for a run whose
+1047:    pass thread was not pinned, with the verdict: INFRA where the record is no measurement, FAIL
+1099:        "isolation": isolation, "problems": problems,
+1112:             isolation: JsonObject | None = None) -> JsonObject:
+1120:                     dt.load_run(run_path), record, isolation)
+1142:    """Where a run pinned to `core` places its threads, and the isolation that its summary
+1143:    records: the pass thread on `core`, which it pins itself to, and the runs' other threads on
+1145:    thread has its core to itself; and that isolation, in the form that the demo's D17 lane
+1147:    the run, of the job and of the host; and the kernel's isolated CPUs (isolcpus), and whether
+1154:        raise InfraError(f"the job's CPUs {cpus} leave the run no core beside the pass thread's, "
+1160:    isolated = sorted(_cpus(CPU_SYSFS / "isolated"))
+1161:    run_cpus: JsonArray = list(others)
+1162:    job_cpus: JsonArray = list(cpus)
+1164:    kept: JsonArray = list(isolated)
+1166:                    "lsf_job": os.environ.get("LSB_JOBID"), "pass_thread_core": core,
+1167:                    "core_siblings_idle": idle, "run_cpus": run_cpus, "job_cpus": job_cpus,
+1168:                    "host_cpus": os.cpu_count(), "isolated_cpus": kept,
+1169:                    "core_isolated": core in isolated}
+1210:    place = None if cpus is None else (lambda: os.sched_setaffinity(0, cpus))
+1235:    # Pinned, the pass thread has its core to itself and the summary records the isolation;
+1237:    cpus, isolation = ((None, None) if a.pass_thread_core is None
+1238:                       else placement(a.pass_thread_core, os.sched_getaffinity(0)))
+1253:    if a.pass_thread_core is not None:
+1254:        cmd += ["--pass-thread-core", str(a.pass_thread_core)]
+1267:    return _summary(trace_path, run, record, isolation)
+1293:    r.add_argument("--pass-thread-core", type=int,
+1294:                   help="the pass thread's core, the runs' other threads on this job's other "
+1295:                        "CPUs but its SMT siblings, and the isolation in the summary; without "
+1296:                        "it the pass thread is unpinned and the summary records no isolation")
+
+=== placement() body (churn.py lines 1140-1175)
+
+def placement(core: int, job: Iterable[int]) -> tuple[list[int], JsonObject]:
+    """Where a run pinned to `core` places its threads, and the isolation that its summary
+    records: the pass thread on `core`, which it pins itself to, and the runs' other threads on
+    the job's CPUs `job` less the core's SMT siblings, which they leave alone, so that the pass
+    thread has its core to itself; and that isolation, in the form that the demo's D17 lane
+    records its own: the host, its boot and the LSF job; the core, its siblings and the CPUs of
+    the run, of the job and of the host; and the kernel's isolated CPUs (isolcpus), and whether
+    the core is among them. The latency judge reads U5 only on a run whose summary records it
+    (spec §11.9)."""
+    cpus = sorted(job)
+    siblings = {core} | _cpus(CPU_SYSFS / f"cpu{core}" / "topology" / "thread_siblings_list")
+    others = [c for c in cpus if c not in siblings]
+    if not others:
+        raise InfraError(f"the job's CPUs {cpus} leave the run no core beside the pass thread's, "
+                         f"{core}")
+    try:
+        boot: str | None = BOOT_ID.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        boot = None
+    isolated = sorted(_cpus(CPU_SYSFS / "isolated"))
+    run_cpus: JsonArray = list(others)
+    job_cpus: JsonArray = list(cpus)
+    idle: JsonArray = list(sorted(siblings - {core}))
+    kept: JsonArray = list(isolated)
+    return others, {"host": {"hostname": socket.gethostname(), "boot_id": boot},
+                    "lsf_job": os.environ.get("LSB_JOBID"), "pass_thread_core": core,
+                    "core_siblings_idle": idle, "run_cpus": run_cpus, "job_cpus": job_cpus,
+                    "host_cpus": os.cpu_count(), "isolated_cpus": kept,
+                    "core_isolated": core in isolated}
+
+
+def admission_delay_ns(mix: ChurnMix, trace: dt.Trace, trace_sha256: str, twin: dt.Run,
+                       twin_record: Mapping[str, JsonValue]) -> int:
+    """The admission-delay canary's hold of each new request (spec §11.9, *Canaries*): 0.02 of the
+    window's largest TTFT° in the twin's run less its turn's wait for capacity, a first turn's from
+
+=== runtime C++: scheduling policy / affinity / mlock use
+/home/positron-perf/positron/src/phoenix-int/runtime/passloop/pass_loop.cpp:36:  CPU_SET(core, &set);
+/home/positron-perf/positron/src/phoenix-int/runtime/passloop/pass_loop.cpp:37:  return sched_setaffinity(0, sizeof set, &set) == 0 ? PinStatus::pinned : PinStatus::failed;
+/home/positron-perf/positron/src/phoenix-int/runtime/workers/worker_thread.cpp:17:    if (pthread_setaffinity_np(pthread_self(), sizeof set, &set) != 0) return AffinityStatus::failed;
+
+=== worker_thread.cpp affinity (lines 1-40)
+#include "runtime/workers/worker_thread.h"
+
+#include <pthread.h>
+#include <sched.h>
+
+namespace positron::rt {
+
+AffinityStatus leave_pass_cpu(int pass_cpu) noexcept {
+  if (pass_cpu < 0) return AffinityStatus::inherited;
+  if (pass_cpu >= CPU_SETSIZE) return AffinityStatus::failed;
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  if (pthread_getaffinity_np(pthread_self(), sizeof set, &set) != 0) return AffinityStatus::failed;
+  if (CPU_ISSET(pass_cpu, &set)) {
+    CPU_CLR(pass_cpu, &set);
+    if (CPU_COUNT(&set) == 0) return AffinityStatus::shared_core;
+    if (pthread_setaffinity_np(pthread_self(), sizeof set, &set) != 0) return AffinityStatus::failed;
+  }
+  cpu_set_t now;
+  CPU_ZERO(&now);
+  if (pthread_getaffinity_np(pthread_self(), sizeof now, &now) != 0) return AffinityStatus::failed;
+  return CPU_ISSET(pass_cpu, &now) ? AffinityStatus::failed : AffinityStatus::off_pass_cpu;
+}
+
+}  // namespace positron::rt
+
+=== docs: isolation / governor / nohz mentions
+/home/positron-perf/positron/src/phoenix-int/docs/superpowers/specs/2026-09-24-sdk-v2-design-07-runtime.md:74:- **Thread model (D17, r2.1).** One pass-loop thread, pinned to an isolated host core, owns the planner, binder and back
+/home/positron-perf/positron/src/phoenix-int/docs/superpowers/specs/2026-09-24-sdk-v2-design-12-repository.md:53:  - *What it needs:* SSH access for agent-run jobs; clang and clang++, the one toolchain (§11.5), with which `tools/
+/home/positron-perf/positron/src/phoenix-int/docs/superpowers/specs/2026-09-24-sdk-v2-design-12-repository.md:182:   - pin `isolcpus`, `nohz_full`, `rcu_nocbs`, SCHED_FIFO and IRQ affinity for the interpreter core, and for the C1 
+/home/positron-perf/positron/src/phoenix-int/docs/superpowers/specs/2026-09-24-sdk-v2-design-12-repository.md:251:- **The Phoenix perf host.** By the P1.3 exit, will the SDK have SSH there for a dedicated local user, cores isolate
+/home/positron-perf/positron/src/phoenix-int/docs/superpowers/specs/2026-09-24-sdk-v2-design-12-repository.md:323:  - On silicon, a package whose base OS image changed reruns the silicon microbenchmarks and the end-to-end rung bef
+/home/positron-perf/positron/src/phoenix-int/docs/superpowers/specs/2026-09-24-sdk-v2-design-06-placement.md:672:- **Scrub (r2.3, HWQ-7).** A masked V row is still read with weight +0, so a NaN or Inf in any slot of a mapped page 
+/home/positron-perf/positron/src/phoenix-int/docs/superpowers/specs/changes/r2.3.md:47:- **Other.** The whole-set nucleus (§7.4); the one-shard 42 µs caveat (§5.5, §14); the bind deadline's reach into §5.5's unqueued-pass cas
+/home/positron-perf/positron/src/phoenix-int/docs/superpowers/specs/changes/r2.12.md:29:- **§6.5, §7.1, §7.3.** Free-time scrubs run on a scrub worker off the isolated core, and capacity counts an item in scrub as neither free 
+/home/positron-perf/positron/src/phoenix-int/docs/runtime-v2.md:126:  - `pass_thread_core`: the pass thread's core; −1 leaves it unpinned, in tests only (§2.1, §2.7);
+/home/positron-perf/positron/src/phoenix-int/docs/runtime-v2.md:207:| `pass_thread_core` | a core of the host; −1 (unpinned) only in dev builds, for tests. It need not be in the calling thread's CPU set: the pass thread pins its
+/home/positron-perf/positron/src/phoenix-int/docs/runtime-v2.md:213:| `POSITRON_RT_COUNTS_PAGE` (the environment, not a field) | unset, or, in a dev build with a pinned `pass_thread_core`, the path of a counts page that is not hel
+/home/positron-perf/positron/src/phoenix-int/docs/runtime-v2.md:304:Each runtime runs one pass thread, `positron-pass`, from `pos_runtime_create` until the runtime is destroyed (`runtime/passloop/pass_loop.h`). It is pinned to `pa
+/home/positron-perf/positron/src/phoenix-int/tools/harness/run.c:736:  c.pass_thread_core = r->o.core;
+/home/positron-perf/positron/src/phoenix-int/tools/perf/host_facts.sh:19:echo "nohz_full=$(cpu_file nohz_full)"
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:64:FACT_KEYS = ("arch", "kernel", "virt", "user", "online", "isolated", "nohz_full", "load1",
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:302:    nohz_full: tuple[int, ...]
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:341:                     nohz_full=parse_cpu_list(values["nohz_full"]), load1=load1,
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:347:    """The online cores in both isolcpus and nohz_full: where the pass thread may run."""
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:348:    return tuple(c for c in facts.isolated if c in facts.nohz_full and c in facts.online)
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:352:    """The online cores outside isolcpus: the workers', the client's and the fake device's."""
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:369:        problems.append("no online core is in both isolcpus and nohz_full (§12.2 l.2049)")
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:383:        problems.append(f"{len(house)} non-isolated cores; the run needs {host_cores_min}, for the "
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:398:    """The pass core, the first isolated nohz_full core, and the taskset list: it plus the rest."""
+/home/positron-perf/positron/src/phoenix-int/tools/perf/records.py:401:        raise ValueError("no pass core: no online core is in both isolcpus and nohz_full")
+/home/positron-perf/positron/src/phoenix-int/tools/perf/perf_lane.py:6:   host: aarch64, bare metal, the lane's dedicated local user, and an online core in both isolcpus
+/home/positron-perf/positron/src/phoenix-int/tools/perf/perf_lane.py:7:   and nohz_full ("Timing under qemu or on a shared host is not valid for the gate", l.2046);
+/home/positron-perf/positron/src/phoenix-int/tools/perf/perf_lane.py:14:   isolated core;
+/home/positron-perf/positron/src/phoenix-int/tools/demo/panels.py:883:    core = inputs.get("pass_thread_core")
+/home/positron-perf/positron/src/phoenix-int/tools/conformance/latency_judge.py:1168:    core = isolation.get("pass_thread_core") if isinstance(isolation, dict) else None
+/home/positron-perf/positron/src/phoenix-int/tools/conformance/churn.py:1147:    the run, of the job and of the host; and the kernel's isolated CPUs (isolcpus), and whether
+
+=== tools/perf/records.py isolation rules (lines 340-405)
+                     isolated=parse_cpu_list(values["isolated"]),
+                     nohz_full=parse_cpu_list(values["nohz_full"]), load1=load1,
+                     others=tuple(item for item in values["others"].split(";") if item),
+                     runner=values["runner"] == "1")
+
+
+def pass_cores(facts: HostFacts) -> tuple[int, ...]:
+    """The online cores in both isolcpus and nohz_full: where the pass thread may run."""
+    return tuple(c for c in facts.isolated if c in facts.nohz_full and c in facts.online)
+
+
+def housekeeping_cores(facts: HostFacts) -> tuple[int, ...]:
+    """The online cores outside isolcpus: the workers', the client's and the fake device's."""
+    return tuple(c for c in facts.online if c not in facts.isolated)
+
+
+def identity_problems(facts: HostFacts, perf_user: str) -> list[str]:
+    """Why the host is not the perf host. Timing anywhere else is not valid (§12.2 l.2046)."""
+    problems: list[str] = []
+    if facts.arch != "aarch64":
+        problems.append(f"arch {facts.arch}: the perf host is the aarch64 Phoenix host "
+                        "(spec §12.2 l.2047)")
+    if facts.virt != "none":
+        problems.append(f"virtualisation {facts.virt}: timing under qemu or on a shared host is "
+                        "not valid for the gate (§12.2 l.2046)")
+    if facts.user != perf_user:
+        problems.append(f"user {facts.user}: the lane runs as the dedicated local user {perf_user} "
+                        "(§12.2 l.2050)")
+    if not pass_cores(facts):
+        problems.append("no online core is in both isolcpus and nohz_full (§12.2 l.2049)")
+    return problems
+
+
+def readiness_problems(before: HostFacts, after: HostFacts | None, host_cores_min: int, *,
+                       check_load: bool = True) -> list[str]:
+    """Why the perf host was not ready or not quiet (§12.2 l.2049); each one is INFRA.
+
+    The one-minute load is read only before anything ships (`check_load`): once the lane has
+    copied its inputs and the job has built the harness, the load is the lane's own.
+    """
+    problems: list[str] = []
+    house = housekeeping_cores(before)
+    if len(house) < host_cores_min:
+        problems.append(f"{len(house)} non-isolated cores; the run needs {host_cores_min}, for the "
+                        "worker pool and two threads (§12.2 l.2049)")
+    if check_load and before.load1 > LOAD_MAX:
+        problems.append(f"load {before.load1:.2f} before the run: the host is not quiet "
+                        "(§12.2 l.2049)")
+    for when, facts in (("before", before), ("after", after)):
+        if facts is not None and facts.others:
+            problems.append(f"other load {when} the run: " + ", ".join(facts.others))
+        if facts is not None and facts.runner:
+            problems.append(f"a CI runner or service runs on the host {when} the run; the lane is "
+                            "agent-run (§12.2 l.2049)")
+    return problems
+
+
+def choose_cores(facts: HostFacts) -> tuple[int, str]:
+    """The pass core, the first isolated nohz_full core, and the taskset list: it plus the rest."""
+    cores = pass_cores(facts)
+    if not cores:
+        raise ValueError("no pass core: no online core is in both isolcpus and nohz_full")
+    core = cores[0]
+    cpus = sorted([*housekeeping_cores(facts), core])
+    return core, ",".join(str(c) for c in cpus)
+
+
+=== perf_lane.py header (lines 1-40)
+"""The perf lane (spec §12.2 l.2046-2050): the TPS gate's host timing on the Phoenix perf host.
+
+Like the dev lane on sw-dev-01 (tools/ci/dev_lane.py, A2c Task 22), it runs agent-run jobs over ssh,
+with no runner and no service on the host (l.2049-2050). From the operator's machine, `run`:
+1. reads the host's facts (tools/perf/host_facts.sh) and refuses any host that is not the perf
+   host: aarch64, bare metal, the lane's dedicated local user, and an online core in both isolcpus
+   and nohz_full ("Timing under qemu or on a shared host is not valid for the gate", l.2046);
+2. ships the commit, copies each registered configuration's inputs from sw-dev-01 and writes its
+   run matrix beside them (records.matrix_from_gate, from Bg Task 6's registration). The ship and
+   the copy each swap their tree in only while no perf-lane job holds the lane's lock, and raise
+   PerfLaneBusy otherwise, so a running job keeps its tree, its build and its inputs;
+3. takes the lane's lock and starts one detached job that holds it (tools/perf/perf_job.sh), which
+   builds positron-hosttiming natively and runs it per configuration with the pass thread on the
+   isolated core;
+4. polls, judges the store (judge_run), uploads it with its verdict to sw-dev-01's artifact store
+   (§12.1 l.2009), and posts perf/host-timing: success, failure, or error for INFRA after one retry
+   (§12.2 l.2065). A poll whose ssh call fails says nothing about the job; the run gives the host
+   up after dev_lane.LOST_POLLS of them in a row, as the dev lane does (R92).
+
+It never posts `pending`: each status it posts is a result, judged after the run (Bg Task 1). A
+REFUSED run posts nothing: a host that is not the perf host, or records that do not show cost-model
+T (an entry that retired passes under another t_source, or no entry that retired passes under it;
+cross-plan contract §4.13, records.combine). A --dry-run is judged like any other run and keeps its
+outcome, PASS included, but posts nothing either. "A gate becomes registered for this rule when it
+posts its first status" (§11.7 l.1892), so only the perf host's real runs register perf/host-timing.
+
+Spec line numbers in this module, records.py and the two scripts cite spec r2.4.1, as sub-plan Bg
+does. In r2.4.3 each cited line is 10 lines later, and l.2065 is l.2076.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import dataclasses
+import json
+import re
+import subprocess
+import sys
+import tempfile
+
+=== null_timing: fake device wait
+/home/positron-perf/positron/src/phoenix-int/backends/null_timing/null_timing.cpp:18:constexpr std::int64_t kSpinNs = 100'000;  // the device thread spins, not sleeps, this close to a retirement
+/home/positron-perf/positron/src/phoenix-int/backends/null_timing/null_timing.cpp:271:                                           kSpinNs, options_.twin != nullptr);
+/home/positron-perf/positron/src/phoenix-int/backends/null_timing/fake_device.cpp:95:                       DeviceWait& wait, std::int64_t poll_ns, std::int64_t spin_ns, bool driven)
+/home/positron-perf/positron/src/phoenix-int/backends/null_timing/fake_device.cpp:100:      poll_ns_(poll_ns),
+/home/positron-perf/positron/src/phoenix-int/backends/null_timing/fake_device.cpp:101:      spin_ns_(spin_ns),
+/home/positron-perf/positron/src/phoenix-int/backends/null_timing/fake_device.cpp:203:    const bool in_window = retirement.hemi != nullptr && retirement.at - now <= spin_ns_;
+/home/positron-perf/positron/src/phoenix-int/backends/null_timing/fake_device.cpp:214:      std::int64_t sleep = poll_ns_;  // the whole sleep when nothing is queued
+/home/positron-perf/positron/src/phoenix-int/backends/null_timing/fake_device.cpp:215:      if (retirement.hemi != nullptr) sleep = std::min(sleep, retirement.at - now - spin_ns_);
+
+=== docs/null-timing.md: lateness band / void
+7:- **Timing.** A pass's T and period are its software-free T and period: its `T_soft_s` lookup, at its decode rows, its chunk's q shape and the most KV pages that any of its rows reads, and its `period_soft_s` lookup, at its deco
+8:- **Threads.** `submit` fixes a pass's start, chain point and retirement when it queues it, and hands the pass to the device through a four-entry ring per hemi. One device thread per deployment, none on a twin (The twin, below),
+9:- **Writes.** Every `write` is a timed device transfer (spec §10.4): a write of b bytes completes b ÷ the rate + the latency after it issues, each write from its own issue, and the call returns at that completion. The rate and
+10:- **The queue.** `submit` issues a pass on every hemi of its plan or on none. It refuses, with `failed_no_start`, a pass k + 2 until pass k has completed on every hemi of pass k, which also bounds each hemi to one pass waiting 
+11:- **`c1.moe_dispatch`.** `register_device_service` takes a MoE hemi's table, `positron.moe_dispatch.v3`, which it decodes and checks (`services::moe::decode_table`), and `submit` checks each pass's record on the hemi as the ser
+12:- **`quiesce` and `reset`.** `quiesce(hemi)` ends the hemi's queued passes as `quiesced` completions; `reset(hemi)` drops them with none and frees their slots. Either starts the hemi's timeline again, on the fake device and in 
+18:The fake device keeps a second timeline of the same passes (`backends/null_timing/shadow.h`; spec §10.4), with the same T and τ and the same chain, in which every software cost is zero: §11.8's ideal run. Each bound hemi has
+25:A hemi's ideal run starts together with the fake device where the hemi's counted intervals start (below): at its first pass since the load, a quiesce or a reset, and at its first pass past the warm-up, the run takes the fake de
+44:- **What the device knows of a row.** Each `c1.sample` table gives its hemi's slot-entry window, and the runtime's writes there give each slot's `positron.c1sample.slot.v1` entry: its seed, policy, top-k, top-p and stop IDs, as
+54:- **The device is driven.** No device thread runs. The twin's driver, on the pass thread, moves the clock to the next retirement (`FakeDevice::next_due`) and retires the passes due there (`FakeDevice::fire`), writing their drai
+63:- **The fault.** That hemi's completion of the pass is an `execution_fault` whose status is the backend's not-OK status with the injected bit (`kInjectedFault`) and no detail, posted at the pass's modeled retirement there, so i
+66:- **The windows.** A recovery's window runs from the faulting pass's modeled retirement, its `retire_ns` on the last of its hemis, to the first normal retirement on every hemi of the deployment after it: on each hemi the retire
+85:| `hemis[]` | per hemi: `passes`; `margin`, how long before the previous pass's chain point each pass was queued, which only the fake device can see, about twice the period less T, τ and the host's time where the period is at 
+86:| `writes` | the writes since the load: `count`, `bytes`, and `time_s`, their transfers' times summed, which saturates at INT64_MAX ns; and the write path that timed them: `bytes_per_s`, `latency_s` and `source`, the inputs tab
+87:| `device` | the device thread's self-check, or on a twin the driver's: passes `retired`; `late_mean_s` and `late_max_s`, how long after its retirement time each completion was posted; `lateness_band_s`, 0.2% of the shortest co
+91:| `pass_entries[]` | each logged pass, in issue order: `pass`; `bound_ns`, its submit, when its binding was in hand, which is its queue time on the fake device; `writes_s`, the transfer time of the writes that the pass thread w
+94:| `token_entries[]` | a replay's tokens, in pass order: the `request`'s id, the token's `index` in the request's tokens and its `pass`; its route `slot`, whose rows the pass's `accounting` names, and its `hemis`, those that dra
+101:- *Stretches with no demanded unit* are left out of both runs, each run its own: between two consecutive passes, from the earlier one's driver start where it demands nothing, or else from the later one's natural start, to the 
+103:- *A cut chunk's split charge*, T(n, q′) + Σ_j (T(n_j, q_j) − T(n_j, 0)) − T(n, q) over the passes j that run its deferred tokens, q_j being the deferred tokens that pass j runs, is charged once those are all run. A rem
+113:- **The B cap** (`runtime/planner/b_cap.h`; `docs/pass-planner.md`, "The B cap"), over the table's `T_cap_s` and latency target: the pass's ready rows in (admission, slot) order, the stop's padded rows among them and a deep ro
+
+=== latency_judge.py void rule (lines 440-460)
+    t_source: str
+    problems: tuple[str, ...]  # why it is no measurement: INFRA
+    faults: Faults  # what it injected, and what fired
+
+    @classmethod
+    def of(cls, doc: object) -> Record:
+        d = _obj(doc, "record")
+        if d.get("schema") != RECORD_SCHEMA:
+            raise JudgeError(f"the record is {d.get('schema')!r}, not {RECORD_SCHEMA}")
+        problems: list[str] = []
+        if _obj(d.get("device"), "record.device").get("void") is True:
+            problems.append("the fake device's lateness voids the record")
+        if d.get("passes_unlogged") != 0:
+            problems.append(f"the record's log left {d.get('passes_unlogged')} passes out")
+        passes = tuple(_pass(p, i) for i, p in enumerate(_list(d.get("pass_entries"),
+                                                                "record.pass_entries")))
+        by_id = {p.pass_id: p for p in passes}
+        if len(by_id) != len(passes):
+            raise JudgeError("the record logs a pass twice")
+        if any(not p.accounted for p in passes):
+            problems.append("a logged pass carries no slot accounting")
