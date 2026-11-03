@@ -120,3 +120,92 @@ Left behind in this batch:
 - `claude-agentsrv:/home/jhan/workspace/intel-AMX/rampup/operand-B.html`: left behind (content conflict: retain repository contents section from 71fc29c pending user decision), 76093 bytes.
 
 - `herdr-config/sessions/claude-agentsrv/session.json` -> `claude-agentsrv:/home/jhan/.config/herdr/sessions/claude-agentsrv/session.json` (15562 bytes). registered artifact.
+
+## Batch: 2026-11-02 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-11-02 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory, same files). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first. New prefixes this batch: `scratch-prune-20261020/` mirrors `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/` (the review and deletion records of the 2026-10-20 /scratch/jhan prune; `scratch-prune-20261020/scratchpad/` holds files relocated there from that session's scratchpad under `/tmp/claude-0/`), and `notebook-memory/` mirrors `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-notebook/memory/` (the canonical stays in the session store because Claude Code edits it in place). `herdr-config/sessions/claude-agentsrv/session.json` was refreshed from its canonical in the same run (a live session record; 13 lines changed).
+
+Covers 1 handoff(s) of 2026-10-16 to 2026-11-02 (see "Related" on each entry). Preserved: 36 files, 6.15 MiB in this topic. Left behind by rule 4 of the prompt for the handoffs of this topic, one reason per file (full per-file inventories in the `.lineage.md` companions named under each report page):
+
+- (provenance: raw workflow output): 7 files
+- (size): 6 files
+- (regenerable: listing of the notebook repository itself): 5 files
+- (no value used: empty file): 4 files
+- (duplicate (ai-runs/scratch-prune-20261020/tools/breakdown.py)): 1 files
+- (duplicate (ai-runs/scratch-prune-20261020/tools/build_page.py)): 1 files
+- (duplicate (ai-runs/scratch-prune-20261020/data/deleted-dirs-20261021.txt)): 1 files
+- (duplicate (ai-runs/scratch-prune-20261020/data/deleted-pftrace-20261021.txt)): 1 files
+- (duplicate (ai-runs/scratch-prune-20261020/data/du-top-after-20261021.tsv)): 1 files
+- (duplicate (ai-runs/scratch-prune-20261020/data/du-top-20261021.tsv)): 1 files
+- (duplicate (ai-runs/scratch-prune-20261020/data/notebook-mirror-mapping.json)): 1 files
+- (duplicate (ai-runs/scratch-prune-20261020/tools/match.py)): 1 files
+- (duplicate (ai-runs/scratch-prune-20261020/tools/numbers.py)): 1 files
+- `no value used` = files under `leaves/` result trees. `scratch directory >60 files` = agent batch trees under session scratchpads. `provenance` = server logs, client streams, .done markers, binaries, raw workflow outputs, subagent journals. `size` = files above 5 MiB. `regenerable: render check PNG` = PNG renders of inline-SVG pages. `scratchpad file not named in the handoff` = files of directory-listed session scratchpads that no handoff names individually. `duplicate` = a copy already held elsewhere (named). `pdftotext extract of a vendor manual`, `text dump of a preserved page`, `directory listing` = rebuilt in minutes from the PDF, the page, or the tree.
+
+### Report pages and their lineage
+
+#### scratch-prune-20261020/scratch-jhan-prune-review.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratch-jhan-prune-review.html` (47198 canonical bytes). Related: [claude_20261020_scratch-jhan-cleanup-and-archived-notebooks.md](../../handoffs/claude_20261020_scratch-jhan-cleanup-and-archived-notebooks.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/dev-machines/scratch-prune-20261020/scratch-jhan-prune-review.html
+- generator: tools/build_page.py in the output folder (writes page.html, scratch-jhan-prune-review.html, reply-to-mitchell.txt, figures.json); the 22:18 status block and the 22:48 update paragraph were patched in by inline Python in the transcript, not saved as scripts
+- input: /tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/data.json
+- input built by: tools/numbers.py from the scratchpad listings 3bda-scratch-files.tsv, 3bda-ondisk.tsv, du-top.tsv and the md5 files repo-md5.txt, remote-md5.clean.txt, doccheck-md5.txt, fullcheck-md5.txt (listings kept gzipped under data/)
+- sources: `find and du over /scratch/jhan on delphi-3bda`: not a local file (code state, URL or text); `git ls-files and md5sum over /home/jhan/workspace/notebook`: not a local file (code state, URL or text); `/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/notebook-mirror-mapping.json`: preserved notebook-mirror-mapping.json; `/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/scratch-jhan-files-20261021.tsv.gz`: nothing preserved; left behind (size) scratch-jhan-files-20261021.tsv.gz; `/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/scratch-jhan-ondisk-20261021.tsv.gz`: nothing preserved; left behind (size) scratch-jhan-ondisk-20261021.tsv.gz; `/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/du-top-20261021.tsv`: preserved du-top-20261021.tsv
+- regenerate: python3 -I /home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/numbers.py <SP> <SP>/data.json && python3 -I /home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/build_page.py <SP> /home/jhan/workspace/ai-runs/scratch-prune-20261020 (SP = the scratchpad; rebuilds version 1 only, the two later patches must be reapplied by hand)
+- regenerate verified 2026-11-02 (byte-identical from the preserved copies)
+- inventory: [scratch-jhan-prune-review.html.lineage.md](scratch-prune-20261020/scratch-jhan-prune-review.html.lineage.md) (5 lines)
+
+#### scratch-prune-20261020/page.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/page.html` (47038 canonical bytes). Related: [claude_20261020_scratch-jhan-cleanup-and-archived-notebooks.md](../../handoffs/claude_20261020_scratch-jhan-cleanup-and-archived-notebooks.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/dev-machines/scratch-prune-20261020/page.html
+- generator: tools/build_page.py in the output folder (writes page.html, scratch-jhan-prune-review.html, reply-to-mitchell.txt, figures.json); the 22:18 status block and the 22:48 update paragraph were patched in by inline Python in the transcript, not saved as scripts
+- input: /tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/data.json
+- input built by: tools/numbers.py from the scratchpad listings 3bda-scratch-files.tsv, 3bda-ondisk.tsv, du-top.tsv and the md5 files repo-md5.txt, remote-md5.clean.txt, doccheck-md5.txt, fullcheck-md5.txt (listings kept gzipped under data/)
+- sources: `find and du over /scratch/jhan on delphi-3bda`: not a local file (code state, URL or text); `git ls-files and md5sum over /home/jhan/workspace/notebook`: not a local file (code state, URL or text); `/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/notebook-mirror-mapping.json`: preserved notebook-mirror-mapping.json; `/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/scratch-jhan-files-20261021.tsv.gz`: nothing preserved; left behind (size) scratch-jhan-files-20261021.tsv.gz; `/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/scratch-jhan-ondisk-20261021.tsv.gz`: nothing preserved; left behind (size) scratch-jhan-ondisk-20261021.tsv.gz; `/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/du-top-20261021.tsv`: preserved du-top-20261021.tsv
+- regenerate: python3 -I /home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/numbers.py <SP> <SP>/data.json && python3 -I /home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/build_page.py <SP> /home/jhan/workspace/ai-runs/scratch-prune-20261020 (SP = the scratchpad; rebuilds version 1 only, the two later patches must be reapplied by hand); page.html is the same page without the doctype/html/head/body wrapper, published as https://claude.ai/artifact/M8kTS2bFC4HKRiKXFedQqd
+- regenerate verified 2026-11-02 (byte-identical from the preserved copies)
+- inventory: [page.html.lineage.md](scratch-prune-20261020/page.html.lineage.md) (5 lines)
+
+### All files of this batch
+
+Repo path -> canonical path (bytes). `origin:` = the session-store or scratchpad path a relocated file was copied from (history only, never fetched again).
+
+Related: [claude_20261020_scratch-jhan-cleanup-and-archived-notebooks.md](../../handoffs/claude_20261020_scratch-jhan-cleanup-and-archived-notebooks.md)
+
+- `notebook-memory/MEMORY.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-notebook/memory/MEMORY.md` (1051 bytes)
+- `notebook-memory/scratch-jhan-prune-review-2026-10.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-notebook/memory/scratch-jhan-prune-review-2026-10.md` (3456 bytes)
+- `notebook-memory/tron-worktree-prune-trap.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-notebook/memory/tron-worktree-prune-trap.md` (1332 bytes)
+- `scratch-prune-20261020/data/deleted-dirs-20261021.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/deleted-dirs-20261021.txt` (1498 bytes)
+- `scratch-prune-20261020/data/deleted-pftrace-20261021.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/deleted-pftrace-20261021.txt` (55914 bytes)
+- `scratch-prune-20261020/data/du-top-20261021.tsv` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/du-top-20261021.tsv` (4109 bytes)
+- `scratch-prune-20261020/data/du-top-after-20261021.tsv` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/du-top-after-20261021.tsv` (3876 bytes)
+- `scratch-prune-20261020/data/notebook-mirror-mapping.json` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/data/notebook-mirror-mapping.json` (4746432 bytes)
+- `scratch-prune-20261020/deletion-log-20261021.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/deletion-log-20261021.txt` (4707 bytes)
+- `scratch-prune-20261020/figures.json` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/figures.json` (8629 bytes)
+- `scratch-prune-20261020/reply-to-mitchell.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/reply-to-mitchell.txt` (629 bytes)
+- `scratch-prune-20261020/scratchpad/3bda-big-files.tsv` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/3bda-big-files.tsv` (189004 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/3bda-big-files.tsv`
+- `scratch-prune-20261020/scratchpad/3bda-detail.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/3bda-detail.txt` (8569 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/3bda-detail.txt`
+- `scratch-prune-20261020/scratchpad/3bda-overview.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/3bda-overview.txt` (17361 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/3bda-overview.txt`
+- `scratch-prune-20261020/scratchpad/breakdown.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/breakdown.txt` (15822 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/breakdown.txt`
+- `scratch-prune-20261020/scratchpad/data.json` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/data.json` (497799 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/data.json`
+- `scratch-prune-20261020/scratchpad/delete-set.json` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/delete-set.json` (59623 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/delete-set.json`
+- `scratch-prune-20261020/scratchpad/delete-story2814.log` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/delete-story2814.log` (305 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/delete-story2814.log`
+- `scratch-prune-20261020/scratchpad/delete.log` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/delete.log` (4378 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/delete.log`
+- `scratch-prune-20261020/scratchpad/delete.sh` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/delete.sh` (1652 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/delete.sh`
+- `scratch-prune-20261020/scratchpad/doccheck-md5.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/doccheck-md5.txt` (223563 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/doccheck-md5.txt`
+- `scratch-prune-20261020/scratchpad/doccheck-rel.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/doccheck-rel.txt` (144139 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/doccheck-rel.txt`
+- `scratch-prune-20261020/scratchpad/doccheck-result.json` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/doccheck-result.json` (161824 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/doccheck-result.json`
+- `scratch-prune-20261020/scratchpad/du-after2.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/du-after2.txt` (23 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/du-after2.txt`
+- `scratch-prune-20261020/scratchpad/match-summary.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/match-summary.txt` (11117 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/match-summary.txt`
+- `scratch-prune-20261020/scratchpad/mirror-diffs.json` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/mirror-diffs.json` (2 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/mirror-diffs.json`
+- `scratch-prune-20261020/scratchpad/remote-md5.clean.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/remote-md5.clean.txt` (61578 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/remote-md5.clean.txt`
+- `scratch-prune-20261020/scratchpad/remote-md5.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/remote-md5.txt` (64915 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/remote-md5.txt`
+- `scratch-prune-20261020/scratchpad/story2814-copy-list.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/story2814-copy-list.txt` (3726 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/story2814-copy-list.txt`
+- `scratch-prune-20261020/scratchpad/story2814-src.md5` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/scratchpad/story2814-src.md5` (5018 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook/ed984320-0dc3-4cf4-9154-84af93c2a407/scratchpad/story2814-src.md5`
+- `scratch-prune-20261020/tools/breakdown.py` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/breakdown.py` (1642 bytes)
+- `scratch-prune-20261020/tools/build_page.py` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/build_page.py` (36945 bytes)
+- `scratch-prune-20261020/tools/match.py` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/match.py` (5634 bytes)
+- `scratch-prune-20261020/tools/numbers.py` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/numbers.py` (4320 bytes)
+

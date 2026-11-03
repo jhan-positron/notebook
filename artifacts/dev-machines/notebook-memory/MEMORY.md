@@ -1,0 +1,5 @@
+- [workspace ai-runs layout](workspace-ai-runs-layout.md) — 2026-09-01 move of Claude-created folders to ~/workspace/ai-runs/; never create directly at ~/workspace
+- [Handoff run gotchas](handoff-run-gotchas.md) — 30-day transcript retention, concurrent codex run, lone-pwd false positives, mirror layout, user decisions (2026-09-11 to 2026-10-16)
+- [Handoff prompt data-preservation draft](handoff-prompt-data-preservation-draft.md) — prompt amended and applied 2026-09-20 (340d8bf), first run done (..4709e1e); agents verify, session writes
+- [scratch/jhan prune review 2026-10](scratch-jhan-prune-review-2026-10.md) — Mitchell's 2026-10-20 prune request; review and 211 GiB deletion done 2026-10-21 (57 GiB left), folder ~/workspace/ai-runs/scratch-prune-20261020/; story2814 notes archived in notebook commit 2159889 (unpushed); kvwait.bin and small doc sets pending
+- [tron worktree prune trap](tron-worktree-prune-trap.md) — ~100 worktrees of ~/workspace/tron live on delphi-3bda /var/tmp; never `git worktree prune` from another host
