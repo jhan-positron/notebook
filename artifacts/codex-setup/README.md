@@ -132,3 +132,30 @@ Left behind in this batch:
 - `skills/PR-description/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/PR-description/SKILL.md` (12139 bytes). document.
   Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).
 - `skills/cpp-coding-guide/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/cpp-coding-guide/SKILL.md` (2577 bytes). registered artifact.
+
+## Batch: 2026-11-02 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-11-02 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory, same files). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first. Canonical root mapping as before: `claude-agentsrv:/home/jhan/.codex/skills/` -> `skills/`.
+
+Covers 1 handoff(s) of 2026-10-16 to 2026-11-02 (see "Related" on each entry). Preserved: 11 files, 0.02 MiB in this topic. Left behind by rule 4 of the prompt for the handoffs of this topic, one reason per file (full per-file inventories in the `.lineage.md` companions named under each report page):
+
+- `no value used` = files under `leaves/` result trees. `scratch directory >60 files` = agent batch trees under session scratchpads. `provenance` = server logs, client streams, .done markers, binaries, raw workflow outputs, subagent journals. `size` = files above 5 MiB. `regenerable: render check PNG` = PNG renders of inline-SVG pages. `scratchpad file not named in the handoff` = files of directory-listed session scratchpads that no handoff names individually. `duplicate` = a copy already held elsewhere (named). `pdftotext extract of a vendor manual`, `text dump of a preserved page`, `directory listing` = rebuilt in minutes from the PDF, the page, or the tree.
+
+### All files of this batch
+
+Repo path -> canonical path (bytes). `origin:` = the session-store or scratchpad path a relocated file was copied from (history only, never fetched again).
+
+Related: [claude_20261018_claude-skills-sync-to-codex.md](../../handoffs/claude_20261018_claude-skills-sync-to-codex.md)
+
+- `skills/PR-description/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/PR-description/agents/openai.yaml` (287 bytes)
+- `skills/PR-description/evals/evals.json` -> `claude-agentsrv:/home/jhan/.codex/skills/PR-description/evals/evals.json` (1604 bytes)
+- `skills/PR-description/references/example-how-to-review.md` -> `claude-agentsrv:/home/jhan/.codex/skills/PR-description/references/example-how-to-review.md` (2807 bytes)
+- `skills/explain-bash/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/explain-bash/SKILL.md` (1575 bytes)
+- `skills/explain-bash/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/explain-bash/agents/openai.yaml` (115 bytes)
+- `skills/explain-diff-html/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/explain-diff-html/SKILL.md` (3042 bytes)
+- `skills/explain-diff-html/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/explain-diff-html/agents/openai.yaml` (160 bytes)
+- `skills/explain-diff-notion/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/explain-diff-notion/SKILL.md` (3655 bytes)
+- `skills/explain-diff-notion/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/explain-diff-notion/agents/openai.yaml` (192 bytes)
+- `skills/simplify-cpp-comments/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/simplify-cpp-comments/SKILL.md` (4903 bytes)
+- `skills/simplify-cpp-comments/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/simplify-cpp-comments/agents/openai.yaml` (135 bytes)
+
