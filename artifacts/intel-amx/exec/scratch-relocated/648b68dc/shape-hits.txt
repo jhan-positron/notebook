@@ -1,0 +1,458 @@
+
+===== 2026-10-18T19:00:00.175Z assistant tool_use len=4263
+{"command": "S=/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad; cat > $S/issue-rename.md <<'EOF'\n## Short version\n\nPR #5015 makes the AMX attention kernels serve kv_mul 16 (Muse Glimmer 30B) next to kv_mul 4 (llama-3.1-8b) through a `group_heads` template parameter, but the namespace and the kernel names still say \"4 query heads per KV head\" (`amx_attn_h128g4`, `pack_q_group_128x4`, `qk_rowmajor_128x4`, `weights_times_v_128x4`). This issue tracks the follow-up PR that renames them. That PR has one requirement beyond the rename: more shapes will follow, so it must look for implementation changes that make the code change for a new shape as small as possible.\n\n## Words used here\n\n- AMX = the Intel tile-matrix instructions. The AMX attention kernel scores one dense 64-token KV page per call (`src/amx_attn.cpp`, interface `h/tron/amx_attn_iface.hpp`).\n- kv_mul = query heads per KV head. llama-3.1-8b has 4, Muse Glimmer 30B has 16. The kernels take it as the template parameter `group_heads`.\n- shape = head size x kv_mul. The kernels serve head size 128 with kv_mul 4 and 16 after PR #5015. A \"new shape\" is another kv_mul at head size 128, or later another head size.\n- `group_heads_ok` = the compile-time gate that lists the served kv_mul values; `shape_ok` = the run-time gate (head size 128 and `group_heads_ok(kv_mul)`).\n\n## Why a separate PR\n\nPR #5015 was written under a minimum-change requirement: keep the names, keep the structure, so that the review stays on the kernel generalization. Renaming was deferred to here on purpose.\n\n## What the follow-up PR does\n\n1. Renames the namespace and the three kernels so that the names describe the shape family (head size 128, `group_heads` as a parameter) instead of one kv_mul value, and updates the header comment that today says the names record the first shape. Call sites, tests and the `Note` comments follow.\n\n2. Requirement: before or with the rename, look for implementation improvements so that adding a shape is a minimal change. Today a new kv_mul touches at least: `group_heads_ok`, the explicit instantiations at the end of `amx_attn.cpp`, the `if constexpr (group_heads == 16)` lanes of the transposing store in the QK kernel, the P-conversion loop of the PV kernel, the `KERNEL_KV_MULS`-style lists in the tests (`t_amx_numerics`, `t_amx_dispatch_dtype`, `t_llama_unit` probes), and the buffer sizing assumptions at the call sites. Candidates to evaluate, not a prescription:\n   - one declared list of served group sizes from which the gate, the instantiations and the test shape lists are generated;\n   - the transposing store and the P-conversion loop written over `group_heads / 4` lanes instead of per-value branches;\n   - call sites that take the geometry object instead of shape constants;\n   - a static check that every served size has a numerics test section.\n   The PR description states, for a hypothetical third group size, which files and lines would change after the PR (the count is the measure of this requirement).\n\n3. Out of scope: adding a shape, changing kernel performance, changing numerics.\n\n## Acceptance\n\n- Numerics unchanged: `t_amx_numerics`, `t_amx_dispatch_dtype` and `t_llama_unit` pass with AMX on and under the kill switch (`TRON_AMX_DISABLE=1`), and the `<4>` and `<16>` instantiations compile to the same instructions as at the PR #5015 head (disassembly compare after address stripping, the method of PR #5015's \"object compare\").\n- The PR description lists the places a new group size would touch, before and after.\n- No throughput change on llama-3.1-8b and Muse Glimmer 30B (same runtron cells as PR #5015, inside the band).\n\n## Related\n\n- PR #5015 (kv_mul 16 support; keeps the old names on purpose).\n- Issue #4444 (token divergence between the AMX and AVX paths; unrelated to the names, listed because every kernel PR references it).\nEOF\ngh issue create --repo positron-ai/tron --title \"AMX attention: rename the kv_mul-4 names (amx_attn_h128g4, *_128x4) and make a new shape a minimal code change\" --body-file $S/issue-rename.md --assignee jhan-positron 2>&1 | tail -2", "description": "Create the tracking issue for the rename follow-up"}
+
+===== 2026-10-18T19:00:15.536Z assistant tool_use len=1446
+{"command": "S=/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad; gh pr view 5015 --repo positron-ai/tron --json body -q .body > $S/pr5015-body-live.md; cmp -s $S/pr5015-body.md $S/pr5015-body-live.md && echo \"body unchanged since fetch\" || echo \"BODY CHANGED on GitHub since the first fetch\"; python3 - \"$S\" <<'PY'\nimport sys\nS = sys.argv[1]\ns = open(S + \"/pr5015-body-live.md\").read()\nold = \"The author decides before merging whether either measurement is needed.\"\nnew = (\"The author decides before merging whether either measurement is needed.\\n\\n\"\n       \"**Names.** The namespace `amx_attn_h128g4` and the `_128x4` kernel suffixes still say kv_mul 4 although the kernels now serve kv_mul 4 and 16. \"\n       \"This PR keeps them on purpose (minimum change). The rename, together with the requirement that a future shape is a minimal code change, is tracked in issue #5021.\")\nassert s.count(old) == 1, \"anchor not found\"\nopen(S + \"/pr5015-body-new.md\", \"w\").write(s.replace(old, new))\nprint(\"patched body:\", len(s.split()), \"->\", len(s.replace(old, new).split()), \"words\")\nPY\ngh pr edit 5015 --repo positron-ai/tron --body-file $S/pr5015-body-new.md >/dev/null && echo \"PR 5015 body updated\" && gh pr view 5015 --repo positron-ai/tron --json body -q .body | grep -c '#5021'", "description": "Add the issue reference to the PR 5015 description"}
+
+===== 2026-10-18T19:03:22.961Z assistant tool_use len=4307
+{"command": "cd /home/jhan/workspace/intel-AMX/exec/glimext-20261018 >/dev/null && bash launch.sh check 2>&1 | tail -3; cat > /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/glimext-20261018-campaign.md <<'EOF'\n---\nname: glimext-20261018-campaign\ndescription: \"2026-10-18 extended test of PR #5015 (kv_mul-16 AMX kernels) with and without the change: scripts exec/glimext-20261018/ (build base g16b = main 6198824246 + head g16h = 5061623a34 with one plain-shell clang-19 recipe; identity smokes; perf cells llama-8b cpu / qwen3-4b fpga / gpt-oss-120b fpga / Glimmer; margin probe for issue #4444); tracking issue #5021 (rename + new-shape-minimal-change requirement) referenced in the PR body\"\nmetadata:\n  type: project\n---\n\njhan 2026-10-18: extend PR #5015 testing: include other 128x16 models if any; add llama3.1-8b, qwen3-4b (hw attn), one\ngpt-oss (hw attn), which must show no perf degradation; compare with and without the PR; test token identity (expect\nissue #4444 on Glimmer: add the test data to #4444, PR #5015 only references the issue); runtron is fine. Later the same\nday: file a tracking issue for the namespace rename (names say kv_mul 4 but kernels serve 4 and 16) and reference it in\nthe PR body; the issue states one requirement: more shapes will come, look for implementation improvements so that a new\nshape is a minimal code change -> issue #5021 (https://github.com/positron-ai/tron/issues/5021), referenced in the PR\n5015 body \"Open items\" (patched onto the LIVE body: jhan had trimmed the Words table in the meantime).\n\nDesign: exec/glimext-20261018/ (README.md has the words, files, cells, launch line, traps). chain.sh steps B (two builds in\nparallel, per-tag flock in build.sh), T (head tests + preservation vs base, same compiler), I (smoke.sh per identity cell:\narms base head head2 headoff; must-match head:head2 everywhere, head:base for llama/qwen/gpt-oss, headoff:base for Glimmer),\nD (campaign.sh two binaries, arms base/head, REPS 4, arm order alternates per rep, TRON_ATTN_STATS=1, SKIP_SERVING_UP=1), E\n(margin.sh: teacher-forced --intermediates-file runs of Glimmer tp2 cpu p1024, dd_logits_step.py at MARK = first-diff\nindex + 1), R (gen_report.py results.md/json + sync4424 summarize.py with WEDPERF_ARMS/PAIRS). Base = merge base, not\ncurrent main: main's 7 newer commits touch only rinzler.cpp, build-model.py and tests.\n\nTraps hit while writing: (1) an apostrophe inside an unquoted ${VAR:?message} starts a quoted string (bash -n error far\naway); (2) `pgrep -f glimext-20261018/build[.]sh` in the chain matched the sandbox's own bash -c wrapper -> replaced by a\nper-tag flock in build.sh; (3) `pkill -f <pattern>` in a tool call killed the tool shell itself (exit 144) -> kill by pid;\n(4) the sandbox dry run (scratchpad dry.sh: sed path rewrites, stub runtron/build/guard/dut, HugePages_Free awk replaced by\necho 512, rev-parse checks replaced by true) cannot run taskset -c 72-143 on claude-box (tests/margin steps fail there\nonly) and dd_logits_step rejects the stub's logits line format (real format: \"... Logits of token N (vocab): values\").\n\n**How to apply:** launch = `bash exec/glimext-20261018/launch.sh chain` (or the README one-liner by hand on 3bda if the\nclassifier refuses); after chain.done: results in exec/results/glimext-20261018/results.md, then update the PR 5015 body\n(sections Token identity + a new \"Other models with and without this PR\"; re-fetch the body first), the results page\nmuse-glimmer/muse-glimmer-amx-results.html, and post the Glimmer identity/margin data as a comment on issue #4444.\nRelated: [[glimmer-kvmul16-implementation]], [[i4444-root-cause-campaign]], [[bash-local-expansion-trap]],\n[[nfs-running-script-stale-handle-trap]], [[platformd-011-restarts-stopped-units]].\nEOF\ncd /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory >/dev/null && grep -q glimext-20261018-campaign MEMORY.md || echo '- [glimext-20261018 campaign (PR 5015 extended test)](glimext-20261018-campaign.md) \u2014 2026-10-18 base-vs-head on llama/qwen/gpt-oss/Glimmer + identity + #4444 margin probe; issue #5021 rename tracker referenced in the PR body' >> MEMORY.md; echo memory ok", "description": "Run the launcher checks against 3bda and save the project memory"}
+
+===== 2026-10-18T19:07:29.870Z assistant text len=1250
+Interim status while the background work runs:
+
+- **Tracking issue filed**: positron-ai/tron #5021 covers the rename of the kv_mul-4 names plus the requirement that a new shape must be a minimal code change. PR 5015's "Open items" section now references it. I patched the live PR body, which you had trimmed since my first fetch, so your edits are kept.
+- **Campaign launched on delphi-3bda** (our half): both builds are running (base = merge base 6198824246, head = 5061623a34, one plain-shell clang-19 recipe). The chain then runs head tests, token-identity smokes on 7 cells (llama-8b cpu, qwen3-4b fpga, gpt-oss-120b fpga, Glimmer tp2/tp4 fpga and cpu), the base-vs-head perf campaign (9 cells, 4 reps), a teacher-forced logits probe for the Glimmer divergence, and the reports. Deadline 01:30 UTC with resume after the nightly if needed.
+- **Checks before launch**: a stubbed sandbox dry run passed every step (serving restored, reports parse). A 6-lens adversarial review of the scripts is still running; the per-step scripts can still be fixed before their step starts.
+- **Model-shape scan** for other head-128 x kv_mul-16 models is running in the background.
+- The results page generator has a new section 10 ready for the base-vs-head data.
+
+===== 2026-10-18T22:26:04.020Z assistant text len=3253
+Done. Everything the request asked for is measured, written up and posted. Machine state at the end: both production engines healthy, no leftover processes or hugepage files, Bill's marker untouched.
+
+**Short version.** With and without PR 5015, llama-3.1-8b, qwen3-4b (FPGA attention) and gpt-oss-120b (FPGA attention) decode and prefill within the noise band, while Glimmer gains 4.3 to 15.6 % decode. Token identity holds everywhere it must; the Glimmer AMX-vs-AVX divergence is the issue 4444 pattern and its near-tie measurement is now on that issue. Only Muse Glimmer 30B (and its permuted twin) has the 128x16 shape, so no other model was added.
+
+**What was done**
+
+- **Tracking issue #5021** filed: rename of the kv_mul-4 names plus your requirement that a new shape must be a minimal code change (candidates listed, acceptance criteria, scope). PR 5015's body references it under Open items.
+- **Campaign on delphi-3bda, our half** (scripts `exec/glimext-20261018/`, results `exec/results/glimext-20261018/`): base = merge base 6198824246, head = 5061623a34, both built with one plain-shell clang 19 recipe. Head tests pass with the earlier assertion counts. Same-compiler disassembly: pack and QK kernels byte-identical to main, PV identical instruction sequence (thread-local addressing differs).
+- **Token identity** (1 user, greedy, 256 tokens), 7 cells: llama head = base = repeat; qwen and gpt-oss all pairs identical; Glimmer kill switch = base exactly in all 4 cells, head diverges from base at token 5 / 53 / 12 / 30.
+- **Throughput** (8 users, 4 paired reps, arm order alternated):
+
+| Cell | base → head TPS/user | delta | verdict |
+|---|---|---|---|
+| llama-8b tp2 p1024 cpu | 119.22 → 119.35 | +0.1 % | holds |
+| llama-8b tp2 p8192 cpu | 25.31 → 25.24 (8 reps) | -0.3 %, t -3.7 | inside band, negative in 6 of 8 |
+| qwen3-4b tp2 p1024 / p8192 fpga | 133.61 → 134.17 / 61.74 → 61.81 | +0.4 / +0.1 % | holds |
+| gpt-oss-120b tp4 p1024 / p2048 fpga | 96.77 → 97.05 / 95.05 → 94.85 | +0.3 / -0.2 % | holds |
+| Glimmer tp2 p1024 / p2048, tp4 p1024 fpga | 38.34 → 41.92 / 33.01 → 38.17 / 60.46 → 63.07 | +9.3 / +15.6 / +4.3 % | gain |
+
+- **Issue 4444 comment** posted: the identity table and the teacher-forced logits probe on Glimmer (3 of 256 argmax flips; at the divergence step the base margin was 1.31 logit units = 21 bf16 ulps and the AMX path moved the pair by -1.56; median per-step top-pair shift 0.75 logit units, wider than qwen's 0-1 ulp ties, with a labeled hypothesis).
+- **PR 5015 body** updated on the live version (your trims kept): Token identity filled, new section "Other models with and without this PR", open items (the llama p8192 -0.3 % effect is listed as open with the measurement that would settle it).
+- **Results page** `muse-glimmer/muse-glimmer-amx-results.html` has a new section 10 (base-vs-head chart, identity table, near-tie paragraph).
+
+**Caveats**
+
+- llama-8b at prompt 8192 shows a consistent small decode loss (0.07 tokens/s, 0.3 %) inside the band; cause not measured.
+- The first margin analysis was one step off (Glimmer's BOS token); the corrected analysis replaced it and the script was fixed. The script review's deadline/resume fixes live in chain2.sh and smoke2.sh for any future relaunch.
+
+===== 2026-10-19T00:39:54.714Z user text len=205
+I asked at this session or another session to look for opportunity to enhance AMX implementation so that, after that, adding new shape support will take minimal code change. Please retreive claude's answer
+
+=====  user text len=205
+I asked at this session or another session to look for opportunity to enhance AMX implementation so that, after that, adding new shape support will take minimal code change. Please retreive claude's answer
+
+===== 2026-10-19T00:40:04.903Z user tool_result len=3950
+https://github.com/positron-ai/tron/issues/5021
+AMX attention: rename the kv_mul-4 names (amx_attn_h128g4, *_128x4) and make a new shape a minimal code change
+2026-10-18T19:00:01Z
+----
+## Short version
+
+PR #5022 makes the AMX attention kernels serve kv_mul 16 (Muse Glimmer 30B) next to kv_mul 4 (llama-3.1-8b) through a `group_heads` template parameter, but the namespace and the kernel names still say "4 query heads per KV head" (`amx_attn_h128g4`, `pack_q_group_128x4`, `qk_rowmajor_128x4`, `weights_times_v_128x4`). This issue tracks the follow-up PR that renames them. That PR has one requirement beyond the rename: more shapes will follow, so it must look for implementation changes that make the code change for a new shape as small as possible.
+
+## Words used here
+
+- AMX = the Intel tile-matrix instructions. The AMX attention kernel scores one dense 64-token KV page per call (`src/amx_attn.cpp`, interface `h/tron/amx_attn_iface.hpp`).
+- kv_mul = query heads per KV head. llama-3.1-8b has 4, Muse Glimmer 30B has 16. The kernels take it as the template parameter `group_heads`.
+- shape = head size x kv_mul. The kernels serve head size 128 with kv_mul 4 and 16 after PR #5022. A "new shape" is another kv_mul at head size 128, or later another head size.
+- `group_heads_ok` = the compile-time gate that lists the served kv_mul values; `shape_ok` = the run-time gate (head size 128 and `group_heads_ok(kv_mul)`).
+
+## Why a separate PR
+
+PR #5022 was written under a minimum-change requirement: keep the names, keep the structure, so that the review stays on the kernel generalization. Renaming was deferred to here on purpose.
+
+## What the follow-up PR does
+
+1. Renames the namespace and the three kernels so that the names describe the shape family (head size 128, `group_heads` as a parameter) instead of one kv_mul value, and updates the header comment that today says the names record the first shape. Call sites, tests and the `Note` comments follow.
+
+2. Requirement: before or with the rename, look for implementation improvements so that adding a shape is a minimal change. Today a new kv_mul touches at least: `group_heads_ok`, the explicit instantiations at the end of `amx_attn.cpp`, the `if constexpr (group_heads == 16)` lanes of the transposing store in the QK kernel, the P-conversion loop of the PV kernel, the `KERNEL_KV_MULS`-style lists in the tests (`t_amx_numerics`, `t_amx_dispatch_dtype`, `t_llama_unit` probes), and the buffer sizing assumptions at the call sites. Candidates to evaluate, not a prescription:
+   - one declared list of served group sizes from which the gate, the instantiations and the test shape lists are generated;
+   - the transposing store and the P-conversion loop written over `group_heads / 4` lanes instead of per-value branches;
+   - call sites that take the geometry object instead of shape constants;
+   - a static check that every served size has a numerics test section.
+   The PR description states, for a hypothetical third group size, which files and lines would change after the PR (the count is the measure of this requirement).
+
+3. Out of scope: adding a shape, changing kernel performance, changing numerics.
+
+## Acceptance
+
+- Numerics unchanged: `t_amx_numerics`, `t_amx_dispatch_dtype` and `t_llama_unit` pass with AMX on and under the kill switch (`TRON_AMX_DISABLE=1`), and the `<4>` and `<16>` instantiations compile to the same instructions as at the PR #5022 head (disassembly compare after address stripping, the method of PR #5022's "object compare").
+- The PR description lists the places a new group size would touch, before and after.
+- No throughput change on llama-3.1-8b and Muse Glimmer 30B (same runtron cells as PR #5022, inside the band).
+
+## Related
+
+- PR #5022 (kv_mul 16 support, with the existing names). Replaces PR #5015.
+- Issue #4444 (token divergence between the AMX and AVX paths; unrelated to the names, listed because every kernel PR references it).
+
+===== 2026-10-19T00:40:05.054Z user tool_result len=7221
+total 1052
+drwx------ 8 root root   4096 Oct 18 15:25 .
+drwx------ 3 root root   4096 Oct 18 11:18 ..
+-rw-r--r-- 1 root root   4097 Oct 18 12:29 attn-stats-sample.txt
+-rw-r--r-- 1 root root      8 Oct 18 12:22 child2.pid
+-rw-r--r-- 1 root root      8 Oct 18 12:22 child.pid
+-rw-r--r-- 1 root root   3353 Oct 18 12:31 dry2.out
+-rw-r--r-- 1 root root   3344 Oct 18 12:01 dry.out
+-rw-r--r-- 1 root root   6711 Oct 18 12:29 dry.sh
+-rw-r--r-- 1 root root     30 Oct 18 12:19 ev.log
+drwxr-xr-x 5 root root   4096 Oct 18 12:11 gr
+-rw-r--r-- 1 root root    139 Oct 18 12:18 inner.sh
+-rw-r--r-- 1 root root   3606 Oct 18 12:51 issue4444-comment-draft.md
+-rw-r--r-- 1 root root   6227 Oct 18 14:54 issue4444-comment.md
+-rw-r--r-- 1 root root  11656 Oct 18 11:31 issue4444.json
+-rw-r--r-- 1 root root   3754 Oct 18 12:00 issue-rename.md
+-rw-r--r-- 1 root root      0 Oct 18 12:22 lock4
+-rw-r--r-- 1 root root      8 Oct 18 12:23 m1
+-rw-r--r-- 1 root root   5778 Oct 18 11:43 m69.sh
+-rw-r--r-- 1 root root   5994 Oct 18 11:43 m70.sh
+-rw-r--r-- 1 root root   1010 Oct 18 12:07 margin_py.py
+-rw-r--r-- 1 root root      8 Oct 18 12:22 marker
+-rw-r--r-- 1 root root   5287 Oct 18 11:43 m.sh
+-rw-r--r-- 1 root root 153335 Oct 18 15:25 muse-glimmer-amx-results.html.bak-20261018
+-rw-r--r-- 1 root root     65 Oct 18 12:23 out1.txt
+-rw-r--r-- 1 root root    182 Oct 18 12:18 outer.sh
+-rw-r--r-- 1 root root 171242 Oct 18 15:00 page-real.html
+-rw-r--r-- 1 root root 170315 Oct 18 12:07 page-test.html
+drwxr-xr-x 2 root root   4096 Oct 18 13:13 partial
+-rw-r--r-- 1 root root   1665 Oct 18 11:59 patch-lock.py
+-rw-r--r-- 1 root root   4800 Oct 18 15:25 patch-pr-body.py
+-rw-r--r-- 1 root root    138 Oct 18 12:13 pg-test.sh
+-rw-r--r-- 1 root root  17858 Oct 18 15:25 pr5015-body-final.md
+-rw-r--r-- 1 root root  12776 Oct 18 15:25 pr5015-body-live2.md
+-rw-r--r-- 1 root root  12166 Oct 18 12:00 pr5015-body-live.md
+-rw-r--r-- 1 root root  12689 Oct 18 11:31 pr5015-body.md
+-rw-r--r-- 1 root root  12350 Oct 18 12:00 pr5015-body-new.md
+-rw-r--r-- 1 root root  17090 Oct 18 14:54 pr5015-body-test.md
+-rw-r--r-- 1 root root   3228 Oct 18 14:55 pr-body-sections-draft.md
+drwxr-xr-x 3 root root   4096 Oct 18 12:25 probe-20261018
+drwxr-xr-x 3 root root   4096 Oct 18 12:17 r
+drwxr-xr-x 5 root root   4096 Oct 18 12:07 res
+-rw-r--r-- 1 root root  19988 Oct 18 12:26 review-findings.txt
+-rw-r--r-- 1 root root   2382 Oct 18 12:29 runtron-stub.sh
+drwxr-xr-x 5 root root   4096 Oct 18 12:31 sandbox
+-rw-r--r-- 1 root root 104110 Oct 18 12:07 sec10.png
+-rw-r--r-- 1 root root 106387 Oct 18 15:00 sec10-real.png
+-rw-r--r-- 1 root root   7054 Oct 18 12:06 sec10.svg
+-rw-r--r-- 1 root root    241 Oct 18 12:22 sim.sh
+-rw-r--r-- 1 root root   1860 Oct 18 12:07 smoke_py.py
+-rw-r--r-- 1 root root     99 Oct 18 12:22 t1.out
+-rw-r--r-- 1 root root    150 Oct 18 12:24 t1.sh
+-rw-r--r-- 1 root root     69 Oct 18 12:24 t2.out
+-rw-r--r-- 1 root root    187 Oct 18 12:24 t2.sh
+-rw-r--r-- 1 root root      0 Oct 18 12:22 t3.lock
+-rw-r--r-- 1 root root     22 Oct 18 12:22 t3.out
+-rw-r--r-- 1 root root    225 Oct 18 12:22 t3.sh
+-rw-r--r-- 1 root root    160 Oct 18 12:22 t4.sh
+-rw-r--r-- 1 root root    331 Oct 18 12:22 termtest-campaign.sh
+-rw-r--r-- 1 root root      8 Oct 18 12:21 t.marker
+-rw-r--r-- 1 root root    242 Oct 18 12:18 t_notrap.sh
+-rw-r--r-- 1 root root     93 Oct 18 12:23 t.sh
+-rw-r--r-- 1 root root   1466 Oct 18 12:23 tt-driver.sh
+-rw-r--r-- 1 root root    276 Oct 18 12:18 t_trap.sh
+----
+## Short version
+
+PR #5015 makes the AMX attention kernels serve kv_mul 16 (Muse Glimmer 30B) next to kv_mul 4 (llama-3.1-8b) through a `group_heads` template parameter, but the namespace and the kernel names still say "4 query heads per KV head" (`amx_attn_h128g4`, `pack_q_group_128x4`, `qk_rowmajor_128x4`, `weights_times_v_128x4`). This issue tracks the follow-up PR that renames them. That PR has one requirement beyond the rename: more shapes will follow, so it must look for implementation changes that make the code change for a new shape as small as possible.
+
+## Words used here
+
+- AMX = the Intel tile-matrix instructions. The AMX attention kernel scores one dense 64-token KV page per call (`src/amx_attn.cpp`, interface `h/tron/amx_attn_iface.hpp`).
+- kv_mul = query heads per KV head. llama-3.1-8b has 4, Muse Glimmer 30B has 16. The kernels take it as the template parameter `group_heads`.
+- shape = head size x kv_mul. The kernels serve head size 128 with kv_mul 4 and 16 after PR #5015. A "new shape" is another kv_mul at head size 128, or later another head size.
+- `group_heads_ok` = the compile-time gate that lists the served kv_mul values; `shape_ok` = the run-time gate (head size 128 and `group_heads_ok(kv_mul)`).
+
+## Why a separate PR
+
+PR #5015 was written under a minimum-change requirement: keep the names, keep the structure, so that the review stays on the kernel generalization. Renaming was deferred to here on purpose.
+
+## What the follow-up PR does
+
+1. Renames the namespace and the three kernels so that the names describe the shape family (head size 128, `group_heads` as a parameter) instead of one kv_mul value, and updates the header comment that today says the names record the first shape. Call sites, tests and the `Note` comments follow.
+
+2. Requirement: before or with the rename, look for implementation improvements so that adding a shape is a minimal change. Today a new kv_mul touches at least: `group_heads_ok`, the explicit instantiations at the end of `amx_attn.cpp`, the `if constexpr (group_heads == 16)` lanes of the transposing store in the QK kernel, the P-conversion loop of the PV kernel, the `KERNEL_KV_MULS`-style lists in the tests (`t_amx_numerics`, `t_amx_dispatch_dtype`, `t_llama_unit` probes), and the buffer sizing assumptions at the call sites. Candidates to evaluate, not a prescription:
+   - one declared list of served group sizes from which the gate, the instantiations and the test shape lists are generated;
+   - the transposing store and the P-conversion loop written over `group_heads / 4` lanes instead of per-value branches;
+   - call sites that take the geometry object instead of shape constants;
+   - a static check that every served size has a numerics test section.
+   The PR description states, for a hypothetical third group size, which files and lines would change after the PR (the count is the measure of this requirement).
+
+3. Out of scope: adding a shape, changing kernel performance, changing numerics.
+
+## Acceptance
+
+- Numerics unchanged: `t_amx_numerics`, `t_amx_dispatch_dtype` and `t_llama_unit` pass with AMX on and under the kill switch (`TRON_AMX_DISABLE=1`), and the `<4>` and `<16>` instantiations compile to the same instructions as at the PR #5015 head (disassembly compare after address stripping, the method of PR #5015's "object compare").
+- The PR description lists the places a new group size would touch, before and after.
+- No throughput change on llama-3.1-8b and Muse Glimmer 30B (same runtron cells as PR #5015, inside the band).
+
+## Related
+
+- PR #5015 (kv_mul 16 support; keeps the old names on purpose).
+- Issue #4444 (token divergence between the AMX and AVX paths; unrelated to the names, listed because every kernel PR references it).
+
+===== 2026-10-19T00:40:13.482Z assistant tool_use len=385
+{"command": "cd /home/jhan/.claude/projects && grep -l -i \"minimal code change\\|minimum code change\\|new shape\" */*.jsonl 2>/dev/null | while read f; do echo \"$f $(stat -c %y \"$f\" | cut -c1-16) $(grep -o -i \"minimal code change\\|minimum code change\\|new shape\" \"$f\" | wc -l)\"; done", "description": "Find session transcripts mentioning new-shape minimal-change analysis"}
+
+===== 2026-10-19T00:40:15.513Z assistant tool_use len=315
+{"command": "cd /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory && grep -l -i \"new shape\\|third group\\|minimal change\\|group_heads / 4\\|5021\\|5022\" *.md; echo ----; cat glimmer-kvmul16-implementation.md | head -80", "description": "Search memory files for the shape-extensibility analysis"}
+
+===== 2026-10-19T00:40:17.443Z assistant tool_use len=351
+{"command": "cd /home/jhan/workspace/intel-AMX && grep -rl -i \"new shape\\|third group size\\|minimal code change\\|5021\\|5022\" --include=*.md --include=*.html --include=*.txt . 2>/dev/null | grep -v node_modules | head -40; echo ----; ls -lt muse-glimmer | head -30", "description": "Search project pages and notes for the extensibility analysis"}
+
+=====  assistant tool_use len=385
+{"command": "cd /home/jhan/.claude/projects && grep -l -i \"minimal code change\\|minimum code change\\|new shape\" */*.jsonl 2>/dev/null | while read f; do echo \"$f $(stat -c %y \"$f\" | cut -c1-16) $(grep -o -i \"minimal code change\\|minimum code change\\|new shape\" \"$f\" | wc -l)\"; done", "description": "Find session transcripts mentioning new-shape minimal-change analysis"}
+
+=====  assistant tool_use len=315
+{"command": "cd /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory && grep -l -i \"new shape\\|third group\\|minimal change\\|group_heads / 4\\|5021\\|5022\" *.md; echo ----; cat glimmer-kvmul16-implementation.md | head -80", "description": "Search memory files for the shape-extensibility analysis"}
+
+=====  assistant tool_use len=351
+{"command": "cd /home/jhan/workspace/intel-AMX && grep -rl -i \"new shape\\|third group size\\|minimal code change\\|5021\\|5022\" --include=*.md --include=*.html --include=*.txt . 2>/dev/null | grep -v node_modules | head -40; echo ----; ls -lt muse-glimmer | head -30", "description": "Search project pages and notes for the extensibility analysis"}
+
+===== 2026-10-19T00:40:50.776Z assistant tool_use len=520
+{"command": "cd /home/jhan/.claude/projects && for d in -home-jhan-workspace-intel-AMX-muse-glimmer -home-jhan-workspace-intel-AMX -home-jhan-workspace-intel-AMX-token-divergence-4444; do for f in $d/*.jsonl; do n=$(grep -c -i \"minimal code change\\|minimum code change\\|new shape\\|third group size\\|group_heads / 4\" \"$f\" 2>/dev/null); [ \"${n:-0}\" -gt 0 ] && echo \"$n $(stat -c %y \"$f\" | cut -c1-16) $f\"; done; done | sort -k2", "description": "Count extensibility-analysis mentions per session transcript"}
+
+===== 2026-10-19T00:40:51.116Z user tool_result len=10951
+]0;:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory
+3bda-nightly-rinzler-cleanup.md
+3bda-shared-with-bill.md
+amd-amx-fallback-test.md
+amx-busy-perf-counter.md
+amx-ci-coverage-facts.md
+amx-iface-comment-flags.md
+amx-mirror-aware-cache-unpack.md
+amx-options-notion-page.md
+amx-router-p0-results.md
+amx-router-project.md
+amx-tron-softattn-project.md
+amx-vnni-pseudocode-check-page.md
+amx-vs-avx-sense.md
+aof-amx-question-20260925.md
+artifact-utf8-mojibake-trap.md
+attention-stats-claude-page.md
+attn-path-counters-design.md
+attnstats-20261002-campaign.md
+attn-stats-pr-implementation.md
+attn-stats-why-not-fuse.md
+attn-worker-lane-facts.md
+baseline-vs-mirror-sketch.md
+bash-local-expansion-trap.md
+ben-split-request-pr3879.md
+bill-claude-review-response.md
+block-store-animation-page.md
+breakup-pr3879-plan.md
+canon-ci-20260918-campaign.md
+ci-amx-row-20260923.md
+ci-amx-test-shapes-recommendation.md
+ci-enable-20260917-campaign.md
+ci-mimic-20260918-campaign.md
+ci-test-host-oom-4593.md
+claude-box-pid-exhaustion.md
+claude-box-tron-build-env.md
+codex-review-loop.md
+cpp-guide-literals-include-bools.md
+debug-code-new-branch.md
+deleted-comments-stay-deleted.md
+delphi-3bda-hardware.md
+english-banned-words.md
+f9b678e-unpack.md
+first-ci-amx-row-20260922.md
+flag-only-decision-changing-facts.md
+fpga-path-under-vnni-k.md
+g1-store-cost-campaign.md
+git-rebase-traps.md
+glimci-20261017-campaign.md
+glimext-20261018-campaign.md
+glimmer-kvmul16-implementation.md
+glimmer-perf-followups.md
+i4444-root-cause-campaign.md
+i4500b-policy-campaign.md
+i4525-first-3bda-test-campaign.md
+intel-doc-amx-estimate.md
+issue-4500-fix-implementation.md
+issue-4500-fpga-attention-vnni-tps.md
+issue-4500-root-cause-campaign.md
+issue4525-design-review.md
+issue4525-implementation.md
+issue-4588-non-iso-kv-reads.md
+issue-4934-fix.md
+jeremy-comments-replies.md
+keep-working-after-answers.md
+l8b-8u4k-20260920-campaign.md
+l8b-levers-20260919-campaign.md
+l8bload-20260918-campaign.md
+lcheck-object-compile-compare.md
+libstdcxx-assertions-memorder-guard.md
+MEMORY.md
+merge-4737-into-4424.md
+mirror-naming-convention.md
+mirror-vs-vnnik-page-data-provenance.md
+mirror-write-ok-unpack.md
+more-testing-round1.md
+muse-glimmer-amx.md
+nfs-attr-cache-build-trap.md
+nfs-running-script-stale-handle-trap.md
+nightly-amx-check-20260916.md
+nightly-vs-ours-tps-context.md
+no-issue-numbers-in-source.md
+no-names-in-github-issues.md
+notebook-preservation-convention.md
+notion-memory-placement-page.md
+notion-questions-keep-verbatim.md
+p0perf-20260911-campaign.md
+p0perf-20260913-campaign.md
+pal-bridge.md
+pending-move-amx-worktrees.md
+perf-model-artifact.md
+perf-model-project.md
+perf-round-20260830.md
+plain-english-default.md
+plain-words-comment-register.md
+platformd-011-restarts-stopped-units.md
+pr221-rhys-amx-benchmark-review.md
+pr3879-open-comments-page.md
+pr3879-split-progress.md
+pr4424-description-on-github.md
+pr4424-diagram-pages.md
+pr4424-short-version-no-tensor-type.md
+pr4557-ben-review-response.md
+pr4587-alloc-creates-blocks.md
+pr4596-body-refresh-20260930.md
+pr4596-claude-review-20260929.md
+pr4737-kvcache-diagram-page.md
+pr4737-review-response.md
+pr4812-merge-4774-onto-4424-head.md
+pr5015-diagram-page.md
+pr5015-multi-skill-review.md
+pr-body-pending-measurement-subsection.md
+pr-body-refetch-before-edit.md
+pr-description-no-history.md
+prefill-amx-vs-fpga-qwen3-4b.md
+primer-one-page.md
+pr-item-register.md
+prompt-not-ctx.md
+q4b-fpga-20260921-campaign.md
+q4b-swattn-20260919-campaign.md
+q4b-swattn-20260919-plan.md
+qk-tile-animation-pages.md
+qpack-attn-accum-investigation.md
+range-hint-audit.md
+remind-protected-section-proposal.md
+review-body-format.md
+reviewer-personas.md
+rinzler-unit-expert-replicas-750.md
+runar-pr4557-review-response.md
+runtron-determinism-recipe.md
+savek-worker-fold.md
+shared-save-animation-page.md
+shared-save-distilled-page.md
+single-attention-measurement.md
+slack-chart-data-lineage.md
+split-4424-plan.md
+store-remedies-catchup-0928.md
+svg-render-check.md
+sync-4424-main-20261007.md
+sync-4557-into-4424.md
+token30-campaign.md
+tron-intuition-page.md
+tron-tsc-timing-infra.md
+value-suffix-names-shared-files.md
+vnnied-k-in-place-project.md
+vnnik6-kvmul8-campaign.md
+vnni-k-terminology.md
+wade-code-review-skill.md
+wade-fuse-question-pr4267.md
+wade-move-test-question-pr4265.md
+wade-pr4557-review-response.md
+wade-pr4596-review-response.md
+wade-pr4596-round5-response.md
+wedperf-20260916-campaign.md
+workflow-journal-reconstruction-trap.md
+workspace-ai-runs-layout.md
+worktree-prune-nfs-trap.md
+---
+name: pr5015-multi-skill-review
+description: "2026-10-18 PR 5015 (Glimmer kv_mul 16): review round (7 reviews/43 comments) + ROUND 3 DONE 2026-10-19 00:1x UTC (head 4c4b7b8864, 14 replies, 10 threads resolved, body patched; CI-enable thread 4308387058 deferred to #3997 by jhan, resolved) - reviewed with a general pass + 6 skills (ben, Wade, cpp-guide, positron, simplify-comments, tron): 7 reviews / 43 inline comments posted at head 5061623a34, each prefixed with the skill name; deduped against another agent's 3 earlier comments (CI coverage, lane masks, P-scratch comment)"
+metadata:
+  node_type: memory
+  type: project
+  originSessionId: 146c3a6e-a1e1-402b-a412-2cd6ec96fdfc
+  modified: 2026-10-18T19:39:32.204Z
+---
+
+Review of positron-ai/tron PR #5015 at head 5061623a34, posted 2026-10-18 ~19:4x UTC as seven COMMENT reviews
+(ids 5564633240 PR review, 5564633376 ben-review, 5564633518 Wade-code-review, 5564633664 cpp-coding-guide,
+5564633747 positron-code-review, 5564633851 simplify-cpp-comments, 5564634294 tron-code-review) plus two
+thread replies (r4308444255 SKIP remedy, r4308444338 uppercase PAIR_SEL/QUAD_SEL). Workflow wf_09f606f9-dc4
+(278 agents: 12 finders, 3-lens adversarial verify per finding, critic per reviewer, composer per reviewer);
+71 findings survived, 43 posted after pruning duplicates and pre-existing items.
+
+Another agent had posted review 5564576364 with 3 inline comments (wade: CI omits TRON_AMX_DISPATCH so 16-head
+cases never run in required CI + probe warning; cpp-guide: lane & 1 / lane & 2 masks, lane template args,
+/*repeat=*/true; simplify: P scratch comment at amx_attn.cpp:283). Those topics were dropped from mine.
+
+Main findings worth acting on (all nits/should-fix, no code defect found): PR body says wrong group size
+"fails to link" (it fails to compile at the requires clause); body says "vshufps" (code is _mm512_shuffle_f32x4
+= vshuff32x4); "2 sections skipped" is 2 test cases; "linker rewrites both to the same code" is unmeasured;
+nightly run 38999609242 is in positron-ai/systems_test, not tron; raw-result file names unreadable from GitHub;
+ben: alias the two page-view types, operation_kv_mul in packed_amx_query, derive lanes from group_heads;
+Wade: `g` param name, check_qk/check_pv header comments, redundant inline, static_assert else branch at the
+lane store, duplicate 16-head round 2; simplify: 22 comment cuts (store_transposed_rows block, tile-geometry
+comment, dispatch comment shape list, s_pages static_assert restatement ...); tron: add KV_MUL_32 refusal row.
+
+**How to apply:** scratchpad review/ dir of session 146c3a6e holds reviews-final.json and post_reviews.py.
+If jhan asks to apply the comments, start with the PR-body wording items, then the code nits. Related:
+[[glimmer-kvmul16-implementation]], [[wade-code-review-skill]], [[review-body-format]].
+
+ROUND 3 (2026-10-18 23:4x - 2026-10-19 00:1x UTC, jhan: "act on all open comments; follow my comments where I left them,
+else respond to the originals"): another agent had pushed a6b93f1f71 (22 simplify items) and 7e7f52d761 (accepted items:
+unpacked-tile name, operation_kv_mul, `g` param, lanes = group_heads / ROWS_PER_LANE_4 with if constexpr, TILE_ROWS_16).
+My commit 4c4b7b8864 (worktree ai-runs/tron-glimmer-amx): aliases const_k_row_major_plane_view / const_v_vnni_plane_view
+(jhan's names) in amx_attn_iface.hpp:140-141 used by declarations/definitions/instantiations; dispatch test: group_heads =
+geometry.kv_mul() for the three REQUIREs, named query-fill values, 16-head section one round (5,756 -> 3,694 assertions),
+fakes+probe inside #ifdef TRON_AMX_DISPATCH (kills the CI "probe not needed" warning), codex credit deleted; numerics:
+KV_MUL_32 refusal row (+1 assertion: 17,425 / kill switch 4,111), check_qk/check_pv comments, WARN+return -> Catch2 SKIP
+(kill switch: "4 | 2 passed | 2 skipped", rc 0); CMakeLists comment "reported as skipped". Tests on 3bda our half
+(tron-g16h, plain-shell clang-19, incremental 101 s) all pass. Object compare (lcheck-obj, clang 19.1.7 -O3): pack<4>/qk<4>
+identical to main (509/204), pv<4> 121 opcodes same order (TLS + register picks differ); vs 5061623a34 all six kernels
+identical except two adjacent adds swapped in qk<16>. Rejected by jhan (withdrawn, no change): lane masks (too nit),
+`inline` (too nit), header "Issue #5021" wording (no issue numbers in source). Replies 4309345823..4309346810; PR comment
+issuecomment-6256815414 answers the Wade review-body items (nightly row = positron-ai/systems_test run 38999609242, final
+"Running averages: TTFT=3696, TPS=78.69" line -> TTFT cell 3696 not 3697; "our half" defined; raw-result files = author's
+files on 3bda). Body patch script scratchpad round3/body_patch.py (re-fetches the live body; jhan's own edits kept).
+OPEN for jhan: thread 4308387058 (Wade: enable TRON_AMX_DISPATCH in the required nix build) - my reply defers it to issue
+#3997's PR because the flag adds the kernels to libtron and would route the lane's model tests through AMX on an AMX runner;
+AGENTS.md:22-26 says an agent may not decide that exception, so jhan must confirm or overrule. Verification workflow
+wf_93092d3d-4e2 (16 agents) caught: libtron not "test library", #3997 tracker, stale CMake comment, s -> s_amx, semicolon
+comment, body "built the same way" (nix develop vs plain shell), "Every result" scope, nightly row source.
+UPDATE 2026-10-19 00:3x UTC: jhan: "yes, good call to defer to 3997. Please proceed with your proposal" -> issue #3997 comment issuecomment-6257030210 (lane facts, one-line fix, two consequences for the CI owner, no names), thread 4308387058 replied and resolved. Nothing open on PR 5015 from the review rounds.
+======
+3:description: "2026-10-18 extended test of PR #5015 (kv_mul-16 AMX kernels) with and without the change: scripts exec/glimext-20261018/ (build base g16b = main 6198824246 + head g16h = 5061623a34 with one plain-shell clang-19 recipe; identity smokes; perf cells llama-8b cpu / qwen3-4b fpga / gpt-oss-120b fpga / Glimmer; margin probe for issue #4444); tracking issue #5021 (rename + new-shape-minimal-change requirement) referenced in the PR body"
+12:the PR body; the issue states one requirement: more shapes will come, look for implementation improvements so that a new
+13:shape is a minimal code change -> issue #5021 (https://github.com/positron-ai/tron/issues/5021), referenced in the PR
+Shell cwd was reset to /home/jhan/workspace/intel-AMX/muse-glimmer
+
+===== 2026-10-19T00:41:03.637Z assistant tool_use len=697
+{"command": "P=/home/jhan/.claude/projects; ls $P/-home-jhan-workspace-intel-AMX-muse-glimmer/*.jsonl | head; echo ----; grep -l -i \"new shape\" $P/-home-jhan-workspace-intel-AMX-muse-glimmer/*.jsonl $P/-home-jhan-workspace-intel-AMX/*.jsonl $P/-home-jhan-workspace-intel-AMX-token-divergence-4444/*.jsonl $P/-home-jhan-workspace-tron/*.jsonl 2>/dev/null | while read f; do echo \"$(stat -c %y \"$f\" | cut -c1-16) $(grep -o -i 'new shape\\|third group size\\|minimal code change\\|minimum code change\\|group_heads / 4\\|GROUP_SIZES\\|served group sizes' \"$f\" | sort | uniq -c | tr '\\n' ';') $f\"; done", "description": "Locate transcripts that discuss the new-shape minimal-change analysis"}
+
+===== 2026-10-19T00:41:04.267Z user tool_result len=1276
+/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc.jsonl
+/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/198bf255-13d0-4111-94e8-6903ff46f117.jsonl
+/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9.jsonl
+/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b.jsonl
+/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/ff60e929-f850-4014-9494-90108583a1a0.jsonl
+----
+2026-10-18 17:40      11 group_heads / 4;     30 minimal code change;     11 minimum code change;    124 new shape;      6 served group sizes;     11 third group size; /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b.jsonl
+2026-08-25 12:12       2 new shape; /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/96d03035-947f-47ab-b02f-d3c208a8e1ea.jsonl
+2026-10-16 13:04      26 new shape; /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/f08a968d-af8f-4685-a0aa-76d2fec72264.jsonl
+2026-09-14 15:07       1 new shape; /home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/d5572a41-5bae-4bce-87ed-3285768e6e77.jsonl

@@ -8779,3 +8779,1240 @@ Left behind in this batch:
   Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).
 
 `rampup/operand-B.html` is withheld from refresh. Its registered original lacks the contents section added in notebook commit `71fc29c`. The existing repository version remains pending a source-of-truth decision.
+
+## Batch: 2026-11-02 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-11-02 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory, same files). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first. `WS` = `claude-agentsrv:/home/jhan/workspace/intel-AMX` (shared NFS home, not a git repository). Layout as before: `pr3879/` mirrors `WS/PR3879/new-PRs/`, `vnnied-k-in-place/` mirrors `WS/VNNIed-K-in-place/`, `memory/` mirrors the intel-AMX project memory folder, `exec/workflows/` holds Workflow scripts relocated from session folders under `~/.claude/projects/` (their `origin:` is recorded), `exec/scratch-relocated/<session id prefix>/` holds files relocated from session scratchpads under `/tmp/claude-0/`, and `3bda-var-tmp/` mirrors small records under `delphi-3bda:/var/tmp/jhan/`. New prefixes this batch: `muse-glimmer/` mirrors `WS/muse-glimmer/` (the Muse Glimmer AMX work folder; its `.git` is an empty directory, not a repository), `random/` mirrors `WS/random/`, `token-divergence-4444/` mirrors `WS/token-divergence-4444/`, and `memory/muse-glimmer/`, `memory/random/`, `memory/token-divergence-4444/` mirror the memory folders of the matching `-home-jhan-workspace-intel-AMX-<name>` projects (the canonical stays in the session store because Claude Code edits it in place).
+
+Covers 7 handoff(s) of 2026-10-16 to 2026-11-02 (see "Related" on each entry). Preserved: 959 files, 83.11 MiB in this topic. Left behind by rule 4 of the prompt for the handoffs of this topic, one reason per file (full per-file inventories in the `.lineage.md` companions named under each report page):
+
+- (no value used): 51808 files
+- (scratch directory >60 files, decide at gate): 22005 files
+- (provenance): 6390 files
+- (provenance: workflow journal or tool output): 1585 files
+- (size): 105 files
+- (provenance: campaign log): 60 files
+- (provenance: raw workflow output): 53 files
+- (duplicate (held by tests-*.txt)): 28 files
+- (regenerable: render check PNG): 26 files
+- (scratchpad file not named in the handoff): 21 files
+- (provenance: talos raw output, not read by summarize.py): 9 files
+- `no value used` = files under `leaves/` result trees. `scratch directory >60 files` = agent batch trees under session scratchpads. `provenance` = server logs, client streams, .done markers, binaries, raw workflow outputs, subagent journals. `size` = files above 5 MiB. `regenerable: render check PNG` = PNG renders of inline-SVG pages. `scratchpad file not named in the handoff` = files of directory-listed session scratchpads that no handoff names individually. `duplicate` = a copy already held elsewhere (named). `pdftotext extract of a vendor manual`, `text dump of a preserved page`, `directory listing` = rebuilt in minutes from the PDF, the page, or the tree.
+
+### Report pages and their lineage
+
+#### muse-glimmer/muse-glimmer-amx-results.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/muse-glimmer/muse-glimmer-amx-results.html` (171370 canonical bytes). Related: [claude_20261016-20261017_amx-kv-mul-16-kernels-on-jhan-amx-kvmul16.md](../../handoffs/claude_20261016-20261017_amx-kv-mul-16-kernels-on-jhan-amx-kvmul16.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/muse-glimmer/muse-glimmer-amx-results.html
+- generator: /home/jhan/workspace/intel-AMX/exec/glimmer-20261016/gen_page.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/ (rt-results.txt, rt/*.log, tests.txt, local-obj-compare/*.s) and /home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/summary.json (+ configs-used.json)
+- input built by: delphi-3bda: /home/jhan/workspace/intel-AMX/exec/glimmer-20261016/{chain.sh,campaign.sh,tests.sh,gen_compare.py} (runtron A/B, 2026-10-16/17) and /home/jhan/workspace/intel-AMX/exec/glimci-20261017/{campaign.sh,dut.sh,st_ci_perf.py,summarize.py} (nightly harness round, 2026-10-17)
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016`: preserved attn-stats-compare.md, exit-reports.txt, glm-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log, glm-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log, glm-tp2-8u-p1024-cpu__cpu__amxon__rep1.log, glm-tp2-8u-p1024-cpu__cpu__amxon__rep2.log, glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log, glm-tp2-8u-p1024-fpga__fpga__amxoff__rep2.log, glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log, glm-tp2-8u-p1024-fpga__fpga__amxon__rep2.log, glm-tp2-8u-p2048-cpu__cpu__amxoff__rep1.log, glm-tp2-8u-p2048-cpu__cpu__amxoff__rep2.log ...; left behind (provenance) build.done, build0.done, chain.done, gen_compare.err, glm-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log.attempt1, glm-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log.attempt1 ...; left behind (no value used) .taken, decode_like_forwards, decode_like_layer_0, decode_like_layer_1, decode_like_layer_10, decode_like_layer_11 ...; `/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017`: preserved base-identity.txt, configs-used.json, configs-used.txt, journal-prompts.txt, outcome.txt, perf.json, preflight.txt, summary.json, summary.md, summary.txt; left behind (provenance) .done, .status, driver.log, status-history.log; left behind (duplicate (held by tests-*.txt)) .lock.out; left behind (provenance: talos raw output, not read by summarize.py) talos.json; `/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/local-obj-compare`: preserved lcheck-obj.sh; left behind (provenance) main-pack_q_group_128x4.s, main-qk_rowmajor_128x4.s, main-weights_times_v_128x4.s, r2-16-pack_q_group_128x4.s, r2-16-qk_rowmajor_128x4.s, r2-16-weights_times_v_128x4.s ...
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/glimmer-20261016 && python3 gen_page.py /home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016 <OUT>   (CI_SUMMARY defaults to /home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/summary.json; the 2026-10-18 version of gen_page.py also reads EXT_RESULTS for section 10)
+- regenerate unverified (generator writes a fixed canonical path (not run; see 2026-10-16 lesson))
+- inventory: [muse-glimmer-amx-results.html.lineage.md](muse-glimmer/muse-glimmer-amx-results.html.lineage.md) (6833 lines)
+
+#### muse-glimmer/muse-glimmer-amx.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/muse-glimmer/muse-glimmer-amx.html` (38668 canonical bytes). Related: [claude_20261016-20261017_amx-kv-mul-16-kernels-on-jhan-amx-kvmul16.md](../../handoffs/claude_20261016-20261017_amx-kv-mul-16-kernels-on-jhan-amx-kvmul16.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/muse-glimmer/muse-glimmer-amx.html
+- generator: none
+- input: none
+- input built by: none
+- sources: none
+- regenerate: none (hand-edited in place with python replace; pre-session copy at /tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9/scratchpad/muse-glimmer-amx.html.bak)
+- regenerate unverified (none)
+- inventory: [muse-glimmer-amx.html.lineage.md](muse-glimmer/muse-glimmer-amx.html.lineage.md) (0 lines)
+
+#### token-divergence-4444/token-divergence-issue4444-report.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/token-divergence-4444/token-divergence-issue4444-report.html` (91207 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/token-divergence-4444/token-divergence-issue4444-report.html
+- generator: /home/jhan/workspace/intel-AMX/exec/td-20261016/report/gen_report.py (python3, no arguments; OUT_DEFAULT is the canonical path)
+- input: the comparison files under exec/results/td-20261016 (layers-*.json/csv, steps-*.json, verdict.txt, tokens.txt), td2/td3/td4 verdicts, ktest/results.txt, tiestats/tie_stats.json, replay/results.md, report/facts.json
+- input built by: /home/jhan/workspace/intel-AMX/exec/td-20261016/probe-td.sh, probe-td2.sh, probe-td3.sh, probe-td4.sh (forced runs on delphi-3bda) and analyze-td.sh / analyze-td-early.sh (exec/dd/dd_first_divergence.py per pair); ktest/build-run.sh; tiestats/tie_stats.py; replay/replay.py + render_md.py; report/collect_facts.py
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-*.json and .csv (10 pairs)`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-*.json (10 pairs), verdict.txt, tokens.txt`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/steps-*.json, verdict.txt, tokens.txt`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/td3-20261016/verdict.txt and /home/jhan/workspace/intel-AMX/exec/results/td4-20261016/verdict.txt`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/p83-20261013/steps-fnew-vs-fbase.json (pre-existing, 2026-10-13)`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/results.txt`: preserved results.txt; `/home/jhan/workspace/intel-AMX/exec/td-20261016/tiestats/tie_stats.json`: preserved tie_stats.json; `/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results.md and results.json`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/td-20261016/report/facts.json`: preserved facts.json
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/td-20261016/report && python3 collect_facts.py && python3 gen_report.py   # writes <OUT> = /home/jhan/workspace/intel-AMX/token-divergence-4444/token-divergence-issue4444-report.html
+- regenerate unverified (generator writes a fixed canonical path (not run; see 2026-10-16 lesson))
+- inventory: [token-divergence-issue4444-report.html.lineage.md](token-divergence-4444/token-divergence-issue4444-report.html.lineage.md) (7 lines)
+
+#### token-divergence-4444/token-divergence-issue4444-fix-design.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/token-divergence-4444/token-divergence-issue4444-fix-design.html` (29728 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/token-divergence-4444/token-divergence-issue4444-fix-design.html
+- generator: none (hand-written with the Write tool, then edited twice with python string replacements)
+- input: the report page, ktest/results.txt and README.md, replay/results.md, the code at PR 4959 head 6b081187e1
+- input built by: same as the report page
+- sources: `/home/jhan/workspace/intel-AMX/token-divergence-4444/token-divergence-issue4444-report.html`: preserved token-divergence-issue4444-report.html; `/home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/results.txt`: preserved results.txt; `/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results.md`: preserved results.md
+- regenerate: none (hand-written)
+- regenerate unverified (none (hand-written))
+- inventory: [token-divergence-issue4444-fix-design.html.lineage.md](token-divergence-4444/token-divergence-issue4444-fix-design.html.lineage.md) (3 lines)
+
+#### exec/td-20261016/ktest/README.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/README.md` (8815 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+- generator: none (hand-written by the kernel-tests agent; quotes results.txt)
+- input: /home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/results.txt
+- input built by: /home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/build-run.sh (compiles ktest.cpp with src/tron/kernels/amx_attn.cpp of /var/tmp/jhan/tron-pr4 on delphi-3bda and runs it on cpus 72-143)
+- sources: `/home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/results.txt`: preserved results.txt
+- regenerate: none (hand-written)
+- regenerate unverified (none (hand-written))
+- inventory: [README.md.lineage.md](exec/td-20261016/ktest/README.md.lineage.md) (2 lines)
+
+#### exec/td-20261016/replay/results.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results.md` (22323 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/td-20261016/replay/render_md.py results.json [wo_check-*.json ...] (tables) plus hand-written prose by the replay agent
+- input: /home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results.json, wo_check-*.json, arms_wo-L0.json
+- input built by: /home/jhan/workspace/intel-AMX/exec/td-20261016/replay/extract.sh (greps the layer-0/1 records on delphi-3bda into /var/tmp/jhan/td/replay/), replay.py --out results.json, wo_check.py, arms_wo.py
+- sources: `delphi-3bda:/var/tmp/jhan/td/replay/*-L01.txt`: preserved arms_wo-L0.json, full-L0.log, full-L1.log, results-L0.json, results-L1.json, test.json, wo_check-base-L0.json, wo_check-newoff-L0.json, wo_check-trunc-L0.json; left behind (provenance) base-L01.done, baseoff-L01.done, clean-L01.done, new-L01.done, newoff-L01.done, poc-L01.done ...; left behind (size) base-L01.txt, baseoff-L01.txt, clean-L01.txt, new-L01.txt, newoff-L01.txt, poc-L01.txt ...; `/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results.json`: preserved results.json
+- regenerate: unavailable (the exact command sequence the replay agent used is not in the main transcript; render_md.py regenerates the tables from results.json)
+- regenerate unverified (unavailable (the exact command sequence the replay agent used is not in the main transcript; render_)
+- inventory: [results.md.lineage.md](exec/td-20261016/replay/results.md.lineage.md) (27 lines)
+
+#### exec/td-20261016/replay/tables-L0.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/tables-L0.md` (20003 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/td-20261016/replay/render_md.py (inferred from its docstring, unverified)
+- input: /home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results-L0.json
+- input built by: /home/jhan/workspace/intel-AMX/exec/td-20261016/replay/replay.py
+- sources: `/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results-L0.json`: preserved results-L0.json
+- regenerate: unavailable (command not in the transcript)
+- regenerate unverified (unavailable (command not in the transcript))
+- inventory: [tables-L0.md.lineage.md](exec/td-20261016/replay/tables-L0.md.lineage.md) (2 lines)
+
+#### exec/td-20261016/replay/tables-L1.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/tables-L1.md` (18654 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/td-20261016/replay/render_md.py (inferred from its docstring, unverified)
+- input: /home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results-L1.json
+- input built by: /home/jhan/workspace/intel-AMX/exec/td-20261016/replay/replay.py
+- sources: `/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results-L1.json`: preserved results-L1.json
+- regenerate: unavailable (command not in the transcript)
+- regenerate unverified (unavailable (command not in the transcript))
+- inventory: [tables-L1.md.lineage.md](exec/td-20261016/replay/tables-L1.md.lineage.md) (2 lines)
+
+#### exec/td-20261016/report/facts.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/report/facts.md` (448360 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/td-20261016/report/collect_facts.py (no arguments)
+- input: every result file of the campaign (layers-*.json/csv, steps-*.json, verdicts, ktest results.txt, tie_stats.json, replay results)
+- input built by: the probe, analysis, ktest, tiestats and replay scripts listed for the report page
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-*.json and .csv (10 pairs)`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-*.json (10 pairs), verdict.txt, tokens.txt`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/steps-*.json, verdict.txt, tokens.txt`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/td3-20261016/verdict.txt and /home/jhan/workspace/intel-AMX/exec/results/td4-20261016/verdict.txt`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/p83-20261013/steps-fnew-vs-fbase.json (pre-existing, 2026-10-13)`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/results.txt`: preserved results.txt; `/home/jhan/workspace/intel-AMX/exec/td-20261016/tiestats/tie_stats.json`: preserved tie_stats.json; `/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results.md and results.json`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/td-20261016/report/facts.json`: preserved facts.json
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/td-20261016/report && python3 collect_facts.py   # writes <OUT> = facts.md and facts.json next to it
+- regenerate verified 2026-11-02 (identical except line 3, where the generator names its own path, which is the mirror copy during the check)
+- inventory: [facts.md.lineage.md](exec/td-20261016/report/facts.md.lineage.md) (6 lines)
+
+#### exec/td-20261016/tiestats/tie_stats.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/tiestats/tie_stats.md` (26503 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/td-20261016/tiestats/tie_stats.py [--out-dir DIR]
+- input: /home/jhan/workspace/intel-AMX/exec/results/p83-20261013/steps-*.json, /home/jhan/workspace/intel-AMX/exec/results/dd/steps-r4x.json, /home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-*.json
+- input built by: exec/dd/dd_logits_step.py runs of the p83-20261013 and td-20261016 probes
+- sources: `/home/jhan/workspace/intel-AMX/exec/results/p83-20261013/steps-*.json`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/results/dd/steps-r4x.json`: preserved steps-r4x.json; `/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-*.json`: no files found under it
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/td-20261016/tiestats && python3 tie_stats.py   # writes <OUT> = tie_stats.md and tie_stats.json next to it
+- regenerate verified 2026-11-02 (byte-identical from the preserved copies)
+- inventory: [tie_stats.md.lineage.md](exec/td-20261016/tiestats/tie_stats.md.lineage.md) (1 lines)
+
+#### exec/scratch-relocated/2110147a/token-divergence-issue4444-fix-design.html
+
+- mirror of `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/token-divergence-issue4444-fix-design.html` (29838 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/scratch-relocated/2110147a/token-divergence-issue4444-fix-design.html
+- generator: same python snippet as the report copy
+- input: /home/jhan/workspace/intel-AMX/token-divergence-4444/token-divergence-issue4444-fix-design.html
+- input built by: hand-written
+- sources: `/home/jhan/workspace/intel-AMX/token-divergence-4444/token-divergence-issue4444-fix-design.html`: preserved token-divergence-issue4444-fix-design.html
+- regenerate: unavailable (the snippet lives only in the transcript)
+- regenerate unverified (page not mirrored at a known root)
+- inventory: [token-divergence-issue4444-fix-design.html.lineage.md](exec/scratch-relocated/2110147a/token-divergence-issue4444-fix-design.html.lineage.md) (1 lines)
+
+#### exec/scratch-relocated/2110147a/token-divergence-issue4444-report.html
+
+- mirror of `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/token-divergence-issue4444-report.html` (91321 canonical bytes). Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/scratch-relocated/2110147a/token-divergence-issue4444-report.html
+- generator: a python snippet in the session (strips the document skeleton of the canonical page and replaces non-ASCII characters) run at 16:23 PT
+- input: /home/jhan/workspace/intel-AMX/token-divergence-4444/token-divergence-issue4444-report.html
+- input built by: /home/jhan/workspace/intel-AMX/exec/td-20261016/report/gen_report.py
+- sources: `/home/jhan/workspace/intel-AMX/token-divergence-4444/token-divergence-issue4444-report.html`: preserved token-divergence-issue4444-report.html
+- regenerate: unavailable (the snippet lives only in the transcript; republish from the canonical file instead)
+- regenerate unverified (page not mirrored at a known root)
+- inventory: [token-divergence-issue4444-report.html.lineage.md](exec/scratch-relocated/2110147a/token-divergence-issue4444-report.html.lineage.md) (2 lines)
+
+#### exec/scratch-relocated/146c3a6e/round3/facts.md
+
+- mirror of `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/facts.md` (3306 canonical bytes). Related: [claude_20261018_pr-5015-multi-skill-review.md](../../handoffs/claude_20261018_pr-5015-multi-skill-review.md)
+- generator: none (hand-written by Claude)
+- input: round3/logs/round3.log, cmp.py and cmp2.py output, GraphQL thread listing
+- input built by: round3.sh on delphi-3bda, lcheck-obj.sh on claude-agentsrv
+- sources: `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/logs/round3.log`: preserved round3.log; `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/cmp.py`: preserved cmp.py; `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/cmp2.py`: preserved cmp2.py
+- regenerate: unavailable (hand-written)
+- regenerate unverified (page not mirrored at a known root)
+- inventory: [facts.md.lineage.md](exec/scratch-relocated/146c3a6e/round3/facts.md.lineage.md) (3 lines)
+
+#### exec/scratch-relocated/146c3a6e/round3/pr-body-new.md
+
+- mirror of `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/pr-body-new.md` (18137 canonical bytes). Related: [claude_20261018_pr-5015-multi-skill-review.md](../../handoffs/claude_20261018_pr-5015-multi-skill-review.md)
+- generator: python3 -I /tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/body_patch.py 4c4b7b886485de971b968de579af170d50d73e04
+- input: the live PR 5015 body fetched by gh pr view 5015 --json body
+- input built by: the user's exec/glimmer-20261016/pr-body.md and earlier edits on GitHub
+- sources: `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/logs/round3.log`: preserved round3.log; `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/cmp2.py`: preserved cmp2.py; `https://github.com/positron-ai/systems_test/actions/runs/38999609242`: no files found under it
+- regenerate: unavailable (the script re-fetches the live body, whose anchor sentences it already replaced)
+- regenerate unverified (page not mirrored at a known root)
+- inventory: [pr-body-new.md.lineage.md](exec/scratch-relocated/146c3a6e/round3/pr-body-new.md.lineage.md) (2 lines)
+
+#### muse-glimmer/diagramming-code-changes-PR5015-amx_attn.cpp.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/muse-glimmer/diagramming-code-changes-PR5015-amx_attn.cpp.html` (1732908 canonical bytes). Related: [claude_20261018_pr5015-amx-attn-cpp-diagrams.md](../../handoffs/claude_20261018_pr5015-amx-attn-cpp-diagrams.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/muse-glimmer/diagramming-code-changes-PR5015-amx_attn.cpp.html
+- generator: /home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/spec_builder.py (key amx_attn), with page_common.py, svg_helpers.py, difflib_units.py
+- input: /home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/units_amx_attn.json, /home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/figs/base_amx_attn.py, /home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/figs/d_amx_attn_a1.py .. a5.py, and the diff 6198824246..5061623a34 of src/tron/kernels/amx_attn.cpp read from /home/jhan/workspace/ai-runs/tron-glimmer-amx
+- input built by: Claude by hand (units JSON, STYLE.md, base figures) and five agents fig-a1 to fig-a5 (change figures), 2026-10-18 12:22 to 12:53 Pacific; lane facts from transpose_sim.py
+- sources: `/home/jhan/workspace/ai-runs/tron-glimmer-amx at 5061623a34 and 6198824246: src/tron/kernels/amx_attn.cpp, h/tron/kernels/amx_attn_iface.hpp, h/tron/models/self_attention.hpp, h/tron/tensor/v_vnni.hpp, tests t_amx_numerics.cpp and t_amx_dispatch_dtype.cpp`: no files found under it; `/home/jhan/workspace/notebook/artifacts/ai-prompts/diagramming-code-changes.md (the prompt literal)`: no files found under it; `/home/jhan/workspace/intel-AMX/exec/pr4424-diagrams-20261009/ (toolchain origin)`: no files found under it
+- regenerate: cd /home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018 && python3 spec_builder.py amx_attn  (writes <OUT>, fixed by OUT_DIR); then python3 check_page.py <OUT>; python3 check_legend.py <OUT>; python3 render_check.py <OUT> png/page
+- regenerate unverified (generator writes a fixed canonical path (not run; see 2026-10-16 lesson))
+- inventory: [diagramming-code-changes-PR5015-amx_attn.cpp.html.lineage.md](muse-glimmer/diagramming-code-changes-PR5015-amx_attn.cpp.html.lineage.md) (3 lines)
+
+#### exec/results/glimext-20261018/results.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/results.md` (11797 canonical bytes). Related: [claude_20261018_pr5015-shape-coverage-across-models.md](../../handoffs/claude_20261018_pr5015-shape-coverage-across-models.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/glimext-20261018/gen_report.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/ (rt-results.txt, rt/*.log, smoke/*/smoke.txt, margin/margin.txt, tests.txt, build-*.txt, preservation.txt)
+- input built by: /home/jhan/workspace/intel-AMX/exec/glimext-20261018/chain.sh steps B T I D E on delphi-3bda (build.sh, tests.sh, smoke.sh, campaign.sh, margin.sh), 2026-10-18 12:03 to 15:17 Pacific
+- sources: `delphi-3bda:/var/tmp/jhan/tron-g16b/gen/runtron.g16b`: nothing preserved; left behind (size) runtron.g16b; `delphi-3bda:/var/tmp/jhan/tron-g16h/gen/runtron.g16h`: nothing preserved; left behind (size) runtron.g16h; `/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/gen_compare.py`: preserved gen_compare.py; `/home/jhan/workspace/intel-AMX/exec/dd/dd_logits_step.py`: preserved dd_logits_step.py
+- regenerate: python3 /home/jhan/workspace/intel-AMX/exec/glimext-20261018/gen_report.py /home/jhan/workspace/intel-AMX/exec/results/glimext-20261018 > <OUT>
+- regenerate unverified (56 of 111 lines differ, all in the identity-check table (lines 32 to 59), which gen_report.py builds from marker and status files left behind as provenance; the throughput tables are identical)
+- inventory: [results.md.lineage.md](exec/results/glimext-20261018/results.md.lineage.md) (12772 lines)
+
+#### exec/results/glimext-20261018/results.round1.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/results.round1.md` (11820 canonical bytes). Related: [claude_20261018_pr5015-shape-coverage-across-models.md](../../handoffs/claude_20261018_pr5015-shape-coverage-across-models.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/glimext-20261018/gen_report.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/ (rt-results.txt, rt/*.log, smoke/*/smoke.txt, margin/margin.txt, tests.txt, build-*.txt, preservation.txt)
+- input built by: /home/jhan/workspace/intel-AMX/exec/glimext-20261018/chain.sh steps B T I D E on delphi-3bda (build.sh, tests.sh, smoke.sh, campaign.sh, margin.sh), 2026-10-18 12:03 to 15:17 Pacific
+- sources: `delphi-3bda:/var/tmp/jhan/tron-g16b/gen/runtron.g16b`: nothing preserved; left behind (size) runtron.g16b; `delphi-3bda:/var/tmp/jhan/tron-g16h/gen/runtron.g16h`: nothing preserved; left behind (size) runtron.g16h; `/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/gen_compare.py`: preserved gen_compare.py; `/home/jhan/workspace/intel-AMX/exec/dd/dd_logits_step.py`: preserved dd_logits_step.py
+- regenerate: copy of results.md taken at 14:59 Pacific before the extra llama repetitions; not regenerable from the current results dir
+- regenerate unverified (copy of results.md taken at 14:59 Pacific before the extra llama repetitions; not regenerable from t)
+- inventory: [results.round1.md.lineage.md](exec/results/glimext-20261018/results.round1.md.lineage.md) (12772 lines)
+
+#### exec/results/glimext-20261018/summary.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/summary.md` (4531 canonical bytes). Related: [claude_20261018_pr5015-shape-coverage-across-models.md](../../handoffs/claude_20261018_pr5015-shape-coverage-across-models.md)
+- generator: /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py
+- input: /home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/
+- input built by: /home/jhan/workspace/intel-AMX/exec/glimext-20261018/chain.sh steps B T I D E on delphi-3bda (build.sh, tests.sh, smoke.sh, campaign.sh, margin.sh), 2026-10-18 12:03 to 15:17 Pacific
+- sources: `delphi-3bda:/var/tmp/jhan/tron-g16b/gen/runtron.g16b`: nothing preserved; left behind (size) runtron.g16b; `delphi-3bda:/var/tmp/jhan/tron-g16h/gen/runtron.g16h`: nothing preserved; left behind (size) runtron.g16h; `/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/gen_compare.py`: preserved gen_compare.py; `/home/jhan/workspace/intel-AMX/exec/dd/dd_logits_step.py`: preserved dd_logits_step.py
+- regenerate: WEDPERF_ARMS="base head" WEDPERF_PAIRS="head:base" python3 /home/jhan/workspace/intel-AMX/exec/sync4424-20261002/summarize.py /home/jhan/workspace/intel-AMX/exec/results/glimext-20261018 > <OUT>
+- regenerate verified 2026-11-02 (identical except the title line: the regenerate line lacks the SUMMARY_TITLE environment variable that summarize.py reads (same lesson as 2026-10-16))
+- inventory: [summary.md.lineage.md](exec/results/glimext-20261018/summary.md.lineage.md) (12772 lines)
+
+#### random/Ben-PR4956.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/random/Ben-PR4956.html` (111929 canonical bytes). Related: [claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md](../../handoffs/claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/random/Ben-PR4956.html
+- generator: /home/jhan/workspace/intel-AMX/exec/pr5047-20261020/gen_page.py (fills the placeholders of /home/jhan/workspace/intel-AMX/exec/pr5047-20261020/page_template.html)
+- input: /home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/results.json (plus results.md, tests.txt, identity.txt, build-*.txt in that folder)
+- input built by: /home/jhan/workspace/intel-AMX/exec/pr5047-20261020/gen_report.py, run by chain.sh step R, by killswitch.sh and again by gen_page.py, from rt-results.txt, rt/*.log exit reports, smoke/*/smoke.txt, tests.txt, build-*.txt
+- sources: `runtron runs on delphi-3bda by /home/jhan/workspace/intel-AMX/exec/pr5047-20261020/chain.sh (campaign.sh, smoke.sh, tests.sh) 2026-10-21 00:36 to 14:43 UTC and killswitch.sh 15:33 to 15:53 UTC`: not a local file (code state, URL or text); `git blame and diff of positron-ai/tron at a5697f86d3 and ade89a9d9c`: not a local file (code state, URL or text); `/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/tasks/wpx0eil3k.output (workflow wf_d8ce6160-022)`: no files found under it
+- regenerate: python3 /home/jhan/workspace/intel-AMX/exec/pr5047-20261020/gen_page.py /home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020 <OUT>
+- regenerate unverified (12 lines differ: the generation timestamp and the campaign status markers (ok versus pending), which gen_page.py reads from the .done and STATUS marker files left behind as provenance; every measured number is identical)
+- inventory: [Ben-PR4956.html.lineage.md](random/Ben-PR4956.html.lineage.md) (4 lines)
+
+#### random/Ben-stack-PR4957-4959.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/random/Ben-stack-PR4957-4959.html` (115100 canonical bytes). Related: [claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md](../../handoffs/claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/random/Ben-stack-PR4957-4959.html
+- generator: /home/jhan/workspace/intel-AMX/exec/benstack-20261021/gen_page.py
+- input: /home/jhan/workspace/intel-AMX/exec/benstack-20261021/status.json; per-file layout-identifier counts computed by the generator with git show on /home/jhan/workspace/ai-runs/tron-ben-pr2; the kept findings of the prediction workflow
+- input built by: status.json written by hand by the session from the workflow audits, the gate rows in /home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/tests.txt and the draft PR URLs
+- sources: `/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/tasks/w2yccllmh.output (workflow wf_e4c2f652-7e0, 82 kept objections)`: no files found under it; `implementation workflows wf_c5916ca6-7e7, wf_a044b496-23f, wf_61fcb49e-71b (/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/tasks/wo2629n4w.output, wqhobg7cj.output, w4vibjgzx.output)`: not a local file (code state, URL or text); `/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/ (3bda gates)`: no files found under it
+- regenerate: python3 /home/jhan/workspace/intel-AMX/exec/benstack-20261021/gen_page.py (OUT fixed inside the script to /home/jhan/workspace/intel-AMX/random/Ben-stack-PR4957-4959.html; needs the tron-ben-pr2 worktree and cairosvg)
+- regenerate unverified (no <OUT> in the regenerate line)
+- inventory: [Ben-stack-PR4957-4959.html.lineage.md](random/Ben-stack-PR4957-4959.html.lineage.md) (54 lines)
+
+#### vnnied-k-in-place/PR4956-4959/Ben-review-response-status.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/VNNIed-K-in-place/PR4956-4959/Ben-review-response-status.html` (22309 canonical bytes). Related: [claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md](../../handoffs/claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/vnnied-k-in-place/PR4956-4959/Ben-review-response-status.html
+- generator: none (hand-written HTML, edited in place with python string replacements; written in random/ and moved here by the user on 2026-10-21)
+- input: none
+- input built by: none
+- sources: `/home/jhan/workspace/intel-AMX/exec/benstack-20261021/status.json`: preserved status.json; `/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/results.md`: preserved results.md; `/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/results.md`: preserved results.md; `gh pr view and gh issue view outputs of 2026-10-21 and 2026-10-22`: not a local file (code state, URL or text)
+- regenerate: unavailable (hand-written)
+- regenerate unverified (unavailable (hand-written))
+- inventory: [Ben-review-response-status.html.lineage.md](vnnied-k-in-place/PR4956-4959/Ben-review-response-status.html.lineage.md) (3 lines)
+
+#### muse-glimmer/respond-2-Isaac.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/intel-AMX/muse-glimmer/respond-2-Isaac.html` (136550 canonical bytes). Related: [claude_20261030_pr-5022-review-replies-from-isaac.md](../../handoffs/claude_20261030_pr-5022-review-replies-from-isaac.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/muse-glimmer/respond-2-Isaac.html
+- generator: python3 -I /tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/build_page.py <OUT>
+- input: content literals inside build_page.py (SHORT, WORDS, DECISIONS, TOP, INLINE, TODO, PROVENANCE)
+- input built by: Claude by hand from results.json and digest.md of workflow run wf_aa5e52f3-4e0 plus fact checks in the worktree
+- sources: `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/results.json`: preserved results.json; `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/digest.md`: preserved digest.md; `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/inline_sorted.json`: preserved inline_sorted.json; `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/isaac_review_body.md`: preserved isaac_review_body.md; `/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr_body.md`: preserved pr_body.md; `/home/jhan/workspace/ai-runs/pr5022-isaac/tron-head`: nothing preserved; `https://github.com/positron-ai/tron/pull/5022#pullrequestreview-5623855297`: no files found under it
+- regenerate: python3 -I /tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/build_page.py <OUT>
+- regenerate verified 2026-11-02 (byte-identical from the preserved copies)
+- inventory: [respond-2-Isaac.html.lineage.md](muse-glimmer/respond-2-Isaac.html.lineage.md) (1322 lines)
+
+### All files of this batch
+
+Repo path -> canonical path (bytes). `origin:` = the session-store or scratchpad path a relocated file was copied from (history only, never fetched again).
+
+Related: [claude_20261016-20261017_amx-kv-mul-16-kernels-on-jhan-amx-kvmul16.md](../../handoffs/claude_20261016-20261017_amx-kv-mul-16-kernels-on-jhan-amx-kvmul16.md)
+
+- `3bda-var-tmp/glimci-20261017/make-deb.log` -> `delphi-3bda:/var/tmp/jhan/glimci-20261017/make-deb.log` (116138 bytes)
+- `3bda-var-tmp/glimci-20261017/manifest.json` -> `delphi-3bda:/var/tmp/jhan/glimci-20261017/manifest.json` (579 bytes)
+- `exec/glimci-20261017/build-deb.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/build-deb.sh` (4355 bytes)
+- `exec/glimci-20261017/campaign.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/campaign.sh` (36847 bytes)
+- `exec/glimci-20261017/configs-glimmer.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/configs-glimmer.json` (383 bytes)
+- `exec/glimci-20261017/dut.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/dut.sh` (19699 bytes)
+- `exec/glimci-20261017/launch.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/launch.sh` (3492 bytes)
+- `exec/glimci-20261017/nightly-20261017-glimmer.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/nightly-20261017-glimmer.json` (1540 bytes)
+- `exec/glimci-20261017/perf-opportunities-report.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/perf-opportunities-report.md` (24090 bytes)
+- `exec/glimci-20261017/st_ci_perf.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/st_ci_perf.py` (39449 bytes)
+- `exec/glimci-20261017/summarize.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/summarize.py` (8062 bytes)
+- `exec/glimci-20261017/talos_stub/talos.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimci-20261017/talos_stub/talos.py` (2058 bytes)
+- `exec/glimmer-20261016-pre/build0.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016-pre/build0.sh` (2945 bytes)
+- `exec/glimmer-20261016-pre/build1.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016-pre/build1.sh` (2948 bytes)
+- `exec/glimmer-20261016-pre/tests0.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016-pre/tests0.sh` (1895 bytes)
+- `exec/glimmer-20261016/README.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/README.md` (11448 bytes)
+- `exec/glimmer-20261016/build.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/build.sh` (6469 bytes)
+- `exec/glimmer-20261016/campaign.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/campaign.sh` (21208 bytes)
+- `exec/glimmer-20261016/chain.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/chain.sh` (11110 bytes)
+- `exec/glimmer-20261016/gen_compare.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/gen_compare.py` (40889 bytes)
+- `exec/glimmer-20261016/gen_page.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/gen_page.py` (72541 bytes)
+- `exec/glimmer-20261016/glimmer_model.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/glimmer_model.py` (9480 bytes)
+- `exec/glimmer-20261016/go.marker` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/go.marker` (0 bytes)
+- `exec/glimmer-20261016/launch.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/launch.sh` (2682 bytes)
+- `exec/glimmer-20261016/page-findings.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/page-findings.json` (17347 bytes)
+- `exec/glimmer-20261016/pfbench/pfbench.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/pfbench/pfbench.cpp` (11953 bytes)
+- `exec/glimmer-20261016/pfbench/results-20261017.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/pfbench/results-20261017.txt` (1761 bytes)
+- `exec/glimmer-20261016/pr-body-findings.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/pr-body-findings.json` (30830 bytes)
+- `exec/glimmer-20261016/pr-body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/pr-body.md` (12621 bytes)
+- `exec/glimmer-20261016/tests.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/tests.sh` (8174 bytes)
+- `exec/glimpf-20261017/SHA.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/SHA.txt` (41 bytes)
+- `exec/glimpf-20261017/build.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/build.sh` (7354 bytes)
+- `exec/glimpf-20261017/campaign.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/campaign.sh` (21209 bytes)
+- `exec/glimpf-20261017/chain.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/chain.sh` (11275 bytes)
+- `exec/glimpf-20261017/gen_compare.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/gen_compare.py` (40887 bytes)
+- `exec/glimpf-20261017/go.marker` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/go.marker` (0 bytes)
+- `exec/glimpf-20261017/launch.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/launch.sh` (2806 bytes)
+- `exec/glimpf-20261017/prefetch.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/prefetch.diff` (31228 bytes)
+- `exec/glimpf-20261017/review-prefetch.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/review-prefetch.json` (37397 bytes)
+- `exec/glimpf-20261017/tests.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpf-20261017/tests.sh` (8174 bytes)
+- `exec/glimpl-20261017/SHA.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/SHA.txt` (41 bytes)
+- `exec/glimpl-20261017/build.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/build.sh` (7354 bytes)
+- `exec/glimpl-20261017/campaign.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/campaign.sh` (21209 bytes)
+- `exec/glimpl-20261017/chain.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/chain.sh` (11275 bytes)
+- `exec/glimpl-20261017/followup-summary.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/followup-summary.json` (5158 bytes)
+- `exec/glimpl-20261017/gen_compare.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/gen_compare.py` (40887 bytes)
+- `exec/glimpl-20261017/go.marker` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/go.marker` (0 bytes)
+- `exec/glimpl-20261017/launch.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/launch.sh` (2806 bytes)
+- `exec/glimpl-20261017/planner.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/planner.diff` (33291 bytes)
+- `exec/glimpl-20261017/pr-body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/pr-body.md` (9180 bytes)
+- `exec/glimpl-20261017/review-planner.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/review-planner.json` (43565 bytes)
+- `exec/glimpl-20261017/tests.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimpl-20261017/tests.sh` (8174 bytes)
+- `exec/results/glimci-20261017/amxoff-pass1/journal-prompts.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxoff-pass1/journal-prompts.txt` (1104 bytes)
+- `exec/results/glimci-20261017/amxoff-pass1/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxoff-pass1/perf.json` (227415 bytes)
+- `exec/results/glimci-20261017/amxoff-pass1/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxoff-pass1/summary.txt` (599 bytes)
+- `exec/results/glimci-20261017/amxoff-pass2/journal-prompts.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxoff-pass2/journal-prompts.txt` (1108 bytes)
+- `exec/results/glimci-20261017/amxoff-pass2/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxoff-pass2/perf.json` (226900 bytes)
+- `exec/results/glimci-20261017/amxoff-pass2/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxoff-pass2/summary.txt` (599 bytes)
+- `exec/results/glimci-20261017/amxoff-pass3/journal-prompts.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxoff-pass3/journal-prompts.txt` (1088 bytes)
+- `exec/results/glimci-20261017/amxoff-pass3/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxoff-pass3/perf.json` (226085 bytes)
+- `exec/results/glimci-20261017/amxoff-pass3/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxoff-pass3/summary.txt` (599 bytes)
+- `exec/results/glimci-20261017/amxon-pass1/journal-prompts.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxon-pass1/journal-prompts.txt` (1104 bytes)
+- `exec/results/glimci-20261017/amxon-pass1/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxon-pass1/perf.json` (226480 bytes)
+- `exec/results/glimci-20261017/amxon-pass1/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxon-pass1/summary.txt` (608 bytes)
+- `exec/results/glimci-20261017/amxon-pass2/journal-prompts.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxon-pass2/journal-prompts.txt` (1104 bytes)
+- `exec/results/glimci-20261017/amxon-pass2/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxon-pass2/perf.json` (225590 bytes)
+- `exec/results/glimci-20261017/amxon-pass2/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxon-pass2/summary.txt` (608 bytes)
+- `exec/results/glimci-20261017/amxon-pass3/journal-prompts.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxon-pass3/journal-prompts.txt` (1100 bytes)
+- `exec/results/glimci-20261017/amxon-pass3/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxon-pass3/perf.json` (227636 bytes)
+- `exec/results/glimci-20261017/amxon-pass3/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/amxon-pass3/summary.txt` (608 bytes)
+- `exec/results/glimci-20261017/base-identity.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-identity.txt` (207 bytes)
+- `exec/results/glimci-20261017/base-pass1/journal-prompts.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-pass1/journal-prompts.txt` (1102 bytes)
+- `exec/results/glimci-20261017/base-pass1/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-pass1/perf.json` (226578 bytes)
+- `exec/results/glimci-20261017/base-pass1/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-pass1/summary.txt` (599 bytes)
+- `exec/results/glimci-20261017/base-pass2/journal-prompts.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-pass2/journal-prompts.txt` (1106 bytes)
+- `exec/results/glimci-20261017/base-pass2/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-pass2/perf.json` (226729 bytes)
+- `exec/results/glimci-20261017/base-pass2/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-pass2/summary.txt` (599 bytes)
+- `exec/results/glimci-20261017/base-pass3/journal-prompts.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-pass3/journal-prompts.txt` (1108 bytes)
+- `exec/results/glimci-20261017/base-pass3/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-pass3/perf.json` (226420 bytes)
+- `exec/results/glimci-20261017/base-pass3/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/base-pass3/summary.txt` (599 bytes)
+- `exec/results/glimci-20261017/check-mode/perf.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/check-mode/perf.json` (13236 bytes)
+- `exec/results/glimci-20261017/configs-used.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/configs-used.json` (383 bytes)
+- `exec/results/glimci-20261017/configs-used.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/configs-used.txt` (73 bytes)
+- `exec/results/glimci-20261017/outcome.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/outcome.txt` (92 bytes)
+- `exec/results/glimci-20261017/preflight.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/preflight.txt` (2698 bytes)
+- `exec/results/glimci-20261017/summary.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/summary.json` (34035 bytes)
+- `exec/results/glimci-20261017/summary.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/summary.md` (2600 bytes)
+- `exec/results/glimmer-20261016/attn-stats-compare.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/attn-stats-compare.md` (85017 bytes)
+- `exec/results/glimmer-20261016/exit-reports.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/exit-reports.txt` (175316 bytes)
+- `exec/results/glimmer-20261016/local-obj-compare/lcheck-obj.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/local-obj-compare/lcheck-obj.sh` (1682 bytes)
+- `exec/results/glimmer-20261016/preservation.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/preservation.txt` (819 bytes)
+- `exec/results/glimmer-20261016/results.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/results.json` (25415 bytes)
+- `exec/results/glimmer-20261016/rt-results.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt-results.txt` (138888 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` (25124 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` (25395 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` (26014 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` (25864 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` (27573 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep2.log` (27887 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` (28020 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep2.log` (28338 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-cpu__cpu__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-cpu__cpu__amxoff__rep1.log` (26287 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-cpu__cpu__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-cpu__cpu__amxoff__rep2.log` (25798 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-cpu__cpu__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-cpu__cpu__amxon__rep1.log` (26706 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-cpu__cpu__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-cpu__cpu__amxon__rep2.log` (26696 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` (29669 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep2.log` (29675 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` (29837 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep2.log` (30175 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-cpu__cpu__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-cpu__cpu__amxoff__rep1.log` (34307 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-cpu__cpu__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-cpu__cpu__amxoff__rep2.log` (34301 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-cpu__cpu__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-cpu__cpu__amxon__rep1.log` (34909 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-cpu__cpu__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-cpu__cpu__amxon__rep2.log` (34909 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` (36794 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep2.log` (36797 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` (37130 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep2.log` (36856 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-cpu__cpu__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-cpu__cpu__amxoff__rep1.log` (35013 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-cpu__cpu__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-cpu__cpu__amxoff__rep2.log` (35012 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-cpu__cpu__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-cpu__cpu__amxon__rep1.log` (35616 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-cpu__cpu__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-cpu__cpu__amxon__rep2.log` (35618 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep1.log` (38170 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep2.log` (38582 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep1.log` (39098 bytes)
+- `exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep2.log` (39104 bytes)
+- `exec/results/glimmer-20261016/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` (25844 bytes)
+- `exec/results/glimmer-20261016/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` (25844 bytes)
+- `exec/results/glimmer-20261016/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` (26328 bytes)
+- `exec/results/glimmer-20261016/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` (26232 bytes)
+- `exec/results/glimmer-20261016/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016/tests.txt` (700 bytes)
+- `exec/results/glimpf-20261017/attn-stats-compare.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/attn-stats-compare.md` (95167 bytes)
+- `exec/results/glimpf-20261017/build-symbols.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/build-symbols.txt` (1281 bytes)
+- `exec/results/glimpf-20261017/build.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/build.txt` (1203 bytes)
+- `exec/results/glimpf-20261017/exit-reports.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/exit-reports.txt` (205301 bytes)
+- `exec/results/glimpf-20261017/preservation.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/preservation.txt` (818 bytes)
+- `exec/results/glimpf-20261017/results.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/results.json` (19903 bytes)
+- `exec/results/glimpf-20261017/rt-results.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt-results.txt` (155574 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` (28182 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep2.log` (28178 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep3.log` (28178 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep4.log` (28181 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` (27871 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep2.log` (28179 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep3.log` (28186 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep4.log` (28032 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` (30009 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep2.log` (30014 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep3.log` (29831 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep4.log` (30010 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` (29673 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep2.log` (30013 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep3.log` (30013 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep4.log` (30001 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` (37053 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep2.log` (36852 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep3.log` (37042 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep4.log` (37055 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` (37026 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep2.log` (37048 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep3.log` (37053 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep4.log` (37052 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep1.log` (38459 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep2.log` (38680 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep3.log` (38681 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxoff__rep4.log` (38894 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep1.log` (38890 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep2.log` (38481 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep3.log` (38900 bytes)
+- `exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/glm-tp4-8u-p2048-fpga__fpga__amxon__rep4.log` (38897 bytes)
+- `exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` (25803 bytes)
+- `exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` (26088 bytes)
+- `exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep3.log` (26094 bytes)
+- `exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep4.log` (26093 bytes)
+- `exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` (26069 bytes)
+- `exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` (26093 bytes)
+- `exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep3.log` (25792 bytes)
+- `exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep4.log` (26087 bytes)
+- `exec/results/glimpf-20261017/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/tests.txt` (764 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/exit-reports.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/exit-reports.txt` (38730 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/rt-results.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/rt-results.txt` (33606 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` (27889 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` (28182 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` (29669 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` (30174 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` (36799 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` (37342 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` (25842 bytes)
+- `exec/results/glimpf-20261017/wrong-arm-run1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpf-20261017/wrong-arm-run1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` (26332 bytes)
+- `exec/results/glimpl-20261017-r1/attn-stats-compare.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/attn-stats-compare.md` (62854 bytes)
+- `exec/results/glimpl-20261017-r1/build-symbols.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/build-symbols.txt` (1269 bytes)
+- `exec/results/glimpl-20261017-r1/build.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/build.txt` (1191 bytes)
+- `exec/results/glimpl-20261017-r1/exit-reports.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/exit-reports.txt` (121563 bytes)
+- `exec/results/glimpl-20261017-r1/preservation.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/preservation.txt` (818 bytes)
+- `exec/results/glimpl-20261017-r1/results.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/results.json` (15359 bytes)
+- `exec/results/glimpl-20261017-r1/rt-results.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt-results.txt` (94265 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` (28341 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep2.log` (28441 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep3.log` (28342 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` (28338 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep2.log` (28336 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep3.log` (28440 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` (30182 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep2.log` (30283 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep3.log` (30178 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` (30011 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep2.log` (29841 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep3.log` (29847 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` (37430 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep2.log` (37156 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep3.log` (37242 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` (37440 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep2.log` (37246 bytes)
+- `exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep3.log` (37247 bytes)
+- `exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` (26236 bytes)
+- `exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` (26236 bytes)
+- `exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep3.log` (25941 bytes)
+- `exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` (26036 bytes)
+- `exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` (26086 bytes)
+- `exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep3.log` (25945 bytes)
+- `exec/results/glimpl-20261017-r1/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017-r1/tests.txt` (700 bytes)
+- `exec/results/glimpl-20261017/attn-stats-compare.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/attn-stats-compare.md` (62848 bytes)
+- `exec/results/glimpl-20261017/build-symbols.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/build-symbols.txt` (1269 bytes)
+- `exec/results/glimpl-20261017/build.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/build.txt` (1200 bytes)
+- `exec/results/glimpl-20261017/exit-reports.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/exit-reports.txt` (121557 bytes)
+- `exec/results/glimpl-20261017/preservation.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/preservation.txt` (818 bytes)
+- `exec/results/glimpl-20261017/r2-tests-f2c75d/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/r2-tests-f2c75d/tests.txt` (731 bytes)
+- `exec/results/glimpl-20261017/results.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/results.json` (15383 bytes)
+- `exec/results/glimpl-20261017/rt-results.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt-results.txt` (94354 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep1.log` (28347 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep2.log` (28329 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxoff__rep3.log` (28344 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep1.log` (28345 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep2.log` (28440 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p1024-fpga__fpga__amxon__rep3.log` (28431 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep1.log` (29845 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep2.log` (30386 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxoff__rep3.log` (30213 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep1.log` (30177 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep2.log` (30178 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp2-8u-p2048-fpga__fpga__amxon__rep3.log` (29844 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep1.log` (36852 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep2.log` (37338 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxoff__rep3.log` (37254 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep1.log` (37220 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep2.log` (37241 bytes)
+- `exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/glm-tp4-8u-p1024-fpga__fpga__amxon__rep3.log` (37240 bytes)
+- `exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep1.log` (26237 bytes)
+- `exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep2.log` (26234 bytes)
+- `exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxoff__rep3.log` (26230 bytes)
+- `exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep1.log` (26219 bytes)
+- `exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep2.log` (25948 bytes)
+- `exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/rt/l8b-tp2-8u-p1024-cpu__cpu__amxon__rep3.log` (26241 bytes)
+- `exec/results/glimpl-20261017/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimpl-20261017/tests.txt` (700 bytes)
+- `exec/workflows/check-pr-body-glimmer-wf_967f3296-13d.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/check-pr-body-glimmer-wf_967f3296-13d.js` (3604 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9/workflows/scripts/check-pr-body-glimmer-wf_967f3296-13d.js`
+- `exec/workflows/glimmer-amx-review-wf_79c4e7d2-48c.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/glimmer-amx-review-wf_79c4e7d2-48c.js` (9929 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9/workflows/scripts/glimmer-amx-review-wf_79c4e7d2-48c.js`
+- `exec/workflows/glimmer-amx-verify-wf_ad028609-7bc.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/glimmer-amx-verify-wf_ad028609-7bc.js` (17475 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9/workflows/scripts/glimmer-amx-verify-wf_ad028609-7bc.js`
+- `exec/workflows/glimmer-perf-opportunities-wf_74d55a8d-2eb.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/glimmer-perf-opportunities-wf_74d55a8d-2eb.js` (10956 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9/workflows/scripts/glimmer-perf-opportunities-wf_74d55a8d-2eb.js`
+- `exec/workflows/glimmer-prompt-cpu-share-wf_4aa35874-11f.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/glimmer-prompt-cpu-share-wf_4aa35874-11f.js` (5875 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9/workflows/scripts/glimmer-prompt-cpu-share-wf_4aa35874-11f.js`
+- `exec/workflows/glimmer-results-review-wf_1bc60d29-827.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/glimmer-results-review-wf_1bc60d29-827.js` (6805 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9/workflows/scripts/glimmer-results-review-wf_1bc60d29-827.js`
+- `exec/workflows/review-planner-diff-wf_8bb1dcce-397.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/review-planner-diff-wf_8bb1dcce-397.js` (6400 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9/workflows/scripts/review-planner-diff-wf_8bb1dcce-397.js`
+- `exec/workflows/review-prefetch-diff-wf_0ded7e6f-e4b.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/review-prefetch-diff-wf_0ded7e6f-e4b.js` (5580 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/2286d13f-0c9b-4afd-a521-f1f97342a0e9/workflows/scripts/review-prefetch-diff-wf_0ded7e6f-e4b.js`
+- `memory/glimci-20261017-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/glimci-20261017-campaign.md` (4668 bytes)
+- `memory/glimmer-kvmul16-implementation.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/glimmer-kvmul16-implementation.md` (8272 bytes)
+- `memory/glimmer-perf-followups.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/glimmer-perf-followups.md` (5578 bytes)
+
+Related: [claude_20261016_near-tie-flip-statistics-for-issue-4444.md](../../handoffs/claude_20261016_near-tie-flip-statistics-for-issue-4444.md)
+
+- `3bda-var-tmp/td/base.log` -> `delphi-3bda:/var/tmp/jhan/td/base.log` (19294 bytes)
+- `3bda-var-tmp/td/baseoff.log` -> `delphi-3bda:/var/tmp/jhan/td/baseoff.log` (19202 bytes)
+- `3bda-var-tmp/td/clean.log` -> `delphi-3bda:/var/tmp/jhan/td/clean.log` (19416 bytes)
+- `3bda-var-tmp/td/new.log` -> `delphi-3bda:/var/tmp/jhan/td/new.log` (19180 bytes)
+- `3bda-var-tmp/td/newoff.log` -> `delphi-3bda:/var/tmp/jhan/td/newoff.log` (19270 bytes)
+- `3bda-var-tmp/td/poc.log` -> `delphi-3bda:/var/tmp/jhan/td/poc.log` (19404 bytes)
+- `3bda-var-tmp/td/pocoff.log` -> `delphi-3bda:/var/tmp/jhan/td/pocoff.log` (19283 bytes)
+- `3bda-var-tmp/td/replay/arms_wo-L0.json` -> `delphi-3bda:/var/tmp/jhan/td/replay/arms_wo-L0.json` (33596 bytes)
+- `3bda-var-tmp/td/replay/full-L0.log` -> `delphi-3bda:/var/tmp/jhan/td/replay/full-L0.log` (48054 bytes)
+- `3bda-var-tmp/td/replay/full-L1.log` -> `delphi-3bda:/var/tmp/jhan/td/replay/full-L1.log` (47048 bytes)
+- `3bda-var-tmp/td/replay/results-L0.json` -> `delphi-3bda:/var/tmp/jhan/td/replay/results-L0.json` (881951 bytes)
+- `3bda-var-tmp/td/replay/results-L1.json` -> `delphi-3bda:/var/tmp/jhan/td/replay/results-L1.json` (883802 bytes)
+- `3bda-var-tmp/td/replay/test.json` -> `delphi-3bda:/var/tmp/jhan/td/replay/test.json` (51164 bytes)
+- `3bda-var-tmp/td/replay/wo_check-base-L0.json` -> `delphi-3bda:/var/tmp/jhan/td/replay/wo_check-base-L0.json` (9990 bytes)
+- `3bda-var-tmp/td/replay/wo_check-newoff-L0.json` -> `delphi-3bda:/var/tmp/jhan/td/replay/wo_check-newoff-L0.json` (5794 bytes)
+- `3bda-var-tmp/td/replay/wo_check-trunc-L0.json` -> `delphi-3bda:/var/tmp/jhan/td/replay/wo_check-trunc-L0.json` (4492 bytes)
+- `3bda-var-tmp/td/trunc.log` -> `delphi-3bda:/var/tmp/jhan/td/trunc.log` (19414 bytes)
+- `3bda-var-tmp/td2/base.log` -> `delphi-3bda:/var/tmp/jhan/td2/base.log` (21245 bytes)
+- `3bda-var-tmp/td2/new.log` -> `delphi-3bda:/var/tmp/jhan/td2/new.log` (21219 bytes)
+- `3bda-var-tmp/td2/newoff.log` -> `delphi-3bda:/var/tmp/jhan/td2/newoff.log` (21215 bytes)
+- `3bda-var-tmp/td2/poc.log` -> `delphi-3bda:/var/tmp/jhan/td2/poc.log` (21134 bytes)
+- `3bda-var-tmp/td3/base63.log` -> `delphi-3bda:/var/tmp/jhan/td3/base63.log` (18332 bytes)
+- `3bda-var-tmp/td3/base64.log` -> `delphi-3bda:/var/tmp/jhan/td3/base64.log` (18356 bytes)
+- `3bda-var-tmp/td3/base65.log` -> `delphi-3bda:/var/tmp/jhan/td3/base65.log` (18396 bytes)
+- `3bda-var-tmp/td3/new63.log` -> `delphi-3bda:/var/tmp/jhan/td3/new63.log` (18313 bytes)
+- `3bda-var-tmp/td3/new64.log` -> `delphi-3bda:/var/tmp/jhan/td3/new64.log` (18159 bytes)
+- `3bda-var-tmp/td3/new65.log` -> `delphi-3bda:/var/tmp/jhan/td3/new65.log` (18371 bytes)
+- `3bda-var-tmp/td3/poc64.log` -> `delphi-3bda:/var/tmp/jhan/td3/poc64.log` (18354 bytes)
+- `3bda-var-tmp/td3/poc65.log` -> `delphi-3bda:/var/tmp/jhan/td3/poc65.log` (18378 bytes)
+- `exec/results/td-20261016/layers-base-vs-new.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-base-vs-new.json` (4974047 bytes)
+- `exec/results/td-20261016/layers-base-vs-new.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-base-vs-new.txt` (2989 bytes)
+- `exec/results/td-20261016/layers-base-vs-poc.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-base-vs-poc.json` (3566130 bytes)
+- `exec/results/td-20261016/layers-base-vs-poc.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-base-vs-poc.txt` (3003 bytes)
+- `exec/results/td-20261016/layers-baseoff-vs-base.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-baseoff-vs-base.json` (4839106 bytes)
+- `exec/results/td-20261016/layers-baseoff-vs-base.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-baseoff-vs-base.txt` (2983 bytes)
+- `exec/results/td-20261016/layers-baseoff-vs-newoff.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-baseoff-vs-newoff.json` (4985555 bytes)
+- `exec/results/td-20261016/layers-baseoff-vs-newoff.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-baseoff-vs-newoff.txt` (2989 bytes)
+- `exec/results/td-20261016/layers-baseoff-vs-pocoff.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-baseoff-vs-pocoff.json` (3315226 bytes)
+- `exec/results/td-20261016/layers-baseoff-vs-pocoff.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-baseoff-vs-pocoff.txt` (2702 bytes)
+- `exec/results/td-20261016/layers-clean-vs-baseoff.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-clean-vs-baseoff.json` (3315223 bytes)
+- `exec/results/td-20261016/layers-clean-vs-baseoff.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-clean-vs-baseoff.txt` (2702 bytes)
+- `exec/results/td-20261016/layers-clean-vs-new.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-clean-vs-new.json` (5001131 bytes)
+- `exec/results/td-20261016/layers-clean-vs-new.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-clean-vs-new.txt` (2991 bytes)
+- `exec/results/td-20261016/layers-new-vs-newoff.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-new-vs-newoff.json` (4838915 bytes)
+- `exec/results/td-20261016/layers-new-vs-newoff.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-new-vs-newoff.txt` (2985 bytes)
+- `exec/results/td-20261016/layers-new-vs-trunc.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-new-vs-trunc.json` (4839102 bytes)
+- `exec/results/td-20261016/layers-new-vs-trunc.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-new-vs-trunc.txt` (2985 bytes)
+- `exec/results/td-20261016/layers-newoff-vs-trunc.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-newoff-vs-trunc.json` (4818370 bytes)
+- `exec/results/td-20261016/layers-newoff-vs-trunc.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/layers-newoff-vs-trunc.txt` (3006 bytes)
+- `exec/results/td-20261016/runs.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/runs.txt` (4708 bytes)
+- `exec/results/td-20261016/steps-base-vs-new.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-base-vs-new.json` (173515 bytes)
+- `exec/results/td-20261016/steps-base-vs-new.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-base-vs-new.txt` (24175 bytes)
+- `exec/results/td-20261016/steps-base-vs-poc.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-base-vs-poc.json` (169573 bytes)
+- `exec/results/td-20261016/steps-base-vs-poc.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-base-vs-poc.txt` (24167 bytes)
+- `exec/results/td-20261016/steps-baseoff-vs-base.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-baseoff-vs-base.json` (173448 bytes)
+- `exec/results/td-20261016/steps-baseoff-vs-base.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-baseoff-vs-base.txt` (24169 bytes)
+- `exec/results/td-20261016/steps-baseoff-vs-newoff.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-baseoff-vs-newoff.json` (173374 bytes)
+- `exec/results/td-20261016/steps-baseoff-vs-newoff.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-baseoff-vs-newoff.txt` (24176 bytes)
+- `exec/results/td-20261016/steps-baseoff-vs-pocoff.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-baseoff-vs-pocoff.json` (157914 bytes)
+- `exec/results/td-20261016/steps-baseoff-vs-pocoff.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-baseoff-vs-pocoff.txt` (24090 bytes)
+- `exec/results/td-20261016/steps-clean-vs-baseoff.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-clean-vs-baseoff.json` (157925 bytes)
+- `exec/results/td-20261016/steps-clean-vs-baseoff.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-clean-vs-baseoff.txt` (24090 bytes)
+- `exec/results/td-20261016/steps-clean-vs-new.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-clean-vs-new.json` (173361 bytes)
+- `exec/results/td-20261016/steps-clean-vs-new.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-clean-vs-new.txt` (24165 bytes)
+- `exec/results/td-20261016/steps-new-vs-newoff.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-new-vs-newoff.json` (173563 bytes)
+- `exec/results/td-20261016/steps-new-vs-newoff.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-new-vs-newoff.txt` (24173 bytes)
+- `exec/results/td-20261016/steps-new-vs-trunc.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-new-vs-trunc.json` (173518 bytes)
+- `exec/results/td-20261016/steps-new-vs-trunc.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-new-vs-trunc.txt` (24168 bytes)
+- `exec/results/td-20261016/steps-newoff-vs-trunc.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-newoff-vs-trunc.json` (173274 bytes)
+- `exec/results/td-20261016/steps-newoff-vs-trunc.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/steps-newoff-vs-trunc.txt` (24185 bytes)
+- `exec/results/td-20261016/tokens.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/tokens.txt` (687 bytes)
+- `exec/results/td-20261016/verdict.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td-20261016/verdict.txt` (5149 bytes)
+- `exec/results/td2-20261016/runs.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/runs.txt` (2070 bytes)
+- `exec/results/td2-20261016/steps-base-vs-new.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/steps-base-vs-new.json` (173448 bytes)
+- `exec/results/td2-20261016/steps-base-vs-new.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/steps-base-vs-new.txt` (24162 bytes)
+- `exec/results/td2-20261016/steps-base-vs-poc.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/steps-base-vs-poc.json` (169475 bytes)
+- `exec/results/td2-20261016/steps-base-vs-poc.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/steps-base-vs-poc.txt` (24161 bytes)
+- `exec/results/td2-20261016/steps-new-vs-newoff.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/steps-new-vs-newoff.json` (173585 bytes)
+- `exec/results/td2-20261016/steps-new-vs-newoff.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/steps-new-vs-newoff.txt` (24160 bytes)
+- `exec/results/td2-20261016/tokens.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/tokens.txt` (253 bytes)
+- `exec/results/td2-20261016/verdict.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td2-20261016/verdict.txt` (764 bytes)
+- `exec/results/td3-20261016/runs.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td3-20261016/runs.txt` (2310 bytes)
+- `exec/results/td3-20261016/stats-base63.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td3-20261016/stats-base63.txt` (4015 bytes)
+- `exec/results/td3-20261016/stats-base64.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td3-20261016/stats-base64.txt` (4015 bytes)
+- `exec/results/td3-20261016/stats-new63.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td3-20261016/stats-new63.txt` (4016 bytes)
+- `exec/results/td3-20261016/stats-new64.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td3-20261016/stats-new64.txt` (4015 bytes)
+- `exec/results/td3-20261016/stats-poc64.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td3-20261016/stats-poc64.txt` (4018 bytes)
+- `exec/results/td3-20261016/verdict.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td3-20261016/verdict.txt` (221 bytes)
+- `exec/results/td4-20261016/runs.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td4-20261016/runs.txt` (1386 bytes)
+- `exec/results/td4-20261016/stats-base64.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td4-20261016/stats-base64.txt` (4015 bytes)
+- `exec/results/td4-20261016/stats-base65.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td4-20261016/stats-base65.txt` (4021 bytes)
+- `exec/results/td4-20261016/stats-new64.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td4-20261016/stats-new64.txt` (4015 bytes)
+- `exec/results/td4-20261016/stats-new65.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td4-20261016/stats-new65.txt` (4018 bytes)
+- `exec/results/td4-20261016/stats-poc64.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td4-20261016/stats-poc64.txt` (4018 bytes)
+- `exec/results/td4-20261016/stats-poc65.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td4-20261016/stats-poc65.txt` (4019 bytes)
+- `exec/results/td4-20261016/verdict.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/td4-20261016/verdict.txt` (459 bytes)
+- `exec/scratch-relocated/2110147a/chart1.svg` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/chart1.svg` (5702 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/chart1.svg`
+- `exec/scratch-relocated/2110147a/chart5.svg` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/chart5.svg` (15467 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/chart5.svg`
+- `exec/scratch-relocated/2110147a/design.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/design.txt` (18226 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/design.txt`
+- `exec/scratch-relocated/2110147a/digest.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/digest.md` (20580 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/digest.md`
+- `exec/scratch-relocated/2110147a/digest.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/digest.py` (19350 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/digest.py`
+- `exec/scratch-relocated/2110147a/main_sa.hpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/main_sa.hpp` (104125 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/main_sa.hpp`
+- `exec/scratch-relocated/2110147a/page.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/page.txt` (34932 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/page.txt`
+- `exec/scratch-relocated/2110147a/report.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/report.txt` (41388 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/report.txt`
+- `exec/scratch-relocated/2110147a/report2.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/report2.txt` (32116 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/report2.txt`
+- `exec/scratch-relocated/2110147a/token30.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/token30.txt` (62857 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/token30.txt`
+- `exec/scratch-relocated/2110147a/verify.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/2110147a/verify.py` (3694 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/scratchpad/verify.py`
+- `exec/td-20261016/analyze-td-early.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/analyze-td-early.sh` (1403 bytes)
+- `exec/td-20261016/analyze-td.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/analyze-td.sh` (1405 bytes)
+- `exec/td-20261016/build-clean.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/build-clean.sh` (1977 bytes)
+- `exec/td-20261016/build-variant.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/build-variant.sh` (2001 bytes)
+- `exec/td-20261016/ktest/build-run.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/build-run.sh` (2921 bytes)
+- `exec/td-20261016/ktest/build.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/build.log` (4184 bytes)
+- `exec/td-20261016/ktest/ktest.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/ktest.cpp` (64805 bytes)
+- `exec/td-20261016/ktest/results.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/ktest/results.txt` (42107 bytes)
+- `exec/td-20261016/probe-td.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/probe-td.sh` (12056 bytes)
+- `exec/td-20261016/probe-td2.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/probe-td2.sh` (8589 bytes)
+- `exec/td-20261016/probe-td3.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/probe-td3.sh` (7422 bytes)
+- `exec/td-20261016/probe-td4.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/probe-td4.sh` (7822 bytes)
+- `exec/td-20261016/replay/arms_wo-L0.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/arms_wo-L0.json` (33596 bytes)
+- `exec/td-20261016/replay/arms_wo.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/arms_wo.py` (7610 bytes)
+- `exec/td-20261016/replay/extract.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/extract.sh` (1050 bytes)
+- `exec/td-20261016/replay/render_md.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/render_md.py` (6885 bytes)
+- `exec/td-20261016/replay/replay.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/replay.py` (34555 bytes)
+- `exec/td-20261016/replay/results-L0.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results-L0.json` (881951 bytes)
+- `exec/td-20261016/replay/results-L1.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results-L1.json` (883802 bytes)
+- `exec/td-20261016/replay/results.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/results.json` (919150 bytes)
+- `exec/td-20261016/replay/wo_check-base-L0.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/wo_check-base-L0.json` (9990 bytes)
+- `exec/td-20261016/replay/wo_check-newoff-L0.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/wo_check-newoff-L0.json` (5794 bytes)
+- `exec/td-20261016/replay/wo_check-trunc-L0.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/wo_check-trunc-L0.json` (4492 bytes)
+- `exec/td-20261016/replay/wo_check.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/replay/wo_check.py` (6492 bytes)
+- `exec/td-20261016/report/collect_facts.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/report/collect_facts.py` (50901 bytes)
+- `exec/td-20261016/report/facts.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/report/facts.json` (960693 bytes)
+- `exec/td-20261016/report/gen_report.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/report/gen_report.py` (71287 bytes)
+- `exec/td-20261016/report/gen_report.v1.bak` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/report/gen_report.v1.bak` (52091 bytes)
+- `exec/td-20261016/tiestats/tie_stats.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/tiestats/tie_stats.json` (154064 bytes)
+- `exec/td-20261016/tiestats/tie_stats.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/td-20261016/tiestats/tie_stats.py` (39252 bytes)
+- `exec/workflows/i4444-report-recheck-wf_b3574120-94a.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/i4444-report-recheck-wf_b3574120-94a.js` (4684 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/workflows/scripts/i4444-report-recheck-wf_b3574120-94a.js`
+- `exec/workflows/i4444-report-verify-wf_7ee35564-d22.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/i4444-report-verify-wf_7ee35564-d22.js` (8922 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/workflows/scripts/i4444-report-verify-wf_7ee35564-d22.js`
+- `exec/workflows/i4444-understand-wf_dc57df18-00d.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/i4444-understand-wf_dc57df18-00d.js` (21552 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-token-divergence-4444/2110147a-d396-4af0-a642-fd0f0d92c2ee/workflows/scripts/i4444-understand-wf_dc57df18-00d.js`
+- `memory/i4444-root-cause-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/i4444-root-cause-campaign.md` (6956 bytes)
+- `token-divergence-4444/predictions.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/token-divergence-4444/predictions.md` (3223 bytes)
+
+Related: [claude_20261018_pr-5015-multi-skill-review.md](../../handoffs/claude_20261018_pr-5015-multi-skill-review.md)
+
+- `3bda-var-tmp/round3-t_amx_dispatch_dtype-killswitch.log` -> `delphi-3bda:/var/tmp/jhan/round3-t_amx_dispatch_dtype-killswitch.log` (26684 bytes)
+- `3bda-var-tmp/round3-t_amx_dispatch_dtype.log` -> `delphi-3bda:/var/tmp/jhan/round3-t_amx_dispatch_dtype.log` (26684 bytes)
+- `3bda-var-tmp/round3-t_amx_numerics-killswitch.log` -> `delphi-3bda:/var/tmp/jhan/round3-t_amx_numerics-killswitch.log` (4927 bytes)
+- `3bda-var-tmp/round3-t_amx_numerics.log` -> `delphi-3bda:/var/tmp/jhan/round3-t_amx_numerics.log` (4872 bytes)
+- `3bda-var-tmp/round3-t_llama_unit.log` -> `delphi-3bda:/var/tmp/jhan/round3-t_llama_unit.log` (98894 bytes)
+- `3bda-var-tmp/round3.log` -> `delphi-3bda:/var/tmp/jhan/round3.log` (1653 bytes)
+- `3bda-var-tmp/round3.patch` -> `delphi-3bda:/var/tmp/jhan/round3.patch` (11305 bytes)
+- `3bda-var-tmp/round3.sh` -> `delphi-3bda:/var/tmp/jhan/round3.sh` (2038 bytes)
+- `exec/scratch-relocated/146c3a6e/job-117495894283.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/job-117495894283.log` (99 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/job-117495894283.log`
+- `exec/scratch-relocated/146c3a6e/review/added.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/added.txt` (19977 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/added.txt`
+- `exec/scratch-relocated/146c3a6e/review/all-comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/all-comments.json` (383887 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/all-comments.json`
+- `exec/scratch-relocated/146c3a6e/review/commits.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/commits.txt` (3798 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/commits.txt`
+- `exec/scratch-relocated/146c3a6e/review/diff-ranges.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/diff-ranges.json` (628 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/diff-ranges.json`
+- `exec/scratch-relocated/146c3a6e/review/disabled.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/disabled.txt` (0 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/disabled.txt`
+- `exec/scratch-relocated/146c3a6e/review/lexicon.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/lexicon.txt` (102102 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/lexicon.txt`
+- `exec/scratch-relocated/146c3a6e/review/post_reviews.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/post_reviews.py` (1175 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/post_reviews.py`
+- `exec/scratch-relocated/146c3a6e/review/pr-body-now.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/pr-body-now.md` (17859 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/pr-body-now.md`
+- `exec/scratch-relocated/146c3a6e/review/pr-body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/pr-body.md` (12351 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/pr-body.md`
+- `exec/scratch-relocated/146c3a6e/review/pr.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/pr.diff` (48292 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/pr.diff`
+- `exec/scratch-relocated/146c3a6e/review/pr0.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/pr0.diff` (22457 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/pr0.diff`
+- `exec/scratch-relocated/146c3a6e/review/pr5015.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/pr5015.diff` (48292 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/pr5015.diff`
+- `exec/scratch-relocated/146c3a6e/review/prfiles.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/prfiles.txt` (164 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/prfiles.txt`
+- `exec/scratch-relocated/146c3a6e/review/prod.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/prod.diff` (22457 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/prod.diff`
+- `exec/scratch-relocated/146c3a6e/review/proposed.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/proposed.txt` (3138 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/proposed.txt`
+- `exec/scratch-relocated/146c3a6e/review/prose.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/prose.txt` (17916 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/prose.txt`
+- `exec/scratch-relocated/146c3a6e/review/reply1.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/reply1.json` (837 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/reply1.json`
+- `exec/scratch-relocated/146c3a6e/review/reply2.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/reply2.json` (675 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/reply2.json`
+- `exec/scratch-relocated/146c3a6e/review/reviews-final.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/reviews-final.json` (62091 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/reviews-final.json`
+- `exec/scratch-relocated/146c3a6e/review/reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/reviews.json` (88294 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/reviews.json`
+- `exec/scratch-relocated/146c3a6e/review/reviews.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/reviews.md` (84739 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/reviews.md`
+- `exec/scratch-relocated/146c3a6e/review/spell.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/spell.txt` (746 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/spell.txt`
+- `exec/scratch-relocated/146c3a6e/review/step1.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/step1.txt` (12461 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/step1.txt`
+- `exec/scratch-relocated/146c3a6e/review/transpose_sim.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/transpose_sim.py` (2050 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/transpose_sim.py`
+- `exec/scratch-relocated/146c3a6e/review/w.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/w.cpp` (16749 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/w.cpp`
+- `exec/scratch-relocated/146c3a6e/review/wade-u0.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/wade-u0.diff` (22457 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/wade-u0.diff`
+- `exec/scratch-relocated/146c3a6e/review/workflow-result.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/review/workflow-result.json` (657624 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/review/workflow-result.json`
+- `exec/scratch-relocated/146c3a6e/round3/apply.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/apply.py` (7108 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/apply.py`
+- `exec/scratch-relocated/146c3a6e/round3/base.s` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/base.s` (32966 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/base.s`
+- `exec/scratch-relocated/146c3a6e/round3/body_patch.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/body_patch.py` (3986 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/body_patch.py`
+- `exec/scratch-relocated/146c3a6e/round3/cmp.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/cmp.py` (1370 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/cmp.py`
+- `exec/scratch-relocated/146c3a6e/round3/cmp2.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/cmp2.py` (923 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/cmp2.py`
+- `exec/scratch-relocated/146c3a6e/round3/commit.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/commit.diff` (11305 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/commit.diff`
+- `exec/scratch-relocated/146c3a6e/round3/head.s` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/head.s` (103035 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/head.s`
+- `exec/scratch-relocated/146c3a6e/round3/issue-3997-comment.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/issue-3997-comment.md` (1877 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/issue-3997-comment.md`
+- `exec/scratch-relocated/146c3a6e/round3/lcheck-obj.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/lcheck-obj.sh` (1684 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/lcheck-obj.sh`
+- `exec/scratch-relocated/146c3a6e/round3/logs/round3-t_amx_dispatch_dtype-killswitch.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/logs/round3-t_amx_dispatch_dtype-killswitch.log` (26684 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/logs/round3-t_amx_dispatch_dtype-killswitch.log`
+- `exec/scratch-relocated/146c3a6e/round3/logs/round3-t_amx_dispatch_dtype.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/logs/round3-t_amx_dispatch_dtype.log` (26684 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/logs/round3-t_amx_dispatch_dtype.log`
+- `exec/scratch-relocated/146c3a6e/round3/logs/round3-t_amx_numerics-killswitch.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/logs/round3-t_amx_numerics-killswitch.log` (4927 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/logs/round3-t_amx_numerics-killswitch.log`
+- `exec/scratch-relocated/146c3a6e/round3/logs/round3-t_amx_numerics.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/logs/round3-t_amx_numerics.log` (4872 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/logs/round3-t_amx_numerics.log`
+- `exec/scratch-relocated/146c3a6e/round3/logs/round3-t_llama_unit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/logs/round3-t_llama_unit.log` (98894 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/logs/round3-t_llama_unit.log`
+- `exec/scratch-relocated/146c3a6e/round3/logs/round3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/logs/round3.log` (1653 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/logs/round3.log`
+- `exec/scratch-relocated/146c3a6e/round3/m5061.s` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/m5061.s` (103036 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/m5061.s`
+- `exec/scratch-relocated/146c3a6e/round3/post_replies.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/post_replies.py` (2534 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/post_replies.py`
+- `exec/scratch-relocated/146c3a6e/round3/posted.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/posted.json` (380 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/posted.json`
+- `exec/scratch-relocated/146c3a6e/round3/recheck/head_now.s` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/recheck/head_now.s` (103047 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/recheck/head_now.s`
+- `exec/scratch-relocated/146c3a6e/round3/replies-draft.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/replies-draft.md` (6861 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/replies-draft.md`
+- `exec/scratch-relocated/146c3a6e/round3/review-body-comment.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/review-body-comment.md` (804 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/review-body-comment.md`
+- `exec/scratch-relocated/146c3a6e/round3/round3.patch` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/round3.patch` (11305 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/round3.patch`
+- `exec/scratch-relocated/146c3a6e/round3/round3.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/round3/round3.sh` (2038 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/round3/round3.sh`
+- `exec/scratch-relocated/146c3a6e/shuf_check.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/146c3a6e/shuf_check.cpp` (168 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/scratchpad/shuf_check.cpp`
+- `exec/workflows/pr5015-multi-skill-review-wf_09f606f9-dc4.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr5015-multi-skill-review-wf_09f606f9-dc4.js` (22849 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/workflows/scripts/pr5015-multi-skill-review-wf_09f606f9-dc4.js`
+- `exec/workflows/pr5015-round3-verify-wf_93092d3d-4e2.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr5015-round3-verify-wf_93092d3d-4e2.js` (5567 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/146c3a6e-a1e1-402b-a412-2cd6ec96fdfc/workflows/scripts/pr5015-round3-verify-wf_93092d3d-4e2.js`
+- `memory/no-issue-numbers-in-source.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/no-issue-numbers-in-source.md` (1398 bytes)
+- `memory/pr5015-multi-skill-review.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr5015-multi-skill-review.md` (5986 bytes)
+
+Related: [claude_20261018_pr5015-amx-attn-cpp-diagrams.md](../../handoffs/claude_20261018_pr5015-amx-attn-cpp-diagrams.md)
+
+- `exec/pr5015-diagrams-20261018/STYLE.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/STYLE.md` (11431 bytes)
+- `exec/pr5015-diagrams-20261018/check_legend.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/check_legend.py` (7684 bytes)
+- `exec/pr5015-diagrams-20261018/check_page.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/check_page.py` (9387 bytes)
+- `exec/pr5015-diagrams-20261018/difflib_units.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/difflib_units.py` (6992 bytes)
+- `exec/pr5015-diagrams-20261018/figs/base_amx_attn.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/figs/base_amx_attn.py` (64531 bytes)
+- `exec/pr5015-diagrams-20261018/figs/d_amx_attn_a1.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/figs/d_amx_attn_a1.py` (19609 bytes)
+- `exec/pr5015-diagrams-20261018/figs/d_amx_attn_a2.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/figs/d_amx_attn_a2.py` (17829 bytes)
+- `exec/pr5015-diagrams-20261018/figs/d_amx_attn_a3.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/figs/d_amx_attn_a3.py` (16516 bytes)
+- `exec/pr5015-diagrams-20261018/figs/d_amx_attn_a4.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/figs/d_amx_attn_a4.py` (24563 bytes)
+- `exec/pr5015-diagrams-20261018/figs/d_amx_attn_a5.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/figs/d_amx_attn_a5.py` (19037 bytes)
+- `exec/pr5015-diagrams-20261018/page_common.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/page_common.py` (23845 bytes)
+- `exec/pr5015-diagrams-20261018/render_check.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/render_check.py` (961 bytes)
+- `exec/pr5015-diagrams-20261018/render_one.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/render_one.py` (1713 bytes)
+- `exec/pr5015-diagrams-20261018/spec_builder.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/spec_builder.py` (2417 bytes)
+- `exec/pr5015-diagrams-20261018/svg_helpers.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/svg_helpers.py` (22382 bytes)
+- `exec/pr5015-diagrams-20261018/transpose_sim.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/transpose_sim.py` (4832 bytes)
+- `exec/pr5015-diagrams-20261018/units_amx_attn.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5015-diagrams-20261018/units_amx_attn.json` (15267 bytes)
+- `exec/scratch-relocated/ff60e929/a5.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff60e929/a5.html` (34809 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/ff60e929-f850-4014-9494-90108583a1a0/scratchpad/a5.html`
+- `exec/scratch-relocated/ff60e929/cite_check.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff60e929/cite_check.py` (2104 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/ff60e929-f850-4014-9494-90108583a1a0/scratchpad/cite_check.py`
+- `exec/scratch-relocated/ff60e929/dry.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/ff60e929/dry.html` (622780 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/ff60e929-f850-4014-9494-90108583a1a0/scratchpad/dry.html`
+- `memory/pr5015-diagram-page.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr5015-diagram-page.md` (4302 bytes)
+
+Related: [claude_20261018_pr5015-shape-coverage-across-models.md](../../handoffs/claude_20261018_pr5015-shape-coverage-across-models.md)
+
+- `exec/glimext-20261018/README.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/README.md` (9161 bytes)
+- `exec/glimext-20261018/build.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/build.sh` (8121 bytes)
+- `exec/glimext-20261018/campaign.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/campaign.sh` (22728 bytes)
+- `exec/glimext-20261018/chain.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/chain.sh` (18026 bytes)
+- `exec/glimext-20261018/chain2.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/chain2.sh` (20314 bytes)
+- `exec/glimext-20261018/gen_report.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/gen_report.py` (13502 bytes)
+- `exec/glimext-20261018/launch.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/launch.sh` (2457 bytes)
+- `exec/glimext-20261018/margin.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/margin.sh` (8265 bytes)
+- `exec/glimext-20261018/smoke.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/smoke.sh` (7406 bytes)
+- `exec/glimext-20261018/smoke2.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/smoke2.sh` (7671 bytes)
+- `exec/glimext-20261018/tests.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimext-20261018/tests.sh` (7248 bytes)
+- `exec/glimmer-20261016/gen_page.py.bak-20261018` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/glimmer-20261016/gen_page.py.bak-20261018` (64608 bytes)
+- `exec/logs/glimext-20261018.done.round1` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/logs/glimext-20261018.done.round1` (3 bytes)
+- `exec/results/glimext-20261018/build-g16b.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/build-g16b.txt` (1384 bytes)
+- `exec/results/glimext-20261018/build-g16h.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/build-g16h.txt` (1404 bytes)
+- `exec/results/glimext-20261018/build-symbols-g16b.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/build-symbols-g16b.txt` (477 bytes)
+- `exec/results/glimext-20261018/build-symbols-g16h.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/build-symbols-g16h.txt` (1269 bytes)
+- `exec/results/glimext-20261018/exit-reports.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/exit-reports.txt` (373886 bytes)
+- `exec/results/glimext-20261018/identity.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/identity.txt` (4485 bytes)
+- `exec/results/glimext-20261018/margin/baseF.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/margin/baseF.log` (20426 bytes)
+- `exec/results/glimext-20261018/margin/headF.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/margin/headF.log` (20429 bytes)
+- `exec/results/glimext-20261018/margin/margin.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/margin/margin.txt` (2741 bytes)
+- `exec/results/glimext-20261018/margin/steps-base-vs-head-v2.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/margin/steps-base-vs-head-v2.json` (172170 bytes)
+- `exec/results/glimext-20261018/margin/steps-base-vs-head-v2.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/margin/steps-base-vs-head-v2.txt` (24188 bytes)
+- `exec/results/glimext-20261018/margin/steps-base-vs-head.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/margin/steps-base-vs-head.json` (172170 bytes)
+- `exec/results/glimext-20261018/margin/steps-base-vs-head.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/margin/steps-base-vs-head.txt` (24188 bytes)
+- `exec/results/glimext-20261018/margin/steps-base-vs-head.v1-promptlen1024.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/margin/steps-base-vs-head.v1-promptlen1024.json` (172254 bytes)
+- `exec/results/glimext-20261018/margin/steps-base-vs-head.v1-promptlen1024.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/margin/steps-base-vs-head.v1-promptlen1024.txt` (24074 bytes)
+- `exec/results/glimext-20261018/preservation.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/preservation.txt` (751 bytes)
+- `exec/results/glimext-20261018/preservation2.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/preservation2.txt` (1089 bytes)
+- `exec/results/glimext-20261018/results.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/results.json` (36925 bytes)
+- `exec/results/glimext-20261018/results.round1.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/results.round1.json` (35670 bytes)
+- `exec/results/glimext-20261018/rt-results.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt-results.txt` (309047 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__base__rep1.log` (27882 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__base__rep2.log` (27587 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__base__rep3.log` (27573 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__base__rep4.log` (27995 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__head__rep1.log` (28340 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__head__rep2.log` (28339 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__head__rep3.log` (28131 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p1024-fpga__fpga__head__rep4.log` (28636 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__base__rep1.log` (29337 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__base__rep2.log` (29680 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__base__rep3.log` (29784 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__base__rep4.log` (29520 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__head__rep1.log` (30291 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__head__rep2.log` (30188 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__head__rep3.log` (29839 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp2-8u-p2048-fpga__fpga__head__rep4.log` (30179 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__base__rep1.log` (36592 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__base__rep2.log` (36797 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__base__rep3.log` (36401 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__base__rep4.log` (36413 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__head__rep1.log` (37241 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__head__rep2.log` (37253 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__head__rep3.log` (37248 bytes)
+- `exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/glm-tp4-8u-p1024-fpga__fpga__head__rep4.log` (37354 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep1.log` (36208 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep2.log` (36408 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep3.log` (36502 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep4.log` (36378 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep1.log` (36505 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep2.log` (36412 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep3.log` (36194 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep4.log` (36390 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__base__rep1.log` (37970 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__base__rep2.log` (38186 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__base__rep3.log` (38387 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__base__rep4.log` (38288 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__head__rep1.log` (38167 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__head__rep2.log` (38190 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__head__rep3.log` (38288 bytes)
+- `exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/gptoss-tp4-8u-p2048-fpga__fpga__head__rep4.log` (37760 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep1.log` (26226 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep2.log` (26236 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep3.log` (26236 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep4.log` (26239 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep1.log` (26237 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep2.log` (26232 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep3.log` (26239 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep4.log` (26231 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep1.log` (30826 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep2.log` (30631 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep3.log` (30616 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep4.log` (30812 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep5.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep5.log` (30816 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep6.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep6.log` (30819 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep7.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep7.log` (30832 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep8.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep8.log` (30826 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep1.log` (30447 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep2.log` (30829 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep3.log` (30835 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep4.log` (30825 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep5.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep5.log` (30829 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep6.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep6.log` (30836 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep7.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep7.log` (30834 bytes)
+- `exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep8.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep8.log` (30831 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep1.log` (27624 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep2.log` (27617 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep3.log` (27624 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep4.log` (27615 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep1.log` (27401 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep2.log` (27618 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep3.log` (27471 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep4.log` (27525 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep1.log` (40258 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep2.log` (40255 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep3.log` (40256 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep4.log` (40258 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep1.log` (40258 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep2.log` (40248 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep3.log` (40247 bytes)
+- `exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep4.log` (39994 bytes)
+- `exec/results/glimext-20261018/smoke/glm-tp2-cpu-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/smoke/glm-tp2-cpu-p1024/smoke.txt` (3276 bytes)
+- `exec/results/glimext-20261018/smoke/glm-tp2-fpga-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/smoke/glm-tp2-fpga-p1024/smoke.txt` (3274 bytes)
+- `exec/results/glimext-20261018/smoke/glm-tp2-fpga-p2048/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/smoke/glm-tp2-fpga-p2048/smoke.txt` (3280 bytes)
+- `exec/results/glimext-20261018/smoke/glm-tp4-fpga-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/smoke/glm-tp4-fpga-p1024/smoke.txt` (3285 bytes)
+- `exec/results/glimext-20261018/smoke/gptoss-tp4-fpga-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/smoke/gptoss-tp4-fpga-p1024/smoke.txt` (3079 bytes)
+- `exec/results/glimext-20261018/smoke/l8b-tp2-cpu-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/smoke/l8b-tp2-cpu-p1024/smoke.txt` (3226 bytes)
+- `exec/results/glimext-20261018/smoke/q4b-tp2-fpga-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/smoke/q4b-tp2-fpga-p1024/smoke.txt` (3111 bytes)
+- `exec/results/glimext-20261018/summary.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/summary.json` (36155 bytes)
+- `exec/results/glimext-20261018/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/tests.txt` (738 bytes)
+- `exec/results/glimext-20261018/tests/preservation2/17qk_rowmajor_128x4.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/tests/preservation2/17qk_rowmajor_128x4.diff` (0 bytes)
+- `exec/results/glimext-20261018/tests/preservation2/18pack_q_group_128x4.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/tests/preservation2/18pack_q_group_128x4.diff` (0 bytes)
+- `exec/results/glimext-20261018/tests/preservation2/21weights_times_v_128x4.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/glimext-20261018/tests/preservation2/21weights_times_v_128x4.diff` (5255 bytes)
+- `exec/scratch-relocated/648b68dc/attn-stats-sample.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/attn-stats-sample.txt` (4097 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/attn-stats-sample.txt`
+- `exec/scratch-relocated/648b68dc/dry.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/dry.sh` (6711 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/dry.sh`
+- `exec/scratch-relocated/648b68dc/issue-rename.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/issue-rename.md` (3754 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/issue-rename.md`
+- `exec/scratch-relocated/648b68dc/issue4444-comment-draft.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/issue4444-comment-draft.md` (3606 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/issue4444-comment-draft.md`
+- `exec/scratch-relocated/648b68dc/issue4444-comment.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/issue4444-comment.md` (6227 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/issue4444-comment.md`
+- `exec/scratch-relocated/648b68dc/issue4444.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/issue4444.json` (11656 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/issue4444.json`
+- `exec/scratch-relocated/648b68dc/margin_py.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/margin_py.py` (1010 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/margin_py.py`
+- `exec/scratch-relocated/648b68dc/muse-glimmer-amx-results.html.bak-20261018` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/muse-glimmer-amx-results.html.bak-20261018` (153335 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/muse-glimmer-amx-results.html.bak-20261018`
+- `exec/scratch-relocated/648b68dc/page-real.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/page-real.html` (171242 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/page-real.html`
+- `exec/scratch-relocated/648b68dc/page-test.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/page-test.html` (170315 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/page-test.html`
+- `exec/scratch-relocated/648b68dc/patch-lock.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/patch-lock.py` (1665 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/patch-lock.py`
+- `exec/scratch-relocated/648b68dc/patch-pr-body.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/patch-pr-body.py` (4800 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/patch-pr-body.py`
+- `exec/scratch-relocated/648b68dc/pr-body-sections-draft.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/pr-body-sections-draft.md` (3228 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/pr-body-sections-draft.md`
+- `exec/scratch-relocated/648b68dc/pr5015-body-final.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/pr5015-body-final.md` (17858 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/pr5015-body-final.md`
+- `exec/scratch-relocated/648b68dc/pr5015-body-live.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/pr5015-body-live.md` (12166 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/pr5015-body-live.md`
+- `exec/scratch-relocated/648b68dc/pr5015-body-live2.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/pr5015-body-live2.md` (12776 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/pr5015-body-live2.md`
+- `exec/scratch-relocated/648b68dc/pr5015-body-new.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/pr5015-body-new.md` (12350 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/pr5015-body-new.md`
+- `exec/scratch-relocated/648b68dc/pr5015-body-test.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/pr5015-body-test.md` (17090 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/pr5015-body-test.md`
+- `exec/scratch-relocated/648b68dc/pr5015-body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/pr5015-body.md` (12689 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/pr5015-body.md`
+- `exec/scratch-relocated/648b68dc/review-findings.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/review-findings.txt` (19988 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/review-findings.txt`
+- `exec/scratch-relocated/648b68dc/runtron-stub.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/runtron-stub.sh` (2382 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/runtron-stub.sh`
+- `exec/scratch-relocated/648b68dc/sec10.svg` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/sec10.svg` (7054 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/sec10.svg`
+- `exec/scratch-relocated/648b68dc/shape-hits.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/shape-hits.txt` (42686 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/shape-hits.txt`
+- `exec/scratch-relocated/648b68dc/smoke_py.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/648b68dc/smoke_py.py` (1860 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/scratchpad/smoke_py.py`
+- `exec/workflows/review-glimext-scripts-wf_924c4c0a-db9.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/review-glimext-scripts-wf_924c4c0a-db9.js` (10250 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/648b68dc-a925-47af-a6eb-b7586de6dc8b/workflows/scripts/review-glimext-scripts-wf_924c4c0a-db9.js`
+- `memory/glimext-20261018-campaign.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/glimext-20261018-campaign.md` (6797 bytes)
+
+Related: [claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md](../../handoffs/claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md)
+
+- `exec/benstack-20261021/README.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/README.md` (1354 bytes)
+- `exec/benstack-20261021/assemble_body.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/assemble_body.py` (11511 bytes)
+- `exec/benstack-20261021/bodies/issue-5097-fix-comment.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/issue-5097-fix-comment.md` (4062 bytes)
+- `exec/benstack-20261021/bodies/issue-5097-root-cause-comment.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/issue-5097-root-cause-comment.md` (8253 bytes)
+- `exec/benstack-20261021/bodies/issue-killswitch-prefill.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/issue-killswitch-prefill.md` (6445 bytes)
+- `exec/benstack-20261021/bodies/pr1fix-body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/pr1fix-body.md` (12884 bytes)
+- `exec/benstack-20261021/bodies/pr2-body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/pr2-body.md` (8929 bytes)
+- `exec/benstack-20261021/bodies/pr2-final.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/pr2-final.md` (11341 bytes)
+- `exec/benstack-20261021/bodies/pr3-body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/pr3-body.md` (9824 bytes)
+- `exec/benstack-20261021/bodies/pr3-final.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/pr3-final.md` (11857 bytes)
+- `exec/benstack-20261021/bodies/pr4-body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/pr4-body.md` (11680 bytes)
+- `exec/benstack-20261021/bodies/pr4-final.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/pr4-final.md` (13889 bytes)
+- `exec/benstack-20261021/bodies/stack-section.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/stack-section.md` (1433 bytes)
+- `exec/benstack-20261021/bodies/words-common.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/bodies/words-common.md` (1016 bytes)
+- `exec/benstack-20261021/build-diag.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/build-diag.sh` (6581 bytes)
+- `exec/benstack-20261021/build.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/build.sh` (7504 bytes)
+- `exec/benstack-20261021/design.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/design.md` (39907 bytes)
+- `exec/benstack-20261021/gen_page.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/gen_page.py` (40490 bytes)
+- `exec/benstack-20261021/ksroot-5097/analyze.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/analyze.py` (1989 bytes)
+- `exec/benstack-20261021/ksroot-5097/base.apply_page_range.dis` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/base.apply_page_range.dis` (74425 bytes)
+- `exec/benstack-20261021/ksroot-5097/exit-report-summary.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/exit-report-summary.txt` (5257 bytes)
+- `exec/benstack-20261021/ksroot-5097/h6/kloop_ws.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/h6/kloop_ws.cpp` (6123 bytes)
+- `exec/benstack-20261021/ksroot-5097/h6/kloop_ws2.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/h6/kloop_ws2.cpp` (6247 bytes)
+- `exec/benstack-20261021/ksroot-5097/head.apply_page_range.dis` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/head.apply_page_range.dis` (74006 bytes)
+- `exec/benstack-20261021/ksroot-5097/lto/aprbody.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/lto/aprbody.py` (1254 bytes)
+- `exec/benstack-20261021/ksroot-5097/lto/base.lto.compare.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/lto/base.lto.compare.txt` (6426 bytes)
+- `exec/benstack-20261021/ksroot-5097/lto/compare.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/lto/compare.py` (2339 bytes)
+- `exec/benstack-20261021/ksroot-5097/lto/head.lto.compare.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/lto/head.lto.compare.txt` (4567 bytes)
+- `exec/benstack-20261021/ksroot-5097/lto/lto-build.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/lto/lto-build.sh` (2311 bytes)
+- `exec/benstack-20261021/ksroot-5097/lto/tiny.cpp` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/lto/tiny.cpp` (127 bytes)
+- `exec/benstack-20261021/ksroot-5097/objcompile.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/objcompile.sh` (1858 bytes)
+- `exec/benstack-20261021/ksroot-5097/objdump-compare.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/objdump-compare.md` (19507 bytes)
+- `exec/benstack-20261021/ksroot-5097/parse_exit_reports.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/parse_exit_reports.py` (4434 bytes)
+- `exec/benstack-20261021/ksroot-5097/prefill-vs-decode.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/prefill-vs-decode.md` (17599 bytes)
+- `exec/benstack-20261021/ksroot-5097/range.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/range.py` (222 bytes)
+- `exec/benstack-20261021/ksroot-5097/root-cause.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/root-cause.md` (31570 bytes)
+- `exec/benstack-20261021/ksroot-5097/run_all.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/run_all.sh` (628 bytes)
+- `exec/benstack-20261021/ksroot-5097/source-diff.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/ksroot-5097/source-diff.md` (20764 bytes)
+- `exec/benstack-20261021/pr4-diagnosis-synthesis.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/pr4-diagnosis-synthesis.md` (16299 bytes)
+- `exec/benstack-20261021/pr4-diagnosis-workflow.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/pr4-diagnosis-workflow.json` (29248 bytes)
+- `exec/benstack-20261021/pr4-diagnosis-workflow.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/pr4-diagnosis-workflow.txt` (124190 bytes)
+- `exec/benstack-20261021/pr4-diagnosis.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/pr4-diagnosis.md` (1707 bytes)
+- `exec/benstack-20261021/run-after-chain.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/run-after-chain.sh` (1187 bytes)
+- `exec/benstack-20261021/run-all.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/run-all.sh` (2317 bytes)
+- `exec/benstack-20261021/run-gates-after-chain.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/run-gates-after-chain.sh` (2127 bytes)
+- `exec/benstack-20261021/run-one.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/run-one.sh` (2266 bytes)
+- `exec/benstack-20261021/status.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/status.json` (18018 bytes)
+- `exec/benstack-20261021/tests.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/benstack-20261021/tests.sh` (5390 bytes)
+- `exec/i5097-20261021/README.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i5097-20261021/README.md` (3454 bytes)
+- `exec/i5097-20261021/build3.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i5097-20261021/build3.sh` (8762 bytes)
+- `exec/i5097-20261021/campaign2.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i5097-20261021/campaign2.sh` (24361 bytes)
+- `exec/i5097-20261021/chain2.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i5097-20261021/chain2.sh` (17013 bytes)
+- `exec/i5097-20261021/gen_report2.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i5097-20261021/gen_report2.py` (12785 bytes)
+- `exec/i5097-20261021/launch2.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i5097-20261021/launch2.sh` (2294 bytes)
+- `exec/i5097-20261021/smoke2.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i5097-20261021/smoke2.sh` (8277 bytes)
+- `exec/i5097-20261021/tests2.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/i5097-20261021/tests2.sh` (5051 bytes)
+- `exec/pr5047-20261020/README.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/README.md` (6808 bytes)
+- `exec/pr5047-20261020/STATUS.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/STATUS.md` (1043 bytes)
+- `exec/pr5047-20261020/build.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/build.sh` (8070 bytes)
+- `exec/pr5047-20261020/build2.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/build2.sh` (8522 bytes)
+- `exec/pr5047-20261020/campaign.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/campaign.sh` (23562 bytes)
+- `exec/pr5047-20261020/chain.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/chain.sh` (15421 bytes)
+- `exec/pr5047-20261020/gen_page.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/gen_page.py` (27526 bytes)
+- `exec/pr5047-20261020/gen_report.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/gen_report.py` (12319 bytes)
+- `exec/pr5047-20261020/killswitch.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/killswitch.sh` (1912 bytes)
+- `exec/pr5047-20261020/launch.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/launch.sh` (2299 bytes)
+- `exec/pr5047-20261020/page_template.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/page_template.html` (58335 bytes)
+- `exec/pr5047-20261020/smoke.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/smoke.sh` (8028 bytes)
+- `exec/pr5047-20261020/tests.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5047-20261020/tests.sh` (4769 bytes)
+- `exec/results/benstack-20261021/build-bp2.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/build-bp2.txt` (1647 bytes)
+- `exec/results/benstack-20261021/build-bp2v.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/build-bp2v.txt` (1648 bytes)
+- `exec/results/benstack-20261021/build-bp3.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/build-bp3.txt` (1633 bytes)
+- `exec/results/benstack-20261021/build-bp3v.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/build-bp3v.txt` (1634 bytes)
+- `exec/results/benstack-20261021/build-bp4.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/build-bp4.txt` (1665 bytes)
+- `exec/results/benstack-20261021/build-bp4v.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/build-bp4v.txt` (1666 bytes)
+- `exec/results/benstack-20261021/probe-bp4d-pagesplit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/probe-bp4d-pagesplit.log` (10746 bytes)
+- `exec/results/benstack-20261021/probe-bp4e-pagesplit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/probe-bp4e-pagesplit.log` (27047 bytes)
+- `exec/results/benstack-20261021/probe-bp4f-pagesplit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/probe-bp4f-pagesplit.log` (10747 bytes)
+- `exec/results/benstack-20261021/probe-bp4g-pagesplit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/probe-bp4g-pagesplit.log` (10746 bytes)
+- `exec/results/benstack-20261021/probe-bp4h-pagesplit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/probe-bp4h-pagesplit.log` (11373 bytes)
+- `exec/results/benstack-20261021/probe-bp4i-pagesplit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/probe-bp4i-pagesplit.log` (29637 bytes)
+- `exec/results/benstack-20261021/probe-bp4j-pagesplit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/probe-bp4j-pagesplit.log` (27054 bytes)
+- `exec/results/benstack-20261021/probe-bp4k-pagesplit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/probe-bp4k-pagesplit.log` (11578 bytes)
+- `exec/results/benstack-20261021/probe-bp4v-pagesplit.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/probe-bp4v-pagesplit.log` (14945 bytes)
+- `exec/results/benstack-20261021/sha-bp2.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/sha-bp2.txt` (41 bytes)
+- `exec/results/benstack-20261021/sha-bp3.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/sha-bp3.txt` (41 bytes)
+- `exec/results/benstack-20261021/sha-bp4.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/sha-bp4.txt` (41 bytes)
+- `exec/results/benstack-20261021/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/benstack-20261021/tests.txt` (5753 bytes)
+- `exec/results/i5097-20261021/build-b47b.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/build-b47b.txt` (1784 bytes)
+- `exec/results/i5097-20261021/build-b47c1.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/build-b47c1.txt` (1503 bytes)
+- `exec/results/i5097-20261021/build-b47f.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/build-b47f.txt` (1510 bytes)
+- `exec/results/i5097-20261021/build-b47h.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/build-b47h.txt` (2319 bytes)
+- `exec/results/i5097-20261021/exit-reports.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/exit-reports.txt` (153112 bytes)
+- `exec/results/i5097-20261021/identity.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/identity.txt` (815 bytes)
+- `exec/results/i5097-20261021/results.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/results.json` (27770 bytes)
+- `exec/results/i5097-20261021/results.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/results.md` (6751 bytes)
+- `exec/results/i5097-20261021/rt-results.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt-results.txt` (135492 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__fix__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__fix__rep1.log` (26247 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__fix__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__fix__rep2.log` (26240 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__fix__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__fix__rep3.log` (26088 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__fix__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__fix__rep4.log` (26233 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep1.log` (26240 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep2.log` (26228 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep3.log` (26234 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep4.log` (26235 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep1.log` (30825 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep2.log` (30821 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep3.log` (30829 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep4.log` (30819 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__fix__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__fix__rep1.log` (30438 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__fix__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__fix__rep2.log` (30821 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__fix__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__fix__rep3.log` (30823 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__fix__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__fix__rep4.log` (30827 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep1.log` (30826 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep2.log` (30819 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep3.log` (30824 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep4.log` (30822 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep1.log` (30358 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep2.log` (29983 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep3.log` (30383 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep4.log` (29990 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__c1off__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__c1off__rep1.log` (30104 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__c1off__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__c1off__rep2.log` (30377 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__c1off__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__c1off__rep3.log` (30190 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__c1off__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__c1off__rep4.log` (29989 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__fixoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__fixoff__rep1.log` (30189 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__fixoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__fixoff__rep2.log` (30378 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__fixoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__fixoff__rep3.log` (30177 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__fixoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__fixoff__rep4.log` (30376 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep1.log` (30377 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep2.log` (30376 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep3.log` (30371 bytes)
+- `exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep4.log` (30182 bytes)
+- `exec/results/i5097-20261021/smoke/l8b-tp2-cpu-p1024-off/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/smoke/l8b-tp2-cpu-p1024-off/smoke.txt` (1563 bytes)
+- `exec/results/i5097-20261021/smoke/l8b-tp2-cpu-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/smoke/l8b-tp2-cpu-p1024/smoke.txt` (2243 bytes)
+- `exec/results/i5097-20261021/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/i5097-20261021/tests.txt` (869 bytes)
+- `exec/results/pr5047-20261020/build-b47b.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/build-b47b.txt` (1784 bytes)
+- `exec/results/pr5047-20261020/build-b47bv.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/build-b47bv.txt` (1482 bytes)
+- `exec/results/pr5047-20261020/build-b47h.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/build-b47h.txt` (2319 bytes)
+- `exec/results/pr5047-20261020/build-b47hv.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/build-b47hv.txt` (2018 bytes)
+- `exec/results/pr5047-20261020/exit-reports.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/exit-reports.txt` (385792 bytes)
+- `exec/results/pr5047-20261020/identity.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/identity.txt` (1842 bytes)
+- `exec/results/pr5047-20261020/results.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/results.json` (46023 bytes)
+- `exec/results/pr5047-20261020/results.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/results.md` (9575 bytes)
+- `exec/results/pr5047-20261020/rt-results.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt-results.txt` (337067 bytes)
+- `exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep1.log` (36008 bytes)
+- `exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep2.log` (36413 bytes)
+- `exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep3.log` (36399 bytes)
+- `exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__base__rep4.log` (36404 bytes)
+- `exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep1.log` (36402 bytes)
+- `exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep2.log` (35987 bytes)
+- `exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep3.log` (36399 bytes)
+- `exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/gptoss-tp4-8u-p1024-fpga__fpga__head__rep4.log` (36400 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep1.log` (26231 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep2.log` (26236 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep3.log` (26237 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__base__rep4.log` (26230 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__basev__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__basev__rep1.log` (25846 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__basev__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__basev__rep2.log` (25846 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__basev__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__basev__rep3.log` (25853 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__basev__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__basev__rep4.log` (25850 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep1.log` (26231 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep2.log` (26236 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep3.log` (26238 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__head__rep4.log` (26240 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__headv__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__headv__rep1.log` (25841 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__headv__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__headv__rep2.log` (25837 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__headv__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__headv__rep3.log` (25840 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__headv__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p1024-cpu__cpu__headv__rep4.log` (25559 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__base__rep1.log` (28001 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__base__rep2.log` (28177 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__base__rep3.log` (28008 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__base__rep4.log` (28008 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__head__rep1.log` (28009 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__head__rep2.log` (28178 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__head__rep3.log` (28005 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p4096-cpu__cpu__head__rep4.log` (28168 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep1.log` (30625 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep2.log` (30820 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep3.log` (30825 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__base__rep4.log` (30828 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__basev__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__basev__rep1.log` (30387 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__basev__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__basev__rep2.log` (29984 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__basev__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__basev__rep3.log` (30382 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__basev__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__basev__rep4.log` (30186 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep1.log` (30438 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep2.log` (30435 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep3.log` (30434 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__head__rep4.log` (30439 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__headv__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__headv__rep1.log` (30379 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__headv__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__headv__rep2.log` (30384 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__headv__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__headv__rep3.log` (30382 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__headv__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-cpu__cpu__headv__rep4.log` (30380 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep1.log` (30355 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep2.log` (30380 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep3.log` (29990 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__baseoff__rep4.log` (29983 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep1.log` (30383 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep2.log` (30183 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep3.log` (30379 bytes)
+- `exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/l8b-tp2-8u-p8192-off__cpu__headoff__rep4.log` (30377 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep1.log` (27625 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep2.log` (27616 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep3.log` (27620 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__base__rep4.log` (27619 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__basev__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__basev__rep1.log` (27629 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__basev__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__basev__rep2.log` (27620 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__basev__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__basev__rep3.log` (27627 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__basev__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__basev__rep4.log` (27621 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep1.log` (27622 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep2.log` (27622 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep3.log` (27625 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__head__rep4.log` (27620 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__headv__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__headv__rep1.log` (27626 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__headv__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__headv__rep2.log` (27308 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__headv__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__headv__rep3.log` (27621 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__headv__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p1024-fpga__fpga__headv__rep4.log` (27308 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep1.log` (39720 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep2.log` (39732 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep3.log` (40255 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__base__rep4.log` (285733 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__basev__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__basev__rep1.log` (39999 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__basev__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__basev__rep2.log` (40001 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__basev__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__basev__rep3.log` (284922 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__basev__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__basev__rep4.log` (40016 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep1.log` (39718 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep2.log` (40250 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep3.log` (40255 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__head__rep4.log` (40251 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__headv__rep1.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__headv__rep1.log` (39482 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__headv__rep2.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__headv__rep2.log` (40006 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__headv__rep3.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__headv__rep3.log` (39742 bytes)
+- `exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__headv__rep4.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/rt/q4b-tp2-8u-p8192-fpga__fpga__headv__rep4.log` (40001 bytes)
+- `exec/results/pr5047-20261020/smoke/gptoss-tp4-fpga-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/smoke/gptoss-tp4-fpga-p1024/smoke.txt` (2266 bytes)
+- `exec/results/pr5047-20261020/smoke/l8b-tp2-cpu-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/smoke/l8b-tp2-cpu-p1024/smoke.txt` (3851 bytes)
+- `exec/results/pr5047-20261020/smoke/q4b-tp2-fpga-p1024/smoke.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/smoke/q4b-tp2-fpga-p1024/smoke.txt` (3884 bytes)
+- `exec/results/pr5047-20261020/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5047-20261020/tests.txt` (1056 bytes)
+- `exec/scratch-relocated/e5f1ec3f/MEMORY.md.bak-20261021` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/MEMORY.md.bak-20261021` (25417 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/MEMORY.md.bak-20261021`
+- `exec/scratch-relocated/e5f1ec3f/ksroot/root-cause.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/ksroot/root-cause.md` (31570 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/ksroot/root-cause.md`
+- `exec/scratch-relocated/e5f1ec3f/overlap.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/overlap.py` (2493 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/overlap.py`
+- `exec/scratch-relocated/e5f1ec3f/plain-english-fixes.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/plain-english-fixes.md` (20746 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/plain-english-fixes.md`
+- `exec/scratch-relocated/e5f1ec3f/pr4-result.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/pr4-result.json` (56703 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/pr4-result.json`
+- `exec/scratch-relocated/e5f1ec3f/pr4956.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/pr4956.diff` (126195 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/pr4956.diff`
+- `exec/scratch-relocated/e5f1ec3f/pr5047-c1.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/pr5047-c1.diff` (4677 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/pr5047-c1.diff`
+- `exec/scratch-relocated/e5f1ec3f/pr5047-c2.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/pr5047-c2.diff` (48289 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/pr5047-c2.diff`
+- `exec/scratch-relocated/e5f1ec3f/pr5047-facts-known.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/pr5047-facts-known.md` (5015 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/pr5047-facts-known.md`
+- `exec/scratch-relocated/e5f1ec3f/pr5047.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/pr5047.diff` (49944 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/pr5047.diff`
+- `exec/scratch-relocated/e5f1ec3f/stack/ben-corpus.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/stack/ben-corpus.md` (22595 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/stack/ben-corpus.md`
+- `exec/scratch-relocated/e5f1ec3f/stack/ben-profile.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/stack/ben-profile.md` (4553 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/stack/ben-profile.md`
+- `exec/scratch-relocated/e5f1ec3f/stack/design-v1.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/stack/design-v1.md` (16202 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/stack/design-v1.md`
+- `exec/scratch-relocated/e5f1ec3f/stack/design.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/stack/design.md` (39907 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/stack/design.md`
+- `exec/scratch-relocated/e5f1ec3f/stack/findings-4957.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/stack/findings-4957.md` (22359 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/stack/findings-4957.md`
+- `exec/scratch-relocated/e5f1ec3f/stack/findings-4958.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/stack/findings-4958.md` (34898 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/stack/findings-4958.md`
+- `exec/scratch-relocated/e5f1ec3f/stack/findings-4959.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/stack/findings-4959.md` (54870 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/stack/findings-4959.md`
+- `exec/scratch-relocated/e5f1ec3f/stack/wfA-critics.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/stack/wfA-critics.md` (107583 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/stack/wfA-critics.md`
+- `exec/scratch-relocated/e5f1ec3f/stack/wfA-result.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/stack/wfA-result.json` (1058525 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/stack/wfA-result.json`
+- `exec/scratch-relocated/e5f1ec3f/status-lanes-v2.svg` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/status-lanes-v2.svg` (7778 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/status-lanes-v2.svg`
+- `exec/scratch-relocated/e5f1ec3f/status.svg` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/status.svg` (7845 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/status.svg`
+- `exec/scratch-relocated/e5f1ec3f/wf-result.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/e5f1ec3f/wf-result.json` (1293677 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/wf-result.json`
+- `exec/workflows/ben-stack-implement-pr-wf_c5916ca6-7e7.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/ben-stack-implement-pr-wf_c5916ca6-7e7.js` (18845 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/workflows/scripts/ben-stack-implement-pr-wf_c5916ca6-7e7.js`
+- `exec/workflows/ben-stack-predictions-wf_e4c2f652-7e0.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/ben-stack-predictions-wf_e4c2f652-7e0.js` (10884 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/workflows/scripts/ben-stack-predictions-wf_e4c2f652-7e0.js`
+- `exec/workflows/f2-dense-mask-review-wf_2a9fd646-f61.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/f2-dense-mask-review-wf_2a9fd646-f61.js` (8642 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/workflows/scripts/f2-dense-mask-review-wf_2a9fd646-f61.js`
+- `exec/workflows/killswitch-prefill-root-cause-wf_163ce000-641.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/killswitch-prefill-root-cause-wf_163ce000-641.js` (11221 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/workflows/scripts/killswitch-prefill-root-cause-wf_163ce000-641.js`
+- `exec/workflows/pr4-prime-page-split-drift-wf_208a07c8-9ac.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr4-prime-page-split-drift-wf_208a07c8-9ac.js` (15058 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/workflows/scripts/pr4-prime-page-split-drift-wf_208a07c8-9ac.js`
+- `exec/workflows/pr5047-understand-wf_d8ce6160-022.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/pr5047-understand-wf_d8ce6160-022.js` (22434 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/workflows/scripts/pr5047-understand-wf_d8ce6160-022.js`
+- `memory/ben-review-skill-g1-g4.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ben-review-skill-g1-g4.md` (1340 bytes)
+- `memory/ben-stack-reexpress-20261021.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/ben-stack-reexpress-20261021.md` (20827 bytes)
+- `memory/draft-pr-run-ci-label.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/draft-pr-run-ci-label.md` (1251 bytes)
+- `memory/issue-5097-killswitch-prefill.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/issue-5097-killswitch-prefill.md` (4231 bytes)
+- `memory/pr4956-description-names-after-5047.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr4956-description-names-after-5047.md` (1219 bytes)
+- `memory/pr5047-ben-refactor-review.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/pr5047-ben-refactor-review.md` (7095 bytes)
+
+Related: [claude_20261030_pr-5022-review-replies-from-isaac.md](../../handoffs/claude_20261030_pr-5022-review-replies-from-isaac.md)
+
+- `exec/scratch-relocated/c19a91bd/pr/build_page.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/build_page.py` (114156 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/build_page.py`
+- `exec/scratch-relocated/c19a91bd/pr/digest.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/digest.md` (365464 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/digest.md`
+- `exec/scratch-relocated/c19a91bd/pr/inline_sorted.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/inline_sorted.json` (42426 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/inline_sorted.json`
+- `exec/scratch-relocated/c19a91bd/pr/isaac_review_body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/isaac_review_body.md` (4744 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/isaac_review_body.md`
+- `exec/scratch-relocated/c19a91bd/pr/issue5021.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/issue5021.md` (3878 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/issue5021.md`
+- `exec/scratch-relocated/c19a91bd/pr/issue_comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/issue_comments.json` (7418 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/issue_comments.json`
+- `exec/scratch-relocated/c19a91bd/pr/items.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/items.json` (45763 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/items.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr.diff` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr.diff` (48838 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr.diff`
+- `exec/scratch-relocated/c19a91bd/pr/pr.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr.json` (31154 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr3879_comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr3879_comments.json` (112478 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr3879_comments.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr4957_comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr4957_comments.json` (70517 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr4957_comments.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr4957_reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr4957_reviews.json` (6803 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr4957_reviews.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr4958_comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr4958_comments.json` (287358 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr4958_comments.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr4958_reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr4958_reviews.json` (7398 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr4958_reviews.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr5015_comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr5015_comments.json` (446297 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr5015_comments.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr5015_issue_comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr5015_issue_comments.json` (9452 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr5015_issue_comments.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr5015_reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr5015_reviews.json` (129027 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr5015_reviews.json`
+- `exec/scratch-relocated/c19a91bd/pr/pr_body.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/pr_body.md` (11339 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr_body.md`
+- `exec/scratch-relocated/c19a91bd/pr/results.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/results.json` (606379 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/results.json`
+- `exec/scratch-relocated/c19a91bd/pr/review_comments.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/review_comments.json` (96615 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/review_comments.json`
+- `exec/scratch-relocated/c19a91bd/pr/reviews.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/reviews.json` (6502 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/reviews.json`
+- `exec/scratch-relocated/c19a91bd/pr/work_inline07_joblog.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/work_inline07_joblog.txt` (287024 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/work_inline07_joblog.txt`
+- `exec/scratch-relocated/c19a91bd/pr/work_top01_buildlog.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/work_top01_buildlog.txt` (287024 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/work_top01_buildlog.txt`
+- `exec/workflows/respond-to-isaac-pr5022-wf_aa5e52f3-4e0.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/respond-to-isaac-pr5022-wf_aa5e52f3-4e0.js` (13382 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/workflows/scripts/respond-to-isaac-pr5022-wf_aa5e52f3-4e0.js`
+

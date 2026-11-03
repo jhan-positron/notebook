@@ -1,0 +1,70 @@
+5061623a346ba5e8d22a6de8b3ab4cc058023214
+AMX attention: update comments that the group_heads parameter made stale
+
+Comment-only. amx_attn_iface.hpp: the file header, Note [AMX attention
+dispatch], the per-page contract diagram, Note [Tile stores write 16
+rows], the tile-geometry comment and Note [QK orientation] now describe
+group_heads query heads (4 or 16) instead of 4, and say that 16 heads
+need no padding. amx_attn.cpp: the shape-constants comment names both
+instantiated group sizes; the transpose comment describes the four stages
+and which lanes each instantiation stores; the store-helper and P-scratch
+comments carry one claim per sentence. self_attention.hpp: the pack-slot,
+fast-path, padding, s_pages and PV comments say kv_mul instead of 4.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+393dbc1759d43021d1adf41c15096133350768d9
+AMX attention: serve kv_mul 16 (Muse Glimmer) with a group_heads template parameter
+
+The three AMX software-attention kernels (pack_q_group_128x4,
+qk_rowmajor_128x4, weights_times_v_128x4) become function templates on
+size_t group_heads, constrained to group_heads_ok (4 or 16). Their
+parameter lists, names, namespace and suffixes are unchanged. The bodies
+stay in amx_attn.cpp, the only -mamx translation unit, which explicitly
+instantiates all three kernels for GROUP_HEADS_4 and GROUP_HEADS_16; that
+list equals group_heads_ok. The gate shape_ok now accepts kv_mul 4 or 16
+with head size 128, so Muse Glimmer 30B (32 query heads over 2 KV heads)
+takes the AMX path; kv_mul 8 (llama-70b, qwen-3-32b) stays refused.
+
+What changes per kernel:
+- pack_q_group_128x4: the head loop bound is group_heads. For 16 heads
+  every packed column is written, so the zero-padding precondition is
+  empty.
+- qk_rowmajor_128x4: the tile loop is unchanged. The transposing store
+  moves into store_transposed_rows<lane>, which runs the previous k loop
+  with lane selectors chosen from the lane number: after the two unpack
+  stages, 128-bit lane l of u[row_group][k] holds tile column 4*l + k, so
+  output row 4*l + k uses selector 0x88 (even lanes) or 0xdd (odd lanes)
+  in stage 3 by bit 0 of l and in stage 4 by bit 1 of l. The 4-head
+  instantiation calls lane 0 only, which is the previous (0x88, 0x88)
+  sequence at the same addresses; the 16-head instantiation adds lanes 1
+  to 3 under if constexpr.
+- weights_times_v_128x4: the P row loop bound is group_heads. The
+  thread_local P scratch exists once per instantiation, so a 4-head call
+  never sees a 16-head call's rows.
+
+For kv_mul 4 the emitted code is unchanged: a clang 19 -O3 compile of the
+old and new amx_attn.cpp gives instruction-identical pack and QK kernels;
+the PV kernel differs only in the thread-local access model of the
+template's static local (general-dynamic instead of local-dynamic, which
+the linker relaxes the same way) and the register names that follow.
+
+Call sites in self_attention.hpp pass geometry.kv_mul() /
+operation_kv_mul as the template argument; the requires-probes in
+t_llama_unit.cpp pass GROUP_HEADS_4.
+
+Tests:
+- t_amx_numerics: the gate case asserts eligibility for kv_mul 16 and
+  refusal for kv_mul 8; the Q-pack, QK and PV cases run for 4 and 16
+  heads. The QK case fills a 16-row score buffer with a sentinel and
+  requires rows group_heads..15 untouched, pinning "s needs only
+  group_heads rows".
+- t_amx_dispatch_dtype: the CPU fakes define the primary templates and
+  each records the group size it was instantiated with; every round
+  requires the pack, QK and PV group sizes to equal the model's.
+  exercise_page takes the head count as a template parameter and gets a
+  16-head full-page section. The query fill gives every head its own
+  offset so a head permutation cannot pass.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+

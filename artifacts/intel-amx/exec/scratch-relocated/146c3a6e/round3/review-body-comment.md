@@ -1,0 +1,4 @@
+Wade-code-review: the two description items of the review at 5061623a34 have no inline thread, so this comment answers them. Both are applied in the description.
+
+- The comparator row names its source: repository positron-ai/systems_test, workflow "System CI (Rinzler 72-core Intel system OCI version)", job system_ci, run 38999609242 (2026-10-17), linked from the row. TPS and TTFT come from the final `Running averages: TTFT=3696, TPS=78.69` line of that job's log. The TTFT cell now reads 3696 ms; it read 3697, and the source of that value is not recorded.
+- "our half" is defined at its first use: one socket of delphi-3bda with 4 of its 8 FPGA cards. The raw-result file names stay as identifiers, and one sentence now says they are the author's files on delphi-3bda, not files in this repository.

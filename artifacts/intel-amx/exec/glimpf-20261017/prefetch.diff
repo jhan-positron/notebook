@@ -1,0 +1,632 @@
+diff --git a/h/tron/kernels/amx_attn_iface.hpp b/h/tron/kernels/amx_attn_iface.hpp
+index 503b288f9c..a947cd5dc8 100644
+--- a/h/tron/kernels/amx_attn_iface.hpp
++++ b/h/tron/kernels/amx_attn_iface.hpp
+@@ -108,6 +108,32 @@
+ // (s_transposed), and the transpose that reads that buffer writes only the
+ // group_heads query rows into the caller's `s`, so `s` needs only group_heads
+ // rows (s[group_heads][s_stride_floats]).
++//
++// Note [Next-page prefetch]
++// ~~~~~~~~~~~~~~~~~~~~~~~~~
++// In decode every KV page is read once per forward, and the pages one engine
++// reads per forward (hundreds of MB) do not fit the caches. So the 16 K tile
++// loads of qk_rowmajor_128x4 and the 16 V tile loads of weights_times_v_128x4
++// wait for memory. The hardware prefetcher does not help: it stops at a 4 KB
++// boundary, and a 16 KB plane spans four of them. The kernels therefore take
++// the next dense page's plane (next_k, next_v) and issue a software prefetch
++// (PREFETCHT1; hint T1 = bring the line into the L2 cache) for one 1 KB slice
++// of that plane after each of their 16 tile loads. The whole next plane is
++// requested exactly once, spread over the kernel, while the current page
++// computes. The spread matters: one burst of all 256 prefetches at the top
++// of a kernel fills the core's line-fill buffers and measured no gain.
++// The call site (apply_page_range in self_attention.hpp) looks one page ahead
++// in the page range of the same KV head and passes the planes of that page
++// when it is full, and only with the first AMX visit of the current page: in
++// a prompt forward one page is reused by up to every query of the batch, and
++// one prefetch per page is enough. Null pointers mean no prefetch.
++// A prefetch has no architectural effect: it changes no value and faults on
++// nothing. The outputs with and without the pointers are therefore identical
++// bit for bit (t_amx_numerics.cpp checks that).
++// TRON_AMX_PREFETCH_DISABLE=1 in the environment makes the call site pass null
++// pointers (prefetch_enabled() is false). Like TRON_AMX_DISABLE it is read
++// once, at the first call, and selects the behavior of a whole run. It exists
++// for the same-binary A/B of this prefetch.
+ 
+ #include <cstddef>
+ #include <type_traits>
+@@ -184,6 +210,21 @@ constexpr bool eligible(size_t model_head_size, size_t model_kv_mul) noexcept {
+ // process lifetime. See Note [AMX attention dispatch].
+ bool available() noexcept;
+ 
++// False when TRON_AMX_PREFETCH_DISABLE is `1`: the call site then passes no
++// prefetch planes to the kernels (Note [Next-page prefetch]). Read once; the
++// result is cached for the process lifetime.
++bool prefetch_enabled() noexcept;
++
++// The planes of the next dense page of the same KV head, for the kernels'
++// software prefetch (Note [Next-page prefetch]); null pointers mean no
++// prefetch. k = the first byte of that page's native K plane, v = the first
++// byte of its packed V plane. The pointers are void: the kernels hand them to
++// the prefetch instruction only and read no element through them.
++struct prefetch_planes {
++  const void* k = nullptr;
++  const void* v = nullptr;
++};
++
+ // Pack one query group (group_heads query heads x 128 dims, contiguous bf16)
+ // into the tile B-operand (VNNI pair-interleaved) layout consumed by
+ // qk_rowmajor_128x4. VNNI (Vector Neural Network Instructions) layout means
+@@ -238,13 +279,16 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+ // k_page = the page's whole native K plane, 64 tokens x 128 dims bf16
+ // row-major (the kv_block K storage), passed as its typed view so that a
+ // packed V plane or a bare pointer cannot be handed in by mistake; q_packed =
+-// the pack_q_group_128x4 output.
++// the pack_q_group_128x4 output; next_k = the first byte of the next dense
++// page's K plane, prefetched and never read (Note [Next-page prefetch]), or
++// nullptr for no prefetch.
+ template <size_t group_heads>
+   requires(group_heads_ok(group_heads))
+ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+     const bf16* q_packed,
+     float* s,
+-    size_t s_stride_floats) noexcept;
++    size_t s_stride_floats,
++    const void* next_k) noexcept;
+ 
+ // Weights-times-values for one page: O = P[group_heads][64] . V_page, where P
+ // (the exponentiated scores, i.e. the unnormalized softmax weights) comes from
+@@ -252,14 +296,17 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+ // page's packed V plane (v_vnni_view, see Note [VNNI Packed V layout] in
+ // h/tron/tensor/v_vnni.hpp), consumed in place as the B operand. `o` MUST hold
+ // 16 * 128 fp32 (8192 bytes, aligned to 64 bytes, row stride 128 floats);
+-// see Note [Tile stores write 16 rows].
++// see Note [Tile stores write 16 rows]. next_v = the first byte of the next
++// dense page's packed V plane, prefetched and never read (Note [Next-page
++// prefetch]), or nullptr for no prefetch.
+ template <size_t group_heads>
+   requires(group_heads_ok(group_heads))
+ void weights_times_v_128x4(
+     v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page,
+     const float* exp_rows,
+     size_t row_stride_floats,
+-    float* o) noexcept;
++    float* o,
++    const void* next_v) noexcept;
+ 
+ // Tile-configuration bracket for a worker's AMX region.
+ // See Note [AMX attention dispatch].
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 9eaa59ea98..d89eb97f0a 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -1537,6 +1537,9 @@ struct self_attention {
+           amx_attn_h128g4::eligible<typename model::activation_scalar>(
+               geometry.kv.head_size, geometry.kv_mul());
+       const bool amx_on = amx_eligible && amx_attn_h128g4::available();
++      // Whether the kernels prefetch the next page (Note [Next-page prefetch]
++      // in amx_attn_iface.hpp); TRON_AMX_PREFETCH_DISABLE=1 turns it off.
++      const bool amx_prefetch = amx_on && amx_attn_h128g4::prefetch_enabled();
+       // Packed-Q storage: this worker's scratchpad slots (attn_accum::amx_qpack),
+       // one 4096-byte slot per token of the minibatch, indexed by
+       // batch_job_ix like v_stars. Only this worker touches attn[scratchpad]
+@@ -1561,8 +1564,8 @@ struct self_attention {
+         if (amx_on) amx_attn_h128g4::end_region();
+       });
+ #endif
+-      for (page_id page_ix : page_range) {
+-        page& page = *(enclosing_state.pages[page_ix]);
++      for (size_t page_pos = 0; page_pos < page_range.size(); page_pos++) {
++        page& page = *(enclosing_state.pages[page_range[page_pos]]);
+         const size_t n_entries = page.count();
+         // Find the range covering this page's first entry once per page.
+         // Consecutive pages are typically in the same or adjacent range,
+@@ -1584,6 +1587,26 @@ struct self_attention {
+           page_end_hint = page_begin_hint;
+           continue;
+         }
++        // The planes the AMX kernels prefetch while scoring this page: those
++        // of the next page of this range for the same KV head, when that page
++        // is full (only a full page can be a dense AMX page). The first AMX
++        // visit of this page carries them and then clears them, so the next
++        // page is requested once per page, not once per query. See Note
++        // [Next-page prefetch] in amx_attn_iface.hpp.
++        amx_attn_h128g4::prefetch_planes amx_next{};
++#ifdef TRON_AMX_DISPATCH
++        if constexpr (amx_eligible) {
++          if (amx_prefetch && page_pos + 1 < page_range.size()) {
++            const auto& next_page = *(enclosing_state.pages[page_range[page_pos + 1]]);
++            if (next_page.count() == page::page_size) {
++              amx_next.k =
++                  next_page.template k<geometry.kv>(binding.kv_slot, kv_head).data;
++              amx_next.v = detail::v_vnni_access::prefetch_base(
++                  next_page.template v_packed<geometry.kv>(binding.kv_slot, kv_head));
++            }
++          }
++        }
++#endif
+         // Page-level visibility gate. The first token's range is exact when
+         // visibility only narrows along the page, the common case. A fresh
+         // page has one range per token, so the union over its ranges costs an
+@@ -1635,11 +1658,16 @@ struct self_attention {
+             }
+           }
+ #endif
+-          const page_tok_result visit = apply_page_tok<geometry>(was_valid, page,
+-              operation, operation_scale, kv_head, q, q_tok, sp, tok_ix,
+-              page_begin_hint, sliding_window_size, run_visible_in_software, amx_qp);
++          const page_tok_result visit =
++              apply_page_tok<geometry>(was_valid, page, operation, operation_scale,
++                  kv_head, q, q_tok, sp, tok_ix, page_begin_hint, sliding_window_size,
++                  run_visible_in_software, amx_qp, amx_next);
+           const int relevant_k_tokens = visit.relevant_k_tokens;
+           page_end_hint = visit.hint;
++#ifdef TRON_AMX_DISPATCH
++          // The first AMX visit of this page carried the prefetch planes.
++          if (visit.served == attn_stats::visit_path::amx) amx_next = {};
++#endif
+           if (stats_enabled) {
+             stats_tally.record(visit.served, relevant_k_tokens, page::page_size);
+             path_bits[tok_ix.i] |= attn_stats::path_bit(visit.served);
+@@ -1730,6 +1758,8 @@ struct self_attention {
+     // (v*, s*, m*) for this query token and kv_head from earlier pages. When
+     // true, this page is folded into that state; when false, this page starts
+     // it. apply_page_range computes it as sp.is_valid_for(kv_head).
++    // next: the planes of the next dense page for the kernels' prefetch, or
++    // null pointers (Note [Next-page prefetch] in amx_attn_iface.hpp).
+     template <attention_geometry geometry>
+     TRON(inline)
+     void apply_dense_amx_page(bool was_valid,
+@@ -1738,7 +1768,8 @@ struct self_attention {
+         float operation_scale,
+         size_t kv_head,
+         token_scratchpad_ref<geometry>& scratchpad,
+-        const bf16* q_packed) noexcept {
++        const bf16* q_packed,
++        amx_attn_h128g4::prefetch_planes next) noexcept {
+       constexpr size_t operation_kv_mul = geometry.kv_mul();
+       constexpr size_t operation_head_size = geometry.kv.head_size;
+       static_assert(amx_attn_h128g4::eligible<typename model::activation_scalar>(
+@@ -1762,7 +1793,7 @@ struct self_attention {
+           "the AMX kernels read s_pages as one block: rows must be consecutive");
+       amx_attn_h128g4::qk_rowmajor_128x4<operation_kv_mul>(
+           pg.template k<geometry.kv>(slot, kv_head), q_packed, &s_pages[0][0],
+-          page::page_size);
++          page::page_size, next.k);
+       // Scale (or softcap), page max, exp and sum per head: the same math as
+       // the dotter epilogue in apply_page_tok, on the AMX scores.
+       float corr_arr[operation_kv_mul], m_new_arr[operation_kv_mul],
+@@ -1790,7 +1821,7 @@ struct self_attention {
+       alignas(64) float amx_o[amx_attn_h128g4::TILE_ROWS_16 * operation_head_size];
+       amx_attn_h128g4::weights_times_v_128x4<operation_kv_mul>(
+           pg.template v_packed<geometry.kv>(slot, kv_head), &s_pages[0][0],
+-          page::page_size, amx_o);
++          page::page_size, amx_o, next.v);
+       // The v*/s*/m* update, from the AMX PV output instead of scaled_v.
+       for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
+         scratchpad_ref<geometry> head_sp =
+@@ -1842,7 +1873,8 @@ struct self_attention {
+         const token_range* range_hint,
+         int sliding_window_size,
+         bool run_visible_in_software,
+-        tron_maybe_unused const bf16* amx_q_packed) {
++        tron_maybe_unused const bf16* amx_q_packed,
++        tron_maybe_unused amx_attn_h128g4::prefetch_planes amx_next) {
+       constexpr size_t operation_kv_mul = geometry.kv_mul();
+       constexpr size_t operation_head_size = geometry.kv.head_size;
+       const attention_binding binding = operation.binding;
+@@ -1883,8 +1915,8 @@ struct self_attention {
+         if (amx_q_packed != nullptr &&
+             is_dense_amx_page(page, begin, end, query_visible, *range_hint, q_position,
+                 k_position, sliding_window_size)) {
+-          apply_dense_amx_page<geometry>(
+-              was_valid, page, slot, operation_scale, kv_head, sp, amx_q_packed);
++          apply_dense_amx_page<geometry>(was_valid, page, slot, operation_scale,
++              kv_head, sp, amx_q_packed, amx_next);
+           // The hint is returned unchanged: is_dense_amx_page proved that the
+           // page's last token is below range_hint->tok_hi, so the dotter's
+           // advance (kv_idx >= tok_hi below) could not have fired for this
+diff --git a/h/tron/tensor/v_vnni.hpp b/h/tron/tensor/v_vnni.hpp
+index db5e59b88c..e589d975b6 100644
+--- a/h/tron/tensor/v_vnni.hpp
++++ b/h/tron/tensor/v_vnni.hpp
+@@ -51,7 +51,9 @@
+ // use the typed operations or the page accessors built on them (page::set_v,
+ // page::get_v, page::append_v, page::v_packed). book::fill_random is the one
+ // documented exception: it fills a whole kv_block without interpreting
+-// coordinates.
++// coordinates. The AMX dispatch in self_attention.hpp also takes a plane's
++// first byte as a void pointer (v_vnni_access::prefetch_base), for a software
++// prefetch only: that pointer reaches no element.
+ //
+ // Writing rules are the cache's: see Note [Zero-Initialized V Slots] in
+ // kv_cache.hpp. In short, appending an even token also zeroes its odd partner,
+@@ -165,6 +167,16 @@ struct v_vnni_access final {
+     return v.data_;
+   }
+ 
++  // The plane's first byte for a software prefetch, as a void pointer: it
++  // reaches no element and names no layout. The AMX dispatch in
++  // self_attention.hpp hands it to the PV kernel as the next page to prefetch
++  // (Note [Next-page prefetch] in amx_attn_iface.hpp).
++  template <typename T, size_t Rows, size_t Cols>
++  TRON(nodiscard, inline, pure)
++  static const void* prefetch_base(v_vnni_view<T, Rows, Cols> v) noexcept {
++    return v.data_;
++  }
++
+   // First element of the pair row holding `token`: the route of the bulk
+   // save/load/copy operations. Precondition: token < Rows. It is asserted here,
+   // one compare-and-branch per call (TRON_ASSERT is active in release builds).
+diff --git a/src/tron/kernels/amx_attn.cpp b/src/tron/kernels/amx_attn.cpp
+index 55753c1437..a07ea96880 100644
+--- a/src/tron/kernels/amx_attn.cpp
++++ b/src/tron/kernels/amx_attn.cpp
+@@ -113,6 +113,17 @@ bool available() noexcept {
+   return ok;
+ }
+ 
++bool prefetch_enabled() noexcept {
++  // The kill switch of the next-page prefetch (Note [Next-page prefetch] in
++  // amx_attn_iface.hpp), read once at the first call and constant afterwards,
++  // the same rule as TRON_AMX_DISABLE above: exactly "1" disables.
++  static const bool off = [] {
++    const char* value = std::getenv("TRON_AMX_PREFETCH_DISABLE");
++    return value != nullptr && std::strcmp(value, "1") == 0;
++  }();
++  return !off;
++}
++
+ void begin_region() noexcept {
+   tile_config cfg{};
+   cfg.palette = 1;
+@@ -182,6 +193,48 @@ inline void store_transposed_rows(
+   }
+ }
+ 
++// The software prefetch of the next page's planes (Note [Next-page prefetch]
++// in amx_attn_iface.hpp). A native K plane and a packed V plane are both
++// PAGE_TOKENS_64 x HEAD_SIZE_128 bf16 = 16 KB. Each kernel loads its plane in
++// PLANE_TILE_LOADS tile loads of TILE_BYTES (1 KB) and prefetches one
++// TILE_BYTES slice of the next page's plane after each of them, so the next
++// plane is requested exactly once by the time the kernel ends.
++constexpr size_t PLANE_BYTES = PAGE_TOKENS_64 * HEAD_SIZE_128 * sizeof(bf16);
++constexpr size_t TILE_BYTES = TILE_ROWS_16 * TILE_ROW_BYTES_64;
++constexpr size_t PLANE_TILE_LOADS = PLANE_BYTES / TILE_BYTES;
++static_assert(PLANE_TILE_LOADS * TILE_BYTES == PLANE_BYTES,
++    "the tile loads of one kernel cover its plane exactly");
++// Both kernels load their plane in PLANE_TILE_LOADS tile loads: QK in
++// (HEAD_SIZE_128 / DIM_STEP_32) steps x (PAGE_TOKENS_64 / TILE_ROWS_16) K
++// blocks, PV in (PAGE_TOKENS_64 / (V_PAIR_TOKENS_2 * TILE_ROWS_16)) bands of
++// 16 pair rows x (V_PAIR_ROW_BYTES / TILE_ROW_BYTES_64) tile-wide columns of
++// a pair row.
++constexpr size_t QK_K_TILE_LOADS =
++    (HEAD_SIZE_128 / DIM_STEP_32) * (PAGE_TOKENS_64 / TILE_ROWS_16);
++constexpr size_t PV_V_TILE_LOADS = (PAGE_TOKENS_64 / (V_PAIR_TOKENS_2 * TILE_ROWS_16)) *
++                                   (V_PAIR_ROW_BYTES / TILE_ROW_BYTES_64);
++static_assert(
++    QK_K_TILE_LOADS == PLANE_TILE_LOADS && PV_V_TILE_LOADS == PLANE_TILE_LOADS,
++    "one prefetched slice per tile load covers the whole next plane");
++// PREFETCHT1 brings one 64-byte x86 cache line into the L2 cache.
++constexpr size_t PREFETCH_LINE_BYTES_64 = 64;
++constexpr size_t PREFETCH_LINES_PER_SLICE = TILE_BYTES / PREFETCH_LINE_BYTES_64;
++
++// Requests slice `slice` (TILE_BYTES at slice * TILE_BYTES) of `plane`, the
++// next page's K or packed V plane, into this core's L2 cache: one PREFETCHT1
++// (hint T1 = bring the line into L2, not L1) per cache line of the slice. A
++// null plane means no prefetch: the caller had no next dense page, or
++// TRON_AMX_PREFETCH_DISABLE is set. A prefetch has no architectural effect,
++// so the kernel's output does not depend on `plane` (t_amx_numerics.cpp
++// checks that).
++inline void prefetch_slice(const void* plane, size_t slice) noexcept {
++  if (plane == nullptr) return;
++  const char* const lines = static_cast<const char*>(plane) + slice * TILE_BYTES;
++  for (size_t line = 0; line < PREFETCH_LINES_PER_SLICE; line++) {
++    _mm_prefetch(lines + line * PREFETCH_LINE_BYTES_64, _MM_HINT_T1);
++  }
++}
++
+ }  // namespace
+ 
+ // S^T[64][16] = K_page . Q^T in tiles (K row-major as the A operand, packed
+@@ -193,7 +246,8 @@ template <size_t group_heads>
+ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page,
+     const bf16* q_packed,
+     float* s,
+-    size_t s_stride_floats) noexcept {
++    size_t s_stride_floats,
++    const void* next_k) noexcept {
+   // The view's data pointer is token 0's row; the tile loads below read the 64
+   // consecutive 128-dim rows behind it, which is what the view type promises.
+   const bf16* const k_rows = k_page.data;
+@@ -203,20 +257,27 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+   _tile_zero(ACCUMULATOR_TILE_1);
+   _tile_zero(ACCUMULATOR_TILE_2);
+   _tile_zero(ACCUMULATOR_TILE_3);
++  // Which slice of the next page's K plane the next K tile load prefetches:
++  // one slice per load, all PLANE_TILE_LOADS slices over the loop.
++  size_t next_k_slice = 0;
+   for (size_t step = 0; step < HEAD_SIZE_128 / DIM_STEP_32; step++) {
+     _tile_loadd(
+         Q_TILE_6, q_packed + step * TILE_ROWS_16 * DIM_STEP_32, TILE_ROW_BYTES_64);
+     _tile_loadd(K_EVEN_BLOCK_TILE_4,
+         k_rows + 0 * TILE_ROWS_16 * HEAD_SIZE_128 + step * DIM_STEP_32, BF16_ROW_BYTES);
++    prefetch_slice(next_k, next_k_slice++);
+     _tile_dpbf16ps(ACCUMULATOR_TILE_0, K_EVEN_BLOCK_TILE_4, Q_TILE_6);
+     _tile_loadd(K_ODD_BLOCK_TILE_5,
+         k_rows + 1 * TILE_ROWS_16 * HEAD_SIZE_128 + step * DIM_STEP_32, BF16_ROW_BYTES);
++    prefetch_slice(next_k, next_k_slice++);
+     _tile_dpbf16ps(ACCUMULATOR_TILE_1, K_ODD_BLOCK_TILE_5, Q_TILE_6);
+     _tile_loadd(K_EVEN_BLOCK_TILE_4,
+         k_rows + 2 * TILE_ROWS_16 * HEAD_SIZE_128 + step * DIM_STEP_32, BF16_ROW_BYTES);
++    prefetch_slice(next_k, next_k_slice++);
+     _tile_dpbf16ps(ACCUMULATOR_TILE_2, K_EVEN_BLOCK_TILE_4, Q_TILE_6);
+     _tile_loadd(K_ODD_BLOCK_TILE_5,
+         k_rows + 3 * TILE_ROWS_16 * HEAD_SIZE_128 + step * DIM_STEP_32, BF16_ROW_BYTES);
++    prefetch_slice(next_k, next_k_slice++);
+     _tile_dpbf16ps(ACCUMULATOR_TILE_3, K_ODD_BLOCK_TILE_5, Q_TILE_6);
+   }
+   _tile_stored(ACCUMULATOR_TILE_0, s_transposed + 0 * TILE_FP32S, TILE_ROW_BYTES_64);
+@@ -267,7 +328,8 @@ void weights_times_v_128x4(
+     v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128> v_page,
+     const float* exp_rows,
+     size_t row_stride_floats,
+-    float* o) noexcept {
++    float* o,
++    const void* next_v) noexcept {
+   // The packed plane's first element; pair row s*16 starts s*16*2*128 elements
+   // later (Note [VNNI Packed V layout] in h/tron/tensor/v_vnni.hpp). This kernel is
+   // one of the two layout-specific readers allowed to take the plane address.
+@@ -292,6 +354,9 @@ void weights_times_v_128x4(
+     }
+   }
+   constexpr size_t P_ROW_BYTES = PAGE_TOKENS_64 * sizeof(uint16_t);
++  // Which slice of the next page's packed V plane the next V tile load
++  // prefetches: one slice per load, all PLANE_TILE_LOADS slices over the loops.
++  size_t next_v_slice = 0;
+   for (int half = 0; half < 2; half++) {
+     _tile_zero(ACCUMULATOR_TILE_0);
+     _tile_zero(ACCUMULATOR_TILE_1);
+@@ -303,21 +368,25 @@ void weights_times_v_128x4(
+           v_pairs + s * TILE_ROWS_16 * HEAD_SIZE_128 * V_PAIR_TOKENS_2 +
+               (half * PV_TILES_PER_HALF_4) * DIM_STEP_32,
+           V_PAIR_ROW_BYTES);
++      prefetch_slice(next_v, next_v_slice++);
+       _tile_dpbf16ps(ACCUMULATOR_TILE_0, P_TILE_4, V_EVEN_SLICE_TILE_5);
+       _tile_loadd(V_ODD_SLICE_TILE_6,
+           v_pairs + s * TILE_ROWS_16 * HEAD_SIZE_128 * V_PAIR_TOKENS_2 +
+               (half * PV_TILES_PER_HALF_4 + 1) * DIM_STEP_32,
+           V_PAIR_ROW_BYTES);
++      prefetch_slice(next_v, next_v_slice++);
+       _tile_dpbf16ps(ACCUMULATOR_TILE_1, P_TILE_4, V_ODD_SLICE_TILE_6);
+       _tile_loadd(V_EVEN_SLICE_TILE_5,
+           v_pairs + s * TILE_ROWS_16 * HEAD_SIZE_128 * V_PAIR_TOKENS_2 +
+               (half * PV_TILES_PER_HALF_4 + 2) * DIM_STEP_32,
+           V_PAIR_ROW_BYTES);
++      prefetch_slice(next_v, next_v_slice++);
+       _tile_dpbf16ps(ACCUMULATOR_TILE_2, P_TILE_4, V_EVEN_SLICE_TILE_5);
+       _tile_loadd(V_ODD_SLICE_TILE_6,
+           v_pairs + s * TILE_ROWS_16 * HEAD_SIZE_128 * V_PAIR_TOKENS_2 +
+               (half * PV_TILES_PER_HALF_4 + 3) * DIM_STEP_32,
+           V_PAIR_ROW_BYTES);
++      prefetch_slice(next_v, next_v_slice++);
+       _tile_dpbf16ps(ACCUMULATOR_TILE_3, P_TILE_4, V_ODD_SLICE_TILE_6);
+     }
+     _tile_stored(ACCUMULATOR_TILE_0, o + half * 64 + 0, O_ROW_BYTES);
+@@ -336,21 +405,25 @@ template void qk_rowmajor_128x4<GROUP_HEADS_4>(
+     const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>,
+     const bf16*,
+     float*,
+-    size_t) noexcept;
++    size_t,
++    const void*) noexcept;
+ template void qk_rowmajor_128x4<GROUP_HEADS_16>(
+     const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>,
+     const bf16*,
+     float*,
+-    size_t) noexcept;
++    size_t,
++    const void*) noexcept;
+ template void weights_times_v_128x4<GROUP_HEADS_4>(
+     v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>,
+     const float*,
+     size_t,
+-    float*) noexcept;
++    float*,
++    const void*) noexcept;
+ template void weights_times_v_128x4<GROUP_HEADS_16>(
+     v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>,
+     const float*,
+     size_t,
+-    float*) noexcept;
++    float*,
++    const void*) noexcept;
+ 
+ }  // namespace tron::amx_attn_h128g4
+diff --git a/t/t_amx_dispatch_dtype.cpp b/t/t_amx_dispatch_dtype.cpp
+index d6853101ba..57be633663 100644
+--- a/t/t_amx_dispatch_dtype.cpp
++++ b/t/t_amx_dispatch_dtype.cpp
+@@ -247,6 +247,11 @@ namespace tron::amx_attn_h128g4 {
+ bool available() noexcept {
+   return fake_amx_available;
+ }
++// The prefetch switch is on, as in a run without TRON_AMX_PREFETCH_DISABLE;
++// the fake kernels ignore the planes they are handed.
++bool prefetch_enabled() noexcept {
++  return true;
++}
+ void begin_region() noexcept {}
+ void end_region() noexcept {}
+ 
+@@ -267,7 +272,8 @@ template <size_t group_heads>
+ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>,
+     const bf16*,
+     float* output,
+-    size_t stride) noexcept {
++    size_t stride,
++    const void*) noexcept {
+   ++probe.qk_calls;
+   probe.qk_group_heads = group_heads;
+   std::fill_n(output, group_heads * stride, 0.0f);
+@@ -277,7 +283,8 @@ template <size_t group_heads>
+ void weights_times_v_128x4(v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>,
+     const float*,
+     size_t,
+-    float* output) noexcept {
++    float* output,
++    const void*) noexcept {
+   ++probe.pv_calls;
+   probe.pv_group_heads = group_heads;
+   std::fill_n(output, TILE_ROWS_16 * HEAD_SIZE_128, 0.0f);
+diff --git a/t/t_amx_numerics.cpp b/t/t_amx_numerics.cpp
+index eeef8276e5..70e56d69e4 100644
+--- a/t/t_amx_numerics.cpp
++++ b/t/t_amx_numerics.cpp
+@@ -182,7 +182,7 @@ void check_qk() {
+     // native K plane the kernel takes.
+     tron::amx_attn_h128g4::qk_rowmajor_128x4<group_heads>(
+         tron::const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>{in->k}, q_packed,
+-        &s_amx[0][0], PAGE_TOKENS_64);
++        &s_amx[0][0], PAGE_TOKENS_64, nullptr);
+     tron::amx_attn_h128g4::end_region();
+ 
+     for (size_t qi = 0; qi < group_heads; ++qi) {
+@@ -267,7 +267,7 @@ void check_pv() {
+       o_amx[TILE_ROWS_16 * HEAD_SIZE_128];  // See Note [Tile stores write 16 rows]
+   tron::amx_attn_h128g4::begin_region();
+   tron::amx_attn_h128g4::weights_times_v_128x4<group_heads>(
+-      v_owner->as_view(), &exp_rows[0][0], PAGE_TOKENS_64, o_amx);
++      v_owner->as_view(), &exp_rows[0][0], PAGE_TOKENS_64, o_amx, nullptr);
+   tron::amx_attn_h128g4::end_region();
+ 
+   double total_rounding_gap = 0;
+@@ -300,6 +300,78 @@ void check_pv() {
+   REQUIRE(total_rounding_gap > 0.0);
+ }
+ 
++using v_plane_owner = tron::v_vnni_tensor<PAGE_TOKENS_64, HEAD_SIZE_128>;
++
++// One packed V plane with random bf16 content, filled through the typed write
++// path (append_v_row) like check_pv's owner; on the heap for its alignment.
++std::unique_ptr<v_plane_owner> random_v_owner(uint32_t seed) {
++  std::mt19937 gen(seed);
++  std::uniform_real_distribution<float> uv(-1.f, 1.f);
++  auto owner = std::make_unique<v_plane_owner>();
++  for (size_t t = 0; t < PAGE_TOKENS_64; ++t) {
++    alignas(tron::chunk_alignment) tron::bf16 row[HEAD_SIZE_128];
++    for (size_t d = 0; d < HEAD_SIZE_128; ++d) {
++      row[d] = tron::bf16::from_bits(bf16_rne(uv(gen)));
++    }
++    tron::append_v_row(owner->as_view(), t, tron::v_source_row<HEAD_SIZE_128>(row));
++  }
++  return owner;
++}
++
++// Note [Next-page prefetch] in amx_attn_iface.hpp: the kernels take the next
++// page's planes only to prefetch them, and a prefetch has no architectural
++// effect. So the outputs with and without the planes must be the same bit for
++// bit, and the prefetched page must keep its bytes. This pins that contract:
++// a change that reads a value through next_k / next_v, or writes through
++// them, fails here before it can change a token.
++template <size_t group_heads>
++void check_prefetch_identity() {
++  // QK: score page `cur` twice, the second time with page `next` to prefetch.
++  auto cur = std::make_unique<qk_inputs<group_heads>>();
++  auto next = std::make_unique<qk_inputs<group_heads>>();
++  fill_qk(*cur, 21u);
++  fill_qk(*next, 22u);
++  const auto next_before = std::make_unique<qk_inputs<group_heads>>(*next);
++  alignas(64) tron::bf16 q_packed[tron::amx_attn_h128g4::Q_PACK_ELEMS_2048] = {};
++  tron::amx_attn_h128g4::pack_q_group_128x4<group_heads>(cur->q, q_packed);
++  alignas(64) float s_plain[GROUP_HEADS_16][PAGE_TOKENS_64] = {};
++  alignas(64) float s_prefetch[GROUP_HEADS_16][PAGE_TOKENS_64] = {};
++  tron::amx_attn_h128g4::begin_region();
++  tron::amx_attn_h128g4::qk_rowmajor_128x4<group_heads>(
++      tron::const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>{cur->k}, q_packed,
++      &s_plain[0][0], PAGE_TOKENS_64, nullptr);
++  tron::amx_attn_h128g4::qk_rowmajor_128x4<group_heads>(
++      tron::const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>{cur->k}, q_packed,
++      &s_prefetch[0][0], PAGE_TOKENS_64, next->k);
++  tron::amx_attn_h128g4::end_region();
++  REQUIRE(std::memcmp(s_plain, s_prefetch, sizeof(s_plain)) == 0);
++  REQUIRE(std::memcmp(next->k, next_before->k, sizeof(next->k)) == 0);
++
++  // PV: the same with two packed V planes and one set of weight rows.
++  auto v_cur = random_v_owner(41u);
++  auto v_next = random_v_owner(42u);
++  const auto v_next_before = std::make_unique<v_plane_owner>(*v_next);
++  std::mt19937 gen(43);
++  std::uniform_real_distribution<float> ue(-10.f, 0.f);
++  alignas(64) float exp_rows[group_heads][PAGE_TOKENS_64];
++  for (auto& row : exp_rows) {
++    for (auto& x : row) {
++      x = std::exp(ue(gen));
++    }
++  }
++  alignas(64) float o_plain[TILE_ROWS_16 * HEAD_SIZE_128] = {};
++  alignas(64) float o_prefetch[TILE_ROWS_16 * HEAD_SIZE_128] = {};
++  tron::amx_attn_h128g4::begin_region();
++  tron::amx_attn_h128g4::weights_times_v_128x4<group_heads>(
++      v_cur->as_view(), &exp_rows[0][0], PAGE_TOKENS_64, o_plain, nullptr);
++  tron::amx_attn_h128g4::weights_times_v_128x4<group_heads>(v_cur->as_view(),
++      &exp_rows[0][0], PAGE_TOKENS_64, o_prefetch,
++      tron::detail::v_vnni_access::prefetch_base(v_next->as_view()));
++  tron::amx_attn_h128g4::end_region();
++  REQUIRE(std::memcmp(o_plain, o_prefetch, sizeof(o_plain)) == 0);
++  REQUIRE(std::memcmp(v_next.get(), v_next_before.get(), sizeof(v_plane_owner)) == 0);
++}
++
+ }  // namespace
+ 
+ TEST_CASE("AMX Q packer moves bf16 values to the documented positions",
+@@ -339,6 +411,20 @@ TEST_CASE(
+   }
+ }
+ 
++TEST_CASE("AMX kernels give bit-identical outputs with and without prefetch planes",
++    "[amx_numerics][kv_data]") {
++  if (!tron::amx_attn_h128g4::available()) {
++    WARN("AMX unavailable on this host - prefetch identity check skipped");
++    return;
++  }
++  SECTION("4 heads") {
++    check_prefetch_identity<GROUP_HEADS_4>();
++  }
++  SECTION("16 heads") {
++    check_prefetch_identity<GROUP_HEADS_16>();
++  }
++}
++
+ #else  // !TRON_AMX_DISPATCH
+ 
+ TEST_CASE("AMX numerics tests skipped (dispatch not compiled)", "[amx_numerics]") {
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index 0c75143c44..ecc99951a7 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -96,13 +96,13 @@ constexpr kv_slot_id test_kv_slot(size_t layer) {
+ template <typename K>
+ constexpr bool amx_qk_accepts = requires(K k, const bf16* q, float* s) {
+   amx_attn_h128g4::qk_rowmajor_128x4<amx_attn_h128g4::GROUP_HEADS_4>(
+-      k, q, s, size_t{0});
++      k, q, s, size_t{0}, nullptr);
+ };
+ 
+ template <typename V>
+ constexpr bool amx_pv_accepts = requires(V v, const float* weights, float* out) {
+   amx_attn_h128g4::weights_times_v_128x4<amx_attn_h128g4::GROUP_HEADS_4>(
+-      v, weights, size_t{0}, out);
++      v, weights, size_t{0}, out, nullptr);
+ };
+ 
+ // Packed-V contract probes. Each is a template so that an invalid body makes
+@@ -2949,7 +2949,7 @@ static void check_page_range_reductions(int sliding_window) {
+       auto const result = state.self_attn_state.apply_page_tok<geometry>(false,
+           *empty_page, operation, operation_scale, 0, q, excluded_token, scratch,
+           excluded_job, &excluded.find_range(token_id(0)),
+-          window_excludes_all ? 1 : 1024, window_excludes_all, nullptr);
++          window_excludes_all ? 1 : 1024, window_excludes_all, nullptr, {});
+       REQUIRE(result.relevant_k_tokens == 0);
+       REQUIRE(result.served == tron::attn_stats::visit_path::empty);
+     }

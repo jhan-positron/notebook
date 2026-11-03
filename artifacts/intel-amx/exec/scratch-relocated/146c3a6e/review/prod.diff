@@ -1,0 +1,370 @@
+diff --git a/h/tron/kernels/amx_attn_iface.hpp b/h/tron/kernels/amx_attn_iface.hpp
+index c5224bbac1..503b288f9c 100644
+--- a/h/tron/kernels/amx_attn_iface.hpp
++++ b/h/tron/kernels/amx_attn_iface.hpp
+@@ -13,3 +13,4 @@
+-// heads share one KV head; kv_mul is that ratio. The kernels serve one shape:
+-// head size 128 and kv_mul 4, hence the namespace name amx_attn_h128g4 and
+-// the _128x4 suffix of every kernel.
++// heads share one KV head; kv_mul is that ratio. The kernels serve head size
++// 128 with kv_mul 4 or 16 (group_heads_ok). The namespace name
++// amx_attn_h128g4 and the _128x4 suffix of every kernel record the first
++// shape, kv_mul 4, and are kept.
+@@ -22 +23 @@
+-// head size 128 and kv_mul 4 whose executor stores activations as bf16
++// head size 128 and kv_mul 4 or 16 whose executor stores activations as bf16
+@@ -24,8 +25,9 @@
+-// that shape is 4 query heads x 128 dims = 512 bf16 = 1024 bytes. Packed as
+-// the B operand, it occupies 4096 bytes: four panels of 16 columns, 4 of them
+-// the query heads and 12 zero padding; the K operand fills its tiles
+-// completely (64 tokens = 4 tiles of 16 rows). Everything else, incomplete
+-// or partially visible pages, pages outside the sliding window, other
+-// geometries, other activation types, runs the existing AVX-512 dotter loop
+-// unchanged. The unit of the decision is the (query, page) pair, not the
+-// query: a query runs its complete pages on AMX and its partial tail page on AVX.
++// that shape is group_heads query heads x 128 dims (4 heads = 1024 bytes, 16
++// heads = 4096 bytes). Packed as the B operand, it occupies 4096 bytes: four
++// panels of 16 columns, group_heads of them the query heads and the rest zero
++// padding (none for 16 heads); the K operand fills its tiles completely (64
++// tokens = 4 tiles of 16 rows). Everything else, incomplete or partially
++// visible pages, pages outside the sliding window, other geometries, other
++// activation types, runs the existing AVX-512 dotter loop unchanged. The unit
++// of the decision is the (query, page) pair, not the query: a query runs its
++// complete pages on AMX and its partial tail page on AVX.
+@@ -57 +59 @@
+-//   inputs: q (4 heads x 128 bf16), K page, V page (64 x 128 bf16)
++//   inputs: q (group_heads x 128 bf16), K page, V page (64 x 128 bf16)
+@@ -59 +61 @@
+-//   QK kernel   ->  s_pages[4][64] fp32, raw q.k (UNSCALED)
++//   QK kernel   ->  s_pages[group_heads][64] fp32, raw q.k (UNSCALED)
+@@ -64 +66 @@
+-//   PV kernel   ->  O[4][128] = bf16(P) . V
++//   PV kernel   ->  O[group_heads][128] = bf16(P) . V
+@@ -70,3 +72,3 @@
+-// attention scale and not yet softcapped, into s_pages[4][64], the same array
+-// and layout the AVX dotter loop fills. The caller does everything after
+-// that: the scale (or tanh softcap), the page max, exp(s - max), and the
++// attention scale and not yet softcapped, into s_pages[group_heads][64], the
++// same array and layout the AVX dotter loop fills. The caller does everything
++// after that: the scale (or tanh softcap), the page max, exp(s - max), and the
+@@ -94,10 +96,11 @@
+-// "store only 4 rows" mode: storing a result tile writes all 16 configured
+-// rows to memory. weights_times_v_128x4 stores its result tiles directly into
+-// the memory the caller passed in (`o`), so `o` must have room for 16 rows of
+-// 128 fp32 (8192 bytes) even though only rows 0..3 (one row per query head)
+-// hold real data. Passing a buffer sized for the 4 real rows causes a silent
+-// overrun: rows 4..15 are written past its end, nothing reports an error, and
+-// whatever follows the buffer in memory is corrupted. Rows 4..15 of `o` are
+-// the products of the kernel's zero padding rows of P (output row i of a tile
+-// multiply comes from row i of the A operand); callers read rows 0..3 and
+-// ignore the rest.
++// "store only group_heads rows" mode: storing a result tile writes all 16
++// configured rows to memory. weights_times_v_128x4 stores its result tiles
++// directly into the memory the caller passed in (`o`), so `o` must have room
++// for 16 rows of 128 fp32 (8192 bytes) even when only rows 0..group_heads-1
++// (one row per query head) hold real data. Passing a buffer sized for the
++// real rows causes a silent overrun: the rows after them are written past its
++// end, nothing reports an error, and whatever follows the buffer in memory is
++// corrupted. Rows group_heads..15 of `o` are the products of the kernel's
++// zero padding rows of P (output row i of a tile multiply comes from row i of
++// the A operand); callers read rows 0..group_heads-1 and ignore the rest. For
++// 16 heads there is no padding: every row of `o` is a real row.
+@@ -105,3 +108,3 @@
+-// (s_transposed), and the transpose that reads that buffer writes only the 4
+-// query rows into the caller's `s`, so `s` needs only 4 rows
+-// (s[4][s_stride_floats]).
++// (s_transposed), and the transpose that reads that buffer writes only the
++// group_heads query rows into the caller's `s`, so `s` needs only group_heads
++// rows (s[group_heads][s_stride_floats]).
+@@ -126,4 +129,4 @@ static_assert(std::is_trivially_copyable_v<bf16>,
+-// 16 rows, even when only 4 of them hold real data (see Note [Tile stores
+-// write 16 rows]). Only one caller buffer receives a tile store directly: the
+-// output `o` of weights_times_v_128x4. The caller must therefore allocate `o`
+-// with TILE_ROWS_16 rows, not 4.
++// 16 rows, even when only group_heads of them hold real data (see Note [Tile
++// stores write 16 rows]). Only one caller buffer receives a tile store
++// directly: the output `o` of weights_times_v_128x4. The caller must
++// therefore allocate `o` with TILE_ROWS_16 rows, not group_heads.
+@@ -133,4 +136,4 @@ inline constexpr size_t TILE_ROW_BYTES_64 = 64;
+-// The one attention shape these kernels serve (Note [AMX attention
+-// dispatch]): a 64-token KV page, 128-dim heads, and 4 query heads per KV
+-// head (4 x 128 bf16 = 1024 bytes per query group). The kernel's shape
+-// constants derive from these three.
++// The attention shapes these kernels serve (Note [AMX attention dispatch]):
++// a 64-token KV page, 128-dim heads, and 4 or 16 query heads per KV head
++// (4 x 128 bf16 = 1024 bytes per query group, 16 x 128 bf16 = 4096 bytes).
++// The kernel's shape constants derive from these.
+@@ -139,0 +143,12 @@ inline constexpr size_t GROUP_HEADS_4 = 4;
++// 16 heads fill the 16 packed-Q columns of the QK B tile and the 16 P rows of
++// the PV A tile, so that group size needs no padding.
++inline constexpr size_t GROUP_HEADS_16 = 16;
++static_assert(GROUP_HEADS_16 == TILE_ROWS_16,
++    "16 heads fill one tile's 16 rows (PV) and 16 columns (QK) exactly");
++
++// The group sizes the kernels are compiled for. Every kernel is a function
++// template on group_heads whose body lives only in amx_attn.cpp, and that file
++// instantiates it for exactly this set.
++constexpr bool group_heads_ok(size_t g) noexcept {
++  return g == GROUP_HEADS_4 || g == GROUP_HEADS_16;
++}
+@@ -146,3 +161,2 @@ static_assert(Q_PACK_ELEMS_2048 == 2048, "the constant's name states its value")
+-// The shape half of the gate: the AMX kernels serve exactly one attention
+-// shape, 4 query heads x 128 dims per KV head (see
+-// Note [AMX attention dispatch]).
++// The shape half of the gate: the AMX kernels serve 128-dim heads with 4 or
++// 16 query heads per KV head (see Note [AMX attention dispatch]).
+@@ -150 +164 @@ constexpr bool shape_ok(size_t model_head_size, size_t model_kv_mul) noexcept {
+-  return model_head_size == HEAD_SIZE_128 && model_kv_mul == GROUP_HEADS_4;
++  return model_head_size == HEAD_SIZE_128 && group_heads_ok(model_kv_mul);
+@@ -173,2 +187,2 @@ bool available() noexcept;
+-// Pack one query group (4 query heads x 128 dims, contiguous bf16) into the
+-// tile B-operand (VNNI pair-interleaved) layout consumed by
++// Pack one query group (group_heads query heads x 128 dims, contiguous bf16)
++// into the tile B-operand (VNNI pair-interleaved) layout consumed by
+@@ -179,3 +193,4 @@ bool available() noexcept;
+-// bytes, with columns 4..15 of every panel already zero: this call writes
+-// columns 0..3 only, so a buffer zeroed once at allocation stays valid for
+-// every pack.
++// bytes, with columns group_heads..15 of every panel already zero: this call
++// writes columns 0..group_heads-1 only, so a buffer zeroed once at allocation
++// stays valid for every pack. For 16 heads every column is written, so that
++// precondition is empty.
+@@ -183,2 +198,2 @@ bool available() noexcept;
+-// 16 dim-pair rows x 16 query columns (columns 0..3 = the 4 heads, columns
+-// 4..15 zero padding) x 2 paired values:
++// 16 dim-pair rows x 16 query columns (columns 0..group_heads-1 = the heads,
++// the rest zero padding) x 2 paired values:
+@@ -186,0 +202,2 @@ bool available() noexcept;
++template <size_t group_heads>
++  requires(group_heads_ok(group_heads))
+@@ -196,2 +213,2 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+-// and the kernel transposes the 4 useful query rows on the way out. That
+-// transpose is the price of reading K exactly as stored.
++// and the kernel transposes the group_heads useful query rows on the way out.
++// That transpose is the price of reading K exactly as stored.
+@@ -205,3 +222,4 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+-// - B operand = packed Q. The 4 query heads of the group are packed as 16
+-//   columns (4 heads + 12 padding columns the caller keeps zero) in the VNNI
+-//   pair-interleaved layout, one panel per dim step.
++// - B operand = packed Q. The group_heads query heads of the group are packed
++//   as 16 columns (the heads first, then padding columns the caller keeps
++//   zero; no padding for 16 heads) in the VNNI pair-interleaved layout, one
++//   panel per dim step.
+@@ -211 +229 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+-//   only columns 0..3 are real heads.
++//   only columns 0..group_heads-1 are real heads.
+@@ -213,2 +231,3 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+-//   buffer; an AVX-512 register transpose then writes columns 0..3 as rows
+-//   into s[head][token], the same 4 x 64 layout the AVX dotter loop fills.
++//   buffer; an AVX-512 register transpose then writes columns
++//   0..group_heads-1 as rows into s[head][token], the same group_heads x 64
++//   layout the AVX dotter loop fills.
+@@ -217,5 +236,8 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept;
+-// on the way out (see Note [QK orientation]); writes s[4][s_stride_floats]
+-// fp32, all 64 token columns, UNSCALED. k_page = the page's whole native K
+-// plane, 64 tokens x 128 dims bf16 row-major (the kv_block K storage), passed
+-// as its typed view so that a packed V plane or a bare pointer cannot be handed
+-// in by mistake; q_packed = the pack_q_group_128x4 output.
++// on the way out (see Note [QK orientation]); writes
++// s[group_heads][s_stride_floats] fp32, all 64 token columns, UNSCALED.
++// k_page = the page's whole native K plane, 64 tokens x 128 dims bf16
++// row-major (the kv_block K storage), passed as its typed view so that a
++// packed V plane or a bare pointer cannot be handed in by mistake; q_packed =
++// the pack_q_group_128x4 output.
++template <size_t group_heads>
++  requires(group_heads_ok(group_heads))
+@@ -227,4 +249,4 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+-// Weights-times-values for one page: O = P[4][64] . V_page, where P (the
+-// exponentiated scores, i.e. the unnormalized softmax weights) comes from the
+-// caller's fp32 exp rows (converted to bf16 inside) and v_page is the page's
+-// packed V plane (v_vnni_view, see Note [VNNI Packed V layout] in
++// Weights-times-values for one page: O = P[group_heads][64] . V_page, where P
++// (the exponentiated scores, i.e. the unnormalized softmax weights) comes from
++// the caller's fp32 exp rows (converted to bf16 inside) and v_page is the
++// page's packed V plane (v_vnni_view, see Note [VNNI Packed V layout] in
+@@ -233,0 +256,2 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
++template <size_t group_heads>
++  requires(group_heads_ok(group_heads))
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 8dbc558bdc..9eaa59ea98 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -279,2 +279,2 @@ struct self_attention {
+-      // The AMX QK kernel cannot read a token's 4 query heads as they are
+-      // stored; it needs them copied to its tile layout (a "pack"). Element
++      // The AMX QK kernel cannot read a token's query heads (one GQA group) as
++      // they are stored; it needs them copied to its tile layout (a "pack"). Element
+@@ -1529,2 +1529,2 @@ struct self_attention {
+-      // AMX fast path for dense pages of the head-128 / kv_mul-4 shape on a
+-      // bf16 Q buffer; see Note [AMX attention dispatch]. Each token's Q
++      // AMX fast path for dense pages of the head-128 / kv_mul-4-or-16 shape
++      // on a bf16 Q buffer; see Note [AMX attention dispatch]. Each token's Q
+@@ -1552 +1552 @@ struct self_attention {
+-        // resize() zero-fills new slots and the packer writes only the 4
++        // resize() zero-fills new slots and the packer writes only the kv_mul
+@@ -1696 +1696 @@ struct self_attention {
+-        amx_attn_h128g4::pack_q_group_128x4(
++        amx_attn_h128g4::pack_q_group_128x4<geometry.kv_mul()>(
+@@ -1757,3 +1757,3 @@ struct self_attention {
+-      // Both kernels take &s_pages[0][0] with row stride page_size, so the 4
+-      // rows of 64 floats must be consecutive with no padding. The size check
+-      // forces both: 4 x 64 x 4 bytes leaves no room for a gap.
++      // Both kernels take &s_pages[0][0] with row stride page_size, so the
++      // kv_mul rows of 64 floats must be consecutive with no padding. The size
++      // check forces both: kv_mul x 64 x 4 bytes leaves no room for a gap.
+@@ -1763,2 +1763,3 @@ struct self_attention {
+-      amx_attn_h128g4::qk_rowmajor_128x4(pg.template k<geometry.kv>(slot, kv_head),
+-          q_packed, &s_pages[0][0], page::page_size);
++      amx_attn_h128g4::qk_rowmajor_128x4<operation_kv_mul>(
++          pg.template k<geometry.kv>(slot, kv_head), q_packed, &s_pages[0][0],
++          page::page_size);
+@@ -1786,3 +1787,3 @@ struct self_attention {
+-      // PV for the 4 heads in one tile call, reading the page's packed V plane
+-      // in place (v_packed). See Note [Tile stores write 16 rows]: only rows
+-      // 0..3 of amx_o carry the result.
++      // PV for the kv_mul heads in one tile call, reading the page's packed V
++      // plane in place (v_packed). See Note [Tile stores write 16 rows]: only
++      // rows 0..kv_mul-1 of amx_o carry the result.
+@@ -1790 +1791 @@ struct self_attention {
+-      amx_attn_h128g4::weights_times_v_128x4(
++      amx_attn_h128g4::weights_times_v_128x4<operation_kv_mul>(
+diff --git a/src/tron/kernels/amx_attn.cpp b/src/tron/kernels/amx_attn.cpp
+index 9ee1dbaf2c..55753c1437 100644
+--- a/src/tron/kernels/amx_attn.cpp
++++ b/src/tron/kernels/amx_attn.cpp
+@@ -34,4 +34,5 @@ namespace {
+-// The kernel shape (PAGE_TOKENS_64, HEAD_SIZE_128, GROUP_HEADS_4) and the tile
+-// shape (TILE_ROWS_16, TILE_ROW_BYTES_64) come from the interface header and
+-// are used by name below. begin_region() configures all 8 tiles with the tile
+-// shape.
++// The kernel shape (PAGE_TOKENS_64, HEAD_SIZE_128, and the group sizes
++// GROUP_HEADS_4 and GROUP_HEADS_16 the kernels are instantiated for at the end
++// of this file) and the tile shape (TILE_ROWS_16, TILE_ROW_BYTES_64) come from
++// the interface header and are used by name below. begin_region() configures
++// all 8 tiles with the tile shape.
+@@ -128,0 +130,2 @@ void end_region() noexcept {
++template <size_t group_heads>
++  requires(group_heads_ok(group_heads))
+@@ -130,3 +133,3 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept {
+-  // Writes columns 0..3 of every panel; columns 4..15 are padding the caller
+-  // keeps zero (see the contract at the declaration). One panel per 32-dim
+-  // step.
++  // Writes columns 0..group_heads-1 of every panel; the remaining columns are
++  // padding the caller keeps zero (see the contract at the declaration). One
++  // panel per 32-dim step.
+@@ -135 +138 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept {
+-      for (size_t q_head = 0; q_head < GROUP_HEADS_4; q_head++) {
++      for (size_t q_head = 0; q_head < group_heads; q_head++) {
+@@ -144,0 +148,39 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept {
++namespace {
++
++// The transposing store of qk_rowmajor_128x4. After the two unpack stages of
++// the 16 x 16 transpose (stage 1 interleaves 32-bit values, stage 2 interleaves
++// 64-bit pairs), 128-bit lane `lane` (0..3) of u[row_group][k] holds tile
++// column 4 * lane + k for the four tokens 4 * row_group .. 4 * row_group + 3.
++// Output row 4 * lane + k (one query head, 16 tokens) is assembled from lane
++// `lane` of u[0..3][k] by two _mm512_shuffle_f32x4 stages. Stage 3 pairs row
++// groups 0/1 and 2/3. Stage 4 joins the two pairs. Each stage picks the even
++// lanes (selector 0x88) or the odd lanes (selector 0xdd) of its two inputs.
++// Stage 3 selects lanes {0, 2} or {1, 3} of each row-group pair. That choice
++// is bit 0 of `lane`. Stage 4 selects the first or the second lane of each
++// pair. That choice is bit 1 of `lane`. The selectors are immediates, so
++// `lane` is a template argument. Lane 0 = (0x88, 0x88) is the one store
++// sequence the 4-head kernel emits.
++constexpr int LANES_EVEN_0X88 = 0x88;
++constexpr int LANES_ODD_0XDD = 0xdd;
++// A 128-bit lane holds 4 fp32 values: lane `lane` of u[.][0..3] holds tile
++// columns 4 * lane .. 4 * lane + 3, which become 4 consecutive output rows.
++constexpr size_t ROWS_PER_LANE_4 = 4;
++
++template <int lane>
++inline void store_transposed_rows(
++    const __m512 (&u)[TILE_ROWS_16 / ROWS_PER_LANE_4][ROWS_PER_LANE_4],
++    float* s_block,
++    size_t s_stride_floats) {
++  constexpr int pair_sel = (lane & 1) ? LANES_ODD_0XDD : LANES_EVEN_0X88;
++  constexpr int quad_sel = (lane & 2) ? LANES_ODD_0XDD : LANES_EVEN_0X88;
++  float* const s_rows = s_block + lane * ROWS_PER_LANE_4 * s_stride_floats;
++  for (size_t k = 0; k < ROWS_PER_LANE_4; k++) {
++    __m512 p = _mm512_shuffle_f32x4(u[0][k], u[1][k], pair_sel);
++    __m512 q2 = _mm512_shuffle_f32x4(u[2][k], u[3][k], pair_sel);
++    _mm512_storeu_ps(
++        s_rows + k * s_stride_floats, _mm512_shuffle_f32x4(p, q2, quad_sel));
++  }
++}
++
++}  // namespace
++
+@@ -146,3 +188,5 @@ void pack_q_group_128x4(const bf16* q_group, bf16* packed) noexcept {
+-// Q as the B operand), then a transposing store of the 4 useful query rows
+-// into the caller's s buffer (UNSCALED). See Note [QK orientation] in
+-// amx_attn_iface.hpp.
++// Q as the B operand), then a transposing store of the group_heads useful
++// query rows into the caller's s buffer (UNSCALED). See Note [QK orientation]
++// in amx_attn_iface.hpp.
++template <size_t group_heads>
++  requires(group_heads_ok(group_heads))
+@@ -183,3 +227,4 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+-  // Transpose s_transposed(64x16) -> s rows 0..3 only (width-4
+-  // specialization: only the k-loop stage-2 paths for output rows 0-3 are
+-  // emitted).
++  // Transpose s_transposed(64x16) -> s rows 0..group_heads-1 only. Stages 1
++  // and 2 (the unpack loop below) are the same for both group sizes; the
++  // store helper emits stages 3 and 4 for lane 0 (rows 0..3) always and for
++  // lanes 1..3 (rows 4..15) only when group_heads is 16.
+@@ -209,5 +254,6 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
+-    for (int k = 0; k < 4; k++) {
+-      __m512 p = _mm512_shuffle_f32x4(u[0][k], u[1][k], 0x88);
+-      __m512 q2 = _mm512_shuffle_f32x4(u[2][k], u[3][k], 0x88);
+-      _mm512_storeu_ps(
+-          s + k * s_stride_floats + r * 16, _mm512_shuffle_f32x4(p, q2, 0x88));
++    float* const s_block = s + r * 16;
++    store_transposed_rows<0>(u, s_block, s_stride_floats);
++    if constexpr (group_heads == GROUP_HEADS_16) {
++      store_transposed_rows<1>(u, s_block, s_stride_floats);
++      store_transposed_rows<2>(u, s_block, s_stride_floats);
++      store_transposed_rows<3>(u, s_block, s_stride_floats);
+@@ -217,0 +264,2 @@ void qk_rowmajor_128x4(const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128> k_page
++template <size_t group_heads>
++  requires(group_heads_ok(group_heads))
+@@ -229,3 +277,7 @@ void weights_times_v_128x4(
+-  // writes raw 16-bit lanes, so this scratch stays uint16_t); rows 4..15 are
+-  // zero padding (never written after thread init), so the padded tile rows
+-  // contribute nothing.
++  // writes raw 16-bit lanes, so this scratch stays uint16_t); rows
++  // group_heads..15 are zero padding (never written after thread init), so
++  // the padded tile rows contribute nothing. A function template's static
++  // locals exist once per specialization. This scratch therefore belongs to
++  // the 4-head or the 16-head instantiation only, and a 4-head call never
++  // sees a 16-head call's rows. For 16 heads every row is written, so there
++  // is no padding.
+@@ -233 +285 @@ void weights_times_v_128x4(
+-  for (size_t q = 0; q < GROUP_HEADS_4; q++) {
++  for (size_t q = 0; q < group_heads; q++) {
+@@ -277,0 +330,26 @@ void weights_times_v_128x4(
++// The kernel bodies live only in this translation unit, so this list is the
++// set of group sizes callers can use: it equals group_heads_ok in
++// amx_attn_iface.hpp.
++template void pack_q_group_128x4<GROUP_HEADS_4>(const bf16*, bf16*) noexcept;
++template void pack_q_group_128x4<GROUP_HEADS_16>(const bf16*, bf16*) noexcept;
++template void qk_rowmajor_128x4<GROUP_HEADS_4>(
++    const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>,
++    const bf16*,
++    float*,
++    size_t) noexcept;
++template void qk_rowmajor_128x4<GROUP_HEADS_16>(
++    const_native_k_view<PAGE_TOKENS_64, HEAD_SIZE_128>,
++    const bf16*,
++    float*,
++    size_t) noexcept;
++template void weights_times_v_128x4<GROUP_HEADS_4>(
++    v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>,
++    const float*,
++    size_t,
++    float*) noexcept;
++template void weights_times_v_128x4<GROUP_HEADS_16>(
++    v_vnni_view<const bf16, PAGE_TOKENS_64, HEAD_SIZE_128>,
++    const float*,
++    size_t,
++    float*) noexcept;
++

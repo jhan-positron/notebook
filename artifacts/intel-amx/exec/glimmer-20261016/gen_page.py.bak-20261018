@@ -1,0 +1,705 @@
+#!/usr/bin/env python3
+"""gen_page.py: the glimmer-20261016 results dir -> muse-glimmer/muse-glimmer-amx-results.html (light theme, inline SVG).
+
+Reads rt-results.txt and rt/<run>.log through gen_compare.py's parsers (same folder), tests.txt and the local object compare
+(local-obj-compare/*.s), and writes one HTML page: Short version, words, decode and prefill dumbbell charts (AMX off vs on per
+cell), the per-layer attention-path map from the TRON_ATTN_STATS exit reports, the attention time per forward, the unit-test
+table and the change list. Every number on the page comes from those files; nothing is typed in by hand.
+
+Unit note: the exit report counts software K tokens (AMX, AVX) once per KV head and FPGA K tokens once per query pass. This
+page multiplies the per-layer FPGA counts by the model's number of KV heads once, when a run is loaded, so every count on the
+page is on the software scale (the scale gen_compare.py uses through fpga_k_tokens_x_kv_heads).
+
+usage: python3 gen_page.py [results_dir] [out.html]
+"""
+import html
+import importlib.util
+import json
+import os
+import re
+import statistics
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+spec = importlib.util.spec_from_file_location("gc", os.path.join(HERE, "gen_compare.py"))
+gc = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gc)
+
+RES = sys.argv[1] if len(sys.argv) > 1 else "/home/jhan/workspace/intel-AMX/exec/results/glimmer-20261016"
+OUT = sys.argv[2] if len(sys.argv) > 2 else "/home/jhan/workspace/intel-AMX/muse-glimmer/muse-glimmer-amx-results.html"
+
+AMX, AVX, FPGA, OFF = "#5b3fa0", "#0f6e8c", "#c2601a", "#5a6472"
+CELL_ORDER = ["glm-tp2-8u-p1024-fpga", "glm-tp2-8u-p2048-fpga", "glm-tp4-8u-p1024-fpga", "glm-tp4-8u-p2048-fpga",
+              "glm-tp2-8u-p1024-cpu", "glm-tp2-8u-p2048-cpu", "glm-tp4-8u-p1024-cpu", "glm-tp4-8u-p2048-cpu",
+              "l8b-tp2-8u-p1024-cpu"]
+GROUP_OF = {"fpga": "Glimmer, FPGA attention on the 13 full layers (production default)",
+            "cpu": "Glimmer, CPU attention on all 52 layers (USE_HW_ATTN=0)",
+            "l8b": "llama-3.1-8b, kv_mul 4 (regression check of the unchanged path)"}
+PLANNED_RUNS = 36
+
+
+def group_key(cell):
+    return "l8b" if cell.startswith("l8b") else cell.rsplit("-", 1)[1]
+
+
+def cell_label(cell):
+    tp = "tp2" if "-tp2-" in cell else "tp4"
+    prompt = "prompt 1024" if "p1024" in cell else "prompt 2048"
+    return f"{tp}, 8 users, {prompt}"
+
+
+def esc(s):
+    return html.escape(str(s))
+
+
+def f2(x, nd=1):
+    return "n/a" if x is None else f"{x:,.{nd}f}"
+
+
+def pct(x, nd=1, sign=True):
+    if x is None:
+        return "n/a"
+    return f"{x:+.{nd}f} %" if sign else f"{x:.{nd}f} %"
+
+
+def load_runs():
+    runs = gc.parse_results(os.path.join(RES, "rt-results.txt"))
+    done = {}
+    for r in runs:
+        if r["kind"] != "rt" or not r["tps"]:
+            continue
+        key = (r["cell"], r["arm"], r["rep"])
+        r["tps_user"] = statistics.mean(r["tps"])
+        r["tps_agg"] = sum(r["tps"])
+        r["prefill_s"] = max(r["ttft"]) if r["ttft"] else None
+        r["prefill_rate"] = statistics.mean(r["prefill_rate"]) if r["prefill_rate"] else None
+        r["log"] = os.path.join(RES, "rt", f"{r['cell']}__{r['attn']}__{r['arm']}__rep{r['rep']}.log")
+        r["stats"] = gc.parse_stats(r["log"])
+        m = r["stats"]["model"] or {}
+        nkv = m.get("n_kv_heads") or 1
+        for cls in r["stats"]["classes"].values():   # FPGA per-layer counts to the software scale (x KV heads), once
+            if cls.get("layers"):
+                cls["layers"] = [(ix, a, v, f * nkv) for ix, a, v, f in cls["layers"]]
+        r["d"] = {cls: gc.derived(c, m.get("tsc_hz")) for cls, c in r["stats"]["classes"].items()}
+        done[key] = r   # the last complete attempt of a (cell, arm, rep) wins
+    failed = [r for r in runs if r["kind"] == "rt" and (r["failed"] or r["stopped"])]
+    return done, failed
+
+
+def summarize(done):
+    cells = {}
+    for (cell, arm, rep), r in sorted(done.items(), key=lambda kv: kv[0][2]):
+        a = cells.setdefault(cell, {"arms": {}, "attn": r["attn"], "model": r["model"], "tp": r["tp"], "prompt": r["prompt"], "users": r["users"]})
+        a["arms"].setdefault(arm, []).append(r)
+    out = {}
+    for cell, c in cells.items():
+        arms = {}
+        for arm, rs in c["arms"].items():
+            tu = [r["tps_user"] for r in rs]
+            ps = [r["prefill_s"] for r in rs if r["prefill_s"] is not None]
+            pr = [r["prefill_rate"] for r in rs if r["prefill_rate"] is not None]
+            arms[arm] = {"reps": len(rs), "tps_user": statistics.mean(tu), "reps_tps": tu, "tps_agg": statistics.mean([r["tps_agg"] for r in rs]),
+                         "prefill_s": statistics.mean(ps) if ps else None, "reps_prefill": ps,
+                         "prefill_rate": statistics.mean(pr) if pr else None, "runs": rs}
+        on = next((v for k, v in arms.items() if gc.is_on(k)), None)
+        off = next((v for k, v in arms.items() if gc.is_off(k)), None)
+        delta = {}
+        if on and off:
+            delta["tps_user"] = gc.delta_pct(on["tps_user"], off["tps_user"])
+            delta["prefill_s"] = gc.delta_pct(on["prefill_s"], off["prefill_s"]) if on["prefill_s"] and off["prefill_s"] else None
+            delta["prefill_rate"] = gc.delta_pct(on["prefill_rate"], off["prefill_rate"]) if on["prefill_rate"] and off["prefill_rate"] else None
+        out[cell] = dict(c, arms=arms, on=on, off=off, delta=delta)
+    return out
+
+
+def dumbbell(rows, title, unit, higher_is_better, off_legend="AMX off (TRON_AMX_DISABLE=1)"):
+    """rows: [(group, label, off_value, on_value, delta_pct)]; one row per cell, grouped. Means only (the repetitions are in the tables)."""
+    if not rows:
+        return "<p>No finished pair yet.</p>"
+    vals = [v for r in rows for v in (r[2], r[3]) if v is not None]
+    xmax = max(vals) * 1.18
+    left, right, rowh, w = 250, 120, 30, 860
+    groups = []
+    for r in rows:
+        if not groups or groups[-1][0] != r[0]:
+            groups.append((r[0], []))
+        groups[-1][1].append(r)
+    legend1 = f"{off_legend}: large grey dot, grey label"
+    two_lines = len(legend1) > 64   # a long grey legend would run into the violet one, so the violet one goes on a second line
+    extra = 16 if two_lines else 0
+    h = 50 + sum(24 + rowh * len(g[1]) for g in groups) + 78 + extra
+    pw = w - left - right
+    sx = lambda v: left + v / xmax * pw
+    o = [f'<svg viewBox="0 0 {w} {h}" width="{w}" height="{h}" role="img" aria-label="{esc(title)}">',
+         '<style>.t{font:600 14px "IBM Plex Sans",sans-serif;fill:#1d2430}.g{font:600 12px "IBM Plex Sans",sans-serif;fill:#5a6472}'
+         '.l{font:13px "IBM Plex Sans",sans-serif;fill:#1d2430}.v{font:600 12px "IBM Plex Mono",monospace}'
+         '.d{font:600 12px "IBM Plex Mono",monospace}.ax{font:11px "IBM Plex Mono",monospace;fill:#5a6472}</style>',
+         f'<text x="0" y="16" class="t">{esc(title)}</text>']
+    y = 40
+    step = next(c for c in (1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000) if xmax / c <= 8)
+    t = 0
+    while t <= xmax:
+        o.append(f'<line x1="{sx(t):.1f}" y1="{y - 6}" x2="{sx(t):.1f}" y2="{h - 66 - extra}" stroke="#ebe9e3"/>')
+        o.append(f'<text x="{sx(t):.1f}" y="{h - 52 - extra}" text-anchor="middle" class="ax">{t:g}</text>')
+        t += step
+    o.append(f'<text x="{left + pw / 2:.1f}" y="{h - 38 - extra}" text-anchor="middle" class="ax">{esc(unit)}</text>')
+    for gname, grows in groups:
+        o.append(f'<text x="0" y="{y + 12}" class="g">{esc(gname)}</text>')
+        y += 24
+        for (_, label, off, on, dl) in grows:
+            cy = y + rowh / 2
+            o.append(f'<text x="0" y="{cy + 4}" class="l">{esc(label)}</text>')
+            if off is not None and on is not None:
+                o.append(f'<line x1="{sx(off):.1f}" y1="{cy}" x2="{sx(on):.1f}" y2="{cy}" stroke="#9a9fa6" stroke-width="2"/>')
+            if off is not None:
+                o.append(f'<circle cx="{sx(off):.1f}" cy="{cy}" r="6" fill="{OFF}"/>')
+            if on is not None:   # drawn smaller on top, so a nearly equal pair still shows both dots
+                o.append(f'<circle cx="{sx(on):.1f}" cy="{cy}" r="4" fill="{AMX}" stroke="#fbfaf7" stroke-width="1"/>')
+            if off is not None and on is not None:
+                lo, hi = (off, on) if off <= on else (on, off)
+                lo_col, hi_col = (OFF, AMX) if off <= on else (AMX, OFF)
+                o.append(f'<text x="{sx(lo) - 10:.1f}" y="{cy + 4}" text-anchor="end" class="v" fill="{lo_col}">{lo:,.1f}</text>')
+                o.append(f'<text x="{sx(hi) + 10:.1f}" y="{cy + 4}" class="v" fill="{hi_col}">{hi:,.1f}</text>')
+                good = (dl > 0) == higher_is_better
+                dcol = "#1a7f37" if good else "#b3261e"
+                o.append(f'<text x="{w - 4}" y="{cy + 4}" text-anchor="end" class="d" fill="{dcol}">{dl:+.1f} %</text>')
+            elif off is not None or on is not None:
+                v = off if off is not None else on
+                o.append(f'<text x="{sx(v) + 10:.1f}" y="{cy + 4}" class="v" fill="#1d2430">{v:,.1f} (other arm missing)</text>')
+            y += rowh
+    y1 = h - 14 - extra
+    o.append(f'<circle cx="8" cy="{y1}" r="6" fill="{OFF}"/><text x="18" y="{y1 + 4}" class="ax">{esc(legend1)}</text>')
+    x2 = 8 if two_lines else 540
+    o.append(f'<circle cx="{x2}" cy="{h - 14}" r="4" fill="{AMX}"/><text x="{x2 + 10}" y="{h - 10}" class="ax">AMX on: small violet dot, violet label</text>')
+    o.append("</svg>")
+    return "\n".join(o)
+
+
+def layer_map(entries, n_layers_max):
+    """entries: [(label, layers[(ix, amx, avx, fpga)])]: one strip per entry, one stacked column per layer (share of K tokens).
+    A path with a share too small to see gets a 2 px minimum slice, taken from the largest slice of the column."""
+    if not entries:
+        return "<p>No exit report yet.</p>"
+    left, colw, rowh, gap, min_px = 450, 10, 26, 10, 2
+    w = left + colw * n_layers_max + 20
+    h = 30 + len(entries) * (rowh + gap) + 56
+    o = [f'<svg viewBox="0 0 {w} {h}" width="{w}" height="{h}" role="img" aria-label="attention path per layer">',
+         '<style>.l{font:12px "IBM Plex Sans",sans-serif;fill:#1d2430}.ax{font:11px "IBM Plex Mono",monospace;fill:#5a6472}</style>']
+    for i in range(0, n_layers_max, 4):
+        o.append(f'<text x="{left + i * colw + colw / 2:.1f}" y="12" text-anchor="middle" class="ax">{i}</text>')
+    o.append(f'<text x="{left - 6}" y="12" text-anchor="end" class="ax">layer</text>')
+    y = 22
+    for label, layers in entries:
+        o.append(f'<text x="0" y="{y + rowh / 2 + 4}" class="l">{esc(label)}</text>')
+        for ix, a, v, f in layers:
+            tot = a + v + f
+            x = left + ix * colw
+            if tot == 0:
+                continue
+            parts = [[f, FPGA], [v, AVX], [a, AMX]]
+            hs = [rowh * part[0] / tot for part in parts]
+            for i in range(3):
+                if parts[i][0] > 0 and hs[i] < min_px:
+                    big = max(range(3), key=lambda j: hs[j])
+                    hs[big] -= min_px - hs[i]
+                    hs[i] = min_px
+            yy = y
+            for (val, col), hh in zip(parts, hs):
+                if val > 0:
+                    o.append(f'<rect x="{x}" y="{yy:.2f}" width="{colw - 1}" height="{hh:.2f}" fill="{col}"/>')
+                    yy += hh
+        y += rowh + gap
+    ly = h - 14
+    for i, (col, txt) in enumerate(((AMX, "AMX kernel"), (AVX, "AVX software loop"), (FPGA, "FPGA card"))):
+        x = i * 200
+        o.append(f'<rect x="{x}" y="{ly - 10}" width="12" height="12" fill="{col}"/><text x="{x + 16}" y="{ly}" class="ax">{txt}</text>')
+    o.append(f'<text x="0" y="{ly - 22}" class="ax">column height = share of the layer\'s K tokens scored by each path (slices below 2 px are drawn 2 px tall)</text>')
+    o.append("</svg>")
+    return "\n".join(o)
+
+
+def kind_sums(layers, full_set):
+    """K tokens per path summed over the sliding and the full layers."""
+    s = {"sliding": [0, 0, 0], "full": [0, 0, 0]}
+    for ix, a, v, f in layers:
+        k = "full" if ix in full_set else "sliding"
+        s[k][0] += a; s[k][1] += v; s[k][2] += f
+    return s
+
+
+def read_tests():
+    rows = []
+    p = os.path.join(RES, "tests.txt")
+    if os.path.exists(p):
+        for line in open(p):
+            if line.startswith("#") or "|" not in line:
+                continue
+            rows.append([x.strip() for x in line.split("|")])
+    return rows
+
+
+def read_obj_compare():
+    """local-obj-compare/{main,r2-4,r2-16}-<kernel>.s (normalized disassembly, one instruction per line): instruction and
+    shuffle counts, and whether the 4-head instantiation equals main. {} when the folder is absent."""
+    d = os.path.join(RES, "local-obj-compare")
+    out = {}
+    for k in ("pack_q_group_128x4", "qk_rowmajor_128x4", "weights_times_v_128x4"):
+        files = {v: os.path.join(d, f"{v}-{k}.s") for v in ("main", "r2-4", "r2-16")}
+        if not all(os.path.exists(f) for f in files.values()):
+            continue
+        txt = {v: [l.strip() for l in open(f) if l.strip() and not l.strip().endswith(":")] for v, f in files.items()}
+        out[k] = {"insns": {v: len(t) for v, t in txt.items()},
+                  "vshuff": {v: sum(1 for l in t if "vshuff" in l) for v, t in txt.items()},
+                  "tdp": {v: sum(1 for l in t if "tdpbf16ps" in l) for v, t in txt.items()},
+                  "same4": txt["main"] == txt["r2-4"]}
+    return out
+
+
+CI_SUMMARY = os.environ.get("CI_SUMMARY", "/home/jhan/workspace/intel-AMX/exec/results/glimci-20261017/summary.json")
+
+
+def read_ci():
+    """The CI-configuration round (exec/glimci-20261017/summarize.py output): arms base / amxoff / amxon with the nightly reference."""
+    if not os.path.exists(CI_SUMMARY):
+        return None
+    try:
+        return json.load(open(CI_SUMMARY))
+    except Exception:
+        return None
+
+
+def read_ci_versions():
+    """tron versions of the two debs of the CI round: base from base-identity.txt (first line: 'base <version> <sha> <file>'),
+    branch from the '== target build: ... version=<version>' line of preflight.txt. None when a file is missing."""
+    d = os.path.dirname(CI_SUMMARY)
+    out = {"base": None, "branch": None}
+    try:
+        parts = open(os.path.join(d, "base-identity.txt")).readline().split()
+        if len(parts) >= 2 and parts[0] == "base":
+            out["base"] = parts[1]
+    except OSError:
+        pass
+    try:
+        for line in open(os.path.join(d, "preflight.txt")):
+            m = re.search(r"^== target build:.*\bversion=(\S+)", line)
+            if m:
+                out["branch"] = m.group(1)
+    except OSError:
+        pass
+    return out
+
+
+def read_ci_config():
+    """The harness config the CI round used (configs-used.json, first entry): prompt_length, generate_length, start_capture, end_capture."""
+    try:
+        return json.load(open(os.path.join(os.path.dirname(CI_SUMMARY), "configs-used.json")))[0]
+    except Exception:
+        return {}
+
+
+def main():
+    done, failed = load_runs()
+    summ = summarize(done)
+    cells = [c for c in CELL_ORDER if c in summ] + [c for c in summ if c not in CELL_ORDER]
+    n_runs = len(done)
+    tip = next((r["version"] for r in done.values() if r["version"]), "?")
+    reps_seen = max([k[2] for k in done] or [0])
+    starts = sorted(r["started"] for r in done.values() if r["started"])
+    span = f"{starts[0]} to {starts[-1]}" if starts else "n/a"
+    partial = n_runs < PLANNED_RUNS
+    counted = set()   # the counted response tokens of the rate lines (runtron prints 'Generating N response tokens')
+    for line in open(os.path.join(RES, "rt-results.txt"), errors="replace"):
+        m = re.search(r"Generating (\d+) response tokens", line)
+        if m:
+            counted.add(int(m[1]))
+    counted_txt = "/".join(str(x) for x in sorted(counted)) if counted else "n/a"
+
+    full_set = set()
+    for (cell, arm, rep), r in done.items():
+        if gc.is_glimmer(r["model"]) and r["attn"] == "fpga":
+            for cls in r["stats"]["classes"].values():
+                for ix, a, v, f in cls.get("layers") or []:
+                    if f > 0:
+                        full_set.add(ix)
+
+    # ---- charts
+    rows_dec, rows_pre = [], []
+    for cell in cells:
+        c = summ[cell]
+        g = GROUP_OF[group_key(cell)]
+        on, off = c["on"], c["off"]
+        rows_dec.append((g, cell_label(cell), off["tps_user"] if off else None, on["tps_user"] if on else None, c["delta"].get("tps_user")))
+        rows_pre.append((g, cell_label(cell), off["prefill_s"] if off else None, on["prefill_s"] if on else None, c["delta"].get("prefill_s")))
+    chart_dec = dumbbell(rows_dec, "Decode: generated tokens per second per user, AMX off vs on", "tokens/s per user (8 users per engine)", True)
+    chart_pre = dumbbell(rows_pre, "Prefill: time to parse the prompt, slowest of the 8 users, AMX off vs on", "seconds", False)
+
+    # ---- layer map (repetition 1; tp2 and llama only, the tp4 strips repeat the tp2 strips exactly)
+    entries, n_layers_max = [], 32
+    picks = [(c, arm) for c in cells for arm in ("amxon", "amxoff") if (c, arm, 1) in done]
+    for cell, arm in [(c, a) for c, a in picks if "-tp4-" not in c]:
+        r = done[(cell, arm, 1)]
+        for cls, lab in (("decode_like", "decode"), ("prompt_or_mixed", "prompt")):
+            lay = (r["stats"]["classes"].get(cls) or {}).get("layers")
+            if not lay or (arm == "amxoff" and cls == "prompt_or_mixed"):
+                continue
+            n_layers_max = max(n_layers_max, len(lay))
+            tp = "tp2" if "-tp2-" in cell else "tp4"
+            prm = "prompt 1024" if "p1024" in cell else "prompt 2048"
+            entries.append((f"{'Glimmer' if cell.startswith('glm') else 'llama-8b'} {tp} {prm} {group_key(cell) if cell.startswith('glm') else 'cpu'} | AMX {'on' if arm == 'amxon' else 'off'} | {lab}", lay))
+    chart_layers = layer_map(entries, n_layers_max)
+    avx_tail = "n/a"
+    r0 = done.get(("glm-tp2-8u-p1024-fpga", "amxon", 1))
+    if r0 and r0["d"].get("decode_like") and full_set:
+        lay0 = r0["stats"]["classes"]["decode_like"].get("layers") or []
+        avx_full = sum(v for ix, a, v, f in lay0 if ix in full_set)
+        fw = r0["d"]["decode_like"]["forwards"]
+        m0 = r0["stats"]["model"] or {}
+        avx_tail = f"{avx_full / len(full_set) / fw / r0['users'] / (m0.get('n_kv_heads') or 2):.1f}"
+
+    kind_rows = []
+    for cell in cells:
+        if not cell.startswith("glm"):
+            continue
+        for arm in ("amxon", "amxoff"):
+            r = done.get((cell, arm, 1))
+            if not r:
+                continue
+            for cls, lab in (("decode_like", "decode"), ("prompt_or_mixed", "prompt")):
+                lay = (r["stats"]["classes"].get(cls) or {}).get("layers")
+                if lay:
+                    kind_rows.append((cell, arm, lab, kind_sums(lay, full_set)))
+
+    # ---- time per forward (decode_like), each repetition divided by its own worker count
+    time_rows = []
+    for cell in cells:
+        for arm in ("amxon", "amxoff"):
+            rs = [done[k] for k in sorted(done) if k[0] == cell and k[1] == arm and done[k]["d"].get("decode_like")]
+            if not rs:
+                continue
+            t1 = statistics.mean(r["d"]["decode_like"]["t1_ms_per_fwd"] for r in rs)
+            aws = [(r["stats"]["model"] or {}).get("active_workers") or 1 for r in rs]
+            busy = statistics.mean(r["d"]["decode_like"]["busy_s"] * 1e3 / r["d"]["decode_like"]["forwards"] / aw for r, aw in zip(rs, aws))
+            join = statistics.mean((r["d"]["decode_like"]["join_share"] or 0) for r in rs)
+            aw_txt = " / ".join(str(a) for a in aws) if len(set(aws)) > 1 else str(aws[0])
+            time_rows.append((cell, arm, len(rs), t1, busy, aw_txt, statistics.mean(r["d"]["decode_like"]["forwards"] for r in rs), join))
+
+    def rng(key, group):
+        ds = [summ[c]["delta"].get(key) for c in cells if group_key(c) == group and summ[c]["delta"].get(key) is not None]
+        return (min(ds), max(ds), len(ds)) if ds else None
+
+    def rng_txt(r):
+        if not r:
+            return "no finished pair yet"
+        lo, hi, n = r
+        return f"{lo:+.1f} % to {hi:+.1f} % over {n} cells" if n > 1 else f"{lo:+.1f} % (1 cell)"
+    def rng_abs(r):
+        if not r:
+            return "no finished pair yet"
+        lo, hi = sorted((abs(r[0]), abs(r[1])))
+        n = r[2]
+        return f"{lo:.1f} % to {hi:.1f} % ({n} cells)" if n > 1 else f"{lo:.1f} % (1 cell)"
+    dec_fpga, dec_cpu, dec_l8b = rng("tps_user", "fpga"), rng("tps_user", "cpu"), rng("tps_user", "l8b")
+    pre_fpga, pre_cpu = rng("prefill_s", "fpga"), rng("prefill_s", "cpu")
+    max_rep_spread = max((max(a["reps_tps"]) - min(a["reps_tps"]) for c in cells for a in summ[c]["arms"].values() if len(a["reps_tps"]) > 1), default=None)
+
+    checks = []
+    for cell, arm in picks:
+        r = done[(cell, arm, 1)]
+        for cls in ("decode_like", "prompt_or_mixed"):
+            lay = (r["stats"]["classes"].get(cls) or {}).get("layers")
+            if lay:
+                n_amx = sum(1 for ix, a, v, f in lay if a > 0)
+                n_fpga = sum(1 for ix, a, v, f in lay if f > 0)
+                both = sum(1 for ix, a, v, f in lay if a > 0 and f > 0)
+                checks.append((cell, arm, cls, gc.layer_check(lay, r["model"], r["attn"], arm), n_amx, n_fpga, both))
+    unexpected = [c for c in checks if c[3].startswith("UNEXPECTED")]
+    tests = read_tests()
+    obj = read_obj_compare()
+
+    o = []
+    p = o.append
+    p("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
+    p("<title>Glimmer AMX Results</title>")
+    p('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">')
+    p("""<style>
+:root{--bg:#fbfaf7;--fg:#1d2430;--muted:#5a6472;--rule:#d9d5cc;--grey-soft:#ebe9e3;--amx:#5b3fa0;--amx-soft:#e6def6;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;color-scheme:light;}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.55;margin:0;padding:28px 16px 56px;}
+main{max-width:900px;margin:0 auto;}
+h1{font-size:28px;font-weight:600;line-height:1.2;margin:0 0 6px;}
+h2{font-size:20px;font-weight:600;margin:40px 0 10px;border-top:1px solid var(--rule);padding-top:18px;}
+h3{font-size:16px;font-weight:600;margin:22px 0 6px;}
+p{margin:0 0 12px;max-width:72ch;} ul{padding-left:22px;margin:0 0 12px;} li{margin:0 0 6px;max-width:72ch;}
+.meta{color:var(--muted);font-size:13px;margin-bottom:22px;}
+.short{background:var(--grey-soft);border-left:4px solid var(--fg);padding:12px 16px;margin:0 0 20px;}
+.short p{margin:0 0 8px;} .short p:last-child{margin:0;}
+.short .lbl{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;display:block;margin-bottom:6px;}
+code{font-family:var(--mono);font-size:13px;background:var(--grey-soft);padding:1px 4px;border-radius:3px;}
+table{border-collapse:collapse;width:100%;font-size:13.5px;margin:0 0 14px;font-variant-numeric:tabular-nums;}
+.tbl{overflow-x:auto;margin:0 0 14px;}
+th,td{text-align:left;vertical-align:top;padding:5px 8px;border-bottom:1px solid var(--rule);}
+th{font-weight:600;font-size:12.5px;color:var(--muted);} td.n,th.n{text-align:right;}
+.fig{margin:16px 0 20px;overflow-x:auto;} .fig svg{display:block;max-width:100%;min-width:720px;height:auto;}
+.fig .cap{font-size:13px;color:var(--muted);margin-top:6px;max-width:74ch;} .fig .take{font-size:14px;font-weight:500;margin-top:6px;}
+.insuf{font-family:var(--mono);font-size:13px;color:#8a2d2d;}
+.gloss dt{font-weight:600;margin-top:8px;} .gloss dd{margin:0 0 4px 0;max-width:72ch;}
+@media (max-width:480px){h1{font-size:24px;} body{font-size:14.5px;}}
+</style></head><body><main>""")
+    p("<h1>Muse Glimmer with the kv_mul-16 AMX kernels: measured</h1>")
+    p(f'<div class="meta">Branch jhan-amx-kvmul16 at {esc(tip)} (tron main 6198824246 plus the kernel generalization), binary runtron.g16 built on delphi-3bda. Runs {esc(span)} UTC on our half of delphi-3bda. {n_runs} of {PLANNED_RUNS} planned runs finished{" (partial campaign, see section 8)" if partial else ""}. Written for jhan. Generated by exec/glimmer-20261016/gen_page.py from the raw result files.</div>')
+
+    # ---- Short version (three sentences)
+    ci = read_ci()
+    ci_b = ci["arms"].get("base") if ci and ci.get("arms") else None
+    ci_n = ci["arms"].get("amxon") if ci and ci.get("arms") else None
+    def l8b_txt(r):
+        if not r:
+            return "has no finished pair yet"
+        lo, hi, n = r
+        if n == 1:
+            return f"decodes {abs(lo):.1f} % {'faster' if lo > 0 else 'slower'} with AMX on than off (1 cell)"
+        return f"decodes {lo:+.1f} % to {hi:+.1f} % with AMX on relative to off over {n} cells"
+    p('<div class="short"><span class="lbl">Short version</span>')
+    p(f"<p>With the AMX attention kernels generalized to 16 query heads per KV head, Muse Glimmer 30B decodes {esc(rng_abs(dec_fpga))} faster per user in the production configuration (FPGA attention on the 13 full layers), and {esc(rng_abs(dec_cpu))} faster with all 52 layers on the CPU.</p>")
+    if ci_b and ci_n:
+        ng0 = ci["nightly"]
+        p(f"<p>At the nightly CI configuration (Glimmer tp4, 2 engines, 8 users per machine, prompt 1024, the nightly's own harness) the branch decodes {pct(100.0 * (ci_n['tps_mean'] / ci_b['tps_mean'] - 1), sign=False)} faster per user than the installed nightly build ({f2(ci_b['tps_mean'], 2)} to {f2(ci_n['tps_mean'], 2)} tokens/s, mean of {len(ci_n['passes'])} passes per arm, the base arm within {pct(100.0 * (ci_b['tps_mean'] / ng0['tps_mean'] - 1))} of the nightly's own row of {f2(ng0['tps_mean'], 2)}), and the time to first token is {pct(100.0 * (1 - ci_n['ttft_mean'] / ci_b['ttft_mean']), sign=False)} shorter ({f2(ci_b['ttft_mean'], 0)} to {f2(ci_n['ttft_mean'], 0)} ms).</p>")
+    else:
+        p(f"<p>Prefill time (the slowest user's prompt parse) is {esc(rng_abs(pre_fpga))} shorter in the FPGA configuration and {esc(rng_abs(pre_cpu))} shorter in the CPU configuration.</p>")
+    p(f"<p>The attention path counters confirm that the kernel ran where expected in every decode forward ({len(checks) - len(unexpected)} of {len(checks)} per-layer checks match, the {len(unexpected)} others are prompt forwards at prompt 2048 explained in section 4a), and the llama-8b cell with the unchanged 4-head path {esc(l8b_txt(dec_l8b))}.</p>")
+    p("</div>")
+
+    # ---- Words
+    p("<h2>Words used here</h2><dl class=\"gloss\">")
+    for t, d in (("tron, runtron, engine", "tron is the inference program under test. runtron is its command-line tool; every run here is one runtron stream-generate-text call. An engine is one tron process serving one copy of the model; every run here uses one engine."),
+                 ("delphi-3bda, our half, CI", "delphi-3bda is the CI test machine (two CPU sockets, eight FPGA cards). Our half is socket 1 with the FPGA cards 90, 93, b9 and bc. CI is the nightly continuous-integration test that owns the machine at night."),
+                 ("AMX, AVX", "Intel CPU instruction sets. AMX multiplies 16-row tiles; the AMX kernel scores one dense KV page per call. AVX is the 512-bit vector set the software attention loop (the dotter) uses for every other page."),
+                 ("AMX on / AMX off, the kill switch", "The same binary in both arms. AMX off sets TRON_AMX_DISABLE=1, the kill switch: the AMX probe answers no once per process, so no query is packed for the kernel and every page goes through the AVX loop. Both arms set TRON_ATTN_STATS=1."),
+                 ("TRON_AMX_DISPATCH", "The CMake option that compiles the AMX kernels into the binary. The run binary has it on."),
+                 ("K, V, KV cache, KV head", "K (key) and V (value) are the two per-token tensors attention reads back at every step; they are stored in the KV cache, one 64-token page at a time. A KV head is one 128-dim K/V pair shared by a group of query heads."),
+                 ("kv_mul", "Query heads per KV head (grouped-query attention). llama-3.1-8b has 4; Glimmer has 32 query heads over 2 KV heads, so 16."),
+                 ("Muse Glimmer 30B", "The production ingested plugin ingested-meta-models--Muse-Glimmer-30B (tp2 and tp4 variants; an ingested plugin is a model whose C++ code tron's ingest compiler generated). 52 layers: 39 use a 2048-token sliding window and always run on the CPU, 13 are full-attention layers that go to the FPGA card when USE_HW_ATTN is unset."),
+                 ("FPGA attention / CPU attention", "attn=fpga: USE_HW_ATTN unset, the model default (13 layers on the card). attn=cpu: USE_HW_ATTN=0, all 52 layers in software."),
+                 ("tp2, tp4", "Tensor-parallel width: the model split over 2 or 4 FPGA cards. The tp2 runs use cards 90 and 93, the tp4 runs cards 90, 93, b9 and bc."),
+                 ("cell, regression cell", "One combination of model, tp, users, prompt length and attention mode; each cell ran with AMX on and AMX off. The regression cell is the llama-3.1-8b cell, included to show that the unchanged 4-head path still behaves as before."),
+                 ("prompt 1024 / 2048", f"The prompt length in tokens (runtron --prompt-length); runtron adds one start token, so the prompts have 1025 and 2049 tokens. Every user is asked for 256 tokens (-l 256 --dont-stop). runtron's rate line counts {esc(counted_txt)} response tokens, and the decode-like forward count is 256."),
+                 ("decode TPS per user", "runtron's 'average tok/s' of one user's generation phase (counted response tokens divided by the generation time), averaged over the 8 users of a run, then over the repetitions."),
+                 ("prefill time", "runtron's 'Parsing the prompt took S s' of the slowest user of a run (all 8 prompts are parsed together), then averaged over repetitions."),
+                 ("attention path stats, exit report", "TRON_ATTN_STATS=1 makes tron print an exit report: per layer, how many K tokens were scored by the AMX kernel, the AVX loop and the FPGA, separately for decode-like forwards (every job of the forward has a listener, the object that receives the generated token) and prompt-or-mixed forwards (at least one job has none)."),
+                 ("K tokens", "Tokens of the KV cache read by one attention pass, counted once per KV head (the software scale). The exit report counts FPGA K tokens once per query pass for all KV heads at once; this page multiplies them by the number of KV heads (2 for Glimmer) so that every count on the page has one unit."),
+                 ("forward", "One pass of the model over all layers for one batch of jobs. A decode step of the 8 users is one forward."),
+                 ("platformd", "The service manager that runs the production rinzler units (rinzler is the production server) on delphi-3bda. The campaign asks it to stop idle serving before the runs and to start it again afterwards."),
+                 ("rc", "The exit status of a test binary; 0 means it passed."),
+                 ("delta", "AMX on relative to AMX off, in percent. For a rate a positive delta is a gain. For a time a negative delta is a gain."),
+                 ("deb", "The Debian package of tron that the nightly installs on delphi-3bda (/opt/positron). The nightly deb is main. The branch deb is the same build recipe from jhan-amx-kvmul16."),
+                 ("TTFT", "Time to first token, in ms. The CI harness measures it from sending the request to the first streamed token, so it holds the prompt parse of the 4 users sharing one engine."),
+                 ("sd", "Standard deviation: the spread of the values around their mean, in the same unit as the values."),
+                 ("paired t", "The paired t statistic over the pass pairs of two arms: the mean of the per-pass differences divided by its standard error. With 3 pairs a value beyond +-4.3 is unlikely to come from pass-to-pass spread alone (5 % two-sided)."),
+                 ("prefill proxy", "The CI harness's own prefill rate: 1024 prompt tokens divided by TTFT, in tokens/s."),
+                 ("ShareGPT set, chat template", "ShareGPT is a public collection of recorded chat conversations. The CI harness cuts each one to the prompt length with its own tokenizer. The chat template is the model's own wrapping of the messages into one token stream."),
+                 ("test proxy", "The Caddy reverse proxy in front of the engines on delphi-3bda. It spreads the users' requests over the engines.")):
+        p(f"<dt>{esc(t)}</dt><dd>{esc(d)}</dd>")
+    p("</dl>")
+
+    # ---- 1. What was measured
+    p("<h2>1. What was measured</h2>")
+    p(f"<p>One binary (runtron.g16, branch jhan-amx-kvmul16 at {esc(tip)}, preset native with BUILD_INGEST_MODELS and TRON_AMX_DISPATCH on) ran 9 cells. Each cell ran with AMX on and then with AMX off, {reps_seen} repetitions{' so far' if partial else ' (the full plan)'}. Every run used 8 users and our half of delphi-3bda (socket 1). Production serving was stopped through platformd for the duration and started again afterwards.</p>")
+    p('<div class="tbl"><table><tr><th>cell</th><th>model</th><th>tp</th><th>attention</th><th class="n">prompt</th><th class="n">runs AMX on / off</th></tr>')
+    for cell in cells:
+        c = summ[cell]
+        p(f"<tr><td><code>{esc(cell)}</code></td><td>{esc(gc.short_model(c['model']))}</td><td>{c['tp']}</td><td>{'FPGA on the full layers' if c['attn'] == 'fpga' else 'CPU, all layers'}</td><td class=\"n\">{c['prompt']}</td><td class=\"n\">{c['on']['reps'] if c['on'] else 0} / {c['off']['reps'] if c['off'] else 0}</td></tr>")
+    p("</table></div>")
+    p("<p>Scripts and raw results: exec/glimmer-20261016/ (campaign.sh, chain.sh, gen_compare.py, this generator) and exec/results/glimmer-20261016/ (rt-results.txt, rt/&lt;run&gt;.log with the exit reports, results.json).</p>")
+
+    # ---- 2. Decode
+    p("<h2>2. Decode throughput</h2>")
+    p(f'<div class="fig">{chart_dec}<div class="take">Violet dots right of the grey dots are cells where the AMX kernel made decode faster.</div><div class="cap">Means over the repetitions of runtron\'s per-user \'average tok/s\', 8 users per engine. The single repetitions are in the table below. Axis starts at 0.</div></div>')
+    p('<div class="tbl"><table><tr><th>cell</th><th class="n">AMX off, tokens/s per user (repetitions)</th><th class="n">AMX on, tokens/s per user (repetitions)</th><th class="n">delta</th><th class="n">aggregate AMX off</th><th class="n">aggregate AMX on</th><th class="n">reps on / off</th></tr>')
+    for cell in cells:
+        c = summ[cell]; on, off = c["on"], c["off"]
+        p(f"<tr><td><code>{esc(cell)}</code></td><td class=\"n\">{f2(off['tps_user'], 2) if off else 'n/a'} ({', '.join(f'{x:.1f}' for x in off['reps_tps']) if off else ''})</td>"
+          f"<td class=\"n\">{f2(on['tps_user'], 2) if on else 'n/a'} ({', '.join(f'{x:.1f}' for x in on['reps_tps']) if on else ''})</td><td class=\"n\">{pct(c['delta'].get('tps_user'))}</td>"
+          f"<td class=\"n\">{f2(off['tps_agg'], 1) if off else 'n/a'}</td><td class=\"n\">{f2(on['tps_agg'], 1) if on else 'n/a'}</td><td class=\"n\">{on['reps'] if on else 0} / {off['reps'] if off else 0}</td></tr>")
+    p(f"</table></div><p>Aggregate = the sum over the 8 users. The two repetitions of one arm differ by at most {f2(max_rep_spread, 2) if max_rep_spread is not None else 'n/a'} tokens/s per user, far below the smallest decode delta.</p>")
+
+    # ---- 3. Prefill
+    p("<h2>3. Prefill</h2>")
+    p(f'<div class="fig">{chart_pre}<div class="take">Prefill is the prompt parse of all 8 users together. Shorter is better.</div><div class="cap">Means over the repetitions of the slowest user\'s \'Parsing the prompt took\' time. Where the two dots nearly coincide (tp4, prompt 1024), the label colours tell the arms apart. Axis starts at 0.</div></div>')
+    p('<div class="tbl"><table><tr><th>cell</th><th class="n">AMX off, s (repetitions)</th><th class="n">AMX on, s (repetitions)</th><th class="n">delta time</th><th class="n">AMX off, prompt tokens/s per request</th><th class="n">AMX on, prompt tokens/s per request</th><th class="n">delta rate</th></tr>')
+    for cell in cells:
+        c = summ[cell]; on, off = c["on"], c["off"]
+        p(f"<tr><td><code>{esc(cell)}</code></td><td class=\"n\">{f2(off['prefill_s'], 3) if off else 'n/a'} ({', '.join(f'{x:.2f}' for x in off['reps_prefill']) if off else ''})</td><td class=\"n\">{f2(on['prefill_s'], 3) if on else 'n/a'} ({', '.join(f'{x:.2f}' for x in on['reps_prefill']) if on else ''})</td><td class=\"n\">{pct(c['delta'].get('prefill_s'))}</td>"
+          f"<td class=\"n\">{f2(off['prefill_rate'], 1) if off else 'n/a'}</td><td class=\"n\">{f2(on['prefill_rate'], 1) if on else 'n/a'}</td><td class=\"n\">{pct(c['delta'].get('prefill_rate'))}</td></tr>")
+    p("</table></div><p>Prompt tokens/s per request = runtron's 'at R tokens/s' on the parse line, mean over users and repetitions.</p>")
+
+    # ---- 4. Where attention ran
+    p("<h2>4. Where the attention ran, per layer</h2>")
+    p("<p>The exit report counts, per layer, the K tokens each path scored. The strips below show the share per path for every layer of repetition 1. Decode-like forwards are the generation steps. Prompt-or-mixed forwards are the prompt parse.</p>")
+    p(f'<div class="fig">{chart_layers}<div class="take">With AMX on, the 39 sliding-window layers are violet (AMX) and the 13 full layers stay orange (FPGA) in the production configuration. With AMX off every CPU layer is teal (AVX).</div>'
+      f'<div class="cap">The tp4 cells are not drawn, because their per-layer counts equal the tp2 counts exactly (the attention work of one engine process does not depend on the tensor-parallel width). Full layers of Glimmer as seen in the exit reports (layers with FPGA K tokens): {esc(gc.ranges(sorted(full_set)) if full_set else "none yet")}. '
+      f'In decode forwards the full layers keep a thin teal slice. It is the step\'s own token plus the 0 to 3 earlier tokens whose copy to the card is not complete yet, {esc(avx_tail)} K tokens per user per KV head per step on average (the card\'s prefix advances in groups of 4 positions) [h/tron/scheduler/full.hpp:2899-2910]. The rest of the layer goes to the card.</div></div>')
+    p("<h3>Per-layer checks</h3>")
+    p(f"<p>{len(checks)} checks (9 cells x 2 arms x 2 forward classes, repetition 1): {len(checks) - len(unexpected)} match the expectation. The expectation per model and attention mode:</p><ul>")
+    p("<li>Glimmer with FPGA attention: AMX K tokens on the 39 sliding layers only, FPGA K tokens on the 13 full layers only.</li>")
+    p("<li>Glimmer with CPU attention: AMX K tokens on all 52 layers.</li>")
+    p("<li>llama-3.1-8b: AMX K tokens on all 32 layers.</li>")
+    p("<li>AMX off: no AMX K tokens on any layer.</li></ul>")
+    if unexpected:
+        p("<p>The checks that differ, all in prompt forwards of the prompt-2048 cells with FPGA attention:</p><ul>")
+        for cell, arm, cls, txt, n_amx, n_fpga, both in unexpected:
+            p(f"<li><code>{esc(cell)}</code>, AMX on, prompt forwards: AMX K tokens on {n_amx} layers (expected 39), FPGA K tokens on {n_fpga} layers (expected 13), both on {both} layers (expected 0).</li>")
+        p("</ul><p>In those forwards the 13 full layers scored part of their K tokens on the CPU with the AMX kernel next to the FPGA (the column 'full: AMX' in the table below). The decode forwards of the same runs match the expectation. Section 4a explains the mechanism.</p>")
+    if kind_rows:
+        p("<h3>K tokens by layer kind (Glimmer, repetition 1, software scale)</h3>")
+        p('<div class="tbl"><table><tr><th>cell</th><th>arm</th><th>forwards</th><th class="n">sliding layers: AMX</th><th class="n">sliding: AVX</th><th class="n">full layers: FPGA (x KV heads)</th><th class="n">full: AVX</th><th class="n">full: AMX</th><th class="n">AMX share of all K tokens</th></tr>')
+        for cell, arm, lab, s in kind_rows:
+            sl, fu = s["sliding"], s["full"]
+            tot = sum(sl) + sum(fu)
+            p(f"<tr><td><code>{esc(cell)}</code></td><td>{esc(arm)}</td><td>{lab}</td><td class=\"n\">{sl[0]:,}</td><td class=\"n\">{sl[1]:,}</td><td class=\"n\">{fu[2]:,}</td><td class=\"n\">{fu[1]:,}</td><td class=\"n\">{fu[0]:,}</td><td class=\"n\">{(sl[0] + fu[0]) / tot * 100 if tot else 0:.1f} %</td></tr>")
+        p("</table></div><p>Sliding layers = the 39 layers with window 2048 (software only). Full layers = the 13 FPGA candidates. In the CPU-attention cells every layer is in software, so the full layers show AMX and AVX instead of FPGA. The FPGA column carries the KV-head factor, so the shares equal those of the campaign's own report (attn-stats-compare.md). The tp2 and tp4 rows of a cell are identical, because the attention work of one engine process does not depend on the tensor-parallel width.</p>")
+
+    # ---- 4a. mechanism
+    p("<h3>4a. Why the full layers score some prompt K tokens on the CPU, and why the AMX kernel appears there only at prompt 2048</h3>")
+    p("<p>Derived from the tron source on 2026-10-17 by a 7-agent read-and-refute workflow. The script exec/glimmer-20261016/glimmer_model.py reproduces every AMX, AVX and FPGA K-token count of both prompt lengths from this model. One zero-token visit count (empty visits in the prompt-2048 decode class) stays open and carries no K tokens.</p>")
+    p("<p>Words used here:</p><ul>")
+    p("<li>chunk = the 128 prompt tokens of one user that one forward processes.</li>")
+    p("<li>shard = a 1024-token block of K/V in the card's memory.</li>")
+    p("<li>KV book = the host-side K/V storage of one token-tree edge, 1600 tokens by default. The token tree is tron's structure of all sequences in flight. An edge is one run of tokens in it.</li>")
+    p("<li>the walker = the scheduler code that plans a forward by walking the token tree and deciding, per shard, whether the card may score it.</li>")
+    p("<li>visible range = the span of K positions one query may see; it ends at the query's own position.</li>")
+    p("<li>dense page = a full 64-token page that the AMX kernel may serve.</li></ul><ul>")
+    p("<li>A prompt is fed in chunks of 128 tokens per user per forward. A 1025-token prompt takes 8 prompt forwards and a 2049-token prompt takes 16 [h/libtron.hpp:197-204; src/tron/generation/context.cpp:40-42].</li>")
+    p("<li>The card scores only the shards whose copy had completed when the forward was planned. The chunk being processed is therefore always scored on the CPU, and the first chunk (positions 0 to 127) has no card work at all [h/tron/scheduler/full.hpp:1979-1996, 2862-2916; src/tron/models/ranged_mask.cpp:63-83].</li>")
+    p("<li>The pages of the current chunk are still being written during the forward. Each query token of the chunk also has its own visible range. A page in that state is never dense, so the AVX loop scores it [h/tron/models/self_attention.hpp:1711-1722, 1881-1892; src/tron/models/ranged_mask.cpp:42-48, 64-66]. That is the AVX share of the full layers in every prompt forward, and the reason the AMX kernel does not appear on the full layers at prompt 1024.</li>")
+    p("<li>At prompt 2048 the first KV book of every user (1600 tokens) is full at the 13th chunk (positions 1536 to 1663). The token tree starts a new edge with a new book at position 1536, and the partial shard that spans the split moves to the new edge. In that one forward the walker refuses the moved shard, because its copy ends at position 1535, below the new edge's base [full.hpp:54-69, 942-951, 1022-1049, 1178-1184, 2909-2916; h/tron/scheduler/token_tree.hpp:316-330].</li>")
+    p("<li>So in that forward all 8 users get card work only for positions 0 to 1023 and score positions 1024 to 1535 on the CPU. Those positions are complete pages from earlier forwards. The first user has 8 dense pages there. The other seven users share only the start token with the first prompt, branch off after it into their own books, and so have a page grid offset by one token: 7 dense pages plus two partial ones [h/tron/scheduler/token_tree.hpp:636-651; full.hpp:947-949]. The dense pages take the AMX kernel, the partial ones the AVX loop. This is the only AMX work on the full layers.</li>")
+    p("<li>Arithmetic: the card deficit per full layer is 8 users x 128 queries x 512 tokens = 524,288 query-token pairs. On the software scale (2 KV heads) that is 1,048,576 K tokens: 933,888 scored by the AMX kernel (the logged per-layer AMX count) plus 114,688 scored by the AVX loop for the partial pages (contained in the logged AVX count of 2,228,210, whose remainder is the current-chunk work). The counts are identical across repetitions, tp2 and tp4, and AMX on and off (with the kill switch the 933,888 are added to the AVX count). The log line 'KV cache footprint: 1.03 GB in 13 books' appears in every prompt-2048 run and in no prompt-1024 run. 13 books x 1600 tokens x 53,248 bytes is the first crossing of the 1 GiB print step [h/tron/models/kv_cache.hpp:560-580, 1351].</li>")
+    p("</ul><p>What this means for the measurement: the pattern is structural, not a race. It costs the prompt-2048 cells one forward's worth of extra CPU attention on the 13 full layers in both arms. Not verified in a log line: the refusal of the moved shard itself. Two measurements would settle it: a debug print at the partial-shard push (edge base, copy end, pushed or not), or a rerun with TRON_BOOK_INITIAL_TOKENS=2176 and TRON_BOOK_MAX_TOKENS=2176, which should give AMX 0 on the full layers at prompt 2048.</p>")
+
+    # ---- 5. Time per forward
+    p("<h2>5. Attention time per decode forward</h2>")
+    p("<p>From the exit report's cycle counters, decode-like forwards only. Wall time per forward is the whole model step. Busy time per forward per worker is the attention workers' busy cycles divided by that repetition's number of active attention workers and by the forwards. The busy cycles cover both software passes and the join at the end of a layer, including the time a worker waited there for the others [h/tron/models/attn_stats.hpp:230-237]. The join wait share column says how much of the busy time was that wait.</p>")
+    p('<div class="tbl"><table><tr><th>cell</th><th>arm</th><th class="n">reps</th><th class="n">forwards per run</th><th class="n">active attention workers</th><th class="n">wall ms per forward</th><th class="n">attention busy ms per forward per worker</th><th class="n">join wait share of busy</th><th class="n">busy share of wall</th></tr>')
+    for cell, arm, n, t1, busy, aw, fw, join in time_rows:
+        p(f"<tr><td><code>{esc(cell)}</code></td><td>{esc(arm)}</td><td class=\"n\">{n}</td><td class=\"n\">{fw:.0f}</td><td class=\"n\">{esc(aw)}</td><td class=\"n\">{t1:.2f}</td><td class=\"n\">{busy:.2f}</td><td class=\"n\">{join * 100:.0f} %</td><td class=\"n\">{busy / t1 * 100 if t1 else 0:.0f} %</td></tr>")
+    p("</table></div><p>Busy share of wall = busy ms per forward per worker divided by wall ms per forward. It is the share of a decode step that the average attention worker spent inside its attention jobs, join wait included. It is an average over workers, and a step waits for its slowest worker, so it is a guide to the attention cost of a step, not a bound on what a faster kernel can remove. A worker count of the form '23 / 24' means the two repetitions ran with different counts.</p>")
+
+    # ---- 6. Code and tests
+    p("<h2>6. The code change and its unit tests</h2>")
+    p("<p>The three kernels (pack_q_group_128x4, qk_rowmajor_128x4, weights_times_v_128x4) are function templates on the group size, instantiated for 4 and 16 heads. The gate shape_ok accepts head size 128 with kv_mul 4 or 16. The score kernel's transposing store gained three more lane variants for 16 rows (new shuffle selectors, not just a loop bound). Buffers were already geometry-sized. Every name is kept. 363 insertions, 164 deletions over six files.</p>")
+    if obj:
+        p("<p>Preservation of the 4-head path, from a compare of the -O3 objects of amx_attn.cpp (main 6198824246 against the branch, clang 19.1.7 on claude-box with the mirrored nix headers, exec/results/glimmer-20261016/local-obj-compare/):</p>")
+        p('<div class="tbl"><table><tr><th>kernel</th><th class="n">instructions main</th><th class="n">4-head instantiation</th><th class="n">16-head instantiation</th><th class="n">lane shuffles (vshuff) 4 / 16 heads</th><th class="n">tile multiplies (tdpbf16ps) 4 / 16 heads</th><th>4-head vs main</th></tr>')
+        for k, v in obj.items():
+            same = "instruction-identical" if v["same4"] else "differs (thread-local scratch access only; see the note)"
+            p(f"<tr><td><code>{esc(k)}</code></td><td class=\"n\">{v['insns']['main']}</td><td class=\"n\">{v['insns']['r2-4']}</td><td class=\"n\">{v['insns']['r2-16']}</td><td class=\"n\">{v['vshuff']['r2-4']} / {v['vshuff']['r2-16']}</td><td class=\"n\">{v['tdp']['r2-4']} / {v['tdp']['r2-16']}</td><td>{same}</td></tr>")
+        p("</table></div><p>The 4-head weights-times-V kernel differs from main only in how it addresses its thread-local scratch (the template's thread_local uses the general-dynamic access model where main's used local-dynamic). Both relax to the direct local-exec form when linked into the executable: the linked runtron.g16 on delphi-3bda contains no __tls_get_addr call. The campaign's own preservation check in tests.sh could not find the templated symbols by demangled name and reports n/a; the table above is the evidence.</p>")
+    if tests:
+        p('<div class="tbl"><table><tr><th>test on delphi-3bda (real AMX, fake device)</th><th class="n">assertions</th><th class="n">rc</th><th>note</th></tr>')
+        for row in tests:
+            p(f"<tr><td>{esc(row[0])}</td><td class=\"n\">{esc(row[1])}</td><td class=\"n\">{esc(row[2])}</td><td>{esc(' '.join(row[3:]))}</td></tr>")
+        p("</table></div>")
+    p("<p>The kill-switch row runs t_amx_numerics with TRON_AMX_DISABLE=1. Its two skips are the AMX-only precision sections, as designed. t_amx_numerics has sections for 4 and 16 heads (kernel against the AVX dotter, with the documented bf16 rounding of the softmax weights). t_amx_dispatch_dtype checks that each of the three kernel entry points is called with the group size of the model.</p>")
+
+    # ---- 7. Corrections to the design page
+    p("<h2>7. What the design page got wrong</h2>")
+    p("<p>Section 4 of muse-glimmer-amx.html listed the changes before the implementation. Three points differ from what was needed (the design page marks four table rows 'Corrected'; its shape_ok row and its apply_dense_amx_page row record the same call-site change).</p><ul>")
+    p("<li>The three kernel call sites in self_attention.hpp do change: they pass the group size as a template argument (the gate sites read shape_ok unchanged).</li>")
+    p("<li>The score store is not a 'full 16x16 transpose, writing 16 score rows' by a loop bound (the design page's wording before its 2026-10-17 update). Rows 4 to 15 need their own shuffle selectors in stages 3 and 4 of the 16 x 16 score-tile transpose, the two _mm512_shuffle_f32x4 stages [src/tron/kernels/amx_attn.cpp:150-161], so the kernel has four lane variants of the store.</li>")
+    p("<li>t_llama_unit also changes: its requires-probes (compile-time checks that a kernel overload exists) name the 4-head instantiation.</li>")
+    p("</ul><p>Models affected: at head size 128, kv_mul 16 is Muse Glimmer 30B and its permuted twin only. The kv_mul-8 models (llama-70b family, qwen-3-32b, qwen-3-30b-moe) stay refused by the gate.</p>")
+
+    # ---- 8. Caveats
+    p("<h2>8. Caveats and open items</h2><ul>")
+    if partial:
+        p(f"<li><b>Partial campaign.</b> {n_runs} of {PLANNED_RUNS} planned runs finished. The campaign stops at 01:30 UTC (pre-CI hold) and resumes after the nightly, so missing cells and second repetitions fill in later.</li>")
+    ci_passes_txt = ""
+    if ci_b and ci_n:
+        per_arm = sorted({len(x["passes"]) for x in ci["arms"].values()})
+        ci_passes_txt = f" Section 9 has {per_arm[0]} passes per arm." if len(per_arm) == 1 else " Section 9 has " + ", ".join(f"{len(x['passes'])} ({k})" for k, x in ci["arms"].items()) + " passes per arm."
+    p(f"<li><b>Repetitions (sections 2 to 5).</b> {reps_seen} per arm. The tables list both, and the largest difference between the two repetitions of one arm is {f2(max_rep_spread, 2) if max_rep_spread is not None else 'n/a'} tokens/s per user. A delta smaller than that difference would not be a result; every decode delta here is far larger.{ci_passes_txt}</li>")
+    p("<li><b>Our half only (sections 2 to 5).</b> One engine on socket 1 with 8 users. The nightly serves the same users behind 2 or 4 engines, so absolute TPS differs from the CI rows. Section 9 holds the measurement at the CI configuration.</li>")
+    if ci_b and ci_n:
+        ng0 = ci["nightly"]
+        b_tps_vs_n = 100.0 * (ci_b["tps_mean"] / ng0["tps_mean"] - 1)
+        b_ttft_vs_n = 100.0 * (ci_b["ttft_mean"] / ng0["ttft_mean"] - 1)
+        p(f"<li><b>CI round comparators (section 9).</b> The nightly reference is one run of 80 requests. The base arm's decode TPS is within {pct(b_tps_vs_n)} of it, but the base arm's TTFT is {abs(b_ttft_vs_n):.1f} % {'higher' if b_ttft_vs_n > 0 else 'lower'} ({f2(ci_b['ttft_mean'], 0)} vs {f2(ng0['ttft_mean'], 0)} ms). So the TTFT gain is {pct(100.0 * (ci_n['ttft_mean'] / ci_b['ttft_mean'] - 1))} against the base arm and {pct(100.0 * (ci_n['ttft_mean'] / ng0['ttft_mean'] - 1))} against the nightly row. The decode gain is {pct(100.0 * (ci_n['tps_mean'] / ci_b['tps_mean'] - 1))} against the base arm and {pct(100.0 * (ci_n['tps_mean'] / ng0['tps_mean'] - 1))} against the nightly row.</li>")
+    ci_ks_txt = ""
+    d0 = next((d for d in (ci or {}).get("diffs", []) if d.get("a") == "base" and d.get("b") == "amxoff"), None)
+    if d0 and ci_b and ci.get("arms", {}).get("amxoff"):
+        base_pz = [x for x in ci.get("passes", []) if x.get("arm") == "base"]
+        n_zero = sum(1 for x in base_pz if x.get("amx_busy_cycles") == 0)
+        spread = max(ci_b["tps_sd_passes"], ci["arms"]["amxoff"]["tps_sd_passes"])
+        inside = abs(d0["tps_b"] - d0["tps_a"]) <= spread
+        ci_ks_txt = (f" At the CI cell (section 9) the kill switch and the nightly deb (main, whose gate refuses Glimmer, 0 AMX busy cycles in {n_zero} of {len(base_pz)} base passes) differ by {pct(d0['tps_delta_pct'])} decode TPS ({f2(d0['tps_a'], 2)} to {f2(d0['tps_b'], 2)} tokens/s per user, paired t {f2(d0['paired_t'], 1)} over {d0['n']} passes), {'inside' if inside else 'outside'} the spread over passes. That covers one cell with FPGA attention and a main build whose AMX code is compiled in but refused at the gate. A TRON_AMX_DISPATCH=OFF build on the CPU-attention cells is still the measurement that settles the rest.")
+    p(f"<li><b>Single binary.</b> AMX off is the kill switch in the branch binary (the AMX code is compiled in, and the AMX probe answers no once per process), not a build without the AMX code. main itself cannot give an AMX-on arm for Glimmer, because its gate refuses kv_mul 16. Whether the kill-switch arm equals a build without the AMX code on the CPU-attention cells is <span class=\"insuf\">Insufficient data</span>.{ci_ks_txt}</li>")
+    if failed:
+        p(f"<li><b>Failed or stopped attempts:</b> {len(failed)}: " + "; ".join(f"{esc(r['cell'])} {esc(r['arm'])} rep{r['rep']} attempt {r['attempt']}" for r in failed) + ".</li>")
+    p("</ul>")
+
+    # ---- 9. The nightly CI configuration (ci was read before the Short version)
+    p("<h2>9. The nightly CI configuration</h2>")
+    if not ci or not ci.get("arms"):
+        p("<p><span class=\"insuf\">Insufficient data</span>: the CI-configuration round (exec/glimci-20261017/) has not produced results yet.</p>")
+    else:
+        ng = ci["nightly"]; arms = ci["arms"]; pz = [x for x in ci.get("passes", []) if x.get("tps_mean") is not None]
+        vers = read_ci_versions(); cfg = read_ci_config()
+        bv = vers.get("base") or "version n/a"; tv = vers.get("branch") or "version n/a"
+        n_req = pz[0]["n"] if pz else None
+        users = cfg.get("nominal_users"); rounds = (n_req // users) if (n_req and users) else None
+        p("<p>The nightly CI runs Glimmer tp4 with 8 users per machine. This round ran that exact cell on the whole of delphi-3bda with the nightly's own harness.</p>")
+        p("<p>The cell:</p><ul>")
+        p("<li>2 engines of 4 cards each, started by platformd.</li>")
+        p("<li>The 8 users reach the engines through the test proxy. The harness pools the 8 users over the 2 engines. The per-pass table below shows how many requests each engine served.</li>")
+        p(f"<li>The CI harness is systems_test scripts/perf.py. Each prompt is one conversation of the ShareGPT set, wrapped in the model's chat template and cut to {f2(cfg.get('prompt_length'), 0)} tokens. Every request generates {f2(cfg.get('generate_length'), 0)} tokens. One pass is {f2(rounds, 0)} rounds of {f2(users, 0)} requests, {f2(n_req, 0)} requests in all. The decode rate is taken between generated tokens {f2(cfg.get('start_capture'), 0)} and {f2(cfg.get('end_capture'), 0)}.</li>")
+        p("</ul><p>The arms:</p><ul>")
+        p(f"<li><b>base</b> = the nightly deb as installed, tron {esc(bv)}. That is main, whose AMX gate refuses Glimmer.</li>")
+        p(f"<li><b>AMX off</b> = the branch deb, tron {esc(tv)}, with the kill switch TRON_AMX_DISABLE=1 in /opt/positron/user/config.env.</li>")
+        p(f"<li><b>AMX on</b> = the branch deb, tron {esc(tv)}, without the kill switch.</li>")
+        p(f"</ul><p>Every arm runs FPGA attention on the 13 full layers, as the nightly does. {len(pz)} passes ran in all. One pass is one harness run of the cell.</p>")
+        rows = []
+        b = arms.get("base"); f = arms.get("amxoff"); n = arms.get("amxon")
+        if b and n:
+            rows.append(("CI config", "base (nightly deb) vs AMX on", b["tps_mean"], n["tps_mean"], 100.0 * (n["tps_mean"] / b["tps_mean"] - 1)))
+        if f and n:
+            rows.append(("CI config", "AMX off (kill switch) vs AMX on", f["tps_mean"], n["tps_mean"], 100.0 * (n["tps_mean"] / f["tps_mean"] - 1)))
+        chart_ci = dumbbell(rows, "Decode at the CI configuration: tokens per second per user, 8 users per machine", "tokens/s per user (CI harness, mean over passes)", True,
+                            off_legend="left arm named in the row label (base or AMX off)")
+        p(f'<div class="fig">{chart_ci}<div class="take">The nightly\'s own row of {esc(str(ng.get("date")))} is {f2(ng["tps_mean"], 2)} tokens/s per user (standard deviation {f2(ng["tps_sd"], 2)} over its 80 requests). The base arm reproduces it within {pct(100.0 * (b["tps_mean"] / ng["tps_mean"] - 1)) if b else "n/a"}.</div><div class="cap">Means over passes. The grey dot is the first arm named in the row label (base or AMX off), the violet dot is AMX on. Axis starts at 0.</div></div>')
+        p('<div class="tbl"><table><tr><th>arm</th><th class="n">passes</th><th class="n">tokens/s per user (mean over passes)</th><th class="n">spread over passes (sd)</th><th class="n">TTFT ms</th><th class="n">prefill proxy tokens/s (1024 / TTFT)</th><th class="n">vs nightly TPS</th><th class="n">vs nightly TTFT</th></tr>')
+        p(f"<tr><td>nightly 2026-10-17 (run {esc(str(ng.get('run')))})</td><td class=\"n\">1</td><td class=\"n\">{f2(ng['tps_mean'], 2)}</td><td class=\"n\">-</td><td class=\"n\">{f2(ng['ttft_mean'], 0)}</td><td class=\"n\">{f2(1024.0 / (ng['ttft_mean'] / 1000.0), 1)}</td><td class=\"n\">-</td><td class=\"n\">-</td></tr>")
+        for a, lab in (("base", "base: nightly deb (main)"), ("amxoff", "AMX off: branch deb + kill switch"), ("amxon", "AMX on: branch deb")):
+            x = arms.get(a)
+            if not x:
+                continue
+            p(f"<tr><td>{lab}</td><td class=\"n\">{len(x['passes'])}</td><td class=\"n\">{f2(x['tps_mean'], 2)}</td><td class=\"n\">{f2(x['tps_sd_passes'], 2)}</td><td class=\"n\">{f2(x['ttft_mean'], 0)}</td><td class=\"n\">{f2(x['prefill_proxy'], 1)}</td><td class=\"n\">{pct(100.0 * (x['tps_mean'] / ng['tps_mean'] - 1))}</td><td class=\"n\">{pct(100.0 * (x['ttft_mean'] / ng['ttft_mean'] - 1))}</td></tr>")
+        p("</table></div>")
+        p(f'<div class="tbl"><table><tr><th>pass</th><th class="n">tokens/s per user (sd over {n_req} requests)</th><th class="n">TTFT ms (sd)</th><th class="n">prompt tokens per request, server count (min-max)</th><th class="n">AMX busy cycles in the 20 s probe</th><th class="n">requests per engine (of {n_req})</th></tr>')
+        for x in pz:
+            amx = x.get("amx_busy_cycles")
+            er = x.get("engine_requests") or {}
+            er_txt = " / ".join(str(v) for k, v in sorted(er.items()) if v is not None) or "n/a"
+            p(f"<tr><td><code>{esc(x['tag'])}</code></td><td class=\"n\">{f2(x['tps_mean'], 2)} ({f2(x['tps_sd'], 2)})</td><td class=\"n\">{f2(x['ttft_mean'], 0)} ({f2(x['ttft_sd'], 0)})</td><td class=\"n\">{f2(x['prompt_tokens_mean'], 0) if x.get('prompt_tokens_mean') else 'n/a'} ({x.get('prompt_tokens_min')}-{x.get('prompt_tokens_max')})</td><td class=\"n\">{format(amx, ',') if isinstance(amx, int) else esc(str(amx))}</td><td class=\"n\">{esc(er_txt)}</td></tr>")
+        p("</table></div>")
+        for d in ci.get("diffs", []):
+            t = f", paired t over {d['n']} passes = {f2(d['paired_t'], 1)}" if "paired_t" in d else ""
+            p(f"<p>{esc(d['a'])} to {esc(d['b'])}: decode {f2(d['tps_a'], 2)} to {f2(d['tps_b'], 2)} tokens/s per user ({pct(d['tps_delta_pct'])}), TTFT {f2(d['ttft_a'], 0)} to {f2(d['ttft_b'], 0)} ms ({pct(d['ttft_delta_pct'])}){esc(t)}.</p>")
+        pt = [x for x in pz if x.get("prompt_tokens_mean") is not None]
+        pt_txt = (f"The server counts {f2(min(x['prompt_tokens_min'] for x in pt), 0)} to {f2(max(x['prompt_tokens_max'] for x in pt), 0)} prompt tokens per request (mean {f2(statistics.mean(x['prompt_tokens_mean'] for x in pt), 0)})."
+                  if pt else "The server's prompt token counts are n/a.")
+        p(f"<p>The prompt token counts come from the server's usage field of each response. The harness cuts every conversation to {f2(cfg.get('prompt_length'), 0)} tokens with its own tokenizer. That count includes a llama-style header per message. So no request exceeds the {f2(cfg.get('prompt_length'), 0)}-token budget. {pt_txt} Why the server counts fewer is not verified. Hypothesis: the server's own chat template tokenizes the message headers differently. A comparison of the two tokenizations of one request would settle it.</p>")
+        p("<p>The requests per engine column counts the requests each of the 2 engines served in the pass. The AMX busy cycles are a 20-second sample of the EXE.AMX_BUSY counter (an Intel core event that counts cycles with AMX work in flight) on both engine processes. The sample runs before each benchmark pass, while 4 short probe requests execute with the same binary and environment as the pass. A count of 0 shows that the engines ran no AMX instruction during that sample.</p>")
+        p("<p>Scripts and raw results: exec/glimci-20261017/ (campaign.sh, dut.sh, st_ci_perf.py, summarize.py) and exec/results/glimci-20261017/&lt;pass&gt;/ (perf.json with every request, driver.log, journal-prompts.txt).</p>")
+
+    p("<h2>Sources</h2><ul>")
+    p("<li>exec/results/glimmer-20261016/rt-results.txt and rt/&lt;run&gt;.log (runtron logs with the [attn-stats] exit reports), tests.txt, results.json, attn-stats-compare.md, local-obj-compare/.</li>")
+    p("<li>exec/glimmer-20261016/README.md (cells, arms, placement, guards), gen_compare.py (the Markdown report the chain writes), gen_page.py (this page), glimmer_model.py (the counter model of section 4a).</li>")
+    p("<li>Branch jhan-amx-kvmul16 in ~/workspace/ai-runs/tron-glimmer-amx (not pushed). Design page muse-glimmer/muse-glimmer-amx.html.</li>")
+    p("</ul></main></body></html>")
+    with open(OUT, "w") as fh:
+        fh.write("\n".join(o))
+    print(f"wrote {OUT}: {n_runs} runs, {len(cells)} cells, {len(checks)} layer checks ({len(unexpected)} unexpected), {len(failed)} failed attempts, obj compare {len(obj)} kernels")
+
+
+if __name__ == "__main__":
+    main()

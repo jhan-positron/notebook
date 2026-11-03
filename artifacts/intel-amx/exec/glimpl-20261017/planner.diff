@@ -1,0 +1,660 @@
+diff --git a/h/tron/models/common.hpp b/h/tron/models/common.hpp
+index 57dee2785d..1094296ba9 100644
+--- a/h/tron/models/common.hpp
++++ b/h/tron/models/common.hpp
+@@ -3,6 +3,8 @@
+ #include <algorithm>
+ #include <compare>
+ #include <cstdint>
++#include <cstdlib>
++#include <cstring>
+ #include <span>
+ 
+ #include <spdlog/spdlog.h>
+@@ -667,6 +669,47 @@ public:
+   }
+ };
+ 
++// Note [Path-weighted attention plan]
++// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++// The attention plan (finish_sw_plan in model.hpp) gives every worker a share
++// of the work in proportion to its speed, and the slowest worker sets the
++// layer time, because the join waits for every section of a KV head. The
++// cost of a visit (one query against one page for one KV head) depends on the
++// path it takes: an AMX visit of a whole page is about three times cheaper
++// than an AVX visit, whether that AVX visit scores the whole page or a part
++// of it. Measured on delphi-3bda with the attention path stats, Muse Glimmer
++// (kv_mul 16), 2026-10-16: 1.65 to 1.7 us per AMX dense visit, 5.5 to 6.9 us
++// per AVX whole-page visit, 5 to 6.6 us per AVX partial-page visit. With one
++// unit per visit the planner handed the workers that held the partial pages
++// (and, with one cumulative sum, the pending pages) up to twice the mean
++// compute time per layer (tp4, prompt 1024: 3.30 ms against a 1.62 ms mean;
++// tp2, prompt 2048: 5.86 ms against 3.63 ms), while the AMX workers waited in
++// the join. estimate_work (model.hpp) classifies every visit
++// with the kernel's own dense predicate (is_dense_amx_page) and work() sums
++// the visits with the weights below.
++//
++// TRON_PLAN_WEIGHTED_DISABLE=1 restores the plan of before the weights: one
++// unit per visit and one cumulative sum over the ready and the pending pages
++// (plan_weighted_enabled). It exists for same-binary A/B tests and for
++// rollback.
++
++// Cost of one visit by path, in units of one AMX dense visit (the measured
++// ratio about 1 : 3 : 3, see Note [Path-weighted attention plan]).
++inline constexpr int64_t amx_dense_visit_cost = 1;
++inline constexpr int64_t avx_full_page_visit_cost = 3;
++inline constexpr int64_t avx_partial_page_visit_cost = 3;
++
++// The switch of Note [Path-weighted attention plan]. Read once per process;
++// exactly "1" disables, the same rule as TRON_AMX_DISABLE (amx_attn.cpp).
++TRON(inline)
++bool plan_weighted_enabled() noexcept {
++  static const bool enabled = [] {
++    const char* off = std::getenv("TRON_PLAN_WEIGHTED_DISABLE");
++    return off == nullptr || std::strcmp(off, "1") != 0;
++  }();
++  return enabled;
++}
++
+ // TODO Can we move work_estimate_t and kv_section into the attention-specific area?
+ // Right now they're here because the overall batch struct uses them.
+ struct work_estimate_t {
+@@ -674,16 +717,30 @@ struct work_estimate_t {
+   int64_t k_dot_products{0};
+   int64_t scaled_vs{0};  // One per relevant q token per page per kv head
+   int64_t kv_heads{0};   // One per page per kv head
+-
++  // The visits of scaled_vs by the path estimate_work predicts for them
++  // (Note [Path-weighted attention plan]): the AMX kernels on a whole page,
++  // the AVX dotter on a whole page, the AVX dotter on part of a page.
++  int64_t amx_dense_visits{0};
++  int64_t avx_full_visits{0};
++  int64_t avx_partial_visits{0};
++
++  // The cost of these visits in units of one AMX dense visit, or one unit per
++  // visit with the weights switched off (Note [Path-weighted attention plan]).
+   TRON(nodiscard, inline, pure)
+   int64_t work() const noexcept {
+-    return scaled_vs;
++    if (!plan_weighted_enabled()) return scaled_vs;
++    return amx_dense_visit_cost * amx_dense_visits +
++           avx_full_page_visit_cost * avx_full_visits +
++           avx_partial_page_visit_cost * avx_partial_visits;
+   }
+ 
+   work_estimate_t& operator+=(work_estimate_t const& other) noexcept {
+     k_dot_products += other.k_dot_products;
+     scaled_vs += other.scaled_vs;
+     kv_heads += other.kv_heads;
++    amx_dense_visits += other.amx_dense_visits;
++    avx_full_visits += other.avx_full_visits;
++    avx_partial_visits += other.avx_partial_visits;
+     return *this;
+   }
+ 
+@@ -692,6 +749,9 @@ struct work_estimate_t {
+     result.k_dot_products = k_dot_products / divisor;
+     result.scaled_vs = scaled_vs / divisor;
+     result.kv_heads = kv_heads / divisor;
++    result.amx_dense_visits = amx_dense_visits / divisor;
++    result.avx_full_visits = avx_full_visits / divisor;
++    result.avx_partial_visits = avx_partial_visits / divisor;
+     return result;
+   }
+ };
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index 262db11c06..e44ae8c21c 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -1978,13 +1978,23 @@ public:
+               ready_page_ixs, pending_page_ixs, profile.sliding_window_size);
+ 
+           // Step 2. Estimate the amount of work per page and total.
+-          // Work is in units of dot products.
++          // Work is in units of visits weighted by their path (Note
++          // [Path-weighted attention plan] in common.hpp).
+           // Work is identical for all KV heads but differs in ready vs pending.
++          // Whether whole pages of this profile take the AMX path: the gate of
++          // run_sections (self_attention.hpp), compiled in, shape and
++          // activation type eligible, hardware present and the switch not set.
++          bool amx_on = false;
++#ifdef TRON_AMX_DISPATCH
++          amx_on = amx_attn_h128g4::eligible<activation_scalar>(
++                       profile.geometry.kv.head_size, profile.geometry.kv_mul()) &&
++                   amx_attn_h128g4::available();
++#endif
+           estimate_work(q_batch->items, attn_work.page_ixs[b][plan_id],
+               attn_work.page_work[b][plan_id], attn_work.page_qrange[b][plan_id],
+               batch_work_total[b][plan_id], profile.sliding_window_size,
+               profile.geometry.n_query_heads, profile.geometry.kv.n_kv_heads,
+-              profile.uses_hw);
++              profile.uses_hw, amx_on);
+ 
+           weighted_total_work += batch_work_total[b][plan_id].work() *
+                                  (int64_t)attention_plan_operation_count[plan_id];
+@@ -2516,9 +2526,14 @@ public:
+         int sliding_window_size,
+         size_t operation_query_heads,
+         size_t operation_kv_heads,
+-        bool use_hw) {
++        bool use_hw,
++        bool amx_on) {
+       const bool full_causal =
+           sliding_window_size >= self_attention<model>::illegal_sliding_window;
++      // EAGLE models skip the first k token (Note [EAGLE first token
++      // exception] in self_attention.hpp), so the page at position 0 never
++      // starts at offset 0 and is never dense.
++      const bool is_eagle = model_ref.plugin.is_eagle;
+       // Visibility is constant within one mask range (the per-offset walk this
+       // replaces only re-queried the mask at tok_hi boundaries), so a page's
+       // offsets are segmented into runs sharing a range once, and each item's
+@@ -2535,6 +2550,10 @@ public:
+         const auto& page_ixs = batch_page_ixs[pending];
+         page_work[pending].resize(page_ixs.size());
+         page_qrange[pending].assign(page_ixs.size(), {0, 0});
++        // Whether a whole-page visit of this pass takes the AMX path. With
++        // hardware attention the pending pass measured no AMX visit in any
++        // cell (attention path stats, 2026-10-16), so its pages count as AVX.
++        const bool pass_amx = amx_on && !(use_hw && pending);
+         const token_range* range_hint =
+             page_ixs.empty()
+                 ? nullptr
+@@ -2543,6 +2562,7 @@ public:
+         for (size_t p = 0; p < page_ixs.size(); ++p) {
+           const auto& page = *(pages[page_ixs[p]]);
+           uint32_t k_position_base = token_positions[page.at_offset(0)];
++          const size_t first_offset = is_eagle && k_position_base == 0 ? 1 : 0;
+           runs.clear();
+           const token_range* entry_range =
+               &query_mask->find_range(page.at_offset(0), *range_hint);
+@@ -2563,6 +2583,13 @@ public:
+           size_t q_lo = SIZE_MAX, q_hi = 0;
+           for (size_t ix = 0; ix < items.size(); ++ix) {
+             bool has_sw_work = false;
++            // The path this item's visit takes, for the weighted cost (Note
++            // [Path-weighted attention plan] in common.hpp): dense when some
++            // run passes the kernel's own predicate, which holds only for a
++            // run that is the whole page; otherwise the dotter scores
++            // `k_tokens` of the page's tokens, the whole page or a part.
++            bool amx_dense = false;
++            size_t k_tokens = 0;
+             const int q_position =
+                 full_causal ? 0 : (int)token_positions[token_jobs[items[ix]]];
+             // One visibility check per run covers all its offsets; the item's
+@@ -2582,10 +2609,23 @@ public:
+               if (!contributes_to_sw || begin >= run.end) continue;
+               page_work[pending][p].k_dot_products +=
+                   operation_query_heads * (run.end - begin);
++              k_tokens += run.end - begin;
+               has_sw_work = true;
++              if (pass_amx && !amx_dense) {
++                amx_dense = is_dense_amx_page(page, std::max(run.begin, first_offset),
++                    run.end, contributes_to_sw, *run.range, (uint32_t)q_position,
++                    k_position_base, sliding_window_size);
++              }
+             }
+             if (has_sw_work) {
+               page_work[pending][p].scaled_vs += operation_kv_heads;
++              if (amx_dense) {
++                page_work[pending][p].amx_dense_visits += operation_kv_heads;
++              } else if (k_tokens == page::page_size) {
++                page_work[pending][p].avx_full_visits += operation_kv_heads;
++              } else {
++                page_work[pending][p].avx_partial_visits += operation_kv_heads;
++              }
+               q_lo = std::min(q_lo, ix);
+               q_hi = ix + 1;
+             }
+@@ -2850,14 +2890,29 @@ public:
+     // `worker_ix`, and `work_cumsum` is the running total of all work
+     // assigned so far.
+     //
+-    // There are two types of section boundary: Worker and KV head. For example:
+-    //  | worker 0 |       worker 1      |   worker 2   |  worker 3 |  4 Workers
+-    //  +----------+---+--------------+--+-----------+--+-----------+  <-- worker
+-    //  |          /   |              |   \          |   \          |  7 Sections
+-    //  +---------+----+--------------+----+---------+----+---------+  <-- page_center
+-    //  | p0 | p1 | p2 | p0 | p1 | p2 | p0 | p1 | p2 | p0 | p1 | p2 |  3 Pages each
+-    //  |     ready    |   pending    |     ready    |   pending    |  Ready vs Pending
+-    //  |            kv 0             |             kv 1            |  2 KV heads
++    // The ready pages and the pending pages are placed in two separate passes,
++    // each with its own total, its own work_cumsum and its own worker cursor
++    // over all workers. A KV head's share of the workers is the same in both
++    // passes (work is identical for all KV heads), so its pending pages spread
++    // over the same workers as its ready pages. One cumulative sum over ready
++    // then pending pages put all pending pages of a KV head on the last worker
++    // or two of its block, and that worker set the layer time (Note
++    // [Path-weighted attention plan] in common.hpp). TRON_PLAN_WEIGHTED_DISABLE=1
++    // restores the one cumulative sum.
++    //
++    // There are two types of section boundary: Worker and KV head. For example,
++    // with 4 workers, 2 KV heads, 6 ready pages and 2 pending pages per KV head
++    // of equal work:
++    //  |   worker 0   |   worker 1   |   worker 2   |   worker 3   |  4 Workers
++    //  +--------------+--------------+--------------+--------------+  <-- worker
++    //  | p0 | p1 | p2 | p3 | p4 | p5 | p0 | p1 | p2 | p3 | p4 | p5 |  Ready pass
++    //  +--------------+--------------+--------------+--------------+
++    //  |      p6      |      p7      |      p6      |      p7      |  Pending pass
++    //  +--------------+--------------+--------------+--------------+
++    //  |            kv 0             |            kv 1             |  2 KV heads
++    // Every worker gets one ready section and one pending section of its KV
++    // head, 8 sections in all. With one cumulative sum, p6 and p7 of each KV
++    // head both land on the last worker of its block.
+     void finish_sw_plan(batch* q_batch,
+         typename batch::attention_plan& plan_state,
+         const std::array<std::vector<page_id>, 2>& batch_page_ixs,
+@@ -2867,51 +2922,71 @@ public:
+         size_t operation_kv_heads) {
+       // KV paging dominates attention planning; count it as its own category.
+       alloc_cat_scope _(alloc_cat::kv_plan);
+-      size_t worker = 0;
+-      size_t work_cumsum = 0;
+-      size_t total_work = 0;
+-      for (int pending : {0, 1}) {
+-        const auto& ixs = batch_page_ixs[pending];
+-        for (size_t p = 0; p < ixs.size(); ++p)
+-          total_work += page_work[pending][p].work();
+-      }
+-      // All attention is on HW: no SW pages to distribute. Step 6
+-      // (in the caller) fills join_workers by broadcasting every
+-      // kv_head to every worker. Returning here avoids a div-by-zero
+-      // on page_center below.
+-      if (total_work == 0) return;
+-
+       TRON_ASSERT(std::abs(worker_cumsum.back() - 1.0f) < 1e-4,
+           "worker_cumsum not normalized: total = {}", worker_cumsum.back());
+-      if (total_work == 0) return;
+-      // Account for work assigned to this worker previously.
+-      work_cumsum += plan_state.ready_kv_plan.work_estimate(0).work();
+-      work_cumsum += plan_state.pending_kv_plan.work_estimate(0).work();
+-      for (size_t kv_head = 0; kv_head < operation_kv_heads; ++kv_head) {
+-        for (int pending : {0, 1}) {
+-          const auto& page_ixs = batch_page_ixs[pending];
+-          auto& plan = pending ? plan_state.pending_kv_plan : plan_state.ready_kv_plan;
+-          for (size_t p = 0; p < page_ixs.size(); ++p) {
+-            work_estimate_t on_this_page = page_work[pending][p] / operation_kv_heads;
+-            // Decide whether to move on to the next worker by asking:
+-            // in which worker's interval does the page center land?
+-            const float page_center =
+-                (work_cumsum + 0.5f * on_this_page.work()) / total_work;
+-            if (worker_cumsum[worker] < page_center &&
+-                worker + 1 < worker_cumsum.size()) {
+-              ++worker;
+-              work_cumsum += plan_state.ready_kv_plan.work_estimate(worker).work();
+-              work_cumsum += plan_state.pending_kv_plan.work_estimate(worker).work();
+-            }
+-            if (plan.assign_page(worker, kv_head, page_ixs[p], on_this_page,
+-                    page_qrange[pending][p].first, page_qrange[pending][p].second)) {
+-              plan_state.n_sections[kv_head]++;
++      // One pass of the page-centre walk over the pages of `passes` (ready,
++      // pending, or both), with its own total and cumulative sum. Returns the
++      // work it placed.
++      auto place_pages = [&](std::initializer_list<int> passes) -> size_t {
++        size_t total_work = 0;
++        for (int pending : passes) {
++          const auto& ixs = batch_page_ixs[pending];
++          for (size_t p = 0; p < ixs.size(); ++p)
++            total_work += page_work[pending][p].work();
++        }
++        // No SW pages in this pass: nothing to place. Returning here avoids a
++        // div-by-zero on page_center below.
++        if (total_work == 0) return 0;
++        // Work assigned to a worker previously in the plans of this pass.
++        auto prior_work = [&](size_t worker) {
++          size_t work = 0;
++          for (int pending : passes) {
++            const auto& plan =
++                pending ? plan_state.pending_kv_plan : plan_state.ready_kv_plan;
++            work += plan.work_estimate(worker).work();
++          }
++          return work;
++        };
++        size_t worker = 0;
++        size_t work_cumsum = prior_work(worker);
++        for (size_t kv_head = 0; kv_head < operation_kv_heads; ++kv_head) {
++          for (int pending : passes) {
++            const auto& page_ixs = batch_page_ixs[pending];
++            auto& plan =
++                pending ? plan_state.pending_kv_plan : plan_state.ready_kv_plan;
++            for (size_t p = 0; p < page_ixs.size(); ++p) {
++              work_estimate_t on_this_page = page_work[pending][p] / operation_kv_heads;
++              // Decide whether to move on to the next worker by asking:
++              // in which worker's interval does the page center land?
++              const float page_center =
++                  (work_cumsum + 0.5f * on_this_page.work()) / total_work;
++              if (worker_cumsum[worker] < page_center &&
++                  worker + 1 < worker_cumsum.size()) {
++                ++worker;
++                work_cumsum += prior_work(worker);
++              }
++              if (plan.assign_page(worker, kv_head, page_ixs[p], on_this_page,
++                      page_qrange[pending][p].first, page_qrange[pending][p].second)) {
++                plan_state.n_sections[kv_head]++;
++              }
++              work_cumsum += on_this_page.work();
+             }
+-            work_cumsum += on_this_page.work();
+           }
+         }
++        TRON_ASSERT_EQ(work_cumsum, total_work);
++        return total_work;
++      };
++      size_t total_work = 0;
++      if (plan_weighted_enabled()) {
++        total_work += place_pages({0});
++        total_work += place_pages({1});
++      } else {
++        total_work = place_pages({0, 1});
+       }
+-      TRON_ASSERT_EQ(work_cumsum, total_work);
++      // All attention is on HW: no SW pages to distribute. Step 6
++      // (in the caller) fills join_workers by broadcasting every
++      // kv_head to every worker.
++      if (total_work == 0) return;
+       split_sections_by_query(
+           q_batch, plan_state, worker_cumsum, init_attn_section_split_cap());
+     }
+@@ -2939,9 +3014,14 @@ public:
+       if (cap < 2 || n_q < static_cast<size_t>(split_min_queries)) return;
+       TRON_ASSERT_EQ(worker_cumsum.size(), n_workers);
+       TRON_ASSERT_EQ(plan_state.pending_kv_plan.size(), n_workers);
+-      // Charge a conservative 20 query units per section for page setup
+-      // and the additional bookkeeping and joins introduced by splitting.
+-      constexpr int64_t fixed_cost = 20;
++      // Charge a conservative 20 query visits per section for page setup
++      // and the additional bookkeeping and joins introduced by splitting, in
++      // the units of work(): AVX whole-page visits, or plain visits with the
++      // weights off (Note [Path-weighted attention plan] in common.hpp).
++      constexpr int64_t fixed_cost_visits = 20;
++      const int64_t fixed_cost = plan_weighted_enabled()
++                                     ? fixed_cost_visits * avx_full_page_visit_cost
++                                     : fixed_cost_visits;
+       auto section_cost = [&](const kv_section& s) {
+         return s.work_estimate.work() == 0 ? int64_t{0}
+                                            : fixed_cost + s.work_estimate.work();
+@@ -3010,8 +3090,9 @@ public:
+                        total * static_cast<int64_t>(begin) /
+                            static_cast<int64_t>(c.span);
+               };
+-              const work_estimate_t piece_work{
+-                  share(work.k_dot_products), share(work.scaled_vs), work.kv_heads};
++              const work_estimate_t piece_work{share(work.k_dot_products),
++                  share(work.scaled_vs), work.kv_heads, share(work.amx_dense_visits),
++                  share(work.avx_full_visits), share(work.avx_partial_visits)};
+               const int64_t cost = fixed_cost + piece_work.work();
+               // Keep the first piece on the original worker; moving the whole
+               // section would discard the page assignment's locality choice.
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index 9eaa59ea98..50dc14b5f6 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -191,6 +191,32 @@ inline attention_sink_update attention_sink_update_for(
+ 
+ inline constexpr int illegal_sliding_window = std::numeric_limits<int>::max();
+ 
++// The dense-page predicate of Note [AMX attention dispatch]: the whole
++// 64-token page is active (begin == 0, end == page_size), the query sees
++// all of it through one visible range, and the whole page is inside the
++// query's sliding window.
++// Only such pages take the AMX path; everything else runs the dotter loop.
++// Shape, activation type and runtime availability are checked separately
++// (eligible, available), before this predicate is reached.
++// Two callers share this one definition: apply_page_tok decides the path of
++// a visit, and estimate_work (model.hpp) predicts that decision per page run
++// so that the plan can weight a page by the cost of its path. It is outside
++// the TRON_AMX_DISPATCH block because the planner compiles it in every build.
++template <typename page_t>
++TRON(inline)
++bool is_dense_amx_page(const page_t& pg,
++    size_t begin,
++    size_t end,
++    bool query_visible,
++    const token_range& range,
++    uint32_t q_position,
++    uint32_t k_position,
++    int sliding_window_size) noexcept {
++  return begin == 0 && end == page_t::page_size && query_visible &&
++         pg.at_offset(page_t::page_size - 1) < range.tok_hi &&
++         (int)q_position - (int)k_position < sliding_window_size;
++}
++
+ template <typename model>
+ struct self_attention {
+   using plugin = model::plugin_t;
+@@ -1700,27 +1726,6 @@ struct self_attention {
+       return slot;
+     }
+ 
+-    // The dense-page predicate of Note [AMX attention dispatch]: the whole
+-    // 64-token page is active (begin == 0, end == page_size), the query sees
+-    // all of it through one visible range, and the whole page is inside the
+-    // query's sliding window.
+-    // Only such pages take the AMX path; everything else runs the dotter loop.
+-    // Shape, activation type and runtime availability are checked separately
+-    // (eligible, available), before this predicate is reached.
+-    TRON(inline)
+-    static bool is_dense_amx_page(const page& pg,
+-        size_t begin,
+-        size_t end,
+-        bool query_visible,
+-        const token_range& range,
+-        uint32_t q_position,
+-        uint32_t k_position,
+-        int sliding_window_size) noexcept {
+-      return begin == 0 && end == page::page_size && query_visible &&
+-             pg.at_offset(page::page_size - 1) < range.tok_hi &&
+-             (int)q_position - (int)k_position < sliding_window_size;
+-    }
+-
+     // The whole AMX path for one (query, page) pair: the QK kernel, the same
+     // scale / max / exp step as the dotter, the PV kernel, and the update of the
+     // running-softmax state. The caller has already checked that a packed Q
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index 0c75143c44..aa5e8cbe08 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -3094,9 +3094,11 @@ static void check_page_range_reductions(int sliding_window) {
+       std::array<std::vector<work_estimate_t>, 2> page_work;
+       std::array<std::vector<std::pair<uint32_t, uint32_t>>, 2> page_qrange;
+       work_estimate_t total;
+-      // Only KV head 0 is computed in this fixture.
++      // Only KV head 0 is computed in this fixture. The AMX path is off, so
++      // every visit costs the same and the split decisions below are the
++      // same as with one unit per visit (every cost scales alike).
+       state.estimate_work(q_batch.items, batch_pages, page_work, page_qrange, total,
+-          sliding_window, kv_mul, 1, false);
++          sliding_window, kv_mul, 1, false, false);
+ 
+       auto prepare_plan = [&] {
+         plan.ready_kv_plan = {};
+@@ -3457,6 +3459,190 @@ TEST_CASE("apply and join page ranges", "[page_range]") {
+   }
+ }
+ 
++// The attention plan weights every page by the path its visits take and
++// places the ready and the pending pages in two separate passes (Note
++// [Path-weighted attention plan] in common.hpp). Why this matters: the join
++// of a KV head waits for every section of that head, so the slowest worker
++// sets the layer time. With one unit per visit, or with ready then pending
++// pages on one cumulative sum, the workers holding the partial pages or the
++// pending pages took up to twice the mean compute time per layer (Muse
++// Glimmer, delphi-3bda, 2026-10-16). The checks assume the default,
++// TRON_PLAN_WEIGHTED_DISABLE unset.
++TEST_CASE(
++    "attention plan weights pages by path and spreads pending pages", "[attention]") {
++  constexpr size_t head_size = 128;
++  constexpr size_t n_heads = 4;
++  constexpr size_t n_kv_heads = 2;
++  constexpr llm_configuration llm_config{.type = model_type::llama,
++      .dim = n_heads * head_size,
++      .hidden_dim = 1024,
++      .n_layers = 1,
++      .n_heads = n_heads,
++      .n_kv_heads = n_kv_heads,
++      .vocab_size = 128,
++      .head_size = head_size,
++      .attention_scale = 0x1.6a09e6p-4f,
++      .n_experts = 1,
++      .n_shared_experts = 1,
++      .n_routed_experts_chosen = 0,
++      .rope_scaling_strategy = rope_scaling::simple};
++  using model_t =
++      model<llm<llm_config, make_llm_executor<false, tensor, tensor, tensor>>>;
++  using page_t = model_t::page;
++  // Eight full pages. The queries are the tokens of the last page, so pages 0
++  // to 6 are whole for every query and page 7 is the causal diagonal: every
++  // query scores part of it. Pages 0 to 5 are ready (written in earlier
++  // forwards), pages 6 and 7 are pending (written in this forward).
++  constexpr size_t num_pages = 8;
++  constexpr size_t n_ready_pages = 6;
++  constexpr size_t n_q = page_t::page_size;
++  constexpr size_t num_kv_tokens = num_pages * page_t::page_size;
++  constexpr size_t first_q_token = num_kv_tokens - n_q;
++  auto model =
++      std::make_unique<model_t>(std::filesystem::path{}, json(json::value_t::object));
++  model_t::book book(num_pages, 1);
++  std::vector<page_t*> pages;
++  for (size_t i = 0; i < num_pages; ++i) {
++    pages.push_back(book.page_of(i * page_t::page_size));
++    pages.back()->set_lo(0, i * page_t::page_size);
++    for (size_t tok = 0; tok < page_t::page_size; ++tok)
++      book.increment_tokens_used();
++    pages.back()->set_offset_bound(page_t::page_size);
++  }
++  model_t::state state(*model, model_config{.max_layers = 1});
++  state.resize(n_q);
++  state.pages.items = std::span<page_t* const>(pages);
++  indexed_vector<token_job_id, token_id> jobs;
++  for (size_t i = 0; i < n_q; ++i)
++    jobs.push_back(token_id(first_q_token + i));
++  state.token_jobs = jobs;
++  std::vector<uint32_t> positions(num_kv_tokens);
++  for (size_t i = 0; i < num_kv_tokens; ++i)
++    positions[i] = i;
++  state.token_positions.items = std::span<const uint32_t>(positions);
++  // Causal visibility: query q sees the tokens at positions up to
++  // first_q_token + q. Each later position drops the lowest remaining query.
++  ranged_mask mask;
++  {
++    mask_t<ranged_mask_capacity> sw{};
++    for (size_t q = 0; q < n_q; ++q)
++      sw.insert(q);
++    mask.add_range(token_id(0), token_id(first_q_token + 1), sw, {});
++    for (size_t q = 0; q + 1 < n_q; ++q) {
++      sw.erase(q);
++      mask.add_range(
++          token_id(first_q_token + q + 1), token_id(first_q_token + q + 2), sw, {});
++    }
++  }
++  state.query_mask = &mask;
++
++  latch_arena latches;
++  with_latch_arena latch_guard(latches);
++  std::vector<token_job_id> items;
++  for (size_t i = 0; i < n_q; ++i)
++    items.emplace_back(i);
++  model_t::batch q_batch(state, std::move(items), latches, 0);
++  q_batch.plans.resize(state.attention_plan_profiles.size());
++  q_batch.reset_channels(0, 0);
++
++  std::array<std::vector<page_id>, 2> batch_pages;
++  for (size_t i = 0; i < num_pages; ++i)
++    batch_pages[i >= n_ready_pages].emplace_back(page_id(i));
++  std::array<std::vector<work_estimate_t>, 2> page_work;
++  std::array<std::vector<std::pair<uint32_t, uint32_t>>, 2> page_qrange;
++  const int full_causal = std::numeric_limits<int>::max();
++  auto estimate = [&](bool use_hw, bool amx_on) {
++    // estimate_work adds to the counts it finds: start from empty vectors, as
++    // the production caller does.
++    page_work = {};
++    page_qrange = {};
++    work_estimate_t total;
++    state.estimate_work(q_batch.items, batch_pages, page_work, page_qrange, total,
++        full_causal, n_heads, n_kv_heads, use_hw, amx_on);
++    return total;
++  };
++  // Every query visits every page for both KV heads. The last query sees all
++  // of the diagonal page, through 64 one-token ranges: the dotter scores the
++  // whole page, so that visit is AVX full, like the kernel's path stats.
++  constexpr int64_t visits = n_q * n_kv_heads;
++  constexpr int64_t diagonal_full_visits = n_kv_heads;
++  constexpr int64_t diagonal_partial_visits = visits - diagonal_full_visits;
++  const work_estimate_t& dense_page = page_work[1][0];    // page 6
++  const work_estimate_t& partial_page = page_work[1][1];  // page 7
++
++  // With the AMX path on, the whole pages are AMX dense and the diagonal page
++  // is AVX partial. The partial page scores fewer K tokens than the dense page
++  // but costs more time, and the plan must charge it that way.
++  work_estimate_t total = estimate(/*use_hw=*/false, /*amx_on=*/true);
++  for (int pending : {0, 1}) {
++    for (size_t p = 0; p < page_work[pending].size(); ++p) {
++      CAPTURE(pending, p);
++      CHECK(page_work[pending][p].scaled_vs == visits);
++      const bool diagonal = pending == 1 && p == 1;
++      CHECK(page_work[pending][p].amx_dense_visits == (diagonal ? 0 : visits));
++      CHECK(page_work[pending][p].avx_full_visits ==
++            (diagonal ? diagonal_full_visits : 0));
++      CHECK(page_work[pending][p].avx_partial_visits ==
++            (diagonal ? diagonal_partial_visits : 0));
++    }
++  }
++  CHECK(partial_page.k_dot_products < dense_page.k_dot_products);
++  CHECK(partial_page.work() > dense_page.work());
++  CHECK(dense_page.work() == amx_dense_visit_cost * visits);
++  const int64_t diagonal_cost = avx_partial_page_visit_cost * diagonal_partial_visits +
++                                avx_full_page_visit_cost * diagonal_full_visits;
++  CHECK(partial_page.work() == diagonal_cost);
++  constexpr int64_t n_whole_pages = num_pages - 1;
++  CHECK(total.work() == n_whole_pages * dense_page.work() + partial_page.work());
++
++  // With the AMX path off every whole page is an AVX full page: the costs
++  // are all equal, so only the two-pass placement acts on such a model.
++  estimate(/*use_hw=*/false, /*amx_on=*/false);
++  CHECK(dense_page.amx_dense_visits == 0);
++  CHECK(dense_page.avx_full_visits == visits);
++  CHECK(dense_page.work() == avx_full_page_visit_cost * visits);
++  CHECK(partial_page.work() == diagonal_cost);
++
++  // With hardware attention the pending pass never takes the AMX path: the
++  // pending whole page counts as AVX while the ready whole pages stay dense.
++  estimate(/*use_hw=*/true, /*amx_on=*/true);
++  CHECK(page_work[0][n_ready_pages - 1].amx_dense_visits == visits);
++  CHECK(dense_page.amx_dense_visits == 0);
++  CHECK(dense_page.avx_full_visits == visits);
++
++  // The plan: four workers of equal speed, two per KV head. The pending pages
++  // of a KV head must land on the same workers as its ready pages, one each,
++  // instead of both on the last worker of the head's block.
++  estimate(/*use_hw=*/false, /*amx_on=*/true);
++  constexpr size_t n_workers = 4;
++  constexpr size_t workers_per_kv_head = n_workers / n_kv_heads;
++  const std::vector<float> worker_cumsum{0.25f, 0.5f, 0.75f, 1.0f};
++  auto& plan = q_batch.plans[attention_plan_id(0)];
++  plan.ready_kv_plan.resize(n_workers);
++  plan.pending_kv_plan.resize(n_workers);
++  plan.n_sections.assign(n_kv_heads, 0);
++  state.finish_sw_plan(
++      &q_batch, plan, batch_pages, page_work, page_qrange, worker_cumsum, n_kv_heads);
++  for (size_t kv_head = 0; kv_head < n_kv_heads; ++kv_head) {
++    CAPTURE(kv_head);
++    std::vector<size_t> ready_workers, pending_workers;
++    for (size_t worker = 0; worker < n_workers; ++worker) {
++      for (const kv_section& s : plan.ready_kv_plan[worker])
++        if (s.kv_head == kv_head) ready_workers.push_back(worker);
++      for (const kv_section& s : plan.pending_kv_plan[worker])
++        if (s.kv_head == kv_head) pending_workers.push_back(worker);
++    }
++    std::vector<size_t> block;
++    for (size_t w = 0; w < workers_per_kv_head; ++w)
++      block.push_back(kv_head * workers_per_kv_head + w);
++    CHECK(ready_workers == block);
++    CHECK(pending_workers == block);
++    // One ready and one pending section per worker of the block; no query
++    // split (every worker already holds several page tasks).
++    CHECK(plan.n_sections[kv_head] == 2 * workers_per_kv_head);
++  }
++}
++
+ // book::try_create — the fallible KV-book factory (memory_pressure_governor
+ // §8). The public ctor aborts on a payload-DMA OOM; try_create returns nullptr instead.
+ // Driven host-side via the fault seam (see Note [DMA fault injection seam],

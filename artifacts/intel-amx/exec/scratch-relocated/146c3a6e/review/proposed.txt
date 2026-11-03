@@ -1,0 +1,44 @@
+// Stages 3 and 4 of the 16 x 16 transpose in qk_rowmajor_128x4: output row
+// 4 * lane + k (one query head, 16 tokens) is assembled from 128-bit lane
+// `lane` of u[0..3][k], which holds tile column 4 * lane + k for tokens
+// 4 * row_group .. 4 * row_group + 3. The shuffle selectors are immediates,
+// so `lane` is a template argument.
+// A 128-bit lane holds 4 fp32 values: 4 output rows per lane.
+  // Stage 3 pairs row groups 0/1 and 2/3: lanes {0, 2} or {1, 3} by bit 0.
+  // Stage 4 joins the two pairs: the first or the second lane by bit 1.
+  // One scratch per instantiation, so a 16-head call's rows never reach a 4-head call.
+// Must equal group_heads_ok in amx_attn_iface.hpp: the kernel bodies live only here.
+// The group sizes amx_attn.cpp instantiates the kernels for (the only translation
+// unit holding their bodies); that list and this set must stay equal.
+  // kv_mul 8 (llama-70b, qwen-3-32b: 64 query heads over 8 KV heads) stays refused.
+// A value no dot product of the fixture produces (|q.k| < 128). check_qk writes
+// it into every score row and requires rows group_heads..15 to keep it, which
+// pins the s[group_heads] contract of Note [Tile stores write 16 rows].
+      // AMX fast path for dense pages when the model is eligible (amx_eligible
+      // below) and the Q buffer is bf16; see Note [AMX attention dispatch]. Each
+      // token's Q group is packed once per call, at its first page that passes the
+        // resize() zero-fills new slots, which is the zero-padding precondition of
+        // the pack contract (amx_attn_iface.hpp).
+      // Both kernels read s_pages through &s_pages[0][0] with row stride page_size.
+      // PV for the page's kv_mul heads in one tile call. amx_o has 16 rows, not
+      // kv_mul: see Note [Tile stores write 16 rows].
+// The kernel shape (PAGE_TOKENS_64, HEAD_SIZE_128, GROUP_HEADS_4, GROUP_HEADS_16)
+// and the tile shape (TILE_ROWS_16, TILE_ROW_BYTES_64) come from the interface
+// header. begin_region() configures all 8 tiles with the tile shape.
+  // The layout contract is at the declaration (amx_attn_iface.hpp).
+  // Transpose s_transposed(64x16) -> s rows 0..group_heads-1. Stages 1 and 2
+  // (the unpack loop below) run for the whole tile at either group size; stages
+  // 3 and 4 run per 4-row lane (store_transposed_rows).
+// Tile geometry shared by every kernel below: begin_region() configures all 8
+// tiles as 16 rows x 64 bytes. A tile store writes all 16 rows; see Note [Tile
+// stores write 16 rows].
+// The attention shapes the kernels serve (Note [AMX attention dispatch]).
+// The shape half of the gate (see Note [AMX attention dispatch]).
+using tron::amx_attn_h128g4::GROUP_HEADS_16;  // query heads per KV head
+  // Sized for the larger group.
+// `n_heads` is also the AMX group size: the model has one KV head.
+    // Each head carries its own offset (i / head_size), so a pack that
+    // permutes or drops heads cannot pass. Every value is a multiple of 1/16
+    // below 4, so it is exact in bf16.
+// S^T = K_page . Q^T, then the transposing store; contract at the declaration and
+// Note [QK orientation] in amx_attn_iface.hpp.

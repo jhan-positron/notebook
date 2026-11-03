@@ -1,0 +1,147 @@
+
+
+Issue 4444 fix design
+
+Issue #4444: design for the fix
+
+Companion to token-divergence-issue4444-report.html (the measurement). Written 2026-10-16 by Claude Code for jhan. Numbers cite the report's records: the kernel test (exec/td-20261016/ktest/results.txt), the replay (exec/td-20261016/replay/results.md) and the record comparisons (exec/results/td-20261016/).
+
+Short version
+
+Two things are worth changing: the AVX-512 PV path should round the softmax weights to nearest instead of truncating them (one instruction, removes a -0.08 % bias and a quarter of the error), and the kill switch should run AVX-512 kernels written in the AMX add order, so that TRON_AMX_DISABLE=1 reproduces the AMX binary's numbers bit for bit (proved at kernel level, 1.30x the reader's cost on partial-page scoring only). The page-completing decode step of PR 4959 should convert its block before attention, so the stack chooses the same path as main at every step. A model-level bound test (issue item 3) can then pin the whole contract: two forced runs, flips only at near ties, logits within a stated distance.
+
+Words used here
+
+term | meaning | 
+
+tron, runtron | tron is the inference program; runtron is its command-line tool. | 
+
+AMX, AVX-512 | Intel's tile instruction set (TDPBF16PS) and vector instruction set (VDPBF16PS). Both multiply bf16 pairs and add in fp32, in different orders. | 
+
+bf16, fp32, ulp, RNE | bf16 is the 16-bit float of the activations (one notch = 0.39 % of the value); fp32 the 32-bit float of the sums (one notch = 1.2e-7). A ulp is one notch at the value's size. RNE is round to nearest, ties to even; truncation drops the low bits (always toward zero). | 
+
+dotter, reader, AMX kernels, PV path | The row-major AVX-512 scorer (dotter<bf16,128>), the VNNI-K AVX-512 scorer (k_vnni::qk_group), the AMX tile kernels (qk_vnni_128x4, qk_rowmajor_128x4, weights_times_v_128x4), and the product of the softmax weights P with V (AVX: scaled_v_expr; AMX: weights_times_v_128x4). | 
+
+the stack, main, clean binary, kill switch | The stack is PR 4956 to 4959 (VNNI K layout + AMX). main is the commit the stack is based on (72308ec90c). The clean binary is main built with TRON_AMX_DISPATCH=OFF. The kill switch is TRON_AMX_DISABLE=1, which turns the AMX kernels off at run time. | 
+
+page, block, dense page, page-end step | A page is 64 tokens of the KV cache; a block is 16 tokens of a page. A dense page is one the AMX kernels take whole. The page-end step is the decode step whose new token completes a page. | 
+
+AMX order | The fp32 add order of the AMX tile instruction as measured on the Xeon 6962P: per instruction of 16 dimension pairs, E = sequential chain of the 16 even-dimension products, O = the same over the odd-dimension products, result = acc + fl(E + O). Verified bit for bit on 512,000 QK scores and 102,400 PV outputs (kernel test T5m, T6d). | 
+
+near tie, flip, forced run, TVD | A near tie is a step where the two best candidates' logits are within a few ulps; a flip is a step where two binaries choose different top tokens; a forced run feeds both binaries the same tokens so logits compare step by step; TVD is the total variation distance between two softmax distributions (0 = identical). | 
+
+goldens | Test files that hold the expected tokens or logits of a fixed prompt; they change whenever production numerics change at a near tie. | 
+
+1. What the measurement settled
+
+The VNNI layout is numerically inert: with the kill switch, a stack binary whose reader is replaced by unpack + dotter equals main bit for bit over all 416,443 records of a 1,280-token run [report, section 3].
+
+The three add orders (dotter, reader, AMX) move a score by one fp32 ulp and an output element now and then; the weight rounding (AVX truncation vs AMX round-to-nearest) moves a third of the attention output elements by a bf16 notch at every dense page and is biased: -0.08 % of the output on real data, RMS error 1.25 times (real data) to 1.8 times (random pages) that of rounding to nearest [report, section 4].
+
+At the PR 4959 head only, the page-completing decode step scores one page in the software loop where main uses AMX [report, section 5].
+
+Every difference saturates to ulp noise on about 80 % of the logits within one forward pass; a greedy flip needs a near tie (margin 0 to 2 ulps at the three observed flips) [report, section 6].
+
+An AVX-512 reader and an AVX-512 PV loop written in the AMX order reproduce the AMX kernels bit for bit (512,000 of 512,000 scores; 1,024,000 of 1,024,000 outputs) at 1.30x and 1.06x the cost of the current AVX versions, single core, data in cache [kernel test T9a, T9b, T9c].
+
+2. The decisions
+
+id | decision | recommendation | size of change | 
+
+D1 | What the kill switch promises on VNNI K (issue item 2) | Option C: AVX-512 kernels in the AMX order under the kill switch, so the switch reproduces the AMX binary's numerics exactly. Until then, option A's one-line amendment of Note [AMX attention dispatch] item 4. | two kernels (about 120 lines) + dispatch + tests | 
+
+D2 | Rounding of the softmax weights in the AVX-512 PV path | Round to nearest even (replace the shift-and-mask by _mm512_cvtne2ps_pbh). Removes the bias; makes AVX and AMX differ by add order only. | one function (interleave_bf16_ps), goldens regenerated, one measurement | 
+
+D3 | When the block completed by a decode step converts to VNNI (PR 4959) | Convert it right after the 16th row is saved and before the attention latch is released, so the page is dense in the same step, as on main. Keep the forward-end conversion as the fallback for blocks completed under hardware attention. | save path, about 20 lines + one test case | 
+
+D4 | A model-level bound test (issue item 3) | A forced-run test with three bounds (below), run on the AMX runner, using the existing comparison tool. | one CI job, one script | 
+
+D5 | The numerics contract text | Rewrite the "exactly two reasons" paragraph of Note [AMX attention dispatch]: three add orders, the measured AMX order, the PV order difference, the rounding mode. | comment only | 
+
+3. D1: the kill-switch contract
+
+Today the switch on a VNNI-K binary gives "AMX off, same binary", not "the clean binary's numbers": the reader's add order stays, so newoff differs from baseoff from prompt token 1 on and flips a token at step 20 of 256 [report, section 2]. The issue lists two options; the measurement adds a third.
+
+option | what the switch gives | cost | what it is good for | what it cannot do | 
+
+A (issue): amend item 4 of the Note: "clean-binary numerics with TRON_K_VNNI off" | AMX off, VNNI reader + AVX PV | none | same-binary A/B of throughput; a rollback that keeps serving | a rollback to the row-major binary's tokens | 
+
+B (issue): keep a row-major build as the deployment rollback artifact | unchanged switch; a second binary for rollback | one more build and package per release | true rollback of the numerics | same-binary tests of anything numeric | 
+
+C (new): AVX-512 kernels in the AMX order (QK: qk_group_amxorder; PV: scaled_v_amxorder, P rounded to nearest) used for dense pages when the switch is on | AMX off, the AMX binary's numbers bit for bit (dense pages through the AMX-order kernels, partial pages through the unchanged reader + AVX PV, as with AMX on) | QK 1.30x, PV 1.06x the current AVX kernels on dense pages, single core, data in cache; the switch arm is a test and rollback mode, not the production path [kernel test T9c] | same-binary A/B where only the hardware differs; a run on hosts without AMX (AMD) that reproduces the Intel tokens; a defect detector: any difference between the two arms is a kernel or dispatch bug, not numerics | reproduce the row-major binary's tokens (no AVX order can match the dotter and the AMX tile at once) | 
+
+D (stretch): make the AMX order the production order everywhere (replace the dotter by the AMX-order reader on row-major K too, D2 included) | every CPU path (AMX, kill switch, AMD hosts) bit-identical | the dotter's successor is 1.30x its cost on every partial page; the clean binary's tokens change once | one set of CPU numerics for the fleet | FPGA attention still differs; a large change to production numerics | 
+
+Recommendation. Option C, with option A's sentence in the Note until C lands. Rationale: the measurement shows that the two kill-switch arms that exist today (reader order, dotter order) flip tokens against each other just as the AMX arm does, so "AMX off" without a numerics promise is not a useful contract for correctness work; option C turns the switch into the one tool that separates "the hardware did something different" from "the numbers were summed in another order". The cost lands only when the switch is on. Under option C, the stack binary with the switch on should equal the stack binary with AMX on over a forced run (a bound test, D4, checks it); under hardware attention and on AMD hosts the same holds, which is also what Note [AMX attention dispatch] item 3 promises today in words.
+
+Implementation sketch for C (from the kernel test program, exec/td-20261016/ktest/ktest.cpp, sections T9a and T9b):
+
+QK, one token per lane, VNNI plane panels: per 32-dimension step, keep two fp32 accumulators per head, E and O, both starting at zero; for each of the 16 pairs, E = fma(q_even, k_even, E) and O = fma(q_odd, k_odd, O) with the pair's two bf16 values widened to fp32 (shift for the even half, mask for the odd half, as the float-query path already does); then acc = acc + (E + O). Four steps per 128 dimensions.
+
+PV, over the V pair rows: P rounded to nearest bf16 and widened; per instruction of 16 token pairs, E = chain over the even tokens' products, O = chain over the odd tokens', acc = acc + (E + O); two instructions for a 64-token page.
+
+Dispatch: where apply_dense_amx_page is chosen today, choose the AVX-order pair instead when available() is false but the page is dense; everything else unchanged.
+
+Tests: an identity case in t_amx_numerics (AMX kernel vs AVX-order kernel, bit for bit, like the existing VNNI-vs-row-major identity case; it needs AMX hardware), a mutation check (swap E and O's order: the case must fail), and the forced-run bound test D4 at model level.
+
+4. D2: round the softmax weights to nearest in the AVX-512 PV path
+
+The change is one instruction in scaled_v_expr::interleave_bf16_ps (h/tron/models/kv_cache.hpp, about line 2996): replace the shift-and-mask that keeps the high 16 bits of each fp32 weight by _mm512_cvtne2ps_pbh, which rounds both halves to nearest even and interleaves them in one instruction. The AMX PV kernel already does this. Cost: the same instruction count (one conversion per 32 weights).
+
+effect | measured today | after the change (expected) | 
+
+bias of the attention output against exact | -0.078 % on real data (replay M3, clean model), -0.073 % on random pages (kernel test T7a) | about 0 (replay clean_rne: -0.0016 %; kernel test o_rne: -0.0006 %) | 
+
+RMS error of the attention output against exact | 2.00e-3 real data, 2.92e-3 random | 1.60e-3 real data, 1.62e-3 random (1.25x and 1.8x lower) | 
+
+softmax weight mass kept | -0.16 % real data, -0.14 % random | about 0 (+1e-6) | 
+
+AVX vs AMX difference at the first dense page | 36 % of the layer-0 WO elements, relative change 1.9e-3 (new vs newoff at token 128) | the add-order residual only: 1.2 % of elements, 2.3e-4 (newoff vs trunc at token 128, layers 0 and 1 identical) | 
+
+tokens of the clean binary | - | change at near ties (the measured flip rate is 0.8 to 1.5 per 256 steps for a change of this kind); goldens must be regenerated | 
+
+What must be measured before merging: (1) the forced-run comparison clean-before vs clean-after on the campaign's cell (expected: a rounding-type seam at the first page, flips only at near ties); (2) the nightly perf numbers (expected: no change, the instruction count is equal); (3) an accuracy benchmark on both binaries (the nightly MMLU-Pro job is the existing instrument; the expected difference is within its noise, so this is a guard, not a proof); (4) whether the FPGA attention path rounds its weights to nearest or truncates (not measured here; if it truncates, the FPGA-vs-CPU difference grows by the same bias the AVX path loses).
+
+Why this is worth doing although the bias is small: the truncation costs accuracy for nothing (the rounding instruction is free), it is the single largest contributor to the CPU-path differences (ten times the add order), and every CPU host without AMX runs it on every page. It is not urgent: a 0.08 % bias on one layer's attention branch is far below the bf16 noise of the residual stream, and no quality regression has been attributed to it.
+
+5. D3: convert the page-completing block before attention
+
+At the PR 4959 head, a decode step that saves the 16th row of a block queues the block and converts it at the forward end, after attention. On the page-end step this leaves the page non-dense for one step, and the page goes through the software loop where main uses AMX [report, section 5]. Converting the block right after its 16th row is stored, before the save counts down the attention latch of that layer, makes the page dense in the same step. Safety argument to verify in review: the block has no reader before the latch (the pending-page attention of this pass waits on it; earlier passes' readers are finished when the pass started), and under hardware attention the block is never converted at all, so that path is unchanged. The cost is one 4 KiB in-place transpose per completed block on the saving thread, once per 16 decode steps per layer. The forward-end queue stays for every other case.
+
+Alternative: leave the behavior and document it in Note [K VNNI storage] ("the page is dense from the next pass on"), which the Note already says. The cost of leaving it: the stack can never be bit-identical to main with AMX on, even once the reader's order question is settled, and a per-step comparison between the two shows a seam at every 64th decode step that has nothing to do with the kernels.
+
+6. D4: a model-level bound test
+
+Issue item 3 asks for a bound at model level instead of the per-kernel envelope. The campaign's tooling (exec/dd/dd_logits_step.py, forced runs with --intermediates-file filtered to the logits lines) gives one directly. Proposed test, run on the AMX runner on a fixed prompt (the cell of this campaign: qwen3-4b tp2, prompt 1024, 256 generated tokens, greedy, --pay-for-determinism):
+
+Run the binary with AMX on, free-running; record its tokens. Run the binary with the kill switch and, when available, the row-major build, force-fed those tokens; record the logits of every step.
+
+Bound 1 (identity, option C): AMX on vs kill switch: all 256 logit vectors identical. Until option C lands, bound 1 is replaced by bounds 2 and 3 for that pair.
+
+Bound 2 (distribution): per step, TVD between the two arms at most 0.10 (observed maximum 0.057 over all pairs tonight; the 2026-08-30 run reached 0.36 at prompt 2048, so the threshold must be set per cell from a measured baseline, with a 2x margin).
+
+Bound 3 (flips only at near ties): every step whose top token differs must have a margin of at most 4 bf16 ulps in the reference arm and a pair movement of at most 4 ulps (observed: margins 0 to 2 ulps, movements 1 to 2 ulps at the three flips); and the number of flips at most 4 per 256 steps (observed 0 to 2; expected 0.8 to 1.5).
+
+The test takes about 11 minutes of machine time per pair (two runs of 5.3 minutes and the comparison). It fails loudly on a wrong index, a dropped token or a precision loss (any of those breaks bound 2 at the first affected step by far more than 0.1), and it stays green across the admissible numerics differences measured here.
+
+7. D5: the numerics contract text
+
+Note [AMX attention dispatch] states that the AVX and AMX outputs differ "for exactly two reasons": the bf16 rounding of the PV weights and the fp32 add order. The measurement refines this to three facts worth writing down, with the numbers: (1) the QK add orders differ (dotter: two lane-split chains and a halving tree; reader: one sequential chain; AMX tile: per instruction two 16-product chains joined once), so no AVX order equals both others; (2) the PV add orders differ the same way (the AMX PV kernel and the AVX loop disagree on 73 % of outputs even for identical bf16 weights); (3) the rounding of the weights (truncation vs nearest) is the largest of the three at the seam and carries a bias. Item 4's contract sentence gets the condition of option A until option C lands, then the sentence "with the switch on, the dense-page kernels run in the AMX order and the run equals the AMX run bit for bit".
+
+8. Order of work, tests and risks
+
+step | what | test that proves it | risk | 
+
+1 | D5 + option A sentence (comment only) | review | none | 
+
+2 | D3 convert-at-save in PR 4959 | forced run base vs poc-style binary: identical to the end of the run; t_heterogeneous_scheduler case for the page-end step | a reader of the row-major block during the conversion: the latch argument must hold; verify with the thread sanitizer build and the existing k_vnni block tests | 
+
+3 | D1 option C kernels + dispatch + identity tests | t_amx_numerics identity case (bit for bit on AMX hardware), mutation check, D4 bound 1 | the measured AMX order is one hardware generation's behavior; the identity test on the CI runner guards it, and a mismatch on a future CPU is a test failure, not a silent change | 
+
+4 | D4 bound test in CI (AMX runner) | itself | flaky thresholds if set too tight: take them from a measured baseline per cell with a 2x margin | 
+
+5 | D2 round-to-nearest in the AVX PV path (separate PR, its own measurement) | forced run before vs after (seam type, flips only at near ties); nightly perf and accuracy jobs unchanged; FPGA weight rounding checked | golden files change; every CPU-attention host changes tokens at near ties once | 
+
+What none of this changes: two paths that add in different orders still flip tokens at near ties. The FPGA attention path and the CPU paths remain different orders, as do Intel and AMD hosts until option C or D exists on both. The bound test is the instrument that tells an admissible flip from a defect.
+
+

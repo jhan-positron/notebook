@@ -1,0 +1,134 @@
+{
+ "file": "src/tron/kernels/amx_attn.cpp",
+ "short": [
+  "PR 5015 turns the three AMX attention kernels of amx_attn.cpp (the query packer pack_q_group_128x4, the QK kernel qk_rowmajor_128x4 and the PV kernel weights_times_v_128x4) into function templates on group_heads, the number of query heads per KV head, and instantiates them for 4 and 16 heads.",
+  "The one new piece of arithmetic is the transposing store of the QK kernel: a new helper store_transposed_rows<lane> writes the 4 score rows of one 128-bit lane, and the 16-head kernel calls it for lanes 1..3 as well as lane 0, so all 16 query rows reach the caller's s buffer.",
+  "This page draws the buffers (B1), the functions (B2), the per-page instruction sequence (B3) and the transpose (B4) once, then each of the five logical changes of the file beside its diagram (section 2)."
+ ],
+ "base": [
+  {
+   "id": "amx_attn-b1",
+   "short": "data model",
+   "title": "Data model: the buffers of one dense page, from q_group to o",
+   "intro": "The QK row: the query group q_group is packed into four panels (packed / q_packed, the B operand), the K page k_rows is the A operand, the four accumulator tiles are stored into s_transposed, and the transpose writes the group_heads useful rows into the caller's s. The PV row: the caller's exp_rows are converted into the P scratch (the A operand), the packed V plane v_pairs is the B operand, and the tile stores write o. Every arrow says how many. The worked example is Muse Glimmer (16 heads), query head 9, token 37."
+  },
+  {
+   "id": "amx_attn-b2",
+   "short": "function model",
+   "title": "Function model: the kernels, the new helper, the gate and the callers",
+   "intro": "The interface header declares each kernel as a template on group_heads with a requires clause on group_heads_ok; the bodies live in amx_attn.cpp and the explicit instantiation list at its end is the set of group sizes a caller can use. self_attention.hpp calls the packer from packed_amx_query and the two kernels from apply_dense_amx_page, passing the model's kv_mul as the template argument. Every cell says in one line what the function does."
+  },
+  {
+   "id": "amx_attn-b3",
+   "short": "sequencing model",
+   "title": "Sequencing model: one dense (query, page) pair, instruction by instruction",
+   "intro": "The ordered steps for one page, each citing the line that does it: the pack (once per token, reused for every page), the 16 QK tile products, the 4 tile stores, the transpose (4 tiles x 4 row groups, then 1 or 4 lane stores), the caller's scale / max / exp step, the conversion of the group_heads exp rows into P, the 16 PV tile products and the 8 tile stores into o. The column at the right says what differs between 4 and 16 heads: only the loop bounds and the number of lane stores."
+  },
+  {
+   "id": "amx_attn-b4",
+   "short": "transpose model",
+   "title": "Interaction model: the 16 x 16 transpose, from tile rows to 128-bit lanes to s rows",
+   "intro": "The heart of the change. One stored tile r holds 16 tokens x 16 columns (one column per query head). Stage 1 and 2 (the unpack loop) turn each 4-row group into four registers u[row_group][k] whose 128-bit lane L holds column 4L+k of the group's 4 tokens. Stages 3 and 4 (store_transposed_rows<lane>) gather lane `lane` of u[0..3][k] into one 16-token row and store it as s row 4*lane+k. The worked example follows query head 9, token 37 through the stages; transpose_sim.py computed and checked every mapping shown."
+  }
+ ],
+ "base_intro": "Four diagrams carry the context that every change below refers to. B1 is the data model (the buffers and their sizes), B2 the function model (kernels, helper, gate, callers), B3 the sequencing model (the instruction sequence of one page) and B4 the interaction model of the transpose (tile rows, 128-bit lanes, s rows). The per-change diagrams in section 2 reuse their shapes and colours and say which base diagram they update.",
+ "changes_intro": "A unit is one logical change: one kernel's new template parameter and what it changes inside the kernel, the new store helper, the instantiation list. Each unit shows the head code with its comments (added lines green, removed base lines red, head line numbers in the second column, base line numbers in the first) and, beside it, the diagram that updates a base diagram. Units are ordered as the file is: the packer (A1), the new store helper (A2), the QK kernel (A3), the PV kernel (A4) and the explicit instantiations (A5).",
+ "trivial_intro": "Changes that alter no behaviour and need no picture.",
+ "trivial_bullets": [
+  "Blank separator lines added at head 186 (after the new anonymous namespace) and 355 (after the instantiation list) are part of units A2 and A5."
+ ],
+ "method": [
+  "Facts in the diagrams come from the head file src/tron/kernels/amx_attn.cpp (5061623a34), from the interface header h/tron/kernels/amx_attn_iface.hpp of the same PR (the kernel contracts, Note [AMX attention dispatch], Note [Tile stores write 16 rows], Note [QK orientation]) and from the two call sites in h/tron/models/self_attention.hpp (packed_amx_query, apply_dense_amx_page). Every box cites the line that defines it; check_page.py verifies that the cited head lines contain the box's identifier.",
+  "The lane, selector and row facts of the transpose (B4, A2, A3) were computed by exec/pr5015-diagrams-20261018/transpose_sim.py, which executes the semantics of _mm512_unpacklo_ps / _mm512_unpackhi_ps / _mm512_unpacklo_pd / _mm512_unpackhi_pd / _mm512_shuffle_f32x4 on a labelled 16 x 16 tile and checks that every output row r equals column r of the 16 tokens, for all 16 rows, and that the worked example (head 9, token 37) lands at s[9][37].",
+  "The worked example (Muse Glimmer, 16 heads, query head 9, token 37 of one dense page) is an illustration of the index arithmetic, not a measurement. The instruction counts (16 tile products per kernel per page) are read from the loops; the count of 64 tdpbf16ps in the binary is quoted from the PR's description."
+ ],
+ "glossary": [
+  ["AMX, tile", "Intel Advanced Matrix Extensions: 8 tile registers, each configured here as 16 rows x 64 bytes (begin_region, amx_attn.cpp:116-124). _tile_loadd / _tile_stored move a tile from / to memory with a row stride in bytes; _tile_dpbf16ps (TDPBF16PS) adds the product of two bf16 tiles into an fp32 accumulator tile; _tile_zero clears one."],
+  ["bf16, fp32", "bfloat16, the 2-byte floating-point format of K, V and Q; fp32 = 32-bit float, the type of the scores, the exp rows and the output."],
+  ["GQA, kv_mul, group_heads", "Grouped-query attention: several query heads share one KV head. kv_mul is the model's ratio (the caller's geometry.kv_mul() / operation_kv_mul); group_heads is the kernels' template parameter that receives it. The PR serves 4 (llama-8b) and 16 (Muse Glimmer)."],
+  ["KV page", "64 tokens of K and V for one layer (PAGE_TOKENS_64). The QK kernel reads the page's K plane, 64 rows of 128 bf16 (one row per token, 256 bytes); the PV kernel reads its packed V plane."],
+  ["A operand, B operand", "The two inputs of _tile_dpbf16ps. A is read row-major; B must be in the VNNI pair-interleaved layout (two consecutive values of a row stored next to each other). In QK, K is A and the packed Q is B (Note [QK orientation]); in PV, P is A and the packed V plane is B."],
+  ["VNNI layout", "Vector Neural Network Instructions layout: pairs of adjacent elements interleaved so that one 32-bit lane holds one pair. The packed Q (pack_q_group_128x4) and the V plane (Note [VNNI Packed V layout], v_vnni.hpp:31-46) use it."],
+  ["panel, dim pair, step", "The packed Q is 4 panels, one per 32-dim step of the 128-dim head (HEAD_SIZE_128 / DIM_STEP_32); a panel is 16 dim-pair rows x 16 columns x 2 values (amx_attn_iface.hpp:197-201). One tile load reads one panel."],
+  ["S^T, s_transposed, s", "The tiles produce the scores transposed, s_transposed[token][query] (64 x 16 fp32, inside the kernel); the transpose writes s[query][token] (group_heads rows of s_stride_floats, 64 token columns) into the caller's s_pages."],
+  ["P, exp_rows, o", "exp_rows = the caller's exp(s - max) rows (fp32); P = their bf16 bit patterns in a 16 x 64 thread_local scratch (the A operand of PV); o = the PV output, 16 rows x 128 fp32 (8192 bytes), of which rows 0..group_heads-1 are real (Note [Tile stores write 16 rows])."],
+  ["512-bit register, 128-bit lane", "An AVX-512 register (__m512) holds 16 fp32 values in four 128-bit lanes of 4 values each. The unpack intrinsics work inside each lane; _mm512_shuffle_f32x4 picks whole lanes from its two inputs with an 8-bit immediate selector (0x88 = lanes 0 and 2 of each input, 0xdd = lanes 1 and 3)."],
+  ["unpack stages 1 and 2", "_mm512_unpacklo_ps / _mm512_unpackhi_ps interleave the 32-bit values of two rows; _mm512_unpacklo_pd / _mm512_unpackhi_pd interleave 64-bit pairs. Together they turn 4 tile rows into 4 registers u[row_group][0..3] (amx_attn.cpp:236-253)."],
+  ["function template, explicit instantiation, requires", "template <size_t group_heads> makes one function body serve several compile-time group sizes; `requires(group_heads_ok(group_heads))` rejects any other size at compile time; `template void f<GROUP_HEADS_4>(...)` at the end of amx_attn.cpp compiles the body for that size so that other translation units can link to it."],
+  ["thread_local static of a template", "A function template's static locals exist once per specialization (amx_attn.cpp:279-283): the 4-head and the 16-head weights_times_v_128x4 each own a P scratch per thread."],
+  ["Muse Glimmer, llama-8b", "Muse Glimmer 30B: head size 128, 2 KV heads, 32 query heads, kv_mul 16 (the model the PR serves). llama-8b: head size 128, kv_mul 4 (the shape the kernels served before)."],
+  ["worked example", "Muse Glimmer (16 heads), one dense page, KV head 0, the element query head 9, token 37: s_transposed[37][9] -> tile r = 2, row_group 1, u[1][1] lane 2 position 1 -> store_transposed_rows<2>, k = 1 -> s[9][37]; then P[9][37] and o[9][0..127]."]
+ ],
+ "units": [
+  {
+   "id": "a1",
+   "title": "pack_q_group_128x4 becomes a template: group_heads query columns per panel",
+   "kind": "changed",
+   "ranges": [[130, 146]],
+   "lead": [
+    "The packer is now a function template on group_heads, constrained by requires(group_heads_ok(group_heads)) (head 130-131); the loop over query heads runs to group_heads instead of GROUP_HEADS_4 (head 138, base 135).",
+    "The output layout is unchanged: packed[((step * 16 + dim_pair) * 16 + q_head) * 2 + j] (head 139-142), 4 panels x 16 dim-pair rows x 16 columns x 2 values = 2048 bf16.",
+    "For 4 heads, columns 4..15 of every panel stay the caller's zero padding (the comment at head 133-135 and the contract at amx_attn_iface.hpp:192-196); for 16 heads every column is written, so the padding precondition is empty."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "a2",
+   "title": "store_transposed_rows<lane>: the transposing store for one 128-bit lane (4 score rows)",
+   "kind": "new",
+   "ranges": [[148, 185]],
+   "lead": [
+    "A new anonymous-namespace helper takes the unpacked registers u[4][4] of one tile and stores the 4 output rows of one 128-bit lane: rows 4 * lane + k for k = 0..3 (head 169-183).",
+    "The two _mm512_shuffle_f32x4 selectors are immediates, so lane is a template argument: pair_sel = bit 0 of lane ? 0xdd : 0x88 (stage 3, pairs row groups 0/1 and 2/3), quad_sel = bit 1 of lane ? 0xdd : 0x88 (stage 4, joins the two pairs) (head 174-175; the comment at head 150-162).",
+    "The row offset is lane * ROWS_PER_LANE_4 * s_stride_floats (head 176). Lane 0 = (0x88, 0x88) is exactly the store sequence the base 4-head kernel emitted (base 209-213).",
+    "Named constants LANES_EVEN_0X88, LANES_ODD_0XDD and ROWS_PER_LANE_4 replace the literals 0x88 and 4 (head 163-167)."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "a3",
+   "title": "qk_rowmajor_128x4 becomes a template: lanes 1..3 stored only for 16 heads",
+   "kind": "changed",
+   "ranges": [[187, 196], [227, 261]],
+   "lead": [
+    "The QK kernel is a function template on group_heads (head 191-192). The tile products and the 4 tile stores are unchanged (head 202-225): 4 steps x 4 K slices, all 16 accumulator columns computed for both group sizes.",
+    "The transpose keeps stages 1 and 2 (the unpack loop, head 231-253) for both group sizes; the removed stage-3/4 loop (base 209-213, the single 0x88 / 0x88 store of rows 0..3) is replaced by store_transposed_rows<0> (head 255) and, under if constexpr (group_heads == GROUP_HEADS_16), store_transposed_rows<1>, <2>, <3> (head 256-260).",
+    "s_block = s + r * 16 is the 16-token column block of tile r in the caller's s (head 254); the helper adds the row offset. For 4 heads the generated code is the same as before: the PR's description reports the -O3 object of qk<4> instruction-identical to main."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "a4",
+   "title": "weights_times_v_128x4 becomes a template: group_heads P rows, one scratch per instantiation",
+   "kind": "changed",
+   "ranges": [[264, 293]],
+   "lead": [
+    "The PV kernel is a function template on group_heads (head 264-265); the conversion loop writes rows 0..group_heads-1 of the P scratch instead of 0..3 (head 285, base 233). The tile products and stores (head 294-327) are unchanged: 2 halves x 2 s x 4 tiles.",
+    "P is a thread_local static of the template, so it exists once per specialization: the 4-head and the 16-head kernels have separate scratches per thread, and a 4-head call never sees a 16-head call's rows 4..15 (the comment at head 279-283). For 4 heads rows 4..15 stay zero (never written after thread init); for 16 heads every row is written.",
+    "The caller's o receives 16 rows either way (Note [Tile stores write 16 rows], amx_attn_iface.hpp:93-110); rows group_heads..15 are the products of the zero rows."
+   ],
+   "base": "(set by the figure module)"
+  },
+  {
+   "id": "a5",
+   "title": "Explicit instantiations for GROUP_HEADS_4 and GROUP_HEADS_16",
+   "kind": "new",
+   "ranges": [[330, 354]],
+   "lead": [
+    "Six explicit instantiation declarations (3 kernels x 2 group sizes) at the end of the translation unit (head 333-354). The kernel bodies live only here, so this list is the set of group sizes a caller can link against; the comment says it equals group_heads_ok in amx_attn_iface.hpp (head 330-332; amx_attn_iface.hpp:149-154).",
+    "Each instantiation compiles one body: the PR's description counts 64 tdpbf16ps in the binary = 2 kernels x 16 tile products x 2 instantiations.",
+    "The callers pick the instantiation with the model's kv_mul: pack_q_group_128x4<geometry.kv_mul()> (self_attention.hpp:1696), qk_rowmajor_128x4<operation_kv_mul> (1763), weights_times_v_128x4<operation_kv_mul> (1791)."
+   ],
+   "base": "(set by the figure module)"
+  }
+ ],
+ "trivial": [
+  {
+   "id": "t1",
+   "title": "File-top comment: the group sizes the kernels are instantiated for",
+   "kind": "comment",
+   "ranges": [[34, 38]],
+   "what": "The comment that lists the kernel shape now names GROUP_HEADS_4 and GROUP_HEADS_16 and points at the instantiation list at the end of the file (unit A5). No code changes."
+  }
+ ]
+}

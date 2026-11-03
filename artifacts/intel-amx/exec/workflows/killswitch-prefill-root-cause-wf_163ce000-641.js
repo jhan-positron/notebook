@@ -1,0 +1,57 @@
+export const meta = {
+  name: 'killswitch-prefill-root-cause',
+  description: 'Root-cause the +2.9 % prefill cost of PR 5047 software K scoring from source and -O3 disassembly on the dev host',
+  phases: [
+    { title: 'Understand', detail: 'source diff, object compile + objdump, prefill-vs-decode model' },
+    { title: 'Verify', detail: 'adversarial refutation of each hypothesis against the evidence' },
+    { title: 'Synthesize', detail: 'ranked causes with the 3bda measurement that settles each' },
+  ],
+}
+
+const FACTS = `
+Measured on delphi-3bda (campaign pr5047-20261020, 4 repetitions, llama-3.1-8b, tensor-parallel 2, 8 users per engine, prompt 8192 tokens, 256 generated, CPU attention, TRON_K_VNNI OFF in both binaries):
+- kill switch (TRON_AMX_DISABLE=1, 100 % of K tokens on the software scoring path): base a5697f86d3 prefill 78.793 s (sd 0.083), decode 21.39 TPS (sd 0.04); head ade89a9d9c prefill 81.040 s (sd 0.057), decode 21.46 TPS (sd 0.05). Prefill +2.247 s (+2.9 %), band 0.166 s -> degradation. Decode +0.3 % inside the band.
+- shipped (AMX on, 2.8 % of K tokens on the software path): base prefill 35.258 s, head 35.396 s (+0.138 s, inside the 0.150 s band).
+- Same cell at prompt 1024 with AMX on: prefill delta -0.001 s.
+Code: base worktree /home/jhan/workspace/ai-runs/tron-split-pr1 (a5697f86d3 = PR 4956 head), head worktree /home/jhan/workspace/ai-runs/tron-pr5047 (ade89a9d9c = PR 5047 head = base + commit e17a12ff09 self_attention token loop -> 64-bit live mask + second pass, and commit ade89a9d9c kv_cache: page::score_k / try_score_k_amx / set_k_row(expr), page::k removed).
+Hot path: h/tron/models/self_attention.hpp apply_page_range (around lines 1890-1960 at both heads), the dotter in h/tron/kernels/dotter.hpp (the bf16/float 128 specialization), and at the head h/tron/models/kv_cache.hpp page::score_k (around line 1978).
+HARD RULES: read-only on both worktrees (never edit, never git checkout/reset there; git log/diff/show are fine). Never ssh to delphi-3bda or any other machine. Never run git in any /var/tmp path. Put every file you create under /tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/ksroot/ (create subdirectories as you like). Plain English in the report: define terms, one claim per sentence, no semicolons, units on numbers, estimates labeled "est.".
+`
+
+const OBJ = `
+Object-compile tooling on this host (no nix, no cmake here): /home/jhan/workspace/ai-runs/lcheck/lcheck.sh runs zig clang 19.1.7 with mirrored nix headers and does full template instantiation with -fsyntax-only. Read its README.md and flags.txt first. flags.txt has one line per (tree, translation unit) with the exact compile flags of the 3bda build. Make a COPY of lcheck.sh in your scratch directory that (a) takes the worktree as an argument, (b) replaces -fsyntax-only with -c -o <out>, (c) uses the flags line of the runtron translation unit that instantiates the llama attention path (find it in flags.txt: a src/tron/... .cpp that instantiates the llama model, not a t/ test; if the only usable line is a test TU such as t/t_llama_unit.cpp, say so and use it, but prefer the production TU and its -O level). Compile that TU for BOTH worktrees (base and head) with identical flags and TRON_K_VNNI undefined (the kill-switch cell uses the option-off binaries). Then objdump -d --no-show-raw-insn both objects, locate the software K scoring loop (the dotter loop: look for the vdpbf16ps / vfmadd / vcvtneps2bf16-free loop that walks 64 tokens, in the base inside apply_page_range, at the head inside page::score_k or inlined into apply_page_range), and compare: instructions per selected token, loads per token, whether the 256-byte K row stays in registers across the 4 query heads, unrolling, any call that is not inlined, stack traffic per visit (the dotter array build, the s_pages fill). Report the mangled symbol names, the instruction counts, and short annotated excerpts. Compilation of one TU may take several minutes: that is expected, use a 20-minute timeout per compile and run the two compiles in parallel. If the production TU cannot be compiled here, fall back to t/t_llama_unit.cpp and say exactly what fell back.
+`
+
+const H_SCHEMA = { type: 'object', properties: { hypotheses: { type: 'array', items: { type: 'object', properties: {
+  id: { type: 'string' }, title: { type: 'string' }, mechanism: { type: 'string' }, evidence: { type: 'string' },
+  explains_prefill_only: { type: 'string' }, cost_estimate: { type: 'string' }, settles_it: { type: 'string' } },
+  required: ['id', 'title', 'mechanism', 'evidence', 'explains_prefill_only', 'settles_it'] } }, report_path: { type: 'string' } }, required: ['hypotheses', 'report_path'] }
+
+phase('Understand')
+const [src, obj, model] = await parallel([
+  () => agent(`You are reading two versions of the same C++ hot loop to find why the newer one is slower in prefill.\n${FACTS}\nTask: list EVERY difference on the software K scoring path between base and head for the option-off build with the AMX kernel disabled at run time (amx_on false). Read both apply_page_range bodies in full, page::score_k at the head, page::k and kv_block::k_view at both heads, the dotter, and the types involved (view flags: aligned, dma, strides). For each difference state the mechanism, the per-visit or per-selected-token cost in instructions (est.), whether it would show in prefill and not in decode, and the measurement that would settle it. Also state what is unchanged (number of dot products, K bytes read, the s_pages fill, the range/mask loop). Write the full report to the scratch directory (ksroot/source-diff.md) and return the hypotheses as structured output.`,
+    { label: 'understand:source', phase: 'Understand', schema: H_SCHEMA }),
+  () => agent(`You compare the machine code of two versions of one hot loop.\n${FACTS}\n${OBJ}\nWrite the full report with the excerpts to ksroot/objdump-compare.md and keep the objects and the disassemblies under ksroot/obj/. Return hypotheses that the machine code supports or refutes as structured output (an entry per codegen difference, with the instruction counts as evidence).`,
+    { label: 'understand:objdump', phase: 'Understand', schema: H_SCHEMA }),
+  () => agent(`You explain a performance asymmetry from first principles and from the code.\n${FACTS}\nQuestion: which kinds of per-visit or per-token overhead in the software K scoring loop would cost +2.9 % of prefill time at prompt 8192 and 0 % of decode time in the same binary pair? Compute from the code and the cell: the number of (query token, page, KV head) visits per forward in prefill (8 users, 8192 tokens, causal mask, 64-token pages, llama-3.1-8b has 32 layers, 8 KV heads, 4 query heads per KV head, head size 128) and per decode step, the K bytes per visit, where the K rows live (L1 / L2 / L3 / DRAM) in each phase given how prefill minibatches queries (read h/tron/models/model.hpp and self_attention.hpp at the head for the minibatch and chunking logic), and so whether the loop is instruction-bound or memory-bound in each phase. Then say for each candidate overhead (extra loads per token, extra instructions per token, extra per-visit setup such as the dotter array build or the s_pages fill, a call that is not inlined) how much prefill time it would cost at the measured scale and whether decode would hide it. Write ksroot/prefill-vs-decode.md and return the candidates as structured hypotheses with the cost estimate per candidate (label est.) and the measurement that settles each.`,
+    { label: 'understand:phase-model', phase: 'Understand', schema: H_SCHEMA }),
+])
+
+const all = [src, obj, model].filter(Boolean).flatMap((r, k) => r.hypotheses.map(h => ({ ...h, from: ['source', 'objdump', 'phase-model'][k] })))
+log(`${all.length} hypotheses collected`)
+
+phase('Verify')
+const V_SCHEMA = { type: 'object', properties: { refuted: { type: 'boolean' }, confidence: { type: 'string' }, reason: { type: 'string' }, corrected_claim: { type: 'string' } }, required: ['refuted', 'confidence', 'reason'] }
+const verified = await parallel(all.map((h, i) => () =>
+  agent(`Adversarially verify one hypothesis about a measured slowdown. Default to refuted=true unless the code or the disassembly supports it.\n${FACTS}\nEvidence files written by other agents: /tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/ksroot/ (source-diff.md, objdump-compare.md, prefill-vs-decode.md, obj/). Read them, then read the code yourself where the hypothesis points.\nHypothesis ${h.id} (from ${h.from}): ${h.title}\nMechanism: ${h.mechanism}\nEvidence claimed: ${h.evidence}\nPrefill-only argument: ${h.explains_prefill_only}\nCheck: (1) is the mechanism real in the code at the two heads, (2) does the disassembly agree, (3) is the cost at the measured scale (2.247 s of 78.8 s of prefill) plausible, (4) is it consistent with decode +0.3 %. Return refuted, confidence (high/medium/low), the reason in plain English, and a corrected claim if the hypothesis is right in substance but wrong in a detail.`,
+    { label: `verify:${h.id}`, phase: 'Verify', schema: V_SCHEMA }).then(v => ({ ...h, verdict: v }))))
+
+const kept = verified.filter(Boolean).filter(h => h.verdict && !h.verdict.refuted)
+const dropped = verified.filter(Boolean).filter(h => h.verdict && h.verdict.refuted)
+log(`${kept.length} hypotheses survive, ${dropped.length} refuted`)
+
+phase('Synthesize')
+const S_SCHEMA = { type: 'object', properties: { report_path: { type: 'string' }, ranked: { type: 'array', items: { type: 'object', properties: { rank: { type: 'number' }, title: { type: 'string' }, one_sentence: { type: 'string' }, settles_it: { type: 'string' } }, required: ['rank', 'title', 'one_sentence', 'settles_it'] } }, fix_candidates: { type: 'array', items: { type: 'string' } }, profile_plan: { type: 'string' } }, required: ['report_path', 'ranked', 'fix_candidates', 'profile_plan'] }
+const synth = await agent(`Write the root-cause record for issue positron-ai/tron#5097.\n${FACTS}\nSurviving hypotheses (with verifier verdicts):\n${JSON.stringify(kept, null, 1)}\nRefuted hypotheses (state each in one line with the reason, so nobody re-opens it):\n${JSON.stringify(dropped.map(d => ({ id: d.id, title: d.title, reason: d.verdict.reason })), null, 1)}\nEvidence files: /tmp/claude-0/-home-jhan-workspace-intel-AMX-random/e5f1ec3f-7cb5-4755-a5bc-0280de828ba5/scratchpad/ksroot/*.md and obj/. Read them. Write ksroot/root-cause.md in plain English with: Short version (3 sentences), Words used here, the measured facts, the ranked causes with the evidence (quote the instruction counts from the disassembly where they exist), the refuted list, the fix candidates in code terms (which function, what shape), and a 3bda profile plan: the exact perf stat events and perf record command lines to run on the two kill-switch binaries during prefill of that cell, one repetition each, and the numbers that would confirm or reject each ranked cause. Return the ranking as structured output.`,
+  { label: 'synthesize', phase: 'Synthesize', schema: S_SCHEMA })
+return { collected: all.length, kept: kept.length, dropped: dropped.length, synth }

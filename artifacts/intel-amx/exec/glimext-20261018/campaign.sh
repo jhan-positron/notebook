@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+# glimext-20261018 runtron cells on OUR half of delphi-3bda: throughput and attention path stats of TWO binaries, base =
+# the PR #5015 merge base (main 6198824246, runtron.g16b) and head = the PR head (5061623a34, runtron.g16h), on the models
+# the PR must not slow down (llama-3.1-8b tp2 with CPU attention; qwen3-4b tp2 and gpt-oss-120b tp4 with FPGA attention)
+# and on Muse Glimmer 30B (the model the PR serves). Fork of exec/glimmer-20261016/campaign.sh (one binary, arms as
+# environments); changes here: an arm picks a BINARY and an environment (arm_bin / ARM_ENV_<arm>), the stats mount dir and
+# the git tip follow the arm's binary, REPS default 4, SKIP_SERVING_UP (the chain brings production back once at the end),
+# the cell table and the rt-results.txt header text. Guards, run recipe, watcher, pre-CI hold, idle-serving takeover
+# through platformd, leaf poller, exit-report collection are unchanged from the parent.
+#   arms: base = RT_BASE, head = RT_HEAD, headoff = RT_HEAD with TRON_AMX_DISABLE=1 (the kill switch), baseoff likewise;
+#         every arm runs with TRON_ATTN_STATS=1 (the exit report with AVX / AMX / FPGA visit counts per layer).
+#   the attention mode and the generated length are cell fields: key|model|tp|users|prompt|attn|len
+#     (attn = cpu -> USE_HW_ATTN=0, fpga -> USE_HW_ATTN unset, fpga1 -> USE_HW_ATTN=1; len = -l value, default 256).
+#   a leaf poller per run copies the live FUSE attention leaves of the model into RES/leaves/<run>/ every POLL_S seconds.
+# Words: our half = socket 1 + cards 90/93/b9/bc (SYSTEM_CONFIG is unset for runtron, placement() pins it); the lease =
+# /run/lock/systems-test-ci.lease (nightly CI); takeover = stopping idle production engines through platformd's API.
+#   NAME      results/log/marker name (default glimext-20261018)
+#   RT_BASE   path of the base runtron binary (default /var/tmp/jhan/tron-g16b/gen/runtron.g16b)
+#   RT_HEAD   path of the head runtron binary (default /var/tmp/jhan/tron-g16h/gen/runtron.g16h)
+#   ARMS      "base head" (default), REPS 4 (default)
+#   CELLS_ALL cell table lines (default below); CELLS the keys to run (default: every key of CELLS_ALL, in table order)
+#   DEADLINE_HHMM UTC deadline (default 0130 -> no run starts after 01:30 UTC), START_NOT_BEFORE ISO UTC
+#   SKIP_SERVING_UP=1: do not bring production back at the end (the caller does)
+# Every run: env -u SYSTEM_CONFIG -u TRON_AMX_DISABLE, then ARM_ENV_<arm>; campaign guard; 10-s watcher; pre-CI hold
+# 01:40-03:45 UTC; idle-serving takeover through platformd. Per-run timeout 2400 s. A run whose log already has the TPS
+# lines is skipped (resume = relaunch).
+# Never edit this file while a campaign runs it (bash re-reads a running script from its byte offset after every forked command).
+# Outputs: exec/results/$NAME/{rt/, leaves/, rt-results.txt, exit-reports.txt}; log exec/logs/$NAME.log; .status; .done.
+set -u
+EXEC=/home/jhan/workspace/intel-AMX/exec
+C=$EXEC/glimext-20261018
+NAME=${NAME:-glimext-20261018}
+RES=$EXEC/results/$NAME
+LOG=$EXEC/logs/$NAME.log
+MARKER=$EXEC/logs/$NAME.done
+STATUS=$EXEC/logs/$NAME.status
+RT_BASE=${RT_BASE:-/var/tmp/jhan/tron-g16b/gen/runtron.g16b}
+RT_HEAD=${RT_HEAD:-/var/tmp/jhan/tron-g16h/gen/runtron.g16h}
+re_escape() { printf '%s' "$1" | sed 's/[.[\*^$()+?{}|]/\\&/g'; }
+OUR_RT_RE="^($(re_escape "$RT_BASE")|$(re_escape "$RT_HEAD")) "
+export GUARD_RUNTRON_USER=jhan
+export GUARD_EXCLUDE_USERS="jhan nobody positron packer bill"
+REPS=${REPS:-4}
+ARMS=${ARMS:-"base head"}
+ARM_ENV_base=${ARM_ENV_base:-"TRON_ATTN_STATS=1"}
+ARM_ENV_head=${ARM_ENV_head:-"TRON_ATTN_STATS=1"}
+ARM_ENV_baseoff=${ARM_ENV_baseoff:-"TRON_ATTN_STATS=1 TRON_AMX_DISABLE=1"}
+ARM_ENV_headoff=${ARM_ENV_headoff:-"TRON_ATTN_STATS=1 TRON_AMX_DISABLE=1"}
+POLL_S=${POLL_S:-1}
+DEADLINE_HHMM=${DEADLINE_HHMM:-0130}      # UTC, HHMM digits only
+START_NOT_BEFORE=${START_NOT_BEFORE:-}   # ISO UTC; empty = start at once
+HPFILE=/dev/hugepages/amx-$NAME
+BILL_UID=1062305141
+SERVING_UP_HELPER=$EXEC/q4b-fpga-20260921/dut.sh
+# cell table: key|model|tp|users|prompt|attn|len. Order = run order: the three "must not slow down" models first (cheap
+# cells first), then Glimmer. llama runs software attention on the CPU (its only path here); qwen and gpt-oss run FPGA
+# attention (the model default, "hw attn"); Glimmer FPGA attention = its 13 full layers on the card, 39 sliding layers on the CPU.
+CELLS_ALL=${CELLS_ALL:-$'l8b-tp2-8u-p1024-cpu|llama-3.1-8b-instruct-good-tp2|2|8|1024|cpu|256
+q4b-tp2-8u-p1024-fpga|ingested-qwen-3-4b-instruct-2507-tp2|2|8|1024|fpga|256
+gptoss-tp4-8u-p1024-fpga|ingested-gpt-oss-120b-tp4|4|8|1024|fpga|256
+l8b-tp2-8u-p8192-cpu|llama-3.1-8b-instruct-good-tp2|2|8|8192|cpu|256
+q4b-tp2-8u-p8192-fpga|ingested-qwen-3-4b-instruct-2507-tp2|2|8|8192|fpga|256
+gptoss-tp4-8u-p2048-fpga|ingested-gpt-oss-120b-tp4|4|8|2048|fpga|256
+glm-tp2-8u-p1024-fpga|ingested-meta-models--Muse-Glimmer-30B-tp2|2|8|1024|fpga|256
+glm-tp2-8u-p2048-fpga|ingested-meta-models--Muse-Glimmer-30B-tp2|2|8|2048|fpga|256
+glm-tp4-8u-p1024-fpga|ingested-meta-models--Muse-Glimmer-30B-tp4|4|8|1024|fpga|256'}
+CELLS=${CELLS:-$(cut -d"|" -f1 <<<"$CELLS_ALL" | tr "\n" " ")}
+mkdir -p "$RES/rt" "$RES/leaves" "$EXEC/logs"
+source "$EXEC/lib-guard.sh"
+export GUARD_TAKEOVER_LAST
+# the latch is per process; smoke.sh, margin.sh and every campaign pass are new processes, so seed it from the shared takeover marker
+[ -e "$RES/serving-taken-down.marker" ] && GUARD_TAKEOVER_LAST=$(stat -c %Y "$RES/serving-taken-down.marker")
+ts() { date -u +%FT%TZ; }
+status() { echo "$(ts) $*" >"$STATUS"; echo "$(ts) STATUS $*"; }
+case $DEADLINE_HHMM in ''|*[!0-9]*) status "rejected: DEADLINE_HHMM='$DEADLINE_HHMM' is not HHMM digits"; exit 1 ;; esac
+DEADLINE_HHMM=$((10#$DEADLINE_HHMM))
+[ "$DEADLINE_HHMM" -le 2359 ] && [ $((DEADLINE_HHMM % 100)) -le 59 ] || { status "rejected: DEADLINE_HHMM=$DEADLINE_HHMM is not a clock time"; exit 1; }
+DEADLINE_EPOCH=$(date -u -d "today $(printf '%02d:%02d' $((DEADLINE_HHMM / 100)) $((DEADLINE_HHMM % 100)))" +%s)
+[ "$DEADLINE_EPOCH" -gt "$(date -u +%s)" ] || DEADLINE_EPOCH=$((DEADLINE_EPOCH + 86400))
+if [ -n "$START_NOT_BEFORE" ]; then
+  SNB_EPOCH=$(date -u -d "$START_NOT_BEFORE" +%s) || { status "rejected: START_NOT_BEFORE='$START_NOT_BEFORE' is not a date"; exit 1; }
+  [ "$SNB_EPOCH" -lt "$DEADLINE_EPOCH" ] || { status "rejected: START_NOT_BEFORE is not before the deadline $(date -u -d @"$DEADLINE_EPOCH" +%FT%TZ)"; exit 1; }
+fi
+placement() {
+  case $1 in
+    2) echo "--instance 2,4 --devices 90:00.0,93:00.0 --app-cores 223-224,96-101,120-125,225-226,102-107,126-131 --dev-cores 75,76 --numa 1 --nr_hugepages 128" ;;
+    4) echo "--instance 1,2 --devices 90:00.0,93:00.0,b9:00.0,bc:00.0 --app-cores 223-224,96-101,120-125,225-226,102-107,126-131,227-228,108-113,132-137,229-230,114-119,138-143 --dev-cores 75,76,77,78 --numa 1 --nr_hugepages 256" ;;
+    *) return 1 ;;
+  esac
+}
+arm_bin() { case $1 in base|baseoff) echo "$RT_BASE" ;; head|headoff) echo "$RT_HEAD" ;; *) return 1 ;; esac; }
+arm_env() { local v="ARM_ENV_$1"; echo "${!v:-}"; }
+arm_tip() { case $1 in base|baseoff) echo "${TIP_BASE:-?}" ;; head|headoff) echo "${TIP_HEAD:-?}" ;; *) echo "?" ;; esac; }
+wt_of() { dirname "$(dirname "$1")"; }     # the worktree of a binary: runtron mounts its stats under <worktree>/stats/instance-N
+cell_field() {  # $1 key $2 field (2 model, 3 tp, 4 users, 5 prompt, 6 attn, 7 len)
+  local line; line=$(grep -m1 "^$1|" <<<"$CELLS_ALL") || return 1
+  cut -d'|' -f"$2" <<<"$line"
+}
+
+preci_hold() { local hm; hm=$((10#$(date -u +%H%M))); [ "$hm" -ge 140 ] && [ "$hm" -lt 345 ]; }
+past_deadline() { [ "$(date -u +%s)" -ge "$DEADLINE_EPOCH" ]; }
+NEED_HUGEPAGES=${NEED_HUGEPAGES:-256}
+blocked() {
+  preci_hold && { echo "pre-CI hold (01:40-03:45 UTC)"; return 0; }
+  ci_lease_busy && { echo "CI lease busy"; return 0; }
+  rinzler_active && { echo "rinzler@N unit active"; return 0; }
+  # after the serving check: production engines hold every hugepage while they run, and the takeover in wait_clear frees them
+  local hp; hp=$(awk '/^HugePages_Free/{print $2}' /proc/meminfo); [ "${hp:-0}" -ge "$NEED_HUGEPAGES" ] || { echo "only $hp free hugepages (need $NEED_HUGEPAGES)"; return 0; }
+  return 1
+}
+wait_clear() {  # returns 2 when the deadline passes while waiting
+  local why waited=0
+  while why=$(blocked); do
+    past_deadline && return 2
+    [ $waited = 0 ] && { status "waiting: $why"; waited=1; }
+    [ "$why" = "rinzler@N unit active" ] && rinzler_takeover_if_idle && { echo "$(ts) takeover by campaign pid $$" >>"$RES/serving-taken-down.marker"; continue; }
+    sleep 120
+  done
+  return 0
+}
+take_guard() {  # returns 2 when the deadline passes while waiting
+  local waited=0
+  until campaign_guard_acquire; do
+    past_deadline && return 2
+    [ $waited = 0 ] && { status "waiting: campaign guard refused (see the GUARD line in the log)"; waited=1; pgrep -a -x 'runtron(\.[a-z0-9]+)?' 2>/dev/null | cut -c1-160 | sed 's/^/  runtron seen: /'; }
+    sleep 60; wait_clear || return 2
+  done
+  return 0
+}
+kill_ours() { local pids; pids=$(pgrep -u jhan -f "$OUR_RT_RE" | tr '\n' ' '); [ -n "$pids" ] && { echo "$(ts) kill_ours: TERM runtron pids $pids"; pkill -TERM -u jhan -f "$OUR_RT_RE" 2>/dev/null; }; return 0; }
+watch_run() {
+  local sf=$1 why main=$$
+  [ -n "${CAMPAIGN_LOCK_FD:-}" ] && exec {CAMPAIGN_LOCK_FD}>&-
+  [ -n "${INST_LOCK_FD:-}" ] && exec {INST_LOCK_FD}>&-
+  while :; do
+    kill -0 "$main" 2>/dev/null || { kill_ours; sleep 10; pkill -KILL -u jhan -f "$OUR_RT_RE" 2>/dev/null; sleep 2; remove_our_slice_files; exit 0; }
+    why=""; if ci_lease_busy; then why="CI lease busy"; elif rinzler_active; then why="rinzler@N unit active"; fi
+    if [ -n "$why" ]; then [ -e "$sf" ] || echo "$(ts) WATCH-STOP $why" >"$sf"; kill_ours; fi
+    sleep 10
+  done
+}
+WPID=""
+stop_watcher() { [ -n "$WPID" ] && { kill "$WPID" 2>/dev/null; wait "$WPID" 2>/dev/null; }; WPID=""; }
+# Leaf poller: while our runtron runs, copy every file of the model's attention leaf directory (FUSE, one read per
+# file) into RES/leaves/<run>/; a snapshot replaces the previous one only when it has at least one counted forward.
+poll_leaves() {
+  local out=$1 wt=$2 A T main=$$
+  [ -n "${CAMPAIGN_LOCK_FD:-}" ] && exec {CAMPAIGN_LOCK_FD}>&-
+  [ -n "${INST_LOCK_FD:-}" ] && exec {INST_LOCK_FD}>&-
+  while :; do
+    kill -0 "$main" 2>/dev/null || exit 0
+    pgrep -u jhan -f "$OUR_RT_RE" >/dev/null 2>&1 || { sleep "$POLL_S"; continue; }
+    A=$(find "$wt/stats" -maxdepth 4 -type d -path '*/attention' 2>/dev/null | head -1)
+    if [ -n "$A" ] && grep -q '"forwards":[1-9]' "$A/decode_like_forwards" 2>/dev/null; then
+      T=$out.tmp; rm -rf "$T"; mkdir -p "$T"
+      for f in "$A"/*; do timeout 5 cat "$f" >"$T/$(basename "$f")" 2>/dev/null; done
+      echo "$(ts) $A" >"$T/.taken"; rm -rf "$out"; mv "$T" "$out"
+    fi
+    sleep "$POLL_S"
+  done
+}
+PPID_POLL=""
+stop_poller() { [ -n "$PPID_POLL" ] && { kill "$PPID_POLL" 2>/dev/null; wait "$PPID_POLL" 2>/dev/null; }; PPID_POLL=""; }
+machine_line() {
+  local bill; bill=$(ps -u "$BILL_UID" -o pcpu= -o comm= 2>/dev/null | awk '{n++; c+=$1} END {printf "bill_procs=%d bill_cpu_pct=%.0f", n, c}')
+  echo "load=$(cut -d' ' -f1-3 /proc/loadavg) hugepages_free=$(awk '/^HugePages_Free/{print $2}' /proc/meminfo) $bill marker=$([ -e /bill-has-instance-0,2 ] && echo present || echo absent)"
+}
+remove_our_slice_files() {
+  local f
+  for f in /dev/hugepages/slice-*-of-8 /dev/hugepages/amx-$NAME*; do
+    [ -e "$f" ] && [ -O "$f" ] && ! fuser -s "$f" 2>/dev/null && rm -f "$f" && echo "$(ts) removed hugepage file $f (unmapped, ours)"
+  done
+  return 0
+}
+serving_back_up() {  # best effort: production engines up again when this script took them down (the takeover latch is set)
+  [ "${SKIP_SERVING_UP:-0}" = 1 ] && { echo "$(ts) serving: SKIP_SERVING_UP=1, the chain brings production up at its end"; return 0; }
+  [ "${GUARD_TAKEOVER_LAST:-0}" != 0 ] || { echo "$(ts) serving: this script did not stop production, nothing to bring up"; return 0; }
+  if ci_lease_busy 600; then echo "$(ts) serving: CI lease busy, leaving serving alone"; return 0; fi
+  if rinzler_active; then echo "$(ts) serving: rinzler units already active"; return 0; fi
+  [ -x "$SERVING_UP_HELPER" ] || { echo "$(ts) serving: helper $SERVING_UP_HELPER missing"; return 0; }
+  echo "$(ts) serving: bringing production up through platformd (dut.sh serving-up)"
+  if timeout 900 bash "$SERVING_UP_HELPER" serving-up; then rm -f "$RES/serving-taken-down.marker"; else echo "$(ts) serving: serving-up returned rc=$? (jhan: check platformd; chain.sh retries)"; fi
+}
+exit_reports() {  # every [attn-stats] line of every finished run, with the run name in front
+  local f
+  for f in "$RES"/rt/*.log; do
+    [ -e "$f" ] || continue
+    echo "## $(basename "$f" .log)"
+    grep -h -m1 "HW attention" "$f" | cut -c1-400
+    grep -h "^\[attn-stats\]" "$f"
+    echo "HBM-EXHAUSTION lose=$(grep -c 'lose HW attention' "$f") exhausted=$(grep -c 'HBM bypass space exhausted' "$f")"
+  done >"$RES/exit-reports.txt"
+}
+finish() {
+  stop_watcher; stop_poller
+  if [ "${1#aborted}" != "$1" ]; then
+    trap '' TERM
+    kill_ours
+    for _ in $(seq 1 60); do pgrep -u jhan -f "$OUR_RT_RE" >/dev/null 2>&1 || break; sleep 1; done
+    pkill -KILL -u jhan -f "$OUR_RT_RE" 2>/dev/null && { echo "$(ts) finish: SIGKILL to our runtron"; sleep 2; }
+  fi
+  remove_our_slice_files
+  campaign_guard_release 2>/dev/null
+  exit_reports
+  serving_back_up
+  echo "$1" >"$MARKER"
+  status "finished: $1"
+  echo "=== campaign finished $(ts): $1 ==="
+}
+
+# one runtron invocation; $1 key $2 arm $3 rep
+run_one() {
+  local key=$1 arm=$2 rep=$3 model tp users prompt attn len run rlog attempt stops=0 rc res hwenv args tmo hdr lose exh bin wt m
+  model=$(cell_field "$key" 2) || { echo "$(ts) unknown cell $key"; return 1; }
+  tp=$(cell_field "$key" 3); users=$(cell_field "$key" 4); prompt=$(cell_field "$key" 5); attn=$(cell_field "$key" 6); len=$(cell_field "$key" 7)
+  len=${len:-256}
+  bin=$(arm_bin "$arm") || { echo "$(ts) unknown arm $arm"; return 1; }
+  wt=$(wt_of "$bin")
+  case $attn in cpu) hwenv="USE_HW_ATTN=0" ;; fpga) hwenv="-u USE_HW_ATTN" ;; fpga1) hwenv="USE_HW_ATTN=1" ;; *) echo "$(ts) cell $key: attn '$attn' is not cpu, fpga or fpga1"; return 1 ;; esac
+  run=${key}__${attn}__${arm}__rep${rep}
+  rlog=$RES/rt/$run.log
+  grep -q "average tok/s" "$rlog" 2>/dev/null && { echo "$(ts) runtron $run already done"; return 0; }
+  args="--prompt-length $prompt -l $len -u $users --dont-stop"; tmo=2400
+  NEED_HUGEPAGES=$([ "$tp" = 4 ] && echo 256 || echo 128)
+  attempt=$(ls "$rlog".attempt* 2>/dev/null | wc -l)
+  while :; do
+    past_deadline && { echo "$(ts) deadline $(date -u -d @"$DEADLINE_EPOCH" +%FT%TZ) reached before rt $run"; return 2; }
+    attempt=$((attempt + 1))
+    wait_clear || { echo "$(ts) deadline reached while waiting before rt $run"; return 2; }
+    take_guard || { echo "$(ts) deadline reached while waiting for the guard before rt $run"; return 2; }
+    status "rt $key attn=$attn arm=$arm rep=$rep attempt=$attempt"
+    hdr="### runtron kind=rt cell=$key model=$model tp=$tp users=$users attn=$attn prompt=$prompt len=$len arm=$arm armenv=[$(arm_env "$arm")] rep=$rep attempt=$attempt bin=$bin tip=$(arm_tip "$arm") $(ts) $(machine_line)"
+    echo "$hdr" >>"$RES/rt-results.txt"
+    # a runtron killed before its unmount leaves its FUSE mount; the next run at the same --instance would fail (README.stats.md)
+    for m in "$wt"/stats/instance-*; do [ -d "$m" ] && mountpoint -q "$m" && ! pgrep -u jhan -f "$OUR_RT_RE" >/dev/null && { fusermount3 -u "$m" 2>/dev/null || fusermount -u "$m" 2>/dev/null; echo "$(ts) unmounted a stale FUSE mount $m"; }; done
+    rm -f "$RES/rt.STOPPED"; watch_run "$RES/rt.STOPPED" & WPID=$!
+    poll_leaves "$RES/leaves/$run" "$wt" & PPID_POLL=$!
+    (cd "$wt" && { [ -z "${CAMPAIGN_LOCK_FD:-}" ] || exec {CAMPAIGN_LOCK_FD}>&-; [ -z "${INST_LOCK_FD:-}" ] || exec {INST_LOCK_FD}>&-; } && env -u SYSTEM_CONFIG -u TRON_AMX_DISABLE $hwenv $(arm_env "$arm") TRON_LOG_LEVEL=debug SPDLOG_LEVEL=debug \
+        timeout -k 60 "$tmo" "$bin" stream-generate-text -m "$model" $(placement "$tp") --hugepage_file "$HPFILE" -o $args) >"$rlog.attempt$attempt" 2>&1
+    rc=$?
+    stop_watcher; stop_poller; campaign_guard_release; remove_our_slice_files
+    res=$(grep -E "Version:|Configured instance|App CPU list|HW attention|Parsing the prompt took|average tok/s" "$rlog.attempt$attempt" 2>/dev/null | cut -c1-400)
+    lose=$(grep -c "lose HW attention" "$rlog.attempt$attempt" 2>/dev/null || true); exh=$(grep -c "HBM bypass space exhausted" "$rlog.attempt$attempt" 2>/dev/null || true)
+    if [ -e "$RES/rt.STOPPED" ] || [ $rc -eq 143 ]; then
+      echo "RUN-STOPPED rc=$rc $(cat "$RES/rt.STOPPED" 2>/dev/null) (full output: $rlog.attempt$attempt)" >>"$RES/rt-results.txt"
+      stops=$((stops + 1)); [ $stops -ge 3 ] && { echo "RUN-GIVEN-UP after 3 stops" >>"$RES/rt-results.txt"; return 1; }
+      sleep 120; continue
+    fi
+    if [ $rc -ne 0 ] || ! grep -q "average tok/s" <<<"$res"; then
+      { echo "RUN-FAILED rc=$rc (full output: $rlog.attempt$attempt)"; echo "$res"; grep -i -m3 -E "error|abort|assert|exception|terminate|not found|unknown model" "$rlog.attempt$attempt" | cut -c1-240; } >>"$RES/rt-results.txt"
+      return 1
+    fi
+    cp "$rlog.attempt$attempt" "$rlog"
+    { echo "$res"; echo "HBM-EXHAUSTION lose=${lose:-0} exhausted=${exh:-0} (warning lines in this run's log: 'lose HW attention' = a 1024-token shard scored on the CPU instead of the card)"
+      echo "ATTN-STATS lines=$(grep -c '^\[attn-stats\]' "$rlog") leaves=$(ls "$RES/leaves/$run" 2>/dev/null | wc -l) taken=$(cat "$RES/leaves/$run/.taken" 2>/dev/null | cut -d' ' -f1) snapshot_decode_forwards=$(grep -o '"forwards":[0-9]*' "$RES/leaves/$run/decode_like_forwards" 2>/dev/null | cut -d: -f2)"; } >>"$RES/rt-results.txt"
+    return 0
+  done
+}
+
+[ "${CAMPAIGN_FUNCTIONS_ONLY:-0}" = 1 ] && { return 0 2>/dev/null || exit 0; }
+
+# ======================= main flow =======================
+exec >>"$LOG" 2>&1
+INST_LOCK=/var/tmp/jhan/$NAME.instance.lock
+exec {INST_LOCK_FD}>"$INST_LOCK"
+flock -n "$INST_LOCK_FD" || { echo "$(ts) another campaign.sh instance holds $INST_LOCK; this one exits"; exit 1; }
+rm -f "$MARKER"
+trap '[ -e "$MARKER" ] || finish aborted' EXIT
+echo "=== $NAME campaign started $(ts) pid $$ REPS=$REPS ARMS=[$ARMS] CELLS=[$CELLS] START_NOT_BEFORE=${START_NOT_BEFORE:-none} deadline=$(date -u -d @"$DEADLINE_EPOCH" +%FT%TZ) ==="
+sudo -n prlimit --pid $$ --memlock=unlimited:unlimited 2>/dev/null || echo "$(ts) could not raise memlock limit (ulimit -l = $(ulimit -l))"
+for arm in $ARMS; do
+  bin=$(arm_bin "$arm") || { echo "$(ts) unknown arm $arm"; finish "unknown-arm-$arm"; exit 1; }
+  [ -x "$bin" ] || { echo "$(ts) $bin missing"; finish "no-$arm-binary"; exit 1; }
+done
+for key in $CELLS; do
+  for fld in 2 3 4 5 6; do [ -n "$(cell_field "$key" $fld)" ] || { echo "$(ts) cell $key: field $fld empty"; finish "bad-cell-$key"; exit 1; }; done
+  placement "$(cell_field "$key" 3)" >/dev/null || { echo "$(ts) cell $key: tp $(cell_field "$key" 3) has no placement"; finish "bad-cell-$key"; exit 1; }
+done
+if [ -n "$START_NOT_BEFORE" ]; then
+  while [ "$(date -u +%s)" -lt "$SNB_EPOCH" ]; do
+    left=$(( SNB_EPOCH - $(date -u +%s) )); [ "$left" -gt 1800 ] && left=1800
+    status "waiting: START_NOT_BEFORE $START_NOT_BEFORE (next check in $((left / 60)) min)"; sleep "$left"
+  done
+  status "START_NOT_BEFORE passed"
+fi
+TIP_BASE=$(git -C "$(wt_of "$RT_BASE")" rev-parse --short HEAD 2>/dev/null || echo "?")
+TIP_HEAD=$(git -C "$(wt_of "$RT_HEAD")" rev-parse --short HEAD 2>/dev/null || echo "?")
+echo "$(ts) tips: base=$TIP_BASE head=$TIP_HEAD; $(machine_line)"
+{
+  echo "# $NAME runtron results: throughput and attention path stats of base = PR #5015 merge base (main $TIP_BASE) vs head = PR #5015 head ($TIP_HEAD, AMX kernels for kv_mul 16) on llama-3.1-8b, qwen3-4b, gpt-oss-120b and Muse Glimmer 30B, on our half of $(hostname); started $(ts)"
+  echo "# binaries (same recipe: plain shell, clang-19, --preset native -DBUILD_INGEST_MODELS=ON -DTRON_AMX_DISPATCH=ON): base = $RT_BASE ($TIP_BASE); head = $RT_HEAD ($TIP_HEAD)"
+  for arm in $ARMS; do echo "#   $arm = $(arm_bin "$arm") with ARM_ENV_$arm=[$(arm_env "$arm")]"; done
+  echo "# attn=cpu: USE_HW_ATTN=0 (software attention on the CPU for all layers); attn=fpga: USE_HW_ATTN unset (the model default: qwen and gpt-oss send attention to the FPGA, Glimmer sends its 13 full layers to the FPGA and runs its 39 sliding-window layers on the CPU; llama runs on the CPU)"
+  echo "# every run: env -u SYSTEM_CONFIG -u TRON_AMX_DISABLE; TRON_LOG_LEVEL=SPDLOG_LEVEL=debug; hugepage file $HPFILE; --dont-stop (every user generates the full len tokens)"
+  echo "# HBM-EXHAUSTION line per run: counts of tron's 'lose HW attention' and 'HBM bypass space exhausted' warnings (card K/V space full -> that shard's attention on the CPU)"
+  echo "# ATTN-STATS line per run: number of [attn-stats] stderr lines (the exit report) and of live FUSE leaves copied into leaves/<run>/"
+  echo "# cells: key|model|tp|users|prompt|attn|len:"; sed 's/^/#   /' <<<"$CELLS_ALL"
+  echo "# placement tp2: $(placement 2)"; echo "# placement tp4: $(placement 4)"
+  for arm in $ARMS; do b=$(arm_bin "$arm"); sha256sum "$b"; ( cd "$(dirname "$b")" && echo "version $(basename "$b"): $("./$(basename "$b")" --version 2>&1 | head -1)" ); done
+} >>"$RES/rt-results.txt"
+
+fails=0; consec=0
+declare -A CELL_FAILS=()
+rt() {  # $1 key $2 arm $3 rep
+  local k="$1|$2" rc
+  [ "${CELL_FAILS[$k]:-0}" -ge 2 ] && { echo "$(ts) skip rt $1 $2 rep$3: failed twice before"; return 0; }
+  run_one "$1" "$2" "$3"; rc=$?
+  [ $rc -eq 2 ] && return 2
+  if [ $rc -eq 0 ]; then consec=0; return 0; fi
+  fails=$((fails + 1)); consec=$((consec + 1)); CELL_FAILS[$k]=$(( ${CELL_FAILS[$k]:-0} + 1 ))
+  [ $consec -ge 5 ] && { echo "$(ts) 5 consecutive failed runs; campaign ends"; return 3; }
+  return 1
+}
+end_check() { case $1 in 2) finish deadline; exit 0 ;; 3) finish aborted-5-consecutive-failures; exit 1 ;; esac; }
+
+# the cells and arms interleaved inside every repetition (the arms of one cell run back to back); the arm order
+# alternates per repetition so that a slow drift of the machine does not favour one arm
+for rep in $(seq 1 "$REPS"); do
+  arms_rep=$ARMS
+  [ $((rep % 2)) -eq 0 ] && arms_rep=$(tr ' ' '\n' <<<"$ARMS" | tac | tr '\n' ' ')
+  for key in $CELLS; do for arm in $arms_rep; do rt "$key" "$arm" "$rep"; end_check $?; done; done
+  echo "$(ts) repetition $rep done (arm order [$arms_rep]), failed runs so far: $fails"
+  exit_reports
+done
+
+status "exit reports"
+exit_reports
+remove_our_slice_files
+finish "$([ $fails -eq 0 ] && echo ok || echo "ok-with-$fails-failed-runs")"

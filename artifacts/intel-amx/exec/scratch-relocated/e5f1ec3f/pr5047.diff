@@ -1,0 +1,971 @@
+diff --git a/h/tron/models/kv_cache.hpp b/h/tron/models/kv_cache.hpp
+index 9a30736c7c..9e01d35ae0 100644
+--- a/h/tron/models/kv_cache.hpp
++++ b/h/tron/models/kv_cache.hpp
+@@ -25,7 +25,10 @@
+ 
+ #include "common/numerics/bf16.hpp"
+ #include "system/memory.hpp"
++#include "tron/kernels/amx_attn_iface.hpp"
++#include "tron/kernels/dotter.hpp"
+ #include "tron/kernels/expr.hpp"
++#include "tron/kernels/k_vnni.hpp"
+ #include "tron/models/common.hpp"
+ #include "tron/simd/auto.hpp"
+ #include "tron/simd/fp32.hpp"
+@@ -715,16 +718,13 @@ struct kv_slot_offsets final {
+ //      (store_row). It issues 4 AVX-512 scatters that together write 4 bytes
+ //      into each of 64 64-byte pair rows. The row-major store was 4 64-byte
+ //      stores per token. TRON_AMX_DISABLE leaves the store untouched.
+-//   2. the dense AMX page path (self_attention.hpp) is not compiled for a
+-//      VNNI slot. Its kernel reads row-major K. Every page of a VNNI slot
+-//      takes the software path (temporary until the VNNI AMX kernel lands).
+-//   3. the software path, for every page of a VNNI slot, uses k_vnni::qk_group
+-//      with page::k_packed, the read-only view of the plane. That reader is
+-//      AVX-512 code with one token per vector
+-//      lane. It needs no per-token gather and no horizontal reduction. The
+-//      row-major dotter loop (the per-token dot-product loop of
+-//      self_attention.hpp) is
+-//      compiled only for row-major slots.
++//   2. page::try_score_k_amx declines VNNI slots: the current AMX kernel reads
++//      row-major K. The caller then uses page::score_k. No AMX QK or PV kernel
++//      runs for a VNNI slot until a VNNI AMX reader is added.
++//   3. page::score_k selects k_vnni::qk_group for VNNI slots and the dotter loop
++//      for row-major slots. The VNNI reader uses AVX-512 with one token per
++//      vector lane. It needs no per-token gather and no horizontal reduction.
++//      Attention code supplies queries and a live-token mask, not a layout.
+ //   4. the FPGA (field-programmable gate array) staging path (gof::populate ->
+ //      shuffle_k_entry) needs one row per token. So page_info::k_head_fn
+ //      materializes it with page::get_k_row into caller-owned scratch.
+@@ -734,9 +734,8 @@ struct kv_slot_offsets final {
+ //      as one owner assignment (dst_block.k = src_block.k) when the range
+ //      covers the page. A token's position inside the page decides its column.
+ //      So every other range moves token by token (copy_token).
+-//   6. the row view page::k() does not exist for VNNI slots. A token's values
+-//      are not contiguous there. The layout-agnostic set_k_row / get_k_row
+-//      accessors exist for every slot.
++//   6. pages expose row transfers and scoring, not K storage views. The same
++//      operations serve every slot; layout-specific access stays in the cache.
+ // The kill switch keeps the layout. With TRON_AMX_DISABLE=1 a TRON_K_VNNI
+ // binary runs the AVX-512 VNNI reader, not the row-major dotter. So it is an
+ // AMX-off run of the same layout, not a rollback to the row-major binary's
+@@ -1971,84 +1970,63 @@ struct alignas(64) page final {
+     spdlog::info("KV page {} with {} tokens starting at {}", ix, count(), lo);
+   }
+ 
+-  // K data indexed by [token][head element]. For a VNNI slot use set_k_row /
+-  // get_k_row below (Note [K VNNI storage]).
+-  TRON(nodiscard, inline, pure)
+-  auto k(kv_slot_id slot, size_t kv_head) noexcept TRON(this_lifetimebound)
+-  requires(layout_t::uniform_geometry && !k_vnni::layout_on<head_size>) {
+-    return kv_block(slot, kv_head).k_view();
+-  }
+-
+-  TRON(nodiscard, inline, pure)
+-  auto k(kv_slot_id slot, size_t kv_head) const noexcept TRON(this_lifetimebound)
+-  requires(layout_t::uniform_geometry && !k_vnni::layout_on<head_size>) {
+-    return kv_block(slot, kv_head).k_view();
+-  }
+-
+-  template <kv_geometry geometry>
+-    requires(book_t::template declares_geometry<geometry>() &&
+-             !k_vnni::layout_on<geometry.head_size>)
+-  TRON(nodiscard, inline, pure)
+-  auto k(kv_slot_id slot, size_t kv_head) noexcept TRON(this_lifetimebound)
+-  {
+-    return kv_block<geometry>(slot, kv_head).k_view();
+-  }
+-
+-  template <kv_geometry geometry>
+-    requires(book_t::template declares_geometry<geometry>() &&
+-             !k_vnni::layout_on<geometry.head_size>)
+-  TRON(nodiscard, inline, pure)
+-  auto k(kv_slot_id slot, size_t kv_head) const noexcept TRON(this_lifetimebound)
+-  {
+-    return kv_block<geometry>(slot, kv_head).k_view();
+-  }
+-
+-  // One token's K data.
+-  TRON(nodiscard, inline, pure)
+-  auto k(kv_slot_id slot, size_t kv_head, size_t i_page) noexcept
+-      TRON(this_lifetimebound)
+-  requires(layout_t::uniform_geometry && !k_vnni::layout_on<head_size>) {
+-    return k(slot, kv_head)[i_page];
+-  }
+-
+-  TRON(nodiscard, inline, pure)
+-  auto k(kv_slot_id slot, size_t kv_head, size_t i_page) const noexcept
+-      TRON(this_lifetimebound)
+-  requires(layout_t::uniform_geometry && !k_vnni::layout_on<head_size>) {
+-    return k(slot, kv_head)[i_page];
+-  }
+-
+-  template <kv_geometry geometry>
+-    requires(book_t::template declares_geometry<geometry>() &&
+-             !k_vnni::layout_on<geometry.head_size>)
+-  TRON(nodiscard, inline, pure)
+-  auto k(kv_slot_id slot, size_t kv_head, size_t i_page) noexcept
+-      TRON(this_lifetimebound)
+-  {
+-    return k<geometry>(slot, kv_head)[i_page];
+-  }
+-
+-  template <kv_geometry geometry>
+-    requires(book_t::template declares_geometry<geometry>() &&
+-             !k_vnni::layout_on<geometry.head_size>)
+-  TRON(nodiscard, inline, pure)
+-  auto k(kv_slot_id slot, size_t kv_head, size_t i_page) const noexcept
+-      TRON(this_lifetimebound)
+-  {
+-    return k<geometry>(slot, kv_head)[i_page];
++  // Write unscaled Q.K scores for selected tokens; leave other scores untouched.
++  // q contains all query heads. Storage is not accessed for an empty selection.
++  template <attention_geometry geometry, typename Q>
++    requires(book_t::template declares_geometry<geometry.kv>())
++  TRON(inline)
++  void score_k(kv_slot_id slot,
++      size_t kv_head,
++      const Q& q,
++      uint64_t live,
++      float* scores,
++      size_t stride) const noexcept {
++    static_assert(page_size <= std::numeric_limits<uint64_t>::digits);
++    if (live == 0) return;
++    constexpr size_t kv_mul = geometry.kv_mul();
++    constexpr size_t dims = geometry.kv.head_size;
++    const auto& block = kv_block<geometry.kv>(slot, kv_head);
++    if constexpr (k_vnni::layout_on<dims>) {
++      k_vnni::qk_group<kv_mul>(
++          block.k.as_view(), q.data + kv_head * kv_mul * dims, live, scores, stride);
++    } else {
++      using scalar_t = std::remove_cv_t<typename Q::element>;
++      auto dot_q = [&]<size_t... I>(std::index_sequence<I...>) {
++        return std::array{
++            dotter<scalar_t, dims>(slice<dims>()(q, (kv_head * kv_mul + I) * dims))...};
++      }(std::make_index_sequence<kv_mul>{});
++      const auto keys = block.k_view();
++      for (uint64_t remaining = live; remaining != 0; remaining &= remaining - 1) {
++        const size_t i = std::countr_zero(remaining);
++        for (size_t h = 0; h < kv_mul; ++h) {
++          scores[h * stride + i] = dot_q[h](keys[i]);
++        }
++      }
++    }
+   }
+ 
+-  // The read-only K plane view for the score reader k_vnni::qk_group. Internal
+-  // cache writes take writable views from the block owner instead.
++#ifdef TRON_AMX_DISPATCH
++  // Try the dense AMX QK kernel. Return false, without touching scores or storage,
++  // when the K layout has no AMX reader. The caller supplies a packed bf16 query
++  // group of four heads and has already checked runtime AMX availability.
+   template <kv_geometry geometry>
+-    requires(book_t::template declares_geometry<geometry>() &&
+-             k_vnni::layout_on<geometry.head_size>)
+-  TRON(nodiscard, inline, pure)
+-  k_vnni_view<const bf16, page_size, geometry.head_size> k_packed(
+-      kv_slot_id slot, size_t kv_head) const noexcept TRON(this_lifetimebound)
+-  {
+-    return kv_block<geometry>(slot, kv_head).k.as_view();
++    requires(book_t::template declares_geometry<geometry>())
++  TRON(inline)
++  bool try_score_k_amx(kv_slot_id slot,
++      size_t kv_head,
++      const bf16* q_packed,
++      float* scores,
++      size_t stride) const noexcept {
++    static_assert(geometry.head_size == amx_attn_h128g4::HEAD_SIZE_128);
++    if constexpr (k_vnni::layout_on<geometry.head_size>) {
++      return false;
++    } else {
++      amx_attn_h128g4::qk_rowmajor_128x4(
++          kv_block<geometry>(slot, kv_head).k_view(), q_packed, scores, stride);
++      return true;
++    }
+   }
++#endif
+ 
+   // Store one token's K row in the slot's K layout. The row may be unaligned.
+   template <kv_geometry geometry, bool Aligned, bool Dma>
+@@ -2067,6 +2045,25 @@ struct alignas(64) page final {
+     }
+   }
+ 
++  // Convert activation rows to the cache's bf16 representation.
++  template <kv_geometry geometry, typename X>
++    requires(book_t::template declares_geometry<geometry>())
++  TRON(inline)
++  void set_k_row(kv_slot_id slot,
++      size_t kv_head,
++      size_t i_page,
++      const expr<X, geometry.head_size>& row) noexcept {
++    TRON_ASSERT_LT(i_page, page_size);
++    if constexpr (k_vnni::layout_on<geometry.head_size>) {
++      alignas(64) bf16 converted[geometry.head_size];
++      k_destination_row<geometry.head_size>(converted).set(row);
++      set_k_row<geometry>(
++          slot, kv_head, i_page, k_source_row<geometry.head_size>(converted));
++    } else {
++      kv_block<geometry>(slot, kv_head).k_at(i_page).set(row);
++    }
++  }
++
+   // Load one token's K row, the inverse of set_k_row. The row may be unaligned.
+   template <kv_geometry geometry, bool Aligned, bool Dma>
+     requires(book_t::template declares_geometry<geometry>())
+diff --git a/h/tron/models/model.hpp b/h/tron/models/model.hpp
+index 23d9d11240..be0e40c4a0 100644
+--- a/h/tron/models/model.hpp
++++ b/h/tron/models/model.hpp
+@@ -3097,22 +3097,8 @@ public:
+         for (size_t kv_head = 0; kv_head < geometry.kv.n_kv_heads; ++kv_head) {
+           auto kout = slice<geometry.kv.head_size>()(
+               ks[ix].as_view(), kv_head * geometry.kv.head_size);
+-          if constexpr (k_vnni::layout_on<geometry.kv.head_size>) {
+-            using kv_elem_t =
+-                std::remove_cv_t<std::remove_pointer_t<decltype(kout.data)>>;
+-            if constexpr (std::is_same_v<kv_elem_t, bf16>) {
+-              pg.template set_k_row<geometry.kv>(
+-                  slot, kv_head, static_cast<size_t>(j), k_source_row(kout));
+-            } else {
+-              // set_k_row takes bf16 rows only: convert other activation types first.
+-              alignas(64) bf16 row[geometry.kv.head_size];
+-              k_destination_row<geometry.kv.head_size>(row).set(kout);
+-              pg.template set_k_row<geometry.kv>(slot, kv_head, static_cast<size_t>(j),
+-                  k_source_row<geometry.kv.head_size>(row));
+-            }
+-          } else {
+-            pg.template k<geometry.kv>(slot, kv_head, j).set(kout);
+-          }
++          pg.template set_k_row<geometry.kv>(
++              slot, kv_head, static_cast<size_t>(j), kout);
+         }
+ 
+         pg.mark_k_complete(slot, static_cast<size_t>(j));
+diff --git a/h/tron/models/self_attention.hpp b/h/tron/models/self_attention.hpp
+index fffac98585..98d223e8fc 100644
+--- a/h/tron/models/self_attention.hpp
++++ b/h/tron/models/self_attention.hpp
+@@ -21,9 +21,7 @@
+ #include "libpos.hpp"
+ #include "spdlog/spdlog.h"
+ #include "tron/kernels/amx_attn_iface.hpp"  // intrinsics-free
+-#include "tron/kernels/dotter.hpp"
+ #include "tron/kernels/expr.hpp"
+-#include "tron/kernels/k_vnni.hpp"
+ #include "tron/kernels/page_share_counters.hpp"  // TRON_PAGE_SHARE_COUNTERS only
+ #include "tron/models/attn_stats.hpp"
+ #include "tron/models/common.hpp"
+@@ -1733,7 +1731,7 @@ struct self_attention {
+     // it. apply_page_range computes it as sp.is_valid_for(kv_head).
+     template <attention_geometry geometry>
+     TRON(inline)
+-    void apply_dense_amx_page(bool was_valid,
++    bool apply_dense_amx_page(bool was_valid,
+         const page& pg,
+         kv_slot_id slot,
+         float operation_scale,
+@@ -1747,13 +1745,8 @@ struct self_attention {
+           "the dense AMX page path exists only for the AMX shape on bf16 Q");
+       static_assert(amx_attn_h128g4::PAGE_TOKENS_64 == page::page_size,
+           "the AMX kernels assume the KV page size");
+-      // QK for the whole page in one kernel call. The kernel writes the raw
+-      // scores, not yet multiplied by the attention scale, into
+-      // s_pages[head][token], the same array and layout the dotter loop fills.
+-      // It reads K straight from storage: the argument is this (slot, kv_head)'s
+-      // whole K plane, a const_native_k_view of 64 consecutive 128-dim rows.
+-      // This is the only place where the AMX path depends on K being stored as
+-      // consecutive rows, and the view type states that layout at the call.
++      // Ask the cache to score the dense page. A layout without an AMX reader
++      // declines before any attention state is changed.
+       tensor<operation_kv_mul, page::page_size> s_pages;
+       // Both kernels take &s_pages[0][0] with row stride page_size, so the 4
+       // rows of 64 floats must be consecutive with no padding. The size check
+@@ -1761,8 +1754,9 @@ struct self_attention {
+       static_assert(
+           sizeof(s_pages) == operation_kv_mul * page::page_size * sizeof(float),
+           "the AMX kernels read s_pages as one block: rows must be consecutive");
+-      amx_attn_h128g4::qk_rowmajor_128x4(pg.template k<geometry.kv>(slot, kv_head),
+-          q_packed, &s_pages[0][0], page::page_size);
++      if (!pg.template try_score_k_amx<geometry.kv>(
++              slot, kv_head, q_packed, &s_pages[0][0], page::page_size))
++        return false;
+       // Scale (or softcap), page max, exp and sum per head: the same math as
+       // the dotter epilogue in apply_page_tok, on the AMX scores.
+       float corr_arr[operation_kv_mul], m_new_arr[operation_kv_mul],
+@@ -1808,6 +1802,7 @@ struct self_attention {
+         }
+         head_sp.m_star = m_new_arr[offset];
+       }
++      return true;
+     }
+ #endif
+ 
+@@ -1871,24 +1866,17 @@ struct self_attention {
+       bool query_visible = run_visible_in_software ? range_hint->visible(job_ix)
+                                                    : range_hint->sw_required(job_ix);
+ #ifdef TRON_AMX_DISPATCH
+-      // Two gates decide here whether this (query, page) pair takes the AMX
+-      // path: a packed Q must exist (it is null when AMX is unavailable or
+-      // disabled) and the page must be dense (is_dense_amx_page). When both
+-      // hold, apply_dense_amx_page does the whole page (QK, softmax step, PV,
+-      // accumulator update) and we return; every other pair falls through to
+-      // the dotter loop below. The `if constexpr` keeps the AMX code out of
+-      // every other geometry's and activation type's instantiation. See
+-      // Note [AMX attention dispatch].
+-      // A VNNI slot has no row view for qk_rowmajor_128x4 to read (item 2 of
+-      // Note [K VNNI storage] in kv_cache.hpp).
++      // Try AMX only with a packed Q and a dense page. The cache can decline
++      // if it has no AMX reader for its K storage; then use software scoring.
++      // The compile-time gate excludes unsupported query types and geometries.
++      // See Note [AMX attention dispatch].
+       if constexpr (amx_attn_h128g4::eligible<typename model::activation_scalar>(
+-                        operation_head_size, operation_kv_mul) &&
+-                    !k_vnni::layout_on<operation_head_size>) {
++                        operation_head_size, operation_kv_mul)) {
+         if (amx_q_packed != nullptr &&
+             is_dense_amx_page(page, begin, end, query_visible, *range_hint, q_position,
+-                k_position, sliding_window_size)) {
+-          apply_dense_amx_page<geometry>(
+-              was_valid, page, slot, operation_scale, kv_head, sp, amx_q_packed);
++                k_position, sliding_window_size) &&
++            apply_dense_amx_page<geometry>(
++                was_valid, page, slot, operation_scale, kv_head, sp, amx_q_packed)) {
+           // The hint is returned unchanged: is_dense_amx_page proved that the
+           // page's last token is below range_hint->tok_hi, so the dotter's
+           // advance (kv_idx >= tok_hi below) could not have fired for this
+@@ -1900,38 +1888,12 @@ struct self_attention {
+       tensor<operation_kv_mul, page::page_size> s_pages;
+       int relevant_k_tokens = 0;
+       {
+-        // share the bf16 -> fp32 conversion across the page
+-        using scalar_t = typename btensor_t<operation_head_size>::element;
+         for (size_t offset = 0; offset < operation_kv_mul; ++offset)
+           s_pages[offset] = constant<page::page_size>(-1.0f / 0.0f);
+-        // Row-major K is scored in the loop. VNNI K is scored after the loop, for
+-        // the tokens the loop marks in `live`.
+-        constexpr bool k_vnni_on = k_vnni::layout_on<operation_head_size>;
+-        // `dotter` binds to a view at construction and has no default
+-        // constructor, so we can't declare a std::array<dotter,...> and fill
+-        // it in a loop. Pack-expand `kv_mul` constructor calls inside the
+-        // array initializer instead. Worth the syntax because `kv_mul` is a
+-        // compile-time constant and this is the per-page hot path, so we
+-        // avoid the heap allocation a std::vector<dotter> would incur.
+-        [[maybe_unused]] auto dot_q = [&] {
+-          if constexpr (k_vnni_on) {
+-            return 0;
+-          } else {
+-            return [&]<size_t... I>(std::index_sequence<I...>) {
+-              return std::array{
+-                  dotter<scalar_t, operation_head_size>(slice<operation_head_size>()(
+-                      q, (kv_head * operation_kv_mul + I) * operation_head_size))...};
+-            }(std::make_index_sequence<operation_kv_mul>{});
+-          }
+-        }();
+-        [[maybe_unused]] uint64_t live = 0;
+-        [[maybe_unused]] auto keys = [&] {
+-          if constexpr (k_vnni_on) {
+-            return 0;
+-          } else {
+-            return decltype(page.template k<geometry.kv>(slot, kv_head)){};
+-          }
+-        }();
++        // Select tokens independently of the K storage layout.
++        static_assert(page::page_size <= std::numeric_limits<uint64_t>::digits,
++            "the live mask must hold one bit per token");
++        uint64_t live = 0;
+         for (size_t i = begin; i < end; ++i) {
+           // Advance range_hint when we move past the current range.
+           token_id kv_idx = page.at_offset(i);
+@@ -1950,26 +1912,10 @@ struct self_attention {
+             continue;
+           }
+           relevant_k_tokens++;
+-          if constexpr (k_vnni_on) {
+-            live |= uint64_t{1} << i;
+-          } else {
+-            if (!keys.valid()) keys = page.template k<geometry.kv>(slot, kv_head);
+-            const auto k = keys[i];
+-            for (size_t offset = 0; offset < operation_kv_mul; ++offset) {
+-              s_pages[offset][i] = dot_q[offset](k);
+-            }
+-          }
+-        }
+-        if constexpr (k_vnni_on) {
+-          static_assert(page::page_size == k_vnni::PAGE_TOKENS_64,
+-              "the live mask is one bit per token");
+-          if (relevant_k_tokens > 0) {
+-            k_vnni::qk_group<operation_kv_mul>(
+-                page.template k_packed<geometry.kv>(slot, kv_head),
+-                q.data + kv_head * operation_kv_mul * operation_head_size, live,
+-                &s_pages[0][0], page::page_size);
+-          }
++          live |= uint64_t{1} << i;
+         }
++        page.template score_k<geometry>(
++            slot, kv_head, q, live, &s_pages[0][0], page::page_size);
+       }
+       if (relevant_k_tokens == 0)
+         // Skip the V portion if there's nothing for it to do.  It
+diff --git a/h/tron/scheduler/full.hpp b/h/tron/scheduler/full.hpp
+index 1a9811aa69..09d3df1580 100644
+--- a/h/tron/scheduler/full.hpp
++++ b/h/tron/scheduler/full.hpp
+@@ -2748,15 +2748,9 @@ struct full_scheduler : scheduler {
+                                        bf16* dest) -> bf16* {
+                       constexpr kv_geometry hw_kv =
+                           model_t::hardware_attention_geometry.kv;
+-                      if constexpr (k_vnni::layout_on<hw_kv.head_size>) {
+-                        // A VNNI slot has no contiguous K row. Gather one into dest
+-                        // (Note [K VNNI storage] in kv_cache.hpp).
+-                        pg_ptr->template get_k_row<hw_kv>(slot, kv_head, off,
+-                            k_destination_row<hw_kv.head_size>(dest));
+-                        return dest;
+-                      } else {
+-                        return pg_ptr->template k<hw_kv>(slot, kv_head, off).data;
+-                      }
++                      pg_ptr->template get_k_row<hw_kv>(
++                          slot, kv_head, off, k_destination_row<hw_kv.head_size>(dest));
++                      return dest;
+                     };
+                     pi.v_head_fn = [pg_ptr, off](kv_slot_id slot, size_t kv_head,
+                                        bf16* dest) -> bf16* {
+diff --git a/h/tron/tensor/k_vnni.hpp b/h/tron/tensor/k_vnni.hpp
+index b7fed05a57..cd1b5d4d18 100644
+--- a/h/tron/tensor/k_vnni.hpp
++++ b/h/tron/tensor/k_vnni.hpp
+@@ -32,7 +32,7 @@
+ // the layout-specific score reader (k_vnni::qk_group), which reaches the plane
+ // through detail::k_vnni_access. Cache code, the model, hardware staging and the tests
+ // use the typed operations or the page accessors built on them (page::set_k_row,
+-// page::get_k_row, page::k_packed). book::fill_random is the
++// page::get_k_row, page::score_k). book::fill_random is the
+ // one documented exception: it fills a whole kv_block without interpreting
+ // coordinates.
+ 
+diff --git a/t/heterogeneous_scheduler_compile.cpp b/t/heterogeneous_scheduler_compile.cpp
+index 23173946be..f0cad34795 100644
+--- a/t/heterogeneous_scheduler_compile.cpp
++++ b/t/heterogeneous_scheduler_compile.cpp
+@@ -19,6 +19,7 @@
+ #include <catch2/generators/catch_generators.hpp>
+ 
+ #include "common/util.hpp"
++#include "kv_cache_helpers.hpp"
+ #include "pos/device.hpp"
+ #include "pos/hwattention.hpp"
+ #include "system/memory.hpp"
+@@ -1082,8 +1083,8 @@ TEST_CASE("Growing sliding storage preserves token-cache accounting",
+   size_t const first_chunk_end = book->reclaimable_chunk_token_end(0);
+   REQUIRE(book->token_capacity() > first_chunk_end);
+   auto* page = book->page_of(0);
+-  page->template k<sliding_geometry>(kv_slot_id(0), 0, 0)[0] = bf16(7.0f);
+-  page->template k<retained_geometry>(kv_slot_id(1), 0, 0)[0] = bf16(9.0f);
++  test::set_k_tag<sliding_geometry>(*page, kv_slot_id(0), 0, 0, bf16(7.0f));
++  test::set_k_tag<retained_geometry>(*page, kv_slot_id(1), 0, 0, bf16(9.0f));
+   int64_t const initial_book_bytes = book->dma_size_bytes();
+ 
+   SECTION("A successful append accounts for storage added to its pinned book") {
+@@ -1125,10 +1126,10 @@ TEST_CASE("Growing sliding storage preserves token-cache accounting",
+         static_cast<node_t*>(retry_prefix.get())->parent_edge.kv_book.get();
+     size_t const append_count = retry_book->token_capacity() - retry_book->size();
+     size_t const initial_height = retry_prefix->abs_ht.i;
+-    retry_book->page_of(0)->template k<sliding_geometry>(kv_slot_id(0), 0, 0)[0] =
+-        bf16(11.0f);
+-    retry_book->page_of(0)->template k<retained_geometry>(kv_slot_id(1), 0, 0)[0] =
+-        bf16(13.0f);
++    test::set_k_tag<sliding_geometry>(
++        *retry_book->page_of(0), kv_slot_id(0), 0, 0, bf16(11.0f));
++    test::set_k_tag<retained_geometry>(
++        *retry_book->page_of(0), kv_slot_id(1), 0, 0, bf16(13.0f));
+ 
+     // Evicting the other child permits compaction into the parent's book.
+     // Filling this book to capacity exposes any stale offset after relocation.
+@@ -1147,10 +1148,10 @@ TEST_CASE("Growing sliding storage preserves token-cache accounting",
+                            saved->parent_edge.parent->abs_ht.i;
+       auto* saved_page = saved->parent_edge.kv_book->page_of(index);
+       size_t const row = index % book_t::page_size;
+-      REQUIRE(float(saved_page->template k<sliding_geometry>(
+-                  kv_slot_id(0), 0, row)[0]) == 11.0f);
+-      REQUIRE(float(saved_page->template k<retained_geometry>(
+-                  kv_slot_id(1), 0, row)[0]) == 13.0f);
++      REQUIRE(
++          test::k_tag<sliding_geometry>(*saved_page, kv_slot_id(0), 0, row) == 11.0f);
++      REQUIRE(
++          test::k_tag<retained_geometry>(*saved_page, kv_slot_id(1), 0, row) == 13.0f);
+ 
+       // Sum distinct resident books independently of the cache's byte ledger.
+       // Compaction may validly change which book owns the retained prefix.
+@@ -1172,8 +1173,8 @@ TEST_CASE("Growing sliding storage preserves token-cache accounting",
+   REQUIRE(cache.size_bytes() - bytes_before == expected_book_bytes);
+   REQUIRE(cache.cache_pinned_bytes() - pinned_before == expected_book_bytes);
+   REQUIRE(cache.cache_opportunistic_bytes() == opportunistic_before);
+-  REQUIRE(float(page->template k<sliding_geometry>(kv_slot_id(0), 0, 0)[0]) == 7.0f);
+-  REQUIRE(float(page->template k<retained_geometry>(kv_slot_id(1), 0, 0)[0]) == 9.0f);
++  REQUIRE(test::k_tag<sliding_geometry>(*page, kv_slot_id(0), 0, 0) == 7.0f);
++  REQUIRE(test::k_tag<retained_geometry>(*page, kv_slot_id(1), 0, 0) == 9.0f);
+   {
+     tree_lock lock;
+     std::string error;
+diff --git a/t/kv_cache_helpers.hpp b/t/kv_cache_helpers.hpp
+new file mode 100644
+index 0000000000..6e54b784e3
+--- /dev/null
++++ b/t/kv_cache_helpers.hpp
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include <array>
++
++#include "tron/models/kv_cache.hpp"
++
++namespace tron::test {
++
++// Allocation and copy tests identify a K row by its first element.
++template <kv_geometry geometry, typename Page>
++void set_k_tag(Page& page, kv_slot_id slot, size_t head, size_t token, bf16 tag) {
++  alignas(64) std::array<bf16, geometry.head_size> row{};
++  row[0] = tag;
++  page.template set_k_row<geometry>(
++      slot, head, token, k_source_row<geometry.head_size>(row.data()));
++}
++
++template <kv_geometry geometry, typename Page>
++float k_tag(const Page& page, kv_slot_id slot, size_t head, size_t token) {
++  alignas(64) std::array<bf16, geometry.head_size> row;
++  page.template get_k_row<geometry>(
++      slot, head, token, k_destination_row<geometry.head_size>(row.data()));
++  return float(row[0]);
++}
++
++}  // namespace tron::test
+diff --git a/t/t_amx_dispatch_dtype.cpp b/t/t_amx_dispatch_dtype.cpp
+index 3e06d54c56..2b4ea616ef 100644
+--- a/t/t_amx_dispatch_dtype.cpp
++++ b/t/t_amx_dispatch_dtype.cpp
+@@ -6,8 +6,8 @@
+ // pulls libtron's amx_attn.cpp object and no AMX instruction is linked or
+ // executed; available() is the fake too, so the dispatch believes AMX is
+ // present. With a VNNI (Vector Neural Network Instructions) K slot
+-// (k_vnni::layout_on, Note [K VNNI storage] in kv_cache.hpp), apply_page_tok
+-// compiles out the dense AMX page path. So the Q pack still runs there and no
++// (Note [K VNNI storage] in kv_cache.hpp), page::try_score_k_amx declines the
++// dense AMX page path. So the Q pack still runs there and no
+ // kernel runs: the full page takes the AVX path, like a partial page. The
+ // expectations below say "row-major K" where the two layouts differ.
+ //   host_bf16, full page: the Q pack runs exactly once and sees the query
+diff --git a/t/t_llama_unit.cpp b/t/t_llama_unit.cpp
+index 11d8c4658a..e7db89a010 100644
+--- a/t/t_llama_unit.cpp
++++ b/t/t_llama_unit.cpp
+@@ -52,6 +52,7 @@
+ #include "common/numerics.hpp"
+ #include "common/types.hpp"
+ #include "common/util.hpp"
++#include "kv_cache_helpers.hpp"
+ #include "pos/lib.hpp"
+ #include "system/memory.hpp"
+ #include "testutil.hpp"
+@@ -114,8 +115,8 @@ template <typename Matrix>
+ constexpr bool matrix_at_writes = requires(Matrix& m) { m.at(0, 0) = bf16{}; };
+ 
+ template <typename Page>
+-constexpr bool page_k_accepts_raw_index =
+-    requires(Page& page) { page.k(size_t{0}, 0, 0); };
++constexpr bool page_k_accepts_raw_index = requires(Page& page,
++    k_row_view<Page::head_size> row) { page.get_k_row(size_t{0}, 0, 0, row); };
+ 
+ template <typename Page>
+ constexpr bool page_completion_accepts_operation =
+@@ -147,7 +148,9 @@ constexpr bool page_supports_uniform_kv_access = requires(Page& page,
+ 
+ template <typename Page, kv_geometry geometry>
+ constexpr bool page_k_accepts_geometry =
+-    requires(Page& page) { page.template k<geometry>(kv_slot_id(0), 0, 0); };
++    requires(Page& page, k_row_view<geometry.head_size> row) {
++      page.template get_k_row<geometry>(kv_slot_id(0), 0, 0, row);
++    };
+ 
+ template <typename Cache>
+ constexpr bool cache_maps_model_layers =
+@@ -450,15 +453,8 @@ TEST_CASE("attention operations resolve to typed KV slots", "[kv_data]") {
+   STATIC_REQUIRE_FALSE(matrix_at_writes<k_packed_mut_t>);
+   // The 64-byte pair rows need a 64-byte-aligned plane.
+   STATIC_REQUIRE(alignof(k_owner_t) == 64);
+-#ifdef TRON_K_VNNI
+-  STATIC_REQUIRE((page_k_packed_accepts_geometry<page_t, one_head>));
+-  STATIC_REQUIRE(
+-      std::is_same_v<decltype(std::declval<page_t const&>().template k_packed<one_head>(
+-                         kv_slot_id(0), 0)),
+-          k_vnni_view<const bf16, page_t::page_size, amx_attn_h128g4::HEAD_SIZE_128>>);
+-#else
+   STATIC_REQUIRE_FALSE((page_k_packed_accepts_geometry<page_t, one_head>));
+-#endif
++  STATIC_REQUIRE((page_k_accepts_geometry<page_t, one_head>));
+ 
+   constexpr attention_binding distinct_binding{
+       attention_op_id(7), model_layer_id(3), kv_slot_id(1)};
+@@ -699,20 +695,20 @@ TEST_CASE("mixed-retention books release and restore one grouped arena",
+   REQUIRE(cache_t::max_reclaimable_window_size() == 128);
+ 
+   auto* page = cache->page_of(0);
+-  page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0] = static_cast<bf16>(7.0f);
++  test::set_k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0, static_cast<bf16>(7.0f));
+   // With TRON_K_VNNI the 128-dimension slot has no row view (Note [K VNNI storage]).
+   alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+   k_row[0] = static_cast<bf16>(9.0f);
+   page->template set_k_row<geometry_128>(
+       kv_slot_id(1), 0, 0, k_source_row<geometry_128.head_size>(k_row.data()));
+-  page->template k<geometry_256>(kv_slot_id(2), 0, 0)[0] = static_cast<bf16>(10.0f);
++  test::set_k_tag<geometry_256>(*page, kv_slot_id(2), 0, 0, static_cast<bf16>(10.0f));
+ 
+   int64_t const released = cache->free_reclaimable_kv_storage();
+   REQUIRE(released == static_cast<int64_t>(pages * reclaimable_bytes_per_page));
+   REQUIRE(cache->has_reclaimed_kv_storage());
+   REQUIRE(
+       cache->dma_size_bytes() == static_cast<int64_t>(pages * retained_bytes_per_page));
+-  REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0]) == 7.0f);
++  REQUIRE(test::k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0) == 7.0f);
+   REQUIRE(cache->free_reclaimable_kv_storage() == 0);
+ 
+   test_seam::arm_dma_fault(0);
+@@ -733,11 +729,11 @@ TEST_CASE("mixed-retention books release and restore one grouped arena",
+   k_row[0] = static_cast<bf16>(11.0f);
+   page->template set_k_row<geometry_128>(
+       kv_slot_id(1), 0, 0, k_source_row<geometry_128.head_size>(k_row.data()));
+-  page->template k<geometry_256>(kv_slot_id(2), 0, 0)[0] = static_cast<bf16>(12.0f);
++  test::set_k_tag<geometry_256>(*page, kv_slot_id(2), 0, 0, static_cast<bf16>(12.0f));
+   page->template get_k_row<geometry_128>(
+       kv_slot_id(1), 0, 0, k_destination_row<geometry_128.head_size>(k_row.data()));
+   REQUIRE(float(k_row[0]) == 11.0f);
+-  REQUIRE(float(page->template k<geometry_256>(kv_slot_id(2), 0, 0)[0]) == 12.0f);
++  REQUIRE(test::k_tag<geometry_256>(*page, kv_slot_id(2), 0, 0) == 12.0f);
+ 
+   size_t const separate_group_cap =
+       pages * std::max(retained_bytes_per_page, reclaimable_bytes_per_page);
+@@ -1006,19 +1002,19 @@ TEST_CASE(
+   REQUIRE(cache != nullptr);
+   auto* page = cache->page_of(0);
+ 
+-  page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0] = static_cast<bf16>(1.0f);
+-  page->template k<geometry_64>(kv_slot_id(1), 0, 0)[0] = static_cast<bf16>(2.0f);
+-  page->template k<geometry_64>(kv_slot_id(2), 0, 0)[0] = static_cast<bf16>(3.0f);
++  test::set_k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0, static_cast<bf16>(1.0f));
++  test::set_k_tag<geometry_64>(*page, kv_slot_id(1), 0, 0, static_cast<bf16>(2.0f));
++  test::set_k_tag<geometry_64>(*page, kv_slot_id(2), 0, 0, static_cast<bf16>(3.0f));
+ 
+   REQUIRE(cache->free_reclaimable_kv_storage() > 0);
+-  REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0]) == 1.0f);
++  REQUIRE(test::k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0) == 1.0f);
+   REQUIRE(cache->restore_reclaimable_kv_storage(1).has_value());
+   cache->finish_reclaimable_kv_restore(1);
+ 
+-  page->template k<geometry_64>(kv_slot_id(1), 0, 0)[0] = static_cast<bf16>(4.0f);
+-  page->template k<geometry_64>(kv_slot_id(2), 0, 0)[0] = static_cast<bf16>(5.0f);
+-  REQUIRE(float(page->template k<geometry_64>(kv_slot_id(1), 0, 0)[0]) == 4.0f);
+-  REQUIRE(float(page->template k<geometry_64>(kv_slot_id(2), 0, 0)[0]) == 5.0f);
++  test::set_k_tag<geometry_64>(*page, kv_slot_id(1), 0, 0, static_cast<bf16>(4.0f));
++  test::set_k_tag<geometry_64>(*page, kv_slot_id(2), 0, 0, static_cast<bf16>(5.0f));
++  REQUIRE(test::k_tag<geometry_64>(*page, kv_slot_id(1), 0, 0) == 4.0f);
++  REQUIRE(test::k_tag<geometry_64>(*page, kv_slot_id(2), 0, 0) == 5.0f);
+ }
+ 
+ TEST_CASE("interleaved retention packs truncated slots and EAGLE independently",
+@@ -1048,44 +1044,47 @@ TEST_CASE("interleaved retention packs truncated slots and EAGLE independently",
+   REQUIRE(cache->logical_slot_count() == layers);
+   REQUIRE(cache->dma_size_bytes() ==
+           static_cast<int64_t>((layers + 1) * slot_bytes + x_bytes));
+-  auto visit_slot = [&](size_t slot, auto&& visit) {
++  auto visit_slot = [&](size_t slot, bool write) {
+     if (slot == layers) cache->set_storage_view(cache->eagle_storage_offset());
+     kv_slot_id const logical_slot(slot == layers ? 0 : slot);
+     for (size_t pg = 0; pg < pages; ++pg) {
+       auto* page = cache->page_of(pg * cache_t::page_size);
+       for (size_t head = 0; head < geometry.n_kv_heads; ++head) {
+         for (size_t token : {size_t{0}, cache_t::page_size - 1}) {
+-          auto& k = page->template k<geometry>(logical_slot, head, token)[0];
+-          visit(k, static_cast<float>(32 * slot + 4 * pg + 2 * head + (token != 0)));
++          const float expected = 32 * slot + 4 * pg + 2 * head + (token != 0);
++          if (write) {
++            test::set_k_tag<geometry>(
++                *page, logical_slot, head, token, static_cast<bf16>(expected));
++          } else {
++            REQUIRE(
++                test::k_tag<geometry>(*page, logical_slot, head, token) == expected);
++          }
+         }
+       }
+     }
+     cache->reset_storage_view();
+   };
+   for (size_t slot = 0; slot <= layers; ++slot)
+-    visit_slot(slot, [](bf16& k, float expected) { k = static_cast<bf16>(expected); });
++    visit_slot(slot, true);
+   for (size_t slot = 0; slot <= layers; ++slot)
+-    visit_slot(slot, [](bf16& k, float expected) { REQUIRE(float(k) == expected); });
++    visit_slot(slot, false);
+ 
+   auto const released = static_cast<int64_t>(sliding_slots * slot_bytes);
+   REQUIRE(cache->free_reclaimable_kv_storage() == released);
+   REQUIRE(cache->dma_size_bytes() ==
+           static_cast<int64_t>(retained_slots * slot_bytes + x_bytes));
+   for (size_t slot = 0; slot <= layers; ++slot)
+-    if (slot == layers || !retentions[slot].reclaimable())
+-      visit_slot(slot, [](bf16& k, float expected) { REQUIRE(float(k) == expected); });
++    if (slot == layers || !retentions[slot].reclaimable()) visit_slot(slot, false);
+ 
+   REQUIRE(cache->restore_reclaimable_kv_storage(1) == released);
+   cache->finish_reclaimable_kv_restore(1);
+   for (size_t slot = 0; slot < layers; ++slot)
+-    if (retentions[slot].reclaimable())
+-      visit_slot(
+-          slot, [](bf16& k, float expected) { k = static_cast<bf16>(expected); });
++    if (retentions[slot].reclaimable()) visit_slot(slot, true);
+   for (size_t slot = 0; slot <= layers; ++slot)
+-    visit_slot(slot, [](bf16& k, float expected) { REQUIRE(float(k) == expected); });
++    visit_slot(slot, false);
+ }
+ 
+-TEMPLATE_TEST_CASE("page K views preserve geometry and row addressing",
++TEMPLATE_TEST_CASE("page K rows preserve geometry and row addressing",
+     "[kv_data]",
+     (book<3, 1, 64, 0>),
+     uniform_mixed_retention_cache,
+@@ -1095,36 +1094,26 @@ TEMPLATE_TEST_CASE("page K views preserve geometry and row addressing",
+   cache_t cache(2);
+   auto check_slot = [&]<size_t slot>() {
+     constexpr auto geometry = cache_t::kv_slot_specs[slot].geometry;
+-    if constexpr (k_vnni::layout_on<geometry.head_size>) {
+-      // set_k_row / get_k_row of a VNNI slot are covered by t_k_vnni_layout.
+-      STATIC_REQUIRE_FALSE(
+-          (page_k_accepts_geometry<typename cache_t::page_t, geometry>));
+-    } else {
+-      for (size_t pg = 0; pg < 2; ++pg) {
+-        auto* page = cache.page_of(pg * cache_t::page_size);
+-        for (size_t head = 0; head < geometry.n_kv_heads; ++head) {
+-          auto rows = page->template k<geometry>(kv_slot_id(slot), head);
+-          auto const_rows =
+-              std::as_const(*page).template k<geometry>(kv_slot_id(slot), head);
+-          STATIC_REQUIRE(std::is_same_v<typename decltype(rows)::dim,
+-              seq<cache_t::page_size, geometry.head_size>>);
+-          decltype(const_rows) lazy_rows;
+-          REQUIRE_FALSE(lazy_rows.valid());
+-          lazy_rows = const_rows;
+-          REQUIRE(lazy_rows.valid());
+-          if constexpr (cache_t::layout_t::uniform_geometry) {
+-            REQUIRE(page->k(kv_slot_id(slot), head).data == rows.data);
+-            REQUIRE(std::as_const(*page).k(kv_slot_id(slot), head).data == rows.data);
++    STATIC_REQUIRE((page_k_accepts_geometry<typename cache_t::page_t, geometry>));
++    for (size_t pg = 0; pg < 2; ++pg) {
++      auto* page = cache.page_of(pg * cache_t::page_size);
++      for (size_t head = 0; head < geometry.n_kv_heads; ++head) {
++        for (size_t token : {size_t{0}, cache_t::page_size - 1}) {
++          alignas(64) std::array<bf16, geometry.head_size> row{}, got{};
++          for (size_t element : {size_t{0}, geometry.head_size - 1}) {
++            row[element] =
++                static_cast<bf16>(slot * 20 + head * 4 + pg * 2 + token + element + 1);
+           }
+-          for (size_t row : {size_t{0}, cache_t::page_size - 1}) {
+-            REQUIRE(rows[row].data ==
+-                    page->template k<geometry>(kv_slot_id(slot), head, row).data);
+-            for (size_t element : {size_t{0}, geometry.head_size - 1}) {
+-              auto const value =
+-                  static_cast<bf16>(slot * 20 + head * 4 + pg * 2 + row + element + 1);
+-              rows[row][element] = value;
+-              REQUIRE(float(lazy_rows[row][element]) == float(value));
+-            }
++          page->template set_k_row<geometry>(kv_slot_id(slot), head, token,
++              k_source_row<geometry.head_size>(row.data()));
++          std::as_const(*page).template get_k_row<geometry>(kv_slot_id(slot), head,
++              token, k_destination_row<geometry.head_size>(got.data()));
++          REQUIRE(got == row);
++          if constexpr (cache_t::layout_t::uniform_geometry) {
++            got.fill(bf16{});
++            page->get_k_row(kv_slot_id(slot), head, token,
++                k_destination_row<geometry.head_size>(got.data()));
++            REQUIRE(got == row);
+           }
+         }
+       }
+@@ -1150,17 +1139,17 @@ TEST_CASE("all-sliding caches retain the EAGLE storage view",
+   auto* page = cache->page_of(0);
+ 
+   cache->set_storage_view(cache->eagle_storage_offset());
+-  page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0] = static_cast<bf16>(6.0f);
++  test::set_k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0, static_cast<bf16>(6.0f));
+   cache->reset_storage_view();
+   REQUIRE(cache->free_reclaimable_kv_storage() > 0);
+   cache->set_storage_view(cache->eagle_storage_offset());
+-  REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0]) == 6.0f);
++  REQUIRE(test::k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0) == 6.0f);
+   cache->reset_storage_view();
+ 
+   REQUIRE(cache->restore_reclaimable_kv_storage(1).has_value());
+   cache->finish_reclaimable_kv_restore(1);
+   cache->set_storage_view(cache->eagle_storage_offset());
+-  REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0]) == 6.0f);
++  REQUIRE(test::k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0) == 6.0f);
+   cache->reset_storage_view();
+ }
+ 
+@@ -1224,12 +1213,7 @@ TEST_CASE("fixed KV layout addresses each slot geometry", "[kv_data][book append
+   STATIC_REQUIRE(cache_t::logical_slot_count_for_layers(99) == 2);
+   STATIC_REQUIRE(cache_t::storage_slot_count_for_layers(99, false) == 2);
+   STATIC_REQUIRE((page_k_accepts_geometry<page_t, geometry_64>));
+-#ifdef TRON_K_VNNI
+-  // A VNNI K plane has no contiguous row view (Note [K VNNI storage]).
+-  STATIC_REQUIRE_FALSE((page_k_accepts_geometry<page_t, geometry_128>));
+-#else
+   STATIC_REQUIRE((page_k_accepts_geometry<page_t, geometry_128>));
+-#endif
+   STATIC_REQUIRE_FALSE((page_k_accepts_geometry<page_t, undeclared_geometry>));
+   STATIC_REQUIRE_FALSE(page_supports_uniform_kv_access<page_t>);
+ 
+@@ -1241,8 +1225,8 @@ TEST_CASE("fixed KV layout addresses each slot geometry", "[kv_data][book append
+   constexpr size_t target_token = cache_t::page_size;
+   source.increment_tokens_used(target_token + 1);
+   page_t* source_page = source.page_of(target_token);
+-  source_page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0] =
+-      static_cast<bf16>(11.0f);
++  test::set_k_tag<geometry_64>(
++      *source_page, kv_slot_id(0), 0, 0, static_cast<bf16>(11.0f));
+   alignas(64) std::array<bf16, geometry_128.head_size> source_k{};
+   source_k[0] = static_cast<bf16>(22.0f);
+   source_page->template set_k_row<geometry_128>(
+@@ -1262,8 +1246,7 @@ TEST_CASE("fixed KV layout addresses each slot geometry", "[kv_data][book append
+   destination.append(source);
+ 
+   page_t* destination_page = destination.page_of(target_token);
+-  REQUIRE(float(destination_page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0]) ==
+-          11.0f);
++  REQUIRE(test::k_tag<geometry_64>(*destination_page, kv_slot_id(0), 0, 0) == 11.0f);
+   alignas(64) std::array<bf16, geometry_128.head_size> destination_k{};
+   destination_page->template get_k_row<geometry_128>(kv_slot_id(1), 1, 0,
+       k_destination_row<geometry_128.head_size>(destination_k.data()));
+@@ -1876,14 +1859,14 @@ TEST_CASE("heterogeneous plugin cache uses value slot topology", "[kv_data]") {
+   source.increment_tokens_used(3);
+   auto* src_page = source.page_of(0);
+   for (size_t token = 0; token < source.size(); ++token) {
+-    src_page->template k<geometry_64>(kv_slot_id(0), 0, token)[0] =
+-        static_cast<bf16>(10.0f + token);
++    test::set_k_tag<geometry_64>(
++        *src_page, kv_slot_id(0), 0, token, static_cast<bf16>(10.0f + token));
+     alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+     k_row[0] = static_cast<bf16>(20.0f + token);
+     src_page->template set_k_row<geometry_128>(
+         kv_slot_id(1), 1, token, k_source_row<geometry_128.head_size>(k_row.data()));
+-    src_page->template k<geometry_256>(kv_slot_id(2), 0, token)[0] =
+-        static_cast<bf16>(30.0f + token);
++    test::set_k_tag<geometry_256>(
++        *src_page, kv_slot_id(2), 0, token, static_cast<bf16>(30.0f + token));
+   }
+ 
+   constexpr size_t bytes_per_page =
+@@ -1899,14 +1882,14 @@ TEST_CASE("heterogeneous plugin cache uses value slot topology", "[kv_data]") {
+   auto* dst_page = destination.page_of(0);
+   for (size_t token = 0; token < source.size(); ++token) {
+     size_t const destination_token = 2 + token;
+-    REQUIRE(float(dst_page->template k<geometry_64>(
+-                kv_slot_id(0), 0, destination_token)[0]) == 10.0f + token);
++    REQUIRE(test::k_tag<geometry_64>(*dst_page, kv_slot_id(0), 0, destination_token) ==
++            10.0f + token);
+     alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+     dst_page->template get_k_row<geometry_128>(kv_slot_id(1), 1, destination_token,
+         k_destination_row<geometry_128.head_size>(k_row.data()));
+     REQUIRE(float(k_row[0]) == 20.0f + token);
+-    REQUIRE(float(dst_page->template k<geometry_256>(
+-                kv_slot_id(2), 0, destination_token)[0]) == 30.0f + token);
++    REQUIRE(test::k_tag<geometry_256>(*dst_page, kv_slot_id(2), 0, destination_token) ==
++            30.0f + token);
+   }
+ }
+ 
+@@ -1927,13 +1910,13 @@ TEST_CASE("heterogeneous cache isolates EAGLE as a uniform capability", "[kv_dat
+                                    geometry_64.head_size * sizeof(bf16) +
+                                cache_t::page_size * 16));
+ 
+-  page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0] = static_cast<bf16>(1.0f);
++  test::set_k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0, static_cast<bf16>(1.0f));
+   cache.set_storage_view(cache.eagle_storage_offset());
+-  page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0] = static_cast<bf16>(2.0f);
++  test::set_k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0, static_cast<bf16>(2.0f));
+   cache.reset_storage_view();
+-  REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0]) == 1.0f);
++  REQUIRE(test::k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0) == 1.0f);
+   cache.set_storage_view(cache.eagle_storage_offset());
+-  REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, 0)[0]) == 2.0f);
++  REQUIRE(test::k_tag<geometry_64>(*page, kv_slot_id(0), 0, 0) == 2.0f);
+ }
+ 
+ TEST_CASE(
+@@ -1997,14 +1980,14 @@ TEMPLATE_TEST_CASE("heterogeneous append preserves pages, V data, and completion
+   for (size_t token = 0; token < source_tokens; ++token) {
+     auto* page = source.page_of(token);
+     size_t const offset = token % cache_t::page_size;
+-    page->template k<geometry_64>(kv_slot_id(0), 0, offset)[0] =
+-        static_cast<bf16>(token + 1);
++    test::set_k_tag<geometry_64>(
++        *page, kv_slot_id(0), 0, offset, static_cast<bf16>(token + 1));
+     alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+     k_row[0] = static_cast<bf16>(token + 51);
+     page->template set_k_row<geometry_128>(
+         kv_slot_id(1), 1, offset, k_source_row<geometry_128.head_size>(k_row.data()));
+-    page->template k<geometry_256>(kv_slot_id(2), 0, offset)[0] =
+-        static_cast<bf16>(token + 101);
++    test::set_k_tag<geometry_256>(
++        *page, kv_slot_id(2), 0, offset, static_cast<bf16>(token + 101));
+     REQUIRE_FALSE(page->mark_k_complete(kv_slot_id(0), offset));
+     REQUIRE(page->mark_v_complete(kv_slot_id(0), offset));
+     REQUIRE_FALSE(page->mark_k_complete(kv_slot_id(1), offset));
+@@ -2020,13 +2003,13 @@ TEMPLATE_TEST_CASE("heterogeneous append preserves pages, V data, and completion
+     size_t const token = destination_tokens + source_token;
+     auto* page = destination.page_of(token);
+     size_t const offset = token % cache_t::page_size;
+-    REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, offset)[0]) ==
+-            source_token + 1);
++    REQUIRE(
++        test::k_tag<geometry_64>(*page, kv_slot_id(0), 0, offset) == source_token + 1);
+     alignas(64) std::array<bf16, geometry_128.head_size> k_row{};
+     page->template get_k_row<geometry_128>(kv_slot_id(1), 1, offset,
+         k_destination_row<geometry_128.head_size>(k_row.data()));
+     REQUIRE(float(k_row[0]) == source_token + 51);
+-    REQUIRE(float(page->template k<geometry_256>(kv_slot_id(2), 0, offset)[0]) ==
++    REQUIRE(test::k_tag<geometry_256>(*page, kv_slot_id(2), 0, offset) ==
+             source_token + 101);
+     REQUIRE(page->is_kv_complete(kv_slot_id(0), offset));
+     REQUIRE_FALSE(page->is_kv_complete(kv_slot_id(1), offset));
+@@ -2053,13 +2036,13 @@ TEMPLATE_TEST_CASE("heterogeneous EAGLE append preserves both views and embeddin
+ 
+   for (size_t token = 0; token < source.size(); ++token) {
+     auto* page = source.page_of(token);
+-    page->template k<geometry_64>(kv_slot_id(0), 0, token)[0] =
+-        static_cast<bf16>(token + 1);
++    test::set_k_tag<geometry_64>(
++        *page, kv_slot_id(0), 0, token, static_cast<bf16>(token + 1));
+     REQUIRE_FALSE(page->mark_k_complete(kv_slot_id(0), token));
+     REQUIRE(page->mark_v_complete(kv_slot_id(0), token));
+     source.set_storage_view(source.eagle_storage_offset());
+-    page->template k<geometry_64>(kv_slot_id(0), 0, token)[0] =
+-        static_cast<bf16>(token + 11);
++    test::set_k_tag<geometry_64>(
++        *page, kv_slot_id(0), 0, token, static_cast<bf16>(token + 11));
+     source.reset_storage_view();
+     std::fill_n(page->template x<uint8_t>(token), 16, uint8_t(token + 21));
+   }
+@@ -2069,12 +2052,12 @@ TEMPLATE_TEST_CASE("heterogeneous EAGLE append preserves both views and embeddin
+     size_t const token = destination_tokens + source_token;
+     auto* page = destination.page_of(token);
+     size_t const offset = token % cache_t::page_size;
+-    REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, offset)[0]) ==
+-            source_token + 1);
++    REQUIRE(
++        test::k_tag<geometry_64>(*page, kv_slot_id(0), 0, offset) == source_token + 1);
+     REQUIRE(page->is_kv_complete(kv_slot_id(0), offset));
+     destination.set_storage_view(destination.eagle_storage_offset());
+-    REQUIRE(float(page->template k<geometry_64>(kv_slot_id(0), 0, offset)[0]) ==
+-            source_token + 11);
++    REQUIRE(
++        test::k_tag<geometry_64>(*page, kv_slot_id(0), 0, offset) == source_token + 11);
+     destination.reset_storage_view();
+     for (size_t byte = 0; byte < 16; ++byte)
+       REQUIRE(page->template x<uint8_t>(offset)[byte] == source_token + 21);

@@ -1,0 +1,21 @@
+---
+name: issue-5097-killswitch-prefill
+description: "Issue #5097 (filed 2026-10-21): PR 5047's two-pass software K scoring costs +2.9 % prefill on llama-8b p8192 under TRON_AMX_DISABLE=1; root cause = the selection pass runs alone; FIX F2 (dense-page live mask) MEASURED 2026-10-22 and PUSHED to PR 5098 (head b79dfb9fed): -3.9 % prefill vs head, -1.2 % vs base, commit 1 alone carries the cost; issue closes when 5098 merges"
+metadata:
+  type: project
+---
+
+Issue positron-ai/tron#5097, assignee jhan-positron, labels Performance + claude-code-assisted. Comment 6324897436 (2026-10-21) carries the root-cause record. Durable copy: exec/benstack-20261021/ksroot-5097/ (root-cause.md, objdump-compare.md, source-diff.md, prefill-vs-decode.md, base/head apply_page_range disassembly, ThinLTO links, kloop microbenchmark). Workflow wf_163ce000-641 (21 agents, 17 hypotheses, 3 survive).
+
+Key numbers (TRON_ATTN_STATS exit reports of campaign pr5047-20261020): prefill busy +167.3 G TSC (+3.22 %), +152.5 TSC cycles per visit, +2.43 per K token over 68.73 G tokens = 2.38 s (wall +2.247 s); decode busy -0.28 %. Disassembly: base 94 instr/token one loop, 16 vdpbf16ps with memory operands; head 97 = 23 (pass 1, bts+jmp) + 74 (pass 2, tzcnt..jne), K row loaded once, 9 vs 20 load uops. Primary cause: pass split (serial pass 1, est. 160-250 core cycles per dense visit). Refuted: un-inlined score_k, Q spill, extra K loads, save_k assert, AMX decline, staging.
+
+**How to apply:** when 3bda is free, run the perf stat / perf record plan in root-cause.md (two kill-switch binaries /var/tmp/jhan/tron-b47b|b47h/gen/runtron.b47b|h, cell l8b p8192, 50 s prefill window, attention workers), then try F1 (one line) and F2 (dense-page mask in apply_page_tok) and re-run the kill-switch cell. Never `cd` in the ssh commands (use env --chdir). Related: [[pr5047-ben-refactor-review]], [[ben-stack-reexpress-20261021]].
+
+## 2026-10-21 fix branch + queued campaign
+- Fix F2 implemented: local branch jhan-vnnik-1-5047-fixes-f2 (worktree ~/workspace/ai-runs/tron-ben-pr1-f2, NOT pushed) = PR 5098 head db76973fdd + e44c048074 (dense-page live-mask fast path in apply_page_tok, relevant_k_tokens = popcount) + b79dfb9fed (unit test: fast path vs token loop, n in {2,63,64} bit-identical m*/s*/v*, n = 1). Syntax matrix OK (22 cells) at both. Adversarial review wf_2a9fd646-f61: 0 counterexamples, verdict safe as written (record scratchpad f2review/review.md).
+- Campaign exec/i5097-20261021/ (chain2/campaign2/smoke2/tests2/build3/gen_report2/launch2, README): builds b47f (FIX_SHA b79dfb9fed...) and b47c1 (commit 1 alone e17a12ff09), reuses b47b/b47h; identity head/fix (+ kill switch); cells l8b p8192 off (baseoff headoff fixoff c1off), p8192 cpu (base head fix), p1024 cpu (head fix), REPS 4; tests of b47f incl. t_llama_unit under the kill switch. LAUNCHED 2026-10-21 20:53Z, waiting for NOT_BEFORE 2026-10-22T04:00:00Z (jhan: Rhys uses 3bda until tonight's CI), then the guard. Results exec/results/i5097-20261021/results.md.
+- jhan's instruction: after the issue is resolved, if the fix is simple, commit it to PR 5098 (= push the f2 branch's two commits onto jhan-vnnik-1-5047-fixes and update the body + the issue).
+
+## 2026-10-22 DONE: campaign i5097-20261021 + fix pushed
+- Chain ran 13:28-14:59 UTC (machine came free then; NOT_BEFORE 04:00 then the guard). Results exec/results/i5097-20261021/results.md. Kill switch p8192 prefill: baseoff 78.825, c1off 81.338 (+3.2 %), headoff 80.977 (+2.7 %), fixoff 77.842 (-3.135 s / -3.9 % vs head, -0.982 s / -1.2 % vs base). Decode inside band everywhere. Shipped p8192 fix vs head prefill -0.172 s (-0.5 %), p1024 equal. Tokens identical fix:fix2, fix:head, fixoff:headoff. Tests on b47f all pass (t_amx_numerics skips 2 precision checks under the kill switch). t_heterogeneous_scheduler built, not run on 3bda. No option-ON build at b79dfb9fed on 3bda.
+- Pushed e44c048074 + b79dfb9fed onto jhan-vnnik-1-5047-fixes (PR 5098 head b79dfb9fed) 2026-10-22 17:3x UTC; body rewritten (bodies/pr1fix-body.md, 1998 words, 4 fixes, Performance subsection); issue comment 6347120219 (bodies/issue-5097-fix-comment.md). Open: issue closes when 5098 merges; F1 alone never measured (F2 skips the pass).
