@@ -40,3 +40,29 @@ Left behind in this batch:
 
 - `PR-description/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/PR-description/SKILL.md` (12139 bytes). registered artifact.
   Related handoffs: [codex_20261018_review-pr5015-using-skills.md](../../handoffs/codex_20261018_review-pr5015-using-skills.md).
+
+## Batch: 2026-11-02 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-11-02 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory, same files). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first. Canonical root mapping as before: `claude-agentsrv:/home/jhan/.claude/skills/` -> the topic root.
+
+Covers 1 handoff(s) of 2026-10-16 to 2026-11-02 (see "Related" on each entry). Preserved: 1 files, 0.01 MiB in this topic. Left behind by rule 4 of the prompt for the handoffs of this topic, one reason per file (full per-file inventories in the `.lineage.md` companions named under each report page):
+
+- (no value used): 16144 files
+- (scratch directory >60 files, decide at gate): 14670 files
+- (provenance): 4700 files
+- (size): 38 files
+- (provenance: campaign log): 26 files
+- (duplicate (held by tests-*.txt)): 20 files
+- (provenance: raw workflow output): 8 files
+- (scratchpad file not named in the handoff): 7 files
+- (regenerable: render check PNG): 4 files
+- `no value used` = files under `leaves/` result trees. `scratch directory >60 files` = agent batch trees under session scratchpads. `provenance` = server logs, client streams, .done markers, binaries, raw workflow outputs, subagent journals. `size` = files above 5 MiB. `regenerable: render check PNG` = PNG renders of inline-SVG pages. `scratchpad file not named in the handoff` = files of directory-listed session scratchpads that no handoff names individually. `duplicate` = a copy already held elsewhere (named). `pdftotext extract of a vendor manual`, `text dump of a preserved page`, `directory listing` = rebuilt in minutes from the PDF, the page, or the tree.
+
+### All files of this batch
+
+Repo path -> canonical path (bytes). `origin:` = the session-store or scratchpad path a relocated file was copied from (history only, never fetched again).
+
+Related: [claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md](../../handoffs/claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md)
+
+- `ben-review/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/ben-review/SKILL.md` (14220 bytes)
+
