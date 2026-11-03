@@ -12,7 +12,7 @@
 
 ## Short version
 
-Follow the notebook handoff prompt: inventory this Codex home, prepare transcript-backed handoffs and artifact proposals, then obtain approval before committing and pushing.
+Published 12 new handoffs and 628 artifact files after approval. The complete batch contains 659 files. All 659 files matched origin/main by Git content identifier after the first push.
 
 ## Objective
 
@@ -29,6 +29,8 @@ Work runs on claude-agentsrv in `/home/jhan/workspace/notebook`. The active Code
 - Audited registered artifacts from local/shared storage and one light SSH batch to delphi-3bda. Kept proposals in scratch and generated a review report.
 - The user approved the complete batch. Rechecked all 657 prepared files. The 627 unchanged artifact originals match their snapshots. The terminal-session original changed its selected pane; its approved snapshot is retained. The batch contains 12 handoffs, 628 artifact files, 17 registry/lineage files, and 2 run logs.
 
+- Committed each new handoff with the required message. Bundled the artifact copies and metadata with this handoff. Pushed all 12 commits, fetched origin, and compared all 659 files with the published tree at `f1fc309a485d3be73559ed1eeeda2c9b4eef654d`. Every file matched. Verification ran at `2026-11-03T06:14:55.679056+00:00`.
+
 ## Artifacts
 
 - `claude-agentsrv:/home/jhan/workspace/notebook/codex-handoff-generation-prompt.md`
@@ -38,11 +40,11 @@ Work runs on claude-agentsrv in `/home/jhan/workspace/notebook`. The active Code
 
 ## Current state
 
-The user approved publication of all 659 listed files. The approved files are applied locally. Commit, push, and remote content verification are in progress. Existing unapproved drafts and the modified common-knowledge page remain outside this batch.
+The approved batch is published in [commit f1fc309a485d](https://github.com/jhan-positron/notebook/commit/f1fc309a485d3be73559ed1eeeda2c9b4eef654d). After fetching origin, all 659 approved files matched `origin/main` by Git content identifier. The 32 pre-existing unrelated files are unchanged and remain outside these commits.
 
 ## Open items / next steps
 
-Finish the approved publication, then fetch origin and compare content identifiers for every approved file. The 118 missing-original alerts and 39 unverified Windows originals remain outstanding. Three oversized files and the operand-B.html contents-section conflict remain excluded. No original is restored or deleted by this approval.
+The 118 missing-original alerts and 39 unverified Windows originals remain outstanding. Three oversized files and the operand-B.html contents-section conflict remain excluded. No original was restored or deleted.
 
 ## Gotchas & decisions
 
@@ -51,3 +53,5 @@ The 28 older untracked handoffs belong to the separate agentsrv Codex home. Thei
 ## Evidence coverage
 
 Read substantive user prompts and assistant final answers from the header transcript. Inspected the state-changing commands, file edits, and validation results supporting the summary. Transcript line references refer to that file. The title comes from session_index.jsonl. Historical measurements and tests were not rerun for this handoff.
+
+Publication evidence: `git fetch origin`, then compare `git ls-tree -r -z origin/main` with `git hash-object` for each of the 659 approved paths. The first verification result is recorded in the published run manifest. A final verification follows the status-record update.
