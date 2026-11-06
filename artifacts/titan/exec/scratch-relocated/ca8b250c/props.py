@@ -1,0 +1,66 @@
+import json, sys
+P = []
+def add(old, new, reason): P.append(dict(file="gen_brief.py", old=old, new=new, reason=reason))
+
+add("""<div class="short"><p><b>Short version.</b> Through the CME (the cluster's C1-SME2 unit), a dependent load costs {c[(4096, 'repeat')]['ns']:.1f} ns at 4 KiB against the core's {c[(4096, 'repeat')]['core']:.1f} ns on boot E, and a register round trip with no memory access already costs {rt:.1f} ns. The CME's latency climbs from 8 KiB on with no step at its 64 KiB L1, and boot B (the CME prefetcher off) shows the climb is the prefetcher's: {cb[4096]:.1f} to {cb[65536]:.1f} ns from 4 to 64 KiB, then {cb[98304]:.1f} ns at 96 KiB. For streaming, run 3's rows (the L3 off, not repeated since) show the CME as the faster path: one core moves about {sum(d['read'] for d in big) / len(big):.0f} GB/s of reads and {min(d['write'] for d in big):.0f} to {max(d['write'] for d in big):.0f} GB/s of writes through it at every footprint from 160 KiB to 32 MiB, about {b32m['read'] / b32m['core_read']:.0f} and {b32m['write'] / b32m['core_write']:.0f} times its own rates.</p></div>
+
+<h2>Words used here</h2>""",
+"""<h2>Words used here</h2>""",
+"Item 6: the core brief lost its Short version block, so the CME brief drops its too. Every number in it is already on the page (table row 1, the figure 1 caption, the figure 2 caption, bullets 1 and 3). Cuts about five printed lines.")
+
+add("""<dt>chase, fresh, flushed, sparse, sequential</dt><dd>A random pointer chain, one load per line. Fresh: walked once. Flushed: every line cleaned and invalidated from the caches first. Sparse: one member line per 4 KiB page. Sequential: the lines in address order.</dd>
+<dt>SLC, OCM, crosspoint</dt><dd>The mesh's 3.75 MiB System Level Cache over five home nodes. Five 256 KiB On-Chip Memory regions, one per home node. A crosspoint is one mesh router.</dd>
+</dl>""",
+"""<dt>chase, fresh, flushed, sparse, dense, sequential</dt><dd>A random pointer chain, one load per line. Fresh: walked once. Flushed: every line cleaned and invalidated from the caches first. Sparse: one member line per 4 KiB page. Dense: every line of the buffer is a member. Sequential: the lines in address order.</dd>
+</dl>""",
+"Item 3: Jibin removed SLC, OCM and crosspoint from the core brief's glossary as known terms, so the CME brief's 'SLC, OCM, crosspoint' entry goes too. The CME-specific entries (CME, streaming mode, register control) stay. 'Dense' is added to the chase entry: the core brief defines dense chain, and the CME table has a dense-chain row with no definition.")
+
+add("""["8 MiB, every line flushed (DRAM)", """,
+"""["DRAM (emulator memory model, fixed delay), 8 MiB random chain, every line flushed from all caches", """,
+"Item 4: the core brief labels this row 'DRAM (emulator memory model, fixed delay)' with the footprint '8 MiB random chain, every line flushed from all caches'. The CME table has no separate footprint column, so the label carries both.")
+
+add("""["8 MiB, sequential chain, flushed", """,
+"""["DRAM (emulator memory model, fixed delay), 8 MiB sequential chain in address order, every line flushed first", """,
+"Item 4: the same label and footprint text as the core brief's sequential DRAM row.")
+
+add("""{p.CME_SEQ['B']:.1f} ns with the prefetcher off (boot B)"],""",
+"""{p.CME_SEQ['B']:.1f} ns with the prefetcher off (boot B). How a prefetch stream overlaps the reads of a chain is drawn in asimov-c1nano-perf.html, section 8"],""",
+"Item 10: the sequential-chain row is where the brief discusses the CME prefetcher's stream, so it gets the one-clause pointer to the core page's new section 8 (Prefetching, in-flight reads and dependent loads). No number is added.")
+
+add("""The core rows partly hit the L3 on E"],""",
+"""On boot E only {p.SPARSE_L3_RNG_CPU2['E'][0]:.2f} to {p.SPARSE_L3_RNG_CPU2['E'][1]:.2f} of the core's loads in this row are read from the mesh (L3 read refills per load). The other loads are served by the L3, so the core values are below the true OCM latency"],""",
+"Item 7: matches the core brief's sparse-row note word for word, with 'the core's loads' and 'the core values' because this table has a CME column beside the core one. The range is p.SPARSE_L3_RNG_CPU2['E'], the same attribute the core brief's note uses (CPU 2's five sparse rows on boot E).")
+
+add("""<li><b>Settled: the CME prefetcher explains the climb from 8 KiB.</b> With the prefetcher off (boot B) the chase reads {cb[4096]:.2f} to {cb[65536]:.2f} ns from 4 to 64 KiB and {cb[98304]:.2f} ns at 96 KiB, the L1 step the other boots hide [cme-latency-dram-small.csv, boot B]. With the L3 on (boot E) the prefetcher's fills at 8 to 24 KiB come from inside the cluster: {100 * p.CME_INNER_SHARE['E'][8192]:.0f} to {100 * min(p.CME_INNER_SHARE['E'][s] for s in (8192, 16384, 24576)):.0f} % of the CME's L1 refills, against {100 * max(p.CME_INNER_SHARE['C'][s] for s in (8192, 16384, 24576)):.0f} % or less on boot C.""",
+"""<li><b>The CME prefetcher explains the climb from 8 KiB.</b> With the prefetcher off (boot B) the chase reads {cb[4096]:.2f} to {cb[65536]:.2f} ns from 4 to 64 KiB and {cb[98304]:.2f} ns at 96 KiB [cme-latency-dram-small.csv, boot B]. That is the L1 step the other boots hide. With the L3 on (boot E) the prefetcher's fills at 8 to 24 KiB come from inside the cluster. They are {100 * p.CME_INNER_SHARE['E'][8192]:.0f} to {100 * min(p.CME_INNER_SHARE['E'][s] for s in (8192, 16384, 24576)):.0f} % of the CME's L1 refills, against {100 * max(p.CME_INNER_SHARE['C'][s] for s in (8192, 16384, 24576)):.0f} % or less on boot C.""",
+"Item 7: the core brief's bullets have no 'Settled:' prefix and no colon chains. The heading drops the prefix, the two-claim first sentence is split, and the colon sentence becomes two sentences. No number changes.")
+
+add("""Through the CME no row gives an L3 hit number: no CME event names the level that served a load.</li>""",
+"""Through the CME no row gives an L3 hit number. No CME event names the level that served a load.</li>""",
+"Item 7: one claim per sentence, no colon chain. Same bullet as the previous proposal, later in the line.")
+
+add("""    co = p.CME_OCM; e_sp = [d["E"]["sparse"] for d in co]; r3_sp = [d["run3"]["best"] for d in co]""",
+"""    co = p.CME_OCM; e_sp = [d["E"]["sparse"] for d in co]; r3_sp = [d["run3"]["best"] for d in co]
+    fastest = min(co, key=lambda d: d["E"]["sparse"])   # the region with the lowest sparse best through the CME on boot E, as gen_perf_cme.py's E_FASTEST""",
+"Item 8 support: the rewritten OCM bullet below names the fastest region and its mesh distance to back the 'does not order by mesh distance' claim. Same expression as E_FASTEST in gen_perf_cme.py line 60, over p.CME_OCM (which carries 'region' and 'dist').")
+
+add("""<li><b>OCM through the CME costs more per load than from the core and does not order by mesh distance.</b> On boot E the sparse rows read {min(e_sp):.1f} to {max(e_sp):.1f} ns through the CME and the dense all-five chain {p.CME_ALL5['E']['dense']:.1f} ns, {p.CME_ALL5['E']['dense'] - p.ALL5[2]['E']['dense']:.1f} ns above the core's {p.ALL5[2]['E']['dense']:.1f} ns (run 3: {min(r3_sp):.1f} to {max(r3_sp):.1f} sparse, {p.CME_ALL5['run3']['dense']:.1f} dense) [cme-latency-ocm-*.csv]. The CME streams OCM at {min(COCMBW['region'][r] / OCMBW['region'][r] for r in range(5)):.1f} to {max(COCMBW['region'][r] / OCMBW['region'][r] for r in range(5)):.1f} times the core's rate (run 3, L3 off).</li>""",
+"""<li><b>OCM through the CME costs more per load than from the core.</b> On boot E the dense all-five chain reads {p.CME_ALL5['E']['dense']:.1f} ns through the CME, {p.CME_ALL5['E']['dense'] - p.ALL5[2]['E']['dense']:.1f} ns above the core's {p.ALL5[2]['E']['dense']:.1f} ns [cme-latency-ocm-*.csv]. The per-region rows through the CME do not order by mesh distance. The fastest is OCM{fastest['region']}, {fastest['dist']} crosspoint{'s' if fastest['dist'] != 1 else ''} away, at {fastest['E']['sparse']:.1f} ns. The CME streams OCM at {min(COCMBW['region'][r] / OCMBW['region'][r] for r in range(5)):.1f} to {max(COCMBW['region'][r] / OCMBW['region'][r] for r in range(5)):.1f} times the core's rate (run 3, L3 off).</li>""",
+"Item 8: this bullet was of the dense kind the core brief deleted (a two-claim heading, one sentence with six numbers and a parenthesis of run 3 values). The sparse range and the run 3 values are already in the table's two OCM rows, so they are cut. The mesh-distance claim keeps one supporting number (the fastest region, its distance, its time), as the full CME page's OCM caption gives it. Net length about the same, in shorter sentences.")
+
+add("""<li><b>Not measured.</b> <span class="gap">Insufficient data</span> Two cores of one DSU in streaming mode at once (the CME is shared): a two-core cme-read row would resolve it. Matrix operands in OCM: a CME matmul row with its operands in an OCM region. Which level served a CME load: a CME event that names the level, which no boot has. Any CME bandwidth with the L3 on: cme-bandwidth-dram-1core.csv on a boot with E's SCP. <span class="hyp">hypothesis</span> The 64-load OCM passes carry a fixed wake-up cost of {WAKE_US[0]:.1f} to {WAKE_US[1]:.1f} us est. each (the CME powered down in dynamic mode at the start of a timed span, Jesse's run 3 README bounds). A per-pass timestamp on those passes would test it.</li>""",
+"""<li><b>Not measured.</b> <span class="gap">Insufficient data</span> Two cores of one DSU in streaming mode at once. The CME is shared, and no two-core CME row has run. A CME matmul with its operands in an OCM region has not run either. <span class="hyp">hypothesis</span> Each 64-load OCM pass carries a fixed wake-up cost of {WAKE_US[0]:.1f} to {WAKE_US[1]:.1f} us est. (the CME is powered down at the start of a timed span, Jesse's run 3 README bounds). A per-pass timestamp on those passes would test it.</li>""",
+"Item 8: this item was the same colon-chain list the core brief deleted. Two of its four gaps are stated elsewhere on the page and are cut here: 'no CME bandwidth row has run with the L3 on' (figure 2 caption and the table footnote) and 'no CME event names the level that served a load' (the prefetcher bullet). The two gaps not covered elsewhere (two cores in streaming mode, matmul operands in OCM) and the wake-up hypothesis stay, as short sentences. Cuts about one printed line.")
+
+src = open("/home/jhan/workspace/titan/cache-perf/asimov/gen_brief.py").read()
+ok = True
+for i, q in enumerate(P):
+    n = src.count(q["old"])
+    print(i, "count", n, q["old"][:60].replace("\n", "\\n"))
+    if n != 1: ok = False
+json.dump(P, open("/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/ca8b250c-52a6-45d3-bbc5-a704f24ca1dd/scratchpad/props.json", "w"), indent=1)
+# apply to a scratch copy and compile it, to check the f-string syntax
+s2 = src
+for q in P: s2 = s2.replace(q["old"], q["new"])
+open("/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/ca8b250c-52a6-45d3-bbc5-a704f24ca1dd/scratchpad/gen_brief_scratch.py", "w").write(s2)
+import ast; ast.parse(s2); print("scratch copy parses OK; all unique:", ok)

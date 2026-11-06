@@ -1,0 +1,22 @@
+---
+name: asimov-run6-state
+description: Run 6 (2026-11-05 evening): the CME per-call cost measured from inside the streaming span; commits aa408ed + b345288 (round 13 fixes), plan section 13, boots F1/F2 to request of Jesse, codex loop in progress
+metadata:
+  type: project
+---
+
+Run 6 state (written 2026-11-05 evening):
+
+- Trigger: Wade (Slack, 2026-11-05) on SMSTART/SMSTOP cost; Jibin asked to move the setup/clear out of the pass loop and redo the CME tests. Decision: two boots, both L3 on: F1 prefetchers on (boot E firmware, `sh run_all.sh`, 3.3 s est.), F2 prefetchers off (boot B TF-A + boot E SCP, `sh run_cme.sh`, 1.7 s est.). Jibin sends the request; Jesse runs cme_test first.
+- Code: commit aa408ed on main of ~/workspace/ai-runs/asimov-repo/cache-mem-perf (on top of b79dffa); aa408ed..0c190a1 pushed to origin/main 2026-11-06. cme_kern.S stamps CNTVCT_EL0 inside every span (cme_span[2]); cme_read4_n / cme_write4_n (single-call form, `--asm-passes --cme`); cme_write4_dsb (`--dsb-st`); latency --cme rows gain ns_per_load_span (column 7), bandwidth --cme rows gain span_s, span_GBps (columns 11-12); run_cme.sh phase F2 = 23 commands (56 total, 71 launches). Project-folder copies in ~/workspace/titan/cache-perf/asimov are identical to the repo's. Host binaries there are x86 builds.
+- Readers: gen_run3.lat_rows handles the span column (base 7); test_lat_rows.py has two run 6 cases. bw readers index columns 6-9, unaffected. A run 6 page generator does not exist yet.
+- Plan: follow-up-run-plan.md section 13 (goals G-k, G-l, G-m; hypotheses H10 posted stores, H11 fold); section 9 "Round 13 pending codex". Review loop: codex reads follow-up-run-plan.md + the commit, writes "Round 13" at the top of codex-review-follow-up-run-plan.md; responses go at the bottom of that file and in section 9.
+- Open items Jibin chose to leave open: the 0.1-0.3 us per-span CME wake cost; two cores in streaming mode. Jesse reminder on the memory-model delay is in message-to-jesse-round4.md and round5.md; round5 (2026-11-06) carries the F1/F2 boot request and cme_test-first ask.
+- CRB (jhan@192.168.2.45): build check only, under /tmp/jhan-cme-build/run6; no SME there, so cme_test cannot run on it.
+
+See [[asimov-cme-test-state]], [[asimov-page-wording]].
+
+Round 13 (codex, 2026-11-06 UTC): R27-R32 + 2 smaller, all accepted in commit b345288: kernels sum spans into cme_span[2] (no C in brackets); "instrumented outside-span interval", isolated switch cost = Insufficient data; --no-fold (cme_read4_nofold) matched fold control; --cme one worker; best row pairs span with best rep; G-m = penalty fit + identifiability; --events cme-l3 (0x328E/0x328F/0x3290) to validate; DSB ST = completion, not memory arrival; single-call rows 48-256 KiB; F2 = 37 commands, script 70 cmds / 2.4 s est.; F1 run_all 4.0 s est. Responses appended to codex-review-follow-up-run-plan.md; plan section 9 updated. gas note: .irp inside .macro is not expanded, register lists written out. Loop continues: codex reviews b345288 (Monitor on the review file; re-arm on expiry).
+Round 14 (codex, 2026-11-06 UTC): R33 (span reset guarded by cfg.cme), R31 rest (identifiability on the fit matrix: rank 2, condition < 100; withhold b, c and endpoints otherwise; "caches inside the immediate cluster"), R27 rest (0.01 ns rule checks only the outside-span contribution; eight instructions after the second stamp; "no C span collection"), R34 (no-fold = net effect of removing the reduction + FMOV dependency; ISB completion guarantee withdrawn, Insufficient data). Commits 0c424d7 (sources) + 2fff008 (README) on b345288, unpushed. Responses appended; section 9 updated. Waiting for codex round 15.
+Round 15 (codex): only R31's event-validation paragraph remained; accepted: CME L3 events (0x328E/0x328F/0x3290) are exploratory counts, no fit reads them, hit-specific fit = Insufficient data until an independent control (0-hit boot; all-hit / all-miss row by construction). Commit 0c190a1 (common.h comment + README). Head 0c190a1 on main, unpushed. Told codex I have nothing open; waiting for its closure round.
+Round 16 (codex, 2026-11-06 UTC): no further findings; loop closed at 0c190a1. Plan final for run 6. Next: Jibin sends Jesse the boot request (F1 run_all.sh 4.0 s est., F2 run_cme.sh 2.4 s est., cme_test first); push when Jibin asks; a run 6 page generator is written when the data arrives (span columns: latency col 7, bandwidth cols 11-12; cme-l3 event set columns are exploratory).
