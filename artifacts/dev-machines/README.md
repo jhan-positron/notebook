@@ -209,3 +209,10 @@ Related: [claude_20261020_scratch-jhan-cleanup-and-archived-notebooks.md](../../
 - `scratch-prune-20261020/tools/match.py` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/match.py` (5634 bytes)
 - `scratch-prune-20261020/tools/numbers.py` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/scratch-prune-20261020/tools/numbers.py` (4320 bytes)
 
+
+## Batch: 2026-11-06 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-11-06 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory, same files). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first. Mappings as before.
+
+Refreshed from their canonical files on 2026-11-06 (registered earlier, content changed since): `herdr-config/sessions/claude-agentsrv/session.json`, `notebook-memory/MEMORY.md`.
+
