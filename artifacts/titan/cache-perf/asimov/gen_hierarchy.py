@@ -376,6 +376,7 @@ t8 = table(["Group", "Rows", "Largest change run 1 to run 2"],
 
 # ---------------------------------------------------------------- page
 HTML = r"""<title>Asimov Memory Hierarchy</title>
+<meta charset="utf-8">
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 :root { --bg:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7;
@@ -446,7 +447,7 @@ svg text { font-family:var(--font); }
 
 <h2 id="words">1. Words used here</h2>
 <dl>
-<dt>C1-Nano, DSU</dt><dd>The Arm core and its two-core cluster (DynamIQ Shared Unit). The hemisphere has 5 DSUs, CPUs 0 to 9. CPUs 0 and 1 (DSU 0) run the kernel. CPUs 2 to 9 are isolated for tests.</dd>
+<dt>C1-Nano, DSU</dt><dd>The Arm core and its two-core cluster (DynamIQ Shared Unit). The hemisphere has 5 DSUs, CPUs 0 to 9. CPUs 2 to 9 are isolated for the tests (kernel command line isolcpus=2-9, nohz_full=2-9, irqaffinity=0-1). CPUs 0 and 1 (DSU 0) are the only cores not isolated, so the kernel, interrupts, the shell and the counter helper run there.</dd>
 <dt>L1, L2, L3</dt><dd>32 KiB data cache per core, 128 KiB per DSU, 256 KiB per DSU, 64-byte lines [sysinfo.txt].</dd>
 <dt>mesh, crosspoint (xp)</dt><dd>The Arm CMN S3 interconnect, a 6 by 6 grid of routers. Distance between two points is the number of crosspoint steps, |dx| + |dy|.</dd>
 <dt>home node (HN-S), SLC</dt><dd>The five mesh nodes that own all addresses, each with 1 MiB of System Level Cache in 16 ways. A DRAM address belongs to one home node by a hash, so a buffer spreads over all five.</dd>
@@ -612,7 +613,8 @@ function drawMesh(svg, o) {
   }
   const bw = s * 0.95, bh = s * (o.boxH || 0.5);
   const d0 = D.dsu0, k = el("rect", {x: cx(d0[0]) - bw / 2, y: cy(d0[1]) - bh / 2, width: bw, height: bh, rx: 4, fill: "#f1f1ee", stroke: C.axis, "stroke-dasharray": "3 2"}, g);
-  tip(k, "DSU 0, CPUs 0 and 1: the kernel's cores, not used by the tests"); lines(g, cx(d0[0]), cy(d0[1]) + bfs * 0.35, ["DSU 0 (kernel)"], bfs * 0.9, "middle", C.muted);
+  tip(k, "DSU 0, CPUs 0 and 1: the only cores not isolated (kernel command line isolcpus=2-9, irqaffinity=0-1). The kernel, interrupts, the shell and the counter helper run here; no test thread does.");
+  lines(g, cx(d0[0]), cy(d0[1]) - bfs * 0.575 + bfs * 0.35, ["DSU 0, CPUs 0-1", "not isolated"], bfs * 0.9, "middle", C.muted, true);
   for (const id in D.dsus) {
     const [X, Y, cpus] = D.dsus[id], f = o.dsuFill ? o.dsuFill(+id) : C.dsu;
     const r = el("rect", {x: cx(X) - bw / 2, y: cy(Y) - bh / 2, width: bw, height: bh, rx: 4, fill: f, stroke: C.s1, "stroke-width": 1.4}, g);
@@ -623,15 +625,15 @@ function drawMesh(svg, o) {
   for (const id in D.nodes) {
     const [X, Y, reg] = D.nodes[id], f = o.hnsFill ? o.hnsFill(+id) : C.hns;
     const r = el("rect", {x: cx(X) - bw / 2, y: cy(Y) - bh / 2, width: bw, height: bh, rx: 4, fill: f, stroke: C.s2, "stroke-width": 1.4}, g);
-    const lab = o.hnsLabel ? o.hnsLabel(+id) : ["HN-S " + id + " (" + X + "," + Y + ")", "OCM" + reg + " · SLC 1 MiB"];
+    const lab = o.hnsLabel ? o.hnsLabel(+id) : ["HN-S " + id + " (" + X + "," + Y + ")", "OCM" + reg + " 256 KiB", "SLC 768 KiB"];
     lines(g, cx(X), cy(Y) - (lab.length - 1) * bfs * 0.575 + bfs * 0.35, lab, bfs, "middle", o.hnsInk ? o.hnsInk(+id) : C.ink, true);
-    tip(r, (o.hnsTip ? o.hnsTip(+id) : "Home node " + id + " at (" + X + "," + Y + "): 1 MiB SLC in 16 ways, 4 ways locked as OCM region " + reg + " (256 KiB at 0xE0" + reg + "00000)"));
+    tip(r, (o.hnsTip ? o.hnsTip(+id) : "Home node " + id + " at (" + X + "," + Y + "): 1 MiB of SLC in 16 ways; 4 ways (256 KiB) locked as OCM region " + reg + " at 0xE0" + reg + "00000, the other 12 ways (768 KiB) cache DRAM"));
   }
   if (o.title) el("text", {x: ox - s * 0.45, y: oy - s * 0.5, "font-size": o.fs * 1.15, "font-weight": 600, fill: C.ink}, g, o.title);
   return {cx, cy, g};
 }
 // ---- the level column (left part of the template)
-const LEVELS = [["CPU 2", "C1-Nano core, 2.0 GHz"], ["L1 data 32 KiB", "per core"], ["L2 128 KiB", "DSU 1, shared with CPU 3"], ["L3 256 KiB", "DSU 1"], ["mesh port (2,3)", "RN-F of DSU 1"], ["home node (HN-S)", "SLC 12 ways, OCM 4 ways"], ["SBSX, DRAM", "emulator memory"]];
+const LEVELS = [["CPU 2", "C1-Nano core, 2.0 GHz"], ["L1 data 32 KiB", "per core"], ["L2 128 KiB", "DSU 1, shared with CPU 3"], ["L3 256 KiB", "DSU 1"], ["mesh port (2,3)", "RN-F of DSU 1"], ["5 home nodes (HN-S)", "SLC 768 KiB each (12 ways)", "OCM 256 KiB each (4 ways)"], ["SBSX, DRAM 2 GiB", "emulator memory", "Linux sees 1.84 GiB"]];
 function drawColumn(svg, o) {
   const g = el("g", {}, svg), x = o.x, w = o.w, y0 = o.y, step = o.step, fs = o.fs;
   const ys = [];
@@ -639,7 +641,8 @@ function drawColumn(svg, o) {
     const y = y0 + i * step; ys.push(y);
     const dsu = i >= 2 && i <= 3, mesh = i >= 4 && i <= 5;
     el("rect", {x, y: y - step * 0.3, width: w, height: step * 0.6, rx: 4, fill: dsu ? C.dsu : mesh ? C.hns : "#f1f1ee", stroke: dsu ? C.s1 : mesh ? C.s2 : C.axis, "stroke-width": 1.2}, g);
-    lines(g, x + w / 2, y - fs * 0.2, [L[0], L[1]], fs, "middle", C.ink, true).lastChild.setAttribute("fill", C.ink2);
+    const sub = L.slice(1), tt = lines(g, x + w / 2, y - fs * 0.2 - (sub.length - 1) * fs * 0.55, L, fs * (sub.length > 1 ? 0.92 : 1), "middle", C.ink, true);
+    for (let j = 1; j < tt.childNodes.length; j++) tt.childNodes[j].setAttribute("fill", C.ink2);
     if (i < LEVELS.length - 1) el("line", {x1: x + w / 2, y1: y + step * 0.3, x2: x + w / 2, y2: y + step * 0.7, stroke: C.axis, "stroke-width": 1.5}, g);
     if (o.label && o.label(i)) {
       const t = lines(g, x + w + 10, y - fs * 0.2 + (o.label(i).length > 1 ? -fs * 0.2 : fs * 0.3), o.label(i), fs, "start", C.ink);
@@ -653,20 +656,31 @@ function drawColumn(svg, o) {
 function drawStrip(svg, o) {
   const g = el("g", {}, svg), fs = o.fs, x = o.x, y = o.y;
   el("text", {x, y, "font-size": fs * 1.05, "font-weight": 600, fill: C.ink}, g, "Where a buffer's lines live");
-  const nodes = Object.keys(D.nodes), X0 = x + 340, P = 100;
-  nodes.forEach((id, i) => {
-    const bx = X0 + i * P;
-    el("rect", {x: bx, y: y + 10, width: 92, height: 30, rx: 4, fill: C.hns, stroke: C.s2}, g);
-    lines(g, bx + 46, y + 29, ["node " + id + " · OCM" + D.nodes[id][2]], fs * 0.82);
-  });
-  el("rect", {x, y: y + 12, width: 110, height: 26, rx: 13, fill: "#f1f1ee", stroke: C.axis}, g); lines(g, x + 55, y + 29, ["DRAM buffer"], fs * 0.9, "middle", C.ink, true);
-  el("rect", {x: x + 130, y: y + 12, width: 170, height: 26, rx: 13, fill: "#f1f1ee", stroke: C.axis}, g); lines(g, x + 215, y + 29, ["OCM region n (256 KiB)"], fs * 0.9, "middle", C.ink, true);
-  nodes.forEach((id, i) => { const bx = X0 + i * P + 46; el("line", {x1: x + 110, y1: y + 25, x2: bx, y2: y + 10, stroke: C.axis, "stroke-dasharray": "3 3"}, g); });
-  el("line", {x1: x + 300, y1: y + 25, x2: X0 + P + 46, y2: y + 10, stroke: C.s2, "stroke-width": 2}, g);
-  el("text", {x, y: y + 58, "font-size": fs * 0.9, fill: C.ink2}, g, "A DRAM buffer: the address hash puts its lines on all five home nodes, about one fifth each (figure 11, right). An OCM region: every line in its own node (figure 11, left, drawn for OCM1).");
+  const nodes = Object.keys(D.nodes), SW = 210, X0 = x + 300, P = 160, BW = 140, BH = 32;
+  // row(yr, source label, source sub-label, source fill, source stroke, share(id) -> text or false, line color)
+  const row = (yr, src, srcSub, srcFill, srcStroke, share, lineColor) => {
+    el("rect", {x, y: yr - 17, width: SW, height: 34, rx: 6, fill: srcFill, stroke: srcStroke, "stroke-width": 1.4}, g);
+    const st = lines(g, x + SW / 2, yr - 2, [src, srcSub], fs * 0.92, "middle", C.ink, true); st.lastChild.setAttribute("fill", C.ink2);
+    // connectors: a rail above the boxes from the source, one drop into each box that holds lines
+    const yr0 = yr - BH / 2 - 9, hits = nodes.filter(share), xe = X0 + nodes.indexOf(hits[hits.length - 1]) * P + BW / 2;
+    el("polyline", {points: [[x + SW, yr], [x + SW + 30, yr], [x + SW + 30, yr0], [xe, yr0]].map(q => q.join(",")).join(" "), fill: "none", stroke: lineColor, "stroke-width": 2.2, "stroke-linejoin": "round"}, g);
+    hits.forEach(id => { const xm = X0 + nodes.indexOf(id) * P + BW / 2; el("line", {x1: xm, y1: yr0, x2: xm, y2: yr - BH / 2, stroke: lineColor, "stroke-width": 2.2}, g); });
+    nodes.forEach((id, i) => {
+      const bx = X0 + i * P, on = share(id);
+      const ra = {x: bx, y: yr - BH / 2, width: BW, height: BH, rx: 4, fill: on ? C.hns : "#f6f6f4", stroke: on ? C.s2 : C.axis, "stroke-width": 1.2};
+      if (!on) ra["stroke-dasharray"] = "3 2";
+      el("rect", ra, g);
+      const bt = lines(g, bx + BW / 2, yr - 2, ["node " + id + ", OCM" + D.nodes[id][2], on || "no lines"], fs * 0.85, "middle", on ? C.ink : C.muted, true);
+      bt.lastChild.setAttribute("fill", on ? C.ink2 : C.muted);
+    });
+  };
+  row(y + 40, "DRAM buffer, 2 MiB", "lines hashed over all five nodes", "#f1f1ee", C.axis, id => "{SPREADPCTLO} to {SPREADPCTHI} % of lines", C.s1);
+  row(y + 98, "OCM region 1, 256 KiB", "one node owns every line", C.hns, C.s2, id => D.nodes[id][2] === 1 && "all its lines", C.s2);
+  el("text", {x, y: y + 138, "font-size": fs * 0.9, fill: C.ink2}, g, "Top: a DRAM buffer; the address hash spreads its lines over the five home nodes (2 MiB read from CPU 2, section 11).");
+  el("text", {x, y: y + 153, "font-size": fs * 0.9, fill: C.ink2}, g, "Bottom: an OCM region; every line is in its own home node, drawn for OCM1 (node 160).");
 }
 function template(id, o) {
-  const svg = document.getElementById(id); svg.setAttribute("viewBox", "0 0 1120 810");
+  const svg = document.getElementById(id); svg.setAttribute("viewBox", "0 0 1120 900");
   const ys = drawColumn(svg, {x: 20, w: 170, y: 110, step: 70, fs: 11.5, label: o.colLabel, title: o.colTitle});
   const m = drawMesh(svg, Object.assign({s: 112, ox: 430, oy: 90, fs: 12, boxFs: 10.5}, o.mesh || {}));
   drawStrip(svg, {x: 20, y: 730, fs: 12});
@@ -684,7 +698,7 @@ template("svg-levels", {
     [f(byS(524288).ns, 1) + " to " + f(byS(2097152).ns, 1) + " ns", "512 KiB to 2 MiB fresh (SLC)", "OCM " + f(Math.min(...Object.values(D.ocm["2"]).map(v => v.best)), 1) + " to " + f(Math.max(...Object.values(D.ocm["2"]).map(v => v.best)), 1) + " ns by region"],
     [f(byS(33554432).ns, 1) + " ns", "32 MiB fresh; 8 MiB flushed " + f(D.flushed8m.ns, 1)]][i],
   mesh: {
-    hnsLabel: id => ["OCM" + D.nodes[id][2] + " " + f(D.ocm["2"][D.nodes[id][2]].best, 2) + " ns", D.ocm["2"][D.nodes[id][2]].dist + " xp · node " + id],
+    hnsLabel: id => ["OCM" + D.nodes[id][2] + " " + f(D.ocm["2"][D.nodes[id][2]].best, 2) + " ns", D.ocm["2"][D.nodes[id][2]].dist + " xp, node " + id],
     dsuLabel: id => id === 1 ? ["CPU 2 reads", "SLC 2M " + f(byS(2097152).ns, 2) + " ns"] : ["DSU " + id, "idle"],
     dsuFill: id => id === 1 ? "#cfe0f7" : "#f6f6f4",
     paths: Object.keys(D.nodes).map(id => ({dsu: 1, node: id, color: C.s1, w: 2.5, op: 0.5, tip: "CPU 2 to node " + id + ": " + D.ocm["2"][D.nodes[id][2]].dist + " crosspoints"})),
@@ -699,7 +713,7 @@ template("svg-levels", {
     const ox = 90 + (i % 2) * 560, oy = 60 + Math.floor(i / 2) * 380;
     const o = D.ocm[String(cpu)], dsu = {2: 1, 4: 2, 6: 3, 8: 4}[cpu];
     drawMesh(svg, {s: 84, ox, oy, fs: 10.5, axes: false, sbsxLabel: false, boxH: 0.5, title: "CPU " + cpu + " (DSU " + dsu + "): OCM latency, ns, and distance",
-      hnsLabel: id => { const r = D.nodes[id][2]; return [f(o[r].best, 2) + " ns · " + o[r].dist + " xp", "OCM" + r + " node " + id]; },
+      hnsLabel: id => { const r = D.nodes[id][2]; return [f(o[r].best, 2) + " ns, " + o[r].dist + " xp", "OCM" + r + " node " + id]; },
       hnsTip: id => { const r = D.nodes[id][2]; return "CPU " + cpu + " reading OCM" + r + " (node " + id + "): best " + f(o[r].best, 3) + " ns per load over " + o[r].passes.length + " fresh passes (" + o[r].passes.map(p => f(p.ns, 2) + " ns, L3 refills " + f(p.l3, 2)).join("; ") + "); " + o[r].dist + " crosspoints"; },
       dsuLabel: id => id === dsu ? ["CPU " + cpu, "reads from here"] : ["DSU " + id, "idle"],
       dsuFill: id => id === dsu ? "#cfe0f7" : "#f6f6f4",
@@ -736,10 +750,10 @@ template("svg-core", {
   colTitle: "Clean chases per core",
   colLabel: i => [null, null, null, null, null, ["2 MiB SLC chase and", "1.25 MiB all-five OCM chase,", "fresh, 1.00 L3 refills per load"], null][i],
   mesh: {
-    dsuLabel: id => { const cpu = {1: 2, 2: 4, 3: 6, 4: 8}[id]; return ["CPU " + cpu + " · " + f(D.all5[cpu].mean_dist, 1) + " xp", "SLC " + f(D.slc[cpu].best, 1) + " ns", "OCM " + f(D.all5[cpu].best, 1) + " ns"]; },
+    dsuLabel: id => { const cpu = {1: 2, 2: 4, 3: 6, 4: 8}[id]; return ["CPU " + cpu + ", " + f(D.all5[cpu].mean_dist, 1) + " xp", "SLC " + f(D.slc[cpu].best, 1) + " ns", "OCM " + f(D.all5[cpu].best, 1) + " ns"]; },
     dsuTip: id => { const cpu = {1: 2, 2: 4, 3: 6, 4: 8}[id]; return "CPU " + cpu + ": 2 MiB DRAM-backed fresh chain " + f(D.slc[cpu].best, 3) + " ns (L3 refills " + f(D.slc[cpu].l3, 3) + "); all-five OCM fresh chain " + f(D.all5[cpu].best, 3) + " ns; mean distance to the five home nodes " + f(D.all5[cpu].mean_dist, 1) + " crosspoints"; },
     dsuFill: id => C.ramp[Math.round((D.all5[{1: 2, 2: 4, 3: 6, 4: 8}[id]].mean_dist - 1.8) / 1.6 * 4)],
-    hnsLabel: id => ["node " + id + " · OCM" + D.nodes[id][2], "SLC 1 MiB"],
+    hnsLabel: id => ["node " + id + ", OCM" + D.nodes[id][2], "SLC 1 MiB"],
     title: "Per core: SLC and all-five OCM latency, ns (DSU shade = mean distance)"
   }
 });
@@ -747,11 +761,11 @@ template("svg-core", {
 const O = D.onecore, byB = s => O.find(d => d.size === s);
 template("svg-bw1", {
   colTitle: "Streaming bandwidth, GB/s, CPU 2",
-  colLabel: i => [null, ["read " + f(byB(16384).read) + " · write " + f(byB(16384).write) + " · copy " + f(byB(16384).copy), "16 KiB buffer"],
-    ["read " + f(byB(49152).read) + " · write " + f(byB(49152).write) + " · copy " + f(byB(49152).copy), "48 KiB; 96 KiB read " + f(byB(98304).read)],
-    ["read " + f(byB(262144).read) + " · write " + f(byB(262144).write) + " · copy " + f(byB(262144).copy), "256 KiB"], null,
-    ["read " + f(byB(2097152).read) + " · write " + f(byB(2097152).write) + " · copy " + f(byB(2097152).copy), "2 MiB (SLC)"],
-    ["read " + f(byB(33554432).read) + " · write " + f(byB(33554432).write) + " · copy " + f(byB(33554432).copy), "32 MiB (DRAM)"]][i],
+  colLabel: i => [null, ["read " + f(byB(16384).read) + ", write " + f(byB(16384).write) + ", copy " + f(byB(16384).copy), "16 KiB buffer"],
+    ["read " + f(byB(49152).read) + ", write " + f(byB(49152).write) + ", copy " + f(byB(49152).copy), "48 KiB; 96 KiB read " + f(byB(98304).read)],
+    ["read " + f(byB(262144).read) + ", write " + f(byB(262144).write) + ", copy " + f(byB(262144).copy), "256 KiB"], null,
+    ["read " + f(byB(2097152).read) + ", write " + f(byB(2097152).write) + ", copy " + f(byB(2097152).copy), "2 MiB (SLC)"],
+    ["read " + f(byB(33554432).read) + ", write " + f(byB(33554432).write) + ", copy " + f(byB(33554432).copy), "32 MiB (DRAM)"]][i],
   mesh: {
     dsuLabel: id => id === 1 ? ["CPU 2, 2 MiB:", "read " + f(byB(2097152).read) + " GB/s", "write " + f(byB(2097152).write) + " GB/s"] : ["DSU " + id, "idle"],
     dsuFill: id => id === 1 ? "#cfe0f7" : "#f6f6f4",
@@ -809,7 +823,7 @@ template("svg-ocmbw", {
   colTitle: "OCM bandwidth, GB/s, CPU 2",
   colLabel: i => [null, null, null, null, null, ["one region " + f(Math.min(...Object.values(D.ocmbw.region))) + " to " + f(Math.max(...Object.values(D.ocmbw.region))), "all five " + f(D.ocmbw.all5) + ", write " + f(D.ocmbw.write), "4 cores, OCM1 to 4: " + f(D.ocmbw.four)], ["DRAM write, one core " + f(byB(33554432).write), "for comparison"]][i],
   mesh: {
-    hnsLabel: id => { const r = D.nodes[id][2]; return ["OCM" + r + " read " + f(D.ocmbw.region[r]), "GB/s · " + D.ocm["2"][r].dist + " xp"]; },
+    hnsLabel: id => { const r = D.nodes[id][2]; return ["OCM" + r + " read " + f(D.ocmbw.region[r]), "GB/s, " + D.ocm["2"][r].dist + " xp"]; },
     hnsTip: id => { const r = D.nodes[id][2]; return "OCM" + r + " (node " + id + "): one core on CPU 2 reads 256 KiB at " + f(D.ocmbw.region[r], 3) + " GB/s after a flush (run 1: " + f(D.ocmbw.region1[r], 3) + ")"; },
     dsuLabel: id => id === 1 ? ["CPU 2, all five:", "read " + f(D.ocmbw.all5) + " GB/s", "write " + f(D.ocmbw.write) + " GB/s"] : ["CPU " + D.dsus[id][2][0] + ": OCM" + id, "in the 4-core", "read, " + f(D.ocmbw.four) + " total"],
     dsuFill: id => id === 1 ? "#cfe0f7" : "#e9f1fb",
@@ -875,6 +889,8 @@ ctl2 = cmn["control-cpu2"]["node"]
 HTML = (HTML.replace("{D1}", fmt(dist_stats[1]["mean"])).replace("{D3}", fmt(dist_stats[3]["mean"])).replace("{D5}", fmt(dist_stats[5]["mean"]))
         .replace("{N1}", str(dist_stats[1]["n"])).replace("{N3}", str(dist_stats[3]["n"])).replace("{N5}", str(dist_stats[5]["n"]))
         .replace("{OWN1}", f"{own1:,}").replace("{OTH1}", f"{min(oth1):,} to {max(oth1):,}")
+        .replace("{SPREADPCTLO}", f"{100 * min(cmn['dram-read-2M-cpu2']['node'].values()) / sum(cmn['dram-read-2M-cpu2']['node'].values()):.1f}")
+        .replace("{SPREADPCTHI}", f"{100 * max(cmn['dram-read-2M-cpu2']['node'].values()) / sum(cmn['dram-read-2M-cpu2']['node'].values()):.1f}")
         .replace("{SPREADLO}", f"{min(cmn['dram-read-2M-cpu2']['node'].values()):,}").replace("{SPREADHI}", f"{max(cmn['dram-read-2M-cpu2']['node'].values()):,}")
         .replace("{RL3LO}", fmt(region_l3[0], 2)).replace("{RL3HI}", fmt(region_l3[1], 2)).replace("{RL2LO}", fmt(region_l2[0], 2)).replace("{RL2HI}", fmt(region_l2[1], 2))
         .replace("{FASTER}", str(faster_has_fewer_l3))
