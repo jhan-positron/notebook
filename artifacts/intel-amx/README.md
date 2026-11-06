@@ -4770,7 +4770,7 @@ Covers the 46 handoffs of 2026-10-03 to 2026-10-16 plus the two updated ones (se
 - regenerate unverified (no output-path argument, fixed output path, or scratchpad generator)
 - inventory: [Wade-code-review-skill.html.lineage.md](vnnied-k-in-place/issue4525/status/Wade-code-review-skill.html.lineage.md) (151 lines)
 
-#### m/from-claude/platformd-amx-sst-brief-2026-10-05.md
+#### (mirrored under artifacts/tron) random/from-claude/platformd-amx-sst-brief-2026-10-05.md
 
 - mirror of `claude-agentsrv:/home/jhan/workspace/random/from-claude/platformd-amx-sst-brief-2026-10-05.md` (36813 canonical bytes). Related: [claude_20261005_amx-and-intel-speed-select-in-platformd.md](../../handoffs/claude_20261005_amx-and-intel-speed-select-in-platformd.md)
 - generator: none (hand-condensed from the workflow draft, corrected by string replacement)
@@ -4779,7 +4779,7 @@ Covers the 46 handoffs of 2026-10-03 to 2026-10-16 plus the two updated ones (se
 - sources: `/home/jhan/workspace/notebook/artifacts/intel-speed-select/README.md`: nothing preserved; `/home/jhan/workspace/notebook/artifacts/intel-speed-select/reminder.md`: nothing preserved; `/home/jhan/workspace/notebook/artifacts/intel-speed-select/results/sst-ab-20260917/summary.md`: nothing preserved; `/home/jhan/workspace/notebook/artifacts/intel-amx/README.md`: nothing preserved; `/home/jhan/workspace/notebook/handoffs/ (speed select and AMX handoffs 2026-09-16 to 2026-10-02)`: no files found under it; `/home/jhan/workspace/tron/CMakeLists.txt`: nothing preserved; `/home/jhan/workspace/tron/CMakePresets.json`: nothing preserved; `/home/jhan/workspace/tron/GNUmakefile`: nothing preserved; `/home/jhan/workspace/tron/packaging/systemd/rinzler@.service`: nothing preserved; `/home/jhan/workspace/tron/src/tron/kernels/amx_attn.cpp`: nothing preserved
 - regenerate: unavailable (hand-edited after the workflow; the long draft can be rebuilt by re-running the workflow script)
 - regenerate unverified (no generator or generator unavailable)
-- inventory: [platformd-amx-sst-brief-2026-10-05.md.lineage.md](m/from-claude/platformd-amx-sst-brief-2026-10-05.md.lineage.md) (9 lines)
+- inventory: [platformd-amx-sst-brief-2026-10-05.md.lineage.md](../tron/random/from-claude/platformd-amx-sst-brief-2026-10-05.md.lineage.md) (9 lines; the page and its inventory live under artifacts/tron/random/from-claude/, this entry was written here by the 2026-10-16 run and its link fixed on 2026-11-06)
 
 #### vnnied-k-in-place/issue4525/status/respond-2-runar-PR4557.html
 
