@@ -1,0 +1,76 @@
+# Source inventory for artifacts/titan/home-tmp/update-crb-memory-hierarchy.md
+
+Canonical files are on claude-agentsrv. The sizes below are bytes.
+
+| Canonical file | Notebook path or reason | Bytes |
+|---|---|---:|
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/bench/analyze_writepath.py` | artifacts/titan/cache-perf/bench/analyze_writepath.py | 3951 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/bench/bandwidth.c` | artifacts/titan/cache-perf/bench/bandwidth.c | 21499 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/bench/run_crb.sh` | artifacts/titan/cache-perf/bench/run_crb.sh | 6744 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/bench/run_sudo.sh` | artifacts/titan/cache-perf/bench/run_sudo.sh | 12475 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/data-all.json` | artifacts/titan/cache-perf/crb/data-all.json | 62393 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/make-brief.py` | artifacts/titan/cache-perf/crb/make-brief.py | 22145 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/bandwidth.csv` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/bandwidth.csv | 24989 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/log.txt` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/log.txt | 1556 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/20261030T193108Z/sysinfo.txt` | artifacts/titan/cache-perf/crb/results/20261030T193108Z/sysinfo.txt | 667783 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/cmn-map.txt` | artifacts/titan/cache-perf/crb/results/cmn-map.txt | 14521 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/dmidecode-t17-2026-10-30.txt` | artifacts/titan/cache-perf/crb/results/dmidecode-t17-2026-10-30.txt | 9563 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/asm.csv` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/asm.csv | 28347 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/dram.csv` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/dram.csv | 6196 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/log.txt` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/log.txt | 673 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup-20261030T194205Z/pair.csv` | artifacts/titan/cache-perf/crb/results/followup-20261030T194205Z/pair.csv | 5738 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup2-20261031T073513Z/spread.csv` | artifacts/titan/cache-perf/crb/results/followup2-20261031T073513Z/spread.csv | 4839 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup3-20261102T031936Z/log.txt` | artifacts/titan/cache-perf/crb/results/followup3-20261102T031936Z/log.txt | 539 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup3-20261102T031936Z/perthread-asmread-3M-40.csv` | artifacts/titan/cache-perf/crb/results/followup3-20261102T031936Z/perthread-asmread-3M-40.csv | 3981 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/probe-20261111T210017Z.cmd.txt` | artifacts/titan/cache-perf/crb/results/probe-20261111T210017Z.cmd.txt | 1786 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/probe-20261111T210017Z.txt` | artifacts/titan/cache-perf/crb/results/probe-20261111T210017Z.txt | 5186 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/slc-20261030T194835Z/slc.csv` | artifacts/titan/cache-perf/crb/results/slc-20261030T194835Z/slc.csv | 9526 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T040631Z/log.txt` | artifacts/titan/cache-perf/crb/results/sudo-20261102T040631Z/log.txt | 10541 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T040631Z/writebw.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T040631Z/writebw.csv | 73013 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/core-positions.json` | artifacts/titan/cache-perf/crb/results/sudo-20261102T054936Z/core-positions.json | 25553 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/full/latency.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T054936Z/full/latency.csv | 1269326 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/log.txt` | artifacts/titan/cache-perf/crb/results/sudo-20261102T054936Z/log.txt | 10913 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/writebw.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T054936Z/writebw.csv | 73013 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T211150Z/log.txt` | artifacts/titan/cache-perf/crb/results/sudo-20261102T211150Z/log.txt | 626 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T211150Z/writepath.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T211150Z/writepath.csv | 116469 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/uncore-20261030T203537Z/log.txt` | artifacts/titan/cache-perf/crb/results/uncore-20261030T203537Z/log.txt | 734 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/uncore2-20261030T203752Z/bw-asmread-3M-40T-even.csv` | artifacts/titan/cache-perf/crb/results/uncore2-20261030T203752Z/bw-asmread-3M-40T-even.csv | 414 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/uncore2-20261030T203752Z/bw-asmread-8M-1T.csv` | artifacts/titan/cache-perf/crb/results/uncore2-20261030T203752Z/bw-asmread-8M-1T.csv | 405 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/uncore2-20261030T203752Z/cmn-asmread-3M-40T-even.csv` | artifacts/titan/cache-perf/crb/results/uncore2-20261030T203752Z/cmn-asmread-3M-40T-even.csv | 535 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/uncore2-20261030T203752Z/cmn-asmread-8M-1T.csv` | artifacts/titan/cache-perf/crb/results/uncore2-20261030T203752Z/cmn-asmread-8M-1T.csv | 525 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p.py | 2513 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p_fixes.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p_fixes.py | 1876 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p_fixes2.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p_fixes2.py | 1366 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_record_p.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_record_p.py | 7714 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_record_p2.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_record_p2.py | 35705 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p.py | 14357 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p_fixes.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p_fixes.py | 16990 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p_fixes2.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p_fixes2.py | 7376 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/check3_results.json` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/check3_results.json | 140755 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/check4_results.json` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/check4_results.json | 110461 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.after-section11.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.after-section11.py | 22145 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.before.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.before.py | 21443 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.check3-state.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.check3-state.py | 21908 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.check4-state.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.check4-state.py | 22081 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/rates.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/rates.py | 1209 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/recheck_third_pass.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/recheck_third_pass.py | 10608 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/render_parts.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/render_parts.py | 1412 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/sentences_p.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/sentences_p.py | 1485 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/structure_check.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/structure_check.py | 2557 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/sweep_results.json` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/sweep_results.json | 92131 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/texts_p.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/texts_p.py | 15942 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_brief_generator.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_brief_generator.py | 1511 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_brief_generator_nowrap.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_brief_generator_nowrap.py | 1147 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_record_10.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_record_10.py | 10729 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_record_check2.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_record_check2.py | 31039 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report.py | 12825 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_bufsize.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_bufsize.py | 1661 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_check2.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_check2.py | 5583 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_comments.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_comments.py | 11626 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_fixes.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_fixes.py | 4568 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/check1_results.json` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/check1_results.json | 249471 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/check_geometry.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/check_geometry.py | 3983 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/mesh_clock.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/mesh_clock.py | 3003 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/port_counts.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/port_counts.py | 4182 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/render.py` | artifacts/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/render.py | 1142 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/make-brief.before-slc-rename.py` | artifacts/titan/cache-perf/crb/tmp/make-brief.before-slc-rename.py | 21221 |

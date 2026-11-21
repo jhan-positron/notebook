@@ -159,3 +159,15 @@ Related: [claude_20261018_claude-skills-sync-to-codex.md](../../handoffs/claude_
 - `skills/simplify-cpp-comments/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/simplify-cpp-comments/SKILL.md` (4903 bytes)
 - `skills/simplify-cpp-comments/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/simplify-cpp-comments/agents/openai.yaml` (135 bytes)
 
+## Codex handoff preservation, 2026-11-20
+
+Each path below is relative to this topic. Original files are on claude-agentsrv unless a different host is given.
+
+- `skills/cpp-coding-guide/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/cpp-coding-guide/SKILL.md` (4831 mirror bytes).
+- `skills/inter-agent-review-loop/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/inter-agent-review-loop/SKILL.md` (9219 mirror bytes).
+- `skills/inter-agent-review-loop/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/inter-agent-review-loop/agents/openai.yaml` (129 mirror bytes).
+- `skills/plain-english/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/plain-english/SKILL.md` (5963 mirror bytes).
+
+### Related handoffs
+
+- [Create inter-agent-review-loop skill](../../handoffs/codex_20261110_create-inter-agent-review-loop-skill.md)

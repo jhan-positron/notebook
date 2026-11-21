@@ -8,12 +8,24 @@ user-created project containers.
 
 # machine
 
-## delphi-3bda
-Use Positron server delphi-3bda for real tests.
-This is CI machine, you need to follow specific rules to use the machine. Check
-your memory for the rules, if your memory rules are newer than handoffs/check-CI.md
-and handoffs/share-3bda-with-bill.md in notebook repo (checked out at ~/workspace/notebook),
-use your memory rules; otherwise use the notebook rules.
+## delphi-3b35 (default since 2026-11-12)
+Use Positron Atlas server delphi-3b35 for real tests (AMX tests included).
+Drive it by ssh from the agent's Linux server (`ssh delphi-3b35`, user jhan).
+
+- It is NOT a CI machine. Tests may run at any time. No CI lease check is needed.
+- We own the 2nd half of the FPGA cards (4 cards). Keep
+  SYSTEM_CONFIG="--instance 1,2" (set by ~/delphi-3b35-setup.sh).
+- The Linux system is shared. Brian Hamon uses the 1st half of the FPGA cards.
+- Before every performance test, measure the system load. Report that load
+  in every performance report.
+- Check your memory (delphi-3b35-default-server) for the detailed rules.
+
+## delphi-3bda (not the default any more)
+Do not use delphi-3bda unless the user names it. It is the CI machine. When
+named, follow the CI rules: check your memory, and if your memory rules are
+newer than handoffs/check-CI.md and handoffs/share-3bda-with-bill.md in the
+notebook repo (checked out at ~/workspace/notebook), use your memory rules;
+otherwise use the notebook rules.
 
 Do not use other delphi or andoria machine unless user specifically mentioned.
 

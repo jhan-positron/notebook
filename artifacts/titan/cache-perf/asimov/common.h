@@ -242,6 +242,9 @@ static const char *perf_name[PERF_N] = { "cycles", "l1d_refill", "l2d_refill", "
 static const char *perf_name_tlb[PERF_N] = { "cycles", "l1d_refill", "l2d_refill", "l3d_refill_rd", "l1d_tlb_refill", "l2d_tlb_refill", "dtlb_walk" };
 static const char *perf_name_l3[PERF_N] = { "cycles", "l1d_refill", "l2d_refill", "l3d_refill_rd", "l2d_hit_rd", "l3d_access_rd", "l3d_hit_rd" };
 static const char *perf_name_walk[PERF_N] = { "cycles", "l1d_refill", "l2d_refill", "l3d_refill_rd", "dtlb_walk", "dtlb_walk_block", "dtlb_walk_page" };
+static const char *perf_name_pf[PERF_N] = { "cycles", "l1d_refill", "l2d_refill", "l3d_refill_rd", "l2d_hwprf", "l3d_hwprf", "l3d_hit_rd_fhwprf" };
+static const char *perf_name_llc[PERF_N] = { "cycles", "l1d_refill", "l2d_refill", "l3d_refill_rd", "ll_cache_rd", "ll_cache_miss_rd", "l3d_lmiss_rd" };
+static const char *perf_name_map[PERF_N] = { "cycles", "l1d_refill", "l2d_refill", "l3d_refill_rd", "l1d_refill_hwprf", "l2d_refill_hwprf", "l1d_tlb_refill" };
 
 static inline int perf_open_one(struct perf_event_attr *a, int group)
 {
@@ -381,6 +384,58 @@ static inline void perf_open_l3(struct perfgrp *g)
 {
     static const uint64_t raw[PERF_N] = { 0, 0x03, 0x17, 0xA2, 0x81C5, 0xA0, 0x81C6 };
     perf_open_set(g, raw, perf_name_l3);
+}
+
+/* The prefetch-target set (--events pf, run 7): the run 3 refill events plus 0x8155 L2D_CACHE_HWPRF
+ * (L2 accesses by hardware prefetchers targeting the L2), 0x8156 L3D_CACHE_HWPRF (L3 accesses by
+ * hardware prefetchers targeting the L3) and 0x81E6 L3D_CACHE_HIT_RD_FHWPRF (demand reads whose
+ * first hit is on a line a hardware prefetcher placed in the L3), C1-Nano TRM table 17-1. The core's
+ * data prefetchers pick the cache their linefills go to (L1, L2 or L3; TRM, Hardware data
+ * prefetcher), and the run 3 set counts only the fills that land in L1 and L2, so these three say
+ * whether the prefetchers aim accesses at the L3 on a stream, and whether the demand loads then
+ * find lines there. 0x8156 counts the access, not a fill: the DSU counts a core's prefetch whose
+ * stash "is not performed due to the L3 cache being off" as a prefetch access (C1-DSU TRM 107804,
+ * SCU_PFTCH_CPU_HIT), and the core raises the event on the serialised L3 stash request
+ * (nevis0_l2_tagctl.sv, l2_evnt_l3d_cache_prf), so it may read nonzero on a boot whose L3 RAM
+ * holds no data. 0x81E6 is the one event of the three that says a line was in the L3 and a demand
+ * read found it. The PMU gates the L3 event on an L3-present signal (nevis0_dpu_pmu.sv,
+ * cb_l3_present_i) whose relation to the runtime snoop-filter-only mode is not known. A column
+ * that never reads nonzero on any boot is unvalidated, and a conclusion that needs it is
+ * Insufficient data; an expected 0 in one condition is a consistency check, not a validation. */
+static inline void perf_open_pf(struct perfgrp *g)
+{
+    static const uint64_t raw[PERF_N] = { 0, 0x03, 0x17, 0xA2, 0x8155, 0x8156, 0x81E6 };
+    perf_open_set(g, raw, perf_name_pf);
+}
+
+/* The last-level-cache set (--events llc, run 7), a candidate set: the run 3 refill events plus
+ * 0x36 LL_CACHE_RD, 0x37 LL_CACHE_MISS_RD and 0x400B L3D_CACHE_LMISS_RD (C1-Nano TRM table 17-1).
+ * What 0x36 and 0x37 count depends on IMP_CPUECTLR_EL1.EXTLLC and on the caches present: with
+ * EXTLLC set and no L3 they count transactions returned from outside the cluster (TRM, event
+ * 0x32 and the EXTLLC field); with EXTLLC clear and an L2 and L3 present they count the L3's read
+ * accesses and read refills (nevis0_dpu_pmu.sv, ll_is_ext / ll_is_l3 and nxt_ll_cache_miss_rd_rs),
+ * the population of 0xA0 and 0xA2; other configurations select another source. In this RTL
+ * 0x400B is the same signal as 0xA2 (evnt_l3d_ll_miss_rd_rs = evnt_l2_evnt_l3d_cache_refill_rs),
+ * a check of that column and not an independent count. So these columns are reported with the
+ * EXTLLC value and the selected source. Once the external source is shown selected on a boot they
+ * are selected external-source counts per program line; they are the total of lines fetched from
+ * outside the cluster only with separate evidence of which demand and prefetch populations the
+ * event includes, and until then that total stays Insufficient data. Per-event activity rule as
+ * for every set. */
+static inline void perf_open_llc(struct perfgrp *g)
+{
+    static const uint64_t raw[PERF_N] = { 0, 0x03, 0x17, 0xA2, 0x36, 0x37, 0x400B };
+    perf_open_set(g, raw, perf_name_llc);
+}
+
+/* The map set (meshmap.c): the run 3 refill events, the two prefetch refill events 0x81BC and
+ * 0x81BD of the default set, and 0x05 L1D_TLB_REFILL of the translation set in place of 0x0111. A
+ * cell's OCM chain covers 4 KiB pages and its DRAM chain one 2 MiB page, so each row carries its
+ * own translation count beside the refills. */
+static inline void perf_open_map(struct perfgrp *g)
+{
+    static const uint64_t raw[PERF_N] = { 0, 0x03, 0x17, 0xA2, 0x81BC, 0x81BD, 0x05 };
+    perf_open_set(g, raw, perf_name_map);
 }
 
 static inline void perf_open_cme(struct perfgrp *g)

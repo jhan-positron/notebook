@@ -126,6 +126,34 @@ results:
   that node received. `hns_mc_reqs_local_all` is the number of requests all home
   nodes sent on to memory. `hns_cache_miss_all` is the SLC miss count over all
   nodes.
+- Step (run 8): one move of a request from one crosspoint (a switch of the
+  mesh grid) to the next. The distance from a CPU's cluster to a home node is
+  the number of steps between their two crosspoints, |dx| + |dy|. On this mesh
+  every such distance is 1, 3 or 5 steps. The step counts come from the
+  crosspoint coordinates. They are an assumption, not a measured route.
+- Slice (run 8): the part of the SLC that one home node holds, 1 MiB. The
+  firmware locks 4 of its 16 ways for OCM, so 768 KiB of a slice hold DRAM
+  lines.
+- Home node of a DRAM line (run 8): a DRAM address selects its home node by a
+  hash of the line address (the firmware's mesh setup). The lines of one 2 MiB
+  page therefore spread over all five nodes. No interface tells a program which
+  node owns a line.
+- Cell (run 8): one (kind, CPU, home node) of `meshmap`: 7 timed passes of
+  2,048 dependent loads, each pass over a different random chain on the same
+  2,048 lines.
+- Classification (run 8): how `meshmap` finds the home node of each line of
+  its 2 MiB buffer. A probe flushes one line and loads it again 64 times
+  (`DC CIVAC`, `DSB SY`, load) and then reads the per-node request counters
+  once. The home node is the node whose counter rose by at least 48 (3/4 of
+  the 64 pairs), provided no other node rose by more than a quarter of that
+  rise. A line without such a node is probed up to three times and is then
+  left unused.
+- Evictor (run 8): one load of every line of the 2 MiB buffer that is not in
+  the cell's DRAM chain, 30,720 loads for a chain of 2,048 lines. The loads
+  push the chain lines out of the cluster's L1, L2 and L3. Each chain line was
+  stored just before, so the design expects it to be written to the slice of
+  its home node, and the next load of it to be served by that slice. The
+  `mc_reqs` column of the row checks this.
 
 ## Files
 
@@ -137,16 +165,19 @@ results:
 | `bandwidth_r2.c` | run 2's bandwidth.c (commit 8ae533c) kept verbatim, built as `bandwidth_r2`: the control of run_followup.sh phase G5 for the per-pass write cost that run 3 added |
 | `bandwidth_r3.c` | run 3's bandwidth.c (commit ba834c0) kept verbatim, built as `bandwidth_r3`: the run 3 side of phase G5, since run 5 changed bandwidth.c |
 | `cmncount.c` | runs one command with mesh PMU events open (system-wide, on the PMU's CPU), appends one CSV line per event and one with the command's lifetime |
+| `meshmap.c` | the mesh latency map (run 8): times one dependent load from each CPU to each home node, for the node's OCM lines and for DRAM-backed lines held in the node's SLC slice. It opens the mesh counters itself and reads them around every timed pass, finds the home node of each line of one 2 MiB buffer (the classification), and appends one CSV row per timed pass to `--out`, flushed line by line. A part that fails prints a `#` line and the other parts still run. It exits 1 when a requested cell is missing or a write to `--out` or `--homes` failed. `./meshmap --selftest` runs its unit checks on any Linux host |
 | `cme_kern.S` | the chase and the read / write / copy loops again as streaming-mode SVE (`LD1D` + `LASTB`; `LD1B` / `ST1B` of four vectors and of one), used by `latency --cme` and `bandwidth --cme`; plus the register round trip and `RDSVL`. From run 6 every span reads `CNTVCT_EL0` after `SMSTART` and before `SMSTOP` into `cme_span` and sums the spans there, and the single-call forms (`cme_read4_n`, `cme_write4_n`), the `DSB ST` write (`cme_write4_dsb`) and the read without its fold (`cme_read4_nofold`) exist |
 | `cme_test.c` | self-test of those kernels on any SME2 machine: chase, round trip, read fold, write pattern, copy, the single-call forms, the `DSB ST` write, the no-fold read, the span stamps and their running sum; `make cme_test && ./cme_test` |
 | `run_followup.sh` | the run 3 follow-up (follow-up-run-plan.md): the OCM chase rows dense, sparse and vary from CPUs 2 and 8, the TLB and walk counter sets on the CPU 2 rows, each with its own validation row, the CME latency sweep, and a sequential chain as the prefetch stimulus, all with the prefetch-refill counters, plus the small one-core write rows with run 3's and run 2's bandwidth programs (G5) and the 20 dense OCM cells under the crosspoint flit counters (G6), the 64 KiB to 512 KiB chase rows with the L2 and L3 hit set (G1, run 5) and the one-core read rows with software prefetch distances and two streams under the prefetch counters (G7, run 5), and the one-core L1 rows at 4 to 24 KiB in the per-pass and `--asm-passes` forms (G8, run 5c); meant to run once per boot (normal, prefetchers off, larger OCM pages, both) |
 | `test_lat_rows.py` | test of the latency CSV reader in gen_run3.py over run 2, run 3 and run 4 row shapes, refused and invalid counters; `python3 test_lat_rows.py` |
 | `perf_cov_test.c` | host test that a multiplexed counter row is rejected and the next row is not; `make perf_cov_test && taskset -c 2 ./perf_cov_test` on an Arm machine |
+| `run_l3.sh` | the L3-mode follow-up (follow-up-run-plan.md section 14): why one core's sequential read of 32 MiB runs 2.7 times faster with the DSU L3 in full mode (boot F1 against run 3) while the random read chains of 1.5 MiB and above and the one-core writes repeat run 3 and, on boots E against C, the refills per line are the same. H1: the one-core 32 MiB and 2 MiB reads, the 32 MiB write and the 32 MiB random chain, each once under the request set and once under the queue set (the read occupancy of each home node's request queue and the mesh cycles); H2: run 3's one-core read sweep, read kernel, then the 32 MiB read under the prefetch-refill set the 2 and 32 MiB reads under the prefetch-target set (`--perf --events pf`) and the same two under the last-level-cache set (`--perf --events llc`, a candidate count of the lines fetched from outside the cluster, read with EXTLLC's value); H3: 16 MiB readers placed on one cluster, two clusters and four clusters, under the queue set. Meant to run once per boot: the L3 on and off, each with the prefetchers on and off |
+| `run_map.sh` | the mesh latency map (run 8), phase M: a small sysinfo file, four control rows of `latency`, then one `meshmap` process for CPUs 2 to 9 and the five home nodes. `--kernel-cpus` adds CPU 0, the kernel's CPU, as a last block. `meshmap` never runs under `cmncount`, which would hold the mesh counters that `meshmap` opens. Meant to run last on a boot, after the other scripts |
 | `est_chip_time.py` | sizes a run from `sh run_asimov.sh --dry-run`: exact counts per command, labelled time assumptions |
 | `run_all.sh` | **the script to run**: the cache and mesh test, then the CME test, into one `results/<UTC time>/` directory |
 | `run_asimov.sh` | the cache and mesh test: phases 0, A, B, D, E and C (last, skipped without `/dev/asimov-spm`) |
 | `run_cme.sh` | the CME test: phase F and, from run 6, F2 (the per-call cost rows); skipped when `/proc/cpuinfo` has no `sme2`; takes CPU 3 offline for its rows and brings it back |
-| `lib_run.sh` | shared by both scripts: options, output directory, mesh counter settings, CPU sets, the `run` / `cmn` helpers |
+| `lib_run.sh` | shared by the scripts: options, output directory, mesh counter settings (the request set and, for run_l3.sh, the queue set), CPU sets, the `run` / `cmn` / `cmnq` helpers |
 | `Makefile` | `make CC=<your aarch64 gcc>`; default flags `-O2 -mcpu=cortex-a520 -static`; links `cme_kern.S` when the compiler targets AArch64 |
 
 ## How to build and run
@@ -187,6 +218,23 @@ from labelled assumptions. Add `--phase F` to size one phase.
 `sh run_all.sh --quick` is a small DRAM-only self-test for any Linux host.
 On an x86 host build it with `make CFLAGS="-O2 -Wall -Wextra -std=gnu11
 -pthread"`. It is not an Asimov measurement.
+
+`sh run_map.sh` (run 8) is the mesh latency map, phase M. It is a separate
+script: `run_all.sh` does not call it. It takes the same options plus
+`--kernel-cpus`, which also measures from CPU 0, the kernel's CPU, in a last
+block after every other row is written. It brings CPU 3 online and leaves all
+of CPUs 2 to 9 online. On a boot that runs several scripts it runs last, so a
+`meshmap` failure costs only its own rows. `sh run_map.sh --quick` runs three
+`meshmap` commands on any Linux host: `--selftest`, a small run with fake home
+nodes, and the same kind of run with `--out /dev/full` (a device that refuses
+every write). The third must exit 1, so the script inverts its status: it
+counts as a failed command only when `meshmap` exits 0 there.
+
+`meshmap --nodes` takes other home node ids than the default five. The OCM
+region of a node follows from its id, not from its place in the list: regions
+0 to 4 belong to nodes 88, 160, 216, 288 and 344. A node id outside these five
+has no OCM region. It gets the two DRAM kinds only, a `#` line says so, and no
+OCM cell is counted as requested for it.
 
 ## What to send back
 
@@ -234,6 +282,13 @@ Total size is a few tens of kilobytes.
 | E | writer placement: 2 writers on CPUs 2+4, 2+8, 2+3; 4 writers on 2+4+6+8 (the control), 2+3+4+5, 2+3+8+9 | 16 MiB each | whether the hemisphere write limit (run 1: 86.8 GB/s at 16 MiB per writer, 88.8 at 2 MiB) depends on where the writers sit; a placement differs from the control only if the gap exceeds the spread of the repeats |
 | E | OCM read from four cores | one region per core | aggregate OCM read |
 | C (runs last) | SPM latency and bandwidth | 64 KiB to 1 MiB | skipped while `/dev/asimov-spm` is absent |
+| M (run 8) | control: the dense flushed OCM chain of `latency` (`--fresh 3 --flush`) from CPUs 2 and 8 on regions 0 and 4, without mesh counters | 256 KiB | the existing program's value on the same boot for four of the `ocm-flush` cells |
+| M (run 8) | `meshmap` kind `ocm-flush`: OCM lines of one home node, `DC CIVAC` on every chain line before each timed pass; CPUs 2 to 9, each of the five nodes | 2,048 lines (128 KiB) per cell, 7 passes | the latency of a load served by each home node from each CPU. CPUs 3, 5, 7 and 9 have no earlier OCM row. These cells need no mesh counter and no classification, so they run first |
+| M (run 8) | `meshmap` classification of the DRAM buffer, pinned to CPU 2 | one 2 MiB buffer, 32,768 lines; it stops when every node has 2,048 lines | the home node of each line, from the per-node request counters. It lowers the lines per cell (to 1,024, 512, 256 or 64) when the time budget or the lines found require it |
+| M (run 8) | `meshmap` kind `slc`: DRAM lines of one home node. Per pass: one store to every chain line, the evictor, the timed chase. Two untimed passes first, four on the first CPU of a node | 2,048 lines per cell out of the 2 MiB buffer, 7 passes | the latency of a load served by one node's SLC slice from each CPU: the per-node form of the 2 MiB SLC row, which is an average over the five nodes |
+| M (run 8) | `meshmap` kind `dram-flush`: the same DRAM lines, `DC CIVAC` on every chain line before each timed pass | 2,048 lines per cell, 7 passes | the load misses at the home node and is fetched from DRAM: the per-node DRAM latency, and the all-miss end of the mesh counter scale |
+| M (run 8) | `meshmap` kind `ocm-evict`: OCM lines of one home node with the `slc` recipe (store, evictor, chase) | 2,048 lines per cell, 7 passes | the control of the `slc` recipe on lines that are known to stay in the node. The hypothesis under test: per node, `slc` latency equals `ocm-evict` latency |
+| M (run 8) | `meshmap` `idle` row, one per CPU: the timed bracket (counter read, clock, chase, clock, counter read) with zero loads | none | the background of the core and mesh counters over one bracket, as raw counts, with the bracket's duration |
 
 The per-region OCM rows run on 4 KiB pages and the DRAM rows on 2 MiB pages, so
 an OCM-versus-SLC latency comparison carries a TLB asymmetry of a few ns (est.).
@@ -314,7 +369,7 @@ is unvalidated rather than broken. A
 nonzero count too small for four decimals prints in exponent form (`4.6e-05`),
 so `0.0000` is an exact zero. A `best` row per size carries the minimum. In
 `--fresh 3` mode the timed rows are `fresh1` and `fresh2`, one pass each over a
-chain that was never walked.
+chain that was never walked. `bandwidth --perf --events pf` (run 7) swaps the three prefetch events for 0x8155 L2D_CACHE_HWPRF and 0x8156 L3D_CACHE_HWPRF (L2 and L3 accesses by hardware prefetchers targeting that level) and 0x81E6 L3D_CACHE_HIT_RD_FHWPRF (demand reads whose first hit is on a line a hardware prefetcher placed in the L3), per 64 B line; the C1-Nano's data prefetchers choose the cache their linefills go to. 0x8156 counts the access aimed at the L3, not a fill (the DSU counts a prefetch whose stash is not performed because the L3 is off as a prefetch access, C1-DSU TRM SCU_PFTCH_CPU_HIT), so it may read nonzero on either L3 mode; 0x81E6 is the column that says a line was in the L3 and a demand read found it. A column that never reads nonzero on any boot is unvalidated. `bandwidth --perf --events llc` (run 7) swaps the three prefetch events for 0x36 LL_CACHE_RD, 0x37 LL_CACHE_MISS_RD and 0x400B L3D_CACHE_LMISS_RD, per 64 B line, a candidate count of the lines fetched from outside the cluster: with IMP_CPUECTLR_EL1.EXTLLC set and no L3 present the first two count transactions returned from outside the cluster, with EXTLLC clear and an L2 and L3 present the L3's own read accesses and refills (0xA0's and 0xA2's populations), and another source in other configurations (nevis0_dpu_pmu.sv's selection); 0x400B is 0xA2's signal in this RTL. The columns are reported with EXTLLC's value and the selected source; once the external source is shown selected they are selected external-source counts per program line, and they become the total of lines fetched from outside the cluster only with separate evidence of which demand and prefetch populations the event includes.
 
 The last counter column, `perf_cov`, is the group's running time over its
 enabled time; 1.0000 means the counters covered the whole walk. When they did
@@ -421,6 +476,195 @@ a numeric row. A `# cmncount:` comment line also records an event that could not
 be opened or enabled, or that the command ran uncounted because the PMU was
 absent or an event name was unknown.
 
+`meshmap` (run 8) appends to `latency-map.csv`. Every run adds one header
+block and then one row per timed pass. Each line is flushed when it is
+written, so the lines written before a kill survive:
+
+```
+# meshmap: ns_per_load = elapsed_ns / lines; one row per timed pass. cpus=3 last_cpus=- nodes=88,160,216,288,344 lines=256 reps=3 warm=2 probe_loads=64 event=hns_pocq_reqs_recvd_all backing=thp cntfrq_hz=0
+kind,cpu,node,lines,rep,ns_per_load,cycles_per_load,l1d_refill,l2d_refill,l3d_refill_rd,l1d_refill_hwprf,l2d_refill_hwprf,l1d_tlb_refill,perf_cov,req_88,req_160,req_216,req_288,req_344,mc_reqs,cache_miss,snp_sent,window_ns
+idle,3,-,0,0,-,5114.00,0.0000,0.0000,0.0000,0.0000,-,-,1.0000,-,-,-,-,-,-,-,-,583136
+slc-fake,3,88,256,0,10.255,55.41,0.0000,0.0000,0.0000,0.0000,-,-,1.0000,-,-,-,-,-,-,-,-,519616
+```
+
+The example is from the x86 host check (`sh run_map.sh --quick`): no mesh
+counter, fake home nodes, two core events refused. The columns:
+
+- `kind`: `ocm-flush`, `slc`, `dram-flush`, `ocm-evict` or `idle` (the phase M
+  rows of the table above). With `--no-perf` the two DRAM kinds are named
+  `slc-fake` and `dram-flush-fake`. The home node of a line is then its index
+  modulo the number of nodes, not a measured one.
+- `cpu`, `node`: the CPU and the home node id of the cell. `node` is `-` in an
+  `idle` row.
+- `lines`: the loads of the pass, equal to the lines of the chain. It is below
+  2,048 when the classification lowered it. It is 0 in an `idle` row.
+- `rep`: the pass, 0 to 6. Pass r walks chain r.
+- `ns_per_load`: the elapsed time of the pass divided by `lines`. `-` in an
+  `idle` row.
+- `cycles_per_load` to `perf_cov`: the core counters of the pass per load, in
+  the formats of `latency`. The events are 0x03, 0x17, 0xA2, 0x81BC, 0x81BD
+  and 0x05 L1D_TLB_REFILL, counted in user mode. A refused event prints `-`.
+  A row whose counters did not cover the pass prints `-` in all of them, and
+  a `# perf: counters of the row above are invalid` line follows it.
+- `req_<id>`: one column per home node. It is the rise of
+  `hns_pocq_reqs_recvd_all` on that node between the two counter reads around
+  the pass, less the node's read floor (the count that one counter read adds
+  by itself, see `# read_floor` below), per load.
+- `mc_reqs`, `cache_miss`, `snp_sent`: the rise of `hns_mc_reqs_local_all`,
+  `hns_cache_miss_all` and `hns_snp_sent` (the snoops the home nodes sent),
+  each a sum over all home nodes, per load. No floor is subtracted.
+- A mesh column prints `-` when its counter is not open or did not run for the
+  whole window. The `ocm-flush` rows of CPUs 2 to 9 always print `-` there:
+  they run before the mesh counters are opened.
+- `window_ns`: the time from the end of the first mesh counter read to the end
+  of the second. It holds the pass and the system calls that start and stop
+  the core counters.
+- An `idle` row holds raw counts in every counter column, not counts per load.
+
+The file also holds `#` lines, in the order of the program's work:
+
+- `# meshmap: cpu N dropped (...)`: a CPU the program could not be pinned to.
+  `# meshmap: OCM kinds skipped (...)`: `/dev/ocm` is absent or a region did
+  not map. `# meshmap: node N has no OCM region (...)`: a node id of `--nodes`
+  outside 88, 160, 216, 288 and 344. It has no OCM cells.
+- `# one_2mib_page: yes|no|not established (...)`: whether the DRAM buffer is
+  established as one physical 2 MiB page.
+  - `yes` with `backing=hugetlb`: a `MAP_HUGETLB` mapping exists only as huge
+    pages.
+  - `yes` with `backing=thp`: `/proc/self/smaps` (the kernel's memory report
+    per mapping) shows a mapping that is exactly the buffer, with 2,048 kB of
+    `AnonHugePages` (the memory that huge pages map).
+  - `not established` with `backing=thp` in every other case. The kernel
+    accepted the hint for transparent huge pages. That alone does not prove
+    the page size.
+  - `no` with `backing=4k`.
+
+  Two conclusions hold only when the line says `yes`. Without `yes` both are
+  `Insufficient data`. The rows are measured either way, and the mesh counter
+  columns still say whether the slice served the loads.
+  - The set bound: at most 8 lines of one node share one SLC set, against the
+    12 ways that hold DRAM lines. This is arithmetic from Arm's hash and the
+    default set index for one 2 MiB page, not a measurement.
+  - The hash check: the physical address of line i is `pfn` x `page_bytes` +
+    64 x i, so the home nodes in `map-homes.txt` can be compared with a hash
+    formula.
+- `# pagemap: pfn=0x... page_bytes=... covers=buffer|first-page (...)`: the
+  page frame number of the buffer's first page, or
+  `# pagemap: unreadable (...)`. `covers=buffer` is printed when the
+  `# one_2mib_page:` line says `yes`. `covers=first-page` is printed
+  otherwise: the frame number covers only the first page of `page_bytes`
+  bytes (4 KiB on the image), and the addresses of the other lines are not
+  known.
+- `# bracket_overhead_ns=...`: the median time of 32 brackets with zero loads.
+- `# mesh counters: level=<1|2|3> events=<names> pmu_cpu=<n>`: how the mesh
+  counters are open. Level 1 is one group with the five per-node events and
+  the three sums. Level 2 is one group with the per-node events only. Level 3
+  is the per-node events, each read by its own system call. A level that
+  fails prints `# meshmap: mesh counters level N: ...` first.
+  `# meshmap: no mesh counters (...)` means that no level worked. The `slc`
+  and `dram-flush` cells are then skipped.
+- `# read_floor: <five values>`: per node, the median count that one counter
+  read adds by itself, over 64 windows with nothing between two reads.
+- `# probe line=<i> ns=<t> d=<five counts> home=<index or ?>`: the raw counts
+  of the first 32 probes, and of the first 32 probes without a clear home
+  node.
+- `# classify: probe_ns=<mean> lines=<n> projected_s=<x>`: the lines per node
+  chosen after 32 probes to fit the time budget (`--max-classify-s`, 1.0 s).
+- `# classify: probed=<n> ambiguous=<n> unused=<n> per_node=<five counts>
+  lines=<n> probe_loads=<P> elapsed_s=<x>`: the result of the classification.
+  `# meshmap: classification failed (...)` follows when a node has fewer than
+  64 lines. The `slc` and `dram-flush` cells are then skipped.
+- Other `# classify:` and `# meshmap:` lines report a doubled number of pairs
+  per probe, a stopped walk, or a sum event that is absent. The walk stops at
+  twice the time budget, after 64 counter windows in a row that were not
+  valid, or when none of the first 256 probes at 256 pairs gave a clear home
+  node.
+- `# meshmap: done cells=<printed>/<requested>`: the last line. A requested
+  cell is one (kind, CPU, node) that the command line asks for: the two DRAM
+  kinds for every node, and the two OCM kinds for every node that has an OCM
+  region (none with `--no-ocm`). The program exits 1 when the two numbers
+  differ, and `run_map.sh` then reports one failed command.
+
+The program also exits 1 when a write, a flush or the close of
+`latency-map.csv` or of `map-homes.txt` failed, or when one of the two could
+not be opened. This holds even when every cell was printed. The first failure
+of each file is reported once on standard error (`meshmap: write to <file>
+failed (<reason>)`), which `run_map.sh` appends to `log.txt`. The measurement
+still runs to its end, and the last `# summary:` line of `meshmap-log.txt`
+names the failure.
+
+`map-homes.txt` is the record of the classification:
+
+```
+# meshmap homes: first_line=0 count=1280 nodes=88,160,216,288,344 pfn=- pfn_covers=-
+0123401234012340123401234012340123401234012340123401234012340123
+```
+
+After the header line there is one character per probed line of the buffer,
+in address order, 64 per text row. The character is the index of the line's
+home node in `nodes` (0 is node 88), or `?` for a line left unused. `count` is
+the number of lines probed. `pfn` is the page frame number of the buffer's
+first page, or `-` when the kernel does not show it. `pfn_covers` says what
+that number is good for:
+
+- `pfn_covers=buffer`: the buffer is one physical 2 MiB page (the
+  `# one_2mib_page: yes` line of `latency-map.csv`). The address of every
+  line follows from `pfn`, so a hash formula can be checked against the
+  record.
+- `pfn_covers=first-page (...)`: one 2 MiB page is not established. The frame
+  number covers only the first 4 KiB page of the buffer. The addresses of the
+  other lines are not known, so a hash check is `Insufficient data`.
+- `pfn_covers=-`: no frame number.
+
+The example is from the host check, where the home nodes are fake.
+
+`run_map.sh` writes three more files. `meshmap-log.txt` is the program's
+standard output: `# progress:` lines with the start time of each part, three
+`# summary:` lines, and one `# perf:` line per core event the kernel refused.
+`sysinfo-map.txt` holds the online CPUs, the kernel's
+`CONFIG_PROC_PAGE_MONITOR` line and the CPU of `arm_cmn_0`. The four control
+rows are in `latency-ocm-region<r>-mapctl-cpu<c>.csv`.
+
+Reading rules for `latency-map.csv`. The page generator applies them. The
+program applies none and drops no row.
+
+- Which node served the loads: read `req_k` minus the mean of the other four
+  `req` columns, where k is the cell's node. The other four are not expected
+  to be near zero. Each timed load brings one line into the cluster and so
+  pushes an evictor line out, and that line is written to its own home node
+  (a hypothesis that the `ocm-evict` rows of the first boot check). The `slc`
+  and `ocm-evict` rows of one cell should show the same pattern over the five
+  columns.
+- Where the line was: `l3d_refill_rd` near 1.0 per load says that each load
+  left the cluster. For an `slc` row, `mc_reqs` near the `ocm-evict` value of
+  the same cell says that the slice served the loads. `mc_reqs` near the
+  `dram-flush` value would mean that the lines were fetched from DRAM.
+- Snoops: compare `snp_sent` with the `idle` row of the same CPU as raw
+  counts, by the conversion of the next rule. Never compare the per-load
+  value with the idle count directly. A raw count above the idle one would
+  mean that the home node asked another holder for the line.
+- Comparing a measured row with an `idle` row. A measured row holds counts
+  per load. An `idle` row holds the raw counts of one bracket.
+  - Multiply the measured row's per-load value by its `lines`. The product is
+    the raw count of that row's bracket.
+  - Compare that product with the idle row's raw count.
+  - Read the two `window_ns` values beside them. The bracket of a measured
+    row lasts longer than an idle one, so counts that rise with time have
+    more time to rise in it.
+- The read floor is subtracted from the `req_<id>` columns of a measured row
+  only. `mc_reqs`, `cache_miss` and `snp_sent` carry no floor in any row, and
+  an `idle` row carries no floor in any column. So for a `req` column,
+  subtract the node's `# read_floor` value from the idle count before the
+  comparison. For the three sums, compare without any floor.
+- "Near" has no number yet. The thresholds are to be set from the first
+  boot's `ocm-evict`, `dram-flush` and `idle` rows.
+- A boot with the prefetchers on is not a distance map. Label its rows
+  "prefetcher effect".
+- The hypothesis under test: per node, `slc` latency equals `ocm-evict`
+  latency.
+- The step counts between a CPU and a home node are coordinate assumptions
+  (crosspoint positions), not measured routes.
+
 ## Assumptions to check on the first boot
 
 - `/dev/ocm` accepts `mmap(NULL, 0x40000, PROT_READ|PROT_WRITE, MAP_SHARED, fd, <region physical base>)`
@@ -483,3 +727,29 @@ script. `sh run_asimov.sh --dry-run | python3
 est_chip_time.py` lists every command with exact counts and labelled
 assumptions: 95 commands, 156 launches, about 4 s (est.) in all, half of it
 the launch allowance, which nothing in the run measures.
+
+Phase M (run 8) is its own script. `sh run_map.sh --dry-run | python3
+est_chip_time.py` gives 5 commands, 5 launches and 0.92 s (est.), about 43 min
+of wall time at 2,779 s per chip second. With `--kernel-cpus` it gives 1.01 s
+(est.). The `meshmap` process is 0.85 s of the 0.92 s (est.):
+
+- 0.55 s for the evictor: 22,732,800 loads at 24 ns each (est., on the upper
+  side, since independent loads overlap).
+- 0.14 s for the classification at its projected count of 12,800 probes (5/4
+  x 5 nodes x 2,048 lines, the count `meshmap` itself uses to choose the lines
+  per node). A probe is 64 flush-and-load pairs at 60 ns (est.) and one
+  counter read at 7 us (est.).
+- 0.12 s for 2,662,400 chase loads and 1,597,440 stores, at the per-load costs
+  of the earlier rows.
+- 0.05 s for the chain builds, the flushes and the 2,156 counter reads outside
+  the probes (2,056 around the passes and the idle rows, 100 for the counter
+  check, the read floor and the first 32 probes).
+
+No part of `meshmap` has run on the chip, so every one of these times is an
+estimate. The counter read is the least certain. If the counters must be read
+one by one (level 3), a read costs about 35 us (est.) and the run takes about
+0.4 s more (est.). The program does not enforce the count of 12,800 probes.
+Its limit for the classification is time: it lowers the lines per node to fit
+1.0 s, and it stops its walk after 2.0 s. A walk that runs until that stop
+makes the whole script about 2.8 s (est.: 0.92 s less the 0.14 s above, plus
+2.0 s).

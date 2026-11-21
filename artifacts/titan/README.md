@@ -2669,3 +2669,1142 @@ Related: [claude_20261102-20261106_c1nano-cme-matrix-engine-performance.md](../.
 - `exec/scratch-relocated/bd044fcf/try_load.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/scratch-relocated/bd044fcf/try_load.py` (799 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/bd044fcf-ffae-49bb-9c0e-8a6c06a13687/scratchpad/try_load.py`
 - `memory/cache-perf-asimov/asimov-run6-state.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-titan-cache-perf-asimov/memory/asimov-run6-state.md` (4478 bytes)
 
+## Codex handoff preservation, 2026-11-20
+
+Each path below is relative to this topic. Original files are on claude-agentsrv unless a different host is given.
+
+- `cache-perf/asimov/Makefile` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/Makefile` (1652 mirror bytes).
+- `cache-perf/asimov/README.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/README.md` (62322 mirror bytes).
+- `cache-perf/asimov/asimov-c1nano-perf-brief.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/asimov-c1nano-perf-brief.html` (32698 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/asimov/asimov-c1nano-perf-brief.html)
+- `cache-perf/asimov/asimov-c1nano-perf.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/asimov-c1nano-perf.html` (576034 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/asimov/asimov-c1nano-perf.html)
+- `cache-perf/asimov/asimov-cme-perf-brief.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/asimov-cme-perf-brief.html` (47894 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/asimov/asimov-cme-perf-brief.html)
+- `cache-perf/asimov/asimov-cme-perf.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/asimov-cme-perf.html` (1355029 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/asimov/asimov-cme-perf.html)
+- `cache-perf/asimov/asimov-mesh-map.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/asimov-mesh-map.html` (205232 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/asimov/asimov-mesh-map.html)
+- `cache-perf/asimov/asimov-mesh-map.html.review.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/asimov-mesh-map.html.review.md` (16876 mirror bytes).
+- `cache-perf/asimov/bandwidth.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/bandwidth.c` (32839 mirror bytes).
+- `cache-perf/asimov/c1nano_page/__init__.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/__init__.py` (0 mirror bytes).
+- `cache-perf/asimov/c1nano_page/data.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/data.py` (145079 mirror bytes).
+- `cache-perf/asimov/c1nano_page/ids.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/ids.py` (3152 mirror bytes).
+- `cache-perf/asimov/c1nano_page/refs.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/refs.py` (21527 mirror bytes).
+- `cache-perf/asimov/c1nano_page/sec_bandwidth.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/sec_bandwidth.py` (30656 mirror bytes).
+- `cache-perf/asimov/c1nano_page/sec_glance.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/sec_glance.py` (24899 mirror bytes).
+- `cache-perf/asimov/c1nano_page/sec_latency.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/sec_latency.py` (37889 mirror bytes).
+- `cache-perf/asimov/c1nano_page/sec_mesh.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/sec_mesh.py` (12968 mirror bytes).
+- `cache-perf/asimov/c1nano_page/sec_multicore.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/sec_multicore.py` (21068 mirror bytes).
+- `cache-perf/asimov/c1nano_page/sec_ocm.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/sec_ocm.py` (38126 mirror bytes).
+- `cache-perf/asimov/c1nano_page/sec_open.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/sec_open.py` (43140 mirror bytes).
+- `cache-perf/asimov/c1nano_page/sec_setup.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/sec_setup.py` (51074 mirror bytes).
+- `cache-perf/asimov/c1nano_page/shell.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/shell.py` (30014 mirror bytes).
+- `cache-perf/asimov/c1nano_page/viz.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/viz.py` (95577 mirror bytes).
+- `cache-perf/asimov/c1nano_page/words.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/c1nano_page/words.py` (13310 mirror bytes).
+- `cache-perf/asimov/cme_page/__init__.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/__init__.py` (0 mirror bytes).
+- `cache-perf/asimov/cme_page/data.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/data.py` (121950 mirror bytes).
+- `cache-perf/asimov/cme_page/refs.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/refs.py` (23419 mirror bytes).
+- `cache-perf/asimov/cme_page/sec_bandwidth.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/sec_bandwidth.py` (70978 mirror bytes).
+- `cache-perf/asimov/cme_page/sec_callcost.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/sec_callcost.py` (92109 mirror bytes).
+- `cache-perf/asimov/cme_page/sec_glance.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/sec_glance.py` (61405 mirror bytes).
+- `cache-perf/asimov/cme_page/sec_l3.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/sec_l3.py` (60080 mirror bytes).
+- `cache-perf/asimov/cme_page/sec_latency.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/sec_latency.py` (70061 mirror bytes).
+- `cache-perf/asimov/cme_page/sec_ocm.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/sec_ocm.py` (104180 mirror bytes).
+- `cache-perf/asimov/cme_page/sec_open.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/sec_open.py` (103719 mirror bytes).
+- `cache-perf/asimov/cme_page/sec_setup.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/sec_setup.py` (96934 mirror bytes).
+- `cache-perf/asimov/cme_page/shell.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/shell.py` (26174 mirror bytes).
+- `cache-perf/asimov/cme_page/viz.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/viz.py` (67988 mirror bytes).
+- `cache-perf/asimov/cme_page/words.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/cme_page/words.py` (18915 mirror bytes).
+- `cache-perf/asimov/codex-review-asimov-c1nano-perf.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/codex-review-asimov-c1nano-perf.md` (27536 mirror bytes).
+- `cache-perf/asimov/codex-review-asimov-cme-perf.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/codex-review-asimov-cme-perf.md` (44114 mirror bytes).
+- `cache-perf/asimov/codex-review-follow-up-run-plan.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/codex-review-follow-up-run-plan.md` (204408 mirror bytes).
+- `cache-perf/asimov/codex-review-measure-hop-latency.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/codex-review-measure-hop-latency.md` (15130 mirror bytes).
+- `cache-perf/asimov/common.h` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/common.h` (31431 mirror bytes).
+- `cache-perf/asimov/est_chip_time.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/est_chip_time.py` (14194 mirror bytes).
+- `cache-perf/asimov/follow-up-run-plan.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/follow-up-run-plan.md` (130007 mirror bytes).
+- `cache-perf/asimov/gen_brief.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_brief.py` (44356 mirror bytes).
+- `cache-perf/asimov/gen_c1nano_perf.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_c1nano_perf.py` (5778 mirror bytes).
+- `cache-perf/asimov/gen_cme_perf.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_cme_perf.py` (2540 mirror bytes).
+- `cache-perf/asimov/gen_mesh_map.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_mesh_map.py` (43633 mirror bytes).
+- `cache-perf/asimov/gen_perf.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_perf.py` (30996 mirror bytes).
+- `cache-perf/asimov/gen_perf_cme.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_perf_cme.py` (112077 mirror bytes).
+- `cache-perf/asimov/gen_perf_core.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_perf_core.py` (134845 mirror bytes).
+- `cache-perf/asimov/gen_run6.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_run6.py` (20985 mirror bytes).
+- `cache-perf/asimov/gen_run8_boots.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_run8_boots.py` (48492 mirror bytes).
+- `cache-perf/asimov/gen_run8_report.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/gen_run8_report.py` (34019 mirror bytes).
+- `cache-perf/asimov/lib_run.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/lib_run.sh` (6062 mirror bytes).
+- `cache-perf/asimov/measure-hop-latency.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/measure-hop-latency.md` (19756 mirror bytes).
+- `cache-perf/asimov/meshmap.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/meshmap.c` (82922 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-004/results/19700101T000000Z/all.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-004/results/19700101T000000Z/all.txt` (105242 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-006/results/bootB/all.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-006/results/bootB/all.txt` (148416 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-007/results/bootC/all.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-007/results/bootC/all.txt` (175858 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-008/results/bootD/all.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-008/results/bootD/all.txt` (155725 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-010/results/bootE/all.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-010/results/bootE/all.txt` (175880 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/README.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/README.md` (77657 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/SHA256SUMS` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/SHA256SUMS` (9470 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/dmesg.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/dmesg.txt` (33701 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/all.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/all.txt` (166742 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-all8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-all8.csv` (2047 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-dram-1core.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-dram-1core.csv` (5892 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-dram-spread.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-dram-spread.csv` (426 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-4core.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-4core.csv` (532 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-all5.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-all5.csv` (537 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region0.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region0.csv` (529 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region1.csv` (529 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region2.csv` (529 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region3.csv` (529 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-region4.csv` (529 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-write.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-ocm-write.csv` (544 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-pair.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-pair.csv` (2935 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-perdsu.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-perdsu.csv` (2038 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-3-4-5.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-3-4-5.csv` (495 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-3-8-9.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-3-8-9.csv` (495 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-3.csv` (495 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-4-6-8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-4-6-8.csv` (498 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-4.csv` (495 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/bandwidth-write-cpus2-8.csv` (495 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-call-cost.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-call-cost.csv` (3156 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-dram-1core-asmpasses.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-dram-1core-asmpasses.csv` (5140 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-dram-1core.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-dram-1core.csv` (13896 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-l1-asmpasses.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-l1-asmpasses.csv` (6478 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-l1-dsb.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-l1-dsb.csv` (3207 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-l1-nofold.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-l1-nofold.csv` (3189 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-l1-passes.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-l1-passes.csv` (6390 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-all5.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-all5.csv` (636 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region0.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region0.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region1.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region2.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region3.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-region4.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-write.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-bandwidth-ocm-write.csv` (643 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-flushed.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-flushed.csv` (1478 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-large-l3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-large-l3.csv` (4495 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-large.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-large.csv` (4509 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-small-l3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-small-l3.csv` (5926 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-small.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-dram-small.csv` (5926 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-all5-dense.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-all5-dense.csv` (1455 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-all5.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-all5.csv` (1944 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region0.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region0.csv` (1927 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region1.csv` (1927 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region2.csv` (1927 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region3.csv` (1927 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cme-latency-ocm-region4.csv` (1927 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/cmn-counts.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/cmn-counts.csv` (41743 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-control-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-control-cpu2.csv` (1300 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-control-cpu4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-control-cpu4.csv` (650 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-control-cpu6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-control-cpu6.csv` (650 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-control-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-control-cpu8.csv` (650 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-flushed.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-flushed.csv` (767 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-large.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-large.csv` (3501 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-slc-cpu4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-slc-cpu4.csv` (762 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-slc-cpu6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-slc-cpu6.csv` (762 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-slc-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-slc-cpu8.csv` (762 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-small.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-dram-small.csv` (4712 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-cpu2.csv` (1183 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-cpu4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-cpu4.csv` (1183 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-cpu6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-cpu6.csv` (1183 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-cpu8.csv` (1183 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-dense-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-dense-cpu2.csv` (754 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-dense-cpu4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-dense-cpu4.csv` (754 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-dense-cpu6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-dense-cpu6.csv` (754 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-dense-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-all5-dense-cpu8.csv` (757 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region0-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region0-cpu2.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region0-cpu4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region0-cpu4.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region0-cpu6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region0-cpu6.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region0-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region0-cpu8.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region1-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region1-cpu2.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region1-cpu4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region1-cpu4.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region1-cpu6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region1-cpu6.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region1-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region1-cpu8.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region2-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region2-cpu2.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region2-cpu4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region2-cpu4.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region2-cpu6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region2-cpu6.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region2-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region2-cpu8.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region3-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region3-cpu2.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region3-cpu4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region3-cpu4.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region3-cpu6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region3-cpu6.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region3-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region3-cpu8.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region4-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region4-cpu2.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region4-cpu4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region4-cpu4.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region4-cpu6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region4-cpu6.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region4-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/latency-ocm-region4-cpu8.csv` (1166 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/log.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/log.txt` (22082 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-011/results/bootF1/sysinfo.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-011/results/bootF1/sysinfo.txt` (18747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/README.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/README.md` (70604 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/SHA256SUMS` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/SHA256SUMS` (3208 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/dmesg.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/dmesg.txt` (20275 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/all.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/all.txt` (90978 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-call-cost.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-call-cost.csv` (3156 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-dram-1core-asmpasses.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-dram-1core-asmpasses.csv` (5140 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-dram-1core.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-dram-1core.csv` (13896 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-l1-asmpasses.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-l1-asmpasses.csv` (6478 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-l1-dsb.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-l1-dsb.csv` (3207 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-l1-nofold.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-l1-nofold.csv` (3189 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-l1-passes.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-l1-passes.csv` (6390 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-all5.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-all5.csv` (636 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region0.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region0.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region1.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region2.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region3.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-region4.csv` (628 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-write.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-bandwidth-ocm-write.csv` (643 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-flushed.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-flushed.csv` (1478 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-large-l3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-large-l3.csv` (4479 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-large.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-large.csv` (4493 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-small-l3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-small-l3.csv` (5876 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-small.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-dram-small.csv` (5881 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-all5-dense.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-all5-dense.csv` (1455 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-all5.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-all5.csv` (1944 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region0.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region0.csv` (1934 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region1.csv` (1928 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region2.csv` (1934 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region3.csv` (1934 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cme-latency-ocm-region4.csv` (1934 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/cmn-counts.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/cmn-counts.csv` (10037 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-012/results/bootF2/log.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-012/results/bootF2/log.txt` (11161 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-013/README.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-013/README.md` (7514 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-013/results/bootM0/map-rehearsal-homes.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-013/results/bootM0/map-rehearsal-homes.txt` (422 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-013/results/bootM0/map-rehearsal.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-013/results/bootM0/map-rehearsal.csv` (5441 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-014/README.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-014/README.md` (11186 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-map.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-map.csv` (178384 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-ocm-region0-mapctl-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-ocm-region0-mapctl-cpu2.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-ocm-region0-mapctl-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-ocm-region0-mapctl-cpu8.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-ocm-region4-mapctl-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-ocm-region4-mapctl-cpu2.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-ocm-region4-mapctl-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-014/results/bootM1/latency-ocm-region4-mapctl-cpu8.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-014/results/bootM1/map-homes.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-014/results/bootM1/map-homes.txt` (10515 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-014/results/bootM1/meshmap-log.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-014/results/bootM1/meshmap-log.txt` (458 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-015/README.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-015/README.md` (12329 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-map.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-map.csv` (177688 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-ocm-region0-mapctl-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-ocm-region0-mapctl-cpu2.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-ocm-region0-mapctl-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-ocm-region0-mapctl-cpu8.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-ocm-region4-mapctl-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-ocm-region4-mapctl-cpu2.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-ocm-region4-mapctl-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-015/results/bootM2/latency-ocm-region4-mapctl-cpu8.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-015/results/bootM2/map-homes.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-015/results/bootM2/map-homes.txt` (10515 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-015/results/bootM2/meshmap-log.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-015/results/bootM2/meshmap-log.txt` (457 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-016/README.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-016/README.md` (13252 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-map.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-map.csv` (177071 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-ocm-region0-mapctl-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-ocm-region0-mapctl-cpu2.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-ocm-region0-mapctl-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-ocm-region0-mapctl-cpu8.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-ocm-region4-mapctl-cpu2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-ocm-region4-mapctl-cpu2.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-ocm-region4-mapctl-cpu8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-016/results/bootM3/latency-ocm-region4-mapctl-cpu8.csv` (747 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-016/results/bootM3/map-homes.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-016/results/bootM3/map-homes.txt` (10515 mirror bytes).
+- `cache-perf/asimov/results/membench-jibin-016/results/bootM3/meshmap-log.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/results/membench-jibin-016/results/bootM3/meshmap-log.txt` (457 mirror bytes).
+- `cache-perf/asimov/run_l3.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/run_l3.sh` (11400 mirror bytes).
+- `cache-perf/asimov/run_map.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/run_map.sh` (7447 mirror bytes).
+- `cache-perf/asimov/sequential-reads-L3-on-better-bandwidth.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/sequential-reads-L3-on-better-bandwidth.md` (5492 mirror bytes).
+- `cache-perf/asimov/sequential-reads-L3-proof-plan.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/sequential-reads-L3-proof-plan.html` (24836 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/asimov/sequential-reads-L3-proof-plan.html)
+- `cache-perf/asimov/thuan-pr/codex-review-pr5186-fix.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/thuan-pr/codex-review-pr5186-fix.md` (23393 mirror bytes).
+- `cache-perf/asimov/thuan-pr/pr5186-fix.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/thuan-pr/pr5186-fix.md` (19083 mirror bytes).
+- `cache-perf/asimov/thuan-pr/pr5186-fix.patch` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/asimov/thuan-pr/pr5186-fix.patch` (25717 mirror bytes).
+- `cache-perf/bench/Makefile` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/bench/Makefile` (873 mirror bytes).
+- `cache-perf/bench/README.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/bench/README.md` (5820 mirror bytes).
+- `cache-perf/bench/bandwidth.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/bench/bandwidth.c` (21499 mirror bytes).
+- `cache-perf/crb/codex-review-crb-memory-hierarchy-brief.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/codex-review-crb-memory-hierarchy-brief.md` (15234 mirror bytes).
+- `cache-perf/crb/codex-review-mesh0-or-mesh1.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/codex-review-mesh0-or-mesh1.md` (14369 mirror bytes).
+- `cache-perf/crb/crb-memory-hierarchy-brief.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/crb-memory-hierarchy-brief.html` (47014 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/crb/crb-memory-hierarchy-brief.html)
+- `cache-perf/crb/crb-memory-hierarchy.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/crb-memory-hierarchy.html` (226562 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/crb/crb-memory-hierarchy.html)
+- `cache-perf/crb/crb-memory-hierarchy.html.review.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/crb-memory-hierarchy.html.review.md` (19332 mirror bytes).
+- `cache-perf/crb/make-brief.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/make-brief.py` (22145 mirror bytes).
+- `cache-perf/crb/mesh0-or-mesh1.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/mesh0-or-mesh1.md` (27702 mirror bytes).
+- `cache-perf/crb/new-test-kernel/decide.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/decide.py` (11899 mirror bytes).
+- `cache-perf/crb/new-test-kernel/fetch.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/fetch.sh` (454 mirror bytes).
+- `cache-perf/crb/new-test-kernel/handoff.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/handoff.md` (53394 mirror bytes).
+- `cache-perf/crb/new-test-kernel/handoff.md.review.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/handoff.md.review.md` (32473 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partA-long.log` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partA-long.log` (155 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partA-short.log` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partA-short.log` (121 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partBC-analysis/make_q1_html.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partBC-analysis/make_q1_html.py` (152639 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partBC-analysis/make_q2_html.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partBC-analysis/make_q2_html.py` (156681 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partBC-analysis/recount/check_listing-crb-build-1.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partBC-analysis/recount/check_listing-crb-build-1.txt` (5376 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partBC-analysis/recount/check_listing-crb-build-2.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partBC-analysis/recount/check_listing-crb-build-2.txt` (4369 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partBC-analysis/recount/recount_results_md.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partBC-analysis/recount/recount_results_md.py` (10616 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partBC-analysis/recount/recount_results_md.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partBC-analysis/recount/recount_results_md.txt` (8869 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partBC-analysis/test_q1.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partBC-analysis/test_q1.py` (29036 mirror bytes).
+- `cache-perf/crb/new-test-kernel/partBC-analysis/test_q2.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/partBC-analysis/test_q2.py` (28238 mirror bytes).
+- `cache-perf/crb/new-test-kernel/results.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/results.md` (85278 mirror bytes).
+- `cache-perf/crb/new-test-kernel/results.md.review.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/results.md.review.md` (18458 mirror bytes).
+- `cache-perf/crb/new-test-kernel/run_partA.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/run_partA.sh` (9318 mirror bytes).
+- `cache-perf/crb/new-test-kernel/session1-folders.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/session1-folders.txt` (284 mirror bytes).
+- `cache-perf/crb/new-test-kernel/session2-folders.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/session2-folders.txt` (284 mirror bytes).
+- `cache-perf/crb/new-test-kernel/session2.log` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/session2.log` (258 mirror bytes).
+- `cache-perf/crb/new-test-kernel/session2.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/session2.sh` (1077 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb-analysis/analyze8.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-analysis/analyze8.py` (78869 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb-analysis/final8.json` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-analysis/final8.json` (4346294 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb-analysis/final8.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-analysis/final8.py` (151854 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb-analysis/h2_analyze.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-analysis/h2_analyze.py` (13293 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb-analysis/levels9.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-analysis/levels9.py` (68831 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb-analysis/report_final.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-analysis/report_final.py` (166352 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb-analysis/s12-summary.json` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-analysis/s12-summary.json` (1924938 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb-handoff.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-handoff.md` (23163 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb-report.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-report.html` (580681 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/crb/new-test-kernel/tackle-8mb-report.html)
+- `cache-perf/crb/new-test-kernel/tackle-8mb.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb.md` (61061 mirror bytes).
+- `cache-perf/crb/new-test-kernel/tackle-8mb.md.review.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb.md.review.md` (50220 mirror bytes).
+- `cache-perf/crb/new-test-kernel/visit.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/visit.sh` (808 mirror bytes).
+- `cache-perf/crb/results/B1-20261114T012315Z/B1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B1-20261114T012315Z/B1.csv` (748913 mirror bytes).
+- `cache-perf/crb/results/B1-20261114T043752Z/B1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B1-20261114T043752Z/B1.csv` (748915 mirror bytes).
+- `cache-perf/crb/results/B10a-20261113T235919Z/B10.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B10a-20261113T235919Z/B10.csv` (3849027 mirror bytes).
+- `cache-perf/crb/results/B10a-20261114T031357Z/B10.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B10a-20261114T031357Z/B10.csv` (3849448 mirror bytes).
+- `cache-perf/crb/results/B10b-20261114T003359Z/B10.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B10b-20261114T003359Z/B10.csv` (3849615 mirror bytes).
+- `cache-perf/crb/results/B10b-20261114T034855Z/B10.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B10b-20261114T034855Z/B10.csv` (3849299 mirror bytes).
+- `cache-perf/crb/results/B2-20261114T015517Z/B2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B2-20261114T015517Z/B2.csv` (564141 mirror bytes).
+- `cache-perf/crb/results/B2-20261114T050925Z/B2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B2-20261114T050925Z/B2.csv` (564138 mirror bytes).
+- `cache-perf/crb/results/B3-20261114T020808Z/B3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B3-20261114T020808Z/B3.csv` (556486 mirror bytes).
+- `cache-perf/crb/results/B3-20261114T052215Z/B3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B3-20261114T052215Z/B3.csv` (556510 mirror bytes).
+- `cache-perf/crb/results/B4-20261114T014024Z/B4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B4-20261114T014024Z/B4.csv` (279896 mirror bytes).
+- `cache-perf/crb/results/B4-20261114T045459Z/B4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B4-20261114T045459Z/B4.csv` (279896 mirror bytes).
+- `cache-perf/crb/results/B5-20261114T011723Z/B5.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B5-20261114T011723Z/B5.csv` (559550 mirror bytes).
+- `cache-perf/crb/results/B5-20261114T043213Z/B5.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B5-20261114T043213Z/B5.csv` (559548 mirror bytes).
+- `cache-perf/crb/results/B6-20261114T014825Z/B6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B6-20261114T014825Z/B6.csv` (233784 mirror bytes).
+- `cache-perf/crb/results/B6-20261114T050300Z/B6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B6-20261114T050300Z/B6.csv` (233784 mirror bytes).
+- `cache-perf/crb/results/B8-20261114T010839Z/B8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B8-20261114T010839Z/B8.csv` (1189173 mirror bytes).
+- `cache-perf/crb/results/B8-20261114T042331Z/B8.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B8-20261114T042331Z/B8.csv` (1189170 mirror bytes).
+- `cache-perf/crb/results/B9-20261114T012105Z/B9.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B9-20261114T012105Z/B9.csv` (360344 mirror bytes).
+- `cache-perf/crb/results/B9-20261114T043555Z/B9.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B9-20261114T043555Z/B9.csv` (360339 mirror bytes).
+- `cache-perf/crb/results/C1-20261114T022058Z/C1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/C1-20261114T022058Z/C1.csv` (215327 mirror bytes).
+- `cache-perf/crb/results/C1-20261114T053506Z/C1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/C1-20261114T053506Z/C1.csv` (215328 mirror bytes).
+- `cache-perf/crb/results/C2-20261114T022500Z/C2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/C2-20261114T022500Z/C2.csv` (132136 mirror bytes).
+- `cache-perf/crb/results/C2-20261114T053907Z/C2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/C2-20261114T053907Z/C2.csv` (132105 mirror bytes).
+- `cache-perf/crb/results/SHORT-20261113T214338Z/SHORT.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/SHORT-20261113T214338Z/SHORT.csv` (2486526 mirror bytes).
+- `cache-perf/crb/results/SHORT-20261113T214338Z/env.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/SHORT-20261113T214338Z/env.txt` (1299 mirror bytes).
+- `cache-perf/crb/results/SHORT-20261113T214338Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/SHORT-20261113T214338Z/launches.txt` (7373 mirror bytes).
+- `cache-perf/crb/results/SHORT-20261113T214338Z/stderr.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/SHORT-20261113T214338Z/stderr.txt` (0 mirror bytes).
+- `cache-perf/crb/results/bwx10-YA-s1-20261115T070307Z/YA.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YA-s1-20261115T070307Z/YA.csv` (2594423 mirror bytes).
+- `cache-perf/crb/results/bwx10-YA-s1-20261115T070307Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YA-s1-20261115T070307Z/launches.txt` (2091 mirror bytes).
+- `cache-perf/crb/results/bwx10-YC-s1-20261115T073339Z/YC.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YC-s1-20261115T073339Z/YC.csv` (215187 mirror bytes).
+- `cache-perf/crb/results/bwx10-YC-s1-20261115T073339Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YC-s1-20261115T073339Z/launches.txt` (10175 mirror bytes).
+- `cache-perf/crb/results/bwx10-YC-s2-20261115T115731Z/YC.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YC-s2-20261115T115731Z/YC.csv` (215199 mirror bytes).
+- `cache-perf/crb/results/bwx10-YC-s2-20261115T115731Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YC-s2-20261115T115731Z/launches.txt` (10185 mirror bytes).
+- `cache-perf/crb/results/bwx10-YF-s1-20261115T073754Z/YF.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YF-s1-20261115T073754Z/YF.csv` (1281288 mirror bytes).
+- `cache-perf/crb/results/bwx10-YF-s1-20261115T073754Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YF-s1-20261115T073754Z/launches.txt` (71083 mirror bytes).
+- `cache-perf/crb/results/bwx10-YF-s2-20261115T120146Z/YF.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YF-s2-20261115T120146Z/YF.csv` (1281803 mirror bytes).
+- `cache-perf/crb/results/bwx10-YF-s2-20261115T120146Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YF-s2-20261115T120146Z/launches.txt` (71087 mirror bytes).
+- `cache-perf/crb/results/bwx10-YL-s1-20261115T070335Z/YL.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YL-s1-20261115T070335Z/YL.csv` (1124968 mirror bytes).
+- `cache-perf/crb/results/bwx10-YL-s1-20261115T070335Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YL-s1-20261115T070335Z/launches.txt` (7798 mirror bytes).
+- `cache-perf/crb/results/bwx10-YL-s2-20261115T112727Z/YL.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YL-s2-20261115T112727Z/YL.csv` (1125050 mirror bytes).
+- `cache-perf/crb/results/bwx10-YL-s2-20261115T112727Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YL-s2-20261115T112727Z/launches.txt` (7820 mirror bytes).
+- `cache-perf/crb/results/bwx10-YP-s1-20261115T071937Z/YP.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YP-s1-20261115T071937Z/YP.csv` (229981 mirror bytes).
+- `cache-perf/crb/results/bwx10-YP-s1-20261115T071937Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YP-s1-20261115T071937Z/launches.txt` (6619 mirror bytes).
+- `cache-perf/crb/results/bwx10-YP-s2-20261115T114329Z/YP.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YP-s2-20261115T114329Z/YP.csv` (229979 mirror bytes).
+- `cache-perf/crb/results/bwx10-YP-s2-20261115T114329Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx10-YP-s2-20261115T114329Z/launches.txt` (6636 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZA-s1-20261115T084128Z/ZA.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZA-s1-20261115T084128Z/ZA.csv` (1511433 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZA-s1-20261115T084128Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZA-s1-20261115T084128Z/launches.txt` (1406 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZC-s1-20261115T084158Z/ZC.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZC-s1-20261115T084158Z/ZC.csv` (166936 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZC-s1-20261115T084158Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZC-s1-20261115T084158Z/launches.txt` (7890 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZC-s2-20261115T130613Z/ZC.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZC-s2-20261115T130613Z/ZC.csv` (167004 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZC-s2-20261115T130613Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZC-s2-20261115T130613Z/launches.txt` (7909 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZD-s1-20261115T084528Z/ZD.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZD-s1-20261115T084528Z/ZD.csv` (952130 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZD-s1-20261115T084528Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZD-s1-20261115T084528Z/launches.txt` (53275 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZD-s2-20261115T130943Z/ZD.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZD-s2-20261115T130943Z/ZD.csv` (952321 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZD-s2-20261115T130943Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZD-s2-20261115T130943Z/launches.txt` (53313 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZM-s1-20261115T094547Z/ZM.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZM-s1-20261115T094547Z/ZM.csv` (847662 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZM-s1-20261115T094547Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZM-s1-20261115T094547Z/launches.txt` (9437 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZM-s2-20261115T141000Z/ZM.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZM-s2-20261115T141000Z/ZM.csv` (847664 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZM-s2-20261115T141000Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZM-s2-20261115T141000Z/launches.txt` (9432 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZN-s1-20261115T092141Z/ZN.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZN-s1-20261115T092141Z/ZN.csv` (650755 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZN-s1-20261115T092141Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZN-s1-20261115T092141Z/launches.txt` (35621 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZN-s2-20261115T134554Z/ZN.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZN-s2-20261115T134554Z/ZN.csv` (650838 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZN-s2-20261115T134554Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZN-s2-20261115T134554Z/launches.txt` (35628 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZS-s1-20261115T100610Z/ZS.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZS-s1-20261115T100610Z/ZS.csv` (265317 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZS-s1-20261115T100610Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZS-s1-20261115T100610Z/launches.txt` (12766 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZS-s2-20261115T143012Z/ZS.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZS-s2-20261115T143012Z/ZS.csv` (265218 mirror bytes).
+- `cache-perf/crb/results/bwx11-ZS-s2-20261115T143012Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx11-ZS-s2-20261115T143012Z/launches.txt` (12765 mirror bytes).
+- `cache-perf/crb/results/bwx8-B6W-s1-20261115T003102Z/B6W.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-B6W-s1-20261115T003102Z/B6W.csv` (38948 mirror bytes).
+- `cache-perf/crb/results/bwx8-B6W-s1-20261115T003102Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-B6W-s1-20261115T003102Z/launches.txt` (952 mirror bytes).
+- `cache-perf/crb/results/bwx8-B6W-s2-20261115T042025Z/B6W.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-B6W-s2-20261115T042025Z/B6W.csv` (38948 mirror bytes).
+- `cache-perf/crb/results/bwx8-B6W-s2-20261115T042025Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-B6W-s2-20261115T042025Z/launches.txt` (974 mirror bytes).
+- `cache-perf/crb/results/bwx8-S2-s1-20261115T003207Z/S2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-S2-s1-20261115T003207Z/S2.csv` (738179 mirror bytes).
+- `cache-perf/crb/results/bwx8-S2-s1-20261115T003207Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-S2-s1-20261115T003207Z/launches.txt` (43769 mirror bytes).
+- `cache-perf/crb/results/bwx8-S2-s2-20261115T042130Z/S2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-S2-s2-20261115T042130Z/S2.csv` (738207 mirror bytes).
+- `cache-perf/crb/results/bwx8-S2-s2-20261115T042130Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-S2-s2-20261115T042130Z/launches.txt` (43729 mirror bytes).
+- `cache-perf/crb/results/bwx8-S4-s1-20261115T010216Z/S4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-S4-s1-20261115T010216Z/S4.csv` (260855 mirror bytes).
+- `cache-perf/crb/results/bwx8-S4-s1-20261115T010216Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-S4-s1-20261115T010216Z/launches.txt` (4495 mirror bytes).
+- `cache-perf/crb/results/bwx8-S4-s2-20261115T045137Z/S4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-S4-s2-20261115T045137Z/S4.csv` (260853 mirror bytes).
+- `cache-perf/crb/results/bwx8-S4-s2-20261115T045137Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx8-S4-s2-20261115T045137Z/launches.txt` (4301 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCA-s1-20261115T053541Z/XCA.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCA-s1-20261115T053541Z/XCA.csv` (231299 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCA-s1-20261115T053541Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCA-s1-20261115T053541Z/launches.txt` (4356 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCA-s2-20261115T102552Z/XCA.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCA-s2-20261115T102552Z/XCA.csv` (231499 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCA-s2-20261115T102552Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCA-s2-20261115T102552Z/launches.txt` (4356 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCB-s1-20261115T054220Z/XCB.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCB-s1-20261115T054220Z/XCB.csv` (219721 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCB-s1-20261115T054220Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCB-s1-20261115T054220Z/launches.txt` (4360 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCB-s2-20261115T103231Z/XCB.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCB-s2-20261115T103231Z/XCB.csv` (219724 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCB-s2-20261115T103231Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCB-s2-20261115T103231Z/launches.txt` (4360 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCC-s1-20261115T054858Z/XCC.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCC-s1-20261115T054858Z/XCC.csv` (205069 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCC-s1-20261115T054858Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCC-s1-20261115T054858Z/launches.txt` (4365 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCC-s2-20261115T103908Z/XCC.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCC-s2-20261115T103908Z/XCC.csv` (205086 mirror bytes).
+- `cache-perf/crb/results/bwx9-XCC-s2-20261115T103908Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XCC-s2-20261115T103908Z/launches.txt` (4350 mirror bytes).
+- `cache-perf/crb/results/bwx9-XEV-s1-20261115T052101Z/XEV.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XEV-s1-20261115T052101Z/XEV.csv` (6681 mirror bytes).
+- `cache-perf/crb/results/bwx9-XEV-s1-20261115T052101Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XEV-s1-20261115T052101Z/launches.txt` (702 mirror bytes).
+- `cache-perf/crb/results/bwx9-XF-s1-20261115T061941Z/XF.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XF-s1-20261115T061941Z/XF.csv` (367840 mirror bytes).
+- `cache-perf/crb/results/bwx9-XF-s1-20261115T061941Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XF-s1-20261115T061941Z/launches.txt` (21786 mirror bytes).
+- `cache-perf/crb/results/bwx9-XF-s2-20261115T110952Z/XF.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XF-s2-20261115T110952Z/XF.csv` (367948 mirror bytes).
+- `cache-perf/crb/results/bwx9-XF-s2-20261115T110952Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XF-s2-20261115T110952Z/launches.txt` (21794 mirror bytes).
+- `cache-perf/crb/results/bwx9-XN-s1-20261115T055535Z/XN.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XN-s1-20261115T055535Z/XN.csv` (614256 mirror bytes).
+- `cache-perf/crb/results/bwx9-XN-s1-20261115T055535Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XN-s1-20261115T055535Z/launches.txt` (35456 mirror bytes).
+- `cache-perf/crb/results/bwx9-XN-s2-20261115T104546Z/XN.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XN-s2-20261115T104546Z/XN.csv` (614234 mirror bytes).
+- `cache-perf/crb/results/bwx9-XN-s2-20261115T104546Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XN-s2-20261115T104546Z/launches.txt` (35461 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/XW.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/XW.csv` (220630 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/launches.txt` (6572 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-0.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-0.txt` (99143 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-1.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-1.txt` (92742 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-10.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-10.txt` (96661 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-11.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-11.txt` (107910 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-12.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-12.txt` (97427 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-13.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-13.txt` (95842 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-14.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-14.txt` (109276 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-15.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-15.txt` (92920 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-16.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-16.txt` (94265 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-17.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-17.txt` (96593 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-18.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-18.txt` (96500 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-19.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-19.txt` (96879 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-2.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-2.txt` (94753 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-20.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-20.txt` (108289 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-21.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-21.txt` (97961 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-22.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-22.txt` (97540 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-23.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-23.txt` (97100 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-24.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-24.txt` (109365 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-25.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-25.txt` (95700 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-26.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-26.txt` (97205 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-27.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-27.txt` (109232 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-3.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-3.txt` (95347 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-4.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-4.txt` (95691 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-5.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-5.txt` (108202 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-6.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-6.txt` (110300 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-7.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-7.txt` (98627 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-8.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-8.txt` (97398 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-9.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s1-20261115T052114Z/watch-9.txt` (110003 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/XW.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/XW.csv` (220628 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/launches.txt` (6587 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-0.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-0.txt` (109899 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-1.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-1.txt` (97950 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-10.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-10.txt` (106997 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-11.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-11.txt` (97792 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-12.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-12.txt` (97755 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-13.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-13.txt` (98541 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-14.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-14.txt` (97016 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-15.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-15.txt` (97560 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-16.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-16.txt` (98536 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-17.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-17.txt` (99921 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-18.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-18.txt` (99157 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-19.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-19.txt` (108139 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-2.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-2.txt` (96013 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-20.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-20.txt` (110325 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-21.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-21.txt` (99567 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-22.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-22.txt` (105752 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-23.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-23.txt` (95281 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-24.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-24.txt` (96668 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-25.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-25.txt` (96427 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-26.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-26.txt` (98723 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-27.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-27.txt` (111420 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-3.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-3.txt` (109248 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-4.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-4.txt` (98738 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-5.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-5.txt` (98630 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-6.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-6.txt` (99068 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-7.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-7.txt` (95265 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-8.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-8.txt` (97490 mirror bytes).
+- `cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-9.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/bwx9-XW-s2-20261115T101125Z/watch-9.txt` (107587 mirror bytes).
+- `cache-perf/crb/results/cread-20261113T060510Z/cread.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/cread-20261113T060510Z/cread.csv` (16240 mirror bytes).
+- `cache-perf/crb/results/cread-20261113T060510Z/make_html.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/cread-20261113T060510Z/make_html.py` (10078 mirror bytes).
+- `cache-perf/crb/results/cread-20261113T060510Z/probe.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/cread-20261113T060510Z/probe.txt` (4333 mirror bytes).
+- `cache-perf/crb/results/h2-s1-20261115T063514Z/H2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/h2-s1-20261115T063514Z/H2.csv` (50600 mirror bytes).
+- `cache-perf/crb/results/h2-s1-20261115T063514Z/env.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/h2-s1-20261115T063514Z/env.txt` (1639 mirror bytes).
+- `cache-perf/crb/results/h2-s1-20261115T063514Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/h2-s1-20261115T063514Z/launches.txt` (17132 mirror bytes).
+- `cache-perf/crb/results/h2-s2-20261115T112456Z/H2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/h2-s2-20261115T112456Z/H2.csv` (50600 mirror bytes).
+- `cache-perf/crb/results/h2-s2-20261115T112456Z/env.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/h2-s2-20261115T112456Z/env.txt` (1656 mirror bytes).
+- `cache-perf/crb/results/h2-s2-20261115T112456Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/h2-s2-20261115T112456Z/launches.txt` (17125 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T181210Z/build.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T181210Z/build.txt` (0 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T181222Z/build.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T181222Z/build.txt` (0 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T181222Z/make_html.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T181222Z/make_html.py` (13322 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T181222Z/one-thread.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T181222Z/one-thread.csv` (118484 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T181222Z/probe.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T181222Z/probe.txt` (13796 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T181222Z/selftest.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T181222Z/selftest.txt` (2194 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T181222Z/summarize.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T181222Z/summarize.py` (1342 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T181222Z/threads120.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T181222Z/threads120.csv` (15340 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T183218Z/build.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T183218Z/build.txt` (0 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T183218Z/probe.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T183218Z/probe.txt` (13716 mirror bytes).
+- `cache-perf/crb/results/kernels-20261113T183218Z/selftest.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T183218Z/selftest.txt` (2194 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T204939Z/A5.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T204939Z/A5.csv` (9728 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T204939Z/A6.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T204939Z/A6.csv` (11376 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T204939Z/env.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T204939Z/env.txt` (897 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T204939Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T204939Z/launches.txt` (4504 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T204939Z/stderr.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T204939Z/stderr.txt` (0 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/A1.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/A1.csv` (124165 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/A2.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/A2.csv` (124301 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/A3.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/A3.csv` (231311 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/A4.csv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/A4.csv` (125559 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/env.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/env.txt` (909 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/launches.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/launches.txt` (13316 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/partA-long.log` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/partA-long.log` (155 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/partA-short.log` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/partA-short.log` (121 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/partA-summary.json` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/partA-summary.json` (608586 mirror bytes).
+- `cache-perf/crb/results/partA-20261113T205055Z/stderr.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partA-20261113T205055Z/stderr.txt` (0 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B1.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B1.txt` (6823 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B10.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B10.txt` (35896 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B2.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B2.txt` (10176 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B3.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B3.txt` (11466 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B4.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B4.txt` (1354 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B5.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B5.txt` (4940 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B6.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B6.txt` (2882 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B7.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B7.txt` (13827 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B8.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B8.txt` (3314 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/B9.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/B9.txt` (2106 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/C1.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/C1.txt` (2559 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/C2.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/C2.txt` (13023 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/C3.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/C3.txt` (48446 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/hypotheses.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/hypotheses.txt` (11924 mirror bytes).
+- `cache-perf/crb/results/partBC-20261114/analysis/summary.json` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/partBC-20261114/analysis/summary.json` (924827 mirror bytes).
+- `cache-perf/crb/results/probe-20261111T210017Z.cmd.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/probe-20261111T210017Z.cmd.txt` (1786 mirror bytes).
+- `cache-perf/crb/results/probe-20261111T210017Z.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/probe-20261111T210017Z.txt` (5186 mirror bytes).
+- `cache-perf/crb/results/sudo-20261102T040631Z/run.log` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T040631Z/run.log` (10541 mirror bytes).
+- `cache-perf/crb/results/sudo-20261102T054936Z/run.log` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/run.log` (10913 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p.py` (2513 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p_fixes.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p_fixes.py` (1876 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p_fixes2.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_brief_p_fixes2.py` (1366 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_record_p.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_record_p.py` (7714 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_record_p2.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_record_p2.py` (35705 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p.py` (14357 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p_fixes.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p_fixes.py` (16990 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p_fixes2.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/apply_report_p_fixes2.py` (7376 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/check3_results.json` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/check3_results.json` (140755 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/check4_results.json` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/check4_results.json` (110461 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.after-section11.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.after-section11.py` (22145 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.before.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.before.py` (21443 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.check3-state.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.check3-state.py` (21908 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.check4-state.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/make-brief.check4-state.py` (22081 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/rates.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/rates.py` (1209 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/recheck_third_pass.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/recheck_third_pass.py` (10608 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/render_parts.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/render_parts.py` (1412 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/sentences_p.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/sentences_p.py` (1485 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/structure_check.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/structure_check.py` (2557 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/sweep_results.json` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/sweep_results.json` (92131 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/texts_p.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/apply-p1-p3-2026-11-12/texts_p.py` (15942 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/analyze_bwx.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/analyze_bwx.py` (67196 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/build.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/build.sh` (4250 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/bwx.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/bwx.c` (50894 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/check_listing.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/check_listing.py` (13093 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/crb-build-1/build.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/crb-build-1/build.txt` (1297 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/crb-build-1/listing.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/crb-build-1/listing.txt` (75230 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/crb-build-2/build.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/crb-build-2/build.txt` (1312 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/crb-build-2/listing.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/crb-build-2/listing.txt` (75145 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/run_bwx.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/run_bwx.sh` (20384 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/test_analyze_bwx.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx-2026-11-13/test_analyze_bwx.py` (47073 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/DECISIONS-bwx8.md` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/DECISIONS-bwx8.md` (51458 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/bwx8.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/bwx8.c` (85771 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/check_accept8.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/check_accept8.py` (1982 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/check_listing8.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/check_listing8.py` (9441 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/crb-build-1/offsets.tsv` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/crb-build-1/offsets.tsv` (858 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/run_bwx8.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/run_bwx8.sh` (14337 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/schedule8.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/schedule8.py` (17172 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/visit8.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx8-2026-11-14/visit8.sh` (1449 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/cmn-s3.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/cmn-s3.txt` (3611020 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/bandwidth_cread.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/bandwidth_cread.c` (17754 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/cread.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/cread.c` (2396 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/make_html.round2.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/make_html.round2.py` (10078 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/probe-cread.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/probe-cread.txt` (2190 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/run_cread.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/cread-2026-11-12/run_cread.sh` (1678 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/bandwidth.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/bandwidth.c` (21499 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/bandwidth.orig.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/bandwidth.orig.c` (15917 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/probe.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/probe.c` (2081 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/run_kernels.sh` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/run_kernels.sh` (4188 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/selftest.c` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/kernels-2026-11-13/selftest.c` (6076 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/hash/hash.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/hash/hash.py` (14875 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/hash/hash2.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/hash/hash2.py` (4084 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/proxyfit/proxy-positions.json` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/proxyfit/proxy-positions.json` (173308 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/proxyfit/proxyfit.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/proxyfit/proxyfit.py` (17822 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/refute-proxy/out.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/refute-proxy/out.txt` (11158 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/trm/pages/p0387.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/trm/pages/p0387.txt` (2145 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/trm/pages/p0390.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/trm/pages/p0390.txt` (2027 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/trm/pages/p0391.txt` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/trm/pages/p0391.txt` (3078 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/worker/apply.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/worker/apply.py` (5478 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/worker/bit6_rule.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/worker/bit6_rule.py` (1821 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/worker/va_rule.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/proxy-examples-2026-11-12/worker/va_rule.py` (977 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_brief_generator.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_brief_generator.py` (1511 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_brief_generator_nowrap.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_brief_generator_nowrap.py` (1147 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_record_10.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_record_10.py` (10729 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_record_check2.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_record_check2.py` (31039 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report.py` (12825 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_bufsize.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_bufsize.py` (1661 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_check2.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_check2.py` (5583 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_comments.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_comments.py` (11626 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_fixes.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/apply_report_fixes.py` (4568 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/check1_results.json` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/slc-rename-2026-11-12/check1_results.json` (249471 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/check_geometry.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/check_geometry.py` (3983 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/mesh_clock.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/mesh_clock.py` (3003 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/port_counts.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/port_counts.py` (4182 mirror bytes).
+- `cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/render.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/spec-row-2026-11-11/render.py` (1142 mirror bytes).
+- `cache-perf/crb/tmp/crb-memory-hierarchy.before-slc-rename.html` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/crb-memory-hierarchy.before-slc-rename.html` (174877 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/crb/tmp/crb-memory-hierarchy.before-slc-rename.html)
+- `cache-perf/crb/tmp/make-brief.before-slc-rename.py` -> `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/tmp/make-brief.before-slc-rename.py` (21221 mirror bytes).
+- `exec/workflows/closer_edit1.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/closer_edit1.py` (9841 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/closer_edit1.py`
+- `exec/workflows/closer_edit9.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/closer_edit9.py` (407 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/closer_edit9.py`
+- `exec/workflows/closer_verify.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/closer_verify.py` (6144 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/closer_verify.py`
+- `exec/workflows/v1_recompute.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/v1_recompute.py` (2740 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/v1_recompute.py`
+- `exec/workflows/v3_num.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/v3_num.py` (5138 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/v3_num.py`
+- `exec/workflows/v4_zero.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/v4_zero.py` (1610 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/v4_zero.py`
+- `exec/workflows/v5_measure.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/v5_measure.py` (3879 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/v5_measure.py`
+- `exec/workflows/v6_recompute.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/v6_recompute.py` (3373 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/v6_recompute.py`
+- `exec/workflows/verify_f2_core.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/verify_f2_core.py` (1393 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/verify_f2_core.py`
+- `exec/workflows/verify_f2_v2.py` -> `claude-agentsrv:/home/jhan/workspace/titan/exec/workflows/verify_f2_v2.py` (2852 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/scripts/codex/verify_f2_v2.py`
+- `home-tmp/investigate-new-c-mysteries.md` -> `claude-agentsrv:/home/jhan/tmp/investigate-new-c-mysteries.md` (42417 mirror bytes).
+- `home-tmp/investigate-new-c-mysteries.md.review.md` -> `claude-agentsrv:/home/jhan/tmp/investigate-new-c-mysteries.md.review.md` (31096 mirror bytes).
+- `home-tmp/k_cread.md` -> `claude-agentsrv:/home/jhan/tmp/k_cread.md` (17075 mirror bytes).
+- `home-tmp/k_cread.md.review.md` -> `claude-agentsrv:/home/jhan/tmp/k_cread.md.review.md` (15384 mirror bytes).
+- `home-tmp/update-crb-memory-hierarchy.md` -> `claude-agentsrv:/home/jhan/tmp/update-crb-memory-hierarchy.md` (196686 mirror bytes).
+- `home-tmp/update-crb-memory-hierarchy.md.review.md` -> `claude-agentsrv:/home/jhan/tmp/update-crb-memory-hierarchy.md.review.md` (28227 mirror bytes).
+- `home-tmp/update_kernel.md` -> `claude-agentsrv:/home/jhan/tmp/update_kernel.md` (28000 mirror bytes).
+- `home-tmp/update_kernel.md.review.md` -> `claude-agentsrv:/home/jhan/tmp/update_kernel.md.review.md` (15196 mirror bytes).
+- `memory/cache-perf-asimov/MEMORY.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-titan-cache-perf-asimov/memory/MEMORY.md` (4131 mirror bytes).
+- `memory/cache-perf-asimov/asimov-cme-test-state.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-titan-cache-perf-asimov/memory/asimov-cme-test-state.md` (46402 mirror bytes).
+- `memory/cache-perf-asimov/asimov-run6-state.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-titan-cache-perf-asimov/memory/asimov-run6-state.md` (9622 mirror bytes).
+- `memory/cache-perf-crb/MEMORY.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-titan-cache-perf-crb/memory/MEMORY.md` (4989 mirror bytes).
+- `memory/cache-perf-crb/perf-measurement-tech-doc.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-titan-cache-perf-crb/memory/perf-measurement-tech-doc.md` (1545 mirror bytes).
+- `review-scratch/asimov-mesh-review-browser.py` -> `claude-agentsrv:/tmp/asimov-mesh-review-browser.py` (2139 mirror bytes).
+- `review-scratch/asimov-mesh-review-browser/results.json` -> `claude-agentsrv:/tmp/asimov-mesh-review-browser/results.json` (209 mirror bytes).
+- `review-scratch/asimov-mesh-review-data.json` -> `claude-agentsrv:/tmp/asimov-mesh-review-data.json` (2451 mirror bytes).
+- `review-scratch/asimov-mesh-review-data.py` -> `claude-agentsrv:/tmp/asimov-mesh-review-data.py` (5826 mirror bytes).
+- `review-scratch/codex-c1nano-review/435968a23bc5f194dafe3aecf687b72928fb0d7fb5c9db620c0be6acf95a2a1f/gen_c1nano_perf.py` -> `claude-agentsrv:/tmp/codex-c1nano-review/435968a23bc5f194dafe3aecf687b72928fb0d7fb5c9db620c0be6acf95a2a1f/gen_c1nano_perf.py` (5778 mirror bytes).
+- `review-scratch/codex-c1nano-review/435968a23bc5f194dafe3aecf687b72928fb0d7fb5c9db620c0be6acf95a2a1f/render/audit.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/435968a23bc5f194dafe3aecf687b72928fb0d7fb5c9db620c0be6acf95a2a1f/render/audit.json` (541256 mirror bytes).
+- `review-scratch/codex-c1nano-review/435968a23bc5f194dafe3aecf687b72928fb0d7fb5c9db620c0be6acf95a2a1f/render/interaction.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/435968a23bc5f194dafe3aecf687b72928fb0d7fb5c9db620c0be6acf95a2a1f/render/interaction.json` (9514 mirror bytes).
+- `review-scratch/codex-c1nano-review/435968a23bc5f194dafe3aecf687b72928fb0d7fb5c9db620c0be6acf95a2a1f/repeatability-independent.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/435968a23bc5f194dafe3aecf687b72928fb0d7fb5c9db620c0be6acf95a2a1f/repeatability-independent.json` (2175 mirror bytes).
+- `review-scratch/codex-c1nano-review/48d9c6ca1b45de258672e22e131d67eb47844bfea33ace8c540d6755ed63bc4a/gen_c1nano_perf.py` -> `claude-agentsrv:/tmp/codex-c1nano-review/48d9c6ca1b45de258672e22e131d67eb47844bfea33ace8c540d6755ed63bc4a/gen_c1nano_perf.py` (5778 mirror bytes).
+- `review-scratch/codex-c1nano-review/48d9c6ca1b45de258672e22e131d67eb47844bfea33ace8c540d6755ed63bc4a/render/audit.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/48d9c6ca1b45de258672e22e131d67eb47844bfea33ace8c540d6755ed63bc4a/render/audit.json` (539461 mirror bytes).
+- `review-scratch/codex-c1nano-review/48d9c6ca1b45de258672e22e131d67eb47844bfea33ace8c540d6755ed63bc4a/render/interaction.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/48d9c6ca1b45de258672e22e131d67eb47844bfea33ace8c540d6755ed63bc4a/render/interaction.json` (9350 mirror bytes).
+- `review-scratch/codex-c1nano-review/48d9c6ca1b45de258672e22e131d67eb47844bfea33ace8c540d6755ed63bc4a/repeatability-evidence.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/48d9c6ca1b45de258672e22e131d67eb47844bfea33ace8c540d6755ed63bc4a/repeatability-evidence.json` (3093 mirror bytes).
+- `review-scratch/codex-c1nano-review/5c3d53a591a501b39a6b1fce4a58904e495c613d3a2f5bb3f012cf52368a76ff/gen_c1nano_perf.py` -> `claude-agentsrv:/tmp/codex-c1nano-review/5c3d53a591a501b39a6b1fce4a58904e495c613d3a2f5bb3f012cf52368a76ff/gen_c1nano_perf.py` (5778 mirror bytes).
+- `review-scratch/codex-c1nano-review/5c3d53a591a501b39a6b1fce4a58904e495c613d3a2f5bb3f012cf52368a76ff/render/audit.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/5c3d53a591a501b39a6b1fce4a58904e495c613d3a2f5bb3f012cf52368a76ff/render/audit.json` (541256 mirror bytes).
+- `review-scratch/codex-c1nano-review/5c3d53a591a501b39a6b1fce4a58904e495c613d3a2f5bb3f012cf52368a76ff/visible-diff.txt` -> `claude-agentsrv:/tmp/codex-c1nano-review/5c3d53a591a501b39a6b1fce4a58904e495c613d3a2f5bb3f012cf52368a76ff/visible-diff.txt` (8307 mirror bytes).
+- `review-scratch/codex-c1nano-review/audit_new_data.py` -> `claude-agentsrv:/tmp/codex-c1nano-review/audit_new_data.py` (10087 mirror bytes).
+- `review-scratch/codex-c1nano-review/new-data-audit-17f70e802c64.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/new-data-audit-17f70e802c64.json` (3690 mirror bytes).
+- `review-scratch/codex-c1nano-review/new-data-audit-23c2045dfdd1.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/new-data-audit-23c2045dfdd1.json` (3690 mirror bytes).
+- `review-scratch/codex-c1nano-review/round2-additions-audit.json` -> `claude-agentsrv:/tmp/codex-c1nano-review/round2-additions-audit.json` (9423 mirror bytes).
+- `review-scratch/codex-cme-review-loop/88eca9932286dec360ec75ecb59a03e6eaf9397a9e38b77d92364d82246bef67/final-diff-check.json` -> `claude-agentsrv:/tmp/codex-cme-review-loop/88eca9932286dec360ec75ecb59a03e6eaf9397a9e38b77d92364d82246bef67/final-diff-check.json` (727 mirror bytes).
+- `review-scratch/codex-cme-review/revision8/mobile-fonts.json` -> `claude-agentsrv:/tmp/codex-cme-review/revision8/mobile-fonts.json` (8062 mirror bytes).
+- `review-scratch/codex-cyclegap-independent.py` -> `claude-agentsrv:/tmp/codex-cyclegap-independent.py` (1373 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline-files.json` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline-files.json` (952 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/c1nano_page/__init__.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/c1nano_page/__init__.py` (0 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/c1nano_page/shell.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/c1nano_page/shell.py` (29704 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/c1nano_page/viz.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/c1nano_page/viz.py` (91285 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/__init__.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/__init__.py` (0 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/data.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/data.py` (121950 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/refs.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/refs.py` (23419 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/sec_bandwidth.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/sec_bandwidth.py` (70978 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/sec_callcost.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/sec_callcost.py` (92109 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/sec_glance.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/sec_glance.py` (61405 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/sec_l3.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/sec_l3.py` (60080 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/sec_latency.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/sec_latency.py` (70061 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/sec_ocm.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/sec_ocm.py` (104180 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/sec_open.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/sec_open.py` (103719 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/sec_setup.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/sec_setup.py` (96934 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/shell.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/shell.py` (26174 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/viz.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/viz.py` (67988 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/cme_page/words.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_page/words.py` (18915 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/est_chip_time.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/est_chip_time.py` (8828 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/gen_cme_perf.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_cme_perf.py` (2540 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/gen_outliers.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_outliers.py` (57603 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/gen_run6.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_run6.py` (20985 mirror bytes).
+- `review-scratch/codex-hop-latency-review/baseline/run_l3.sh` -> `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/run_l3.sh` (11400 mirror bytes).
+- `review-scratch/codex-hop-latency-review/check_handoff.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/check_handoff.py` (718 mirror bytes).
+- `review-scratch/codex-hop-latency-review/harness/est_chip_time.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/harness/est_chip_time.py` (13895 mirror bytes).
+- `review-scratch/codex-hop-latency-review/harness/run_l3.sh` -> `claude-agentsrv:/tmp/codex-hop-latency-review/harness/run_l3.sh` (11400 mirror bytes).
+- `review-scratch/codex-hop-latency-review/harness/run_map.sh` -> `claude-agentsrv:/tmp/codex-hop-latency-review/harness/run_map.sh` (6737 mirror bytes).
+- `review-scratch/codex-hop-latency-review/harness2/old-binary-quick.log` -> `claude-agentsrv:/tmp/codex-hop-latency-review/harness2/old-binary-quick.log` (1107 mirror bytes).
+- `review-scratch/codex-hop-latency-review/harness2/run_l3.sh` -> `claude-agentsrv:/tmp/codex-hop-latency-review/harness2/run_l3.sh` (11400 mirror bytes).
+- `review-scratch/codex-hop-latency-review/harness2/run_map.sh` -> `claude-agentsrv:/tmp/codex-hop-latency-review/harness2/run_map.sh` (7447 mirror bytes).
+- `review-scratch/codex-hop-latency-review/monitor.json` -> `claude-agentsrv:/tmp/codex-hop-latency-review/monitor.json` (201 mirror bytes).
+- `review-scratch/codex-hop-latency-review/ocm_node_repro.c` -> `claude-agentsrv:/tmp/codex-hop-latency-review/ocm_node_repro.c` (1100 mirror bytes).
+- `review-scratch/codex-hop-latency-review/ocm_node_repro_round2.c` -> `claude-agentsrv:/tmp/codex-hop-latency-review/ocm_node_repro_round2.c` (1108 mirror bytes).
+- `review-scratch/codex-hop-latency-review/page_check_round2.c` -> `claude-agentsrv:/tmp/codex-hop-latency-review/page_check_round2.c` (444 mirror bytes).
+- `review-scratch/codex-hop-latency-review/round1/est_chip_time.py` -> `claude-agentsrv:/tmp/codex-hop-latency-review/round1/est_chip_time.py` (13895 mirror bytes).
+- `review-scratch/codex-hop-latency-review/round1/estimator-checks.jsonl` -> `claude-agentsrv:/tmp/codex-hop-latency-review/round1/estimator-checks.jsonl` (422 mirror bytes).
+- `review-scratch/codex-hop-latency-review/round1/meshmap.c` -> `claude-agentsrv:/tmp/codex-hop-latency-review/round1/meshmap.c` (69367 mirror bytes).
+- `review-scratch/codex-hop-latency-review/round1/run_map.sh` -> `claude-agentsrv:/tmp/codex-hop-latency-review/round1/run_map.sh` (6737 mirror bytes).
+- `review-scratch/codex-hop-latency-review/round2/harness-checks.json` -> `claude-agentsrv:/tmp/codex-hop-latency-review/round2/harness-checks.json` (1068 mirror bytes).
+- `review-scratch/codex-hop-latency-review/round2/meshmap.c` -> `claude-agentsrv:/tmp/codex-hop-latency-review/round2/meshmap.c` (82922 mirror bytes).
+- `review-scratch/codex-hop-latency-review/round2/run_map.sh` -> `claude-agentsrv:/tmp/codex-hop-latency-review/round2/run_map.sh` (7447 mirror bytes).
+- `review-scratch/codex-hop-latency-selftest/full.log` -> `claude-agentsrv:/tmp/codex-hop-latency-selftest/full.log` (472 mirror bytes).
+- `review-scratch/codex-hop-latency-selftest/meshmap.c` -> `claude-agentsrv:/tmp/codex-hop-latency-selftest/meshmap.c` (69367 mirror bytes).
+- `review-scratch/codex-hop-latency-selftest/round2/close-shim.c` -> `claude-agentsrv:/tmp/codex-hop-latency-selftest/round2/close-shim.c` (681 mirror bytes).
+- `review-scratch/codex-hop-latency-selftest/round2/meshmap.c` -> `claude-agentsrv:/tmp/codex-hop-latency-selftest/round2/meshmap.c` (82922 mirror bytes).
+- `review-scratch/codex-hop-latency-selftest/round2/results.json` -> `claude-agentsrv:/tmp/codex-hop-latency-selftest/round2/results.json` (1640 mirror bytes).
+- `review-scratch/codex-pr5186-r2-kr7xocre/launcher-tests.log` -> `claude-agentsrv:/tmp/codex-pr5186-r2-kr7xocre/launcher-tests.log` (2153 mirror bytes).
+- `review-scratch/codex-pr5186-r2-kr7xocre/mutation-forwarding.log` -> `claude-agentsrv:/tmp/codex-pr5186-r2-kr7xocre/mutation-forwarding.log` (1147 mirror bytes).
+- `review-scratch/codex-pr5186-review/tag-check.json` -> `claude-agentsrv:/tmp/codex-pr5186-review/tag-check.json` (363 mirror bytes).
+- `review-scratch/followup-monitor/round2/chain_probe.c` -> `claude-agentsrv:/tmp/followup-monitor/round2/chain_probe.c` (2107 mirror bytes).
+- `review-scratch/followup-monitor/round2/common.h` -> `claude-agentsrv:/tmp/followup-monitor/round2/common.h` (20367 mirror bytes).
+- `review-scratch/followup-monitor/round2/est_chip_time.py` -> `claude-agentsrv:/tmp/followup-monitor/round2/est_chip_time.py` (8083 mirror bytes).
+- `review-scratch/followup-monitor/round2/gen_run3.py` -> `claude-agentsrv:/tmp/followup-monitor/round2/gen_run3.py` (106677 mirror bytes).
+- `review-scratch/followup-monitor/round2/latency.c` -> `claude-agentsrv:/tmp/followup-monitor/round2/latency.c` (17864 mirror bytes).
+- `review-scratch/followup-monitor/round2/run_followup.sh` -> `claude-agentsrv:/tmp/followup-monitor/round2/run_followup.sh` (10994 mirror bytes).
+- `review-scratch/followup-monitor/round2/test_lat_rows.py` -> `claude-agentsrv:/tmp/followup-monitor/round2/test_lat_rows.py` (3321 mirror bytes).
+- `review-scratch/followup-pmu-review/parser_probe.py` -> `claude-agentsrv:/tmp/followup-pmu-review/parser_probe.py` (1427 mirror bytes).
+- `review-scratch/followup-pmu-review/probe.c` -> `claude-agentsrv:/tmp/followup-pmu-review/probe.c` (1372 mirror bytes).
+- `review-scratch/followup-pmu-review/round2_mapping_probe.c` -> `claude-agentsrv:/tmp/followup-pmu-review/round2_mapping_probe.c` (3077 mirror bytes).
+- `review-scratch/followup-r2-context.py` -> `claude-agentsrv:/tmp/followup-r2-context.py` (2554 mirror bytes).
+- `review-scratch/followup-round11-e024d57/bandwidth.c` -> `claude-agentsrv:/tmp/followup-round11-e024d57/bandwidth.c` (27045 mirror bytes).
+- `review-scratch/followup-round11-e024d57/cme_kern.S` -> `claude-agentsrv:/tmp/followup-round11-e024d57/cme_kern.S` (6940 mirror bytes).
+- `review-scratch/followup-round11-e024d57/common.h` -> `claude-agentsrv:/tmp/followup-round11-e024d57/common.h` (23996 mirror bytes).
+- `review-scratch/followup-round11-e024d57/est_chip_time.py` -> `claude-agentsrv:/tmp/followup-round11-e024d57/est_chip_time.py` (8673 mirror bytes).
+- `review-scratch/followup-round11-e024d57/estimator-calls-check.json` -> `claude-agentsrv:/tmp/followup-round11-e024d57/estimator-calls-check.json` (1291 mirror bytes).
+- `review-scratch/followup-round11-e024d57/latency.c` -> `claude-agentsrv:/tmp/followup-round11-e024d57/latency.c` (19061 mirror bytes).
+- `review-scratch/followup-round11-e024d57/lib_run.sh` -> `claude-agentsrv:/tmp/followup-round11-e024d57/lib_run.sh` (4616 mirror bytes).
+- `review-scratch/followup-round11-e024d57/outcome-rule-counterexample.json` -> `claude-agentsrv:/tmp/followup-round11-e024d57/outcome-rule-counterexample.json` (431 mirror bytes).
+- `review-scratch/followup-round11-e024d57/run_followup.sh` -> `claude-agentsrv:/tmp/followup-round11-e024d57/run_followup.sh` (21814 mirror bytes).
+- `review-scratch/followup-round17-c9b5b8b/arm-cmn.c` -> `claude-agentsrv:/tmp/followup-round17-c9b5b8b/arm-cmn.c` (92955 mirror bytes).
+- `review-scratch/followup-round17-c9b5b8b/bandwidth.c` -> `claude-agentsrv:/tmp/followup-round17-c9b5b8b/bandwidth.c` (31086 mirror bytes).
+- `review-scratch/followup-round17-c9b5b8b/common.h` -> `claude-agentsrv:/tmp/followup-round17-c9b5b8b/common.h` (27257 mirror bytes).
+- `review-scratch/followup-round17-c9b5b8b/est_chip_time.py` -> `claude-agentsrv:/tmp/followup-round17-c9b5b8b/est_chip_time.py` (8828 mirror bytes).
+- `review-scratch/followup-round17-c9b5b8b/lib_run.sh` -> `claude-agentsrv:/tmp/followup-round17-c9b5b8b/lib_run.sh` (5655 mirror bytes).
+- `review-scratch/followup-round17-c9b5b8b/run_l3.sh` -> `claude-agentsrv:/tmp/followup-round17-c9b5b8b/run_l3.sh` (7220 mirror bytes).
+- `review-scratch/followup-round20-ba93ae1/bandwidth.c` -> `claude-agentsrv:/tmp/followup-round20-ba93ae1/bandwidth.c` (32015 mirror bytes).
+- `review-scratch/followup-round20-ba93ae1/common.h` -> `claude-agentsrv:/tmp/followup-round20-ba93ae1/common.h` (28466 mirror bytes).
+- `review-scratch/followup-round20-ba93ae1/est_chip_time.py` -> `claude-agentsrv:/tmp/followup-round20-ba93ae1/est_chip_time.py` (8828 mirror bytes).
+- `review-scratch/followup-round20-ba93ae1/pf_then_prefetch.txt` -> `claude-agentsrv:/tmp/followup-round20-ba93ae1/pf_then_prefetch.txt` (760 mirror bytes).
+- `review-scratch/followup-round20-ba93ae1/prefetch_without_perf.txt` -> `claude-agentsrv:/tmp/followup-round20-ba93ae1/prefetch_without_perf.txt` (401 mirror bytes).
+- `review-scratch/followup-round20-ba93ae1/run_l3.sh` -> `claude-agentsrv:/tmp/followup-round20-ba93ae1/run_l3.sh` (9262 mirror bytes).
+- `review-scratch/pr5186-round2-gate-3j46q037/mutation-default18.log` -> `claude-agentsrv:/tmp/pr5186-round2-gate-3j46q037/mutation-default18.log` (2100 mirror bytes).
+- `review-scratch/pr5186-round2-gate-3j46q037/mutation-lane0-literal18.log` -> `claude-agentsrv:/tmp/pr5186-round2-gate-3j46q037/mutation-lane0-literal18.log` (1224 mirror bytes).
+- `review-scratch/pr5186-round2-gate-3j46q037/patched.log` -> `claude-agentsrv:/tmp/pr5186-round2-gate-3j46q037/patched.log` (3270 mirror bytes).
+- `review-scratch/review-run5c-numeric.json` -> `claude-agentsrv:/tmp/review-run5c-numeric.json` (5855 mirror bytes).
+- `review-scratch/round11-asm-review-pbn6nwsc/bandwidth.c` -> `claude-agentsrv:/tmp/round11-asm-review-pbn6nwsc/bandwidth.c` (27045 mirror bytes).
+- `review-scratch/round11-asm-review-pbn6nwsc/common.h` -> `claude-agentsrv:/tmp/round11-asm-review-pbn6nwsc/common.h` (23996 mirror bytes).
+- `review-scratch/round11-asm-review-pbn6nwsc/report.json` -> `claude-agentsrv:/tmp/round11-asm-review-pbn6nwsc/report.json` (1293 mirror bytes).
+- `review-scratch/round17-review/queue_failure_probe.sh` -> `claude-agentsrv:/tmp/round17-review/queue_failure_probe.sh` (208 mirror bytes).
+
+### home-tmp/investigate-new-c-mysteries.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [home-tmp/investigate-new-c-mysteries.md.lineage.md](home-tmp/investigate-new-c-mysteries.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### home-tmp/investigate-new-c-mysteries.md.review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [home-tmp/investigate-new-c-mysteries.md.review.md.lineage.md](home-tmp/investigate-new-c-mysteries.md.review.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### home-tmp/k_cread.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [home-tmp/k_cread.md.lineage.md](home-tmp/k_cread.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### home-tmp/k_cread.md.review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [home-tmp/k_cread.md.review.md.lineage.md](home-tmp/k_cread.md.review.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### home-tmp/update-crb-memory-hierarchy.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [home-tmp/update-crb-memory-hierarchy.md.lineage.md](home-tmp/update-crb-memory-hierarchy.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### home-tmp/update-crb-memory-hierarchy.md.review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [home-tmp/update-crb-memory-hierarchy.md.review.md.lineage.md](home-tmp/update-crb-memory-hierarchy.md.review.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### home-tmp/update_kernel.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [home-tmp/update_kernel.md.lineage.md](home-tmp/update_kernel.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### home-tmp/update_kernel.md.review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [home-tmp/update_kernel.md.review.md.lineage.md](home-tmp/update_kernel.md.review.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/asimov-c1nano-perf-brief.html
+
+- generator: /home/jhan/workspace/titan/cache-perf/asimov/gen_brief.py
+- input: Source rows and modules listed in the companion inventory
+- input built by: gen_run4.py for run4-bootA-facts.json
+- sources: See [cache-perf/asimov/asimov-c1nano-perf-brief.html.lineage.md](cache-perf/asimov/asimov-c1nano-perf-brief.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: unavailable (generator writes to fixed paths)
+- regenerate unverified (unavailable (generator writes to fixed paths))
+
+### cache-perf/asimov/asimov-c1nano-perf.html
+
+- generator: /home/jhan/workspace/titan/cache-perf/asimov/gen_c1nano_perf.py
+- input: Source rows and modules listed in the companion inventory
+- input built by: none
+- sources: See [cache-perf/asimov/asimov-c1nano-perf.html.lineage.md](cache-perf/asimov/asimov-c1nano-perf.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: python3 gen_c1nano_perf.py --out <OUT>
+- regenerate verified 2026-11-20 (byte-identical from preserved inputs)
+
+### cache-perf/asimov/asimov-cme-perf-brief.html
+
+- generator: /home/jhan/workspace/titan/cache-perf/asimov/gen_brief.py
+- input: Source rows and modules listed in the companion inventory
+- input built by: gen_run4.py for run4-bootA-facts.json
+- sources: See [cache-perf/asimov/asimov-cme-perf-brief.html.lineage.md](cache-perf/asimov/asimov-cme-perf-brief.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: unavailable (generator writes to fixed paths)
+- regenerate unverified (unavailable (generator writes to fixed paths))
+
+### cache-perf/asimov/asimov-cme-perf.html
+
+- generator: /home/jhan/workspace/titan/cache-perf/asimov/gen_cme_perf.py
+- input: Source rows and modules listed in the companion inventory
+- input built by: none
+- sources: See [cache-perf/asimov/asimov-cme-perf.html.lineage.md](cache-perf/asimov/asimov-cme-perf.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: unavailable (generator writes to a fixed path)
+- regenerate unverified (unavailable (generator writes to a fixed path))
+
+### cache-perf/asimov/asimov-mesh-map.html
+
+- generator: /home/jhan/workspace/titan/cache-perf/asimov/gen_mesh_map.py
+- input: Source rows and modules listed in the companion inventory
+- input built by: none
+- sources: See [cache-perf/asimov/asimov-mesh-map.html.lineage.md](cache-perf/asimov/asimov-mesh-map.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: python3 gen_mesh_map.py --out <OUT>
+- regenerate verified 2026-11-20 (byte-identical from preserved inputs)
+
+### cache-perf/asimov/asimov-mesh-map.html.review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/asimov-mesh-map.html.review.md.lineage.md](cache-perf/asimov/asimov-mesh-map.html.review.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/codex-review-asimov-c1nano-perf.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/codex-review-asimov-c1nano-perf.md.lineage.md](cache-perf/asimov/codex-review-asimov-c1nano-perf.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/codex-review-asimov-cme-perf.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/codex-review-asimov-cme-perf.md.lineage.md](cache-perf/asimov/codex-review-asimov-cme-perf.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/codex-review-follow-up-run-plan.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/codex-review-follow-up-run-plan.md.lineage.md](cache-perf/asimov/codex-review-follow-up-run-plan.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/codex-review-measure-hop-latency.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/codex-review-measure-hop-latency.md.lineage.md](cache-perf/asimov/codex-review-measure-hop-latency.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/codex-review-run3.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/codex-review-run3.md.lineage.md](cache-perf/asimov/codex-review-run3.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/follow-up-run-plan.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/follow-up-run-plan.md.lineage.md](cache-perf/asimov/follow-up-run-plan.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/measure-hop-latency.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/measure-hop-latency.md.lineage.md](cache-perf/asimov/measure-hop-latency.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/sequential-reads-L3-on-better-bandwidth.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/sequential-reads-L3-on-better-bandwidth.md.lineage.md](cache-perf/asimov/sequential-reads-L3-on-better-bandwidth.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/sequential-reads-L3-proof-plan.html
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/sequential-reads-L3-proof-plan.html.lineage.md](cache-perf/asimov/sequential-reads-L3-proof-plan.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/thuan-pr/codex-review-pr5186-fix.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/thuan-pr/codex-review-pr5186-fix.md.lineage.md](cache-perf/asimov/thuan-pr/codex-review-pr5186-fix.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/asimov/thuan-pr/pr5186-fix.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/asimov/thuan-pr/pr5186-fix.md.lineage.md](cache-perf/asimov/thuan-pr/pr5186-fix.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/codex-review-crb-memory-hierarchy-brief.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/codex-review-crb-memory-hierarchy-brief.md.lineage.md](cache-perf/crb/codex-review-crb-memory-hierarchy-brief.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/codex-review-mesh0-or-mesh1.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/codex-review-mesh0-or-mesh1.md.lineage.md](cache-perf/crb/codex-review-mesh0-or-mesh1.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/crb-memory-hierarchy-brief.html
+
+- generator: /home/jhan/workspace/titan/cache-perf/crb/make-brief.py
+- input: Source rows and modules listed in the companion inventory
+- input built by: none
+- sources: See [cache-perf/crb/crb-memory-hierarchy-brief.html.lineage.md](cache-perf/crb/crb-memory-hierarchy-brief.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: unavailable (fixed output and absolute paths in generator)
+- regenerate unverified (unavailable (fixed output and absolute paths in generator))
+
+### cache-perf/crb/crb-memory-hierarchy.html
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/crb-memory-hierarchy.html.lineage.md](cache-perf/crb/crb-memory-hierarchy.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/crb-memory-hierarchy.html.review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/crb-memory-hierarchy.html.review.md.lineage.md](cache-perf/crb/crb-memory-hierarchy.html.review.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/mesh0-or-mesh1.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/mesh0-or-mesh1.md.lineage.md](cache-perf/crb/mesh0-or-mesh1.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/new-test-kernel/handoff.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/new-test-kernel/handoff.md.lineage.md](cache-perf/crb/new-test-kernel/handoff.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/new-test-kernel/handoff.md.review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/new-test-kernel/handoff.md.review.md.lineage.md](cache-perf/crb/new-test-kernel/handoff.md.review.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/new-test-kernel/results.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/new-test-kernel/results.md.lineage.md](cache-perf/crb/new-test-kernel/results.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/new-test-kernel/results.md.review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/new-test-kernel/results.md.review.md.lineage.md](cache-perf/crb/new-test-kernel/results.md.review.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/new-test-kernel/tackle-8mb-handoff.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/new-test-kernel/tackle-8mb-handoff.md.lineage.md](cache-perf/crb/new-test-kernel/tackle-8mb-handoff.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/new-test-kernel/tackle-8mb-report.html
+
+- generator: /home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/tackle-8mb-analysis/report_final.py
+- input: tackle-8mb-analysis/final8.json, raw H2.csv and S4.csv, and the decision record
+- input built by: final8.py reads s12-summary.json built with BWX8_NIVCSW_PER_S=3.0 by analyze8.py
+- sources: See [cache-perf/crb/new-test-kernel/tackle-8mb-report.html.lineage.md](cache-perf/crb/new-test-kernel/tackle-8mb-report.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: python3 tackle-8mb-analysis/report_final.py --results ../results --date 2026-11-15 -o <OUT>
+- regenerate verified 2026-11-20 (all bytes match after normalizing the reference directory paths printed by the generator)
+
+### cache-perf/crb/new-test-kernel/tackle-8mb.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/new-test-kernel/tackle-8mb.md.lineage.md](cache-perf/crb/new-test-kernel/tackle-8mb.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/new-test-kernel/tackle-8mb.md.review.md
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/new-test-kernel/tackle-8mb.md.review.md.lineage.md](cache-perf/crb/new-test-kernel/tackle-8mb.md.review.md.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### cache-perf/crb/tmp/crb-memory-hierarchy.before-slc-rename.html
+
+- generator: none
+- input: none
+- input built by: none
+- sources: See [cache-perf/crb/tmp/crb-memory-hierarchy.before-slc-rename.html.lineage.md](cache-perf/crb/tmp/crb-memory-hierarchy.before-slc-rename.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: none
+- regenerate unverified (authored document, no generation command)
+
+### Sources left behind
+
+- `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B7-20261113T232859Z/B7.csv` — left behind (size), 8339498 bytes.
+- `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/B7-20261114T024352Z/B7.csv` — left behind (size), 8339297 bytes.
+- `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/C3-20261114T022708Z/C3.csv` — left behind (size), 7363534 bytes.
+- `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/C3-20261114T054116Z/C3.csv` — left behind (size), 7362604 bytes.
+- `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/full/homes.csv` — left behind (size), 7687696 bytes.
+- `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/review/codex/closer/final.txt` — left behind (provenance (layout validation output)), 334154 bytes.
+- `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/review/codex/closer/final_svg.txt` — left behind (provenance (layout validation output)), 371006 bytes.
+- `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/review/codex/integ/before.txt` — left behind (provenance (layout validation output)), 311397 bytes.
+- `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/495815bc-dbda-43cc-9015-e0d1efe06259/scratchpad/cme/review/codex/integ/final_svg.txt` — left behind (provenance (layout validation output)), 370082 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/bandwidth.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/bandwidth.c)), 32839 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/bandwidth_r2.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/bandwidth_r2.c)), 16161 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/bandwidth_r3.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/bandwidth_r3.c)), 17265 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cme_test.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/cme_test.c)), 7224 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/cmncount.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/cmncount.c)), 14606 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_brief.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/gen_brief.py)), 44356 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_hierarchy.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/gen_hierarchy.py)), 83503 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_perf.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/gen_perf.py)), 30996 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_perf_cme.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/gen_perf_cme.py)), 112077 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_perf_core.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/gen_perf_core.py)), 134845 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_run3.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/gen_run3.py)), 142695 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/gen_run4.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/gen_run4.py)), 179906 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/l1_reader.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/l1_reader.py)), 6797 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/latency.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/latency.c)), 20871 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/lib_run.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/lib_run.sh)), 6062 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/perf_cov_test.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/perf_cov_test.c)), 2674 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/run_all.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_all.sh)), 1076 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/run_asimov.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_asimov.sh)), 13081 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/run_cme.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_cme.sh)), 10804 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/run_followup.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_followup.sh)), 21823 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/baseline/test_lat_rows.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/test_lat_rows.py)), 4484 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness/lib_run.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/lib_run.sh)), 6062 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness/run_all.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_all.sh)), 1076 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness/run_asimov.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_asimov.sh)), 13081 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness/run_cme.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_cme.sh)), 10804 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness/run_followup.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_followup.sh)), 21823 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness2/est_chip_time.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/est_chip_time.py)), 14194 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness2/lib_run.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/lib_run.sh)), 6062 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness2/run_all.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_all.sh)), 1076 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness2/run_asimov.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_asimov.sh)), 13081 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness2/run_cme.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_cme.sh)), 10804 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/harness2/run_followup.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/run_followup.sh)), 21823 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/round1/common.h` — left behind (duplicate (artifacts/titan/cache-perf/asimov/common.h)), 31431 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/round2/common.h` — left behind (duplicate (artifacts/titan/cache-perf/asimov/common.h)), 31431 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-review/round2/est_chip_time.py` — left behind (duplicate (artifacts/titan/cache-perf/asimov/est_chip_time.py)), 14194 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-selftest/common.h` — left behind (duplicate (artifacts/titan/cache-perf/asimov/common.h)), 31431 bytes.
+- `claude-agentsrv:/tmp/codex-hop-latency-selftest/round2/common.h` — left behind (duplicate (artifacts/titan/cache-perf/asimov/common.h)), 31431 bytes.
+- `claude-agentsrv:/tmp/followup-round11-e024d57/bandwidth_r3.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/bandwidth_r3.c)), 17265 bytes.
+- `claude-agentsrv:/tmp/followup-round11-e024d57/cmncount.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/cmncount.c)), 14606 bytes.
+- `claude-agentsrv:/tmp/followup-round17-c9b5b8b/cmncount.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/cmncount.c)), 14606 bytes.
+- `claude-agentsrv:/tmp/followup-round17-c9b5b8b/latency.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/latency.c)), 20871 bytes.
+- `claude-agentsrv:/tmp/followup-round20-ba93ae1/cmncount.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/cmncount.c)), 14606 bytes.
+- `claude-agentsrv:/tmp/followup-round20-ba93ae1/latency.c` — left behind (duplicate (artifacts/titan/cache-perf/asimov/latency.c)), 20871 bytes.
+- `claude-agentsrv:/tmp/followup-round20-ba93ae1/lib_run.sh` — left behind (duplicate (artifacts/titan/cache-perf/asimov/lib_run.sh)), 6062 bytes.
+
+### Related handoffs
+
+- [Review RUN2-PLAN.md](../../handoffs/codex_20261101-20261104_review-run2-plan-md.md)
+- [Review CME profiling plan](../../handoffs/codex_20261102-20261108_review-cme-profiling-plan.md)
+- [Plan L3 interpretation tests](../../handoffs/codex_20261108_plan-l3-interpretation-tests.md)
+- [Review Claude's mesh answers](../../handoffs/codex_20261109_review-claude-mesh-answers.md)
+- [Review memory hierarchy brief](../../handoffs/codex_20261110_review-memory-hierarchy-brief.md)
+- [Review asimov-cme-perf.html](../../handoffs/codex_20261110_review-asimov-cme-perf-html.md)
+- [Start Claude review loop](../../handoffs/codex_20261110_start-claude-review-loop-c1nano.md)
+- [Start Claude review loop](../../handoffs/codex_20261110_start-claude-review-loop-hop-latency.md)
+- [Review pr5186 fix](../../handoffs/codex_20261110-20261111_review-pr5186-fix.md)
+- [Review CRB memory hierarchy](../../handoffs/codex_20261111_review-crb-memory-hierarchy.md)
+- [Review asimov-mesh-map.html](../../handoffs/codex_20261112_review-asimov-mesh-map-html.md)
+- [Review memory hierarchy changes](../../handoffs/codex_20261112_review-memory-hierarchy-changes.md)
+- [Monitor and review k_cread.md](../../handoffs/codex_20261112_monitor-and-review-k-cread-md.md)
+- [Review kernel update](../../handoffs/codex_20261113_review-kernel-update.md)
+- [Monitor inter-agent review loop](../../handoffs/codex_20261113_monitor-inter-agent-review-loop.md)
+- [Review results.md](../../handoffs/codex_20261113-20261114_review-results-md.md)
+- [One thing does not make sense to me](../../handoffs/codex_20261115-20261116_one-thing-does-not-make-sense-to-me.md)

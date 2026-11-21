@@ -7,6 +7,7 @@
  * bytes moved and their own elapsed time. GB means 1e9 bytes throughout.
  */
 #define _GNU_SOURCE
+#include <arm_neon.h> /* NEON intrinsics for the C kernels: this file builds on AArch64 only */
 #include <pthread.h>
 #include <sched.h>
 #include <stdint.h>
@@ -132,9 +133,13 @@ static uint64_t *alloc_buf(uint64_t bytes)
     return (uint64_t *)p;
 }
 
-/* 16 independent accumulators keep the loop load-bound: on 128-bit NEON gcc
- * folds them into 8 vector chains, enough to hide a 2-cycle add latency;
- * on AVX-512 they become 2 zmm chains. */
+/*
+ * History: k_read, k_write and k_copy as they were until 2026-11-13. They
+ * are replaced by the C kernels below. The old comment of k_read was: "16
+ * independent accumulators keep the loop load-bound: on 128-bit NEON gcc
+ * folds them into 8 vector chains, enough to hide a 2-cycle add latency; on
+ * AVX-512 they become 2 zmm chains."
+ *
 __attribute__((noinline)) static uint64_t k_read(const uint64_t *a, size_t n)
 {
     uint64_t s[16] = { 0 };
@@ -157,6 +162,125 @@ __attribute__((noinline)) static void k_copy(uint64_t *restrict d, const uint64_
 {
     for (size_t i = 0; i < n; i++)
         d[i] = s[i];
+}
+ */
+
+/*
+ * C kernels: the same algorithm as the asm kernels below, written with NEON
+ * intrinsics. Each iteration moves 256 B as 16 vectors of 16 B and does no
+ * arithmetic on the data. Callers guarantee n * 8 is a multiple of 256 and
+ * non-zero. The compiler chooses the machine code: check it with objdump
+ * after a change of compiler or flags.
+ *
+ * k_read and k_copy contain an empty asm statement that takes the 16 loaded
+ * vectors as inputs in NEON registers ("w"). gcc must have all 16 values in
+ * registers at that point. In k_read this keeps gcc from deleting the loads.
+ * The statement adds no instruction. It does not fix the order of the loads
+ * and the stores of k_copy: gcc may move code across it. Observed with gcc
+ * 14.2.0 and the Makefile flags: with the statement, k_copy has its 8 ldp
+ * ahead of its 8 stp, as k_asmcopy has; without it, loads and stores
+ * alternate.
+ */
+__attribute__((noinline)) static void k_read(const uint64_t *a, size_t n)
+{
+    const uint64_t *p = a;
+    const uint64_t *end = a + n;
+    do {
+        uint64x2_t v0 = vld1q_u64(p + 0);
+        uint64x2_t v1 = vld1q_u64(p + 2);
+        uint64x2_t v2 = vld1q_u64(p + 4);
+        uint64x2_t v3 = vld1q_u64(p + 6);
+        uint64x2_t v4 = vld1q_u64(p + 8);
+        uint64x2_t v5 = vld1q_u64(p + 10);
+        uint64x2_t v6 = vld1q_u64(p + 12);
+        uint64x2_t v7 = vld1q_u64(p + 14);
+        uint64x2_t v8 = vld1q_u64(p + 16);
+        uint64x2_t v9 = vld1q_u64(p + 18);
+        uint64x2_t v10 = vld1q_u64(p + 20);
+        uint64x2_t v11 = vld1q_u64(p + 22);
+        uint64x2_t v12 = vld1q_u64(p + 24);
+        uint64x2_t v13 = vld1q_u64(p + 26);
+        uint64x2_t v14 = vld1q_u64(p + 28);
+        uint64x2_t v15 = vld1q_u64(p + 30);
+        __asm__ volatile("" : : "w"(v0), "w"(v1), "w"(v2), "w"(v3),
+                         "w"(v4), "w"(v5), "w"(v6), "w"(v7),
+                         "w"(v8), "w"(v9), "w"(v10), "w"(v11),
+                         "w"(v12), "w"(v13), "w"(v14), "w"(v15));
+        p += 32;
+    } while (p < end);
+}
+
+__attribute__((noinline)) static void k_write(uint64_t *a, size_t n, uint64_t v)
+{
+    uint64_t *p = a;
+    const uint64_t *end = a + n;
+    uint64x2_t q = vdupq_n_u64(v);
+    do {
+        vst1q_u64(p + 0, q);
+        vst1q_u64(p + 2, q);
+        vst1q_u64(p + 4, q);
+        vst1q_u64(p + 6, q);
+        vst1q_u64(p + 8, q);
+        vst1q_u64(p + 10, q);
+        vst1q_u64(p + 12, q);
+        vst1q_u64(p + 14, q);
+        vst1q_u64(p + 16, q);
+        vst1q_u64(p + 18, q);
+        vst1q_u64(p + 20, q);
+        vst1q_u64(p + 22, q);
+        vst1q_u64(p + 24, q);
+        vst1q_u64(p + 26, q);
+        vst1q_u64(p + 28, q);
+        vst1q_u64(p + 30, q);
+        p += 32;
+    } while (p < end);
+}
+
+__attribute__((noinline)) static void k_copy(uint64_t *restrict d, const uint64_t *restrict s, size_t n)
+{
+    uint64_t *dp = d;
+    const uint64_t *sp = s;
+    const uint64_t *end = s + n;
+    do {
+        uint64x2_t v0 = vld1q_u64(sp + 0);
+        uint64x2_t v1 = vld1q_u64(sp + 2);
+        uint64x2_t v2 = vld1q_u64(sp + 4);
+        uint64x2_t v3 = vld1q_u64(sp + 6);
+        uint64x2_t v4 = vld1q_u64(sp + 8);
+        uint64x2_t v5 = vld1q_u64(sp + 10);
+        uint64x2_t v6 = vld1q_u64(sp + 12);
+        uint64x2_t v7 = vld1q_u64(sp + 14);
+        uint64x2_t v8 = vld1q_u64(sp + 16);
+        uint64x2_t v9 = vld1q_u64(sp + 18);
+        uint64x2_t v10 = vld1q_u64(sp + 20);
+        uint64x2_t v11 = vld1q_u64(sp + 22);
+        uint64x2_t v12 = vld1q_u64(sp + 24);
+        uint64x2_t v13 = vld1q_u64(sp + 26);
+        uint64x2_t v14 = vld1q_u64(sp + 28);
+        uint64x2_t v15 = vld1q_u64(sp + 30);
+        __asm__ volatile("" : : "w"(v0), "w"(v1), "w"(v2), "w"(v3),
+                         "w"(v4), "w"(v5), "w"(v6), "w"(v7),
+                         "w"(v8), "w"(v9), "w"(v10), "w"(v11),
+                         "w"(v12), "w"(v13), "w"(v14), "w"(v15));
+        vst1q_u64(dp + 0, v0);
+        vst1q_u64(dp + 2, v1);
+        vst1q_u64(dp + 4, v2);
+        vst1q_u64(dp + 6, v3);
+        vst1q_u64(dp + 8, v4);
+        vst1q_u64(dp + 10, v5);
+        vst1q_u64(dp + 12, v6);
+        vst1q_u64(dp + 14, v7);
+        vst1q_u64(dp + 16, v8);
+        vst1q_u64(dp + 18, v9);
+        vst1q_u64(dp + 20, v10);
+        vst1q_u64(dp + 22, v11);
+        vst1q_u64(dp + 24, v12);
+        vst1q_u64(dp + 26, v13);
+        vst1q_u64(dp + 28, v14);
+        vst1q_u64(dp + 30, v15);
+        sp += 32;
+        dp += 32;
+    } while (sp < end);
 }
 
 /*
@@ -254,9 +378,13 @@ __attribute__((noinline)) static void k_asmcopy(uint64_t *restrict d, const uint
 #define HAVE_ASM_KERNELS 0
 #endif
 
-/* One pass over the thread's buffer; returns bytes moved. The sink is per
- * thread (on its stack) so the read kernels of 120 threads do not all store
- * to one shared cache line. */
+/*
+ * History: pass() as it was until 2026-11-13, when the old k_read returned a
+ * sum. Its comment was: "One pass over the thread's buffer; returns bytes
+ * moved. The sink is per thread (on its stack) so the read kernels of 120
+ * threads do not all store to one shared cache line." worker() had a local
+ * "volatile uint64_t sink" and passed "&sink" in its two pass() calls.
+ *
 static uint64_t pass(enum kernel k, struct thread *t, size_t n, uint64_t v, volatile uint64_t *sink)
 {
     switch (k) {
@@ -284,12 +412,41 @@ static uint64_t pass(enum kernel k, struct thread *t, size_t n, uint64_t v, vola
         return 0;
     }
 }
+ */
+
+/* One pass over the thread's buffer; returns bytes moved. */
+static uint64_t pass(enum kernel k, struct thread *t, size_t n, uint64_t v)
+{
+    switch (k) {
+    case K_READ:
+        k_read(t->a, n);
+        return cfg.bytes;
+    case K_WRITE:
+        k_write(t->a, n, v);
+        return cfg.bytes;
+    case K_COPY:
+        k_copy(t->b, t->a, n);
+        return 2 * cfg.bytes;
+#if HAVE_ASM_KERNELS
+    case K_ASMREAD:
+        k_asmread(t->a, n);
+        return cfg.bytes;
+    case K_ASMWRITE:
+        k_asmwrite(t->a, n, v);
+        return cfg.bytes;
+    case K_ASMCOPY:
+        k_asmcopy(t->b, t->a, n);
+        return 2 * cfg.bytes;
+#endif
+    default:
+        return 0;
+    }
+}
 
 static void *worker(void *arg)
 {
     struct thread *t = arg;
     size_t n = cfg.bytes / 8;
-    volatile uint64_t sink;
     /* Runtime-dependent, non-byte-repeating store value: cannot fold to memset. */
     uint64_t v = ((uint64_t)getpid() + (uint64_t)t->idx + 1) * 0x9E3779B97F4A7C15ULL;
     uint64_t passes_per_check = CHECK_BYTES / cfg.bytes;
@@ -309,13 +466,13 @@ static void *worker(void *arg)
         if (!cfg.run[k])
             continue;
         for (int rep = 0; rep < cfg.reps; rep++) {
-            pass(k, t, n, v, &sink); /* warm-up */
+            pass(k, t, n, v); /* warm-up */
             pthread_barrier_wait(&bar);
             double t0 = now_s(), t1;
             uint64_t bytes = 0, p = 0;
             do {
                 for (uint64_t c = 0; c < passes_per_check; c++, p++)
-                    bytes += pass(k, t, n, v + p, &sink);
+                    bytes += pass(k, t, n, v + p);
                 t1 = now_s();
             } while (t1 - t0 < cfg.min_s);
             t->res[k][rep].bytes = bytes;
@@ -332,7 +489,7 @@ static void usage(void)
             "usage: bandwidth [--threads T --cpus LIST] [--bytes B] "
             "[--kernel read|write|copy|all|asmread|asmwrite|asmcopy|asmall] "
             "[--min-ms MS] [--reps R] [--no-thp] [--per-thread]\n"
-            "  asm* kernels: aarch64 only, loads/stores only, bytes must be a multiple of 256\n");
+            "  all kernels: loads/stores only, bytes must be a multiple of 256; the program builds on AArch64 only\n");
     exit(2);
 }
 

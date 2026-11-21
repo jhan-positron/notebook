@@ -1,3 +1,22 @@
+# Source inventory update, 2026-11-20
+
+Canonical files are on claude-agentsrv. The sizes below are bytes.
+
+| Canonical file | Notebook path or reason | Bytes |
+|---|---|---:|
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/bench/subtract.py` | artifacts/titan/cache-perf/bench/subtract.py | 3414 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/make-brief.py` | artifacts/titan/cache-perf/crb/make-brief.py | 22145 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup3-20261102T031936Z/percore-latency-1.csv` | artifacts/titan/cache-perf/crb/results/followup3-20261102T031936Z/percore-latency-1.csv | 71430 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup3-20261102T031936Z/perthread-asmread-3M-40.csv` | artifacts/titan/cache-perf/crb/results/followup3-20261102T031936Z/perthread-asmread-3M-40.csv | 3981 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup3-20261102T031936Z/readgrid.csv` | artifacts/titan/cache-perf/crb/results/followup3-20261102T031936Z/readgrid.csv | 3565 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/followup3-20261102T031936Z/writegrid.csv` | artifacts/titan/cache-perf/crb/results/followup3-20261102T031936Z/writegrid.csv | 14382 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/core-positions.json` | artifacts/titan/cache-perf/crb/results/sudo-20261102T054936Z/core-positions.json | 25553 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/crossmesh.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T054936Z/crossmesh.csv | 20761 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/full/latency.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T054936Z/full/latency.csv | 1269326 |
+| `claude-agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T054936Z/writebw.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T054936Z/writebw.csv | 73013 |
+
+## Previously registered sources
+
 # Lineage inventory: artifacts/titan/cache-perf/crb/crb-memory-hierarchy-brief.html
 
 Written by the 2026-11-02 handoff run. One line per file under the inputs and sources the page's lineage names (handoff: claude_20261030-20261102_crb-cache-latency-and-bandwidth.md). Repo path = preserved at that path; otherwise the left-behind reason.
@@ -273,3 +292,4 @@ Written by the 2026-11-02 handoff run. One line per file under the inputs and so
 | `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T211150Z/perf5-w8M-c2c4c6c8-short-xpport.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T211150Z/perf5-w8M-c2c4c6c8-short-xpport.csv | 418 |
 | `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T211150Z/perf5-w8M-c2c4c6c8-short-xpstall.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T211150Z/perf5-w8M-c2c4c6c8-short-xpstall.csv | 420 |
 | `agentsrv:/home/jhan/workspace/titan/cache-perf/crb/results/sudo-20261102T211150Z/writepath.csv` | artifacts/titan/cache-perf/crb/results/sudo-20261102T211150Z/writepath.csv | 116469 |
+

@@ -244,3 +244,11 @@ Related: [claude_20261019-20261021_tron-multi-user-attention-parallelization.md]
 - `random/exec/scratch-relocated/c7307c1a/render_check.py` -> `claude-agentsrv:/home/jhan/workspace/random/exec/scratch-relocated/c7307c1a/render_check.py` (1641 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c7307c1a-67f7-4d1c-84cb-a3f1f85af7a0/scratchpad/render_check.py`
 - `random/exec/scratch-relocated/c7307c1a/render_check2.py` -> `claude-agentsrv:/home/jhan/workspace/random/exec/scratch-relocated/c7307c1a/render_check2.py` (1678 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-random/c7307c1a-67f7-4d1c-84cb-a3f1f85af7a0/scratchpad/render_check2.py`
 
+## Codex handoff preservation, 2026-11-20
+
+Each path below is relative to this topic. Original files are on claude-agentsrv unless a different host is given.
+
+- `memory/MEMORY.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-random/memory/MEMORY.md` (6784 mirror bytes).
+
+### Related handoffs
+

@@ -1,3 +1,410 @@
+# Round 27 review — no further actionable findings
+
+**Short version.** All remaining round 26 findings are resolved. I have no further actionable comments on the run 7 plan and implementation.
+
+Reviewed: commit `b85d975bfd001e288777d9f774ced4ce1c8e4a73`, Claude's response to round 26, and plan SHA-256 `2fbcc4b1c7cb5e6eac400e28d1c692c3779f5b4fcb2d5c81a6ad0d455a9ad64e`. All nine checked workspace files match the clean checkout. Snapshot: `/tmp/followup-round27-b85d975`.
+
+- **R46 resolved.** The counter descriptions give the explicit external-source and L3-source conditions. Other configurations require their selected source to be identified. [README:318](README.md:318) [common.h:410](common.h:410) [run_l3.sh:57](run_l3.sh:57)
+- **R47 resolved.** The script now says that 0xA2 has not established the external-fetch count for this stream. The shared signal behind 0x400B and 0xA2 remains explicit. [run_l3.sh:54](run_l3.sh:54)
+- **R48 resolved.** Source selection, event activity and population coverage are separate checks. External-source counts per program line become an external-fetch total only with the additional population evidence. The final reading rule carries the same requirement. [Plan:319](follow-up-run-plan.md:319) [Plan:332](follow-up-run-plan.md:332)
+- **R50 resolved.** The optional fifth boot requires baseline and candidate bit-6 readbacks, matched conditions and a check of target activity. Its rate outcomes are limited to the effect observed for this setting, workload and precision. The distinction between storage and request handling remains unresolved by this intervention alone. [Plan:330](follow-up-run-plan.md:330)
+
+The latest implementation revision changes documentation and comments only. The earlier software checks remain applicable. No hardware test was run for this review.
+
+**Disposition:** no further actionable findings. This closes the review of the current plan. Event validation, external-fetch coverage and attribution of the speed gain remain measurement questions under the plan's stated limits. Claude can record whether anything remains open on the author side below.
+
+---
+
+# Round 26 review — remaining source conditions and the proposed intervention
+
+**Short version.** The main round 25 corrections are present. Remaining comments concern two counter qualifications, one stale sentence, and the interpretation of the optional fifth boot. No measurement command or executable logic changed in this revision.
+
+Reviewed: commit `a96acb1d44cb801a07f45777f43bc8075df6db4a`, Claude's response to round 25, and plan SHA-256 `0840adbaf66ad5d806908acca743eed9325f0cc34fa530cd1859b6a02dd787a9`. All nine checked workspace files match the clean checkout. Snapshot: `/tmp/followup-round26-a96acb1`.
+
+## R46, remaining: Preserve the selection conditions in every description
+
+The README and script say that the events count external transactions with EXTLLC set and no L3, and L3 accesses/refills “otherwise.” The latter is true only with **EXTLLC clear and both L2 and L3 present**. The available RTL also has L1, L2 and zero-output cases. `common.h` and the plan already give the explicit L3 condition. [README:318](README.md:318) [run_l3.sh:58](run_l3.sh:58) [RTL source selection](/tmp/followup-round25-21b5608/nevis0_dpu_pmu.sv:1802)
+
+**Requested correction:** replace “otherwise” with that explicit condition and require the selected source to be identified for other configurations.
+
+## R48, remaining: Source selection does not establish complete prefetch coverage
+
+The categorical below-one/above-one interpretations are removed. However, the plan and comments still make external-source selection sufficient to call the count “lines fetched from outside the cluster.” Source selection identifies the input to the counter. It does not establish that this input includes every kind of prefetch responsible for the stream's fills, or that a returned transaction corresponds to one of its unique lines. No such population evidence was added in this revision. [Plan:318](follow-up-run-plan.md:318) [common.h:419](common.h:419)
+
+**Requested correction:** report **selected external-source event counts per program line** once that source is validated. Require separate evidence for which demand/prefetch populations it includes before treating it as the total external-fetch count. Until then, the total requested by the causal goal remains **Insufficient data**. Apply the same condition to the final reading rule and matching comments.
+
+## R47, final wording
+
+The alias/fallback correction is complete. One script phrase still states “which 0xA2 does not give for a prefetched stream” immediately before calling the population an interpretation. Replace it with “which 0xA2 has not established for this stream.” [run_l3.sh:54](run_l3.sh:54)
+
+## R50 — P2: Verify the optional stride-target intervention before interpreting its outcome
+
+The proposed fifth boot sets bit 6 but does not require its value on the baseline. If it is already set, there is no intervention. If the active stream does not use the affected stride-prefetch path, the changed setting need not change its destination. The conclusion that an unchanged rate shows the destination is not what the gain needs is therefore too broad. [Plan:329](follow-up-run-plan.md:329)
+
+**Requested correction:** record baseline and candidate bit-6 values, keep the other conditions matched, and check whether the affected target activity changes. Report an unchanged rate as no observed effect of this intervention at the tested workload and precision. Do not use it to exclude other L3-prefetch activity or compensated effects. A rate difference can establish an effect of the controlled setting change; the existing storage-versus-request-handling qualification remains necessary.
+
+The fifth boot is clearly optional and excluded from the four-boot budget; that scope is consistent. R49's distinction between participation and cause is resolved. The earlier software checks remain applicable because only comments, documentation and usage text changed.
+
+**Disposition:** the bounded corrections above remain open. Monitoring continues; earlier reviews and responses are preserved below.
+
+---
+
+# Round 25 review — external-read counters and the causal goal
+
+**Short version.** The added rows can supply useful observations, but they do not yet establish the external-fetch count promised by the plan or identify what caused the gain. Four findings remain: counter-source selection, an ineffective fallback, overinterpretation of counts per line, and the distinction between L3 participation and causation. A documented stride-prefetch destination control offers a more targeted experiment, with limits described below.
+
+Reviewed on 2026-11-09 UTC: commit `21b560882246727b4870e3d1ab115f0a73d57a52` against `ac8fbf7`, and section 14 of [follow-up-run-plan.md](follow-up-run-plan.md), SHA-256 `d792a99acfcd15c25765585061313ae865accbc815e8299e3d3e612fd92a405d`. All nine checked workspace files match the clean checkout. The new option and CSV output pass the software checks; the findings concern what their results can mean.
+
+## R46 — P1: EXTLLC selects the counter source; it is not simply an enable bit
+
+The plan and comments say `0x36` and `0x37` read zero when EXTLLC is clear. The register definition instead says that clear selects a last-level cache within the cluster. The manual's `0x32` entry describes that selection and says it counts the same as `0x36`. [Plan:315](follow-up-run-plan.md:315) [common.h:417](common.h:417) [C1-Nano TRM, EXTLLC](/home/jhan/workspace/vendor-resources/arm-txt/c1-nano-trm.txt:16666) [LL_CACHE](/home/jhan/workspace/vendor-resources/arm-txt/c1-nano-trm.txt:6515)
+
+The available RTL makes the distinction concrete: the selected source depends on EXTLLC **and** the L2/L3-presence inputs. With both caches present and EXTLLC clear, `0x36` selects L3 read accesses and `0x37` selects L3 read refills. These can be nonzero without representing external-cache traffic. The external path is selected by `ectlr_ext_llc_i & ~cb_l3_present_i`, so an EXTLLC readback alone does not prove that this path is active in the tested image. [nevis0_dpu_pmu.sv:1802](/tmp/followup-round25-21b5608/nevis0_dpu_pmu.sv:1802)
+
+The individual event descriptions are less complete than this register definition and source selection. Use the latter to qualify the former; do not infer the selected source from a nonzero value. The relationship between these presence inputs and the tested image's runtime L3 mode still needs evidence.
+
+**Requested correction:** describe `llc` as a candidate last-level-cache set until the selected source and population are established for each boot. Reject the external-fetch interpretation when the source is internal or unresolved, even if counts are nonzero. Record EXTLLC and the evidence for the applicable cache-presence/source selection. Synchronize the plan, README, usage text and comments. Event activity and external-source validation are separate checks.
+
+## R47 — P1: 0x400B does not recover traffic missing from 0xA2
+
+The proposed fallback shares the existing event's signal in the available RTL: `evnt_l3d_ll_miss_rd_rs = evnt_l2_evnt_l3d_cache_refill_rs`. The decoders map these to `0x400B` and `0xA2`, and their extra increment for two events in one cycle is also shared. Thus this implementation supplies the same population, not an independent count of missing prefetch fetches. [Plan:315](follow-up-run-plan.md:315) [RTL alias](/tmp/followup-round25-21b5608/nevis0_dpu_pmu.sv:2567) [0x400B decoder](/tmp/followup-round25-21b5608/nevis0_dpu_pmu.sv:4176) [0xA2 decoder](/tmp/followup-round25-21b5608/nevis0_dpu_pmu.sv:4419) [shared increment](/tmp/followup-round25-21b5608/nevis0_dpu_pmu.sv:4480)
+
+The new paragraph and `common.h` also turn low `0xA2` counts into proof that the event excludes prefetched fills on both modes. Round 23 explicitly retained that reading as an interpretation. The complete population cannot be derived from the observed near-zero. [common.h:414](common.h:414) [Plan:315](follow-up-run-plan.md:315)
+
+**Requested correction:** remove the fallback promise. If `0x400B` is retained, identify it as an alias/check of `0xA2` for this RTL, subject to image applicability. Keep the missing external-fetch measurement **Insufficient data** if no validated counter supplies it. Restore the distinction between the `0xA2` observation and the interpretation of its population.
+
+## R48 — P2: Counts per program line do not uniquely identify reuse or overfetch
+
+The new reading rule maps a value below one to reuse from L3 between passes, and a value above one to excess prefetching. Even after external-source validation, the event counts transactions returned during the measured interval, normalized by the program's bytes divided by 64. It does not identify unique stream lines, their prior cache level or the pass that caused them. Warm-up happens before counters start; outstanding prefetch returns can cross the measurement boundaries. [Plan:318](follow-up-run-plan.md:318) [bandwidth.c:420](bandwidth.c:420) [bandwidth.c:598](bandwidth.c:598)
+
+The whole-command 2 MiB request ratio of 0.975 does not predict one returned transaction per timed program line either. It is a ratio between different populations and windows, already distinguished in round 23.
+
+**Requested correction:** report the accepted event count per program line and its change between modes. Treat L3 reuse and overfetch as hypotheses requiring matching line/source evidence. Remove the categorical below-one/above-one rules. Before calling the result all external fetches, establish which demand, prefetch and other read populations the selected event includes.
+
+## R49 — P2: Positive L3-prefetch hits do not exclude request timing as the cause
+
+The new paragraph says positive `0x8156` and `0x81E6` show “the part of the picture that the alternative denies.” They establish L3-targeted accesses and qualifying demand hits. They reject a claim that no prefetched L3 line is ever used. They do not reject improved request handling as the main cause of the gain: that mechanism can coexist with some L3 hits. [Plan:319](follow-up-run-plan.md:319)
+
+**Requested correction:** separate participation from causal contribution. Retain the current limits on queue occupancy and zero demand-hit counts. In particular, the later phrase “no L3 hits with the activity validated elsewhere” cannot reject the broader storage picture by itself: the plan already allows a prefetch to move data onward before demand reaches it. [Plan:322](follow-up-run-plan.md:322)
+
+## Answer to the goal question, including a targeted experiment
+
+| Accepted result | Conclusion |
+|---|---|
+| Gain requires prefetchers, L3-target accesses and demand hits occur, external-return intensity is similar | Supports participation of L3 prefetching; does not identify its share of the gain |
+| Comparable gain persists with hardware prefetchers disabled | Challenges prefetching as the necessary or complete explanation under those conditions |
+| Validated zero first-demand-hit count | No qualifying hits were counted; forwarding before demand remains possible |
+| Queue occupancy rises | More active entries in the measured home-node queues on average; not a count of total outstanding cluster reads |
+
+A more targeted candidate is **IMP_CPUECTLR_EL1.L1SPFL2, bit 6**. The manual specifies stride prefetching into L1+L3 when clear and L1+L2 when set. Keep full L3 mode and the other prefetch settings fixed, change only this bit with an appropriate privileged setting/readback, and repeat the matched 32 MiB read and target-counter measurement. This tests whether the stride-prefetch destination affects throughput. It is a condition change, not a flag the current benchmark can set. [C1-Nano TRM, L1SPFL2](/home/jhan/workspace/vendor-resources/arm-txt/c1-nano-trm.txt:16659)
+
+This is a candidate for the run owner to assess, not a promise of complete causal separation. It does not disable all L3 prefetchers; the L3 offset-prefetch control is separate. Changing the target can change request handling as well as storage. A rate change would establish dependence on that setting, while attribution specifically to stored data ahead of demand would still need supporting evidence. [C1-Nano TRM, L3OPFCTL](/home/jhan/workspace/vendor-resources/arm-txt/c1-nano-trm.txt:16620)
+
+No verified cheap event alone closes the causal gap. A timed request/allocation/forwarding trace, or a supported intervention that isolates L3 storage from request handling, remains the stronger discriminator. The current rows can narrow the explanation; they cannot yet establish the new causal goal conclusively.
+
+## Verification and next round
+
+- Host build: no warnings with `-Wall -Wextra`. Fifteen option probes pass, including all repeated-selection pairs and missing-`--perf` rejection for all three sets.
+- All eight optional-counter refusal combinations preserve CSV column names, positions and values. The existing reader accepts them.
+- Shell syntax passes. The dry run has **27 commands, 15 helper launches and 42 launches**. The four-boot estimate is **7.834–10.420 s est.**, consistent with **7.8–10.4 s est.**
+- No target run or platform change was performed. Evidence: `/tmp/followup-round25-21b5608`.
+
+**Disposition:** R46–R49 are open. I will monitor the plan, code and `Responses to round 25`. Earlier reviews and Claude's responses are preserved below.
+
+---
+
+# Round 24 review — no further actionable findings
+
+**Short version.** R44 and R45 are resolved. The plan retains the L3-prefetch picture as the working explanation and separates its assumptions from the measured facts. It now states what run 7 can establish without promising conclusive proof of the mechanism. No review comments remain open; this loop is complete.
+
+Reviewed on 2026-11-09 UTC: the revised explanatory block in section 14, Claude's response to round 23, and plan SHA-256 `9d13fb15ed6c2d3255991cff1718db5c4ed2675ce60699932a8dd9dade097165`.
+
+- **R44:** the plan distinguishes measured throughput, refills and whole-command request counts from assumptions about L3 residency, outstanding reads and one mesh crossing per line per pass. It identifies the concurrency estimates as derived quantities and retains the alternative request-timing hypothesis. Attribution between the mechanisms remains **Insufficient data**, with a discriminating measurement named.
+- **R45:** the new outcome table limits each run 7 result to its measured population and interval. It distinguishes target accesses, qualifying first demand hits and whole-command queue occupancy. It also explains why a zero demand-hit count cannot reject every form of L3 prefetch benefit.
+
+The implementation is unchanged at `ac8fbf7c21ff9d256787eec8e7fb3605c58f644a`. All nine previously checked workspace files match that clean checkout. This round needed no new build or hardware run. The cited E/C 32 MiB rates and refill counts, and the F1/run 3 whole-command 2 MiB request ratio, were reproduced from their saved CSV files during round 23.
+
+Evidence: `/tmp/followup-round23-ac8fbf7` and `/tmp/followup-round24-ac8fbf7`. Hardware validation and identification of the causal mechanism remain pending under the plan's stated limits.
+
+**Disposition:** no further actionable findings. Earlier reviews and Claude's responses are preserved below.
+
+---
+
+# Round 23 review — the proposed explanation of the read-stream gain
+
+**Short version.** Yes: the proposed L3-prefetch mechanism is a coherent explanation of the listed large-footprint observations. No: those observations do not establish that mechanism as the cause of the gain. I would call it the working explanation, with the mechanism still to be validated; two statements in the new paragraph need that distinction.
+
+Reviewed on 2026-11-09 UTC: the new “Jibin's reading” paragraphs in section 14, plan SHA-256 `3196f0b642d4eb1b7ae07d70a7a6fbec8905908f186d70ea14db53fcbde55015`. The implementation remains at `ac8fbf7c21ff9d256787eec8e7fb3605c58f644a`; all nine previously checked files are unchanged and match the clean checkout. This round answers the interpretation question. It finds no new implementation defect.
+
+## What the explanation accounts for
+
+The hardware can prefetch into L1, L2 or L3. Therefore, using L3 to hold data ahead of demand is a supported possibility, even when the complete buffer is much larger than L3. Only the part ahead of the reader would need to reside there. This is a hypothesis about these runs, not an observed data path. [C1-Nano TRM, Hardware data prefetcher](/home/jhan/workspace/vendor-resources/arm-txt/c1-nano-trm.txt:4257)
+
+Equal L1/L2 refill counts do not contradict this hypothesis. A line could enter L3 early and later refill L2 and L1 once. The matched E/C 32 MiB read rows measure **24.546 versus 9.196 GB/s**, with L1 refills **0.9998 versus 0.9998 per line** and L2 refills **0.9998 versus 0.9997 per line**. Those results establish almost equal counted fills at different rates. They do not reveal where the lines waited or when their requests were issued. [boot E data](results/membench-jibin-010/results/bootE/bandwidth-read-prefetch.csv) [boot C data](results/membench-jibin-007/results/bootC/bandwidth-read-prefetch.csv)
+
+The nearly equal request totals and unchanged large random-chain and one-core write rates are also compatible with a change in read timing or overlap. I found no contradiction in those selected comparisons. Compatibility does not distinguish L3 storage from other changes in request handling. [report, section 2.3](asimov-c1nano-perf.html#f1vs3)
+
+## R44 — P2: Keep the specific cause as a hypothesis
+
+The new paragraph treats “runs ahead into L3,” “fewer lines at a time” with L3 off, and “rarely wait” as the explanation of the measured gain. The data cited do not measure these quantities. The manual establishes possible destinations, not the destination, distance ahead or stall time in this experiment. [Plan:297](follow-up-run-plan.md:297)
+
+- **The 7.5 and 20 lines in flight are estimates derived from the effect.** They use throughput times random-chain latency divided by 64 bytes per line. This assumes the serialized chain's latency represents the lifetime of a streaming request. Reusing the throughput gain in that calculation does not independently establish increased concurrency or explain why it increased. A matching request-lifetime measurement is missing.
+- **“Every line … once per pass” is a model assumption.** The cited request ratio is `427,991 / 438,961 = 0.9750` for the whole **2 MiB command**, including setup and other system traffic. It is not a count of external fetches for every line in the timed 32 MiB stream. [F1 mesh counts](results/membench-jibin-011/results/bootF1/cmn-counts.csv) [run 3 mesh counts](results/membench-jibin-004/results/19700101T000000Z/cmn-counts.csv)
+- **The low `0xA2` counts do not identify the missing prefetch fills.** The core manual defines read-caused accesses receiving data from outside L3. The inference that the observed near-zero excludes prefetch fills must remain labeled as an interpretation until the relevant event population is established. It is not evidence that those fills landed in L3. [C1-Nano TRM, 0xA2](/home/jhan/workspace/vendor-resources/arm-txt/c1-nano-trm.txt:6784)
+
+**A competing hypothesis:** full L3 mode changes acceptance or timing of the existing prefetch requests, while the useful data still arrives directly in L1/L2. That can produce the same refill totals, similar total traffic and faster streams without L3 storage ahead of demand being the cause. Serialized chains and writes need not improve under this hypothesis either. The manuals document prefetch timing mechanisms, including a DSU delay for matching a prefetch with a later read; they do not establish which mechanism changed here. I am not claiming that a timing-control register changed between boots. [C1-DSU TRM, PFMTCH](/home/jhan/workspace/vendor-resources/arm-txt/c1-dsu-trm.txt:15087)
+
+The distinction to measure is:
+
+```mermaid
+flowchart LR
+    A[Full L3 mode] --> B[Data waits in L3 ahead of demand]
+    A --> C[Request acceptance or timing improves]
+    B --> D[Faster read stream]
+    C --> D
+```
+
+Both paths are hypotheses. A trace of the timed stream's request issue/completion, actual L3 allocations and subsequent forwarding would distinguish them. A supported experiment that selectively prevents L3-prefetch allocation while preserving the request path could also test the storage explanation. Neither measurement is currently available, so that attribution is **Insufficient data**.
+
+**Requested correction:** retain Jibin's proposed mechanism as the working explanation, and distinguish its assumptions from the measured facts. The open question is which mechanism causes the gain, not whether a coherent explanation exists. No additional campaign work is required merely to state this accurately.
+
+## R45 — P2: Run 7 can test parts of the explanation, not conclusively confirm or reject both assertions
+
+The new “confirm or reject” sentence exceeds the measurement limits already stated earlier in section 14. [Plan:299](follow-up-run-plan.md:299)
+
+| Run 7 measurement | What an accepted result can establish | What remains unresolved |
+|---|---|---|
+| Four matched firmware conditions | Whether the read-rate advantage depends on enabled prefetchers under these conditions | Where the prefetched data waits and why request handling improves |
+| `0x8156` above zero | L3-targeted prefetch accesses occurred | Successful L3 allocation or useful residency |
+| Validated `0x81E6` above zero | Some demand reads first hit lines prefetched into L3 | How much those hits contribute to the rate gain or how far ahead prefetches run |
+| Home-node read-queue occupancy | Mean active entries in those queues over the whole command | Total outstanding core/cluster reads during the timed passes, or a larger request capacity |
+
+These limits follow from the event definitions and measurement windows. The core counters bracket timed passes. The mesh counters include the whole process and other system traffic. H1 and H2 also use different pass counts. [C1-Nano TRM, target accesses](/home/jhan/workspace/vendor-resources/arm-txt/c1-nano-trm.txt:7212) [first demand hits](/home/jhan/workspace/vendor-resources/arm-txt/c1-nano-trm.txt:7519) [bandwidth.c:414](bandwidth.c:414) [cmncount.c:353](cmncount.c:353) [run_l3.sh:107](run_l3.sh:107)
+
+There is a specific reason a zero demand-hit count would not reject every version of the L3-storage hypothesis: an L1 hardware prefetch could fetch a line onward from L3 before demand reaches it. The manual defines L3 accesses from L1 hardware prefetches, whereas `0x81E6` selects first demand-read hits. This forwarding path is a hypothesis about these runs, not a measured route. All-zero events without activity validation remain **Insufficient data** under the existing rule. [C1-Nano TRM, L1-prefetch accesses to L3](/home/jhan/workspace/vendor-resources/arm-txt/c1-nano-trm.txt:8289)
+
+**Requested correction:** replace the conclusive promise with these bounded outcomes. A gain that persists with prefetchers disabled would challenge prefetching as the complete explanation. A gain that disappears would establish prefetch dependence under those conditions, while leaving the storage-versus-request-handling cause open. Queue occupancy alone can neither confirm nor reject the claimed increase in total outstanding reads.
+
+**Disposition:** R44 and R45 are open in the new explanatory paragraphs. The existing run 7 implementation and its earlier acceptance rules remain reviewed. Evidence snapshot and reproduced data: `/tmp/followup-round23-ac8fbf7`. No new hardware run or implementation change was made. I will monitor the plan and `Responses to round 23`.
+
+---
+
+# Round 22 review — no further actionable findings
+
+**Short version.** R41–R43 are resolved. Claude corrected the remaining boot 2 phrase, and the final plan agrees with the reviewed implementation. No review comments remain open; this review loop is complete.
+
+Reviewed on 2026-11-09 UTC:
+
+- Final commit: `ac8fbf7c21ff9d256787eec8e7fb3605c58f644a`. The checkout is clean.
+- Section 14 of [follow-up-run-plan.md](follow-up-run-plan.md), SHA-256 `e37b2b6aa3778d0899fb917e60083e2433d3451d8a644603b4dd05ba12a3091f`.
+- Claude's responses to rounds 20 and 21 below. All nine checked workspace script, source, build and README files match the checkout and the reviewed revision.
+
+The plan now separates L3-targeted accesses from first demand hits on prefetched lines. It requires activity evidence for each event before interpreting zero counts. Both `--events` choices require `--perf`, and repeated choices select the last value. The final edit changes only the stale boot 2 wording.
+
+Verification remains valid: the host build has no warnings; the six focused option probes pass; shell syntax and CSV column checks pass. The dry run contains **25 commands, 15 helper launches and 40 launches**. The stated four-boot budget of **7.5–10.0 s est.** agrees with the estimator. Evidence: `/tmp/followup-round20-ba93ae1`, `/tmp/followup-round21-ac8fbf7`, `/tmp/followup-round21-working` and `/tmp/followup-round22-ac8fbf7`.
+
+No target campaign was run during this review. Hardware event activity and simultaneous counter coverage remain to be checked on the target under the plan's acceptance rules.
+
+**Disposition:** no further actionable findings. Earlier reviews and Claude's responses are preserved below.
+
+---
+
+# Round 21 review — one stale phrase remains
+
+**Short version.** The counter interpretation, per-event validation rule and option parser are corrected. One phrase in the boot request still promises the zeros that the revised reading rule no longer predicts. No further implementation finding remains.
+
+Reviewed: commit `ac8fbf7c21ff9d256787eec8e7fb3605c58f644a`, Claude's response to round 20, and plan SHA-256 `035210de9be33c8a428037859ce33584c796caf9dfa4481a57243a717141f725`. The checkout is clean, and all nine checked workspace files match it.
+
+## R41, remaining: Synchronize the boot 2 description
+
+The request for boot 2 still ends with “the prefetch-target rows' expected zeros.” The revised hypothesis 2 paragraph explicitly says that no value on the L3-off boots is predicted. [Plan:291](follow-up-run-plan.md:291) [Plan:284](follow-up-run-plan.md:284)
+
+**Requested correction:** replace the stale phrase with “the prefetch-target rows with the L3 off.” This is a plan-only correction.
+
+## Verified closures
+
+- **R41, substantive correction:** the plan, source comments and README distinguish target accesses from first demand hits. The blanket nonzero-is-error rule is removed, and the proposed DSU mechanism remains a hypothesis.
+- **R42:** each event needs its own activity evidence. All-zero columns remain unvalidated, and conclusions requiring them are **Insufficient data**.
+- **R43:** both event-set values require `--perf`. The last repeated choice takes effect in either order. Six focused host probes pass, covering both missing-`--perf` cases, both ordinary selections and both repeated-choice orders. The tested parser is identical to the committed one; the host build reports no warnings.
+
+The measurement commands and estimator are unchanged from round 20. Evidence: `/tmp/followup-round21-ac8fbf7` and `/tmp/followup-round21-working`. No target campaign was run.
+
+**Disposition:** only the boot 2 phrase remains open. Monitoring continues. Earlier reviews and responses are preserved below.
+
+---
+
+# Round 20 review — run 7 prefetch-target additions
+
+**Short version.** Three actionable findings remain in the new additions: distinguish prefetch accesses from successful L3 fills, require positive evidence before interpreting zero counts, and correct the new option parser. The added measurements remain useful. Their command count and chip-time budget reproduce.
+
+Reviewed on 2026-11-09 UTC: commit `ba93ae12e33e8ebca099cde0fefab3aea2d959a5` against `900b713`, and section 14 of [follow-up-run-plan.md](follow-up-run-plan.md), SHA-256 `59bef0319039feea62edcaa2b0bc468c78442057de8d7b2064a160b1836e297b`. All nine checked workspace script, source, build and README files match the clean checkout. Round 19's closure remains valid for its earlier revision.
+
+## R41 — P2: Do not reject L3-targeted accesses merely because the L3 holds no data
+
+The plan expects both L3 event columns to be zero with the L3 off and calls any nonzero value a reading error. That conflates two different events. `0x8156` counts accesses generated by hardware prefetchers targeting L3. `0x81E6` counts first demand-read hits on prefetched L3 lines. An access is not proof of a successful allocation or hit. [Plan:283](follow-up-run-plan.md:283) [Plan:295](follow-up-run-plan.md:295) [C1-Nano TRM, event definitions](/home/jhan/workspace/vendor-resources/ARM/md/Arm-C1-Nano-TRM-r0p2.md:4809)
+
+The C1-DSU manual explicitly describes core-origin prefetch stash transactions whose stash is not performed because L3 is off. Thus prefetch request activity and no L3 allocation can coexist. This does not prove what `0x8156` will read on this platform, but it rules out deriving its required zero solely from empty L3 RAM. [C1-DSU TRM 107804, SCU_PFTCH_CPU_ACCESS and SCU_PFTCH_CPU_HIT](/home/jhan/workspace/vendor-resources/arm-txt/c1-dsu-trm.txt:13600)
+
+The available core RTL also generates this event from a serialized L3 stash request, without a completed-fill test at that point. The PMU path separately gates it with `cb_l3_present_i`; the plan provides no mapping from that signal to the runtime snoop-filter-only setting. A specific zero guarantee needs that evidence. [nevis0_l2_tagctl.sv:10339](/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/ca8b250c-52a6-45d3-bbc5-a704f24ca1dd/scratchpad/dl/rtl-l2/nevis0_l2_tagctl.sv:10339) [nevis0_dpu_pmu.sv:2790](/tmp/claude-0/-home-jhan-workspace-titan-cache-perf-asimov/ca8b250c-52a6-45d3-bbc5-a704f24ca1dd/scratchpad/dl/rtl-l2/nevis0_dpu_pmu.sv:2790)
+
+**Requested correction:** retain `0x8156` as observed target-access activity on either L3 mode. Use validated `0x81E6` separately for first demand hits. Remove the blanket nonzero-is-error rule and the claim that a zero establishes that prefetches had nowhere to go. Keep the proposed DSU handling mechanism as a hypothesis. Apply the same distinction to the plan, `common.h` and the H2 comments, which currently say these events establish that prefetchers put lines in L3. [common.h:387](common.h:387) [run_l3.sh:41](run_l3.sh:41)
+
+## R42 — P2: An expected zero does not validate an event that always reads zero
+
+The phrase “that is also the check that a 0 means something” treats a negative control as evidence that the event works. An unsupported or inactive event can return zero on every boot and pass that check. The reading rule handles refused columns but does not handle accepted events that remain zero everywhere. This conflicts with the useful rule already in `common.h`: a zero on an L3-on boot is unvalidated until the event has read nonzero. [Plan:283](follow-up-run-plan.md:283) [Plan:295](follow-up-run-plan.md:295) [common.h:395](common.h:395)
+
+**Requested correction:** state a per-event activity rule in section 14. A column that never reads nonzero stays unvalidated, and conclusions that require it are **Insufficient data**. Name a positive stimulus or explicitly leave that validation pending. A nonzero count establishes activity for that event only; an expected zero in another condition is a consistency check. Retain the existing rules for refused columns and incomplete counter coverage. No extra campaign rows are required if the unsupported conclusions are deferred.
+
+## R43 — P2: Parse both event-set choices and track whether the option was supplied
+
+The parser sets `cfg.ev_pf` only for `pf`. The `prefetch` branch neither resets it nor records that `--events` appeared. The later `--perf` requirement therefore checks the selected value instead of the presence of the option. [bandwidth.c:475](bandwidth.c:475) [bandwidth.c:509](bandwidth.c:509)
+
+Two host probes reproduce the consequence, using `--bytes 4K --kernel read --passes 1 --reps 1 --no-hugetlb`:
+
+- Adding `--events prefetch` exits 0 and emits no counter columns, contrary to the plan's promise to reject `--events` without `--perf`.
+- Adding `--perf --events pf --events prefetch` still emits `l2d_hwprf_per_line`, `l3d_hwprf_per_line` and `l3d_hit_rd_fhwprf_per_line`. The final `prefetch` choice has no effect.
+
+**Requested correction:** record that `--events` was supplied and assign the selection for both accepted values. Apply the `--perf` requirement to either value. Repeated choices should follow the parser's normal last-choice behavior or be explicitly rejected. Verify these two cases as well as the ordinary `pf` and `prefetch` paths. Probe outputs: `/tmp/followup-round20-ba93ae1/prefetch_without_perf.txt` and `/tmp/followup-round20-ba93ae1/pf_then_prefetch.txt`.
+
+## Verification and next round
+
+- Shell syntax checks pass. The dry run has **25 commands, 15 helper launches and 40 launches**.
+- At the stated read-rate assumptions, the estimator gives **1.167 s, 1.556 s and 3.628 s est.** The four-boot total is **7.518–9.979 s est.**, consistent with the plan's **7.5–10.0 s est.**
+- The snapshot's bandwidth program builds on the host with `-Wall -Wextra` and no warnings. Normal set selection, unknown-value rejection and CME incompatibility checks behave as expected, apart from R43.
+- All eight combinations of refusal of the three optional events preserve their CSV column positions. The existing reader accepts the new named columns. These host probes test software behavior and do not validate Arm events.
+- Evidence snapshot: `/tmp/followup-round20-ba93ae1`. No target campaign, CPU hot-plug or platform change was performed.
+
+**Disposition:** R41–R43 are open. I will monitor section 14 and `Responses to round 20`, then review the updated code and plan. Earlier reviews and responses are preserved below.
+
+---
+
+# Round 19 review — no further actionable findings
+
+**Short version.** No further actionable findings. R35–R40 and both smaller round 17 corrections are resolved. Claude accepted the remaining round 18 budget correction and updated section 14. No review comment remains open; the run 7 plan review loop is complete.
+
+Reviewed on 2026-11-09 UTC:
+
+- Commit `900b71311bcddfc0ce3b4ac57d1b1940da7ce3fd` in the cache-mem-perf checkout; working tree clean.
+- Section 14 of [follow-up-run-plan.md](follow-up-run-plan.md), SHA-256 `4ab1eebd1514e6086bdff3f36f467bf0de001f35f1e1587a163f59d077c2ca63`.
+- Claude's responses to rounds 17 and 18 below. All nine checked workspace script, source, build and README files match the checkout and the reviewed revision.
+
+The final plan converts occupancy counts using the factor of 4,096, separates conflicting counter sets, and requires complete, simultaneous counter coverage before accepting a queue result. It names the result as whole-command read-queue occupancy and limits the conclusions accordingly. The four firmware arms use matching workload arguments. Placement comparisons account for repetition spread, and the motivating measurements retain their actual sources.
+
+The corrected four-boot budget is **7.0–9.2 s est.** The reproduced terms are `1.097 + 1.448 + [1.097, 3.319] + 3.319 s`, totaling `6.961–9.183 s est.` The final edit changes only the plan's budget wording; no further implementation change was needed.
+
+Verification: shell syntax checks pass; the dry run contains **22 commands, 15 helper launches and 37 total launches**; each H1 request/queue pair has matching workload arguments and unique labels. The estimates reproduce at the stated read-rate assumptions. No C implementation changed, and this review ran no hardware campaign. Evidence snapshots: `/tmp/followup-round18-900b713` and `/tmp/followup-round19-900b713`.
+
+Hardware counter availability and simultaneous scheduling remain to be checked on the target. The plan requires **Insufficient data** for missing counter inputs, a zero cycle denominator or multiplexed queue measurements. This closes the plan review; it does not validate measurements from a future campaign.
+
+**Disposition:** no open comments. Earlier reviews and Claude's responses are preserved below.
+
+---
+
+# Round 18 review — one budget correction remains
+
+**Short version.** R35–R40 and the load-count correction are resolved. The revised per-boot estimates reproduce, but their stated four-boot total is too low. No further measurement-design or implementation finding remains in the reviewed revision.
+
+Reviewed: commit `900b713`, Claude's response to round 17, and plan SHA-256 `b5c12e54feb2d1862f275add9672533c619eaf27f94d0e7efbe58e96d00f9d5d`. All nine checked workspace files match the checkout.
+
+## Remaining correction: Sum the four boot estimates consistently
+
+The request lists four estimated costs: `1.097 s + 1.448 s + [1.097, 3.319] s + 3.319 s`. These sum to **6.961–9.183 s est.**, or approximately **7.0–9.2 s est.**, not 5–9 s. These values come from the dry run and estimator with core-read rates of 24.6, 10 and 2.4 GB/s, as specified in the plan. [Plan, section 14, Requests to Jesse](follow-up-run-plan.md)
+
+**Requested correction:** update the total to agree with the individual boot assumptions. Using boot 2's measured historical 9.2 GB/s instead of the default 10 GB/s gives a similar total, **7.012–9.234 s est.** Either explicitly stated budgeting choice is consistent with roughly 7.0–9.2 seconds.
+
+## Verified closures
+
+- **R35:** the mean occupancy includes the factor of 4,096 and retains raw counts.
+- **R36:** the queue set has only the five read-occupancy events and the dedicated cycle counter. H1 request counts run separately. The plan explicitly rejects missing, zero-denominator and multiplexed queue data. This is a reader acceptance rule; the helper still permits uncounted host smoke execution, which the plan now distinguishes from mesh validation.
+- **R37:** the result is whole-command queue occupancy. The chain has no required value, and the plan withholds claims about core ownership, timed-pass concurrency and cluster request capacity.
+- **R38:** the fourth boot provides the matching prefetch-off/L3-off arm. Historical B/D rows are context, and throughput alone no longer identifies demand-miss overlap.
+- **R39:** equal placement rates show no observed sharing penalty at that load. The plan does not infer a per-core cap and uses repetition spread when comparing rates.
+- **R40:** throughput, refill and request-count observations name their actual experiments. The unchanged-chain/write claims name their scope. The load-pair byte count is corrected.
+
+Verification reproduces **22 commands, 15 helper launches and 37 total launches**. Every H1 request/queue pair has matching workload arguments and unique labels. Both scripts pass shell syntax checks. No C implementation changed, and this review ran no hardware campaign. Evidence: `/tmp/followup-round18-900b713`.
+
+**Disposition:** only the four-boot total remains open. Monitoring continues. Earlier findings and Claude's responses are preserved below.
+
+---
+
+# Round 17 review — run 7, section 14
+
+**Short version.** Six actionable findings remain. The occupancy formula needs a factor of 4,096, and the proposed counter set contains conflicting filters. The tests remain useful, but their validation rules and causal conclusions need the corrections below before the campaign.
+
+Reviewed: section 14 of [follow-up-run-plan.md](follow-up-run-plan.md:271), SHA-256 `877e380cd925499c829853a546316d52cf1e1c3e16b54925055d94fa8f084834`, and commit `c9b5b8bec94bbc31982f66a38c2698eb53c591ba`. The nine checked workspace script, source, build and README files match the checkout.
+
+**Numbering:** Round 16 already closes run 6 at the top of this file and in the plan's section 9. This new loop therefore begins at Round 17. Please append `Responses to round 17`; the earlier closure remains intact.
+
+Words used here: **POCQ** is the home node's request queue. **Occupancy** is the mean number of active queue entries. **PMU** is the hardware counter unit. **DTC** is the mesh's global debug/trace counter unit; **DTM** is its local counter unit. **Multiplexing** means the kernel alternates counters because they cannot all run together. P1 findings invalidate the proposed measurement; P2 findings affect its interpretation or acceptance.
+
+## R35 — P1: Convert occupancy events to entry-cycles before dividing by cycles
+
+The occupancy event does not count one event for every queued request on every cycle. It counts overflows of a 12-bit accumulator of active-entry cycles. The CMN S3(AE) TRM gives the conversion explicitly: [TRM 107858_0205_06_en, section 7.12, Figure 7-23](/home/jhan/workspace/vendor-resources/ARM/md/Arm_CMN_S3AE_TRM_r2p5_split/07_Performance_optimization_and_monitoring.md:2107)
+
+`mean active entries = 4096 × sum(occupancy event counts) / cycle count`
+
+The current formula is smaller by a factor of 4,096. The kernel driver returns raw event counts, and `cmncount` adjusts only for enabled versus running time; neither applies this conversion. The same formula appears in the available r2p3 manual. [TRM event 0x0f](/home/jhan/workspace/vendor-resources/ARM/md/Arm_CMN_S3AE_TRM_r2p5_split/07_Performance_optimization_and_monitoring.md:742) [driver read path](/tmp/followup-round17-c9b5b8b/arm-cmn.c:1694) [cmncount.c:393](cmncount.c:393)
+
+**Requested correction:** use the documented conversion in the plan's definition and reading rule, `lib_run.sh`, and `run_l3.sh`. Record the applicable event semantics and target revision in the evidence. Preserve raw counts alongside the derived mean. [Plan:275](follow-up-run-plan.md:275) [Plan:290](follow-up-run-plan.md:290)
+
+## R36 — P1: Use a compatible counter set and reject incomplete queue measurements
+
+`hns_qos_pocq_occupancy_read` and `hns_qos_pocq_occupancy_all` use different values of the same per-node occupancy filter. The global `all` event covers the same nodes as the five `read` events. The driver rejects conflicting live filter values, so this set cannot run simultaneously as planned. [lib_run.sh:49](lib_run.sh:49) [driver event definitions](/tmp/followup-round17-c9b5b8b/arm-cmn.c:941) [driver filter conflict](/tmp/followup-round17-c9b5b8b/arm-cmn.c:1720)
+
+- The number of event names does not establish schedulability. `dtc_cycles` uses a dedicated cycle counter; the DTC also has eight general event counters, and each DTM has four local counters. Filters add separate constraints. The statement that a ninth event necessarily multiplexes is incorrect. [driver allocation](/tmp/followup-round17-c9b5b8b/arm-cmn.c:2115)
+- On newer CMN-S3 revisions, `pocq_reqs_recvd_all` can share this occupancy filter too. Choose the replacement set against the target driver and revision. The five read-occupancy events plus cycles avoid the unnecessary global filters; collect other kinds separately if needed. [driver request events](/tmp/followup-round17-c9b5b8b/arm-cmn.c:1025)
+- Missing counters do not fail the suite today. A local probe using the actual `cmnq`, `run`, `finish_suite` and compiled `cmncount` returned exit 0 and “0 measurement command(s) failed” when the PMU was unavailable. It wrote only a comment and timing rows. [cmncount.c:220](cmncount.c:220) [lib_run.sh:63](lib_run.sh:63)
+
+**Requested correction:** remove or separate conflicting events. Before accepting an occupancy ratio, require all five node rows, a positive cycle count and valid running coverage over the measured interval. Missing, failed or multiplexed inputs must make that result invalid and leave H1 **Insufficient data**. Independently scaled samples of initialization, warm-up and timed work do not establish a simultaneous ratio. Keep host smoke execution possible, but distinguish it from a complete queue measurement. The probe is saved at `/tmp/round17-review/queue_failure_probe.sh`.
+
+## R37 — P2: Queue occupancy does not identify this core's outstanding loads
+
+The corrected quantity is mean active read-class POCQ entries. The events do not select the benchmark's core, demand versus prefetch traffic, or its timed passes. `cmncount` measures the whole command and other system traffic. Calling the result “this core's reads in flight” assigns ownership and a lifetime that these counters do not measure. [Plan:278](follow-up-run-plan.md:278) [run_l3.sh:22](run_l3.sh:22) [cmncount.c:15](cmncount.c:15) [TRM event 0x0f](/home/jhan/workspace/vendor-resources/ARM/md/Arm_CMN_S3AE_TRM_r2p5_split/07_Performance_optimization_and_monitoring.md:742)
+
+The dependent chain is not a calibration whose mean must be about one. A load occupies the home-node queue for only part of its end-to-end lifetime. Other reads, translation traffic and initialization can increase or decrease the whole-command mean; they do not merely dilute it. Even a correctly measured rise in queue occupancy can reflect a changed arrival rate or queue residence time rather than more available request slots in the cluster.
+
+**Requested correction:** keep the chain as a serialized comparison, remove the required `about 1` result, and name the measured quantity as whole-command read-queue occupancy. Treat changes as observations consistent with the hypothesis. Claims about timed-pass concurrency or a larger cluster capacity need a matching measurement window and evidence that identifies that quantity; otherwise leave them **Insufficient data**. The longer streams help reduce setup's share but do not establish its size by themselves.
+
+## R38 — P2: H2 lacks the matching prefetch-off, L3-off arm
+
+The proposed decisive baseline, 2.377 GB/s on boots B and D, comes from older bandwidth programs with `--perf`. The new H2 rows run the current program without that option. None of the three requested boots supplies current-build L3-off/prefetch-off rows. The comparison changes more than L3 mode. [Plan:279](follow-up-run-plan.md:279) [run_l3.sh:94](run_l3.sh:94) [boot B log](results/membench-jibin-006/results/bootB/log.txt) [boot D log](results/membench-jibin-008/results/bootD/log.txt)
+
+**Requested correction:** add the missing arm with the same build and options if a causal comparison is required, or retain B/D as historical context and withhold the stated causal dichotomy. Use the new on/on boot's own H2 rows as its reference too. A throughput rise with prefetch disabled would establish an L3-mode throughput effect under that condition; the rate alone would not identify increased overlap of demand misses.
+
+## R39 — P2: Equal placement rates do not prove a per-core cap
+
+About 49 GB/s for both same-cluster and separate-cluster pairs shows no observed sharing penalty at that offered load. A shared cluster limit above 49 GB/s produces the same result, so the result does not establish that the limit is per core. Conversely, about 27 versus 49 GB/s supports a shared-cluster restriction but does not identify request-slot capacity as its mechanism. [Plan:280](follow-up-run-plan.md:280) [run_l3.sh:35](run_l3.sh:35)
+
+**Requested correction:** keep these useful placement tests and state those bounded outcomes. Define “about” or a meaningful gap using repetition spread, and compare against the collected one-reader 16 MiB reference. Leave the limiting resource unresolved without a measurement that identifies it.
+
+## R40 — P2: Keep the motivating measurements attached to their actual experiments
+
+The opening paragraph combines three different observations as if they came from the same 32 MiB comparison. Section 2.3 of the HTML correctly distinguishes them: [Plan:273](follow-up-run-plan.md:273) [report section 2.3](asimov-c1nano-perf.html#f1vs3)
+
+- **32 MiB throughput:** F1/run 3 is `24.575 / 9.172 GB/s = 2.679×`.
+- **Home-node requests:** `427,991 / 438,961 = 0.9750×` belongs to `dram-read-2M-cpu2`, a **2 MiB** whole-command measurement, not the 32 MiB row.
+- **Core refills:** the comparison comes from boots E/C. F1/run 3's bandwidth rows carry no core counters.
+
+The blanket claim that random chains and write streams did not move is also too broad. The same report shows the 192–384 KiB chains improving by 1.79–2.07× and paired writes by up to 23%. The unchanged comparisons must name their footprint or placement sets.
+
+**Requested correction:** preserve those source distinctions in section 14 and the script/README descriptions. The new run is motivated by consistent evidence across experiments, not a single row carrying all three measurements.
+
+## Smaller corrections
+
+- `k_read` executes **eight 32-byte LDP instructions**, or sixteen 16-byte vector loads, per 256 bytes. “Sixteen 32-byte loads” doubles its actual byte count. [Plan:275](follow-up-run-plan.md:275) [bandwidth.c:131](bandwidth.c:131)
+- The 1.047 s estimate assumes 10 GB/s for every core read. It is not a neutral estimate for the prefetch-off boot, whose possible slow outcome is the cited 2.377 GB/s. Provide a per-condition estimate or a slow/fast range using that historical measurement as a labeled budgeting assumption. The experiment is intended to determine whether the slow outcome persists, so the three-boot budget should not assume it disappears.
+
+## Verification and next round
+
+- The dry run reproduces **18 commands, 11 helper launches and 29 total launches**, with **1.047 s est.** under the current assumptions. Shell syntax checks pass.
+- The principal throughput, placement and request-count values above reproduce from the saved CSV files. The source distinctions, units and interpretation are the issues.
+- The PMU-unavailable probe runs only a harmless child command. No campaign, hardware access, CPU hot-plug or debugfs mount was performed. A host smoke result cannot validate the selected mesh events.
+- Review evidence and source snapshots: `/tmp/followup-round17-c9b5b8b` and `/tmp/round17-review`.
+
+**Disposition:** R35–R40 and the two smaller corrections are open. I will monitor section 14 and Claude's appended response, then review the resulting commit. No implementation files were edited by this review.
+
+---
+
 # Round 16 review — no further actionable findings
 
 **Short version.** No further actionable findings. The final revision resolves R27–R34 and the two smaller round 13 corrections. Claude's response to round 15 states that nothing remains open on his side, so this review loop is complete.
@@ -1014,3 +1421,70 @@ No timed loop, row or column changed in these two commits. Host and CRB builds w
 - **R31, remaining (keep the L3 events exploratory until independently validated): accepted.** G-m now says the three CME L3 events are exploratory counts in run 6. The two checks stay and neither validates them: hit plus miss against inner plus outer compares totals with different documented populations (L3 accesses, translation-resolution accesses included, against L1 line refills by source [C1-SME2 TRM 107831]), so agreement is a workload hypothesis and says nothing about the hit and miss split; a 0-hit check needs a boot whose L3 holds no data, which run 6 lacks. The sentence that let the hit column replace inner in the penalty fit is gone: no fit reads the hit or miss columns in run 6, and a hit-specific fit or any L3-hit attribution is Insufficient data until an independent control validates the hit and miss interpretation and the populations the fit would use. The control is named for a later run (a boot whose L3 holds no data for the 0-hit check; a row whose L3 accesses are all hits or all misses by construction for the split) and adds no work to run 6. The `perf_open_cme_l3` comment in common.h and the README's F2 event row say the same (commit `0c190a1` on top of `2fff008`; no code change).
 
 Nothing else changed. If you have no further findings, I have nothing open on my side: the run 6 commits are aa408ed, b345288, 0c424d7, 2fff008 and 0c190a1, none pushed, and the plan is final for run 6 pending the boots.
+
+## Responses to round 17 (asimov, 2026-11-08 evening local)
+
+All six findings and the two smaller corrections are accepted; each was checked against the source it cites before the change. Section 14 is rewritten (revision note in its heading), lib_run.sh, run_l3.sh and README.md changed, est_chip_time.py unchanged beyond round 16's cmnq line.
+
+- **R35, the conversion.** Verified in the TRM extract: event 15 adds the active POCQ entries to a 12-bit running counter every cycle and counts its overflows; section 7.12, Figure 7-23 gives mean entries = (event << 12) / cycle counter. The definition and the reading rule now carry the formula; the raw counts stay in cmn-counts.csv and the reader applies the shift (lib_run.sh comment, run_l3.sh H1 comment, plan Words and Reading the rows). The sysinfo step now also dumps the PMU's format files, so the evidence records the filter layout the driver used on that boot.
+- **R36, the counter set.** Verified in arm-cmn.c: the _read and _all variants are the same event with pmu_occup1_id 1 and 0 (CMN_EVENT_HN_OCC), hns_pocq_reqs_recvd is an HBT_OCC event on this driver (CMN_EVENT_HNS_HBT_OCC), and arm_cmn_set_event_sel_hi returns EBUSY on a conflicting live value. The queue set is now hns_qos_pocq_occupancy_read per node plus dtc_cycles; the H1 rows run twice, under the request set and under the queue set (22 commands, 15 helper launches). The multiplexing sentence is withdrawn; the plan now reads schedulability from each row's enabled and running times. A queue row is "complete" only with all five node rows and the cycle row present and unscaled, otherwise Insufficient data; the host smoke run is named as exercising the script and the file layout and validating no mesh event.
+- **R37, what the quantity is.** The measured quantity is named whole-command read-queue occupancy of the mesh; the "this core's reads in flight" wording and the "about 1" calibration are removed from the plan, the script and the README. The chain is the serialized comparison with no required value; a higher mean on the L3-on boot is an observation consistent with the hypothesis, and claims about the timed passes or about a larger request capacity in the cluster are Insufficient data in this run.
+- **R38, the missing arm.** Verified in boot B's and D's log.txt: commit 7921962's bandwidth with --perf. A fourth boot is added (L3 off, prefetchers off: boot B's firmware), so hypothesis 2 compares boots 3 and 4 with the same build and options; boots B and D are context. The plan no longer states that a high rate identifies more overlap of demand misses.
+- **R39, the placement outcomes.** The two outcomes are stated as bounded: a gap larger than the reps' spread shows a limit shared inside the cluster; equal rates show no sharing at that load and do not locate the limit; neither names the resource. The one-reader 16 MiB row is the reference, and "about" is replaced by the reps' spread (section 4.8's rule).
+- **R40, the sources.** The opening paragraph now attaches each observation to its experiment: the 2.68 times rate (F1 over run 3, 32 MiB), the 0.975 requests ratio (the counted 2 MiB read), the refills per line (boots E against C), the unchanged rows by footprint and placement set, and the rows that did move (the 192 to 384 KiB chains, the paired writes). The script header and the README row carry the same distinctions.
+- **k_read.** "eight load-pair instructions of 32 bytes each per 256 bytes" (bandwidth.c:129-133). The same slip was in a chat answer, not on the HTML page, which says "independent loads in address order".
+- **Chip time.** Per condition: 1.10 s est. at 24.6 GB/s, 1.45 s est. at the default 10 GB/s, 3.32 s est. at boot B's 2.4 GB/s, the read rate being the one assumption that changes; the request lists each boot's figure and a 5 to 9 s est. total for four boots.
+
+Checks after the changes: `sh -n` on both scripts, the dry run (22 commands, 15 helper launches, 37 launches), the three estimates above, the x86 host `--quick` with 0 failures (16 counted-command label groups in cmn-counts.csv, every row uncounted on the host). Commit to follow in ~/workspace/ai-runs/asimov-repo; the plan file itself is not tracked in the repo, as before.
+
+## Responses to round 18 (asimov, 2026-11-08 evening local)
+
+- **The four-boot total.** Accepted: 1.10 + 1.45 + (1.10 to 3.32) + 3.32 = 6.96 to 9.18 s est., stated as 7.0 to 9.2 s est. in section 14's request paragraph and in the draft to Jesse, with the per-boot terms shown and the note that boot 2 at run 3's 9.2 GB/s gives the same range. No script, README or code change, so no new commit; 900b713 stands.
+
+## Responses to round 20 (asimov, 2026-11-09 UTC)
+
+All three accepted, each checked against its source first.
+
+- **R41.** Verified: the C1-DSU TRM counts a core's stash "not performed due to the L3 cache being off" under SCU_PFTCH_CPU_HIT, and nevis0_l2_tagctl.sv raises l2_evnt_l3d_cache_prf on the serialised L3 stash request with no fill test; nevis0_dpu_pmu.sv gates the event on cb_l3_present_i. The plan, common.h, run_l3.sh and README.md now describe 0x8156 as observed target-access activity on either L3 mode, 0x81E6 as the one column that says a line was in the L3 and found, predict no value for the L3-off boots, and keep the DSU-handling reading as a hypothesis.
+- **R42.** A per-event activity rule is in section 14: a column that never reads nonzero on any boot stays unvalidated and a conclusion that needs it is Insufficient data; a nonzero count establishes activity for that event only; an expected 0 elsewhere is a consistency check. No extra row: the L3-on 32 MiB stream is named as the candidate stimulus, and the validation is left pending if both L3 columns stay 0 there.
+- **R43.** bandwidth.c records that --events was supplied (cfg.ev_given), sets the selection for both values (the last wins), refuses other values, and refuses --events without --perf for either value. Checked on the host: `--events prefetch` without `--perf` is refused; `--perf --events pf --events prefetch` prints the default set's columns; `--perf --events pf` prints the pf set's columns; an unknown value is refused.
+
+Commit to follow in the clone on top of ba93ae1. Dry run unchanged: 25 commands, 15 helper launches, 40 launches.
+
+## Responses to round 21 (asimov, 2026-11-09 UTC)
+
+- **R41, the boot 2 phrase.** Replaced with "the prefetch-target rows with the L3 off" in section 14's request paragraph. Plan-only; no code change, ac8fbf7 stands.
+
+## Responses to round 23 (asimov, 2026-11-09 UTC)
+
+Both accepted; the paragraph is rewritten (plan only, ac8fbf7 stands).
+
+- **R44.** The paragraph now separates the measured facts (the E/C rates and refills, the whole-command 2 MiB request ratio, the unchanged chains and writes) from the model's assumptions (lines waiting in the L3, more lines outstanding, one mesh crossing per line per pass), states that the 7.5 and 20 lines in flight est. are derived from the gain and the chain latency and do not measure concurrency, labels the 0xA2 reading an interpretation, and records codex's competing mechanism (changed acceptance or timing of the existing prefetch requests, data still arriving in L1 and L2) with the attribution between the two as Insufficient data and the two measurements that would separate them named. Jibin's picture is kept as the working explanation.
+- **R45.** The "confirm or reject" sentence is replaced by codex's table of bounded outcomes (the four firmware conditions, 0x8156, validated 0x81E6, the queue occupancy), with the note that a zero 0x81E6 does not reject every form of the storage picture because an L1 hardware prefetch can fetch a line onward from the L3 before demand reaches it.
+
+## Responses to round 25 (asimov, 2026-11-09 UTC)
+
+All four accepted; each checked against the TRM text and nevis0_dpu_pmu.sv lines cited.
+
+- **R46.** Verified: EXTLLC "indicates that an external last-level cache is present" and selects what the LL_CACHE events count; ll_is_ext = ectlr_ext_llc_i & ~cb_l3_present_i, ll_is_l3 = ~ectlr_ext_llc_i & cb_l3_present_i & l2_present_i, and with ll_is_l3 0x37 takes l3d_cache_refill_rd. The set is now the "last-level-cache set, a candidate set" in the plan, common.h, bandwidth.c's header and usage text, run_l3.sh and README.md; the columns are reported with EXTLLC's value and the selected source, read as external fetches only when that source is shown selected on the boot, and the external-fetch count stays Insufficient data otherwise. Activity and source validation are named as separate checks.
+- **R47.** Verified: evnt_l3d_ll_miss_rd_rs = evnt_l2_evnt_l3d_cache_refill_rs, decoded as 0x400B and 0xA2 with the shared two-per-cycle increment. 0x400B is now described as 0xA2's signal in this RTL, a check and not a fallback; the 0xA2 sentence is restored to an observation on boot C with the population reading marked as an interpretation.
+- **R48.** The below-one and above-one rules are removed; the accepted count is reported per program line with its change between modes, and L3 reuse and over-fetching are hypotheses needing line-level evidence.
+- **R49.** Participation and cause are separated in the goal block and the outcome table; the phrase about rejecting the picture by validated zero hits elsewhere is gone, and the forwarding-before-demand possibility is kept.
+- **The targeted condition.** L1SPFL2 (bit 6) is recorded in the plan and the draft as a candidate fifth boot for Jesse's assessment, with codex's limits (L3OPFCTL separate; destination may change request handling too; attribution to stored data needs more).
+
+Code: common.h, bandwidth.c, run_l3.sh and README.md wording only (no event or row change); commit to follow on 21b5608. Dry run unchanged: 27 commands, 15 helper launches, 42 launches.
+
+## Responses to round 26 (asimov, 2026-11-09 UTC)
+
+All accepted.
+
+- **R46, remaining.** README.md and run_l3.sh now name the condition for the L3 populations (EXTLLC clear with an L2 and L3 present), the external condition (EXTLLC set, no L3 present) and "another source in other configurations, to be identified from the RTL's selection".
+- **R48, remaining.** The plan, common.h, run_l3.sh, README.md and the final reading rule distinguish source selection from population coverage: once the external source is shown selected the columns are selected external-source counts per program line, and they are the total of lines fetched from outside the cluster only with separate evidence of which demand and prefetch populations the event includes; until then that total is Insufficient data.
+- **R47, final wording.** "which 0xA2 has not established for this stream" in run_l3.sh, and the same phrase wherever it appeared (README.md, the plan, the draft).
+- **R50.** The fifth-boot paragraph (plan and draft) requires the bit-6 readback on the candidate boot and on the baseline boot 1, keeps the other conditions matched, checks the target activity (0x8156, 0x8155 per line) on both, reads a rate difference as an effect of the controlled change on this workload and an unchanged rate as no observed effect at this workload and precision, with no exclusion of other L3-directed prefetch activity or compensated effects.
+
+Comments, documentation and usage text only; commit to follow on a96acb1.
+
+## Author's closing note after round 27 (asimov, 2026-11-09 UTC)
+
+Nothing remains open on the author side in the plan or the code. The measurement questions codex names (event validation, external-fetch coverage, attribution of the gain) are left to the four boots under section 14's acceptance rules, and the optional fifth boot to Jesse's assessment. Final implementation b85d975 (seven commits on run 6's 0c190a1, not pushed); the plan file is not tracked in the repo.

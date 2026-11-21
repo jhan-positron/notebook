@@ -1,3 +1,78 @@
+# Source inventory update, 2026-11-20
+
+Canonical files are on claude-agentsrv. The sizes below are bytes.
+
+| Canonical file | Notebook path or reason | Bytes |
+|---|---|---:|
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/PR3879/new-PRs/new-counters/attn-stats-compare.md` | artifacts/intel-amx/pr3879/new-counters/attn-stats-compare.md | 61056 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/README.md` | artifacts/intel-amx/exec/pr5022-final-20261119/README.md | 12140 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/build-3b35.sh` | artifacts/intel-amx/exec/pr5022-final-20261119/build-3b35.sh | 6048 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/ci-watch.sh` | artifacts/intel-amx/exec/pr5022-final-20261119/ci-watch.sh | 1399 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/mutation-exit-code-3b35.sh` | artifacts/intel-amx/exec/pr5022-final-20261119/mutation-exit-code-3b35.sh | 4585 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/objcmp-3b35.sh` | artifacts/intel-amx/exec/pr5022-final-20261119/objcmp-3b35.sh | 5106 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/objcmp-compare.py` | artifacts/intel-amx/exec/pr5022-final-20261119/objcmp-compare.py | 5291 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/objcmp-main4-3b35.sh` | artifacts/intel-amx/exec/pr5022-final-20261119/objcmp-main4-3b35.sh | 2925 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/registry-check-3b35.sh` | artifacts/intel-amx/exec/pr5022-final-20261119/registry-check-3b35.sh | 2905 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/tests-3b35.sh` | artifacts/intel-amx/exec/pr5022-final-20261119/tests-3b35.sh | 6312 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/build-final.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/build-final.txt | 1249 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/ci-watch.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/ci-watch.txt | 3502 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/commits.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/commits.txt | 86 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/build-final.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/build-final.txt | 1252 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/overlay-files.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/overlay-files.txt | 284 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/registry-check-before.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/registry-check-before.txt | 1550 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/tests.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/tests.txt | 2993 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/tree.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/tree.txt | 41 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/lint-notes.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/lint-notes.txt | 4458 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/load-snapshot-after.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/load-snapshot-after.txt | 3045 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/mutation-exit-code.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/mutation-exit-code.txt | 1416 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/build-info.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/objcmp/build-info.txt | 2125 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/diff-5061623a34-vs-4c4b7b8864-qk_rowmajor_128x4_16.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/objcmp/diff-5061623a34-vs-4c4b7b8864-qk_rowmajor_128x4_16.txt | 317 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/diff-5061623a34-vs-final-qk_rowmajor_128x4_16.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/objcmp/diff-5061623a34-vs-final-qk_rowmajor_128x4_16.txt | 317 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/diff-built-vs-linked-weights_times_v_128x4_16.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/objcmp/diff-built-vs-linked-weights_times_v_128x4_16.txt | 243 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/diff-built-vs-linked-weights_times_v_128x4_4.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/objcmp/diff-built-vs-linked-weights_times_v_128x4_4.txt | 243 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/flags.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/objcmp/flags.txt | 1299 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/main-vs-final-4head.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/objcmp/main-vs-final-4head.txt | 7104 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/objcmp.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/objcmp/objcmp.txt | 8094 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/overlay-files.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/overlay-files.txt | 312 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/posted-bot-replies.json` | artifacts/intel-amx/exec/results/pr5022-final-20261119/posted-bot-replies.json | 345 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/posted-review.json` | artifacts/intel-amx/exec/results/pr5022-final-20261119/posted-review.json | 2589 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/prep.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/prep.txt | 2033 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/registry-check-after.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/registry-check-after.txt | 1410 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/registry-check-before.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/registry-check-before.txt | 1550 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/slice-route.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/slice-route.txt | 457 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/tests.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/tests.txt | 2993 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/tests/dispatch.log` | artifacts/intel-amx/exec/results/pr5022-final-20261119/tests/dispatch.log | 40439 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/tree.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/tree.txt | 41 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/trial-merge.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/trial-merge.txt | 616 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/wall-times.txt` | artifacts/intel-amx/exec/results/pr5022-final-20261119/wall-times.txt | 867 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/muse-glimmer/pr5022-body-round2.final.md` | artifacts/intel-amx/muse-glimmer/pr5022-body-round2.final.md | 12659 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch.py` | artifacts/intel-amx/exec/workflows/apply_patch.py | 33708 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch10.py` | artifacts/intel-amx/exec/workflows/apply_patch10.py | 1508 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch11.py` | artifacts/intel-amx/exec/workflows/apply_patch11.py | 851 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch12.py` | artifacts/intel-amx/exec/workflows/apply_patch12.py | 1208 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch13.py` | artifacts/intel-amx/exec/workflows/apply_patch13.py | 18769 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch14.py` | artifacts/intel-amx/exec/workflows/apply_patch14.py | 2766 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch15.py` | artifacts/intel-amx/exec/workflows/apply_patch15.py | 4486 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch2.py` | artifacts/intel-amx/exec/workflows/apply_patch2.py | 44383 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch3.py` | artifacts/intel-amx/exec/workflows/apply_patch3.py | 39740 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch4.py` | artifacts/intel-amx/exec/workflows/apply_patch4.py | 6517 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch5.py` | artifacts/intel-amx/exec/workflows/apply_patch5.py | 30035 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch6.py` | artifacts/intel-amx/exec/workflows/apply_patch6.py | 69855 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch7.py` | artifacts/intel-amx/exec/workflows/apply_patch7.py | 4896 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch8.py` | artifacts/intel-amx/exec/workflows/apply_patch8.py | 2057 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch9.py` | artifacts/intel-amx/exec/workflows/apply_patch9.py | 2297 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/frag_decisions.html` | artifacts/intel-amx/exec/workflows/frag_decisions.html | 30065 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/frag_i6diff.html` | artifacts/intel-amx/exec/workflows/frag_i6diff.html | 2328 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/frag_refs.html` | artifacts/intel-amx/exec/workflows/frag_refs.html | 8299 |
+| `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/respond-2-Isaac.orig.html` | artifacts/intel-amx/exec/workflows/respond-2-Isaac.orig.html | 136550 |
+| `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/digest.md` | artifacts/intel-amx/exec/scratch-relocated/c19a91bd/pr/digest.md | 365464 |
+| `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/inline_sorted.json` | artifacts/intel-amx/exec/scratch-relocated/c19a91bd/pr/inline_sorted.json | 42426 |
+| `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/isaac_review_body.md` | artifacts/intel-amx/exec/scratch-relocated/c19a91bd/pr/isaac_review_body.md | 4744 |
+| `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr_body.md` | artifacts/intel-amx/exec/scratch-relocated/c19a91bd/pr/pr_body.md | 11339 |
+| `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/results.json` | artifacts/intel-amx/exec/scratch-relocated/c19a91bd/pr/results.json | 606379 |
+
+## Previously registered sources
+
 # Lineage inventory: artifacts/intel-amx/muse-glimmer/respond-2-Isaac.html
 
 Written by the 2026-11-02 handoff run. One line per file under the inputs and sources the page's lineage names (handoff: claude_20261030_pr-5022-review-replies-from-isaac.md). Repo path = preserved at that path; otherwise the left-behind reason.
@@ -1326,3 +1401,4 @@ Written by the 2026-11-02 handoff run. One line per file under the inputs and so
 | `agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/isaac_review_body.md` | artifacts/intel-amx/exec/scratch-relocated/c19a91bd/pr/isaac_review_body.md | 4744 |
 | `agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/pr_body.md` | artifacts/intel-amx/exec/scratch-relocated/c19a91bd/pr/pr_body.md | 11339 |
 | `agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/results.json` | artifacts/intel-amx/exec/scratch-relocated/c19a91bd/pr/results.json | 606379 |
+

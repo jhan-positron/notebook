@@ -10016,3 +10016,88 @@ Related: [claude_20261030_pr-5022-review-replies-from-isaac.md](../../handoffs/c
 - `exec/scratch-relocated/c19a91bd/pr/work_top01_buildlog.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/scratch-relocated/c19a91bd/pr/work_top01_buildlog.txt` (287024 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/scratchpad/pr/work_top01_buildlog.txt`
 - `exec/workflows/respond-to-isaac-pr5022-wf_aa5e52f3-4e0.js` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/respond-to-isaac-pr5022-wf_aa5e52f3-4e0.js` (13382 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX-muse-glimmer/c19a91bd-35ba-4b1c-8db4-368d54a84066/workflows/scripts/respond-to-isaac-pr5022-wf_aa5e52f3-4e0.js`
 
+## Codex handoff preservation, 2026-11-20
+
+Each path below is relative to this topic. Original files are on claude-agentsrv unless a different host is given.
+
+- `exec/pr5022-final-20261119/README.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/README.md` (12140 mirror bytes).
+- `exec/pr5022-final-20261119/build-3b35.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/build-3b35.sh` (6048 mirror bytes).
+- `exec/pr5022-final-20261119/ci-watch.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/ci-watch.sh` (1399 mirror bytes).
+- `exec/pr5022-final-20261119/mutation-exit-code-3b35.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/mutation-exit-code-3b35.sh` (4585 mirror bytes).
+- `exec/pr5022-final-20261119/objcmp-3b35.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/objcmp-3b35.sh` (5106 mirror bytes).
+- `exec/pr5022-final-20261119/objcmp-compare.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/objcmp-compare.py` (5291 mirror bytes).
+- `exec/pr5022-final-20261119/objcmp-main4-3b35.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/objcmp-main4-3b35.sh` (2925 mirror bytes).
+- `exec/pr5022-final-20261119/registry-check-3b35.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/registry-check-3b35.sh` (2905 mirror bytes).
+- `exec/pr5022-final-20261119/tests-3b35.sh` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/pr5022-final-20261119/tests-3b35.sh` (6312 mirror bytes).
+- `exec/results/pr5022-final-20261119/build-final.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/build-final.txt` (1249 mirror bytes).
+- `exec/results/pr5022-final-20261119/ci-watch.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/ci-watch.txt` (3502 mirror bytes).
+- `exec/results/pr5022-final-20261119/commits.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/commits.txt` (86 mirror bytes).
+- `exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/build-final.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/build-final.txt` (1252 mirror bytes).
+- `exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/overlay-files.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/overlay-files.txt` (284 mirror bytes).
+- `exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/registry-check-before.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/registry-check-before.txt` (1550 mirror bytes).
+- `exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/tests.txt` (2993 mirror bytes).
+- `exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/tree.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/first-pass-tree-5821ee86/tree.txt` (41 mirror bytes).
+- `exec/results/pr5022-final-20261119/lint-notes.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/lint-notes.txt` (4458 mirror bytes).
+- `exec/results/pr5022-final-20261119/load-snapshot-after.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/load-snapshot-after.txt` (3045 mirror bytes).
+- `exec/results/pr5022-final-20261119/mutation-exit-code.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/mutation-exit-code.txt` (1416 mirror bytes).
+- `exec/results/pr5022-final-20261119/objcmp/build-info.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/build-info.txt` (2125 mirror bytes).
+- `exec/results/pr5022-final-20261119/objcmp/diff-5061623a34-vs-4c4b7b8864-qk_rowmajor_128x4_16.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/diff-5061623a34-vs-4c4b7b8864-qk_rowmajor_128x4_16.txt` (317 mirror bytes).
+- `exec/results/pr5022-final-20261119/objcmp/diff-5061623a34-vs-final-qk_rowmajor_128x4_16.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/diff-5061623a34-vs-final-qk_rowmajor_128x4_16.txt` (317 mirror bytes).
+- `exec/results/pr5022-final-20261119/objcmp/diff-built-vs-linked-weights_times_v_128x4_16.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/diff-built-vs-linked-weights_times_v_128x4_16.txt` (243 mirror bytes).
+- `exec/results/pr5022-final-20261119/objcmp/diff-built-vs-linked-weights_times_v_128x4_4.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/diff-built-vs-linked-weights_times_v_128x4_4.txt` (243 mirror bytes).
+- `exec/results/pr5022-final-20261119/objcmp/flags.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/flags.txt` (1299 mirror bytes).
+- `exec/results/pr5022-final-20261119/objcmp/main-vs-final-4head.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/main-vs-final-4head.txt` (7104 mirror bytes).
+- `exec/results/pr5022-final-20261119/objcmp/objcmp.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/objcmp/objcmp.txt` (8094 mirror bytes).
+- `exec/results/pr5022-final-20261119/overlay-files.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/overlay-files.txt` (312 mirror bytes).
+- `exec/results/pr5022-final-20261119/posted-bot-replies.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/posted-bot-replies.json` (345 mirror bytes).
+- `exec/results/pr5022-final-20261119/posted-review.json` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/posted-review.json` (2589 mirror bytes).
+- `exec/results/pr5022-final-20261119/prep.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/prep.txt` (2033 mirror bytes).
+- `exec/results/pr5022-final-20261119/registry-check-after.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/registry-check-after.txt` (1410 mirror bytes).
+- `exec/results/pr5022-final-20261119/registry-check-before.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/registry-check-before.txt` (1550 mirror bytes).
+- `exec/results/pr5022-final-20261119/slice-route.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/slice-route.txt` (457 mirror bytes).
+- `exec/results/pr5022-final-20261119/tests.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/tests.txt` (2993 mirror bytes).
+- `exec/results/pr5022-final-20261119/tests/dispatch.log` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/tests/dispatch.log` (40439 mirror bytes).
+- `exec/results/pr5022-final-20261119/tree.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/tree.txt` (41 mirror bytes).
+- `exec/results/pr5022-final-20261119/trial-merge.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/trial-merge.txt` (616 mirror bytes).
+- `exec/results/pr5022-final-20261119/wall-times.txt` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/results/pr5022-final-20261119/wall-times.txt` (867 mirror bytes).
+- `exec/workflows/apply_patch.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch.py` (33708 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch.py`
+- `exec/workflows/apply_patch10.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch10.py` (1508 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch10.py`
+- `exec/workflows/apply_patch11.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch11.py` (851 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch11.py`
+- `exec/workflows/apply_patch12.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch12.py` (1208 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch12.py`
+- `exec/workflows/apply_patch13.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch13.py` (18769 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch13.py`
+- `exec/workflows/apply_patch14.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch14.py` (2766 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch14.py`
+- `exec/workflows/apply_patch15.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch15.py` (4486 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch15.py`
+- `exec/workflows/apply_patch2.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch2.py` (44383 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch2.py`
+- `exec/workflows/apply_patch3.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch3.py` (39740 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch3.py`
+- `exec/workflows/apply_patch4.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch4.py` (6517 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch4.py`
+- `exec/workflows/apply_patch5.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch5.py` (30035 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch5.py`
+- `exec/workflows/apply_patch6.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch6.py` (69855 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch6.py`
+- `exec/workflows/apply_patch7.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch7.py` (4896 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch7.py`
+- `exec/workflows/apply_patch8.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch8.py` (2057 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch8.py`
+- `exec/workflows/apply_patch9.py` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/apply_patch9.py` (2297 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/apply_patch9.py`
+- `exec/workflows/frag_decisions.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/frag_decisions.html` (30377 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/frag_decisions.html`
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/workflows/frag_decisions.html)
+- `exec/workflows/frag_i6diff.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/frag_i6diff.html` (2634 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/frag_i6diff.html`
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/workflows/frag_i6diff.html)
+- `exec/workflows/frag_refs.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/frag_refs.html` (8601 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/frag_refs.html`
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/workflows/frag_refs.html)
+- `exec/workflows/respond-2-Isaac.orig.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/exec/workflows/respond-2-Isaac.orig.html` (136874 mirror bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-intel-AMX-muse-glimmer/78b9fca8-c24b-4ac2-a02d-0236a437cdd6/scratchpad/respond-2-Isaac.orig.html`
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/workflows/respond-2-Isaac.orig.html)
+- `memory/MEMORY.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/MEMORY.md` (16916 mirror bytes).
+- `memory/wade-code-review-skill.md` -> `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-intel-AMX/memory/wade-code-review-skill.md` (5639 mirror bytes).
+- `muse-glimmer/pr5022-body-round2.final.md` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/muse-glimmer/pr5022-body-round2.final.md` (12659 mirror bytes).
+- `muse-glimmer/respond-2-Isaac.html` -> `claude-agentsrv:/home/jhan/workspace/intel-AMX/muse-glimmer/respond-2-Isaac.html` (257723 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/muse-glimmer/respond-2-Isaac.html)
+
+### muse-glimmer/respond-2-Isaac.html
+
+- generator: build_page.py for the October base, followed by the November apply_patch scripts
+- input: October HTML snapshot, revision fragments and cited run records
+- input built by: none
+- sources: See [muse-glimmer/respond-2-Isaac.html.lineage.md](muse-glimmer/respond-2-Isaac.html.lineage.md) for every registered or proposed file and each left-behind reason.
+- regenerate: unavailable (incremental scripts use fixed working paths and live Git data)
+- regenerate unverified (unavailable (incremental scripts use fixed working paths and live Git data))
+
+### Related handoffs
+
+- [Find HTML files with raw prompts](../../handoffs/codex_20261109_find-html-files-with-raw-prompts.md)

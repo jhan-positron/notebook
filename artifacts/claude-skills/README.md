@@ -66,3 +66,12 @@ Related: [claude_20261020-20261022_pr-5047-perf-regression-vs-pr-4956.md](../../
 
 - `ben-review/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/ben-review/SKILL.md` (14220 bytes)
 
+## Codex handoff preservation, 2026-11-20
+
+Each path below is relative to this topic. Original files are on claude-agentsrv unless a different host is given.
+
+- `CLAUDE.md` -> `claude-agentsrv:/home/jhan/.claude/CLAUDE.md` (8311 mirror bytes).
+- `cpp-coding-guide/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/cpp-coding-guide/SKILL.md` (4831 mirror bytes).
+
+### Related handoffs
+

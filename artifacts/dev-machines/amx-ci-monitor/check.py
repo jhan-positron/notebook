@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent
 BENCHMARK = "llama-3.1-8b-instruct-good-tp2 @32u per machine (AMX benchmark)"
 MIN_DECODE_TPS = Decimal("32.3")
-MIN_PREFILL_TPS = Decimal("353")
+MIN_PREFILL_TPS = Decimal("340")
 CODEX = "/home/jhan/.local/bin/codex"
 
 

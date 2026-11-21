@@ -1,6 +1,6 @@
 # lib_run.sh - shared part of run_asimov.sh (the cache and mesh test) and
 # run_cme.sh (the CME test): options, output directory, binaries, mesh
-# counter settings, CPU sets, and the run / cmn / cmn0 / cpu_set_online
+# counter settings, CPU sets, and the run / cmn / cmn0 / cmnq / cpu_set_online
 # helpers. Sourced with ". "$HERE/lib_run.sh"" after the caller set HERE.
 # Both scripts write into one results directory when run_all.sh runs them.
 #
@@ -40,6 +40,19 @@ HNS="88,160,216,288,344"
 # Mesh events: requests received per home node, plus two sums over all nodes.
 CMN_PER_NODE="hns_pocq_reqs_recvd_all"
 CMN_GLOBAL="hns_mc_reqs_local_all,hns_cache_miss_all"
+# Mesh queue set (run_l3.sh): per home node the read occupancy of its request queue (POCQ), and
+# the mesh cycle counter. The occupancy event adds the number of active read entries to a 12-bit
+# running counter every cycle and counts that counter's overflows, so the mean number of active
+# entries over the counted interval is (event count << 12) / dtc_cycles [CMN S3(AE) TRM 107858,
+# event 15 and section 7.12, Figure 7-23]. cmncount writes the raw counts; the reader applies the
+# shift. The occupancy events of one node share one filter register (the request type), so a
+# node cannot count read occupancy and all-type occupancy at once, and on this driver
+# hns_pocq_reqs_recvd_all sets the same filter to another value: the request set (cmn) and the
+# queue set (cmnq) therefore run as two commands. A node whose event fails to open gets a
+# "# cmncount:" comment line and the command still runs, so a queue measurement is complete only
+# when all five node rows and the cycle row are present with running time equal to enabled time.
+CMN_Q_PER_NODE="hns_qos_pocq_occupancy_read"
+CMN_Q_GLOBAL="dtc_cycles"
 
 if [ "$QUICK" = 1 ]; then
     CPU=3; PAIR="3,5"; PERDSU="3,5"; ALL="3,5"; OFFLINE_CPU=""; OCMCPUS="3"
@@ -86,6 +99,12 @@ cmn() {
 cmn0() {
     l="$1"; shift
     "$CMN" --out "$CMNOUT" --label "$l" -- "$@"
+}
+# cmnq <label> <cmd...>: run cmd under the mesh queue set (run_l3.sh). A row whose running time
+# is below its enabled time was multiplexed and is scaled; cmncount prints both times.
+cmnq() {
+    l="$1"; shift
+    "$CMN" --out "$CMNOUT" --label "$l" --nodes "$HNS" --events "$CMN_Q_PER_NODE" --global "$CMN_Q_GLOBAL" -- "$@"
 }
 cpu_set_online() { # cpu 0|1
     [ -n "$OFFLINE_CPU" ] || return 0

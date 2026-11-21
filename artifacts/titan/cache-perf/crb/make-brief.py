@@ -101,8 +101,8 @@ def mesh_panel(m, X0, Y0, core_of, lat_from, title):
 core_map_svg = '<svg viewBox="0 0 880 292" role="img" aria-label="Core positions and slice latency on both meshes">' + \
     mesh_panel(0, 36, 44, 0, {k: v for k, v in L[0].items() if k[0] == 0}, 'mesh 0 (arm_cmn_0), CPUs 0 to 63: ns from CPU 0 to each slice') + \
     mesh_panel(1, 466, 44, 64, {k: v for k, v in L[64].items() if k[0] == 1}, 'mesh 1 (arm_cmn_1), CPUs 64 to 119: ns from CPU 64') + \
-    '<text x="36" y="276" font-size="10.5" fill="#5b6470">Each cell is one crosspoint with two 1 MiB slices. Top line: the core pair on its port. Number: median of 7 fresh pointer chases of 2048 lines homed there.</text>' + \
-    '<text x="36" y="289" font-size="10.5" fill="#5b6470">Red border: the measuring core. Dashed: a crosspoint without slices. Nearest slice 19 ns, about 2.7 ns per hop, far corner 33 to 44 ns.</text></svg>'
+    '<text x="36" y="276" font-size="10.5" fill="#5b6470">Each cell is one crosspoint with two 1 MiB slices. Top line: its core pair. Number: the faster slice, median of 7 fresh chases of 2048 lines homed there.</text>' + \
+    '<text x="36" y="289" font-size="10.5" fill="#5b6470">Full report: mean of both slices. Red border: the measuring core. Dashed: no slice. Nearest slice 19 ns, about 2.7 ns per hop, far corner 33 to 44 ns.</text></svg>'
 
 # write grid
 A = [0, 16, 32, 48, 64]; Bv = [0, 16, 32, 48, 56]
@@ -126,7 +126,7 @@ wg.append(f'<text x="{X0}" y="{Y0 + 5 * CH + 30}" font-size="10" fill="#5b6470">
 write_grid_svg = '\n'.join(wg)
 
 # per-core fresh latency strip (120 dots)
-pcs = ['<svg viewBox="0 0 430 150" role="img" aria-label="Per-core mesh-cache latency">']
+pcs = ['<svg viewBox="0 0 430 150" role="img" aria-label="Per-core SLC latency">']
 Lm, Rm, T, H = 40, 10, 24, 90
 X = lambda c: Lm + (c + 0.5) / 120 * (430 - Lm - Rm); Y = lambda v: T + (1 - (v - 25) / 6) * H
 pcs.append('<text x="40" y="14" font-size="11" font-weight="600">fresh 16 MiB chase per CPU, ns (average over all slices)</text>')
@@ -163,28 +163,28 @@ svg {{ width: 100%; height: auto; display: block; font-family: inherit; }}
 </style>
 <main>
 <h1>CRB memory hierarchy: results brief</h1>
-<p class="sub">Phoenix Reference Server, 128 Neoverse V3AE at 2.8 GHz, two CMN S3 meshes. Measured 2026-10-30 to 2026-11-02 on CPUs 0 to 119. Full report with methods: crb-memory-hierarchy.html. Brief generated {today}.</p>
+<p class="sub">Phoenix Reference Server, 128 Neoverse V3AE at 2.8 GHz, two CMN S3 meshes. Measured 2026-10-30 to 2026-11-02 on CPUs 0 to 119. Full report with methods: crb-memory-hierarchy.html. Brief generated {today} (UTC).</p>
 
 <h2>Levels, one core and whole chip</h2>
 <table>
 <tr><th>Level</th><th>Size</th><th>Load-to-use latency</th><th>Read, 1 core</th><th>Write, 1 core</th><th>Read, whole chip</th><th>Write, whole chip</th></tr>
-<tr><td>L1 data, private, 4-way</td><td>64 KiB</td><td>1.43 ns (4 cycles)</td><td>133 GB/s</td><td>89.5 GB/s</td><td>15.9 TB/s</td><td>10.7 TB/s</td></tr>
-<tr><td>L2, private, 8-way</td><td>2 MiB</td><td>3.75 ns (10.5)</td><td>85 GB/s</td><td>89.5 GB/s</td><td>10.2 TB/s</td><td>10.7 TB/s</td></tr>
-<tr><td>Mesh cache (SLC), 128 slices of 1 MiB, 16-way</td><td>128 MiB (64 MiB seen by one core)</td><td>19 to 44 ns by slice, 29 avg (85)</td><td>67 GB/s</td><td>73 GB/s, goes to DRAM</td><td>≥ 0.62 TB/s served by slices (1.38 TB/s total at 40 threads)</td><td>not cached</td></tr>
-<tr><td>DRAM, 10 ch DDR5-8000</td><td>320 GiB</td><td>148 ns (415)</td><td>30 GB/s</td><td>63 GB/s</td><td>533 GB/s (83 % of 640 peak)</td><td>447 GB/s</td></tr>
+<tr><td>L1 data, private, <span style="white-space:nowrap">4-way</span></td><td>64 KiB</td><td>1.43 ns (4 cycles)</td><td>133 GB/s</td><td>89.5 GB/s</td><td>15.9 TB/s</td><td>10.7 TB/s</td></tr>
+<tr><td>L2, private, <span style="white-space:nowrap">8-way</span></td><td>2 MiB</td><td>3.75 ns (10.5)</td><td>85 GB/s</td><td>89.5 GB/s</td><td>10.2 TB/s</td><td>10.7 TB/s</td></tr>
+<tr><td>SLC (L3), 128 slices of <span style="white-space:nowrap">1 MiB</span>, <span style="white-space:nowrap">16-way</span></td><td>128 MiB (64 MiB seen by one core)</td><td>19 to 44 ns by slice, 29 avg (85)</td><td>67 GB/s</td><td>73 GB/s, goes to DRAM</td><td>≥ 0.62 TB/s served by slices (1.38 TB/s total at 40 threads)</td><td>not cached</td></tr>
+<tr><td>DRAM, 10 ch <span style="white-space:nowrap">DDR5-8000</span></td><td>320 GiB</td><td>148 ns (415)</td><td>30 GB/s</td><td>63 GB/s</td><td>533 GB/s (83 % of 640 peak)</td><td>447 GB/s</td></tr>
 </table>
-<p class="cap">Latency: one dependent load, random chain, prefetch defeated. Per-core bandwidth: one thread, hand-written ldp/stp loop. Whole chip: best placement on CPUs 0 to 119. Cycles at 2.8 GHz.</p>
+<p class="cap">Latency: one dependent load, random chain, prefetch defeated. Per-core bandwidth: one thread, hand-written ldp/stp loop. Whole chip: best placement on CPUs 0 to 119. Cycles at 2.8 GHz. SLC: Arm's system level cache, in the mesh. Linux lists it as L3.</p>
 
 <h2>Findings</h2>
 <ul>
-<li class="take">Pair port: cores 2k and 2k+1 share one crosspoint port. Two partners together read 78 GB/s from the mesh cache; two non-partners 134 GB/s.</li>
-<li>One writer's 73 GB/s limit is inside the core: no L1/L2 allocation (0 refills, 0 write-backs), no credit stalls on its crosspoint links, and the same port carries 82 GB/s with the partner core, 229 GB/s with 4 writers [sudo-20261102T211150Z/writepath.csv].</li>
+<li class="take">Pair port: cores 2k and 2k+1 share one crosspoint port (inferred from two timing tests and the mesh map, not read from hardware). Two partner cores together read 78 GB/s with a buffer of 8 MiB each. That rate counts the lines from their own L2 too. Two cores of different pairs read 125 to 134 GB/s. What limits a pair was not measured.</li>
+<li>What limits one writer at 8 MiB (70 to 73 GB/s in runs of 0.5 s and 2 s) was not measured. Its lines are not allocated in L1 or L2 (0.000 refills for writes and at most 0.001 write-backs per line). The mesh links out of its crosspoint waited for the receiver in about 0.001 % of the cycles of the mesh clock (2.0 GHz). With the partner core on the same port the pair writes 82 GB/s. Four writers on four ports write 229 GB/s. Hypothesis, not tested: the core keeps only a fixed number of writes unfinished at a time. The test is the write loop run on every core in turn. It was not run. At 1 GiB one writer alone (63.0 GB/s) already reaches the rate of the pair (63.2 GB/s) [sudo-20261102T211150Z/writepath.csv, followup-20261030T194205Z/asm.csv].</li>
 <li class="take">Slice distance: nearest slice {min(near):.1f} to {max(near):.1f} ns, {st.median(hop):.1f} ns per crosspoint hop, farthest {min(far):.1f} to {max(far):.1f} ns. Repeat spread {100 * rep_spread:.0f} %.</li>
 <li>Every core's position is known from its latency gradient (map below): CPUs 0 to 63 on mesh 0, 64 to 119 on mesh 1, numbered column by column; pairs 34/35 and 98/99 sit on a crosspoint without slices.</li>
-<li>Every 2 MiB chunk of memory is split half and half between the two meshes by an address hash (the XOR of address bits 6, 8, ... 20 and higher bits), not line by line. A hit is always served on the core's own mesh, by the home slice or by a proxy slice for lines homed on the other mesh, at the same 19 to 44 ns. A line held only on the other mesh costs about 85 ns on its first access, then it is kept locally. So one core's data lives on its own mesh: one buffer sees 64 MiB, not 128.</li>
-<li>Streaming writes largely bypass the mesh cache: {rate(RB, 'asmwrite-8M-1', 0, 'hns_cache_fill_all'):.3f} fills and {rate(RB, 'asmwrite-8M-1', 0, 'hns_mc_reqs_local_all'):.2f} memory requests per line at 8 MiB per thread. The 73 GB/s "mesh write" is mostly the DRAM write path.</li>
+<li>Every 2 MiB chunk of memory is split half and half between the two meshes by a per-line address hash (the XOR of address bits 6, 8, ... 20 and higher bits). 80 % of neighbouring lines have different homes. A hit is served on the core's own mesh, by the home slice or by a proxy slice for lines homed on the other mesh, at the same 19 to 44 ns. A line held only on the other mesh costs about 85 ns on its first access, then it is kept locally. So one core's data lives on its own mesh: one buffer sees 64 MiB, not 128. Home lines and proxy lines share the slices under occupancy limits that were not read.</li>
+<li>Streaming writes largely bypass the SLC: {rate(RB, 'asmwrite-8M-1', 0, 'hns_cache_fill_all'):.3f} fills and {rate(RB, 'asmwrite-8M-1', 0, 'hns_mc_reqs_local_all'):.2f} memory requests per line at 8 MiB per thread. The 73 GB/s "SLC write" is mostly the DRAM write path.</li>
 <li class="take">DRAM write collapses only with heavy writers on both meshes: 64 writers on one mesh 394 GB/s, 32 on each mesh 173 GB/s. Reads do not collapse. Home-node retry and throttle counts fall in the collapsed case; the bottleneck is not located (hypothesis: chip-to-chip links).</li>
-<li>Concurrent reads from the mesh cache: 32 threads on one mesh share about {sum(m0):.0f} GB/s ({min(m0):.0f} to {max(m0):.0f} each); 8 threads on the other mesh get {min(m1):.0f} to {max(m1):.0f} each (3 MiB per thread, one thread per pair, {best_3m:.0f} GB/s total).</li>
+<li>Concurrent reads from the SLC: 32 threads on one mesh share about {sum(m0):.0f} GB/s ({min(m0):.0f} to {max(m0):.0f} each); 8 threads on the other mesh get {min(m1):.0f} to {max(m1):.0f} each (3 MiB per thread, one thread per pair, {best_3m:.0f} GB/s total).</li>
 </ul>
 
 <h2>Where the cores are, and how far each slice is</h2>
@@ -194,7 +194,7 @@ svg {{ width: 100%; height: auto; display: block; font-family: inherit; }}
 <h2>DRAM write bandwidth against writer placement</h2>
 <div class="row">
 <div>{write_grid_svg}</div>
-<div>{percore_svg}<p class="cap">Average mesh-cache latency by core: {min(fresh.values()):.1f} to {max(fresh.values()):.1f} ns, partners equal, two sweeps agree to 0.2 ns. The spread is the core's distance to the slices.</p></div>
+<div>{percore_svg}<p class="cap">Average SLC latency by core: {min(fresh.values()):.1f} to {max(fresh.values()):.1f} ns, partners equal, two sweeps agree to 0.2 ns. The spread is the core's distance to the slices.</p></div>
 </div>
 
 <h2>What the home-node counters say, per 64 B line streamed</h2>
@@ -219,7 +219,7 @@ svg {{ width: 100%; height: auto; display: block; font-family: inherit; }}
 <h2>Open</h2>
 <ul>
 <li>Bottleneck of the cross-mesh write collapse: chip-to-chip gateway and memory-controller counters not yet read.</li>
-<li>Slice partition between home lines and proxy lines (configuration register, not perf), and the excess whole-mesh accesses and misses beyond the timed loads, recorded but not attributed.</li>
+<li>Slice occupancy limits for home lines and proxy lines (configuration registers in the Root security space, not perf), and the excess whole-mesh accesses and misses beyond the timed loads, recorded but not attributed.</li>
 <li>Cross-chiplet first access: 85 to 88 ns per load at 16 MiB for lines the other chiplet's slices hold, 32 ns on the second walk (matches Bill's 81 to 88 ns); remote-slice hits and lines still in the builder's L2 not separated.</li>
 </ul>
 </main>

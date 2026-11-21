@@ -1,0 +1,121 @@
+---
+name: inter-agent-review-loop
+description: Run a file-based review loop between a worker agent and a reviewer agent. Use when agents must exchange review comments and replies about a worker's change description until the reviewer explicitly has no further comments. Requires an assigned role and an initial file path. Accepts an optional shared review file path.
+---
+
+# Inter-Agent Review Loop
+
+## Short version
+
+Run as either the worker (makes the change) or the reviewer (checks the change).
+Use the worker's initial file to understand the change, and exchange comments and replies in one shared review file.
+Continue until the reviewer explicitly records that there are no further comments.
+
+## Invocation
+
+Use these invocation inputs:
+
+- `role` (required): exactly `worker` or `reviewer`. The user must assign it. Do not infer it from the agent's model or product name.
+- `initial_file` (required): the worker-authored file that describes the change. It is the starting point for review and may also be the artifact being changed, such as an HTML report.
+- `review_file`: optional path for the shared comments and replies. If omitted, use `<initial_file>.review.md` beside the initial file, as described below.
+
+Accept these inputs in ordinary language or as `key=value` arguments.
+Ask for a missing role or initial file before starting the loop.
+An omitted review file does not require a question.
+Run only the assigned role. Do not start another agent unless the user requests it.
+
+Example worker invocation:
+
+```text
+Use $inter-agent-review-loop role=worker initial_file=./change-summary.html```
+
+Example reviewer invocation in the other agent's session:
+
+```text
+Use $inter-agent-review-loop role=reviewer initial_file=./change-summary.html```
+
+Both invocations may omit `review_file` when they resolve `initial_file` to the same absolute path on a shared filesystem.
+
+## Resolve the files
+
+1. Resolve `initial_file` to an absolute path, resolving symlinks where possible. Resolve a supplied `review_file` the same way. Keep the configured file extension throughout the loop.
+2. When `review_file` is omitted, append `.review.md` to the absolute initial file path. For example, `/work/change-summary.html` gives `/work/change-summary.html.review.md`. The review file then sits in the same directory as the initial file, so both agents reach it wherever they reach the initial file.
+3. State the assigned role and both absolute paths before monitoring. The agents must access the same physical files. If they run on different hosts without shared storage, ask for a shared location.
+4. Reject identical initial and review paths. Preserve any existing review history. If an existing review file identifies a different initial file, resolve that conflict before appending.
+
+The reviewer waits if the initial file does not exist yet.
+The worker creates or updates it as part of the assigned work.
+If the worker has no description of the requested change, ask for that scope before making changes.
+
+## Shared record and turn ownership
+
+Append entries to `review_file`. Never overwrite the other agent's entries.
+The worker creates the file if it is missing and starts each new session with a `START` entry.
+Give the session a unique identifier, such as a UTC timestamp plus a random suffix.
+Include both absolute file paths in that entry.
+The reviewer waits for this entry before writing.
+
+For an unfinished session covering the same work, read its history and resume the outstanding turn.
+After a completed session, the worker starts a new session before requesting more review.
+Old completion messages do not finish a new session.
+
+Give every entry a header in this form:
+
+```text
+## session=<id> round=<n> role=<worker|reviewer> status=<status> digest=<digest> time=<UTC timestamp>
+```
+
+`digest` is the SHA-256 digest (a hash that identifies one exact version) of the initial file's contents.
+Write it as 64 lowercase hexadecimal characters, for example from `sha256sum < "$initial_file"`.
+`READY` and `REVIEW_COMPLETE` entries carry the digest. `START` and `COMMENTS` entries use `digest=-`.
+
+The worker uses `START` to begin a session and `READY` to hand a finished revision to the reviewer.
+The reviewer uses `COMMENTS` to return findings or `REVIEW_COMPLETE` to end review.
+Begin with round 1. Increase the round number for each worker reply submitted for review.
+Each entry must be complete before the other role acts on it.
+Write the entry in one append operation and finish it with `END ENTRY` on its own line.
+Ignore an incomplete trailing entry until its terminator appears.
+
+After `READY`, the worker waits without changing the submitted work.
+After `COMMENTS`, the reviewer waits for the next `READY`.
+If the user requests a change during review, record the interruption and submit a new round before accepting completion.
+
+## Worker role
+
+1. Finish the requested change. Keep `initial_file` accurate about the current work, relevant files, and validation results.
+2. Append a `READY` entry with the change summary and evidence from relevant checks. Explicitly identify any checks that were not run. Put the SHA-256 digest of the initial file's contents in the header's `digest` field to identify the submitted version.
+3. Monitor `review_file` for the reviewer's response to that session and round.
+4. For each finding, either make the correction or explain why you disagree. Support replies with code, data, or other relevant evidence. Update the implementation or artifact when you accept a finding. Keep the initial description current.
+5. Append the replies in the next round's `READY` entry. Address every finding by its identifier. State what changed and how it was checked. Submit a new round even if the reply required no file edits.
+6. Repeat until the reviewer writes `REVIEW_COMPLETE` with `No further comments.` for the latest submitted round and file digest. Then report completion with both paths.
+
+Silence, unchanged files, a worker's own replies, or an older completion entry do not end the loop.
+
+## Reviewer role
+
+1. Monitor the initial file and the shared record. Begin reviewing only after the worker posts a complete `READY` entry. A file that has stopped changing is not proof that the worker has finished.
+2. Confirm that the initial file's digest matches the `READY` entry before reviewing. If the digest does not match, do not review. Append a `COMMENTS` entry with one finding that gives the recorded digest and the observed digest, and wait for a new `READY`. Read that file and the referenced changes within the requested scope. Review the artifact itself when it is the deliverable. Check the worker's validation claims against the available evidence.
+3. Append a `COMMENTS` entry for that session and round when there are findings. Give each finding a stable identifier, location, concrete problem, and requested correction. Use those identifiers in later rounds.
+4. Monitor the shared record for the next `READY`. Read the worker's replies and updated files. Recheck unresolved findings and any changes introduced by the fixes. Do not repeat a resolved finding without new evidence.
+5. When there are no further comments, confirm that the latest submitted round and initial file digest still match the reviewed work. If they do not match, follow the mismatch rule in step 2 and do not write `REVIEW_COMPLETE`. Append `REVIEW_COMPLETE` for that session, round, and digest. Include the exact sentence `No further comments.` Then report completion with both paths.
+
+The reviewer writes findings and the completion message only in the shared review file.
+The worker owns changes to the implementation and initial file.
+Do not declare completion when required evidence is missing. Record the missing evidence as a finding.
+
+## Disputed findings
+
+A finding is disputed when the worker disagrees with it and the reviewer keeps it open.
+If a finding stays disputed for two consecutive rounds and neither role adds new evidence, both roles stop adding rounds for it.
+Each role reports the finding identifier and both positions to its user, and waits for the user's decision.
+The role that receives the decision records it in its next entry, and the loop continues from there.
+Apply the same rule to a finding about missing evidence that neither role can produce.
+
+## Monitoring and interruption
+
+- Poll at a modest interval, such as 15 seconds, or use an available file watcher. Keep each wait at most 5 minutes so new user instructions can be handled.
+- Read new complete entries after each change. Do not process your own entry as a response from the other role.
+- Keep waiting for the expected response. Do not invent a timeout or a maximum number of review rounds. The disputed-findings rule is the only exception.
+- A user stop request ends monitoring. An access failure or unavailable required tool may block it. Report an interrupted or blocked loop accurately, including the paths and outstanding turn. Do not claim review completion.
+- If the execution environment cannot keep monitoring, state that limitation. Leave enough information in the shared record for the same role to resume.
+- Stop any watcher processes you started when the loop ends or is interrupted.

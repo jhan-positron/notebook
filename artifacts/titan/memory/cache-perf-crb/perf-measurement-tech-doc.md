@@ -20,8 +20,9 @@ adversarially verified against the code and the brief/full report.
 **How to apply:**
 - The verbatim-snippet check is a small python loop over `<pre>` blocks against
   the source files; re-run it after any edit of that page.
-- The dev machine has no chromium, playwright or weasyprint: SVG layout must be
-  checked by coordinates (label width about 6.3 px per char at 12 px).
+- Corrected on 2026-11-12: the dev machine does have a headless Chrome in the
+  playwright cache. Render the page with it ([[headless-chrome-offline-render]]).
+  The older advice to check SVG layout by coordinates is no longer needed.
 - Source-side defect noticed, not fixed: `run_sudo.sh:5` says "512-line
   re-check" but part 1 passes `--verify-sample 256`.
 - Measured numbers in the page come from `crb/crb-memory-hierarchy-brief.html`

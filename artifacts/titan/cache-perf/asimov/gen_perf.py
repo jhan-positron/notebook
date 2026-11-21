@@ -105,6 +105,7 @@ A_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, A_DIR)
 import gen_run3 as g
 import gen_run4 as r4
+import gen_run6 as r6
 from gen_run3 import (kib, fmt, tr, table, pct, esc, C, SVG, legend, line_chart, dumbbell, strip, bars_h, mesh_map, cme_path_fig, page, fig, words,
                       dist, NODES, DSUS, NODE_OF_REGION, CPU_DSU, SLC_BYTES, BENCH)
 from gen_run4 import (dotplot, stacked_h, hyp, ok, no, gap, rng, mono, cell_label, CELLS, BOOT_RUN_ID, BOOT_NAME, BOOT_COL, FIVE, RATIOS, PAIRS,
@@ -117,8 +118,10 @@ OUT = dict(core=A_DIR + "/asimov-c1nano-perf.html", cme=A_DIR + "/asimov-cme-per
 # ---------------------------------------------------------------- boots and platform
 BOOTS = r4.BOOT_ORDER
 BT = r4.BT
+F1, F2 = r6.F1, r6.F2   # run 6 (2026-11-06 and 07, commit 0c190a1): F1 the L3 on with the prefetchers on (run 3's command set plus the run 6 rows), F2 the L3 on with the prefetchers off (the CME rows) [gen_run6]
+RUN6 = dict(F1=F1, F2=F2)
 E, C, A, B, D = (BT[x] for x in "ECABD")
-BOOT_SHORT = dict(A="boot A (L3 off, 4 KiB pages)", B="boot B (L3 off, prefetchers off)", C="boot C (L3 off, 64 KiB hint)", D="boot D (L3 off, hint, prefetchers off)", E="boot E (L3 on)")
+BOOT_SHORT = dict(A="boot A (L3 off, 4 KiB pages)", B="boot B (L3 off, prefetchers off)", C="boot C (L3 off, 64 KiB hint)", D="boot D (L3 off, hint, prefetchers off)", E="boot E (L3 on)", F1="boot F1 (L3 on, run 6)", F2="boot F2 (L3 on, prefetchers off)")
 
 def _readme_date(text):
     m = re.search(r"on (2026-\d\d-\d\d(?: and \d\d)?) \(UTC\)", text)
@@ -126,12 +129,15 @@ def _readme_date(text):
 PLATFORM = {x: dict(run_id=BOOT_RUN_ID[x], dir=f"results/membench-jibin-{BOOT_RUN_ID[x]}/results/boot{x}/", commit=r4.EX[x]["commit"], scp=r4.EX[x]["scp"], tfa=r4.EX[x]["tfa"],
                     pwrstat=r4.EX[x]["pwrstat"], date=_readme_date(BT[x]["README"]), chip_s=BT[x]["CHIP_S"], commands=len(BT[x]["CMDS"]),
                     pf_on=r4.EX[x]["pf_on"], cont=r4.EX[x]["cont"], l3_on=r4.EX[x]["pwrstat"] == ["0x70", "0x70"]) for x in BOOTS}
+for _x in ("F1", "F2"): PLATFORM[_x] = {k: RUN6[_x][k] for k in ("run_id", "dir", "commit", "scp", "tfa", "pwrstat", "date", "chip_s", "commands", "pf_on", "l3_on")}
 _r3_readme = open(A_DIR + "/results/membench-jibin-004/README.md").read()
 RUN3 = dict(run_id="004", dir="results/membench-jibin-004/results/", commit=re.search(r"commit `([0-9a-f]{7})", _r3_readme).group(1),
             scp=re.search(r"SCP (0\.48\.0-nopcie(?:-l3)?\.\d+)", _r3_readme).group(1), tfa=re.search(r"TF-A (0\.35\.0(?:-pfoff\.\d+)?)", _r3_readme).group(1),
             date=_readme_date(_r3_readme), chip_s=float(re.search(r"ns=(\d+)", _r3_readme).group(1)) / 1e9, commands=len(g.CMD4), files=g.FILES4)
 CONTROLS = {x: dict(p4k=BT[x]["P4K"]["ns"], p4k_cyc=BT[x]["P4K"]["cyc"], rt=BT[x]["RT_NS"], ctrl=dict(BT[x]["CTRL"])) for x in BOOTS}
 CONTROLS["run3"] = dict(p4k=g.LV4[0]["ns"], p4k_cyc=None, rt=g.RT_NS, ctrl={c: g.CTRL[c]["best"] for c in g.CTRL})
+CONTROLS["F1"] = dict(p4k=F1["core"]["P4K"]["ns"], p4k_cyc=F1["core"]["P4K"]["cyc"], rt=F1["cme"]["RT_NS"], ctrl={c: F1["core"]["CTRL"][c]["best"] for c in F1["core"]["CTRL"]})
+CONTROLS["F2"] = dict(p4k=None, p4k_cyc=None, rt=F2["cme"]["RT_NS"], ctrl={})
 def _bw_cov_rows(x):
     """the bandwidth rows of boot x that carry a perf_cov column (the timed reps; the best rows carry '-'): count and the set of values"""
     import csv, glob
@@ -246,6 +252,8 @@ META = (f"Latest: run 4 boot E (membench-jibin-{BOOT_RUN_ID['E']}, {PLATFORM['E'
         f"Beside it: run 3 (membench-jibin-004, {RUN3['date']}, the L3 off), boot C ({BOOT_RUN_ID['C']}, same commit, the L3 off) and boot A ({BOOT_RUN_ID['A']}, run 3's configuration). "
         f"Runs 1 to 3 and boots A to D measured with the L3 of CPUs 2 to 9 holding no data. Every number is read from the CSV files by gen_perf.py.")
 SOURCES = [
+    (f"results/membench-jibin-011/", "run 6 boot F1 (2026-11-06): boot E's firmware on commit 0c190a1, the whole run_all.sh (core and CME rows with the L3 on) and the run 6 rows; Jesse's README (cme_test, the L3 and prefetcher checks, the memory model)"),
+    (f"results/membench-jibin-012/", "run 6 boot F2 (2026-11-06 and 07): the same SCP with boot B's TF-A, the prefetchers off, run_cme.sh only; Jesse's README (the readbacks)"),
     (f"results/membench-jibin-010/", "run 4 boot E (2026-11-05): results/bootE/*.csv, log.txt, sysinfo.txt, dmesg.txt and Jesse's README (the SCP rebuild, the L3 power reading)"),
     (f"results/membench-jibin-007/", "run 4 boot C (2026-11-05): the same commit as E with the L3 off and the OCM in 64 KiB contiguous translations"),
     (f"results/membench-jibin-005/", "run 4 boot A (2026-11-04): run 3's configuration with the prefetch and TLB counters"),
@@ -254,7 +262,7 @@ SOURCES = [
     (f"results/membench-jibin-004/", "run 3 (2026-11-03): the bandwidth set, the CPU 4 and 6 rows, the mesh-counter attribution"),
     (f"results/membench-jibin-002/", "run 2 (2026-11-02): the dense OCM chains"),
     ("gen_perf.py, gen_perf_core.py, gen_perf_cme.py, gen_brief.py", "the generators of these four pages (data layer, core page, CME page, briefs)"),
-    ("gen_run3.py, gen_run4.py", "the readers of run 2, run 3 and the five boots of run 4 (imported, not edited)"),
+    ("gen_run3.py, gen_run4.py, gen_run6.py", "the readers of run 2, run 3, the five boots of run 4 and the two boots of run 6 (imported, not edited)"),
     ("asimov-c1nano-run4.html, asimov-cme-run4.html", "the run 4 pages: the hypotheses, the per-boot checks and the five-boot comparisons"),
 ]
 L3_WORD = ("L1, L2, L3", f"32 KiB data cache per core, 128 KiB per DSU, 256 KiB per DSU, 64-byte lines [sysinfo.txt]. On runs 1 to 3 and run 4 boots A to D the L3 of CPUs 2 to 9 was in snoop-filter-only mode "

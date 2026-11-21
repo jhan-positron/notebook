@@ -8,11 +8,12 @@ endif
 # loops into memset/memcpy calls.
 CFLAGS = -O3 -march=native -fno-tree-loop-distribute-patterns -pthread -Wall -Wextra -std=gnu11
 
-# homelat uses AArch64 cache-maintenance instructions, so it is built only there.
+# homelat uses AArch64 cache-maintenance instructions and bandwidth uses NEON
+# intrinsics, so both are built only there.
 ifeq ($(shell uname -m),aarch64)
 all: latency bandwidth homelat
 else
-all: latency bandwidth
+all: latency
 endif
 
 latency: latency.c Makefile

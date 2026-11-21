@@ -216,3 +216,16 @@ Registered by the 2026-11-06 `SCOPE: auto` handoff run of claude-handoff-generat
 
 Refreshed from their canonical files on 2026-11-06 (registered earlier, content changed since): `herdr-config/sessions/claude-agentsrv/session.json`, `notebook-memory/MEMORY.md`.
 
+## Codex handoff preservation, 2026-11-20
+
+Each path below is relative to this topic. Original files are on claude-agentsrv unless a different host is given.
+
+- `amx-ci-monitor/README.html` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/README.html` (4383 mirror bytes).
+  - [Rendered page](https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/dev-machines/amx-ci-monitor/README.html)
+- `amx-ci-monitor/check.py` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/check.py` (6650 mirror bytes).
+- `amx-ci-monitor/test_check.py` -> `claude-agentsrv:/home/jhan/workspace/random/amx-ci-monitor/test_check.py` (4393 mirror bytes).
+- `herdr-config/config.toml` -> `claude-agentsrv:/home/jhan/.config/herdr/config.toml` (440 mirror bytes).
+- `herdr-config/sessions/claude-agentsrv/session.json` -> `claude-agentsrv:/home/jhan/.config/herdr/sessions/claude-agentsrv/session.json` (14689 mirror bytes).
+
+### Related handoffs
+

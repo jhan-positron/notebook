@@ -20,6 +20,15 @@
  *   the L1, L2 and L3 refills, the refills by the hardware prefetchers) is
  *   counted around the timed passes of each rep and printed per 64 B line of
  *   data moved, with the coverage column, as latency.c prints them per load.
+ *   --events pf (run 7) swaps the three refill-by-prefetcher events for the
+ *   prefetch-target set: the L2 and L3 accesses by hardware prefetchers
+ *   targeting that level, and the demand reads that first hit a line a
+ *   prefetcher placed in the L3 (0x8155, 0x8156, 0x81E6). --events llc swaps
+ *   them for the last-level-cache set (0x36 LL_CACHE_RD, 0x37 LL_CACHE_MISS_RD,
+ *   0x400B L3D_CACHE_LMISS_RD): what the first two count depends on
+ *   IMP_CPUECTLR_EL1.EXTLLC and the caches present (external returns, or the
+ *   L3's read accesses and refills), and 0x400B is 0xA2's signal in this RTL;
+ *   see common.h.
  * --asm-passes (read and write, one segment): the kernel walks the
  *   buffer --passes times inside one assembly call, so a rep has one call, one
  *   return and one save of d8-d15 instead of one per pass. The inner loop
@@ -69,7 +78,7 @@ static struct {
     int threads, ncpus, cpus[MAX_CPUS];
     uint64_t bytes;
     int run[K_COUNT];
-    int passes, reps, flush_before, flush_after, cme, use_perf, asm_passes, dsb_st, no_fold;
+    int passes, reps, flush_before, flush_after, cme, use_perf, ev_given, ev_pf, ev_llc, asm_passes, dsb_st, no_fold;
     enum mem_kind kind;
     int regions[MAX_SEGS], nregions;
 } cfg = { .threads = 1, .bytes = 1 << 20, .passes = 4, .reps = 3, .kind = MEM_DRAM };
@@ -394,8 +403,14 @@ static void *worker(void *arg)
         pin_cpu(t->cpu);
     if (cfg.cme)
         require_cme();
-    if (cfg.use_perf)
-        perf_open(&pg); /* on this thread, so the group counts the pinned worker */
+    if (cfg.use_perf) {
+        if (cfg.ev_pf)
+            perf_open_pf(&pg); /* on this thread, so the group counts the pinned worker */
+        else if (cfg.ev_llc)
+            perf_open_llc(&pg);
+        else
+            perf_open(&pg);
+    }
     alloc_thread_bufs(t);
     pthread_barrier_wait(&bar); /* all buffers exist before anyone starts timing */
 
@@ -437,13 +452,15 @@ static void usage(void)
 {
     fprintf(stderr,
             "usage: bandwidth [--threads T --cpus LIST] [--bytes B] [--kernel read|write|copy|all|ldr16|str16|read-pf4|read-pf8|read-pf16|read-2s]\n"
-            "                 [--passes P] [--reps R] [--mem dram|ocm|spm] [--ocm-regions 0,1,..] [--perf]\n"
+            "                 [--passes P] [--reps R] [--mem dram|ocm|spm] [--ocm-regions 0,1,..] [--perf] [--events prefetch|pf|llc]\n"
             "                 [--flush-before] [--flush-after] [--cme] [--asm-passes] [--dsb-st] [--no-fold] [--no-hugetlb] [--no-thp] [--ocm-*/--spm-* overrides]\n"
             "  bytes is per thread and must be a multiple of 256 (1024 with --cme); cpus: \"2,4,6\" or \"2-9\" or \"2-8:2\"\n"
             "  --cme: run the kernels through the CME in streaming mode (needs SME2, SVL 64 B)\n"
             "  read-pf4/8/16: the read loop with a PRFM PLDL1KEEP on every line that many lines ahead; read-2s: two streams\n"
             "    over the two halves of the buffer (core kernels only, no CME form)\n"
             "  --perf: count the core prefetch set around the timed passes, printed per 64 B line (needs --threads 1)\n"
+            "  --events pf: with --perf, count the prefetch-target set instead (L2 and L3 accesses by hardware prefetchers, first demand hits on L3-prefetched lines)\n"
+            "  --events llc: with --perf, count the last-level-cache set instead (LL_CACHE_RD, LL_CACHE_MISS_RD, L3D_CACHE_LMISS_RD; their source depends on IMP_CPUECTLR_EL1.EXTLLC and the caches present)\n"
             "  --asm-passes: read or write only, one segment: all passes of a rep inside one assembly call (with --cme: one streaming span)\n"
             "  --dsb-st: with --cme and the write kernel, looped form: DSB ST before SMSTOP, so each call waits for its stores\n"
             "  --no-fold: with --cme and the read kernel, looped form: the read kernel without its end-of-call fold\n");
@@ -463,6 +480,14 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--flush-after")) cfg.flush_after = 1;
         else if (!strcmp(a, "--cme")) cfg.cme = 1;
         else if (!strcmp(a, "--perf")) cfg.use_perf = 1;
+        else if (!strcmp(a, "--events") && more) {
+            const char *e = argv[++i];
+            cfg.ev_given = 1;
+            cfg.ev_pf = cfg.ev_llc = 0; /* the last choice wins, as for every other option */
+            if (!strcmp(e, "pf")) cfg.ev_pf = 1;
+            else if (!strcmp(e, "llc")) cfg.ev_llc = 1;
+            else if (strcmp(e, "prefetch") != 0) { fprintf(stderr, "--events takes prefetch (the default), pf or llc\n"); usage(); }
+        }
         else if (!strcmp(a, "--asm-passes")) cfg.asm_passes = 1;
         else if (!strcmp(a, "--dsb-st")) cfg.dsb_st = 1;
         else if (!strcmp(a, "--no-fold")) cfg.no_fold = 1;
@@ -492,6 +517,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "warning: %d threads on %d cpus\n", cfg.threads, cfg.ncpus);
     if (cfg.use_perf && cfg.threads != 1) { fprintf(stderr, "--perf needs --threads 1 (one counter group, one worker)\n"); usage(); }
     if (cfg.use_perf && cfg.cme) { fprintf(stderr, "--perf counts the core cache set; it has no CME set here (latency --cme has one)\n"); usage(); }
+    if (cfg.ev_given && !cfg.use_perf) { fprintf(stderr, "--events needs --perf\n"); usage(); }
     if (cfg.cme && (cfg.run[K_READ_PF4] || cfg.run[K_READ_PF8] || cfg.run[K_READ_PF16] || cfg.run[K_READ_2S])) {
         fprintf(stderr, "the read-pf and read-2s kernels have no CME form\n");
         usage();

@@ -14,13 +14,14 @@ Sizes use K/M/G = 1024, 1024^2, 1024^3 bytes.
   algorithm: a shuffle that produces one cycle through every 64 B line).
   Prints `size_bytes,rep,loads,ns_per_load` and a `best` line per size.
 - `bandwidth.c` - T pthreads, each pinned to a CPU from `--cpus`, each with
-  its own first-touched buffer. Kernels: read (16-accumulator sum), write
-  (store a runtime value), copy (dst[i] = src[i]), and the aarch64-only asm
+  its own first-touched buffer. Kernels: read (loads only), write
+  (store a runtime value), copy (dst[i] = src[i]), and the asm
   kernels asmread, asmwrite, asmcopy (see below; `--kernel asmall` runs the
   three, `--kernel all` stays read,write,copy). Prints
   `kernel,threads,bytes_per_thread,rep,total_bytes,elapsed_s,aggregate_GBps,per_thread_min_GBps,per_thread_max_GBps,per_thread_avg_GBps`
   and a `best` line per kernel.
-- `Makefile` - `make` builds both; `make clean` removes them.
+- `Makefile` - `make` builds latency, bandwidth and homelat on AArch64 and only latency
+  elsewhere; `make clean` removes them.
 - `run_crb.sh` - the CRB measurement plan (CPUs 0-119 only, latency on CPU 3).
   The script re-executes itself under `taskset -c 0-119`, so every child runs
   inside that mask. `--quick` runs a tiny version for a smoke test;
@@ -32,11 +33,14 @@ Sizes use K/M/G = 1024, 1024^2, 1024^3 bytes.
 
 The asm kernels (asmread, asmwrite, asmcopy) are hand-written AArch64 loops in
 `bandwidth.c`. Each iteration moves 256 B with eight `ldp`/`stp` instructions
-on 16 B q registers, then one add, one compare and one branch. They exist
-because the compiler's read loop issues 8 adds per 8 loads and reaches 24 B/cycle
-on CRB; the asm kernels issue only loads/stores, so their only limit is the
-core's load/store pipes. They need `--bytes` to be a multiple of 256 and are
-refused on non-aarch64 hosts (exit 2).
+on 16 B q registers, then one add, one compare and one branch. They were added
+because the read kernel was a 16-accumulator sum until 2026-11-13: its compiled
+loop issued 8 adds per 8 loads and reached 24 B/cycle on CRB. The asm kernels
+issue only loads/stores, so their only limit is the core's load/store pipes.
+Since 2026-11-13 the C kernels read, write and copy use the same algorithm,
+written with NEON intrinsics (the old C kernels are kept as a comment in
+`bandwidth.c`). `bandwidth.c` builds on AArch64 only since that change. All six kernels need
+`--bytes` to be a multiple of 256.
 
 ## Build on CRB
 
@@ -83,9 +87,10 @@ runs per size: "short" times exactly 2 cycles, "long" times at least 1 s and
 - In the L1 and L2 regimes the copy kernel's two buffers together equal the
   cache size exactly (2 x 32 KiB = 64 KiB, 2 x 1 MiB = 2 MiB), so a few sets
   also hold stack or static data; the effect is under about 1%.
-- Each bandwidth pass pays a fixed cost outside the vector loop (call,
-  accumulator setup, reduction, sink store). At 32 KiB per pass this is a
-  few percent, so the L1-regime bandwidth is a lower bound by that much.
+- Each bandwidth pass pays a fixed cost outside the vector loop (the call
+  and the return, and in the asm read and copy kernels the save and restore
+  of d8-d15). The size of this cost is not measured for the kernels in use
+  since 2026-11-13.
 - Arm cores may detect a long run of full-line stores with no loads (the
   write kernel) and switch to write-streaming mode, which bypasses L1/L2
   allocation. If write at 32K on 1 thread is far below read at 32K, check

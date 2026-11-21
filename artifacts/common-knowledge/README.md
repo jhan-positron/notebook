@@ -101,3 +101,13 @@ This approved topic contains 8 files, 0.091 MiB. The report and companion invent
   Related handoffs: [codex_20261020-20261021_plan-phoenix-crb-testing.md](../../handoffs/codex_20261020-20261021_plan-phoenix-crb-testing.md).
 - `random/verify-phoenix-access.sh` -> `claude-agentsrv:/home/jhan/workspace/random/verify-phoenix-access.sh` (1002 bytes). access script.
   Related handoffs: [codex_20261020-20261021_plan-phoenix-crb-testing.md](../../handoffs/codex_20261020-20261021_plan-phoenix-crb-testing.md).
+
+## Codex handoff preservation, 2026-11-20
+
+Each path below is relative to this topic. Original files are on claude-agentsrv unless a different host is given.
+
+- `random/plain-english-inspection-codex.md` -> `claude-agentsrv:/home/jhan/workspace/random/plain-english-inspection-codex.md` (5576 mirror bytes).
+
+### Related handoffs
+
+- [Inspect plain-english skill](../../handoffs/codex_20261120_inspect-plain-english-skill.md)
