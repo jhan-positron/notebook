@@ -1,11 +1,13 @@
 ---
-name: wade-code-review
-description: Review a positron-ai/tron pull request at its final head the way reviewer Wade does, before he sees it. 35 checks derived from his whole review record (115 PRs, 273 comments, 2025-09 to 2026-10). Code checks (dead symbols and includes, debug switches left on, comments that contradict code, magic literals, duplicated logic, type and initialization choices, names, silent fallbacks, index and wait-set mismatches, lock placement, buffer lifetime, hot-path cost, instrumentation ownership), test checks (value rows without a consumer, hardware-gated or silently skipped tests, duplicate coverage, test names, tests that bypass the changed path, workaround tracking), claim checks (guarantees wider than the code, CI lanes, stale result rows, PR-body passages, stale descriptions), and scope checks (unrelated hunks, fixup clusters, shared-header ownership, bot findings). Use before requesting review, after every review round, when replying to Wade, and whenever the PR body or commit history is part of what he reads.
+name: folks-code-review
+description: Review a positron-ai/tron PR at its final head the way its reviewers do, before they see it (formerly Wade-code-review). 35 checks, mostly from Wade's record (115 PRs, 273 comments, 2025-09 to 2026-10). Code checks (dead symbols and includes, debug switches left on, comments that contradict code, magic literals, duplicated logic, type and initialization choices, names, silent fallbacks, index and wait-set mismatches, lock placement, buffer lifetime, hot-path cost, instrumentation ownership), test checks (value rows without a consumer, hardware-gated or silently skipped tests, duplicate coverage, test names, tests that bypass the changed path, workaround tracking), claim checks (guarantees wider than the code, CI lanes, stale result rows, PR-body passages, stale descriptions), and scope checks (unrelated hunks, fixup clusters, shared-header ownership, bot findings). Use before requesting review, after every review round, when replying to a reviewer, and whenever the PR body or commit history is under review.
 ---
 
-# Wade-code-review
+# folks-code-review
 
 Short version: Review the PR as the reviewer reads it, not as the author built it. Wade reads production code first (203 of 243 inline comments sit in h/ and src/, the header and source directories), and he asks one question of every added line: who consumes it, what guards it, and does the text beside it say what the code does. Read the diff, the full files it touches, the PR body, the branch commit list and the CI configuration at the final head, and ask that question of every hunk, every test row and every body sentence.
+
+This skill was named Wade-code-review until 2026-11-19. Most checks come from Wade's review record. A check or trigger that comes from another reviewer says so in its precedent note.
 
 Passing tests and a faithful implementation of a design do not establish that the design chose the right contract. The design document, earlier review findings, a test's own header comment and a pasted bot finding (a comment from an automated review tool) are claims to check, never the oracle.
 
@@ -29,10 +31,10 @@ Passing tests and a faithful implementation of a design do not establish that th
 
 1. Determine HEAD and BASE. Save the PR body (`gh pr view N --json body`), the branch log (`git log --no-merges BASE..HEAD`), the diff, and the full text at HEAD of every file the diff touches, tests included. Line numbers in findings are HEAD lines.
 2. Read the complete discussion over the three paginated endpoints (`pulls/N/reviews`, `pulls/N/comments`, `issues/N/comments`), including later replies. A retracted objection is not precedent. An author's answer can close a question before you ask it.
-3. Read the repository test policy in AGENTS.md ("Tests": assertions about values or structure need an identifiable consumer, no duplicate coverage, extend the closest existing test) and the NaN rule (treat NaN as corruption). Quote them by line in findings.
+3. Read the repository test policy in AGENTS.md ("Test policy": a required CI suite must execute every committed test, a local run does not count, and an agent may not decide that an exception applies; assertions about values or structure need an identifiable consumer; no duplicate coverage; extend the closest existing test) and the NaN rule (treat NaN as corruption). Quote them by line in findings.
 4. If the user limits the evidence (no network, no worktree), respect the limit and report what each check could not establish. Write `Insufficient data` and name the missing input. Never fetch or change state in a worktree you were told not to change.
-5. Run every check at the final head, after each review round and before requesting review. A check that ran on an earlier diff does not count. A hunk outside the diff gets at most an informational "fwiw" line.
-6. When Wade has already commented, run the checks on his comments before replying. He can name the right concern and still propose a remedy that removes protection. Concede the substance, correct the detail, and never post a replacement sentence the checks have not verified.
+5. Run every check at the final head, after each review round and before requesting review. A check that ran on an earlier diff does not count. A hunk outside the diff gets at most an informational "fwiw" line. Two checks reach lines outside the diff. Check 30 reads unchanged lines on a path where the PR raises a size. Check 3A form (f) reads the guard around a test unit that the diff adds or widens.
+6. When Wade has already commented, run the checks on his comments before replying. He can name the right concern and still propose a remedy that removes protection. Concede the substance, correct the detail, and never post a replacement sentence the checks have not verified. When you or the author decline a remedy for a concern that the checks confirm, the concern stays open. Look for another remedy that fixes it (section "When a remedy is declined").
 
 Exact commands for each check are in [references/procedures.md](references/procedures.md). How he words findings, how he decides verdicts and what he never comments on are in [references/wade-style.md](references/wade-style.md). The corpus boundary and the method are in [references/wade-corpus.md](references/wade-corpus.md). The originating PR 4557 case is in [references/pr4557-misses.md](references/pr4557-misses.md).
 
@@ -42,7 +44,7 @@ In check-number order; the sections below are ordered by how often Wade raised e
 
 1. Value row, fixture literal or opaque literal: name what depends on this exact value (reader, exercised field read) or where it came from (command, date, revision).
 2. Compile-time shape check: which production line outside the probed type's own header would misbehave if it flipped, and is it not already fixed by a declaration or static_assert in a header?
-3A. Gated or blind test: were the code wrong as the test claims, which assertion fails on the gating lane, without hardware, on a second run?
+3A. Gated or blind test: were the code wrong as the test claims, which assertion fails on the gating lane, with that lane's build options, without hardware, on a second run?
 3B. Named run: which run, by binary or command, build configuration and commit, executed the changed path at this head, and where does the PR say so?
 4. Duplicate coverage: which deliberate code break fails test A but passes test B, and, for a new test binary, which existing binary already executes the function under test?
 5. Test label: next to the setup, the REQUIRE lines and the sibling units, does the name, tag string or result print describe the passing state and follow the siblings' pattern?
@@ -70,7 +72,7 @@ In check-number order; the sections below are ordered by how often Wade raised e
 27. Silent fallback: can a bug-free caller reach this clamp, early return or spin, and if not, why is it not an assert that names the value?
 28. Shared state: what protects mutation, which thread writes, which reads at HEAD, and does the lock, atomic or wait live in the object that owns the state?
 29. Buffer: after the line that frees, submits or reallocates it, who still reads it, and does its declared alignment reach the consumer's widest aligned store?
-30. Hot path: does every call on a spin, layer, token or poll path do work the sibling or BASE avoided, unneeded in the common case?
+30. Hot path: does every call on a spin, layer, token or poll path do work the sibling or BASE avoided, unneeded in the common case, and does a size the PR raised multiply a fill or a copy on an unchanged line of that path?
 31. State ownership: who owns this record, does every call into the subsystem sit under its guard, and does the row key name one thread in every forward?
 32. Operator view: can an operator see, measure or switch on the new state, counter, trace or option through the debug dump, Perfetto, FUSE (the file-system interface that exposes live stats) or the launcher?
 33. Changed path: which test enters the changed code at its production entry, and which assertion fails if that code is wrong?
@@ -383,20 +385,21 @@ Severity and precedent: "Nit" (3120788282); "Fix:" (3960506641); "Top robustness
 
 ### 30. Avoidable per-call work on a per-token, per-layer or spin path
 
-Trigger: a new production line allocates, zeroes, sorts, re-gathers, re-asserts, precomputes before a wait branch, or frees at zero count, on a spin (atomic re-read), layer, token or poll path.
+Trigger: a new production line allocates, zeroes, copies into a temporary, sorts, re-gathers, re-asserts, precomputes before a wait branch, or frees at zero count, on a spin (atomic re-read), layer, token or poll path. Raised size: the PR lets a size take a larger value on such a path (a new model shape, a larger template argument), and a line there, changed or not, default-constructs a buffer that the next writer fully overwrites, or copies a row only to pass it on.
 
 Procedure:
 1. Grep the diff for the patterns, then their callers. Classify the loop.
 2. Count calls from loop bounds, with units.
 3. Read how the sibling or BASE avoids it.
+4. Raised size: grep the path's functions at HEAD, not the diff, for `memcpy`, `std::copy` and locals declared without an initializer. Read each type's default constructor: `tensor()` zero-fills, `tensor(uninitialized_t)` does not. State the bytes per call at the old and the new size.
 
-Question: does every call do work the sibling or BASE avoided, unneeded in the common case?
+Question: does every call do work the sibling or BASE avoided, unneeded in the common case? At the raised size, how many bytes does each call fill or copy without need?
 
-Do not fire on: startup, teardown, t/, once-per-forward code unless BASE allocated nothing, containers sized after the empty check, live-transfer frees (check 29), second container walks (check 18, 4029533521), wrong-key per-token folds (check 31 (c), 4125033686). Before/after capture: a question, only when memory is traded for repeated work (4607543703 is owned here; check 32 asks only for a sample image or trace path).
+Do not fire on: startup, teardown, t/, once-per-forward code unless BASE allocated nothing, containers sized after the empty check, live-transfer frees (check 29), second container walks (check 18, 4029533521), wrong-key per-token folds (check 31 (c), 4125033686). Before/after capture: a question, only when memory is traded for repeated work (4607543703 is owned here; check 32 asks only for a sample image or trace path). Raised size: a buffer read before it is fully written (an accumulator), a buffer whose untouched elements are read later as zeros, a snapshot of memory that is about to change, a conversion between number formats.
 
-Finding shape: "`<fn>` runs <count> per <path>, doing <work> every call where `<sibling>` avoids it. So <consequence>. Should we <remedy>?"
+Finding shape: "`<fn>` runs <count> per <path>, doing <work> every call where `<sibling>` avoids it. So <consequence>. Should we <remedy>?" Raised size: "`<declaration>` <zero-fills|copies> <N> bytes per <path> at <size>, right before `<writer>` overwrites every element. `<existing facility>` avoids it." (4356061865, 4356062246).
 
-Severity and precedent: nit (3350064944); normal with the count (3907183627, 3907185740); minor, not blocking, rebuild-after-free (4674512577). n = 4 comments over 3 PRs, 2026-06-03 to 2026-09-01, attributed.
+Severity and precedent: nit (3350064944); normal with the count (3907183627, 3907185740); minor, not blocking, rebuild-after-free (4674512577). n = 4 comments over 3 PRs, 2026-06-03 to 2026-09-01, attributed. The raised-size trigger is not from Wade's record. It comes from review 5623855297 of PR 5022 by ishapira-positron (2026-10-23, CHANGES_REQUESTED, output of a multi-agent review pipeline): comments 4356061865 (zero fill, 4,096 bytes per AMX page visit) and 4356062246 (row copies, 8,192 bytes per AMX page visit). Neither line was in the diff. The author accepted both on 2026-11-19.
 
 ### 31. One owner per record, one gate per subsystem, one stable row key
 
@@ -509,7 +512,38 @@ Do not fire on: a covered gated assertion; a hidden tag at BASE or explained; fp
 
 Finding shape: the fact and its line, then "so it skips on <lane>", then the move. For a fake, say what "would still pass" (3960538177).
 
-Severity and precedent: no 'nit'. Questions, non-blocking, except form (d), which opens with 'Coverage gap:' and asks in the must-change form 'Please extend an existing CI suite' (3960538177). n = 5 comments over 4 PRs (tron 1920, 2011, 4128, 4557), 2026-01-28 to 2026-10-05.
+Severity and precedent for forms (a) to (e): no 'nit'. Questions, non-blocking, except form (d), which opens with 'Coverage gap:' and asks in the must-change form 'Please extend an existing CI suite' (3960538177). n = 5 comments over 4 PRs (tron 1920, 2011, 4128, 4557), 2026-01-28 to 2026-10-05. Form (f) is must-change and has its own severity line below.
+
+Widening from PR 5022 (2026-11-23): form (f), a compile-time gate.
+
+Trigger: in t/, the diff adds or widens a test unit (TEST_CASE, SECTION, GENERATE arm, or an assertion in a helper that such a unit calls) that at HEAD sits inside a region, and a CMake option of the project switches the region's macro. A region is the lines between an `#if`, `#ifdef` or `#ifndef` line (the guard) and its `#endif`, the `#else` arm included. The option switches the macro through a `target_compile_definitions` line under `if(<option>)`, or through a `#cmakedefine` header, where the macro can have another name than the option. The guard and its `#else` arm may be unchanged since BASE. The trigger is the unit, not the guard. Highest priority when the `#else` arm holds a placeholder case, which is a case that only passes (`SUCCEED`, an empty body). The binary then reports a pass on a lane that compiled none of the added assertions.
+
+Procedure:
+1. Read the whole test file at HEAD, not the diff. List its regions. Map each added or widened unit to its region and to the `#else` arm.
+2. Find every place that defines the macro (the option and its default, each `target_compile_definitions` line, a `DEFINES` argument or a `target_compile_definitions` call on the test's own target, each preset, each workflow). Take the gating lane from check 7, steps 1 to 4. Only a workflow that a `pull_request` or `merge_group` event starts counts as gating here. A workflow that a person dispatches does not count, even when README.ci.md lists its check names as required and a run of it passed at HEAD. Work out whether the gating lane compiles each added or widened unit. State how many assertions the binary runs there.
+3. Sort each guarded unit into one of four classes. Class (i) calls only code that every build compiles. Class (ii) needs header code under the same macro, and the test file supplies the rest itself (its own fakes, the stand-in functions that it defines). Class (iii) needs option-only code, which is code that a library holds only in a build with the option: a source file or a compiler flag that the build adds only under the option, a region of a library source file under the same macro, or a class that a library source file also compiles and whose layout the macro changes. A class inside a template that only the test instantiates does not make a unit class (iii). Step 5 checks that case. Class (iv) needs an instruction set that the lane's runners lack.
+4. Pick the remedy by class. A class (i) unit moves above the guard. When every other guarded unit of the target is class (ii), the test target can pass the define itself. A define is a macro that the build file gives to the compiler for one target, and it reaches every unit of that target. Search t/CMakeLists.txt for a test that already does this (`DEFINES` in `add_catch_test`, or `target_compile_definitions` on a test target), and quote it. Do not propose the define when a unit of the same target is class (iii) or (iv). With the option off the binary would then not link, or the test and the library would compile two layouts of one class.
+5. Check that the define is safe for one target. Grep h/ and src/ for the macro. List the other translation units of the test program: its linked libraries, and the object files that the registration adds (`testlog_objects`, `testfake_objects`, `testmain_objects`, support objects in FILES). They are built without the define. Three kinds of hit are unsafe. The first is a hit in a .cpp file of a linked library. The second is a hit in a non-template type, an inline function or an inline variable that such a unit also compiles. The third is a hit in a template that such a unit instantiates for a type the test also uses. In each case ask, do not prescribe.
+6. Quote the lines of the AGENTS.md test policy on CI execution at HEAD.
+7. Name the runs that the fix needs before the author takes it. The test passes in a build with the gating lane's options. A deliberate break of the changed path makes it fail there. The test still passes in a build with the option on.
+
+Question: with the option at the gating lane's value, which added assertion executes, and can this one test target pass the define itself?
+
+Do not fire on:
+
+- a unit of class (iii) or (iv). Say what it needs, name the run under 3B, and say that the exception needs the user's approval. A hardware probe stays with forms (a) and (b).
+- a macro that no CMake option of the project switches (compiler, platform and standard-library macros).
+- a unit that the gating lane compiles. Under a guard that asks for the macro (`#ifdef <NAME>`, `#if defined(<NAME>)`), that holds in three cases: the lane sets the option, or the option's default defines the macro, or the test's own registration defines the macro outside every `if(<option>)` block (`DEFINES <NAME>`, or `target_compile_definitions` on the test target). Under `#ifndef <NAME>` and in an `#else` arm, it holds when the lane's build of the test leaves the macro undefined.
+- a manual switch, which is a macro that no build file defines and that the source tells the developer to set by hand.
+- a unit outside the region that asserts the same contract on the gating lane (name it).
+- a file in which the diff neither adds nor widens a unit ("fwiw" at most).
+- fpga/DISABLED binaries.
+
+A change of the gating lane's global build flags is never the first remedy. It changes what every other test of that lane exercises. A run of another workflow is the remedy of 3B, not of this form.
+
+Finding shape, class (ii): "Every unit this PR adds to `<file>` sits under `#ifdef <NAME>` (:<line>). <gating workflow> leaves `<NAME>` off (<configure file:line>). So there the binary runs <K> assertions (<the `#else` case at :<line>, or the cases outside the region>), none of the new ones, and a break of <changed path> passes the required checks. The units call <header entry point> and the file's own fakes, so they need neither <hardware> nor <option-only source>. `<sibling test>` (<CMake file:line>) passes its own define. Please register `<test>` with `DEFINES <NAME>` and drop the `#else` case, so that a lost define fails instead of passing." Class (i): "`<unit>` (:<line>) sits under `#ifdef <NAME>` (:<line>), and <gating workflow> leaves `<NAME>` off (<configure file:line>). The unit calls only <header entry point>, which every build compiles. Please move it above the guard."
+
+Severity and precedent: must-change, in the "Please <verb>" form, before the merge. The repository test policy requires a required CI suite to execute every committed test, and it does not let an agent grant the exception. The author decides whether the fix enters this PR or an exception applies. After the fix, rerun checks 7 and 8. Each sentence that says the test is compiled out is then wrong. Also refresh the test's rows in config/test-benchmarks.json (the run time and memory that the test scheduler plans with). t/AGENTS.md asks for that after a material change of a test. Not from Wade's record. It comes from ishapira-positron on PR 5022 (output of a multi-agent review pipeline). Comment 4356060700 (2026-10-23) asked for the option in the Nix build. claude[bot] thread 4645384802 (2026-11-20) asked for the sections in a required suite, and it gave the Nix option as an example. The author declined the Nix option. It changes every model test of the lane. Comment 7118448228 with PR 5606 (2026-11-24 UTC) gave the per-target define, the way `t_page_share_counters` does it (t/CMakeLists.txt:276 at ddf843ad97).
 
 ### 3B. A run on the changed path is named at the reviewed head
 
@@ -663,7 +697,7 @@ Procedure:
 
 A lane is named only by a workflow's `name:` string, its file name or a job name. "CI", "the required CI" and "the build job" are not lane names when the repository calls two lanes with opposite settings "CI".
 
-Do not fire on: a sentence that names the lane and matches that lane's configure line; a generic "CI is green"; a runtime log or WARN string in code; a PR-label sentence that matches the documented label policy. README text is a claim to check, never evidence.
+Do not fire on: a sentence that names the lane and matches that lane's configure line; a generic "CI is green"; a runtime log or WARN string in code; a PR-label sentence that matches the documented label policy. README text is a claim to check, never evidence. A true lane sentence closes this check only. When the sentence says that the gating lane leaves a setting off, check 3A form (f) asks which added test units that setting compiles out.
 
 Severity and precedent: a statement in the review body; n = 1 comment (5420005787, PR 4557), where Wade's own CI citation was itself wrong about the gating lane (references/pr4557-misses.md).
 
@@ -804,23 +838,24 @@ Finding shape: "<file>:<line> adds a global `<symbol>` in a header that reaches 
 
 ### 35. Bot finding traced to the deciding line before any reply
 
-Trigger: a cursor[bot] (automated reviewer) thread (unresolved, unanswered) on a C++ line the diff changes under h/, src/ or t/, or a reviewer-run agent review.
+Trigger: a thread whose first author is an automated reviewer (a login that ends in `[bot]`, such as cursor[bot] or claude[bot]; unresolved, unanswered) on a C++ line the diff changes under h/, src/ or t/, or a reviewer-run agent review.
 
 Procedure:
 1. Fetch thread state (resolved, outdated, first author), bot bodies.
-2. Bin: SENTINEL (`-1` default reaches a callee), UNREACHABLE, UNUSED, DUPLICATE-CONSTANT, CONCURRENCY.
+2. Bin: SENTINEL (`-1` default reaches a callee), UNREACHABLE, UNUSED, DUPLICATE-CONSTANT, CONCURRENCY, COVERAGE (a test or a path does not execute on a lane; owning checks 3A, 3B and 7).
 3. SENTINEL: grep the initializer and every production constructor call.
 4. UNREACHABLE: table the gate's states; read the title and body.
 5. Others: owning check; a narrowed readiness predicate on shared storage confirms (attributed: assistant text pasted by Wade in 3970590653).
 6. Verdict with the deciding file:line.
+7. For a CONFIRMED claim, take the severity from the severity line below. If you or the author decline the bot's fix, go to "When a remedy is declined".
 
 Question: which HEAD line decides the claim, and is it quoted?
 
-Do not fire on: author reply (2879602159); outdated thread; numeric claim (2879962155); duplicate-constant claim (2948416014); the PR's stated goal (3659990818); optional forwarded agent items, never a blocker.
+Do not fire on: author reply (2879602159); outdated thread; numeric claim (2879962155); duplicate-constant claim (2948416014); the PR's stated goal (3659990818); optional forwarded agent items that the checks do not confirm (never a blocker).
 
 Finding shape: "false positive... `<member>` is initialized like this: <initializer file:line>".
 
-Severity and precedent: none for a refutation; a confirmed claim is "a legit concern" (3156090573). n = 14 comments over 11 PRs, 2026-03-11 to 2026-09-09, attributed (3970590653, 4800935083).
+Severity and precedent: none for a refutation. A confirmed claim is "a legit concern" (3156090573). When it rests on a written repository rule, it has the severity of its owning check, and the bot's own label does not lower that severity. Such a label is the word "optional", or a mark such as the yellow circle of claude[bot]. Quote the rule by file:line. A confirmed claim that rests on no written rule keeps the bot's label. n = 14 comments over 11 PRs, 2026-03-11 to 2026-09-09, attributed (3970590653, 4800935083). The COVERAGE bin, the claude[bot] login and the rule on the bot's label are not from Wade's record. They come from claude[bot] thread 4645384802 on PR 5022 (2026-11-20).
 
 ## How Wade reviews and words a finding
 
@@ -871,7 +906,20 @@ He does not comment on the C++ guide or kernel arithmetic line by line (0 of 269
 - He defers to the area owner (3277240111). Get that owner's written answer.
 - He accepts "next iteration" (3405172585), so a declined preference gets one reason and a follow-up offer.
 - About one in six substantive asks is declined and left unchanged (16 of 239 rows were pushed back by the author). Classify first: a must-change signal or a preference word ("nit", "trivial", "pedantic", "maybe").
-- Answer a must-change with a fact at the reviewed head (file:line, commit id). Never write "LGTM", resolve a thread for him, or post without the author's approval.
+- Answer a must-change with a fact at the reviewed head (file:line, commit id). Never write "LGTM", resolve a thread for him, or post without the author's approval. When the checks confirm the finding, also follow "When a remedy is declined" below.
+
+### When a remedy is declined
+
+This rule covers any reviewer and any bot. It applies to a finding that the checks confirm, in three cases: its owning check rates it must-change, or the reviewer marked it with one of the four signals above or with a CHANGES_REQUESTED review, or it rests on a written repository rule. The wording of the remark does not decide it. A must-change finding can arrive as a question ("Could we add ...?"). The rule does not apply to a claim that the checks refute. It does not apply to a declined preference ("nit", "trivial", "pedantic", "maybe"), which keeps the rule above. Apply it in two situations: you are about to recommend against a proposed fix, or the author declines one.
+
+1. A declined remedy does not close the finding. Write the finding without the fix, and mark whether the change at HEAD closes it. Write the reason for declining as a condition on any fix ("must not change what the other tests of the lane exercise").
+2. Search for a fix that meets the condition. Try the same change at a narrower scope (one test target, one file, one call site). Try the way a sibling in the same file already solved it (`git grep` the neighboring registrations, guards and helpers).
+3. Test every sentence of the form "X needs Y" in the draft. Search for one way to reach X without Y. Keep the sentence only when the search finds none.
+4. Show the author one narrower fix next to the draft reply. Name the runs that the fix needs and what else it changes. The author decides whether it enters the PR.
+5. A reply with words only is the last choice for such a finding. The reply stays short. The record of the fixes that were tried, and why each fails, goes to the author, not into the reply.
+6. Do not pass the finding on as settled. A list of decided points for a later review or a handoff names the declined remedy and, next to it, the finding that is still open.
+
+Not from Wade's record. Precedent: PR 5022. Threads 4356060700 and 4645384802 were answered with one reason and a run started by hand. The reviewer kept the changes-requested state and supplied the narrower fix himself (comment 7118448228, PR 5606).
 
 ## Report the result
 

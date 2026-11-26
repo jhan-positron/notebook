@@ -53,3 +53,8 @@ The six dense inline comments on PR 4128 (3907183627, 3907185740, 3907214892, 39
 4. Codex's parallel refresh of its own copy of the skill (~/.codex/skills/wade-code-review, 2026-10-06 10:26) was cross-checked: 8 of its claims that contradict the Claude skill were fact-checked (4 hold, 4 partly), and its 65 guidance bullets were mapped to corpus evidence (58 backed by Wade comments, 2 by pasted assistant text only, 5 by none).
 
 Inputs and outputs: /home/jhan/workspace/intel-AMX/VNNIed-K-in-place/issue4525/exec/wade-20261006/ (corpus/, classified.json, merged-taxonomy.json, items/, codex-factcheck.md, codex-map.json, the workflow scripts).
+
+## Additions from outside the corpus
+
+- 2026-11-19: the raised-size trigger of check 30 (a default-constructed buffer, or a row copy, on a hot-path line that the diff may not touch). Source: review 5623855297 of tron PR 5022 by ishapira-positron, comments 4356061865 and 4356062246. That review is the output of a multi-agent review pipeline, not of Wade. The count of check 30 (n = 4 comments over 3 PRs) still counts Wade's comments only.
+- 2026-11-19: the skill was renamed from Wade-code-review to folks-code-review at jhan's request.
