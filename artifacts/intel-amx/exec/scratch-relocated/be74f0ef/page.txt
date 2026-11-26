@@ -1,0 +1,295 @@
+GDN AMX Design
+GDN and AMX: design for Qwen3.5 4B
+2026-11-20. Measured on delphi-3b35 (our test server), on our half of it. tron commit 72e1191804 (open pull request #3696). Status: baseline, prediction and design. Nothing is built yet.
+Short version
+In Qwen3.5 4B, 24 of the 32 layers are GDN layers (GatedDeltaNet: a layer that keeps a memory matrix of fixed size), and tron (our inference program) runs no AMX code (Intel's matrix instructions) for this model today.
+We propose three changes, and the table below gives what each one is predicted to do to the time to first token.
+Nothing is built yet, so every gain is an estimate (est.) from the baseline that we measured on delphi-3b35.
+The three changes at a glance
+Change | What it is | Uses AMX | Bits of the result | Time to first token, working values (est.) | Range of the fall (est.) | Decode speed (est.) | 
+Part 0 | A new loop order for GDN in prompt processing. The state stays in the L1 cache. | No | Same as today | falls by 15 to 24 % | 12 to 26 % | No change | 
+Part A | An AMX kernel for GDN in prompt processing. It takes 32 tokens at once. It replaces the inner loop of Part 0. | Yes | Rare output bits differ | falls by 18 to 29 % | 11 to 32 % | No change | 
+Part B | An AMX kernel for the 8 attention layers, whose heads are 256 values wide. | Yes | Same error band as today's AMX attention kernel | falls by 5 to 25 % | 4 to 29 % | -5.3 to +7.8 %, working value 0 % | 
+Parts A and B | Both AMX kernels. | Yes | As Part A | falls by 35 to 43 % | 22 to 49 % | As Part B | 
+[WORDS LIST]
+1. What GDN is
+2. Baseline on delphi-3b35
+3. Where the time goes
+4. Prediction
+5. Software design
+6. Plan and open points
+7. Sources
+1. What GDN is, seen from llama-3.1-8b
+llama-3.1-8b has 32 layers. Every layer is a full-attention layer [Ref20].
+Qwen3.5 4B has 32 layers too. 24 are GDN layers and 8 are full-attention layers [Ref1, Ref2].
+A GDN layer does the job of attention. It mixes what earlier tokens said into the current token. It uses a different mechanism.
+[SVG]Figure 1. The 32 layers of each model. Qwen3.5 4B keeps full attention in every fourth layer only.
+[SVG]Figure 2. What one new token does in one layer. Gray boxes run on the FPGA cards. Colored boxes run on the host CPU. Attention looks at a list that grows. GDN rewrites a matrix of fixed size.
+The differences that matter for the CPU
+ | Attention layer (llama-3.1-8b) | GDN layer (Qwen3.5 4B) | 
+What it remembers | The K and V rows of every earlier token (the KV cache). | One matrix S per value head. Each token rewrites it. | 
+Memory per sequence | Grows. 131,072 bytes per context token over 32 layers. | Fixed at any context length. 50.25 MiB over 24 layers: 48 MiB of state and 2.25 MiB of convolution history [Ref4]. | 
+CPU work per new token | Grows with the context. 262,144 bf16 multiply-adds per context token. | Constant. 37.7 million FP32 multiply-adds [Ref3]. | 
+Number formats | bf16 times bf16. | bf16 inputs times an FP32 state [Ref3]. | 
+Order of tokens | The tokens of a prompt chunk can be scored in parallel. | Token t needs the state that token t-1 left. One serial chain per key head [Ref5]. | 
+Threads in tron (this setup, 56 threads) | The 40 attention workers. | The main thread and 15 main helpers. The 40 attention workers wait [Ref5]. | 
+Other ways to run it | FPGA attention, for heads of 64 or 128 values. | None. Host CPU only. | 
+AMX today | Yes, for 128-wide heads with 4 query heads per KV head. | No. | 
+The 8 full-attention layers of Qwen3.5 4B differ from llama's too. They have 16 query heads of 256 values and 4 KV heads [Ref17]. llama-3.1-8b has 32 heads of 128 values and 8 KV heads [Ref20].
+tron's AMX attention kernels accept only 128-wide heads [Ref6].
+tron's FPGA attention accepts only 64-wide and 128-wide heads [Ref7].
+So every attention layer of this model runs the AVX-512 path, at every prompt length.
+The attention statistics confirm it. AMX scored 0 K tokens in all 36 runs [Ref9].
+[SVG]Figure 3. CPU arithmetic per generated token, computed from the model shape. It is a count, not a timing. Attention costs 262,144 multiply-adds per context token in llama-3.1-8b and 65,536 in Qwen3.5 4B. GDN costs 37.7 million multiply-adds per token at every context length. By this count GDN looks small at long context. Section 3 shows that its time is not small.
+2. Baseline on delphi-3b35
+Server. delphi-3b35, with two Xeon 6962P CPUs. We used our half: socket 1 with 56 application CPUs, and FPGA cards 4 to 7 (PCI addresses 90, 93, b9 and bc). The setting is SYSTEM_CONFIG="--instance 1,2".
+Build. tron pull request #3696 at commit 72e1191804, clang 19.1.7, AMX kernels compiled in. The model is not on tron's main branch yet [Ref1].
+Model. ingested-qwen-3.5-4b-tp4: one engine on four FPGA cards.
+Runs. runtron with 1 or 8 users, prompt 1,024, 4,096 or 8,192, and 256 generated tokens per user. 6 runs per cell.
+Load. A load snapshot of 10 s was taken before every run. Our application CPUs were at most 0.2 % busy. The other socket ran two servers of another team. It was 43.1 to 43.2 % busy [Ref15].
+Core clock. 26 of the 29 CPUs that we probed run AVX-512 work at 2.70 GHz. CPUs 108, 109 and 126 run it at 4.00 GHz [Ref11].
+[SVG]Figure 4. Measured time to first token (TTFT). Median of 6 runs per cell. The value is the slowest user's time. With 8 users the same prompt length takes 7.5 to 7.6 times longer than with 1 user.
+[SVG]Figure 5. Measured decode speed per user. Median of 6 runs per cell. From prompt 1,024 to prompt 8,192 the speed falls by 16 % with 1 user and by 54 % with 8 users.
+Users | Prompt (tokens) | TTFT, median (s) | TTFT, range (s) | Prefill rate, all users (tokens/s) | Decode, median (tok/s per user) | Decode, range (tok/s per user) | Decode, all users (tok/s) | Runs | 
+1 | 1,024 | 0.385 | 0.381 to 0.385 | 2,662 | 273.2 | 272.7 to 276.3 | 273 | 6 | 
+1 | 4,096 | 1.897 | 1.895 to 1.911 | 2,159 | 252.6 | 251.6 to 254.1 | 253 | 6 | 
+1 | 8,192 | 4.706 | 4.696 to 4.709 | 1,741 | 230.5 | 229.2 to 233.6 | 231 | 6 | 
+8 | 1,024 | 2.907 | 2.900 to 2.913 | 2,818 | 121.1 | 120.8 to 121.6 | 968 | 6 | 
+8 | 4,096 | 14.285 | 14.279 to 14.289 | 2,294 | 77.6 | 77.3 to 77.8 | 621 | 6 | 
+8 | 8,192 | 35.747 | 35.705 to 35.760 | 1,833 | 56.3 | 56.2 to 56.3 | 450 | 6 | 
+The runs used two arms: AMX allowed, and the kill switch set. On this model both arms run the same code. Their decode medians differ by -0.6 to +1.1 %. So all runs of a cell count as baseline samples.
+These numbers are not comparable with our earlier numbers from delphi-3bda. Three CPU settings differ: TSX is off, no flat-frequency service runs, and deep idle states are on [Ref12].
+The model's registry entry has the support level cpp_plugin. This level means that the plugin compiles and that its tokens are not yet valid [Ref1]. The timings do not depend on that.
+3. Attention metrics: where the time goes
+What was turned on. TRON_ATTN_STATS=1 in every run [Ref8].
+Pass wall. The statistics give the wall time of every pass.
+Attention busy time. The statistics give the time that the attention workers spend on attention jobs, without their waits for input. The page divides the sum over all workers by the 40 workers.
+Attention wait. The statistics also give the wall time of the attention jobs on one worker, waits included. It is 2.3 to 2.6 ms longer than the busy time per prefill pass with 1 user, 19 ms with 8 users, and 0.3 to 0.4 ms per decode step. The worker waits for K and V from the FPGA cards. This wait stays in the rest.
+What the statistics do not see. GDN. They have no hook in the GDN code [Ref8].
+How GDN was timed. With tron's trace, one traced run per cell. The slice named GatedDeltaNet covers the GDN host work of one layer on one thread [Ref10]. The GDN wall of a layer runs from the first thread's start to the last thread's end.
+The rest. Pass wall minus GDN wall minus attention busy time. It is FPGA matrix multiplies, small host kernels and the attention wait.
+Limit of the decode numbers. A traced decode step is 3 to 28 % longer than an untraced one. A traced prefill pass is 0.2 to 3.1 % longer. The decode table divides the traced GDN wall by the untraced step. So its GDN shares are upper values. The last column gives the share inside the traced run.
+[SVG]Figure 6. Wall time of one prefill pass, split into three parts. The attention busy time comes from the attention statistics. The GDN wall comes from the trace. The rest is the remainder. GDN takes 42 to 44 % of a pass at prompt 1,024 and 27 to 29 % at prompt 8,192. Its time per pass does not change with the prompt length. The attention time grows.
+Users | Prompt (tokens) | Wall of one prefill pass (ms) | GDN wall (ms) | GDN share (%) | Attention busy time (ms) | Attention share (%) | Rest (ms) | Rest share (%) | Attention wait, inside the rest (ms) | 
+1 | 1,024 | 47.97 | 20.33 | 42 | 6.04 | 13 | 21.60 | 45 | 2.58 | 
+1 | 4,096 | 59.15 | 20.26 | 34 | 17.28 | 29 | 21.60 | 37 | 2.35 | 
+1 | 8,192 | 73.38 | 20.17 | 27 | 31.44 | 43 | 21.77 | 30 | 2.39 | 
+8 | 1,024 | 362.18 | 160.40 | 44 | 34.11 | 9 | 167.67 | 46 | 19.48 | 
+8 | 4,096 | 445.03 | 160.14 | 36 | 118.95 | 27 | 165.95 | 37 | 19.11 | 
+8 | 8,192 | 556.88 | 160.14 | 29 | 230.58 | 41 | 166.16 | 30 | 19.02 | 
+[SVG]Figure 7. Wall time of one decode step, split the same way. The GDN wall comes from traced runs, where a decode step is longer. So the GDN shares here are upper values. GDN takes up to 15 % of a step with 1 user and up to 35 % with 8 users.
+Users | Prompt (tokens) | Wall of one decode step (ms) | GDN wall (ms) | GDN share (%) | Attention busy time (ms) | Attention share (%) | Rest (ms) | Rest share (%) | Attention wait, inside the rest (ms) | GDN share inside the traced run (%) | 
+1 | 1,024 | 3.62 | 0.55 | 15 | 0.19 | 5 | 2.89 | 80 | 0.28 | 12 | 
+1 | 4,096 | 3.89 | 0.48 | 12 | 0.42 | 11 | 2.99 | 77 | 0.29 | 10 | 
+1 | 8,192 | 4.23 | 0.47 | 11 | 0.72 | 17 | 3.04 | 72 | 0.27 | 10 | 
+8 | 1,024 | 8.09 | 2.84 | 35 | 1.05 | 13 | 4.20 | 52 | 0.40 | 32 | 
+8 | 4,096 | 12.44 | 3.12 | 25 | 4.71 | 38 | 4.61 | 37 | 0.40 | 23 | 
+8 | 8,192 | 16.97 | 3.21 | 19 | 8.90 | 52 | 4.85 | 29 | 0.39 | 18 | 
+What the numbers say
+The GDN time of a prefill pass does not depend on the prompt length. It is 20.2 to 20.3 ms with 1 user and 160 ms with 8 users.
+One GDN step takes 6.3 to 6.5 us on 14 of the 16 GDN threads in prefill. The 2 threads on CPUs 108 and 109 take 3.8 to 4.0 us. Their cores run at 4.00 GHz [Ref11]. The mean over the 16 threads is 6.1 us.
+The slowest thread sets the wall. One GDN layer takes 0.85 ms for 128 tokens with 1 user. That is 6.6 us per token.
+A stand-alone benchmark of the recurrence alone takes 3.06 us per value head (1 thread, 2 MiB state) [Ref11]. The convolution takes 0.50 us per key head. The benchmark is not the same quantity as the traced GDN step. In tron the recurrence takes about 2.8 us per value head (est.: 6.4 us minus 0.8 us of other work, for 2 value heads).
+Hypothesis: the GDN step is limited by moving the state, not by arithmetic. A value head's matrix is 64 KiB. The L1 cache is 48 KiB. Each token passes over the matrix twice. The arithmetic alone needs 0.95 to 1.16 us per value head (est.), against about 2.8 us (est.) in tron. Task 1 of the plan confirms or rejects this.
+The same GDN step takes 13 to 16 us in decode (mean over the threads, traced runs). Hypothesis: in decode the state comes from outside the core's own caches for every token, and the check for invalid values reads it once more [Ref4]. The open points name the measurement that confirms or rejects this.
+Only 16 of the 56 threads run GDN. With 8 users each of the 16 threads has 8 chains to run, one after another. The GDN wall with 8 users is 7.9 times the wall with 1 user in prefill, and 5.2 to 6.8 times in decode.
+[SVG]Figure 8. Who does what, and when, in one GDN layer of a prefill pass (1 user, prompt 1,024). Durations are to scale. The gray block is the mean per layer of the FPGA matrix multiplies and the small host kernels. Its position inside the layer is schematic. Solid blocks are work. Dashed outlines are waiting. The red path is serial: 128 GDN steps, one after another. Token t cannot start before token t-1 of the same key head. More threads cannot shorten it. A faster GDN step can.
+4. Prediction, made before any test of the solution
+Method
+The layers of a pass run one after another. Inside a layer the FPGA projections, the host work and the next projection run one after another.
+So a time saved in GDN or in attention shortens the pass by the same amount.
+pass_new = pass - GDN_wall x (1 - 1/s_gdn) - attention_busy x (1 - 1/s_attn) + rest x clock_cost
+TTFT_new = TTFT - passes x (pass - pass_new)
+ms_per_token_new = ms_per_token - (step - step_new)
+Measured inputs: pass wall, attention busy time, number of passes, TTFT and decode speed (attention statistics and runtron, section 2), and the GDN wall (trace, section 3).
+Measured today for this prediction: the core clock under AMX on delphi-3b35, and the cost of the tile and FMA instructions [Ref11].
+Estimated inputs: the factors in the table below. Each one comes from operation counts, measured instruction costs, or an earlier measurement on delphi-3bda.
+Ranges: the low case uses every low factor together. The high case uses every high factor together.
+Factor (old time / new time) | Low (est.) | Working value (est.) | High (est.) | Basis | 
+GDN step, prefill, Part 0 | 1.8 | 2.2 | 2.5 | GDN step today on a 2.70 GHz thread: 6.4 us (trace).
+Recurrence with the state in L1: 0.95 to 1.16 us per value head (est.). The 5,120 vector operations stay the same. Each costs 0.50 to 0.61 cycles. The measured FMA rate is 0.61 cycles per operation [Ref11].
+About 80 cache lines per token still come from L2: 0.05 to 0.09 us per value head (est.).
+Other work of the GDN step: 0.7 to 1.0 us (est.). Convolution: 0.50 us (measured, stand-alone benchmark [Ref11]). Normalization of q and k, decay and beta: about 0.2 us (est.). Norm, output gate and copies: 0 to 0.3 us (not measured).
+New GDN step: 2.6 to 3.5 us (est.). Factor 1.8 to 2.5.
+Working value 2.2: a new GDN step of 2.9 us (est.), near the middle of this range.
+ | 
+GDN step, prefill, Part A | 2 | 3.2 | 3.7 | Recurrence in the block kernel: 972 to 1,286 cycles per value head per token (est., table in section 5.3).
+Other work of the GDN step: 0.8 us at 2.70 GHz (est.). It runs at the lower clock too.
+At 2.40 GHz the new GDN step is 1.7 to 2.0 us (est.). Factor 3.2 to 3.7.
+At 1.90 GHz the new GDN step is 2.2 to 2.5 us (est.). Factor 2.6 to 3.0.
+The clock at this kernel's own mix of tile work and AVX-512 work is not measured (see the clock note).
+Working value 3.2: the high cycle count at 2.40 GHz.
+Low case 2.0: 1.5 times the high cycle count at 1.90 GHz (GDN step 3.2 us, est.). It leaves room for costs that the model does not count.
+High case 3.7: the low cycle count at 2.40 GHz.
+ | 
+GDN step, decode | 1 | 1 | 1 | A decode chain has one token. It has no block form.
+A tile would use 1 or 2 of its 16 rows. The state is FP32 and differs per sequence [Ref14].
+ | 
+Attention busy time, prefill, Part B | 1.6 | 2.4 | 3.2 | On delphi-3bda the 128-wide AMX kernel cut the prefill time of qwen-3-4b by 20, 35, 47 and 57 % at prompts 1,024, 2,048, 4,096 and 8,192 [Ref13].
+A fit with one constant speedup of the attention time gives 3.0 to 3.3 times (est., script in [Ref18]). The lower bound is 2.3 times.
+On delphi-3bda the core ran AMX work at 92 % of its AVX-512 clock [Ref12]. On delphi-3b35 it runs at 70 % (1.90 of 2.70 GHz) to 89 % (2.40 of 2.70 GHz). So the factor is multiplied by 0.76 to 0.96 (est.).
+Working value 2.4 = 3.15 x 0.76. High case 3.2 = 3.3 x 0.96.
+Both values assume that the factor of 128-wide heads holds for 256-wide heads.
+Low case 1.6: this assumption fails. One page of a 256-wide head holds 64 KiB of K and V. It does not fit the 48 KiB L1 cache, so every visit loads the page from L2. A count of instructions and cache lines then gives 1.6 to 2.2 times (est., [Ref18]).
+ | 
+Attention busy time, decode, Part B | 0.9 | 1 | 1.17 | On delphi-3bda the attention time per token got 1.02, 1.18 and 1.22 times shorter with the 128-wide kernel, at prompts 256, 2,048 and 8,192 [Ref19].
+In decode most of that time is a wait for K and V from main memory (77 % of a page unit at prompt 8,192 [Ref12]). A lower clock does not change this wait.
+Working value 1.0: the gain and the lower clock cancel (est.). Low case 0.9 = 1.18 x 0.76. High case 1.17 = 1.22 x 0.96.
+ | 
+Clock cost on the rest of a prefill pass, Part A (a slowdown, not a speedup) | +8.8 % | +2.6 % | +0 % | The 16 GDN threads also do other work of the pass. Under AMX their clock is 2.40 GHz instead of 2.70 GHz, or 1.90 GHz in the low case.
+About 21 % of the rest is CPU work on these threads (est.). The value is the launch work in a decode trace of qwen-3-4b on delphi-3bda [Ref12]. Its share in a prefill pass of this model is not measured.
+Working value 0.21 x (2.70 / 2.40 - 1) = 2.6 %. Low case 0.21 x (2.70 / 1.90 - 1) = 8.8 %. High case: no cost.
+ | 
+The core clock under AMX, measured with the clock probe on one of our CPUs today [Ref11].AVX-512 FMA loop: 2.70 GHz.
+Tile products only, after the upper halves of the vector registers were cleared: 2.40 GHz.
+Tile products only, with live 512-bit values in the registers: 1.90 GHz.
+Short turns of 4 tile products and 64 FMAs (34 ns per turn), with the clearing: 1.90 GHz.
+Long turns of 4,096 tile products and 16,384 FMAs (25 us per turn), with the clearing: 2.40 GHz.
+Turn lengths between these two were not probed. The block kernel and the attention kernel both lie between. Insufficient data. Tasks 3 and 4 of the plan measure them.
+The working values assume 2.40 GHz for the block kernel. The low case assumes 1.90 GHz.
+On delphi-3bda the core ran AMX work at 92 % of its AVX-512 clock [Ref12]. On delphi-3b35 the figure is 70 to 89 %.
+[SVG]Figure 9. Time to first token, relative to today's measured value (100 %). The ring is Part 0 alone (no AMX). The green dot is both AMX kernels at the working values. The shaded bar is the range between the low and the high factors. Labels give seconds. Both AMX kernels: TTFT falls by 35 to 43 % (est.). Part 0 alone gives 15 to 24 % (est.).
+[SVG]Figure 10. Decode speed per user with Part B, relative to today's measured value (100 %). No GDN change applies to decode. The shaded bar is the range between the low and the high factors. Working value: no change (est.). Range: -5.3 % to +7.8 % (est.).
+Each cell of the table gives the working value, its change against today, and the range between the low and the high case.
+Users | Prompt (tokens) | TTFT today (s) | Part 0 (s, est.) | Part A (s, est.) | Part B (s, est.) | Parts A and B (s, est.) | Decode today (tok/s per user) | Decode with Part B (tok/s per user, est.) | 
+1 | 1,024 | 0.38 | 0.30 (-23 %) / -19 to -25 % | 0.28 (-28 %) / -17 to -31 % | 0.36 (-7 %) / -5 to -9 % | 0.25 (-35 %) / -22 to -39 % | 273.2 | 273.2 (+0.0 %) / -0.6 to +0.7 % | 
+1 | 4,096 | 1.90 | 1.54 (-19 %) / -15 to -21 % | 1.47 (-23 %) / -14 to -25 % | 1.57 (-17 %) / -11 to -20 % | 1.15 (-40 %) / -25 to -45 % | 252.6 | 252.6 (+0.0 %) / -1.2 to +1.6 % | 
+1 | 8,192 | 4.71 | 4.00 (-15 %) / -12 to -16 % | 3.86 (-18 %) / -11 to -20 % | 3.53 (-25 %) / -16 to -29 % | 2.68 (-43 %) / -27 to -49 % | 230.5 | 230.5 (+0.0 %) / -1.8 to +2.5 % | 
+8 | 1,024 | 2.91 | 2.21 (-24 %) / -20 to -26 % | 2.06 (-29 %) / -18 to -32 % | 2.75 (-5 %) / -4 to -6 % | 1.90 (-35 %) / -22 to -39 % | 121.1 | 121.1 (+0.0 %) / -1.4 to +1.9 % | 
+8 | 4,096 | 14.29 | 11.49 (-20 %) / -16 to -22 % | 10.90 (-24 %) / -15 to -26 % | 12.06 (-16 %) / -10 to -18 % | 8.68 (-39 %) / -25 to -44 % | 77.6 | 77.6 (+0.0 %) / -3.9 to +5.6 % | 
+8 | 8,192 | 35.75 | 30.16 (-16 %) / -13 to -17 % | 28.98 (-19 %) / -12 to -21 % | 27.14 (-24 %) / -15 to -28 % | 20.37 (-43 %) / -27 to -49 % | 56.3 | 56.3 (+0.0 %) / -5.3 to +7.8 % | 
+How to read the prediction
+Part 0 alone (new loop order, no AMX, same bits): TTFT falls by 15 to 24 % (est.). Range: 12 to 26 %.
+Part A (AMX block kernel for GDN): TTFT falls by 18 to 29 % (est.). Range: 11 to 32 %.
+What AMX itself adds for GDN. At the working values Part A gives 3 to 5 points more than Part 0. At the low values Part A is 1.0 to 1.6 points worse than Part 0, because the lower core clock costs more than the kernel gains. Part 0 gives about 83 to 83 % of the fall that Part A gives.
+Part B (AMX attention kernel for 256-wide heads): TTFT falls by 5 to 25 % (est.). Range: 4 to 29 %. The gain grows with the prompt length.
+Parts A and B together: TTFT falls by 35 to 43 % (est.). Range: 22 to 49 %.
+Decode: no change at the working values (est.). Range: -5.3 % to +7.8 %. All of it comes from Part B. This is the weakest part of the prediction. It rests on measurements from delphi-3bda and on a clock ratio.
+What would prove the prediction wrong
+Part 0: the measured GDN step on a 2.70 GHz thread is above 3.6 us. The estimate is 2.6 to 3.5 us.
+Part A: the measured GDN step of the block kernel is not below the measured GDN step of Part 0. Then Part A adds nothing. The estimate is 1.7 to 2.5 us against 2.6 to 3.5 us.
+The method: the GDN wall of a pass gets shorter by some milliseconds, and the pass wall gets shorter by less. Then the layers do not form one serial path.
+Seen in the same data. It is not an AMX matter.With 8 users the 16 GDN threads each run 8 chains in a row while 40 attention workers wait.
+Spreading the 128 work items over all 56 threads would cut the GDN wall to about 3/8 of today's value (est., from the work-item count).
+Prefill, 8 users, prompt 1,024: that is about 100 ms of the 362 ms pass (est.).
+Decode, same cell: at most 1.8 ms of the 8.1 ms step (est., an upper value because the GDN wall comes from a traced run).
+It needs a scheduling change, not a new kernel. It does not help 1 user.
+5. Software design
+5.1 What AMX can and cannot do here
+Work | Share of the time today | Can AMX help? | Why | 
+GDN, prefill | 27 to 44 % of a pass | Yes, with Part A. Part 0 comes first and needs no AMX. | A chain of 128 tokens can be written as matrix products. Then all 16 rows of a tile carry data. | 
+GDN, decode | 10 to 32 % of a step (inside the traced runs) | No. | One token per sequence. The state is FP32 and differs per sequence. A tile would use 1 or 2 of its 16 rows. | 
+Full attention, prefill | 9 to 43 % of a pass | Yes, with Part B. | Same method as today's 128-wide kernels. | 
+Full attention, decode | 5 to 52 % of a step | Not on this server (est.). Part B applies, and its working value is no gain. | Most of this time is a wait for K and V from main memory. The lower core clock under AMX takes the rest of the gain. | 
+Convolution, norms, output gate | inside the GDN step, about 0.8 us of 6.4 us (est.) | No. | Small. Every operation is followed by a bf16 rounding. | 
+[SVG]Figure 11. Where the new code sits. Green boxes are new AMX code. The blue box named advance() is new code without AMX. Prefill chains take advance() on every machine. Decode chains keep today's code path.
+5.2 Part 0: a chain path that keeps the state in L1 (no AMX, same bits)
+Today. For each token the kernel passes over a 64 KiB matrix twice [Ref3]. The matrix does not fit the 48 KiB L1 cache. So every pass moves it between L2 and L1.
+Fact used. Each value column of S is its own recurrence. Column c depends only on the keys, the decay, the beta and column c of the values.
+New order. Split each value head into two halves of 64 columns (32 KiB). Run all tokens of the chain on one half. Then run them on the other half. The half stays in L1 for the whole chain.
+Three phases per chain. Phase 1, per token: convolution, normalization, decay and beta, saved in a small buffer. Phase 2: the recurrence over the chain, half by half. Phase 3, per token: norm and output gate.
+Layout. Each half is stored as one contiguous block of 32 KiB in a buffer of its own. In the layout of today's working copy the rows of a half would compete for the same places in L1 [Ref18].
+Bits. Unchanged. Every column sees the same operations in the same order.
+Why it is in an AMX design. It gives about 83 to 83 % of the fall that Part A is predicted to give (est.). It also builds the chain entry point and the per-token buffers that Part A needs.
+5.3 Part A: the AMX block kernel
+Idea. Process a block of 32 tokens at once. The state is read twice and written once per block. Today it is read twice and written once per token.
+Why AMX fits. The three large products become matrix times matrix. A tile product then uses all 16 rows. The kernel needs 18.5 tile products and 272 FMAs per value head per token. Today's kernel needs about 5,120 vector operations (est. count).
+The FP32 state. AMX multiplies bf16 by bf16 only. Each FP32 value is split into 3 bf16 pieces whose sum is exactly the FP32 value. The product is computed once per piece, and the 3 results are added [Ref18].
+Same algebra as the reference. Hugging Face Transformers uses this block form (block size 64) for every call with several tokens. vLLM and SGLang ship an AMX kernel that is built on it [Ref14].
+Block size 32. One block of K, Q and their products fits the L1 cache. The cost model has its lowest value near 32 [Ref18].
+Stage 1 in detail. The kernel takes 16 value columns of S0 at a time. AVX-512 code splits them into 3 pieces in a 12 KiB buffer that stays in L1. Then 48 tile products run on that buffer.
+Stage 4 in detail. AVX-512 code scales Delta and splits it into 3 pieces. Tile product 3 builds the update. AVX-512 code then writes the decayed start state plus the update.
+Clock. So tile work and AVX-512 work take turns about every 0.2 to 0.4 us (est.). The clock probe covered turns of 34 ns (1.90 GHz) and of 25 us (2.40 GHz) [Ref11]. Insufficient data for the length between. Task 3 of the plan measures it.
+If the clock is 1.90 GHz at this turn length. The alternative is to split the whole state first and to run all tile products in one long run. The pieces of one value head are then 96 KiB, which do not fit L1.
+[SVG]Figure 12. The four stages of the AMX block kernel for one value head. Dashed green frames are AMX tile products. The three large products become matrix times matrix. So all 16 rows of a tile carry data.
+Part of the block kernel | Cycles per value head per token (est.) | Basis | 
+Tile product 1 (stage 1: read the state) | 269 | 12 tile products, 7 tile loads and 1 tile store per token | 
+Tile product 2 (stage 2: token against token) | 15 | 0.5 tile products, 0.625 tile loads and 0.125 tile stores per token. Shared by the 2 value heads of a key head | 
+Tile product 3 (stage 4: write the state) | 159 | 6 tile products, 3.5 tile loads and 2 tile stores per token | 
+AVX-512 work: split of S0, packing, corrections, split of Delta, final write | 340 to 417 | about 680 vector operations per token at 0.50 to 0.61 cycles per operation | 
+Moving data between L2 and L1 | 189 to 426 | Low: the 2,048 cache lines of the state per block, at about 3 cycles per line. High: 4,608 lines per block, with the kernel's own buffers | 
+Total | 972 to 1,286 | 0.41 to 0.54 us at 2.40 GHz (est.). Today: 3.06 us (measured, stand-alone benchmark). The cycle counts are estimates, not timings. | 
+[SVG]Figure 13. Time of the recurrence per value head per prompt token. The first bar is measured. The hatched bars are estimates from operation counts and measured instruction costs. Most of the estimated gain comes from keeping the state in the L1 cache (Part 0). The AMX kernel adds a second, smaller gain (Part A).
+5.4 Numerics: what changes and what the contract should say
+Part 0 changes no bit. Each value column of S is its own recurrence. Part 0 runs the columns in two halves, with all tokens of the chain per half. Each column still sees the same operations in the same order. Two independent scripts confirm equal bits for outputs and state [Ref18].
+Part A changes the order of the FP32 sums. The result is close to today's result, and it is not equal. Three numeric checks on synthetic inputs compared the block form with today's kernel. 0.005 to 0.10 % of the bf16 output words differ [Ref18].
+The differences are small. An output above 1 % of the typical output size differs by one bf16 increment. Outputs nearer to zero differ by up to 46 increments [Ref18].
+The error is of the same size as today's. The checks compare both kernels with a float64 computation. The block form's output error is 0.3 to 1.1 times the error of today's kernel. Its state error is 0.3 to 3.2 times today's [Ref18].
+Long chains with a decay near 1. After 1,024 tokens the two kernels differ by up to 33 FP32 increments in the state. Today's kernel is then 27 increments away from float64, and the block form 9 [Ref18].
+The 3-piece split is exact. For every FP32 value of size 9.9e-32 or larger the three bf16 pieces add up to the value. A script checked every finite FP32 bit pattern [Ref18].
+Below 9.9e-32. A piece can be a subnormal number. TDPBF16PS treats subnormal inputs and subnormal results as zero. The part lost is below 1.2e-38 [Ref18].
+Two pieces are not enough. In the checks their state error against float64 is 7.5e-8 to 1.7e-6, which is 18 to 61 times the error of today's kernel [Ref18].
+Decay factors are built by multiplication only. Dividing two running products gives wrong results when the product becomes very small inside a block [Ref18].
+Fallback. If the start state or an intermediate result of a block is not finite, the block runs on the token path. The state is still untouched at that point. One check found a case where the block form overflows and today's kernel does not [Ref18].
+What the tests require today. The recurrence is checked with an absolute tolerance of 1e-7. Other tests require equal bytes between the prefill path and the decode path. One test fixes 320 output words to PyTorch values [Ref16].
+These tests use a small head. Their state has 16 key rows and 80 value columns. A block path that is limited to 128 by 128 never runs in them. So they stay unchanged, and they do not cover the new paths. New tests at 128 by 128 are needed.
+Contract proposed for Part A. The block path stays within a stated error band of the token path. It runs only for the 128 by 128 shape, only for full blocks of 32 tokens on a fixed grid of token positions, and only when AMX is on. The token path stays the reference.
+Consequence to accept: prefill and decode. With Part A, prefill and decode of the same text can differ in rare output bits. Hugging Face Transformers has the same property. It uses the block form for prompts and the token form for single tokens [Ref14].
+Consequence to accept: resumed prompts. tron can resume a prompt from a stored state at any token position. A block that is cut by such a position runs on the token path. So a resumed run and a run from the start can differ in rare output bits. Today all paths give equal bytes [Ref16].
+5.5 Part B: attention kernels for 256-wide heads
+Same method as the existing kernels. K and V are bf16 already. No split is needed.
+QK (queries times stored keys, which gives the scores). 8 groups of 32 dimensions instead of 4, into the same 4 result tiles. That is 32 tile products per query token, page and KV head. Today's 128-wide kernel has 16 [Ref6].
+PV (softmax weights times stored values). 4 groups of output dimensions instead of 2. That is 32 tile products per query token, page and KV head. Today's kernel has 16.
+Buffers grow. The packed queries of one token grow from 4 KiB to 8 KiB. The PV output grows from 8 KiB to 16 KiB.
+Eligibility check. shape_ok accepts head width 256 with 4 query heads per KV head. The dispatch, the kill switch and the attention statistics work as today.
+Numerics. The same two known differences from AVX-512 as today's kernel: the weights are rounded to nearest, and the sums are added in another order. The existing error-band tests extend to the new shape.
+Tile rows. Each kernel call serves one query token. So 4 of 16 tile rows carry data, in prefill and in decode. Today's kernel has the same property.
+Clock (hypothesis). The probe read 1.90 GHz when 4 tile products alternate with 64 FMAs, and 2.40 GHz for runs of 4,096 tile products [Ref11]. One visit of a page has 64 tile products between pieces of AVX-512 work. This case was not probed. Task 4 measures it.
+Risk: the page does not fit L1. One page of a 256-wide head holds 64 KiB of K and V. At 128-wide it holds 32 KiB, which fits the 48 KiB L1 cache while the tokens of a prompt chunk visit the page. The low case of section 4 covers this.
+Optional later step for prefill. Serve 4 query tokens per kernel call. Then all 16 tile rows carry data, and a page is loaded once per 4 tokens. The bits equal those of the single-token AMX kernel. It is not part of the prediction.
+5.6 Code structure
+Piece | Where | What | 
+Chain path (Part 0) | h/tron/models/gdn_rolling_executor.hpp, gdn_execution.hpp | New advance(chain). It replaces the token loop for chains of 2 or more tokens. Phase 1, per token: convolution, normalization, decay and beta into a buffer of about 2 KiB per token. Phase 2: the recurrence over the chain. Phase 3, per token: norm and output gate. Chains of 1 token keep step(). The check for invalid values still covers the state and the convolution history. | 
+Column-half recurrence (Part 0) | h/tron/kernels/gated_delta_net.hpp | Same loop body as today on a slice of columns. The slice lives in its own buffer of contiguous 32 KiB halves. The buffer is filled from the working copy and written back at the end of the chain. The slice width follows the head size, because the tests use heads of 16 and 80 columns. | 
+AMX block kernel (Part A) | new src/tron/kernels/amx_gdn.cpp, h/tron/kernels/amx_gdn_iface.hpp | Out-of-line kernel for one value head and one block of 32 tokens. Built with the AMX compiler flags, like amx_attn.cpp. The interface header has no AMX intrinsics. The call site is inside #ifdef TRON_AMX_DISPATCH. The buffers of one GDN thread grow from 227 KiB to at most 559 KiB. They still fit the 2 MiB L2 cache. | 
+Attention 256 x 4 (Part B) | amx_attn_iface.hpp, amx_attn.cpp, self_attention.hpp | Second shape next to 128 x 4: query packer, QK kernel, PV kernel, eligibility check, buffer sizes. The per-shape counters keep their meaning. | 
+Switches | build option TRON_AMX_DISPATCH, kill switch TRON_AMX_DISABLE=1 | Both exist. They cover the new kernels too. With the kill switch set, GDN prefill runs Part 0, which has today's bits. One more run-time switch turns the GDN block path off alone, for A/B runs. Each switch is read once at start. | 
+Tile setup | begin_region / end_region of the AMX code | Opened once per work item on the GDN threads. The upper halves of the vector registers are cleared before each run of tile work. The probe read 2.40 GHz with the clearing and 1.90 GHz without it. | 
+Counters | new h/tron/models/gdn_stats.hpp | Per layer: tokens taken by the token path, by the column-half path and by the AMX block path, and the GDN wall time. Today only a trace can time GDN. | 
+Tests | t/t_gated_delta_net.cpp, new t/t_amx_gdn_numerics.cpp, t/t_amx_numerics.cpp, t/t_amx_dispatch_dtype.cpp, t/t_llama_unit.cpp | Part 0: equal bytes against the token path for chains of 2, 3, 127 and 128 tokens, at 128 by 128 and at the small test heads. Part A: error band against the token path on chains of 128 tokens or fewer, exactness of the split, the fallback cases, chains that do not start on a block boundary. Part B: the existing QK and PV band tests for 256-wide heads, and the tests that name the 128-wide kernel shape. The AMX kernel tests run only on a CPU with AMX, so they need a CI runner with such a CPU. | 
+5.7 What stays outside this design
+AMX is not used for GDN decode. One token fills 1 or 2 of the 16 tile rows. Users cannot share a tile, because each sequence has its own state.
+Decode has options without AMX. The check for invalid values reads the state before every token. The state part of this check could be folded into the first loop of the recurrence. This keeps the bits. Est. gain: 1.1 to 1.2 times on the decode recurrence [Ref18].
+A state stored in column halves could help decode more. Together with the folded check: est. 1.2 to 1.55 times on the decode recurrence [Ref18]. It needs a new layout of the stored state. It is not part of this design.
+Threads. 16 of 56 threads run GDN while 40 attention workers wait. Using all threads would cut the GDN wall of a prefill pass with 8 users to about 3/8 (est.). It changes the scheduler and the code generator, not a kernel.
+A state stored in 16 bits is rejected. A state in fp16 or in bf16 could be loaded into tiles without a split. In a numeric check with synthetic inputs, 7 to 36 % of the bf16 output words change with an fp16 state, and 32 to 81 % with a bf16 state [Ref18].
+6. Plan and open points
+Task | Work | Measurement that closes it | Pass rule | 
+1 | Stand-alone benchmark of the recurrence at the working-copy size (128 KiB): today's kernel and the column-half order. | us per value head per token, on 1 thread and on 16 threads. | The column-half order is 2 times faster or more. | 
+2 | Part 0 in tron: chain path with the column-half order. | Byte compare of outputs and state against today. TTFT in the 6 cells. | Equal bytes. TTFT change inside the Part 0 range of the table in section 4. | 
+3 | Stand-alone AMX block kernel with the 3-piece split. | us per value head per token, and the core clock while it runs. | 2 times faster than the column-half kernel of task 1 at the measured clock. If not, Part A stops here. | 
+4 | Stand-alone 256 x 4 attention kernel against the AVX-512 path. | us per page unit with the data in cache and from main memory, and the core clock. | 1.5 times faster than the AVX-512 path or more, with the data in cache. | 
+5 | Part B in tron. | A/B with the kill switch: decode tok/s and TTFT in the 6 cells. AMX K tokens above 0 in the attention statistics. | TTFT change inside the Part B range. Decode not slower than today. | 
+6 | Part A in tron, after the owners of the GDN code accept the numerics contract. | A/B with the GDN switch: TTFT in the 6 cells. Error-band test. | TTFT change inside the Part A range, and a larger fall than the one measured for Part 0. | 
+Open points
+Core clock under AMX in tron. The probe measured stand-alone loops only. In the block kernel, tile work and AVX-512 work take turns every 0.2 to 0.4 us (est.). In the attention kernel they take turns about every 1 us (est.). The probe covered turns of about 34 ns and of about 25 us. Insufficient data for the lengths between. Tasks 3 and 4 measure them.
+Costs that the block kernel's cost model does not count. A tile load right after an AVX-512 store of the same data waits until the data is in the cache (Intel optimization manual, section 20.15). Small decay values put subnormal numbers into the AVX-512 parts, which the CPU handles on a slow path. Task 3 measures both. The low case of section 4 leaves room for them.
+Mixed core clocks on this server. 3 of the 29 probed CPUs run at 4.00 GHz and 26 run at 2.70 GHz [Ref11]. All factors in section 4 are for 2.70 GHz threads. A server with another clock setup needs its own baseline.
+CPU share of the rest of a prefill pass on the 16 GDN threads. It decides how much a lower clock costs outside the kernel. Insufficient data. A trace of the main thread with the matrix-multiply events turned on would give it.
+Real value ranges of state, decay and beta in this model. The numeric checks used synthetic inputs. A capture of the GDN inputs of one real prompt would give the size of the error band.
+Chains that do not start on a block boundary. After a resume from a stored state, a chain of 128 tokens holds only 3 full blocks. Then 96 of its 128 tokens run in the block kernel, and the other 32 run on Part 0. The 6 cells of this page do not show this case.
+Cause of the slow decode step. The hypothesis in section 3 is not confirmed. A stand-alone benchmark of one decode step on a cold 128 KiB state would confirm or reject it. Cache-miss counters on one GDN thread would do the same.
+The numerics contract. The owners of the GDN code must decide whether prefill may differ from decode in rare output bits. Part 0 does not need this decision. Part A does.
+Model status. The model's registry entry says that its tokens are not yet valid. The design should be checked again when the pull requests that add the model are merged.
+Not read. We could not open the design document of that series of pull requests.
+7. Sources
+tron pull request #3696 "Register Qwen3.5 4B", head commit 72e1191804. Registry entry qwen_3p5_4b in config/models.yaml. Meaning of the support levels: the comment at the top of that file, and README.models.md line 35. Read-only copy of the code: ~/workspace/ai-runs/tron-qwen35-4b.
+Checkpoint configuration /opt/positron/weights/huggingface/Qwen/Qwen3.5-4B/config.json on delphi-3b35. Fields layer_types, head_dim 256, linear_num_key_heads 16, linear_num_value_heads 32, mamba_ssm_dtype float32.
+h/tron/kernels/gated_delta_net.hpp. Note [GatedDeltaNet BF16 rounding points]: lines 22-42. Note [GatedDeltaNet recurrence]. The two state loops: lines 266-294.
+h/tron/models/gdn_rolling_executor.hpp. step: lines 311-358. Layout of the stored state: lines 91-131. Check for invalid values: lines 281 and 419-437. State size: gdn_geometry.hpp lines 27-52.
+h/tron/models/gdn_execution.hpp. Note [GatedDeltaNet replay] and run_gdn_operation: lines 76-147. Thread split: model.hpp lines 2527-2577.
+h/tron/kernels/amx_attn_iface.hpp lines 149-151 (shape_ok: head width 128, 4 query heads per KV head). Kernels: src/tron/kernels/amx_attn.cpp. Dispatch: h/tron/models/self_attention.hpp lines 1533-1536.
+h/tron/models/model.hpp lines 835-845 (model_shape_is_hwattn_eligible: head width 128 or 64). Run log line "HW-attention not available for this model".
+h/tron/models/attn_stats.hpp, Note [Attention path stats]. Also README.stats.md. No hook exists in the GDN files.
+Campaign results: exec/results/gdn-20261120/rt-results.txt, rt/*.log, collected.json, predictions.json. Scripts: exec/gdn-20261120/.
+Traces: exec/results/gdn-20261120/trace/*.perfetto-trace and *.summary.json, written by analyze_trace.py. Definition of the slice: gdn_execution.hpp line 110.
+Kernel benchmarks and clock probes of 2026-11-20: exec/results/gdn-20261120/bench/clock-probe.txt, clock-probe2.txt, clock-probe3.txt. Benchmark source: t/t_gated_delta_net.cpp lines 597 and 1227.
+Earlier AMX measurements on delphi-3bda: perf-model/index.html (instruction costs, core clocks, time of a page unit, share of the wait). Differences between the two servers: exec/3b35-inspect-20261112/delphi-3b35-vs-3bda.html.
+Prefill of qwen-3-4b with and without the AMX attention kernel, 2026-09-22: CI-test/status/qwen3-4b-prefill-amx-vs-fpga.html lines 857-891.
+Published work, read by two independent readers. The GatedDeltaNet paper (arXiv 2412.06464) and the DeltaNet paper (arXiv 2406.06484) give the block form. Hugging Face Transformers modeling_qwen3_5.py uses block size 64 for calls with several tokens and the token form for one token. vLLM and SGLang ship an AMX kernel for this layer (csrc/cpu/sgl-kernels/fla.cpp): block prefill with bf16 tile products, decode per token in AVX-512. The CUDA kernel of llama.cpp splits FP32 operands into bf16 pieces.
+Load snapshots before every run: exec/results/gdn-20261120/load/. Script: exec/3b35-inspect-20261112/load-snapshot.sh.
+t/t_gated_delta_net.cpp. Tolerance 1e-7: lines 702, 776, 780. Output words fixed bit for bit: lines 1414-1460 (table) and 1666-1672 (check). Equal-bytes replay checks: lines 2034, 2167, 2202. Test head sizes: lines 1278-1284.
+Generated plugin exec/results/gdn-20261120/plugin/qwen_3p5_4b.hpp. GDN shape: line 42. Attention shape: line 60. One GDN layer, from the wait for the 4 input projections to the launch of the output projection: lines 1151-1175.
+Design checks of 2026-11-20, scripts and saved outputs in exec/gdn-20261120/design-checks/. Block form against token form: proto/gdn_block_proto.py, skeptic/numerics_check.py and verify-math/vm_checks.py. Long chains: verify-math/vm_longmem.py. Exhaustive checks of the split: kernel/02_split3_exhaustive.py and verify-math/vm_checks.py. Tile layouts: kernel/07_tile_layout_check.py. L1 cache models: skeptic/l1_sim.py and verify-cost/l1_check.py. Equal bits of the column-half order, and a state stored in 16 bits: skeptic/numerics_check.py. Cost models and their check: kernel/04_cost_model.py, skeptic/cost_model.py, integration/cost_arith.py, lead/lead_costs.py, verify-cost/verify_numbers.py. Count of tile instructions: verify-cost/recount_tiles.py. Fit of the prefill attention speedup: review/attn_prefill_fit.py.
+Time per page unit and attention time per token of qwen-3-4b on delphi-3bda, AVX-512 against the merged AMX kernel, 2026-09-01: exec/results/single-attn-20260901/summary.json. Report: PR3879/make-sense-amx-vs-avx.html.
+Shape of llama-3.1-8b (32 layers, 32 heads of 128 values, 8 KV heads): registry entry llama_3p1_8b in config/models.yaml and the config.json of the checkpoint.

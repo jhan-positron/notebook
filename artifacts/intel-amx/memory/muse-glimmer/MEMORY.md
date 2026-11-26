@@ -1,0 +1,22 @@
+- [Isaac's reviews are agent pipeline output](isaac-reviews-are-agent-pipeline.md) — marks to recognize them (Checked by line, scope/lens@model tags) and how to handle their findings
+- [Skill copies: Claude, Codex, notebook](skill-copies-claude-codex-notebook.md) — three locations; re-install to ~/.codex/skills after a Claude-side edit; description limit 1,024 characters
+- [tron main merge queue squashes](tron-main-merge-queue-squash.md) — every PR lands as one commit since 2026-10-27; the squash message lists the branch commit messages; enqueue with the GraphQL mutation, `gh pr merge` fails
+- [Reply drafts: show code edits as diffs](review-reply-edits-as-diffs.md) — jhan 2026-11-19: before/after diff with line numbers, quote the reviewer, explain anchor line vs edited lines
+- [No issue numbers in source](no-issue-numbers-in-source.md) — jhan's rule, reaffirmed 2026-11-19; README files are not covered; leave existing lines with issue links untouched
+- [Changes need system tests](changes-need-system-tests.md) — jhan 2026-11-19: keep PRs scoped, decline untested scope additions, no tracking-issue promises without review; small edits may ride on the nightly if the PR body says so
+- [delphi-3bda lost for own runs](delphi-3bda-lost-no-comparable-reruns.md) — no comparable benchmark reruns for PR 5022; object compare on delphi-3b35 instead
+- [Manual legacy CI run before merge](tron-manual-legacy-ci-run.md) — `gh workflow run cmake-single-platform.yml`: the only CI pipeline that builds AMX; documented by Hannah 2026-09-11; rerun the test-host job to land on a Delphi runner
+- [Keep review replies simple](review-replies-keep-simple.md) — jhan 2026-11-19: simplest change, shortest explanation, no tracking-issue citations or promises unless asked; 2026-11-20: no downgrading words ("only", "I accept")
+- [No bin/slice bench on delphi-3b35](delphi-3b35-no-slice-bench.md) — tool measures on the other users' half; hand-edit registry metadata instead; host clock is UTC
+- [Peer FYI notes trigger code changes](peer-fyi-notes-trigger-code-changes.md) — a peer session edited code 37 s after my FYI; report code observations to jhan first, not to the peer
+- [Post replies as one review](tron-pr-post-replies-as-one-review.md) — pending review via GraphQL, read back, submit; tools in muse-glimmer/pr5022-post/
+- [A push brings a bot review](tron-pr-push-triggers-bot-review.md) — claude[bot] reviews a new tron PR head within about 16 minutes; re-read the PR before posting; test bot findings first
+- [PR 5022 cloud watch](pr5022-cloud-watch.md) — hourly cloud task `trig_01GVEL2kVKy4FwLGZXcG7At9`; PR merged 2026-11-25, jhan told to turn it off, not confirmed; delete the memory once it is off
+- [Cloud scheduled task facts](cloud-scheduled-task-facts.md) — REST-only GitHub, PushNotification tool, no state between runs, connector limits; probe with a test run first
+- [A declined fix leaves the finding open](declined-fix-leaves-finding-open.md) — PR 5022 lesson of 2026-11-23: restate the goal, search a narrower fix and a sibling precedent, never pass the point on as "settled, do not report"; same gap in draft PR 5572
+- [Skill replay harness](skill-replay-harness.md) — how to test a review-skill edit: blind replay on a frozen PR, held-out PR, negative control; folders under ai-runs/skill-replay-20261123 and skill-miss-analysis-20261123; version 3 installed 2026-11-24, backup in ai-runs/skills-backup-20261124
+- [tron Slice registry refresh routes](tron-slice-registry-refresh-routes.md) — one machine class per refresh is enough; remote bench, branch dry run, hand edit, weekly refresh, with preconditions and costs; never write that a measurement is impossible
+- [A/B runtron test recipe on delphi-3b35](delphi-3b35-ab-runtron-recipe.md) — exec/pr5022-optb-20261124: two builds, tests, token identity, throughput; 31 minutes; slugs, weights path, traps
+- [tron commit hook on the agent machine](tron-commit-hook-on-agentsrv.md) — plain git commit fails (lefthook from Nix is missing); hand checks, then --no-verify; never chain push or CI dispatch after an unchecked commit
+- [PR 5022 nightly watch](pr5022-nightly-watch.md) — daily check of the nightly numbers after the merge, until jhan says stop; folder muse-glimmer/pr5022-nightly-watch, artifact link, four session cron jobs to re-create
+- [Talos REST API](talos-rest-api.md) — http://talos:5000/sessions gives every nightly session as JSON from agentsrv; field formats and nightly timing

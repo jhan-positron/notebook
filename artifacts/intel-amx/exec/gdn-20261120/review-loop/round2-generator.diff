@@ -1,0 +1,935 @@
+--- round1/predict.py	2026-11-20 19:37:33.103025506 -0800
++++ predict.py	2026-11-20 21:05:54.842968222 -0800
+@@ -5,20 +5,32 @@
+ - pass: one forward computation. A prefill pass processes one prompt chunk of every user (128 tokens per user).
+   A decode step is a pass with one token per user.
+ - T1: mean wall time of a pass (attention statistics, field wall_cycles / forwards).
+-- attention busy time: the time an attention worker spends on the attention jobs of the 8 full-attention layers in
+-  one pass, without its waits for the projections. Measured as T2 (field busy_cycles, summed over the workers) divided
+-  by the number of attention workers. The kernel speedup applies to this time only.
++- attention busy time: the time of the attention jobs of the 8 full-attention layers on one attention worker in one
++  pass, without the worker's waits for Q, K and V. Measured as T2 (field busy_cycles, summed over the workers) divided
++  by the number of attention workers. T2 holds the scoring of the pages stored before the pass (full pages), the
++  scoring of the pages that the pass itself writes (AVX-512 with or without AMX), the join, and the join wait.
++- join wait: T5 (field join_wait_cycles), the time a worker waits in the join for the other workers. T5 is inside T2.
++- full-page time: the part of the prefill busy time that grows with the K tokens in stored pages. Per user count, a
++  least-squares line through the cells: T2 - T5 = fixed + c x (K tokens of the ready pass per pass). The full-page
++  time is c x K tokens. The prefill factor of the attention kernel divides this time only. The decode factor is a
++  ratio of whole attention times, so it divides the whole busy time of a decode step.
+ - attention wait: T3 (field wall_cycles_w0: wall time of the attention jobs on attention worker 0, waits included)
+-  minus the busy time. It is FPGA and main-thread time, so it stays in the rest.
++  minus the busy time. It holds the waits of worker 0 for Q and for K and V, and the difference between the busy time
++  of worker 0 and the mean. tron has no timer for one of these waits alone. It stays in the rest.
+ - GDN wall: time from the first worker's start to the last worker's end of each of the 24 GDN operations, summed.
+   Measured in a Perfetto trace (slice "GatedDeltaNet"); the attention statistics do not see GDN.
+ - rest: T1 - GDN wall - attention busy time. FPGA matrix multiplies, small host kernels and the attention wait.
+ - s: speedup factor of a kernel (old time / new time). Every s below is an ESTIMATE; see ASSUMPTIONS.
+ 
+-Model (critical-path form of Amdahl's law). The layers of a pass run one after another, and inside a layer the
+-FPGA projections, the host work and the next FPGA projection run one after another. So a time saved in the GDN
+-wall or in the attention wall shortens the pass by the same amount:
+-    T1_new = T1 - GDN_wall * (1 - 1/s_gdn) - attention_busy * (1 - 1/s_attn) + rest * tax
++Model (critical-path form of Amdahl's law). The layers of a pass run one after another. In a GDN layer the FPGA
++projections, the host work and the next FPGA projection run one after another, so a time saved in the GDN wall
++shortens the pass by the same amount. In an attention layer the scoring of the full pages starts when Q is ready and
++can run while the FPGA cards produce K and V of the pass. Assumption: with Part B on, this scoring still ends after
++K and V are ready. Then a time saved in attention shortens the pass by the same amount too:
++    T1_new = T1 - GDN_wall * (1 - 1/s_gdn) - attention_scaled * (1 - 1/s_attn) + rest * tax + attention_other * tax_attn
++    attention_scaled = full-page time (prefill), attention busy time (decode)
++    attention_other  = attention busy time - full-page time - join wait (prefill, Part B only): the AVX-512 scoring of
++                       the pages of the pass, and the join. Under Part B the same workers run it at the AMX clock.
+     TTFT_new = TTFT - passes * (T1 - T1_new)          (time between passes unchanged)
+     ms_per_token_new = ms_per_token - (T1 - T1_new)   (time between decode steps unchanged)
+ "tax" is the slowdown of the other work of the 16 GDN threads when AMX lowers their core clock (measured on
+@@ -61,6 +73,10 @@
+     # Slowdown of the rest of a prefill pass when the 16 GDN threads run at the AMX clock (share of "rest").
+     # 21 % of the rest is CPU work on the 16 GDN threads (est.); clock 2.40 GHz (mid) or 1.90 GHz (lo) instead of 2.70.
+     "tax_rest_amx_gdn": {"lo": 0.088, "mid": 0.026, "hi": 0.0},
++    # Slowdown of the other attention work of a prefill pass under Part B (busy time - full-page time - join wait).
++    # The attention workers run it in the same job as the tile work, so it runs at the clock of the kernel:
++    # 1.90 GHz (lo and mid: 2.70 / 1.90 - 1) or 2.40 GHz (hi: 2.70 / 2.40 - 1). The join wait is not CPU work of this kind.
++    "tax_attn_other": {"lo": 0.421, "mid": 0.421, "hi": 0.125},
+ }
+ if len(sys.argv) > 1:
+     ASSUMPTIONS.update(json.load(open(sys.argv[1])))
+@@ -79,9 +95,50 @@
+ }
+ 
+ 
++def cell_median(cells, cell, path):
++    """Median over the runs of both arms of one value that collect.py derived."""
++    vals = []
++    for a in ("on", "off"):
++        if a in cells[cell]:
++            d = cells[cell][a]
++            for k in path:
++                d = d[k]
++            vals.extend(d["values"])
++    vals.sort()
++    n = len(vals)
++    return (vals[(n - 1) // 2] + vals[n // 2]) / 2.0
++
++
++def full_page_times(col):
++    """Prefill, per cell: (full-page time, join wait), in ms per pass and attention worker.
++    Per user count, a least-squares line through the cells: busy time - join wait = fixed + c x K, where K is the number
++    of K tokens that the ready pass scores per pass (pages stored before the pass). The full-page time is c x K."""
++    cells, runs = col["cells"], col["runs"]
++    pts = {}
++    for cell in cells:
++        names = [n for a in ("on", "off") if a in cells[cell] for n in cells[cell][a]["runs"]]
++        k = {runs[n]["attn"]["prompt_or_mixed"]["totals"]["ready_avx_k_tokens"] / runs[n]["attn"]["prompt_or_mixed"]["forwards"]["forwards"] for n in names}
++        assert len(k) == 1, (cell, k)   # a count: equal in every run of a cell
++        workers = cell_median(cells, cell, ["prompt_or_mixed", "attn_workers"])
++        busy = cell_median(cells, cell, ["prompt_or_mixed", "attn_busy_cpu_ms_per_forward"]) / workers
++        join = cell_median(cells, cell, ["prompt_or_mixed", "attn_join_wait_cpu_ms_per_forward"]) / workers
++        pts[cell] = (k.pop(), busy - join, join)
++    out = {}
++    for users in {cells[c]["on"]["users"] for c in cells}:
++        group = [c for c in cells if cells[c]["on"]["users"] == users]
++        assert len(group) >= 2, users
++        mx = sum(pts[c][0] for c in group) / len(group)
++        my = sum(pts[c][1] for c in group) / len(group)
++        slope = sum((pts[c][0] - mx) * (pts[c][1] - my) for c in group) / sum((pts[c][0] - mx) ** 2 for c in group)
++        for c in group:
++            out[c] = (slope * pts[c][0], pts[c][2])
++    return out
++
++
+ def main():
+     col = json.load(open(RES + "/collected.json"))
+     cells, traces = col["cells"], col["traces"]
++    full_page = full_page_times(col)
+     out = {"assumptions": ASSUMPTIONS, "cells": {}}
+     print(f"{'cell':18} {'T1 pf':>7} {'GDN%':>5} {'att%':>5} {'rest%':>5} | {'TTFT s':>7} | {'reorder':>16} | {'amx_gdn':>16} | {'amx_attn':>16} | {'amx_both':>16} || "
+           f"{'T1 dec':>6} {'GDN%':>5} {'att%':>5} | {'TPS':>6} | {'amx_attn':>18}")
+@@ -119,9 +176,13 @@
+         gdn_pf = tr["prefill"]["gdn"]["wall_span_ms_per_pass"]
+         gdn_dec = tr["decode"]["gdn"]["wall_span_ms_per_pass"]
+         rest_pf = t1_pf - gdn_pf - attn_pf
++        attn_full_pf, join_pf = full_page[cell]
++        attn_other_pf = attn_pf - attn_full_pf - join_pf
++        join_dec = med(["decode_like", "attn_join_wait_cpu_ms_per_forward"])[0] / n_attn
+         rec = {
+             "users": users, "prompt": prompt, "samples": n,
+             "prefill": {"t1_ms": t1_pf, "gdn_ms": gdn_pf, "attn_ms": attn_pf, "attn_t3_ms": t3_pf, "attn_wait_ms": t3_pf - attn_pf,
++                        "attn_full_ms": attn_full_pf, "attn_join_ms": join_pf, "attn_other_ms": attn_other_pf,
+                         "rest_ms": rest_pf, "passes": passes,
+                         "gdn_step_slow_us": tr["prefill"]["gdn"].get("slowest_thread_step_us"),
+                         "gdn_step_median_us": tr["prefill"]["gdn"].get("median_thread_step_us"),
+@@ -131,6 +192,7 @@
+                         "trace_pass_ms": tr["prefill"]["mean_pass_ms"], "gdn_step_us": tr["prefill"]["gdn"]["cpu_us_per_group_step"],
+                         "gdn_cpu_ms": tr["prefill"]["gdn"]["cpu_ms_per_pass"]},
+             "decode": {"t1_ms": t1_dec, "gdn_ms": gdn_dec, "attn_ms": attn_dec, "attn_t3_ms": t3_dec, "attn_wait_ms": t3_dec - attn_dec,
++                       "attn_join_ms": join_dec,
+                        "rest_ms": t1_dec - gdn_dec - attn_dec,
+                        "gdn_step_slow_us": tr["decode"]["gdn"].get("slowest_thread_step_us"),
+                        "gdn_step_median_us": tr["decode"]["gdn"].get("median_thread_step_us"),
+@@ -149,7 +211,8 @@
+                 if gkey:
+                     d_pf += gdn_pf * (1 - 1 / ASSUMPTIONS[gkey][level])
+                 if attn_on:
+-                    d_pf += attn_pf * (1 - 1 / ASSUMPTIONS["s_attn_prefill"][level])
++                    d_pf += attn_full_pf * (1 - 1 / ASSUMPTIONS["s_attn_prefill"][level])
++                    d_pf -= attn_other_pf * ASSUMPTIONS["tax_attn_other"][level]
+                 if tax_on:
+                     d_pf -= rest_pf * ASSUMPTIONS["tax_rest_amx_gdn"][level]
+                 d_dec = attn_dec * (1 - 1 / ASSUMPTIONS["s_attn_decode"][level]) if attn_on else 0.0
+--- round1/design_numbers.py	2026-11-20 19:37:33.107025562 -0800
++++ design_numbers.py	2026-11-20 21:05:54.834968112 -0800
+@@ -128,6 +128,83 @@
+     return parts, sum(x[1] for x in parts), sum(x[2] for x in parts)
+ 
+ 
++def kernel_runs(B=BLOCK):
++    """Tile runs and AVX-512 runs of the block kernel for one value head and one block, in execution order.
++    Estimates from the instruction counts, every load from L1: (name, kind, instructions, runs per block, share per value
++    head, cycles low, cycles high). Same rows as design-checks/review/phase_lengths.out, part A."""
++    t = lambda n, ld, st: (n * CYC_TDP + ld * CYC_TLD + st * CYC_TST,) * 2
++    v = lambda ops: (ops * 0.50, ops * CYC_FMA)
++    tile = lambda n, ld, st: f"{n} tile products, {ld} tile loads, {st} tile stores"
++    nc = n_corrections(B)
++    return [
++        ("Packing of K, Q and K^T", "AVX-512", "1,664 operations", "1 per key head", 0.5, *v(1664)),
++        ("Stage 1: split of 16 value columns of S0", "AVX-512", "1,024 operations", "8", 8, *v(1024)),
++        ("Stage 1: tile product 1 on these columns", "Tile", tile(48, 28, 4), "8", 8, *t(48, 28, 4)),
++        ("Stage 2: tile product 2", "Tile", tile(32, 40, 8), "1 per key head", 0.5, *t(32, 40, 8)),
++        ("Stage 3: corrections and their coefficients", "AVX-512", f"{nc + 223:,} operations ({nc:,} and 223)", "1", 1, *v(nc + 223)),
++        ("Stage 4: scaling and split of Delta", "AVX-512", "2,304 operations", "1", 1, *v(2304)),
++        ("Stage 4: one part of tile product 3", "Tile", tile(12, 7, 4), "16", 16, *t(12, 7, 4)),
++        ("Stage 4: final write of one part", "AVX-512", "64 operations", "16", 16, *v(64)),
++    ]
++
++
++def kernel_runs_summary(B=BLOCK):
++    """Numbers of the run table that the text quotes. Times in us at 2.40 GHz unless the key says 190."""
++    rows = kernel_runs(B)
++    us = lambda cyc, clk=CLK_AMX: cyc / clk / 1e3
++    tiles = [r for r in rows if r[1] == "Tile"]
++    avx = [r for r in rows if r[1] == "AVX-512"]
++    run3 = (rows[4][5] + rows[5][5], rows[4][6] + rows[5][6])           # stage 3 and the split of Delta: one AVX-512 run
++    turn1 = (rows[1][5] + rows[2][5], rows[1][6] + rows[2][6])          # split of 16 columns + its tile run
++    turn4 = (rows[6][5] + rows[7][5], rows[6][6] + rows[7][6])          # one part of tile product 3 + its final write
++    block = (sum(r[4] * r[5] for r in rows), sum(r[4] * r[6] for r in rows))
++    lines_lo, lines_hi = 2048 * LINE_HI, 4608 * LINE_HI                 # cache lines from L2 per block (cost table)
++    qk, pv = 32 * CYC_TDP + 40 * CYC_TLD + 4 * CYC_TST, 32 * CYC_TDP + 40 * CYC_TLD + 16 * CYC_TST
++    tile12 = rows[2][5] + rows[3][5]                                   # last tile run of stage 1 + tile run of stage 2 (once per key head)
++    avx01 = (rows[0][5] + rows[1][5], rows[0][6] + rows[1][6])         # packing + first split of stage 1 (once per key head)
++    return {"tile_lo": us(min(r[5] for r in tiles)), "tile_hi": us(tile12), "avx_lo": us(min(r[5] for r in avx)), "avx_hi": us(run3[1]),
++            "tile12_cyc": tile12, "tile12": us(tile12), "tile12_190": us(tile12, CLK_MIX), "avx01": (us(avx01[0]), us(avx01[1])),
++            # first turn (packing + split + tile run) and last turn (split + tile run of stage 1 and of stage 2) of that value head
++            "turn1_long": (us(min(avx01[0] + rows[2][5], rows[1][5] + tile12)), us(max(avx01[1] + rows[2][6], rows[1][6] + tile12))),
++            "run3": (us(run3[0]), us(run3[1])), "run3_190": (us(run3[0], CLK_MIX), us(run3[1], CLK_MIX)), "run3_ops": n_corrections(B) + 223 + 2304,
++            "turn1": (us(turn1[0]), us(turn1[1])), "turn1_190": (us(turn1[0], CLK_MIX), us(turn1[1], CLK_MIX)),
++            "turn4": (us(turn4[0]), us(turn4[1])), "turn4_190": (us(turn4[0], CLK_MIX), us(turn4[1], CLK_MIX)),
++            "l2_pct": (100 * lines_lo / block[1], 100 * lines_hi / block[0]),
++            "qk": us(qk), "pv": us(pv), "qk_190": us(qk, CLK_MIX), "pv_190": us(pv, CLK_MIX), "qk_cyc": qk, "pv_cyc": pv}
++
++
++RUNS_LEAD = ("Runs of the block kernel for one value head and one block of 32 tokens, in execution order. "
++             "The lengths are estimates from the instruction counts, with every load from L1 [Ref18].")
++
++
++def runs_table(table):
++    rng = lambda a, b, f: f(a) if abs(a - b) < 1e-9 else f"{f(a)} to {f(b)}"
++    cyc = lambda x: f"{x:,.0f}"
++    us = lambda x: f"{x:.2f}" if x >= 0.1 else f"{x:.3f}"
++    rows = [[name, kind, ins, runs, rng(lo, hi, cyc), rng(lo / CLK_AMX / 1e3, hi / CLK_AMX / 1e3, us), rng(lo / CLK_MIX / 1e3, hi / CLK_MIX / 1e3, us)]
++            for name, kind, ins, runs, _, lo, hi in kernel_runs()]
++    return table(["Run", "Kind", "Instructions per run (est. count)", "Runs per block", "Cycles per run (est.)", "us at 2.40 GHz (est.)", "us at 1.90 GHz (est.)"],
++                 rows, num_cols=(3, 4, 5, 6))
++
++
++def runs_notes():
++    k = kernel_runs_summary()
++    return [
++        "Two rows of the same kind that follow each other are one run.",
++        f"For the first value head of a key head, the packing and the first split of stage 1 are one AVX-512 run of 2,688 operations: {k['avx01'][0]:.2f} to {k['avx01'][1]:.2f} us at 2.40 GHz (est.). "
++        f"The last tile run of stage 1 and the tile run of stage 2 are one tile run of {k['tile12_cyc']:,.0f} cycles: {k['tile12']:.2f} us at 2.40 GHz, or {k['tile12_190']:.2f} us at 1.90 GHz (est.).",
++        f"Stage 3 and the scaling and split of Delta follow each other with no tile work between. Together they are one AVX-512 run of {k['run3_ops']:,} operations: "
++        f"{k['run3'][0]:.1f} to {k['run3'][1]:.1f} us at 2.40 GHz, or {k['run3_190'][0]:.1f} to {k['run3_190'][1]:.1f} us at 1.90 GHz (est.).",
++        f"Turns: stage 1 has 8 turns of {k['turn1'][0]:.2f} to {k['turn1'][1]:.2f} us at 2.40 GHz, or {k['turn1_190'][0]:.2f} to {k['turn1_190'][1]:.2f} us at 1.90 GHz (est.). "
++        f"For the first value head of a key head, the first and the last of these turns are longer: {k['turn1_long'][0]:.1f} to {k['turn1_long'][1]:.1f} us at 2.40 GHz (est.). "
++        f"Stage 4 has 16 turns of {k['turn4'][0]:.2f} us at 2.40 GHz, or {k['turn4_190'][0]:.2f} to {k['turn4_190'][1]:.2f} us at 1.90 GHz (est.).",
++        f"Costs used: {CYC_TDP} cycles per tile product, {CYC_TLD} cycles per tile load, {CYC_TST} cycles per tile store, and 0.50 to 0.61 cycles per AVX-512 operation.",
++        f"The lengths leave out the cache lines from L2 of the table above. Those add {k['l2_pct'][0]:.0f} to {k['l2_pct'][1]:.0f} % to the cycles of a block (est.).",
++        "The final write of stage 4 has 64 FMAs per run. The short turn of the clock probe has the same count.",
++        "The clock of the AVX-512 runs is not measured either. The table uses the two clocks that the probe read under tile work.",
++    ]
++
++
+ def step_estimates():
+     """GDN step time per variant on a 2.70 GHz thread, in us: {name: (low, high)}. All est."""
+     _, lo, hi = cost_model()
+@@ -216,16 +293,16 @@
+         ]),
+         "attn_pf": ul([
+             "On delphi-3bda the 128-wide AMX kernel cut the prefill time of qwen-3-4b by 20, 35, 47 and 57 % at prompts 1,024, 2,048, 4,096 and 8,192 [Ref13].",
+-            "A fit with one constant speedup of the attention time gives 2.95 to 3.05 times (est., script in [Ref18]). The lower bound is 2.3 times: the ratio of the whole prefill times at prompt 8,192.",
++            "A fit of these times gives 2.95 to 3.05 times (est., script in [Ref18]). The fit writes the prefill time of a prompt of p tokens as a x p + b x p x p without AMX, and as a x p + b x p x p / s with AMX. So s is the speedup of the part that grows with the square of the prompt length. That part is the scoring of the full pages of earlier passes. The pages that a pass writes and every cost that is fixed per pass grow with p. They stay in the term a x p. The lower bound is 2.3 times: the ratio of the whole prefill times at prompt 8,192.",
+             "On delphi-3bda the core ran AMX work at 92 % of its AVX-512 clock [Ref12]. On delphi-3b35 it runs at 70 % (1.90 of 2.70 GHz) to 89 % (2.40 of 2.70 GHz). "
+             "So the factor is multiplied by 0.76 to 0.96 (est.).",
+             "Working value 2.3 = 3.0 x 0.76. High case 2.9 = 3.05 x 0.96.",
+             "Both values assume that the factor of 128-wide heads holds for 256-wide heads.",
+             "Low case 1.6: the case in which this assumption does not hold. One page of a 256-wide head holds 64 KiB of K and V. It does not fit the 48 KiB L1 cache. So every visit loads the 1,024 cache lines of the page from L2, at about 3 cycles per line (est.). "
+-            "A count of instruction cycles and cache lines then gives (8,192 + 3,031) / (2,031 + 3,031) = 2.2 times at an equal clock, and 1.6 times at 1.90 GHz (est., script in [Ref18]).",
++            "A count of instruction cycles and cache lines then gives (8,192 + 3,031) / (2,027 + 3,031) = 2.2 times at an equal clock, and 1.6 times at 1.90 GHz (est., script in [Ref18]). The count is for one visit of a full page. It does not cover the pages that a pass writes.",
+         ]),
+         "attn_dec": ul([
+-            "On delphi-3bda the attention time per token got 1.02, 1.18 and 1.22 times shorter with the 128-wide kernel, at prompts 256, 2,048 and 8,192 [Ref19].",
++            "On delphi-3bda the attention time per token got 1.02, 1.18 and 1.22 times shorter with the 128-wide kernel, at prompts 256, 2,048 and 8,192 [Ref19]. That time is the busy time of attention worker 0, summed over the layers. So the factor already contains the join, the join wait and the pages of the pass in progress.",
+             "In decode a large part of that time is a memory stall: the core waits while K and V rows are loaded from main memory. On delphi-3bda the stall was 47 % of a page unit with the AVX-512 kernel and 77 % with the AMX kernel, at prompt 8,192 [Ref12]. This stall is inside the busy time. It is not the attention wait of section 3. A lower clock does not change it.",
+             "Working value 1.0: the gain and the lower clock cancel (est.). Low case 0.9 = 1.18 x 0.76. High case 1.17 = 1.22 x 0.96.",
+         ]),
+@@ -233,22 +310,26 @@
+             "The 16 GDN threads also do other work of the pass. Under AMX their clock is 2.40 GHz instead of 2.70 GHz, or 1.90 GHz in the low case.",
+             "About 21 % of the rest is CPU work on these threads (est.). The value is the share of the work that prepares and starts the FPGA matrix multiplies, in a decode trace of qwen-3-4b on delphi-3bda [Ref12]. "
+             "Its share in a prefill pass of this model is not measured.",
+-            "Working value 0.21 x (2.70 / 2.40 - 1) = 2.6 %. Low case 0.21 x (2.70 / 1.90 - 1) = 8.8 %. High case: no cost.",
++            "Working value 0.21 x (2.70 / 2.40 - 1) = 2.6 %. Low case 0.21 x (2.70 / 1.90 - 1) = 8.8 %. High case: no cost. It assumes that none of the rest is CPU work on these threads. That share is not measured for this model.",
+         ]),
+     }
+ 
+ 
+ NUMERICS_HTML = """
+ <li><b>Part 0 changes no bit.</b> Each value column of S is its own recurrence. Part 0 runs the columns in two halves, with all tokens of the chain per half. Each column still sees the same operations in the same order. Two independent scripts confirm equal bits for outputs and state. A stand-alone copy in AVX-512 code on another CPU confirms it too [Ref18].</li>
+-<li><b>Part A changes the order of the FP32 sums.</b> The result is close to today's result, and it is not equal. Three numeric checks on synthetic inputs compared the block form with today's kernel. 0.005 to 0.10 % of the bf16 output words differ [Ref18].</li>
++<li><b>Part A changes the order of the FP32 sums.</b> It also applies the scale of the read step (figure 2, line 4) in FP32 after the tile products, to the coefficients of the read sum. The token kernel applies it to q before the sum. The tile product needs q as a bf16 value, and scale x q is not a bf16 value. The result is close to today's result, and it is not equal. Three numeric checks on synthetic inputs compared the block form with today's kernel. 0.005 to 0.10 % of the bf16 output words differ [Ref18].</li>
+ <li><b>The differences are small.</b> An output above 1 % of the typical output size differs by one bf16 increment. Outputs nearer to zero differ by up to 67 increments [Ref18].</li>
+ <li><b>The error is of the same size as today's.</b> The checks compare both kernels with a float64 computation. The block form's output error is 0.3 to 1.1 times the error of today's kernel. Its state error is 0.3 to 3.2 times today's [Ref18].</li>
+ <li><b>Long chains with a decay near 1.</b> After 1,024 tokens the two kernels differ by up to 33 FP32 increments in the state. Today's kernel is then 27 increments away from float64, and the block form 9 [Ref18].</li>
+-<li><b>The 3-piece split is exact.</b> For every FP32 value of size 9.9e-32 or larger the three bf16 pieces add up to the value. A script checked every finite FP32 bit pattern [Ref18].</li>
+-<li><b>Below 9.9e-32.</b> A piece can be a subnormal number. TDPBF16PS treats subnormal inputs and subnormal results as zero. The part lost is below 1.2e-38 [Ref18].</li>
++<li><b>The split rule.</b> The first piece is the FP32 value with the low 16 bits of its bit pattern cleared. This is truncation, which rounds toward zero. The remainder is the value minus the first piece. The second piece is the remainder with its low 16 bits cleared. The third piece is the remainder minus the second piece. Both subtractions are FP32 subtractions. tron's bf16 conversion rounds to nearest, and the split does not use it [Ref18].</li>
++<li><b>The split is exact from 2^-103 upward.</b> Take an FP32 value of size 2^-103 (about 9.9e-32) or larger. Its three pieces are bf16 values, and their sum is the value. None of the three is a subnormal value. This holds up to the largest FP32 value, 3.4028235e38. A script checked every finite FP32 bit pattern of both signs [Ref18].</li>
++<li><b>Below 2^-103: the tile product reads some pieces as zero.</b> The second or the third piece can then be a subnormal value. TDPBF16PS reads a subnormal input as zero. It also replaces a subnormal result by zero. So a piece can exist as a number and still be absent from the product. An FP32 value that is subnormal itself is absent as a whole. In every case the part of one value that the tile product does not read is below 2^-126 (about 1.2e-38) [Ref18].</li>
++<li><b>Below 2^-110: an exact split does not always exist.</b> Every finite bf16 value is a multiple of 2^-133 (about 9.2e-41). An FP32 value below 2^-110 (about 7.7e-34) can have bits below 2^-133. No sum of bf16 values holds such bits. The smallest positive FP32 value, 2^-149, is an example. The third piece then keeps its upper 16 bits, and the part dropped is below 2^-133. From 2^-110 to 2^-103 the three pieces still add up to the value [Ref18].</li>
++<li><b>Top of the range.</b> Under the truncation rule every finite FP32 value gives three finite pieces. Round to nearest does not. The largest finite bf16 value is 3.3895314e38. Round to nearest turns every value of size 3.3961775e38 (2^128 - 2^119) or larger into an infinite first piece. These are the 32,768 largest FP32 values of each sign. The checks covered both rules up to the largest FP32 value [Ref18].</li>
++<li><b>Which rule the numeric checks used.</b> One of the three numeric checks above uses the truncation rule. The other two round every piece to nearest. The first one also ran the round-to-nearest rule on the same inputs in 3 of its test cases. Between the two rules, 0 to 56 of 131,072 bf16 output words differ. The error against float64 with round to nearest is 0.99 to 1.13 times the error with truncation [Ref18].</li>
+ <li><b>Two pieces are not enough.</b> In the three checks their state error against float64 is 7.5e-8 to 1.6e-5. That is 5 to 227 times the error of today's kernel [Ref18].</li>
+ <li><b>Decay factors are built by multiplication only.</b> Dividing two running products gives wrong results when the product becomes very small inside a block [Ref18].</li>
+-<li><b>Fallback.</b> If the start state or an intermediate result of a block is not finite, the block runs on the column-half path of Part 0. That path has the bits of the token path. The state is still untouched at that point. One check found a case where the block form overflows and today's kernel does not [Ref18].</li>
++<li><b>Fallback.</b> If the start state or an intermediate result of a block is not finite, the block runs on the column-half path of Part 0. That path has the bits of the token path. The state is still untouched at that point. One check found a case where the block form overflows and today's kernel does not [Ref18]. The split adds no case to this list. Under the truncation rule every finite value gives three finite pieces [Ref18]. Values below 2^-103 take no fallback. Their loss is part of the error band of the contract.</li>
+ <li><b>What the tests require today.</b> The recurrence is checked with an absolute tolerance of 1e-7. Other tests require equal bytes between the prefill path and the decode path. One test fixes 320 output words to PyTorch values [Ref16].</li>
+ <li><b>No existing test runs the block path.</b> The equal-bytes tests and the test with 320 fixed output words use a small head: 16 key rows and 80 value columns. The tolerance tests call the token kernel directly, one of them at 128 by 128 for 2 tokens. So a block path that is limited to chains on a 128 by 128 head never runs in them. They stay unchanged. The equal-bytes tests run chains of 2 or more tokens on the small head. So they will run the chain path of Part 0 at 16 by 80. New tests of both paths at 128 by 128 are needed.</li>
+ <li><b>Contract proposed for Part A.</b> The block path stays within a stated error band of the token path. It runs only for the 128 by 128 shape, only for full blocks of 32 tokens on a fixed grid of token positions, and only when AMX is on. The token path stays the reference.</li>
+@@ -264,7 +345,12 @@
+ <li><b>Eligibility check.</b> <code>shape_ok</code> accepts head width 256 with 4 query heads per KV head. The dispatch, the kill switch and the attention statistics work as today.</li>
+ <li><b>Numerics.</b> The same two known differences from AVX-512 as today's kernel: the weights are rounded to nearest, and the sums are added in another order. The existing error-band tests extend to the new shape.</li>
+ <li><b>Tile rows.</b> Each kernel call serves one query token. So 4 of 16 tile rows carry data, in prefill and in decode. Today's kernel has the same property.</li>
+-<li><b>Clock (hypothesis).</b> The probe read 1.90 GHz when 4 tile products alternate with 64 FMAs, and 2.40 GHz for runs of 4,096 tile products [Ref11]. One visit of a page has two runs of 32 tile products (QK, then PV), with AVX-512 work before, between and after them. This case was not probed. Task 4 measures it.</li>
++<li><b>Clock (hypothesis).</b> Section 4 assumes 1.90 GHz at the working value and 2.40 GHz in the high case. No probed turn has the mix of this kernel. Task 4 measures the clock.<ul>
++<li>The probe read 1.90 GHz for turns of 4 tile products and 64 FMAs, and 2.40 GHz for turns of 4,096 tile products and 16,384 FMAs [Ref11].</li>
++<li>One page unit has two tile runs. The QK run has 32 tile products, 40 tile loads and 4 tile stores. That is 917 cycles: 0.38 us at 2.40 GHz or 0.48 us at 1.90 GHz (est. from counts, every load from L1). The PV run has 32 tile products, 40 tile loads and 16 tile stores. That is 1,110 cycles: 0.46 us at 2.40 GHz or 0.58 us at 1.90 GHz (est.).</li>
++<li>When the 512 cache lines of K or of V come from L2, a run is 0.4 to 0.6 us longer at 2.40 GHz (est.).</li>
++<li>AVX-512 work follows each tile run. After QK it turns the scores into softmax weights. After PV it adds the result to the running sums of the token. No count of this AVX-512 work exists for the 256-wide kernel. With the 128-wide kernel on delphi-3bda, the softmax step took 0.08 to 0.11 us and the update after PV took 0.07 to 0.17 us per page unit in decode (measured) [Ref19].</li>
++</ul></li>
+ <li><b>Risk: the page does not fit L1.</b> One page of a 256-wide head holds 64 KiB of K and V. At 128-wide a page holds 32 KiB. That fits the 48 KiB L1 cache. So the page stays in L1 while the tokens of one prefill pass visit it. The low case of section 4 covers this.</li>
+ <li><b>Optional later step for prefill.</b> Serve 4 query tokens per kernel call. Then all 16 tile rows carry data, and a page is loaded once per 4 tokens. The bits equal those of the single-token AMX kernel. It is not part of the prediction.</li>
+ """
+@@ -282,13 +368,13 @@
+     ["Attention 256 x 4 (Part B)", "<code>amx_attn_iface.hpp</code>, <code>amx_attn.cpp</code>, <code>self_attention.hpp</code>",
+      "Second shape next to 128 x 4: query packer, QK kernel, PV kernel, eligibility check, buffer sizes. The per-shape counters keep their meaning."],
+     ["Switches", "build option <code>TRON_AMX_DISPATCH</code>, kill switch <code>TRON_AMX_DISABLE=1</code>",
+-     "Both exist. They cover the new kernels too. With the kill switch set, GDN prefill runs Part 0, which has today's bits. One more run-time switch turns the GDN block path off alone. It allows A/B runs (two runs that differ only in this switch). Each switch is read once at start."],
++     "Both exist. They cover the new kernels too. With the kill switch set, GDN prefill runs Part 0, which has today's bits. Attention then runs AVX-512. One more run-time switch, the GDN switch, turns the GDN block path off alone. With the GDN switch set, GDN prefill runs Part 0. Attention keeps its kernel. The GDN switch allows A/B runs (two runs that differ only in this switch). No switch selects today's token loop for prefill. No switch turns the attention kernel of Part B off alone. Each switch is read once at start."],
+     ["Tile setup", "<code>begin_region</code> / <code>end_region</code> of the AMX code",
+      "Opened once per work item on the GDN threads. The upper halves of the vector registers are cleared before each run of tile work. For tile products alone the probe read 2.40 GHz with the clearing and 1.90 GHz without it. Short turns of tile work and AVX-512 work read 1.90 GHz even with the clearing (clock note in section 4)."],
+     ["Counters", "new <code>h/tron/models/gdn_stats.hpp</code>",
+      "Per layer: tokens taken by the token path, by the column-half path and by the AMX block path, and the GDN wall time. Today only a trace can time GDN."],
+     ["Tests", "<code>t/t_gated_delta_net.cpp</code>, new <code>t/t_amx_gdn_numerics.cpp</code>, <code>t/t_amx_numerics.cpp</code>, <code>t/t_amx_dispatch_dtype.cpp</code>, <code>t/t_llama_unit.cpp</code>",
+-     "Part 0: equal bytes against the token path for chains of 2, 3, 127 and 128 tokens, at 128 by 128 and at the small test heads. Part A: error band against the token path on chains of 128 tokens or fewer, exactness of the split, the fallback cases, chains that do not start on a block boundary. "
++     "Part 0: equal bytes against the token path for chains of 2, 3, 127 and 128 tokens, at 128 by 128 and at the small test heads. Part A: error band against the token path on chains of 128 tokens or fewer, the split rule (exact sum from 2^-103 up to the largest FP32 value, the stated loss below 2^-103), the fallback cases, chains that do not start on a block boundary. "
+      "Part B: the existing QK and PV band tests for 256-wide heads, and the tests that name the 128-wide kernel shape. The AMX kernel tests run only on a CPU with AMX. They need a CI runner (a machine of the automated test system) with such a CPU."],
+ ]
+ 
+@@ -301,24 +387,48 @@
+ """
+ 
+ PLAN_ROWS = [
+-    ["1", "Stand-alone benchmark of the recurrence at the working-copy size (128 KiB): today's kernel and the column-half order.",
++    ["1", "Stand-alone benchmark of the recurrence at the working-copy size (128 KiB): today's kernel and the column-half order. Also the recurrence alone on one 32 KiB slice that stays in L1.",
+      "us per value head per token, on 1 thread and on 16 threads.",
+      "2 times faster or more: the estimate from the counts holds. From 1.46 to 2 times: Part 0 continues at its low case. Below 1.46 times: the prediction for Part 0 is wrong."],
+-    ["2", "Part 0 in tron: chain path with the column-half order.", "Byte compare of outputs and state against today. TTFT in the 6 cells.",
+-     "Equal bytes. TTFT change inside the Part 0 range of the table in section 4."],
++    ["2", "Part 0 in tron: chain path with the column-half order.",
++     "Byte compare of outputs and state against the base build. TTFT of the base run and of the Part 0 run in the 6 cells. GDN step on a 2.70 GHz thread, with separate timers for the recurrence, the copy into the contiguous buffer and back, the normalization and the other per-token work. Pass wall and GDN wall for both builds from the counters of section 5.6, in untraced runs, for prefill and for decode.",
++     "Equal bytes. The TTFT fall from the base run to the Part 0 run, as a percent of the base run, is inside the Part 0 range of the table in section 4."],
+     ["3", "Stand-alone AMX block kernel with the 3-piece split.", "us per value head per token, and the core clock while it runs.",
+      "2 times faster than the column-half kernel of task 1 at the measured clock. If not, Part A stops here."],
+     ["4", "Stand-alone 256 x 4 attention kernel against the AVX-512 path.", "us per page unit with the data in cache and from main memory, and the core clock.",
+      "1.5 times faster than the AVX-512 path or more, with the data in cache."],
+-    ["5", "Part B in tron.", "A/B with the kill switch: decode tok/s and TTFT in the 6 cells. AMX K tokens above 0 in the attention statistics.",
+-     "TTFT change inside the Part B range. Decode not slower than today."],
+-    ["6", "Part A in tron, after the owners of the GDN code accept the numerics contract.", "A/B with the GDN switch: TTFT in the 6 cells. Error-band test.",
+-     "TTFT change inside the Part A range, and a larger fall than the one measured for Part 0."],
++    ["5", "Part B in tron.", "A/B run with the kill switch: decode tok/s and TTFT in the 6 cells. A base run in the same session. Pass wall and attention busy time per prefill pass in every run. AMX K tokens above 0 in the attention statistics.",
++     "The TTFT fall of the A/B run, as a percent of the base run, is inside the Part B range of the table in section 4. Decode with Part B is at most 1.1 % below decode with the kill switch set. 1.1 % is the largest difference between two sets of runs of the same code in section 2. This rule is stricter than the prediction on purpose. The low case of section 4 (down to -5.3 %, est.) fails it. After a fail the design needs a rule that keeps the 256-wide kernel off in decode steps."],
++    ["6", "Part A in tron, after the owners of the GDN code accept the numerics contract.", "A/B run with the GDN switch: TTFT in the 6 cells. A base run and a Part 0 run in the same session. Error-band test.",
++     "The run with Part A has a lower TTFT than the run with the GDN switch set, in all 6 cells. The fall from the base run to the Part 0 run plus the fall of the A/B run, as a percent of the base run, is inside the Part A range of the table in section 4."],
++]
++
++COMPARE_HTML = """
++<li><b>Base build, base run.</b> The base build is tron without Parts 0, A and B, at the commit where the Part 0 change starts. A base run is a run of the base build. Its GDN prefill runs today's token loop. Its attention runs AVX-512. The base build holds the counters of section 5.6. They change no output bit. Their time cost is not measured.</li>
++<li><b>Why a second build.</b> No switch selects today's token loop in a build with Part 0 (section 5.6). So today's kernel is measured with the base build.</li>
++<li><b>One session.</b> All runs of one task are made in one session on delphi-3b35, with a load snapshot before every run. Every session has its own base run. The values of section 2 are not used as a denominator.</li>
++<li><b>Quantities.</b> TTFT and decode speed are medians per cell, as in section 2. A TTFT fall is the TTFT of run 1 minus the TTFT of run 2, in seconds.</li>
++<li><b>Denominator of a range rule.</b> Every range of section 4 is a percent of today's TTFT. So a range rule divides a TTFT fall by the TTFT of the base run. The bounds of a range are the unrounded low and high values of the prediction [Ref9].</li>
++<li><b>Denominator of an A/B run.</b> An A/B run alone gives a percent of its run 1. Run 1 already runs Part 0. So this percent is not comparable with a range of section 4. The second table gives its predicted value.</li>
++<li><b>Why a fall in seconds is comparable.</b> In the model of section 4 the seconds that one part saves do not depend on the other parts (est.). So Part B saves the same seconds on a build with Part 0 as on the base build (est.). The fall from the base run to Part A is the fall from the base run to Part 0 plus the fall from Part 0 to Part A.</li>
++"""
++
++COMPARE_ROWS = [
++    ["Base to Part 0", "2. Repeated in the sessions of tasks 5 and 6.", "Base run: base build. GDN prefill: today's token loop. Attention: AVX-512.",
++     "Part 0 run: build of the task, kill switch set. GDN prefill: Part 0. Attention: AVX-512.",
++     "The build. In task 2 the kill switch changes nothing. That build has no AMX kernel for this model."],
++    ["A/B run of Part B", "5", "Build with Parts 0 and B, kill switch set. GDN prefill: Part 0. Attention: AVX-512.",
++     "Same build, kill switch not set. GDN prefill: Part 0. Attention: Part B.",
++     "The kill switch. If the build holds Part A, the GDN switch is set in both runs."],
++    ["A/B run of Part A", "6", "Build with Parts 0 and A, GDN switch set. GDN prefill: Part 0.",
++     "Same build, GDN switch not set. GDN prefill: Part A.",
++     "The GDN switch. The kill switch is not set. Attention runs the same kernel in both runs: Part B if the build holds Part B, AVX-512 if not."],
+ ]
+ 
+ OPEN_HTML = """
+ <li><b>Size of the Part 0 gain on this CPU.</b> No timing of the column-half order exists for delphi-3b35. On another CPU (AMD Zen 5) it was 1.46 to 1.74 times faster than today's order [Ref18]. That is below the 2 times that the counts predict. Insufficient data. Task 1 measures it.</li>
+-<li><b>Core clock under AMX in tron.</b> The probe measured stand-alone loops only. In the block kernel, tile work and AVX-512 work take turns every 0.2 to 0.4 us (est.). In the attention kernel they take turns about every 0.4 to 0.6 us (est.). The probe covered turns of about 35 ns and of about 33 us. Insufficient data for the lengths between. Tasks 3 and 4 measure them.</li>
++<li><b>Core clock under AMX in tron.</b> The probe measured stand-alone loops only. It covered two turns: 4 tile products with 64 FMAs (35 ns per turn, 1.90 GHz), and 4,096 tile products followed by 16,384 FMAs (33 us per turn, 2.40 GHz). Neither kernel has one turn length. The runs of the block kernel are in the second table of section 5.3. The tile runs of the attention kernel are in section 5.5. The AVX-512 work of the attention kernel is not counted. Insufficient data for the clock of either kernel. Tasks 3 and 4 measure it. The clock of the other attention work under Part B is not measured either. A reading of the core clock of one attention worker during a prefill pass of task 5 would give it.</li>
++<li><b>Wait for K and V under Part B.</b> A worker scores the full pages while K and V of the pass are produced. If the AMX kernel ends this scoring before K and V are ready, the worker waits for them. That part of the saving is then lost. tron has no timer for this wait alone. Insufficient data. A timer around the wait for K and V in <code>run_attention_job</code> (the tron function that runs one attention job on one worker) would give it [Ref8]. The risk is largest at prompt 1,024, where the full-page time is 0.38 ms per layer with 1 user (est.).</li>
+ <li><b>Costs that the block kernel's cost model does not count.</b> A tile load right after an AVX-512 store of the same data waits until the data is written to memory [Ref21]. Small decay values put subnormal numbers into the AVX-512 parts. The CPU handles such numbers much more slowly. Task 3 measures both. The low case of section 4 allows for them.</li>
+ <li><b>Mixed core clocks on this server.</b> 3 of the 29 probed CPUs run at 4.00 GHz and 26 run at 2.70 GHz [Ref11]. All factors in section 4 are for 2.70 GHz threads. A server with another clock setup needs its own baseline.</li>
+ <li><b>CPU share of the rest of a prefill pass on the 16 GDN threads.</b> It decides how much a lower clock costs outside the kernel. Insufficient data. A trace of the main thread with the matrix-multiply events turned on would give it.</li>
+@@ -333,12 +443,12 @@
+ REFS = [
+     "tron pull request #3696 \"Register Qwen3.5 4B\", head commit 72e1191804. Registry entry <code>qwen_3p5_4b</code> in <code>config/models.yaml</code>. Meaning of the support levels: the comment at the top of that file, and <code>README.models.md</code> line 35. Read-only copy of the code: <code>~/workspace/ai-runs/tron-qwen35-4b</code>.",
+     "Checkpoint configuration <code>/opt/positron/weights/huggingface/Qwen/Qwen3.5-4B/config.json</code> on delphi-3b35. Fields <code>layer_types</code>, <code>head_dim 256</code>, <code>linear_num_key_heads 16</code>, <code>linear_num_value_heads 32</code>, <code>mamba_ssm_dtype float32</code>.",
+-    "<code>h/tron/kernels/gated_delta_net.hpp</code>. Note [GatedDeltaNet BF16 rounding points]: lines 22-42. Note [GatedDeltaNet recurrence]. The two state loops: lines 266-294.",
++    "<code>h/tron/kernels/gated_delta_net.hpp</code>. Note [GatedDeltaNet BF16 rounding points]: lines 22-42. Note [GatedDeltaNet recurrence]. The two state loops: lines 266-294. Scale of the query: lines 242-243 and 287.",
+     "<code>h/tron/models/gdn_rolling_executor.hpp</code>. <code>step</code>: lines 311-358. Layout of the stored state: lines 91-131. Check for invalid values: lines 281 and 419-437. State size: <code>gdn_geometry.hpp</code> lines 27-52.",
+     "<code>h/tron/models/gdn_execution.hpp</code>. Note [GatedDeltaNet replay]: lines 18-53. <code>run_gdn_operation</code>: lines 76-147. Thread split: <code>model.hpp</code> lines 2527-2577.",
+     "<code>h/tron/kernels/amx_attn_iface.hpp</code> lines 149-151 (<code>shape_ok</code>: head width 128, 4 query heads per KV head). Kernels: <code>src/tron/kernels/amx_attn.cpp</code>. Dispatch: <code>h/tron/models/self_attention.hpp</code> lines 1533-1536.",
+     "<code>h/tron/models/model.hpp</code> lines 835-845 (<code>model_shape_is_hwattn_eligible</code>: head width 128 or 64). Run log line \"HW-attention not available for this model\".",
+-    "<code>h/tron/models/attn_stats.hpp</code>, Note [Attention path stats]. Also <code>README.stats.md</code>. The GDN files do not call it.",
++    "<code>h/tron/models/attn_stats.hpp</code>, Note [Attention path stats]. The timers: lines 30-43. Full-page visits that stay on the AVX path: lines 200-204. Also <code>README.stats.md</code> lines 290-298. The timed code is <code>run_attention_job</code> in <code>h/tron/models/self_attention.hpp</code>, lines 771-851: start of the wall timer at line 794, wait for Q at lines 800-802, wait for K and V at line 819. The join wait is timed in <code>run_joins</code>, lines 1262-1274. Ready and pending pages: <code>h/tron/models/model.hpp</code> lines 2383-2401, Note [Ready versus pending attention work]. The GDN files do not call the statistics code.",
+     "Campaign results: <code>exec/results/gdn-20261120/rt-results.txt</code>, <code>rt/*.log</code>, <code>collected.json</code>, <code>predictions.json</code>. Scripts: <code>exec/gdn-20261120/</code>.",
+     "Traces: <code>exec/results/gdn-20261120/trace/*.perfetto-trace</code> and <code>*.summary.json</code>, written by <code>analyze_trace.py</code>. Definition of the trace event: <code>gdn_execution.hpp</code> line 110.",
+     "Kernel benchmarks and clock probes of 2026-11-20: <code>exec/results/gdn-20261120/bench/clock-probe.txt</code>, <code>clock-probe2.txt</code>, <code>clock-probe3.txt</code>. Benchmark source: <code>t/t_gated_delta_net.cpp</code> lines 597 and 1227.",
+@@ -348,9 +458,10 @@
+     "Load snapshots before every run: <code>exec/results/gdn-20261120/load/</code>. Script: <code>exec/3b35-inspect-20261112/load-snapshot.sh</code>.",
+     "<code>t/t_gated_delta_net.cpp</code>. Tolerance 1e-7: lines 702, 776, 780. Output words fixed bit for bit: lines 1414-1460 (table) and 1666-1672 (check). Equal-bytes replay checks: lines 2034, 2167, 2202. Test head sizes: lines 1278-1284.",
+     "Generated plugin <code>exec/results/gdn-20261120/plugin/qwen_3p5_4b.hpp</code>. GDN shape: line 42. Attention shape: line 60. One GDN layer, from the wait for the 4 input projections to the launch of the output projection: lines 1151-1182.",
+-    "Design checks of 2026-11-20, scripts and saved outputs in <code>exec/gdn-20261120/design-checks/</code>. Block form against token form: <code>proto/gdn_block_proto.py</code>, <code>skeptic/numerics_check.py</code> and <code>verify-math/vm_checks.py</code>. Long chains: <code>verify-math/vm_longmem.py</code>. Exhaustive checks of the split: <code>kernel/02_split3_exhaustive.py</code> and <code>verify-math/vm_checks.py</code>. Tile layouts: <code>kernel/07_tile_layout_check.py</code>. L1 cache models: <code>skeptic/l1_sim.py</code> and <code>verify-cost/l1_check.py</code>. Equal bits of the column-half order: <code>skeptic/numerics_check.py</code> and <code>verify-math/vm_checks.py</code> (check F1). A state stored in 16 bits: <code>skeptic/numerics_check.py</code>. Cost models and their check: <code>kernel/04_cost_model.py</code>, <code>skeptic/cost_model.py</code>, <code>integration/cost_arith.py</code>, <code>lead/lead_costs.py</code>, <code>verify-cost/verify_numbers.py</code>. Count of tile instructions: <code>verify-cost/recount_tiles.py</code>. Timing of both loop orders on another CPU (AMD Zen 5, a virtual machine): <code>verify-cost/bench_gdn.c</code> with 3 saved runs. Fit of the prefill attention speedup: <code>review/attn_prefill_fit.py</code>. Count for a 256-wide page that is loaded from L2: <code>review/attn_256_l2_count.py</code>. Range of the two decode options: <code>review/decode_options_range.py</code>.",
+-    "Time per page unit and attention time per token of qwen-3-4b on delphi-3bda, AVX-512 against the merged AMX kernel, 2026-09-01: <code>exec/results/single-attn-20260901/summary.json</code>. Report: <code>PR3879/make-sense-amx-vs-avx.html</code>.",
++    "Design checks of 2026-11-20, scripts and saved outputs in <code>exec/gdn-20261120/design-checks/</code>. Block form against token form: <code>proto/gdn_block_proto.py</code>, <code>skeptic/numerics_check.py</code> and <code>verify-math/vm_checks.py</code>. Long chains: <code>verify-math/vm_longmem.py</code>. Exhaustive checks of the split: <code>kernel/02_split3_exhaustive.py</code>, <code>verify-math/vm_checks.py</code> (part C) and <code>review/r3_split_facts.py</code>. Truncation rule against round to nearest in the block form: <code>verify-math/vm_checks.py</code> (part E) and <code>review/r3_rule_variants.py</code>. Tile layouts: <code>kernel/07_tile_layout_check.py</code>. L1 cache models: <code>skeptic/l1_sim.py</code> and <code>verify-cost/l1_check.py</code>. Equal bits of the column-half order: <code>skeptic/numerics_check.py</code> and <code>verify-math/vm_checks.py</code> (check F1). A state stored in 16 bits: <code>skeptic/numerics_check.py</code>. Cost models and their check: <code>kernel/04_cost_model.py</code>, <code>skeptic/cost_model.py</code>, <code>integration/cost_arith.py</code>, <code>lead/lead_costs.py</code>, <code>verify-cost/verify_numbers.py</code>. Count of tile instructions: <code>verify-cost/recount_tiles.py</code>. Lengths of the tile runs and AVX-512 runs of both kernels, and the parts of the two probed turns: <code>review/phase_lengths.py</code>. Timing of both loop orders on another CPU (AMD Zen 5, a virtual machine): <code>verify-cost/bench_gdn.c</code> with 3 saved runs. Fit of the prefill attention speedup: <code>review/attn_prefill_fit.py</code>. Count for a 256-wide page that is loaded from L2: <code>review/attn_256_l2_count.py</code>. Range of the two decode options: <code>review/decode_options_range.py</code>. Parts of the attention busy time, and Part B under four assumptions: <code>review/r1_attention_timers.py</code>. Paired changes of the A/B runs: <code>review/paired_changes.py</code>. Traced runs against untraced runs: <code>review/r6_traced_vs_untraced.py</code>. Scale of the read step: <code>review/r4_scale_check.py</code>. Components of the Part 0 step and the serial-path numbers: <code>review/r7_serial_path_numbers.py</code>.",
++    "Time per page unit and attention time per token of qwen-3-4b on delphi-3bda, AVX-512 against the merged AMX kernel, 2026-09-01: <code>exec/results/single-attn-20260901/summary.json</code>. Report: <code>PR3879/make-sense-amx-vs-avx.html</code>. The attention time per token is the busy time of attention worker 0, summed over the 36 layers (<code>exec/single-attn-20260901/instr-design-report.md</code> lines 8 and 22).",
+     "Shape of llama-3.1-8b (32 layers, 32 heads of 128 values, 8 KV heads): <code>h/tron/plugins/llama.hpp</code> line 1680 (<code>TRON_LLAMA_CONFIG</code> for <code>llama_3p1_8b</code>).",
+     "Intel 64 and IA-32 Architectures Optimization Reference Manual, volume 1 (document 248966, revisions 049 and 050), chapter 20 (Intel AMX), section 20.15 \"Store to Load Forwarding\".",
+     "<code>h/tron/scheduler/full.hpp</code> lines 255-263, Note [Recurrent state snapshots]. It points to Note [Paying for Determinism] in <code>h/runtron/stream_generate.hpp</code> line 140.",
++    "Attention statistics of qwen-3-4b and llama-3.1-8b on delphi-3bda with the AMX attention kernel on and off, 2026-10-02. tron main dd0f942c75, 8 users, software attention, one run per arm. <code>exec/results/attnstats-20261002/exit-reports.txt</code>. Report: <code>attn-stats-compare.md</code> in the same folder.",
+ ]
+--- round1/gen_design.py	2026-11-20 19:37:53.279297155 -0800
++++ gen_design.py	2026-11-20 21:05:54.834968112 -0800
+@@ -55,12 +55,13 @@
+     return "<ul>" + "".join(f"<li>{i}</li>" for i in items) + "</ul>"
+ 
+ 
+-def table(head, rows, num_cols=()):
++def table(head, rows, num_cols=(), kind=""):
+     num_cols = set(num_cols)
+     cls = lambda i: ' class="n"' if i in num_cols else ""
+     h = "".join(f"<th{cls(i)}>{c}</th>" for i, c in enumerate(head))
+     b = "".join("<tr>" + "".join(f"<td{cls(i)}>{c}</td>" for i, c in enumerate(r)) + "</tr>" for r in rows)
+-    return f'<div class="tablewrap"><table><thead><tr>{h}</tr></thead><tbody>{b}</tbody></table></div>'
++    c = f' class="{kind}"' if kind else ""
++    return f'<div class="tablewrap"><table{c}><thead><tr>{h}</tr></thead><tbody>{b}</tbody></table></div>'
+ 
+ 
+ # ---------------------------------------------------------------- derived numbers used in the prose
+@@ -152,6 +153,45 @@
+ 
+ c1u = cells[[c for c in order if cells[c]["users"] == 1 and cells[c]["prompt"] == 1024][0]]
+ c8u = cells[[c for c in order if cells[c]["users"] == 8 and cells[c]["prompt"] == 1024][0]]
++c8u_long = cells[[c for c in order if cells[c]["users"] == 8 and cells[c]["prompt"] == 8192][0]]
++
++# attention: join wait (inside the busy time) and full-page time of a prefill pass (est., both from predict.py)
++join_pf_1u, join_pf_8u = vals("prefill", "attn_join_ms", one_u), vals("prefill", "attn_join_ms", eight_u)
++join_dec = vals("decode", "attn_join_ms")
++join_share_pf = lambda r: 100.0 * r["prefill"]["attn_join_ms"] / r["prefill"]["attn_ms"]
++join_share_dec = [100.0 * cells[c]["decode"]["attn_join_ms"] / cells[c]["decode"]["attn_ms"] for c in order]
++join_growth = [join_pf_1u[-1] / join_pf_1u[0], join_pf_8u[-1] / join_pf_8u[0]]   # prompt 1,024 -> 8,192
++full_share = lambda pick: [100.0 * cells[c]["prefill"]["attn_full_ms"] / cells[c]["prefill"]["attn_ms"] for c in order if pick(cells[c])]
++attn_fixed = lambda pick: [cells[c]["prefill"]["attn_ms"] - cells[c]["prefill"]["attn_full_ms"] for c in order if pick(cells[c])]
++
++
++def whole_busy(scen):
++    """Sensitivity: TTFT change per level if the prefill factor divided the whole attention busy time."""
++    out = {}
++    for level in ("lo", "mid", "hi"):
++        s = ASM["s_attn_prefill"][level]
++        # the whole busy time is divided by the factor, and no other attention work is left to run at the AMX clock
++        out[level] = [pct(cells[c]["pred"][level][scen]["ttft_s"]
++                          - cells[c]["prefill"]["passes"] * ((cells[c]["prefill"]["attn_ms"] - cells[c]["prefill"]["attn_full_ms"]) * (1 - 1 / s)
++                                                             + cells[c]["prefill"]["attn_other_ms"] * ASM["tax_attn_other"][level]) / 1e3,
++                          cells[c]["prefill"]["ttft_s"]) for c in order]
++    return out
++
++
++def tps_join_fixed(level):
++    """Sensitivity: decode speed change if the join wait of a decode step did not shrink with the kernel."""
++    s = ASM["s_attn_decode"][level]
++    return [pct(1e3 / (1e3 / cells[c]["decode"]["tps"] - (cells[c]["decode"]["attn_ms"] - cells[c]["decode"]["attn_join_ms"]) * (1 - 1 / s)), cells[c]["decode"]["tps"])
++            for c in order]
++
++
++wb_b, wb_ab = whole_busy("amx_attn"), whole_busy("amx_both")
++attn_other = lambda pick: [cells[c]["prefill"]["attn_other_ms"] for c in order if pick(cells[c])]
++full_of_pass = [100.0 * cells[c]["prefill"]["attn_full_ms"] / cells[c]["prefill"]["t1_ms"] for c in order]
++tax_attn = ASM["tax_attn_other"]
++assert f"{tax_attn['mid']:.3f}" == f"{DN.CLK_AVX / DN.CLK_MIX - 1:.3f}" and f"{tax_attn['hi']:.3f}" == f"{DN.CLK_AVX / DN.CLK_AMX - 1:.3f}", tax_attn
++wb_all = lambda w: w["lo"] + w["mid"] + w["hi"]
++KR = DN.kernel_runs_summary()
+ gdn_layer_ms = c1u["prefill"]["gdn_ms"] / 24.0
+ rest_layer_ms = c1u["prefill"]["rest_ms"] / 32.0
+ slow_step_us = gdn_layer_ms * 1e3 / 128.0
+@@ -160,9 +200,10 @@
+ 
+ # ---------------------------------------------------------------- tables
+ def glance_table():
+-    f = lambda scen: f"falls by {fall(ttft_change(scen))}"
+-    g = lambda scen: f"{fall(ttft_all(scen))}"
+-    dec = f"{signed(min(tps_change('lo')))} to {signed(max(tps_change('hi')))} %, working value 0 %"
++    nw = lambda s: re.sub(r"(\S+ %)", r'<span class="nw">\1</span>', s)   # a number and its percent sign stay on one line
++    f = lambda scen: nw(f"falls by {fall(ttft_change(scen))}")
++    g = lambda scen: nw(f"{fall(ttft_all(scen))}")
++    dec = nw(f"{signed(min(tps_change('lo')))} to {signed(max(tps_change('hi')))} %, working value 0 %")
+     return table(["Change", "What it is", "Uses AMX", "Bits of the result", "Time to first token, working values (est.)", "Range of the fall (est.)", "Decode speed (est.)"], [
+         ["<b>Part 0</b>", "A new loop order for GDN in prompt processing. The state stays in the L1 cache.", "No", "Same as today", f("reorder"), g("reorder"), "No change"],
+         ["<b>Part A</b>", "An AMX kernel for GDN in prompt processing. It takes 32 tokens at once. It replaces the inner loop of Part 0.", "Yes", "Rare output bits differ",
+@@ -192,13 +233,19 @@
+         k = r[kind]
+         t = k["t1_ms"]
+         row = [f"{r['users']}", f"{r['prompt']:,}", f"{t:.2f}", f"{k['gdn_ms']:.2f}", f"{100 * k['gdn_ms'] / t:.0f}",
+-               f"{k['attn_ms']:.2f}", f"{100 * k['attn_ms'] / t:.0f}", f"{k['rest_ms']:.2f}", f"{100 * k['rest_ms'] / t:.0f}", f"{k['attn_wait_ms']:.2f}"]
++               f"{k['attn_ms']:.2f}", f"{100 * k['attn_ms'] / t:.0f}"]
++        if kind == "prefill":
++            row.append(f"{k['attn_full_ms']:.2f}")
++        row += [f"{k['attn_join_ms']:.2f}", f"{k['rest_ms']:.2f}", f"{100 * k['rest_ms'] / t:.0f}", f"{k['attn_wait_ms']:.2f}"]
+         if kind == "decode":
+             row.append(f"{k['gdn_trace_share_pct']:.0f}")
+         rows.append(row)
+     what = "one prefill pass" if kind == "prefill" else "one decode step"
+-    head = ["Users", "Prompt (tokens)", f"Wall of {what} (ms)", "GDN wall (ms)", "GDN share (%)", "Attention busy time (ms)", "Attention share (%)",
+-            "Rest (ms)", "Rest share (%)", "Attention wait, inside the rest (ms)"]
++    est = "" if kind == "prefill" else ", est."   # decode: a traced GDN wall over an untraced step wall
++    head = ["Users", "Prompt (tokens)", f"Wall of {what} (ms)", "GDN wall (ms)", f"GDN share (%{est})", "Attention busy time (ms)", "Attention share (%)"]
++    if kind == "prefill":
++        head.append("Full-page time, inside the busy time (ms, est.)")
++    head += ["Join wait, inside the busy time (ms)", f"Rest (ms{est})", f"Rest share (%{est})", "Attention wait, inside the rest (ms)"]
+     if kind == "decode":
+         head.append("GDN share inside the traced run (%)")
+     return table(head, rows, num_cols=range(len(head)))
+@@ -227,13 +274,56 @@
+ num = lambda x: f"{x:.1f}" if abs(x - round(x, 1)) < 1e-9 else f"{x:g}"
+ A = lambda k: (num(ASM[k]["lo"]), num(ASM[k]["mid"]), num(ASM[k]["hi"]))
+ tax = ASM["tax_rest_amx_gdn"]
++# Part A if its clock is 1.90 GHz: the high cycle count at that clock, and the low-case clock cost on the rest of the pass
++f190 = round(DN.STEP_TODAY / se["parta_mix"][1], 1)
++parta_190 = [pct(p["ttft_s"] - p["passes"] * (p["gdn_ms"] * (1 - 1 / f190) - p["rest_ms"] * tax["lo"]) / 1e3, p["ttft_s"]) for p in (cells[c]["prefill"] for c in order)]
++# typed copies in design_numbers.py text must match the data
++assert f"{max(abs(x) for x in arm_delta):.1f} % below decode with the kill switch set" in DN.PLAN_ROWS[4][3], arm_delta
++assert f"(down to {signed(min(tps_change('lo')))} %, est.)" in DN.PLAN_ROWS[4][3], tps_change('lo')
++assert f"where the full-page time is {c1u['prefill']['attn_full_ms'] / 8:.2f} ms per layer" in DN.OPEN_HTML, c1u["prefill"]["attn_full_ms"]
++
++
++def ab_table():
++    """Section 6: predicted TTFT fall of the two A/B runs, working values in both runs."""
++    rows = []
++    for c in order:
++        r = cells[c]
++        m, t0 = r["pred"]["mid"], r["prefill"]["ttft_s"]
++        run1, run1_b = m["reorder"]["ttft_s"], m["reorder_attn"]["ttft_s"]
++        fall_b, fall_a = run1 - run1_b, run1 - m["amx_gdn"]["ttft_s"]
++        assert abs(fall_a - (run1_b - m["amx_both"]["ttft_s"])) < 1e-9, c
++        rows.append([f"{r['users']}", f"{r['prompt']:,}", f"{fall_b:.3f}", f"{100 * fall_b / t0:.1f}", f"{100 * fall_b / run1:.1f}",
++                     f"{fall_a:.3f}", f"{100 * fall_a / t0:.1f}", f"{100 * fall_a / run1:.1f}", f"{100 * fall_a / run1_b:.1f}"])
++    return table(["Users", "Prompt (tokens)", "Part B, A/B run: TTFT fall (s, est.)", "Part B: percent of the base run (est.)", "Part B: percent of run 1 (est.)",
++                  "Part A, A/B run: TTFT fall (s, est.)", "Part A: percent of the base run (est.)", "Part A: percent of run 1, Part B off (est.)",
++                  "Part A: percent of run 1, Part B on (est.)"], rows, num_cols=range(9))
++
++
++_m8, _t8 = c8u["pred"]["mid"], c8u["prefill"]["ttft_s"]
++ab_notes = ul([
++    "The percent of the base run in the Part B columns equals the Part B column of section 4.",
++    "The percent of the base run in the Part A columns is the Part A column of section 4 minus the Part 0 column.",
++    "The A/B run of Part A has no predicted range. The factors of Part 0 and of Part A are separate estimates. Section 4 defines no case that mixes a low factor with a high factor. So the pass rule for this run asks only that the TTFT falls.",
++    f"Example: 8 users, prompt 1,024, Part B off. The base run takes {_t8:.3f} s. Part 0 takes {_m8['reorder']['ttft_s']:.3f} s (est.). Part A takes {_m8['amx_gdn']['ttft_s']:.3f} s (est.). "
++    f"The A/B run shows a fall of {100 * (_m8['reorder']['ttft_s'] - _m8['amx_gdn']['ttft_s']) / _m8['reorder']['ttft_s']:.1f} % (est.). "
++    f"The fall from the base run is {abs(pct(_m8['amx_gdn']['ttft_s'], _t8)):.1f} % (est.). "
++    f"The Part A range of this cell is {abs(pct(c8u['pred']['lo']['amx_gdn']['ttft_s'], _t8)):.0f} to {abs(pct(c8u['pred']['hi']['amx_gdn']['ttft_s'], _t8)):.0f} %.",
++])
+ factor_rows = [
+     ["<b>GDN step, prefill, Part 0</b>", *A("s_gdn_reorder"), FB["part0"]],
+     ["<b>GDN step, prefill, Part A</b>", *A("s_gdn_amx"), FB["parta"]],
+     ["<b>GDN step, decode</b>", "1.0", "1.0", "1.0", FB["decode_gdn"]],
+-    ["<b>Attention busy time, prefill, Part B</b>", *A("s_attn_prefill"), FB["attn_pf"]],
++    ["<b>Full-page time of the attention, prefill, Part B</b>", *A("s_attn_prefill"), FB["attn_pf"]],
+     ["<b>Attention busy time, decode, Part B</b>", *A("s_attn_decode"), FB["attn_dec"]],
+     ["<b>Clock cost on the rest of a prefill pass, Part A</b> (a slowdown, not a speedup)", f"+{100 * tax['lo']:.1f} %", f"+{100 * tax['mid']:.1f} %", f"+{100 * tax['hi']:.0f} %", FB["tax"]],
++    ["<b>Clock cost on the other attention work of a prefill pass, Part B</b> (a slowdown, not a speedup)", f"+{100 * tax_attn['lo']:.0f} %", f"+{100 * tax_attn['mid']:.0f} %", f"+{100 * tax_attn['hi']:.1f} %", ul([
++        "Under Part B an attention worker runs tile work and AVX-512 work in the same job. The model assumes that its other attention work then runs at the core clock of the kernel. This clock is not measured.",
++        f"The other attention work is the busy time without the full-page time and without the join wait: the AVX-512 scoring of the pages that the pass writes, and the join. "
++        f"It is {rng(attn_other(one_u), 1, ' ms')} per prefill pass with 1 user and {rng(attn_other(eight_u), 1, ' ms')} with 8 users (est.).",
++        "Working value and low case: 1.90 GHz, so 2.70 / 1.90 - 1 = 42 %. High case: 2.40 GHz, so 2.70 / 2.40 - 1 = 12.5 %.",
++        "The join wait is not CPU work of this kind. The model holds it fixed.",
++        "Decode needs no such row. Its factor is a ratio of whole busy times. So the other attention work and the lower clock are already inside the factor.",
++    ])],
+ ]
+ 
+ differences_table = table(["", "Attention layer (llama-3.1-8b)", "GDN layer (Qwen3.5 4B)"], [
+@@ -254,7 +344,7 @@
+      "A chain of 128 tokens can be written as matrix products. Then all 16 rows of a tile carry data."],
+     ["GDN, decode", f"{rng(gdn_dec_tr_1u + gdn_dec_tr_8u)} of a step (inside the traced runs)", "<b>No.</b>",
+      "One token per sequence. The state is FP32 and differs per sequence. A tile would use 1 or 2 of its 16 rows."],
+-    ["Full attention, prefill", f"{rng(attn_pf_short + attn_pf_long)} of a pass", "<b>Yes</b>, with Part B.", "Same method as today's 128-wide kernels."],
++    ["Full attention, prefill", f"{rng(attn_pf_short + attn_pf_long)} of a pass", "<b>Yes</b>, with Part B.", f"Same method as today's 128-wide kernels. Part B makes only the full-page time faster. That is {rng(full_of_pass)} of a pass (est.)."],
+     ["Full attention, decode", f"{rng(attn_dec_all)} of a step", "<b>Not on this server</b> (est.). Part B applies, and its working value is no gain.",
+      f"About half of this time is a memory stall: the core waits while K and V rows are loaded from main memory (47 % of a page unit on delphi-3bda {ref(12)}). A new kernel does not shorten the stall. The lower core clock under AMX cancels the remaining gain (est.)."],
+     ["Convolution, norms, output gate", f"inside the GDN step, about {DN.OTHER_US} us of {DN.STEP_TODAY} us (est.)", "No.", "Small. Every operation is followed by a bf16 rounding."],
+@@ -285,8 +375,9 @@
+                       f'<span class="take">GDN takes {rng(gdn_pf_short)} of a pass at prompt 1,024 and {rng(gdn_pf_long)} at prompt 8,192. '
+                       "Its time per pass does not change with the prompt length. The attention time grows.</span>", "fig6")
+ fig_split_dec = figure(FD.fig_split(pred, "decode"), "<b>Figure 7.</b> Wall time of one decode step, split the same way. "
+-                       "The GDN wall comes from traced runs, where a decode step is longer. So the GDN shares here are upper values. "
+-                       f'<span class="take">GDN takes up to {max(gdn_dec_1u):.0f} % of a step with 1 user and up to {max(gdn_dec_8u):.0f} % with 8 users.</span>', "fig7")
++                       "The GDN wall comes from the traced runs. The step wall and the attention busy time come from the untraced runs. So the GDN shares and the rest are estimates (est.). "
++                       "They can be too high or too low (see the limit of the decode numbers above). "
++                       f'<span class="take">GDN takes {rng(gdn_dec_1u)} of a step with 1 user and {rng(gdn_dec_8u)} with 8 users (est.).</span>', "fig7")
+ fig_lanes = figure(FG.lanes(gdn_layer_ms, rest_layer_ms, 128, slow_step_us, ASM["s_gdn_amx"]["mid"], clock_layer_ms),
+                    "<b>Figure 8.</b> Who does what, and when, in one GDN layer of a prefill pass (1 user, prompt 1,024). Durations are to scale. "
+                    "The gray block is the mean per layer of the FPGA matrix multiplies and the small host kernels. Its position inside the layer is schematic. Solid blocks are work. Dashed outlines are waiting. "
+@@ -332,10 +423,12 @@
+     ("tile product (TDPBF16PS)", "one AMX instruction. It computes 8,192 bf16 multiply-adds and adds them into a 16 by 16 FP32 tile."),
+     ("AVX-512, FMA", "512-bit vector instructions. FMA is the fused multiply-add on 16 FP32 values at once."),
+     ("bf16, fp16, FP32, float64", "number formats. bf16: 16 bits, 8 significant bits. fp16: 16 bits, 11 significant bits. FP32: 32 bits, 24 significant bits. float64: 64 bits, used as the exact reference in checks."),
+-    ("piece, plane", "Part A writes one FP32 value as the sum of 3 bf16 values, the pieces. A plane is the matrix of one piece of every state value."),
++    ("piece, plane", "Part A splits one FP32 value into 3 bf16 values, the pieces. Their sum is the FP32 value when its size is 2^-103 (about 9.9e-32) or larger. Section 5.4 gives the rule. A plane is the matrix of one piece of every state value."),
++    ("subnormal value", "a nonzero value that is smaller than the smallest normal value of its number format. For bf16 and for FP32 the smallest normal value is 2^-126, about 1.2e-38."),
+     ("L1, L2 cache, cache line", "the two private caches of a CPU core: 48 KiB and 2 MiB on this CPU. Data in L1 is the fastest to reach. A cache line is 64 bytes."),
+     ("core clock", "the frequency at which a CPU core runs. The CPU lowers it while AVX-512 or AMX instructions run."),
+     ("clock probe", "our small test program. It runs one instruction mix on one CPU and reads the core clock."),
++    ("tile run, AVX-512 run, turn", "a tile run is a stretch of tile instructions with no AVX-512 work between them. An AVX-512 run is a stretch of AVX-512 work with no tile instruction. A turn is one tile run plus the AVX-512 run next to it."),
+     ("FPGA cards", "the accelerator cards that do tron's large matrix multiplies (projections, feed-forward layers)."),
+     ("host", "the server's own CPUs, as opposed to the FPGA cards."),
+     ("engine, tp4", "an engine is one running copy of the model. tp4 is the executor that spreads one engine over four FPGA cards."),
+@@ -358,12 +451,20 @@
+     ("main thread, main helpers, attention workers", "tron's CPU threads. The main thread and 15 main helpers run GDN. The 40 attention workers run software attention only."),
+     ("application CPUs", "the CPUs that tron's threads may use: 56 per engine in this setup."),
+     ("attention statistics", "counters and timers that tron reports when the environment variable <code>TRON_ATTN_STATS=1</code> is set."),
+-    ("attention busy time, attention wait", "busy time is the time an attention worker spends on attention jobs without its waits for input. The wait is the rest of the job's wall time."),
++    ("attention busy time", "the time of the attention jobs on one attention worker, without the worker's waits for the queries (Q) and for K and V. It contains four parts: the scoring of the full pages of earlier passes, the scoring of the pages that the pass in progress writes, the join, and the join wait. The page gives the mean over the 40 workers."),
++    ("join, join wait", "the join is the last step of an attention job. It adds the partial results of the workers into one result per token. The join wait is a worker's waiting time in the join. It ends when the other workers have finished their scoring. It is part of the busy time."),
++    ("other attention work", "the part of the attention busy time of a prefill pass that is neither full-page time nor join wait: the AVX-512 scoring of the pages that the pass writes, and the join (est.)."),
++    ("full-page time", "the part of the attention busy time of a prefill pass that is spent on the full pages of earlier passes (est.). In a prefill pass Part B makes only this part faster."),
++    ("attention wait", "the wall time of the attention jobs on attention worker 0, minus the mean busy time. It contains the worker's wait for Q at the start of a job and its wait for K and V in the middle of a job. tron has no timer for either wait alone."),
+     ("memory stall", "the time a core waits while data is loaded from main memory. It is part of the busy time."),
+     ("trace, trace event", "a trace is a recording of timed events made by runtron, in the Perfetto format. Its trace event named GatedDeltaNet is tron's only timer for GDN."),
+     ("kill switch", "the environment variable <code>TRON_AMX_DISABLE=1</code>. It turns the AMX kernels off at run time."),
+     ("arm", "one of the two settings of a comparison. Here: AMX allowed, or the kill switch set."),
+     ("A/B run", "two runs that differ in one switch only."),
++    ("base build, base run", "the base build is tron without Parts 0, A and B. A base run is a run of the base build, made in the same session as the runs that are compared with it."),
++    ("GDN switch", "a new run-time switch of this design. It turns the GDN block path of Part A off alone."),
++    ("token path, column-half path, block path", "the three code paths of the GDN recurrence. Token path: <code>step()</code> per token, today's code. Column-half path: <code>advance()</code> with the loop order of Part 0. Block path: <code>advance()</code> with the block kernel of Part A."),
++    ("session", "one series of runs on delphi-3b35 without a reboot and without a change of the server's own settings (CPU settings, SYSTEM_CONFIG) between them."),
+     ("cell", "one combination of user count and prompt length."),
+     ("prompt N", "a prompt of N tokens. Every baseline run then generates 256 tokens per user. A traced run generates 32 tokens per user."),
+     ("Part 0, Part A, Part B", "the three proposed changes. Part 0: a new loop order for GDN prompt processing, without AMX. Part A: the AMX block kernel for GDN. Part B: the AMX attention kernel for 256-wide heads."),
+@@ -396,7 +497,7 @@
+ ])
+ s2_setup = ul([
+     "<b>Server.</b> delphi-3b35, with two Xeon 6962P CPUs. We used our half: socket 1 with 56 application CPUs, and FPGA cards 4 to 7 (PCI addresses 90, 93, b9 and bc). "
+-    'The setting is <code>SYSTEM_CONFIG="--instance 1,2"</code>.',
++    'The setting is <code class="nw">SYSTEM_CONFIG="--instance 1,2"</code>.',
+     f"<b>Build.</b> tron pull request #3696 at commit 72e1191804, clang 19.1.7, AMX kernels compiled in. The model is not on tron's main branch yet {ref(1)}.",
+     "<b>Model.</b> <code>ingested-qwen-3.5-4b-tp4</code>: one engine on four FPGA cards.",
+     f"<b>Runs.</b> runtron with 1 or 8 users, prompt 1,024, 4,096 or 8,192, and 256 generated tokens per user. {n_samples[0]} runs per cell.",
+@@ -413,16 +514,29 @@
+ s3_how = ul([
+     f"<b>What was turned on.</b> <code>TRON_ATTN_STATS=1</code> in every run {ref(8)}.",
+     "<b>Pass wall.</b> The statistics give the wall time of every pass.",
+-    "<b>Attention busy time.</b> The statistics give the time that the attention workers spend on attention jobs, without their waits for input. The page divides the sum over all workers by the 40 workers.",
+-    f"<b>Attention wait.</b> The statistics also give the wall time of the attention jobs on one worker, waits included. It is {rng(wait_pf_1u, 1, ' ms')} longer than the busy time per prefill pass with 1 user, "
+-    f"{rng(wait_pf_8u, 0, ' ms')} with 8 users, and {rng(wait_dec, 1, ' ms')} per decode step. The worker waits for K and V from the FPGA cards. This wait stays in the rest.",
++    f"<b>Attention busy time.</b> The statistics give, per worker, the time of the attention jobs without the worker's waits for Q and for K and V {ref(8)}. The page divides the sum over all workers by the 40 workers. "
++    "This time is not kernel time only. It contains the scoring of the full pages of earlier passes, the scoring of the pages that the pass in progress writes, the join, and the join wait.",
++    f"<b>Join wait.</b> A worker finishes its scoring. Then it waits in the join until the other workers have finished theirs. The statistics time this wait. It is inside the busy time {ref(8)}. "
++    f"Per prefill pass it is {rng(join_pf_1u, 1, ' ms')} with 1 user and {rng(join_pf_8u, 1, ' ms')} with 8 users. That is {join_share_pf(c1u):.0f} % of the busy time with 1 user at prompt 1,024, "
++    f"and {join_share_pf(c8u_long):.1f} % with 8 users at prompt 8,192. Per decode step it is {min(join_dec):.2f} to {max(join_dec):.2f} ms, or {rng(join_share_dec)} of the busy time.",
++    f"<b>Attention wait.</b> The statistics also give the wall time of the attention jobs on attention worker 0, waits included. It is {rng(wait_pf_1u, 1, ' ms')} longer than the mean busy time per prefill pass with 1 user, "
++    f"{rng(wait_pf_8u, 0, ' ms')} with 8 users, and {rng(wait_dec, 1, ' ms')} per decode step. The page calls this difference the attention wait. "
++    f"It contains two waits of worker 0. The first is the wait for Q at the start of each job. The second is the wait for K and V. It comes before the scoring of the pages that the pass writes {ref(8)}. "
++    "It also contains the difference between the busy time of worker 0 and the mean. So it does not give the wait for K and V alone. tron has no timer for that wait. The attention wait stays in the rest.",
+     f"<b>What the statistics do not see.</b> GDN. The GDN code does not call the statistics code {ref(8)}.",
+     f"<b>How GDN was timed.</b> With tron's trace, one traced run per cell. A traced run generates 32 tokens per user. The trace event named GatedDeltaNet covers the GDN host work of one layer on one thread {ref(10)}. "
+     "The GDN wall of a layer runs from the first thread's start to the last thread's end.",
+     "<b>The rest.</b> Pass wall minus GDN wall minus attention busy time. It is FPGA matrix multiplies, small host kernels and the attention wait.",
+-    f"<b>Limit of the decode numbers.</b> A traced decode step is {rng(trace_longer)} longer than an untraced one. A traced prefill pass is {rng(trace_longer_pf, 1)} longer. "
+-    "The traced mean leaves out the first pass of each kind, and the untraced mean covers every pass. "
+-    "The decode table divides the traced GDN wall by the untraced step. So its GDN shares are upper values. The last column gives the share inside the traced run.",
++    "<b>Limit of the decode numbers.</b> The decode table divides the GDN wall of a traced run by the step wall of the untraced runs. So its GDN shares are estimates (est.). "
++    "The rest of a decode step is computed with the same GDN wall. It is an estimate too. The last column gives the share inside the traced run." + ul([
++        f"The two kinds of run differ in three ways. The trace is on: a traced decode step is {rng(trace_longer)} longer than an untraced one, and a traced prefill pass is {rng(trace_longer_pf, 1)} longer. "
++        "A traced run generates 32 tokens per user, and an untraced run generates 256. The traced mean leaves out the first pass of each kind, and the untraced mean covers every pass.",
++        "The untraced runs have no timer for GDN. So we do not know whether the GDN shares are too high or too low, or by how much. Insufficient data. "
++        "The GDN wall counter proposed in section 5.6 (row Counters) runs without the trace. It would give the direction and the size of the error.",
++        "Size of the time that no timer locates: a decode step of the traced run is 0.5 to 1.0 ms longer than a step of the untraced runs. 0.1 to 0.3 ms of that is attention busy time. No timer locates the other 0.3 to 0.7 ms. "
++        f"With 1 user that is 73 to 134 % of the traced GDN wall. With 8 users it is 11 to 22 % {ref(18)}.",
++        f"The prefill table is built the same way. There the time that no timer locates is at most 4 % of the GDN wall {ref(18)}.",
++    ]),
+ ])
+ s3_say = ul([
+     f"<b>The GDN time of a prefill pass does not depend on the prompt length.</b> It is {rng(gdn_pf_1u, 1, ' ms')} with 1 user and {rng(gdn_pf_8u, 0, ' ms')} with 8 users.",
+@@ -440,12 +554,31 @@
+     f"The GDN wall with 8 users is {rng(x8_pf, 1, '')} times the wall with 1 user in prefill, and {rng(x8_dec, 1, '')} times in decode.",
+ ])
+ s4_method = ul([
+-    "The layers of a pass run one after another. Inside a layer the FPGA projections, the host work and the next projection run one after another.",
+-    "So a time saved in GDN or in attention shortens the pass by the same amount.",
++    "The layers of a pass run one after another.",
++    "In a GDN layer the FPGA projections, the host work and the next projection run one after another. So a time saved in GDN shortens the pass by the same amount.",
++    f"In an attention layer the scoring of the full pages starts when Q is ready. It can run while the FPGA cards produce K and V of the pass {ref(8)}. "
++    "Assumption of the model: with Part B on, this scoring still ends after K and V are ready. Under this assumption a time saved in attention shortens the pass by the same amount. "
++    "The open point on the wait for K and V names the measurement that tests it.",
+ ])
+ s4_inputs = ul([
+-    "<b>Symbols:</b> s_gdn and s_attn are the factors of the table below for the GDN step and for the attention busy time. clock_cost is the last row of that table. step is the wall of one decode step. step_new is computed like pass_new.",
+-    "<b>Measured inputs:</b> TTFT and decode speed (runtron, section 2), pass wall, attention busy time and number of passes (attention statistics, section 3), and the GDN wall (trace, section 3).",
++    "<b>Symbols:</b> s_gdn and s_attn are the factors of the table below for the GDN step and for the attention. attention_scaled is the part of the attention busy time that s_attn divides. clock_cost and clock_cost_attention are the last two rows of that table. attention_other is the other attention work: the AVX-512 scoring of the pages that the pass writes, and the join. step is the wall of one decode step. step_new is computed like pass_new.",
++    f"<b>Prefill: the factor divides the full-page time only.</b> The AMX kernel replaces the scoring of the full pages of earlier passes. The pages that the pass in progress writes stay on the AVX-512 path {ref(8)}. "
++    f"They contain 12.6 % of the scored K tokens of a pass at prompt 1,024, 3.1 % at prompt 4,096 and 1.6 % at prompt 8,192 {ref(9)}. The join and the join wait are not kernel work.",
++    f"<b>Size of the full-page time.</b> The busy time without the join wait fits a straight line: a fixed part per pass, plus 67 ns of CPU time per K token in full pages. The error of the line is below 0.1 ms at each of the three prompt lengths {ref(18)}. "
++    f"The full-page time is the part that grows with the K tokens (est.). It is {full_share(lambda r: r is c1u)[0]:.0f} % of the busy time with 1 user at prompt 1,024, {full_share(lambda r: r is c8u)[0]:.0f} % with 8 users at prompt 1,024, "
++    f"and {rng(full_share(long_p))} at prompt 8,192 (est.). The part that s_attn does not divide is {rng(attn_fixed(one_u), 1, ' ms')} per pass with 1 user and {rng(attn_fixed(eight_u), 1, ' ms')} with 8 users (est.). "
++    "It holds the join wait and the other attention work. The model holds the join wait fixed. The other attention work gets slower under Part B (last row of the factor table).",
++    f"<b>The join wait of a prefill pass grows far less than the kernel work.</b> From prompt 1,024 to prompt 8,192 the K tokens in full pages become 9 times as many. The join wait gets {min(join_growth):.1f} to {max(join_growth):.1f} times longer. The model holds it fixed.",
++    f"<b>Check against a measurement.</b> On delphi-3bda the same statistics were recorded for qwen-3-4b with the 128-wide kernel on and off (8 users, prompt 1,024, one run per arm) {ref(23)}. "
++    "The kernel scored every K token of the full pages. It scored no K token of the pages that the pass wrote. The busy time per pass got 1.88 times shorter. The join wait rose from 4.1 to 12.0 ms. This rise is already inside the measured ratio of 1.88 times. "
++    "The pass wall fell by 99.7 ms, and the busy time fell by 106.5 ms. So 94 % of the fall of the busy time appeared in the pass wall. With the kernel factor of that server (2.95 to 3.05, est.), this model gives 1.90 to 1.93 times for our cell with 8 users and prompt 1,024 (est.). "
++    f"A factor on the whole busy time gives 2.95 to 3.05 times {ref(18)}. The measurement is of qwen-3-4b on delphi-3bda. The model value uses the parts of the busy time of Qwen3.5 4B on delphi-3b35, and it has no clock cost for the other attention work. So this is a check of plausibility, not a fit.",
++    f"<b>Decode: the factor divides the whole busy time.</b> The decode factor is a ratio of whole busy times of attention worker 0 {ref(19)}. So the join, the join wait and the pages of the pass in progress are already in it. "
++    f"With 8 users the mean busy time per decode step got 1.18 to 1.19 times shorter in three A/B runs on delphi-3bda {ref(23)}. "
++    f"If the join wait of a decode step did not shrink with the kernel, the decode range would be {signed(min(tps_join_fixed('lo')))} % to {signed(max(tps_join_fixed('hi')))} % (est.).",
++    f"<b>Sensitivity of the prefill model.</b> If the factor divided the whole busy time, Part B would give a TTFT fall of {fall(wb_b['mid'])} (est.), range {fall(wb_all(wb_b))}. "
++    f"Parts A and B together would give {fall(wb_ab['mid'])} (est.), range {fall(wb_all(wb_ab))}.",
++    "<b>Measured inputs:</b> TTFT and decode speed (runtron, section 2), pass wall, attention busy time, join wait, K tokens and number of passes (attention statistics, section 3), and the GDN wall (trace, section 3).",
+     f"<b>Measured today for this prediction:</b> the core clock under AMX on delphi-3b35, and the cost of the tile and FMA instructions {ref(11)}.",
+     "<b>Estimated inputs:</b> the factors in the table below. Each one comes from operation counts, measured instruction costs, an earlier measurement on delphi-3bda, or a stand-alone timing on another CPU (the low case of Part 0).",
+     "<b>Ranges:</b> the low case uses every low factor together. The high case uses every high factor together.",
+@@ -454,17 +587,22 @@
+     "AVX-512 FMA loop: 2.70 GHz.",
+     "Tile products only, after the upper halves of the vector registers were cleared: 2.40 GHz.",
+     "Tile products only, with live 512-bit values in the registers: 1.90 GHz.",
+-    "Short turns of 4 tile products and 64 FMAs (35 ns per turn), with the clearing: 1.90 GHz.",
+-    "Long turns of 4,096 tile products and 16,384 FMAs (33 us per turn), with the clearing: 2.40 GHz.",
+-    "Turn lengths between these two were not probed. The block kernel and the attention kernel both lie between. Insufficient data. Tasks 3 and 4 of the plan measure them.",
+-    "The working values assume 2.40 GHz for the block kernel. The low case assumes 1.90 GHz.",
++    "Short turns of 4 tile products and 64 FMAs (35 ns per turn), with the clearing: 1.90 GHz. The 4 tile products alone take 34.1 ns at this clock (est. from the rate of the loop with tile products only). So the FMAs run while the tile products run. This turn has no AVX-512 run of its own.",
++    "Long turns of 4,096 tile products and 16,384 FMAs (33 us per turn), with the clearing: 2.40 GHz. The tile run takes 27.6 us of the turn and the FMA run 5.4 us (est. from the rate of the loop with tile products only).",
++    "No other turn was probed. The two probed turns differ in length and in mix. The short turn has 16 FMAs per tile product. The long turn has 4. Neither proposed kernel has a single turn length. "
++    "Their runs are listed in the second table of section 5.3 (block kernel) and in section 5.5 (attention kernel). "
++    "Every tile run of both kernels is longer than the tile part of the short turn (34 ns) and shorter than the tile run of the long turn (27.6 us) (est.). "
++    "The probe does not show which clock these mixes get. Insufficient data. Tasks 3 and 4 of the plan measure it.",
++    "The working values assume 2.40 GHz for the block kernel and 1.90 GHz for the attention kernel. The high case assumes 2.40 GHz for both. The low case assumes 1.90 GHz for both. The probe does not show which clock the block kernel gets. So 2.40 GHz is an assumption.",
++    f"At 1.90 GHz with the same cycle count, the factor of Part A is {f190:.1f} and the clock cost is {100 * tax['lo']:.1f} % (est.). The TTFT fall of Part A is then {fall(parta_190)} (est.). "
++    f"The fall of Part 0 at its working value is {fall(ttft_change('reorder'))} (est.).",
+     "On delphi-3bda the core ran AMX work at 92 % of its AVX-512 clock " + ref(12) + ". On delphi-3b35 the figure is 70 to 89 %.",
+ ]) + "</div>")
+ s4_read = ul([
+     f"<b>Part 0 alone (new loop order, no AMX, same bits):</b> TTFT falls by {fall(ttft_change('reorder'))} (est.). Range: {fall(ttft_all('reorder'))}.",
+     f"<b>Part A (AMX block kernel for GDN):</b> TTFT falls by {fall(ttft_change('amx_gdn'))} (est.). Range: {fall(ttft_all('amx_gdn'))}.",
+     f"<b>What AMX itself adds for GDN.</b> At the working values Part A gives {abs(max(extra_mid)):.0f} to {abs(min(extra_mid)):.0f} percentage points more than Part 0 (est.). "
+-    f"Part 0 then gives about {rng(part0_of_a)} of the fall that Part A gives (est.). "
++    f"Part 0 then gives about {rng(part0_of_a)} of the fall that Part A gives (est.). These values depend on the assumed clock of 2.40 GHz for the block kernel (clock note above). "
+     f"In its low case Part A gives {min(a_low_less):.0f} to {max(a_low_less):.0f} percentage points less than Part 0 at its working value (est.). "
+     "In that case the block kernel is no faster than the loop of Part 0, and the lower core clock slows the rest of the pass.",
+     f"<b>Part B (AMX attention kernel for 256-wide heads):</b> TTFT falls by {fall(ttft_change('amx_attn'))} (est.). Range: {fall(ttft_all('amx_attn'))}. The gain grows with the prompt length.",
+@@ -474,15 +612,25 @@
+ ])
+ s4_wrong = ul([
+     f"<b>Part 0:</b> the measured GDN step on a 2.70 GHz thread is above {se['part0_other'][1]:.1f} us, the low case. The estimate from the counts is {se['part0'][0]:.1f} to {se['part0'][1]:.1f} us. "
+-    f"A step between {se['part0'][1]:.1f} and {se['part0_other'][1]:.1f} us means that delphi-3b35 moves the state at a lower cost than the estimate assumes.",
++    f"A step between {se['part0'][1]:.1f} and {se['part0_other'][1]:.1f} us has three possible causes." + ul([
++        f"Hypothesis 1: the recurrence with the state in L1 takes more than {se['rec0'][1]:.2f} us per value head, the high end of the estimate. Then moving the state costs less today than the estimate assumes. "
++        "Test: task 1 times the recurrence on one 32 KiB slice that stays in L1.",
++        "Hypothesis 2: the slice does not stay in L1. Test: task 1 also times the column-half order on the 128 KiB working copy. The difference between the two timings tests this hypothesis.",
++        f"Hypothesis 3: the other work of the step (convolution, normalization, rounding to bf16, copies, norm, output gate) takes more than {DN.OTHER_HI} us, the high end of the estimate. "
++        "Test: task 2 has separate timers for the copy into the contiguous buffer and back, the normalization and the other per-token work.",
++    ]),
+     f"<b>Part A:</b> the measured GDN step of the block kernel is not below the measured GDN step of Part 0. Then Part A adds nothing. The estimate is {se['parta'][0]:.1f} to {se['parta_mix'][1]:.1f} us against {se['part0'][0]:.1f} to {se['part0'][1]:.1f} us.",
+-    "<b>The method:</b> the GDN wall of a pass gets shorter by some milliseconds, and the pass wall gets shorter by less. Then the layers do not form one serial path.",
++    "<b>The method:</b> the test is Part 0 against the base build (today's kernel). Part 0 uses no AMX. So no core clock changes. On one serial path the pass wall then falls by the same time as the GDN wall, within the spread of repeated runs. "
++    f"The spread is the largest minus the smallest pass wall of a cell: 0.2 to 0.5 ms with 1 user and 0.3 to 1.7 ms with 8 users in the 6 runs of section 2 {ref(18)}. "
++    "Both walls must come from the same kind of run: both from counters of untraced runs, or both from traced runs. If the pass wall falls by less, the layers do not form one serial path. "
++    "Part A alone cannot show this. Its lower core clock also slows the rest of the pass (row \"Clock cost on the rest of a prefill pass, Part A\" of the factor table). That clock cost must be subtracted from the fall of the GDN wall first.",
++    "<b>Part B:</b> in the A/B run of task 5 the pass wall falls by less than the attention busy time falls, by more than the spread of repeated runs. Hypothesis: the workers then wait for K and V after the faster scoring (open point on the wait for K and V). A longer join wait gives the same pattern. The timer of the open point separates the two.",
+ ])
+ threads_note = ('<div class="note"><b>Seen in the same data. It is not an AMX matter.</b>' + ul([
+     "With 8 users the 16 GDN threads each run 8 chains, one after another, while 40 attention workers wait.",
+     "Spreading the 128 work items over all 56 threads would cut the GDN wall to about 3/8 of today's value (est., from the work-item count).",
+     f"Prefill, 8 users, prompt 1,024: that is about {c8u['prefill']['gdn_ms'] * 5 / 8:.0f} ms of the {c8u['prefill']['t1_ms']:.0f} ms pass (est.).",
+-    f"Decode, same cell: at most {c8u['decode']['gdn_ms'] * 5 / 8:.1f} ms of the {c8u['decode']['t1_ms']:.1f} ms step (est., an upper value because the GDN wall comes from a traced run).",
++    f"Decode, same cell: about {c8u['decode']['gdn_ms'] * 5 / 8:.1f} ms of the {c8u['decode']['t1_ms']:.1f} ms step (est.). The GDN wall behind this value comes from a traced run. So the value can be too high or too low (section 3, limit of the decode numbers).",
+     "It needs a scheduling change, not a new kernel. It does not help 1 user.",
+ ]) + "</div>")
+ s52 = ul([
+@@ -499,13 +647,18 @@
+     f"<b>Idea.</b> Process a block of {DN.BLOCK} tokens at once. The state is read twice and written once per block. Today it is read twice and written once per token.",
+     f"<b>Why AMX fits.</b> The three large products become matrix times matrix. A tile product then uses all 16 rows. "
+     f"The kernel needs {tc['per_token']:.1f} tile products and about 680 AVX-512 operations per value head per token (est. count). Today's kernel needs about {DN.VEC_OPS:,} AVX-512 operations (est. count).",
+-    f"<b>The FP32 state.</b> AMX has no tile product for FP32 inputs. Its floating-point tile products take 16-bit inputs: bf16, and fp16 on this CPU. Each FP32 value is split into 3 bf16 pieces whose sum is exactly the FP32 value. The product is computed once per piece, and the 3 results are added {ref(18)}.",
++    f"<b>The FP32 state.</b> AMX has no tile product for FP32 inputs. Its floating-point tile products take 16-bit inputs: bf16, and fp16 on this CPU. Each FP32 value is split into 3 bf16 pieces. Their sum is exactly the FP32 value when its size is 2^-103 (about 9.9e-32) or larger. Section 5.4 gives the split rule and what is lost for smaller values. The product is computed once per piece, and the 3 results are added {ref(18)}.",
+     f"<b>Same algebra as the reference.</b> Hugging Face Transformers uses this block form (block size 64) for every call with several tokens. vLLM and SGLang include a CPU kernel that is built on it. Its matrix products call a library routine. A comment in that kernel says that the routine uses AMX bf16 products {ref(14)}.",
+     f"<b>Block size 32.</b> In the L1 cache model, the tile loads find 87 % of their cache lines in L1 with blocks of 32 tokens (est.). With blocks of 64 tokens the value is 40 % (est.) {ref(18)}.",
+     "<b>Stage 1 in detail.</b> The kernel takes 16 value columns of S0 (the state at the start of the block) at a time. AVX-512 code splits them into 3 pieces in a 12 KiB buffer that stays in L1. Then 48 tile products run on that buffer.",
+-    "<b>Stage 4 in detail.</b> AVX-512 code scales Delta (the 32 correction rows of the block) and splits it into 3 pieces. Tile product 3 builds the update. AVX-512 code then writes the decayed start state plus the update.",
+-    f"<b>Clock.</b> So tile work and AVX-512 work take turns about every 0.2 to 0.4 us (est.). The clock probe covered turns of 35 ns (1.90 GHz) and of 33 us (2.40 GHz) {ref(11)}. Insufficient data for the length between. Task 3 of the plan measures it.",
+-    "<b>If the clock is 1.90 GHz at this turn length.</b> The alternative is to split the whole state first and to run all tile products in one long run. The pieces of one value head are then 96 KiB, which do not fit L1.",
++    "<b>Stage 4 in detail.</b> AVX-512 code scales Delta (the 32 correction rows of the block) and splits it into 3 pieces. Tile product 3 then builds the update in 16 parts. "
++    "One part has 12 tile products and covers 64 key rows by 16 value columns. After each part, AVX-512 code writes the decayed start state plus the update for these values (64 FMAs).",
++    "<b>Clock.</b> Tile work and AVX-512 work alternate in runs of many lengths. The second table below lists the runs of one value head and one block. The lengths are estimates from the instruction counts. They are not timings. "
++    f"At 2.40 GHz, stage 1 has 8 turns of {KR['turn1'][0]:.2f} to {KR['turn1'][1]:.2f} us (est.). For the first value head of a key head, the first and the last of these turns are longer: {KR['turn1_long'][0]:.1f} to {KR['turn1_long'][1]:.1f} us (est.). Stage 3 and the split of Delta are one AVX-512 run of {KR['run3'][0]:.1f} to {KR['run3'][1]:.1f} us with no tile work (est.). "
++    f"Stage 4 has 16 turns of {KR['turn4'][0]:.2f} us (est.). The clock probe covered two turns: 4 tile products with 64 FMAs (35 ns per turn, 1.90 GHz), and 4,096 tile products followed by 16,384 FMAs (33 us per turn, 2.40 GHz) {ref(11)}. "
++    "Neither has the mix of this kernel. Insufficient data for the clock of the block kernel. Task 3 of the plan measures it.",
++    "<b>If the turns of stage 1 give 1.90 GHz.</b> The alternative is to split the whole state first and to run all tile products of stage 1 in one long run. The pieces of one value head are then 96 KiB, which do not fit L1.",
++    "<b>If the turns of stage 4 give 1.90 GHz.</b> The alternative is to store all 64 result tiles of tile product 3 first and to do the final write in one run of 1,024 FMAs. The result tiles are then 64 KiB, which do not fit L1.",
+ ])
+ 
+ page = f"""<title>GDN AMX Design</title>
+@@ -585,13 +738,18 @@
+ <h3>Method</h3>
+ {s4_method}
+ <pre><code>pass_new = pass - GDN_wall x (1 - 1/s_gdn)
+-                - attention_busy x (1 - 1/s_attn)
++                - attention_scaled x (1 - 1/s_attn)
+                 + rest x clock_cost
++                + attention_other x clock_cost_attention
++attention_scaled = full-page time        (prefill pass)
++attention_scaled = attention busy time   (decode step)
++attention_other  = attention busy time - full-page time - join wait
++                   (prefill pass, Part B only)
+ TTFT_new = TTFT - passes x (pass - pass_new)
+ ms_per_token_new = ms_per_token - (step - step_new)</code></pre>
+ {s4_inputs}
+ </div>
+-{table(["Factor (old time / new time)", "Low (est.)", "Working value (est.)", "High (est.)", "Basis"], factor_rows, num_cols=(1, 2, 3))}
++{table(["Factor (old time / new time)", "Low (est.)", "Working value (est.)", "High (est.)", "Basis"], factor_rows, num_cols=(1, 2, 3), kind="prose")}
+ <div class="col">
+ {clock_note}
+ </div>
+@@ -623,6 +781,13 @@
+ </div>
+ {fig_block}
+ {DN.block_table(table)}
++<div class="col">
++<p>{DN.RUNS_LEAD}</p>
++</div>
++{DN.runs_table(table)}
++<div class="col">
++{ul(DN.runs_notes())}
++</div>
+ {fig_kernel}
+ <div class="col">
+ <h3>5.4 Numerics: what changes and what the contract should say</h3>
+@@ -635,7 +800,7 @@
+ </ul>
+ <h3>5.6 Code structure</h3>
+ </div>
+-{table(["Piece", "Where", "What"], DN.CODE_ROWS)}
++{table(["Piece", "Where", "What"], DN.CODE_ROWS, kind="prose")}
+ <div class="col">
+ <h3>5.7 What stays outside this design</h3>
+ <ul>
+@@ -644,7 +809,21 @@
+ </div>
+ 
+ <h2 id="s6">6. Plan and open points</h2>
+-{table(["Task", "Work", "Measurement that closes it", "Pass rule"], DN.PLAN_ROWS)}
++{table(["Task", "Work", "Measurement that closes it", "Pass rule"], DN.PLAN_ROWS, kind="prose")}
++<div class="col">
++<h3>Which runs tasks 2, 5 and 6 compare</h3>
++<ul>
++{DN.COMPARE_HTML}
++</ul>
++</div>
++{table(["Comparison", "Task", "Run 1", "Run 2", "The two runs differ in"], DN.COMPARE_ROWS, kind="prose")}
++<div class="col">
++<p>Predicted TTFT fall of the two A/B runs, with the working values of section 4 in both runs (est.).</p>
++</div>
++{ab_table()}
++<div class="col">
++{ab_notes}
++</div>
+ <div class="col">
+ <h3>Open points</h3>
+ <ul>
+@@ -661,6 +840,19 @@
+ 
+ # sentence-end references written as [RefN] inside design_numbers text blocks
+ page = re.sub(r'(?<!<span class="ref">)\[Ref(\d+)\]', lambda m: f'<span class="ref">[Ref{m.group(1)}]</span>', page)
++
++
++def nowrap(html_text):
++    """A browser may break a line after the hyphen of 9.2e-41, 2^-103 or AVX-512. Wrap these tokens in a no-wrap span.
++    Only text nodes outside svg, style, pre, code and title elements are touched."""
++    token = re.compile(r"\b\d+(?:\.\d+)?e-\d+\b|\b2\^-?\d+(?: - 2\^\d+)?|\bAVX-512\b")
++    out, skip = [], 0
++    for part in re.split(r"(<svg\b.*?</svg>|<style\b.*?</style>|<pre\b.*?</pre>|<code\b.*?</code>|<title\b.*?</title>|<[^>]+>)", html_text, flags=re.S):
++        out.append(part if part.startswith("<") else token.sub(lambda m: f'<span class="nw">{m.group(0)}</span>', part))
++    return "".join(out)
++
++
++page = nowrap(page)
+ page = page.encode("ascii", "xmlcharrefreplace").decode("ascii")
+ assert_ascii(page)
+ open(OUT, "w").write(page)
+--- round1/pagelib.py	2026-11-20 19:37:33.103025506 -0800
++++ pagelib.py	2026-11-20 21:05:54.838968167 -0800
+@@ -59,6 +59,12 @@
+ th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+ th { background: #eef0f3; font-family: var(--font-head); font-weight: 600; }
+ td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
++th.n { white-space: normal; }
++table { line-height: inherit; }
++table.prose th:last-child { min-width: min(400px, calc(100vw - 56px)); }
++body, table { font-feature-settings: "calt" 0; }
++.nw { white-space: nowrap; }
++.short { box-sizing: border-box; }
+ code, .mono { font-family: var(--font-mono); font-size: 0.88em; background: #eceff3; padding: 1px 4px; border-radius: 3px; }
+ pre { font-family: var(--font-mono); font-size: 13px; line-height: 1.45; background: var(--surface); color: var(--ink); border: 1px solid var(--line); padding: 12px 14px; overflow-x: auto; margin: 12px 0; }
+ pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+@@ -67,7 +73,7 @@
+ .ref { color: var(--muted); font-size: 0.85em; white-space: nowrap; }
+ .refs li { font-size: 14px; overflow-wrap: anywhere; }
+ .toc { columns: 2; column-gap: 28px; font-size: 15px; padding-left: 20px; }
+-@media (max-width: 640px) { .toc { columns: 1; } h1 { font-size: 27px; } }
++@media (max-width: 640px) { .toc { columns: 1; } h1 { font-size: 27px; } figure svg { min-width: 880px; } }
+ """
+ 
+ 
+--- round1/figs_design.py	2026-11-20 19:04:34.904341008 -0800
++++ figs_design.py	2026-11-20 20:46:59.167320242 -0800
+@@ -103,7 +103,7 @@
+ def block_kernel(B=32, counts=None):
+     """The matrix products of the GDN block kernel for one value head and one block of B tokens."""
+     counts = counts or {}
+-    W, H = 960, 578
++    W, H = 960, 594
+     IN, ST, RES = "#e9edf2", "#c9def8", "#fdf3d7"
+     out = [svg_open(W, H, "The matrix products of the GDN block kernel for one value head and one block of tokens"), arrow_defs("ab1")]
+     out.append(text(14, 20, f"One value head, one block of {B} prompt tokens. K, Q, V rows are the tokens. S is the 128 x 128 state.", size=13, weight=600))
+@@ -151,7 +151,8 @@
+     out.append(text(44, y2 + 172, "G = K K^T. H = Q K^T. S0 = the state at the start of the block.", size=11.5, fill=C["ink2"]))
+     out.append(text(44, y2 + 188, "K and Q = the 32 key rows above the 32 query rows.", size=11.5, fill=C["ink2"]))
+     out.append(text(44, y2 + 204, "Delta = the rows delta_t. S_B = the state after the block.", size=11.5, fill=C["ink2"]))
+-    out.append(text(44, y2 + 226, counts.get("sub", ""), size=11.5, fill=C["ink2"], weight=600))
++    out.append(text(44, y2 + 220, "scale = 1 / sqrt(128), in the FP32 coefficients.", size=11.5, fill=C["ink2"]))
++    out.append(text(44, y2 + 242, counts.get("sub", ""), size=11.5, fill=C["ink2"], weight=600))
+     # ---- row 2 right: state update ----
+     ux = 520
+     out.append(text(ux, y2 - 14, "Stage 4. Write the state once", size=12.5, weight=600, fill=C["gdn"]))
+@@ -185,7 +186,7 @@
+     out.append(A(458, 74, 687, 124))
+     out.append(box(690, 182, 256, 58, "amx_gdn.cpp   new, Part A", ["phase 2 as an AMX block kernel:", "tile products 1, 2, 3 per 32 tokens"], "amx"))
+     out.append(A(818, 168, 818, 180))
+-    out.append(text(246, 196, "No AMX on this CPU, or a switch is off:", size=11.5, fill=C["ink2"]))
++    out.append(text(246, 196, "No AMX, or the kill switch or the GDN switch is set:", size=11.5, fill=C["ink2"]))
+     out.append(text(246, 212, "phase 2 runs the column-half kernel of Part 0", size=11.5, fill=C["ink2"]))
+     out.append(text(246, 228, "(AVX-512, same bits as today).", size=11.5, fill=C["ink2"]))
+     out.append(line(14, 262, W - 14, 262, stroke=C["line"]))
+@@ -195,8 +196,8 @@
+     out.append(A(206, 331, 243, 331))
+     out.append(box(690, 284, 256, 46, "AVX-512 path   unchanged", ["dotter<bf16,256>, scaled_v"], "attn"))
+     out.append(box(690, 338, 256, 56, "amx_attn kernels for 256 x 4   new", ["QK 32 + PV 32 tile products per", "query token, page and KV head"], "amx"))
+-    out.append(A(458, 320, 687, 306, "partial page, or no AMX", dx=-60, dy=-8))
+-    out.append(A(458, 342, 687, 364, "full 64-token page", dx=-50, dy=16))
++    out.append(A(458, 320, 687, 306, "page of this pass, or no AMX", dx=-88, dy=-10))
++    out.append(A(458, 342, 687, 364, "full page of an earlier pass", dx=-84, dy=19))
+     out.append("</svg>")
+     return "".join(out)
+ 
+--- round1/figs_static.py	2026-11-20 19:19:53.484755868 -0800
++++ figs_static.py	2026-11-20 20:15:34.517711616 -0800
+@@ -107,11 +107,12 @@
+     tx = sx + 190  # right of the arrow from the Recurrence box, so that the arrow crosses no text
+     # three columns per line (number, step name, formula): SVG collapses runs of spaces, so each column has its own x
+     steps = [("1", "recall", "r = decay x (k times S)"), ("2", "correct", "delta = beta x (v - r)"),
+-             ("3", "write", "S = decay x S + (k outer delta)"), ("4", "read", "o = q times S")]
++             ("3", "write", "S = decay x S + (k outer delta)"), ("4", "read", "o = (scale x q) times S")]
+     for i, cols in enumerate(steps):
+         for dx, s in zip((0, 22.5, 97.5), cols):
+             out.append(text(tx + dx, sy + 22 + i * 22, s, size=12.5, mono=True))
+     out.append(text(tx, sy + 22 + 4 * 22 + 4, "k, q, v are bf16 values. S, decay and delta are FP32.", size=12, fill=C["ink2"]))
++    out.append(text(tx, sy + 22 + 4 * 22 + 20, "scale = 1 / sqrt(128) = 0.0884. It multiplies q in FP32.", size=12, fill=C["ink2"]))
+     out.append(text(14, sy + 150, "Work per token: constant. Memory: constant. Order matters: token t needs the state left by token t-1.", size=12.5, weight=600))
+     out.append("</svg>")
+     return "".join(out)

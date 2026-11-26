@@ -1,0 +1,46 @@
+AMX attention: transpose test on every host, per-head state checks, no zero fill
+
+Kernel. Stages 1-4 of the QK kernel (the transposing store) move to
+h/tron/kernels/amx_attn_transpose.hpp as transpose_scores<group_heads>. The
+header uses AVX-512 intrinsics only, so a host without AMX can run it. The
+two static_asserts sit next to the lane ladder they guard, and the second
+one states the real bound (at most 4 stored lanes). amx_attn.cpp includes
+the header and calls the function after the tile stores.
+
+apply_dense_amx_page. The score buffer s_pages is left uninitialized: the
+QK kernel writes every element before any read. Each PV output row is
+merged from a view of the kernel output instead of a copy.
+
+t_amx_numerics. A new case "AMX QK transpose writes the group_heads score
+rows" checks 4 and 16 heads against a scalar transpose. It sits outside
+the TRON_AMX_DISPATCH guard, so it also runs in the default build, and the
+placeholder case of that build is gone. check_pv passes 16 expected rows
+and checks that rows group_heads..15 stay zero. The test is registered
+with SKIP_RETURN_CODE 4 and the label skip_return_code_4, and both of its
+rows in config/test-benchmarks.json carry skip_return_codes [4] (edited by
+hand, timings not re-measured).
+
+t_amx_dispatch_dtype. exercise_page takes the KV-head count and the KV
+head. The PV test double writes a distinct value per row, and every round
+visits the page twice, so the softmax state of every head and the merge of
+a second visit are checked. New sections: 16 heads on a partial page, 16
+heads with available() false, and 32 heads / 2 KV heads at KV head 1 (the
+pack must read the second group of 16 heads).
+
+Comments and documents. amx_attn_iface.hpp: why the names keep h128g4, the
+overrun warning scoped to group_heads < 16, and why group_heads_ok admits
+4 and 16 only. src/tron/CMakeLists.txt and README.ci.md: which CI build
+sets TRON_AMX_DISPATCH, and that skipped kernel cases still report a pass.
+changelog.d/5022.changed.md.
+
+Tests on delphi-3b35 (Xeon 6962P, clang 19.1.7, preset native,
+RelWithDebInfo, TRON_AMX_DISPATCH=ON), 2026-11-20: t_amx_numerics
+21,521 / 5 pass; t_amx_dispatch_dtype 30,747 / 1 pass; t_llama_unit
+265,564 / 75 pass. Kill switch: t_amx_numerics 5 cases, 3 passed,
+2 skipped, 6,671 assertions, exit code 0; with the filter "[kv_data]"
+exit code 4; the other two tests unchanged. Object compare of
+kernels/amx_attn.cpp with the build's own compile command: all 11
+functions identical to 4c4b7b8864; pack<4> and qk<4> identical to main
+(509, 204 instructions). No throughput measurement at this head.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>

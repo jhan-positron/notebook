@@ -1,0 +1,575 @@
+GDN AMX Results
+
+- 
+
+# GDN and AMX on Qwen3.5 4B: what was built and what it gave
+
+2026-11-21. Measured on our half of delphi-3b35, the test server. The code is tron, the inference program under test, on the branch jhan-gdn-amx.
+
+This page follows the design page gdn-amx-design.html. It compares the measurement with the prediction of that page.
+
+## Short version
+
+- The three changes of the GDN and AMX design are built in tron and measured on delphi-3b35.
+- With both AMX kernels the time to first token fell by 25 to 39 %, against a predicted 30 to 41 %.
+- The AMX attention kernels raised decode speed by up to 23 %, and tron now reports GDN counters.
+
+### The changes in one table
+
+Change | What runs | Predicted fall of the time to first token, working values (est.) | Predicted range (est.) | Measured fall | Measured change of decode speed | Measured fall against the predicted range | 
+Part 0 | GDN chain kernel, no AMX | 14 to 23 % | 8 to 26 % | 9.0 to 14.1 % | -0.6 to +0.3 % | Inside the predicted range in all 6 cells | 
+Part A | AMX block kernel for GDN | 18 to 29 % | 11 to 32 % | 15.3 to 24.8 % | -0.5 to +0.7 % | Inside the predicted range in all 6 cells | 
+Parts 0 and B | GDN chain kernel, AMX attention | 24 to 37 % | 13 to 42 % | 14.9 to 32.3 % | -0.8 to +22.6 % | Inside the predicted range in all 6 cells | 
+Parts A and B | both AMX kernels | 30 to 41 % | 18 to 47 % | 25.2 to 39.0 % | 0.0 to +22.6 % | Inside the predicted range in all 6 cells | 
+
+[SVG: Predicted and measured fall of the time to first token, per change and cell]
+[SVG-TEXT: predicted range (est.) ; predicted working value (est.) ; measured ; 0 % ; 10 % ; 20 % ; 30 % ; 40 % ; 50 % ; fall of the time to first token, percent of the base run ; Part 0: GDN chain kernel, no AMX ; 1 user, prompt 1,024 ; 13.8 % (inside) ; 1 user, prompt 4,096 ; 11.2 % (inside) ; 1 user, prompt 8,192 ; 9.0 % (inside) ; 8 users, prompt 1,024 ; 14.1 % (inside) ; 8 users, prompt 4,096 ; 11.6 % (inside) ; 8 users, prompt 8,192 ; 9.2 % (inside) ; Part A: AMX block kernel for GDN ; 1 user, prompt 1,024 ; 23.8 % (inside) ; 1 user, prompt 4,096 ; 19.2 % (inside) ; 1 user, prompt 8,192 ; 15.3 % (inside) ; 8 users, prompt 1,024 ; 24.8 % (inside) ; 8 users, prompt 4,096 ; 20.2 % (inside) ; 8 users, prompt 8,192 ; 16.2 % (inside) ; Parts 0 and B: GDN chain kernel, AMX attention ; 1 user, prompt 1,024 ; 16.4 % (inside) ; 1 user, prompt 4,096 ; 24.3 % (inside) ; 1 user, prompt 8,192 ; 31.9 % (inside) ; 8 users, prompt 1,024 ; 14.9 % (inside) ; 8 users, prompt 4,096 ; 23.7 % (inside) ; 8 users, prompt 8,192 ; 32.3 % (inside) ; Parts A and B: both AMX kernels ; 1 user, prompt 1,024 ; 26.0 % (inside) ; 1 user, prompt 4,096 ; 32.0 % (inside) ; 1 user, prompt 8,192 ; 38.4 % (inside) ; 8 users, prompt 1,024 ; 25.2 % (inside) ; 8 users, prompt 4,096 ; 32.2 % (inside) ; 8 users, prompt 8,192 ; 39.0 % (inside)]
+
+Figure 1. Predicted and measured fall of the time to first token. - The pale bar is the predicted range (est.), and the tick is the working value (est.).
+- The blue dot is the measured fall, as a percent of the base run of this session.
+- The text at the right gives the measured value and where it lies.
+
+Words used here
+- tron, runtron: tron is the inference program under test. runtron is its command-line tool.
+- Qwen3.5 4B: the model under study. Its tron name is ingested-qwen-3.5-4b.
+- GDN (GatedDeltaNet): a recurrent layer type. 24 of the 32 layers of Qwen3.5 4B are GDN layers. The other 8 are attention layers.
+- state: the memory of a GDN layer. It is one matrix of 128 key rows by 128 value columns per value head, in FP32.
+- key head, value head: a GDN layer has 16 key heads and 32 value heads. Each key head serves 2 value heads.
+- recurrence: the arithmetic that reads and rewrites the state for one token.
+- GDN step: the work of one token for one key head. It holds the convolution, the normalization, the recurrence on 2 value heads, the norm and the output gate.
+- chain: the consecutive tokens of one sequence in one pass. A GDN layer must take them in order.
+- token kernel, chain kernel, block kernel: three routines for the recurrence.- The token kernel is today's code. It takes one token per call.
+- The chain kernel is Part 0. It gives the same bits with another loop order.
+- The block kernel is Part A. It takes 32 tokens at once with AMX.
+
+- window, block: advance() cuts a chain into windows of at most 32 tokens. A full window of 32 tokens is a block.
+- AMX: Intel Advanced Matrix Extensions: tile registers, and instructions that multiply two tiles.
+- tile, tile product: a tile is an AMX register of 16 rows by 64 bytes. A tile product is one TDPBF16PS instruction, which multiplies two tiles of bf16 values.
+- AVX-512: 512-bit vector instructions. The code without AMX uses them.
+- bf16, FP32, float64: number formats with 8, 24 and 53 significant bits.
+- subnormal value: a nonzero value below the smallest normal value of its format (2^-126 for FP32). A CPU computes with such values slowly.
+- FTZ, DAZ: two control bits of the CPU. With FTZ a result that would be subnormal becomes zero. With DAZ a subnormal operand is read as zero.
+- core clock: the frequency at which a CPU core runs. The CPU lowers it under AVX-512 or AMX work.
+- prefill, pass: prefill is the processing of the prompt. A pass is one forward computation through all 32 layers. A prefill pass holds 128 prompt tokens per user.
+- TTFT: time to first token: from the request to the first generated token.
+- decode, tok/s: decode is the generation of tokens after the prompt. Its speed is given in tokens per second per user.
+- wall: wall-clock time: the elapsed time of a piece of work, waits included.
+- GDN wall: per GDN layer and pass: the time from the first thread's start to the last thread's end.
+- busy time: the time a thread spends inside its GDN or attention work, without the waits before it.
+- K token, page unit: a K token is one stored key row that a query is scored against. A page unit is the attention work of one query token on one 64-token page of one KV head.
+- counters: the new GDN statistics of tron. The environment variable TRON_GDN_STATS=1 turns them on.
+- head token: the unit of the counters: one token of one key head of one GDN layer.
+- kill switch: the environment variable TRON_AMX_DISABLE=1. It turns every AMX kernel off.
+- GDN switch: the new environment variable TRON_AMX_GDN_DISABLE=1. It turns only the AMX block kernel of GDN off.
+- arm: one build with one set of switches. The campaign has 6 arms.
+- cell: one combination of user count and prompt length.
+- base build, base run: the base build is tron with the new counters and with none of the three changes. A base run is a run of the base build in this session.
+- Part 0, Part A, Part B: the three changes of the design.- Part 0 is the GDN chain kernel, without AMX.
+- Part A is the AMX block kernel for GDN.
+- Part B is the AMX attention kernel for 256-wide heads.
+
+- working value, range: the design gave each prediction a low, a working and a high value. The range runs from the low to the high value.
+- delphi-3b35, our half: the test server. We use its second CPU socket and FPGA cards 4 to 7. Other users hold the first socket.
+- us: the microsecond, one millionth of a second.
+- est.: an estimate. Every number without it is measured.
+- Insufficient data: a value that we could not measure. The text names the measurement that would give it.
+
+- 1. What was built
+
+- 2. How it was measured
+
+- 3. Time to first token
+
+- 4. Decode speed
+
+- 5. Measurement against the prediction
+
+- 6. A problem found on the way
+
+- 7. The new GDN counters
+
+- 8. Numerics and tests
+
+- 9. Stand-alone measurements
+
+- 10. Limits and open points
+
+- 11. Sources
+
+## 1. What was built
+
+- The work is 3 commits on the branch jhan-gdn-amx, on top of commit 72e1191804 of the open pull request that adds the model [Ref1].
+- Commit d5093e07c2 adds the GDN counters. It changes no kernel.
+- Commit 8351e4ad52 adds Part 0 and Part A. They are the chain kernel, the executor entry advance() and the AMX block kernel.
+- Commit aacdd287c0 adds Part B: the AMX attention kernels for heads of 256 values.
+- Nothing is pushed. The branch is local.
+
+Piece | Where | What | 
+Counters | h/tron/models/gdn_stats.hpp, hooks in gdn_execution.hpp and model.hpp | - TRON_GDN_STATS=1 turns them on.
+- They count head tokens per path and time the parts of the GDN work.
+- Section 7 describes them.
+
+ | 
+Chain kernel (Part 0) | h/tron/kernels/gated_delta_net.hpp | - gdn_recurrence_chain advances a chain window by window.
+- The state is held as two row-contiguous halves of 64 value columns.
+- The write loop of a token also computes the read sum of the next token.
+
+ | 
+Executor | h/tron/models/gdn_rolling_executor.hpp, gdn_execution.hpp | - advance() takes a run of tokens: prepare a window, run the recurrence, postprocess the window.
+- Chains of 1 token keep step(), so decode runs today's code.
+- The working copy of a chain now has the layout of the chain kernel.
+
+ | 
+AMX block kernel (Part A) | src/tron/kernels/amx_gdn.cpp, h/tron/kernels/amx_gdn_iface.hpp | - It takes one block of 32 tokens of one key head.
+- The FP32 state is split into 3 bf16 pieces per value.
+- It refuses a block whose results are not finite. That value head then takes the chain kernel.
+
+ | 
+Attention kernels (Part B) | src/tron/kernels/amx_attn.cpp, amx_attn_iface.hpp, self_attention.hpp | - A second kernel shape: heads of 256 values with 4 query heads per KV head.
+- The three existing 128-wide kernels are unchanged, byte for byte.
+
+ | 
+Switches | environment variables, read once at start | - TRON_AMX_DISABLE=1 turns every AMX kernel off (it existed).
+- TRON_AMX_GDN_DISABLE=1 turns only the GDN block kernel off (new).
+- TRON_GDN_STATS=1 turns the GDN counters on (new).
+
+ | 
+
+### Differences from the design
+
+- The chain kernel has another loop than the design describes.- The loop order of the design was 1.45 to 1.47 times faster than today's loop in a stand-alone test on delphi-3b35 [Ref4].
+- Another loop joins the write pass of a token with the read pass of the next token. It was 1.99 to 2.03 times faster, with equal bits [Ref5].
+
+- The halves of the state are stored row by row. The layout of the stand-alone test of the design gave unstable times on this CPU.
+- The windows of 32 tokens follow the token position in the sequence, not the start of the chain. The same tokens then fall into the same blocks however the scheduler cuts the passes.
+- The block kernel sets the CPU bits FTZ and DAZ for its own work. Section 6 gives the measurement behind this.
+- The design asked to clear the 512-bit registers before tile work. A measurement showed no effect, so the kernel does not do it [Ref7].
+- Part 0 and Part A are one commit. The design listed them as two tasks.
+- The counters are kept per GDN operation, not per model layer. tron's GDN code does not know the layer number.
+
+## 2. How it was measured
+
+- Every run uses runtron on our half of delphi-3b35, with one engine on four FPGA cards (tp4) [Ref2].
+- A cell is 1 or 8 users with a prompt of 1,024, 4,096 or 8,192 tokens. Every run then generates 256 tokens per user.
+- The campaign ran 108 runs: 6 cells, 6 arms and 3 repetitions. The arm order changes with each repetition.
+- These runs are session 2. They ran from 2026-11-22 00:13 to 2026-11-22 01:16 UTC, with the final commits.
+- Session 1 ran earlier, with the commits before the code review [Ref13]. It was stopped after 43 runs to measure the final commits.
+- Every value on this page comes from session 2, unless the text names session 1.
+- Every value is the median of the repetitions of one cell and arm.
+- The base run is part of the same session. The values of 2026-11-20 are not used as a denominator.
+- A load snapshot was taken before every run. A run does not start when our CPUs are more than 5 % busy.
+- All arms have both sets of counters on (TRON_ATTN_STATS=1 and TRON_GDN_STATS=1).
+
+Arm | Build | Switch | GDN prefill runs | Attention runs | 
+base | counters only | none | today's token kernel | AVX-512 | 
+p0 | all three changes | TRON_AMX_DISABLE=1 | chain kernel (Part 0) | AVX-512 | 
+b | all three changes | TRON_AMX_GDN_DISABLE=1 | chain kernel (Part 0) | AMX (Part B) | 
+ab | all three changes | none | AMX block kernel (Part A) | AMX (Part B) | 
+a0 | counters, Part 0, Part A | TRON_AMX_GDN_DISABLE=1 | chain kernel (Part 0) | AVX-512 | 
+a | counters, Part 0, Part A | none | AMX block kernel (Part A) | AVX-512 | 
+
+The load before the runs was low on our half [Ref2].
+
+Arm | Runs | Our CPUs busy before the run (%, median per cell) | Other socket busy before the run (%, median per cell) | 
+Base run | 18 | 0.0 | 42.4 to 42.5 | 
+Part 0 | 18 | 0.0 | 42.4 to 42.5 | 
+Part 0, GDN switch | 18 | 0.0 | 42.4 to 42.5 | 
+Part A | 18 | 0.0 | 42.4 to 42.5 | 
+Parts 0 and B | 18 | 0.0 | 42.4 to 42.5 | 
+Parts A and B | 18 | 0.0 | 42.4 to 42.5 | 
+
+## 3. Time to first token
+
+- With Part 0 alone the time to first token fell by 9.0 to 14.1 %. The prediction was 14 to 23 % (est.). The result is inside the predicted range in all 6 cells.
+- With Part A it fell by 15.3 to 24.8 %. The prediction was 18 to 29 % (est.). The result is inside the predicted range in all 6 cells.
+- With Parts 0 and B it fell by 14.9 to 32.3 %. The prediction was 24 to 37 % (est.). The result is inside the predicted range in all 6 cells.
+- With Parts A and B it fell by 25.2 to 39.0 %. The prediction was 30 to 41 % (est.). The result is inside the predicted range in all 6 cells.
+- The GDN changes help most at short prompts, and the attention change helps most at long prompts. The prediction said the same.
+
+[SVG: Time to first token of every arm, relative to the base run]
+[SVG-TEXT: base run ; Part 0 ; Part A ; Parts 0 and B ; Parts A and B ; 50 % ; 60 % ; 70 % ; 80 % ; 90 % ; 100 % ; time to first token, percent of the base run ; 1 user, prompt 1,024 ; 0.385 s ; 0.332 s ; 0.293 s ; 0.322 s ; 0.285 s ; 1 user, prompt 4,096 ; 1.902 s ; 1.690 s ; 1.537 s ; 1.440 s ; 1.293 s ; 1 user, prompt 8,192 ; 4.711 s ; 4.285 s ; 3.990 s ; 3.209 s ; 2.903 s ; 8 users, prompt 1,024 ; 2.903 s ; 2.493 s ; 2.184 s ; 2.471 s ; 2.172 s ; 8 users, prompt 4,096 ; 14.271 s ; 12.621 s ; 11.384 s ; 10.883 s ; 9.678 s ; 8 users, prompt 8,192 ; 35.715 s ; 32.421 s ; 29.939 s ; 24.196 s ; 21.801 s]
+
+Figure 2. Time to first token of every arm, relative to the base run (100 %). Labels give seconds. Lower is better.
+
+Users | Prompt (tokens) | Base run (s) | Part 0: measured (s) | Part 0: fall (%) | Part 0: predicted fall, low / working / high (%, est.) | Part A: measured (s) | Part A: fall (%) | Part A: predicted fall, low / working / high (%, est.) | Parts 0 and B: measured (s) | Parts 0 and B: fall (%) | Parts 0 and B: predicted fall, low / working / high (%, est.) | Parts A and B: measured (s) | Parts A and B: fall (%) | Parts A and B: predicted fall, low / working / high (%, est.) | 
+1 | 1,024 | 0.385 | 0.332 | 13.8 | 12.1 / 22.1 / 24.7 | 0.293 | 23.8 | 17.2 / 27.9 / 30.8 | 0.322 | 16.4 | 13.1 / 24.4 / 28.4 | 0.285 | 26.0 | 18.2 / 30.2 / 34.6 | 
+1 | 4,096 | 1.902 | 1.690 | 11.2 | 9.8 / 17.9 / 19.9 | 1.537 | 19.2 | 13.9 / 22.5 / 24.9 | 1.440 | 24.3 | 17.3 / 29.8 / 34.6 | 1.293 | 32.0 | 21.4 / 34.4 / 39.6 | 
+1 | 8,192 | 4.711 | 4.285 | 9.0 | 7.8 / 14.4 / 16.0 | 3.990 | 15.3 | 11.1 / 18.1 / 20.0 | 3.209 | 31.9 | 21.1 / 34.7 / 40.4 | 2.903 | 38.4 | 24.3 / 38.5 / 44.4 | 
+8 | 1,024 | 2.903 | 2.493 | 14.1 | 12.6 / 23.1 / 25.7 | 2.184 | 24.8 | 18.0 / 29.1 / 32.2 | 2.471 | 14.9 | 14.4 / 26.2 / 29.9 | 2.172 | 25.2 | 19.8 / 32.2 / 36.4 | 
+8 | 4,096 | 14.271 | 12.621 | 11.6 | 10.2 / 18.8 / 20.9 | 11.384 | 20.2 | 14.7 / 23.7 / 26.2 | 10.883 | 23.7 | 18.7 / 31.9 / 36.7 | 9.678 | 32.2 | 23.2 / 36.8 / 41.9 | 
+8 | 8,192 | 35.715 | 32.421 | 9.2 | 8.2 / 15.0 / 16.7 | 29.939 | 16.2 | 11.7 / 18.9 / 20.9 | 24.196 | 32.3 | 22.5 / 36.9 / 42.4 | 21.801 | 39.0 | 26.0 / 40.8 / 46.6 | 
+
+### The earlier session
+
+- Session 1 measured the same arms with the commits before the code review. Most of its cells have one repetition.
+- Its falls differ from session 2 by at most 0.5 percentage points.
+- In session 1 the fall is inside the predicted range in 24 of 24 comparisons.
+
+Users | Prompt (tokens) | Part 0: session 1 (%) | Part 0: session 2 (%) | Part A: session 1 (%) | Part A: session 2 (%) | Parts 0 and B: session 1 (%) | Parts 0 and B: session 2 (%) | Parts A and B: session 1 (%) | Parts A and B: session 2 (%) | 
+1 | 1,024 | 13.3 | 13.8 | 23.7 | 23.8 | 16.1 | 16.4 | 25.8 | 26.0 | 
+1 | 4,096 | 11.3 | 11.2 | 19.4 | 19.2 | 24.2 | 24.3 | 32.4 | 32.0 | 
+1 | 8,192 | 9.0 | 9.0 | 15.4 | 15.3 | 31.7 | 31.9 | 38.5 | 38.4 | 
+8 | 1,024 | 14.3 | 14.1 | 24.8 | 24.8 | 14.8 | 14.9 | 25.5 | 25.2 | 
+8 | 4,096 | 11.5 | 11.6 | 20.2 | 20.2 | 23.6 | 23.7 | 32.4 | 32.2 | 
+8 | 8,192 | 9.2 | 9.2 | 16.1 | 16.2 | 32.1 | 32.3 | 39.2 | 39.0 | 
+
+## 4. Decode speed
+
+- Part 0 and Part A do not touch decode. Their decode speed is within 0.7 % of the base run.
+- With Part B, decode changed by -1.0 to +22.2 % against the same build with the kill switch set.
+- The prediction for Part B was no change at the working value. Its range grows with the users and the prompt. The widest range is -5.3 to +7.8 % (est.).
+- Against the base run, the measured change is above the range of its cell in 4 of 6 cells and below it in 1.
+- The plan asked that decode with Part B is at most 1.1 % below the kill-switch run. That holds in 6 of 6 cells.
+
+[SVG: Decode speed of every arm, change against the base run]
+[SVG-TEXT: Part 0 ; Part A ; Parts 0 and B ; Parts A and B ; predicted range with Part B (est.) ; -10 % ; -5 % ; 0 % ; +5 % ; +10 % ; +15 % ; +20 % ; +25 % ; decode tokens per second per user, change against the base run ; 1 user, prompt 1,024 ; -0.8 to -0.0 % ; 1 user, prompt 4,096 ; +0.9 to +1.0 % ; 1 user, prompt 8,192 ; +2.5 to +2.9 % ; 8 users, prompt 1,024 ; +3.0 to +3.3 % ; 8 users, prompt 4,096 ; +17.7 to +17.8 % ; 8 users, prompt 8,192 ; +22.6 %]
+
+Figure 3. Decode speed per user, change against the base run. - Each dot is one arm.
+- The pale bar is the range predicted for Part B (est.).
+- Part 0 and Part A were predicted to change nothing.
+- The label gives the change of the two arms with Part B.
+
+Users | Prompt (tokens) | Base run (tok/s per user) | Part 0 (tok/s per user) | Part A (tok/s per user) | Parts 0 and B (tok/s per user) | Parts A and B (tok/s per user) | Part B against the kill switch (%) | Predicted range with Part B (%, est.) | 
+1 | 1,024 | 273.4 | 274.0 (+0.2 %) | 273.6 (+0.1 %) | 271.2 (-0.8 %) | 273.4 (-0.0 %) | -1.0 | -0.6 to +0.7 | 
+1 | 4,096 | 253.1 | 252.0 (-0.5 %) | 254.9 (+0.7 %) | 255.6 (+1.0 %) | 255.4 (+0.9 %) | +1.5 | -1.2 to +1.6 | 
+1 | 8,192 | 232.8 | 231.5 (-0.6 %) | 231.8 (-0.5 %) | 238.7 (+2.5 %) | 239.6 (+2.9 %) | +3.1 | -1.8 to +2.5 | 
+8 | 1,024 | 120.8 | 121.2 (+0.3 %) | 121.2 (+0.3 %) | 124.5 (+3.0 %) | 124.8 (+3.3 %) | +2.7 | -1.4 to +1.9 | 
+8 | 4,096 | 78.0 | 77.8 (-0.2 %) | 77.9 (-0.2 %) | 91.8 (+17.7 %) | 91.9 (+17.8 %) | +18.0 | -3.9 to +5.6 | 
+8 | 8,192 | 56.4 | 56.5 (+0.3 %) | 56.5 (+0.2 %) | 69.1 (+22.6 %) | 69.1 (+22.6 %) | +22.2 | -5.3 to +7.8 | 
+
+### Why decode gained more than predicted
+
+- The prediction assumed that the attention work of a decode step gets 0.9 to 1.17 times faster (est.).
+- The design took this range from measurements of the 128-wide kernels on another server.
+- The attention counters give 1.31 to 1.55 times with 8 users and 0.89 to 1.19 times with 1 user.
+- Take 8 users and prompt 8,192. There the attention busy time of a decode step fell from 8.88 to 6.01 ms. The decode step fell from 16.89 to 13.71 ms.
+- The stand-alone test gave 1.33 to 1.34 times for decode with pages from main memory [Ref9].
+- So the decode gain with 8 users is larger than the design assumed.
+
+## 5. Measurement against the prediction
+
+### The pass rules of the plan
+
+The design page set a pass rule for each of its 6 tasks. The table gives the outcome of each rule [Ref3].
+
+Task | What | Pass rule of the plan | Measured | Outcome | 
+1 | Stand-alone timing of the loop order of the design | 2 times faster or more: the estimate holds. From 1.46 to 2 times: the low case. Below 1.46 times: wrong. | 1.45 to 1.47 times in 3 runs. The same with 16 copies at once: 1.45 to 1.47 times. | At the lower limit of the low case | 
+1 | The loop that was built in its place (see section 1) | Same rule | 1.99 to 2.03 times in 2 runs. | The estimate from the counts holds | 
+2 | Part 0 in tron | Equal bytes. The fall of the time to first token lies inside the Part 0 range. The GDN step on a 2.70 GHz thread is not above 4.6 us. | Equal bytes in the unit tests. Fall 9.0 to 14.1 %. GDN step of the median thread 4.23 to 4.29 us. | Inside the predicted range in all 6 cells. The step is below 4.6 us in 6 of 6 cells. | 
+3 | Stand-alone AMX block kernel | 2 times faster than the loop of task 1 at the measured clock. | 0.58 us against 1.74 us: 3.0 times, at a clock reading of 1.89 to 2.10 GHz. | Pass | 
+4 | Stand-alone attention kernel for 256-wide heads | 1.5 times faster than the AVX-512 path or more, with the data in cache. | 2.34 to 2.72 times with the data in cache. 1.33 to 1.34 times for decode from main memory. | Pass | 
+5 | Part B in tron | The fall between the two runs of the kill-switch pair, as a percent of the base run, lies inside the Part B range. Decode is at most 1.1 % below the kill-switch run. AMX K tokens are above 0. | Fall 0.8 to 23.0 % of the base run. Decode -1.0 to +22.2 % against the kill-switch run. AMX K tokens per prefill pass: 1,835,008 to 132,120,576. | Range: inside in 5 of 6 cells. Decode rule: pass in 6 of 6 cells. | 
+6 | Part A in tron | The run with Part A has a lower time to first token than the run with the GDN switch set, in all 6 cells. The two falls, added, lie inside the Part A range. | Fall of the GDN-switch pair 6.9 to 12.1 % of its first run. Sum of the two falls 15.4 to 24.5 % of the base run. | Lower in 6 of 6 cells. Range: inside in 6 of 6 cells. | 
+
+### Where the GDN step time goes
+
+- The base run takes 6.08 us per GDN step. Part 0 takes 4.00 us, and Part A takes 2.55 us (cell with 1 user, prompt 1,024).
+- So the measured factor is 1.52 for Part 0 and 2.38 for Part A. The design assumed 2.1 and 3.2 at the working values (est.).
+- The recurrence itself is close to the estimates. The chain kernel takes 2.45 us for 2 value heads, and the block kernel takes 1.03 us.
+- The work around the recurrence is larger than estimated. It takes 1.41 us per step, against 0.7 to 1.0 us (est.).
+- This work is the convolution, the normalization, the norm and the output gate. No change of the design makes it faster.
+- With the block kernel this work is 60 % of the GDN step. It now limits what a faster recurrence can give.
+
+[SVG: Time of one GDN step by part, measured by the new counters]
+[SVG-TEXT: recurrence ; before: convolution, normalization ; after: norm, output gate ; start and write of the state ; 0 ; 2.00 ; 4.00 ; 6.00 ; 8.00 ; microseconds per GDN step (one token of one key head), mean of the 16 GDN threads ; Base run ; token kernel ; 5.95 us ; 98 % ; 6.08 us ; Part 0 ; chain kernel ; 2.45 us ; 61 % ; 1.02 us ; 25 % ; 4.00 us ; Part A ; AMX block kernel ; 1.03 us ; 40 % ; 0.974 us ; 38 % ; 2.55 us]
+
+Figure 4. Time of one GDN step by part, from the new counters (cell with 1 user, prompt 1,024). - The counters cannot split the step of the base run. Its blue bar holds the whole step loop.
+- Only the blue part gets shorter with Part 0 and Part A.
+
+Part of the GDN step (us) | Base run, measured | Part 0, design (est.) | Part 0, measured | Part A, design (est.) | Part A, measured | 
+Recurrence, 2 value heads | 5.95 (the whole step loop) | 1.9 to 2.3, plus 0.1 to 0.2 for cache lines from L2 | 2.45 | 0.8 to 1.1 at 2.40 GHz, 1.0 to 1.4 at 1.90 GHz | 1.03 | 
+Work before and after the recurrence | inside the row above | 0.7 to 1.0 | 1.41 | 0.8 | 1.38 | 
+Start and write of the state | 0.12 | not counted | 0.15 | not counted | 0.15 | 
+GDN step | 6.08 | 2.7 to 3.5 | 4.00 | 1.7 to 2.0 at 2.40 GHz, 2.2 to 2.5 at 1.90 GHz | 2.55 | 
+Factor against the base run | 1 | 1.4 / 2.1 / 2.4 (low / working / high) | 1.52 | 2.0 / 3.2 / 3.7 (low / working / high) | 2.38 | 
+
+### From the GDN step to the pass
+
+- The method of the prediction holds for Part 0. The pass wall fell by 99 to 101 % of the fall of the GDN wall.
+- So a time saved in GDN shortens the pass by about the same time, as the design assumed.
+- For Part A the same ratio is 99 to 101 %.
+
+[SVG: Wall time of one prefill pass and its GDN part]
+[SVG-TEXT: GDN wall ; rest of the pass ; 0 ; 200 ; 400 ; 600 ; milliseconds per prefill pass ; base run ; 1 user, prompt 1,024 ; 48.1 ms ; Part 0 ; 1 user, prompt 1,024 ; 41.4 ms ; Part A ; 1 user, prompt 1,024 ; 36.6 ms ; Parts 0 and B ; 1 user, prompt 1,024 ; 40.2 ms ; Parts A and B ; 1 user, prompt 1,024 ; 35.6 ms ; base run ; 8 users, prompt 8,192 ; 160 ms ; 29 % ; 397 ms ; 71 % ; 556 ms ; Part 0 ; 8 users, prompt 8,192 ; 108 ms ; 21 % ; 397 ms ; 79 % ; 505 ms ; Part A ; 8 users, prompt 8,192 ; 69.1 ms ; 15 % ; 397 ms ; 85 % ; 466 ms ; Parts 0 and B ; 8 users, prompt 8,192 ; 108 ms ; 29 % ; 269 ms ; 71 % ; 376 ms ; Parts A and B ; 8 users, prompt 8,192 ; 70.2 ms ; 21 % ; 269 ms ; 79 % ; 339 ms]
+
+Figure 5. Wall time of one prefill pass and its GDN part, for the smallest and the largest cell.
+
+### Attention with Part B
+
+- With Part B the attention busy time of a prefill pass got 1.10 to 2.27 times shorter.
+- The pass wall fell by 94 to 100 % of the fall of the busy time.
+- The stand-alone test of the kernel gave 2.34 to 2.72 times per page unit with the data in cache [Ref9].
+- The prediction assumed 2.3 times for the scoring of full pages only (est.). It also assumed a slower clock for the other attention work.
+
+### All measured parts of a prefill pass
+
+Cell | Arm | Prefill pass wall (ms) | GDN wall (ms) | Rest of the pass (ms) | Attention busy time (ms) | Join wait (ms) | GDN step, mean (us) | GDN step, median thread (us) | GDN tokens on the AMX path (%) | Attention K tokens on the AMX path (%) | 
+1 user, prompt 1,024 | Base run | 48.07 | 20.12 | 27.95 | 6.07 | 1.47 | 6.08 | 6.39 | 0 | 0 | 
+1 user, prompt 1,024 | Part 0 | 41.43 | 13.45 | 27.98 | 5.99 | 1.46 | 4.01 | 4.23 | 0 | 0 | 
+1 user, prompt 1,024 | Part A | 36.56 | 8.73 | 27.83 | 5.95 | 1.44 | 2.56 | 2.70 | 100 | 0 | 
+1 user, prompt 1,024 | Parts 0 and B | 40.18 | 13.44 | 26.74 | 4.70 | 1.27 | 3.97 | 4.18 | 0 | 87 | 
+1 user, prompt 1,024 | Parts A and B | 35.60 | 8.93 | 26.67 | 4.71 | 1.28 | 2.60 | 2.75 | 100 | 87 | 
+1 user, prompt 4,096 | Base run | 59.30 | 20.07 | 39.24 | 17.39 | 2.13 | 6.07 | 6.38 | 0 | 0 | 
+1 user, prompt 4,096 | Part 0 | 52.68 | 13.43 | 39.24 | 17.32 | 2.11 | 4.02 | 4.26 | 0 | 0 | 
+1 user, prompt 4,096 | Part A | 47.92 | 8.68 | 39.24 | 17.42 | 2.14 | 2.53 | 2.67 | 100 | 0 | 
+1 user, prompt 4,096 | Parts 0 and B | 44.88 | 13.43 | 31.45 | 9.37 | 1.66 | 4.02 | 4.25 | 0 | 97 | 
+1 user, prompt 4,096 | Parts A and B | 40.28 | 8.82 | 31.46 | 9.33 | 1.69 | 2.57 | 2.71 | 100 | 97 | 
+1 user, prompt 8,192 | Base run | 73.45 | 20.04 | 53.41 | 31.50 | 2.29 | 6.06 | 6.37 | 0 | 0 | 
+1 user, prompt 8,192 | Part 0 | 66.80 | 13.43 | 53.37 | 31.38 | 2.30 | 4.01 | 4.23 | 0 | 0 | 
+1 user, prompt 8,192 | Part A | 62.19 | 8.74 | 53.45 | 31.47 | 2.34 | 2.55 | 2.68 | 100 | 0 | 
+1 user, prompt 8,192 | Parts 0 and B | 49.98 | 13.40 | 36.57 | 14.55 | 1.46 | 3.99 | 4.22 | 0 | 98 | 
+1 user, prompt 8,192 | Parts A and B | 45.21 | 8.79 | 36.42 | 14.56 | 1.47 | 2.55 | 2.68 | 100 | 98 | 
+8 users, prompt 1,024 | Base run | 361.64 | 159.60 | 202.04 | 34.07 | 3.21 | 6.07 | 6.38 | 0 | 0 | 
+8 users, prompt 1,024 | Part 0 | 310.42 | 107.88 | 202.54 | 34.15 | 3.30 | 4.04 | 4.29 | 0 | 0 | 
+8 users, prompt 1,024 | Part A | 271.78 | 69.11 | 202.67 | 34.22 | 3.45 | 2.54 | 2.66 | 100 | 0 | 
+8 users, prompt 1,024 | Parts 0 and B | 307.56 | 107.84 | 199.72 | 31.12 | 10.86 | 4.05 | 4.28 | 0 | 87 | 
+8 users, prompt 1,024 | Parts A and B | 270.22 | 70.21 | 200.01 | 31.49 | 10.74 | 2.58 | 2.72 | 100 | 87 | 
+8 users, prompt 4,096 | Base run | 444.52 | 159.64 | 284.89 | 118.68 | 3.91 | 6.07 | 6.38 | 0 | 0 | 
+8 users, prompt 4,096 | Part 0 | 393.01 | 108.03 | 284.98 | 118.80 | 3.82 | 4.04 | 4.28 | 0 | 0 | 
+8 users, prompt 4,096 | Part A | 354.41 | 69.15 | 285.26 | 118.92 | 3.98 | 2.54 | 2.66 | 100 | 0 | 
+8 users, prompt 4,096 | Parts 0 and B | 338.76 | 107.98 | 230.78 | 63.43 | 12.12 | 4.05 | 4.29 | 0 | 97 | 
+8 users, prompt 4,096 | Parts A and B | 301.16 | 70.30 | 230.87 | 63.27 | 12.15 | 2.58 | 2.72 | 100 | 97 | 
+8 users, prompt 8,192 | Base run | 556.42 | 159.52 | 396.89 | 230.39 | 3.70 | 6.08 | 6.38 | 0 | 0 | 
+8 users, prompt 8,192 | Part 0 | 504.97 | 107.81 | 397.17 | 230.59 | 3.61 | 4.04 | 4.27 | 0 | 0 | 
+8 users, prompt 8,192 | Part A | 466.20 | 69.09 | 397.11 | 230.32 | 3.64 | 2.53 | 2.66 | 100 | 0 | 
+8 users, prompt 8,192 | Parts 0 and B | 376.49 | 107.86 | 268.63 | 101.79 | 7.65 | 4.05 | 4.28 | 0 | 98 | 
+8 users, prompt 8,192 | Parts A and B | 339.10 | 70.19 | 268.91 | 102.00 | 7.66 | 2.58 | 2.72 | 100 | 98 | 
+
+## 6. A problem found on the way
+
+- The first runs of Part A in tron were slower than expected. In some GDN layers one thread took twice as long as the others.
+- The cause was subnormal numbers. A value head that forgets fast has small decay values. The block kernel multiplies the decays of up to 32 tokens.
+- That product then drops below the smallest normal FP32 value. The CPU computes with such values through a slow path.
+- In a stand-alone test with decays from 0.01 to 0.1 the block kernel took 3,239 ns per value head and token. With the bits FTZ and DAZ set it took 598 ns [Ref8].
+- The kernel now sets both bits for its own work and restores the caller's setting on return. The tile product already works this way inside.
+- The numeric checks give the same results with and without the bits.
+- The token kernel and the chain kernel do not form such products. Their time does not depend on the decay.
+
+Decay per token | AMX block kernel without the two bits (ns) | AMX block kernel as built (ns) | Chain kernel (ns) | Token kernel (ns) | 
+0.9 to 1 | 596 | 589 | 1,373 | 2,605 | 
+0.5 to 1 | 591 | 590 | 1,376 | 2,604 | 
+0.2 to 0.6 | 592 | 592 | 1,370 | 2,599 | 
+0.05 to 0.3 | 593 | 597 | 1,373 | 2,605 | 
+0.01 to 0.1 | 3,239 | 598 | 1,373 | 2,607 | 
+0.001 to 0.01 | 2,959 | 587 | 1,372 | 2,605 | 
+
+## 7. The new GDN counters
+
+- Until now only a trace could time GDN. The new counters time it in every run, with no trace.
+- They follow the attention statistics of tron.- One environment variable turns them on.
+- Each worker thread has its own counters.
+- tron prints a report at exit.
+- Files show the values while the program runs.
+
+- Per GDN operation and thread they count the work items and the head tokens on each of the three paths.
+- The paths are the token path (step()), the chain path (the chain kernel) and the AMX block path.
+- They also count the blocks that the AMX kernel finished and the blocks that it refused.
+- They time the parts of the work.- the start of a chain
+- the work before the recurrence
+- the recurrence, per path
+- the work after the recurrence
+- the write of the state
+
+- Per operation they give the GDN wall of every pass. Prefill passes and decode steps are kept apart.
+- With the switch off, a GDN call tests one flag and reads no clock.
+- The files are under /model/<model_id>/gdn/ of tron's statistics folder [Ref12].
+
+One line of the exit report of a run with Parts A and B, shortened:
+
+### What the counters cost
+
+- Control runs give the cost of the counters [Ref2]. They ran on 3 cells with 3 repetitions.
+- With the GDN counters on, decode speed changed by -0.6 to +0.1 % against the same build with them off.
+- The time to first token changed by -0.2 to +0.4 %.
+- With the counters off, decode speed is within 0.5 % of the build of 2026-11-20. That build has no GDN counters.
+- The attention counters were on in all three arms.
+- Repetitions of one arm differ by up to 1.2 % in decode speed. The change with the counters on is not larger. So these runs show no cost of the counters.
+
+Cell | TTFT, build of 2026-11-20 (s) | TTFT, GDN counters off (s) | TTFT, GDN counters on (s) | TTFT, on against off (%) | Decode, build of 2026-11-20 (tok/s) | Decode, GDN counters off (tok/s) | Decode, GDN counters on (tok/s) | Decode, on against off (%) | 
+1 user, prompt 1,024 | 0.384 | 0.383 | 0.384 | +0.4 | 272.7 | 274.1 | 273.8 | -0.1 | 
+1 user, prompt 4,096 | 1.897 | 1.900 | 1.896 | -0.2 | 255.3 | 255.2 | 253.8 | -0.6 | 
+8 users, prompt 1,024 | 2.910 | 2.909 | 2.910 | 0.0 | 121.8 | 121.3 | 121.5 | +0.1 | 
+
+## 8. Numerics and tests
+
+- Part 0 changes no bit. New unit tests compare advance() with step() byte by byte, for outputs and for the stored state.
+- They cover these cases.- chains of 1, 2, 3, 31, 32, 33, 127 and 128 tokens
+- 4 start positions in the sequence
+- heads of 16, 80 and 128 value columns
+
+- The existing tests of the prefill path now run the chain kernel too. They still require equal bytes.
+- Part A changes rare bits, as the design said. New tests bound the difference against the chain kernel and against a float64 computation.
+- In the stand-alone check 0.006 to 0.034 % of the bf16 output words differ [Ref6]. An output above 1 % of the typical size differs by at most one bf16 increment.
+- Against float64 the output error of the block kernel is 0.37 to 0.61 times the error of today's kernel.
+- A block with a start state or a result that is not finite is refused, and its state stays untouched. Tests cover an infinity, a NaN and a value of 3e38.
+- advance() then gives the refused value head to the chain kernel. A test checks that this head gets the bytes of step().
+- In the campaign the block kernel refused 0 blocks.
+- Part B has the error band of the existing 128-wide kernels. The existing band tests now run for both shapes.
+
+Input family (128 tokens, stand-alone) | Chain kernel against the token kernel | bf16 output words of the block kernel that differ (%) | Largest difference of a large output (bf16 increments) | State difference of the block kernel (relative) | Output error against float64: block kernel / token kernel | State error against float64: block kernel / token kernel | 
+uniform, decay 0.90-1.00, state 0.02 | identical | 0.018 | 1 | 1.6e-07 | 0.53 | 0.89 | 
+gaussian, decay 0.90-1.00, state 0.02 | identical | 0.034 | 1 | 1.5e-07 | 0.54 | 0.77 | 
+gaussian, decay 0.999-1.00 (long memory), state 0.5 | identical | 0.034 | 1 | 3.7e-07 | 0.56 | 0.48 | 
+gaussian, decay 0.50-1.00, state 0.02 | identical | 0.018 | 1 | 8.8e-08 | 0.42 | 1.02 | 
+gaussian, decay 0.01-0.30 (fast forget), state 1.0 | identical | 0.006 | 0 | 5.2e-08 | 0.37 | 1.30 | 
+gaussian, decay 0.90-1.00, zero start state | identical | 0.021 | 1 | 1.6e-07 | 0.54 | 0.75 | 
+gaussian, decay 0.90-1.00, state 30, values 30 | identical | 0.024 | 1 | 1.6e-07 | 0.61 | 0.75 | 
+gaussian, decay 0.90-1.00, state 1e-20, values 1e-20 | identical | 0.027 | 1 | 1.6e-07 | 0.58 | 0.75 | 
+
+- One more check compares generated tokens [Ref11]. Each arm ran the same prompt with a fixed thread split and a sampler that takes the best-scoring token.
+- The arms without an AMX kernel must give the tokens of the base run. 7 of 7 such runs did, over 256 generated tokens.
+- So Part 0 changes no bit of the model output in this check. Token positions count from 0.
+- A second run of an arm gave the tokens of its first run in 4 of 4 cases. So the differences below are repeatable.
+- At prompt 1,024:- Part A: the run differs from generated token 185 on.
+- Parts 0 and B: the run differs from generated token 1 on.
+- Parts A and B: the run differs from generated token 185 on.
+
+- At prompt 4,096:- Part A: the run gives the tokens of the base run.
+- Parts 0 and B: the run gives the tokens of the base run.
+- Parts A and B: the run gives the tokens of the base run.
+
+- One more build holds the Part B commit alone. It was built before the GDN changes and before the code review.
+- It gives the tokens of the arm with Parts 0 and B in 2 of 2 prompts. So that difference comes from the AMX attention kernels alone.
+- A different token is allowed for Part A and Part B. Both change rare low bits, and the sampler takes the best score.
+- Hypothesis: at the first differing step, the two best scores of the base run are within one bf16 notch. A dump of the scores of that step would confirm or reject it.
+- An earlier campaign on another model found such exact ties [Ref15].
+
+Prompt (tokens) | Arm | Must equal the base run | Tokens equal to the base run | First difference | 
+1,024 | Build of 2026-11-20 (no counters) | yes | 256 of 256 | none | 
+1,024 | Base run, second run | yes | 256 of 256 | none | 
+1,024 | Part 0 (kill switch) | yes | 256 of 256 | none | 
+1,024 | Part 0 (GDN switch, build without Part B) | yes | 256 of 256 | none | 
+1,024 | Part A | no | 236 of 256 | generated token 185 | 
+1,024 | Part A, second run | no | 236 of 256 | generated token 185 | 
+1,024 | Parts 0 and B | no | 2 of 256 | generated token 1 | 
+1,024 | Parts 0 and B, second run | no | 2 of 256 | generated token 1 | 
+1,024 | Part B alone (commit before the GDN changes) | no | 2 of 256 | generated token 1 | 
+1,024 | Parts A and B | no | 236 of 256 | generated token 185 | 
+1,024 | Parts A and B, second run | no | 236 of 256 | generated token 185 | 
+4,096 | Build of 2026-11-20 (no counters) | yes | 256 of 256 | none | 
+4,096 | Part 0 (kill switch) | yes | 256 of 256 | none | 
+4,096 | Part 0 (GDN switch, build without Part B) | yes | 256 of 256 | none | 
+4,096 | Part A | no | 256 of 256 | none | 
+4,096 | Parts 0 and B | no | 256 of 256 | none | 
+4,096 | Part B alone (commit before the GDN changes) | no | 256 of 256 | none | 
+4,096 | Parts A and B | no | 256 of 256 | none | 
+
+### Unit tests on delphi-3b35
+
+- All 19 runs of the test programs pass [Ref10].
+- The CPU has AMX. Without a switch, every AMX case ran.
+- The last rows repeat two test programs with the kill switch and with the GDN switch set. The GDN cases then take the chain kernel.
+
+Build | Commit | Test program | Switch | Assertions | Test cases | Result | Lines that report a case without AMX | 
+Counters only (base build) | d5093e07c2 | t_gated_delta_net | none | 108,253 | 44 | passed | 0 | 
+Counters only (base build) | d5093e07c2 | t_amx_numerics | none | 4,109 | 4 | passed | 0 | 
+Counters only (base build) | d5093e07c2 | t_amx_dispatch_dtype | none | 1,612 | 1 | passed | 0 | 
+Counters only (base build) | d5093e07c2 | t_llama_unit | none | 265,523 | 74 | passed | 0 | 
+Counters only (base build) | d5093e07c2 | t_tronstats_convention | none | 1,420 | 30 | passed | 0 | 
+Plus GDN chain and block kernels | 8351e4ad52 | t_gated_delta_net | none | 108,794 | 50 | passed | 0 | 
+Plus GDN chain and block kernels | 8351e4ad52 | t_amx_numerics | none | 4,499 | 9 | passed | 0 | 
+Plus GDN chain and block kernels | 8351e4ad52 | t_amx_dispatch_dtype | none | 1,612 | 1 | passed | 0 | 
+Plus GDN chain and block kernels | 8351e4ad52 | t_llama_unit | none | 265,523 | 74 | passed | 0 | 
+Plus GDN chain and block kernels | 8351e4ad52 | t_tronstats_convention | none | 1,420 | 30 | passed | 0 | 
+Plus attention kernels | aacdd287c0 | t_gated_delta_net | none | 108,794 | 50 | passed | 0 | 
+Plus attention kernels | aacdd287c0 | t_amx_numerics | none | 11,674 | 12 | passed | 0 | 
+Plus attention kernels | aacdd287c0 | t_amx_dispatch_dtype | none | 4,730 | 1 | passed | 0 | 
+Plus attention kernels | aacdd287c0 | t_llama_unit | none | 265,523 | 74 | passed | 0 | 
+Plus attention kernels | aacdd287c0 | t_tronstats_convention | none | 1,420 | 30 | passed | 0 | 
+Plus attention kernels | aacdd287c0 | t_gated_delta_net | kill switch | 108,794 | 50 | passed | 0 | 
+Plus attention kernels | aacdd287c0 | t_gated_delta_net | GDN switch | 108,794 | 50 | passed | 0 | 
+Plus attention kernels | aacdd287c0 | t_amx_numerics | kill switch | 6,162 | 12 | passed | 9 | 
+Plus attention kernels | aacdd287c0 | t_amx_numerics | GDN switch | 11,284 | 12 | passed | 5 | 
+
+### Review of the code
+
+- Seven review agents read the change, each with another focus. Three more agents then checked every finding against the code.
+- They reported 67 findings. The check confirmed 53 in full and 14 in part, and rejected none [Ref14].
+- One finding was a build error. A build without AMX and without optimization failed to link. It is fixed.
+- 21 findings named a comment or a document that did not match the code. 18 findings named a missing test. Most of them are fixed.
+- Session 2 ran on the commits with these fixes.
+- A second review then read the fixes. It found no defect in the code that runs.
+- It found 4 stale comments and 2 test checks that could not fail. These are fixed, and the unit tests ran again on the result.
+- These findings are not fixed.- The model-level unit test has no case that proves the 256-wide kernels ran.
+- No unit test sets the GDN switch. The test programs ran once more with each switch set.
+- The clamp of the GDN wall counter has no test.
+- The attention dispatch repeats one pattern in 3 branches. A shared type for the kernel set would remove the repeat.
+- The 128-wide and the 256-wide kernels each hold a copy of two helper routines.
+- The query pack of the 256-wide kernel moves one value pair per step, and it runs before the page test.
+
+## 9. Stand-alone measurements
+
+### The GDN recurrence kernels (tasks 1 and 3)
+
+- The stand-alone programs time only the recurrence, on one CPU [Ref6].
+- In loops of 4 s the system reported a lower core clock for the faster kernels. The block kernel read 1.89 to 2.10 GHz.
+- tron runs the kernel in bursts with other work between them. The second table gives the kernels in such bursts.
+- A burst of the AMX kernel gets longer when the gap before it gets longer. The scalar work after a burst runs at the normal clock again after a short time.
+- AMX bursts on 16 CPUs did not stall a seventeenth CPU. No gap above 0.1 ms was seen [Ref8].
+
+[SVG: Time of the GDN recurrence per value head and token, stand-alone on delphi-3b35]
+[SVG-TEXT: 0 ; 1.00 ; 2.00 ; 3.00 ; microseconds per value head per prompt token ; Short runs, lowest of 60 ; Loops of 4 s ; Token kernel (today) ; 2.56 us 128 KiB working copy ; Loop order of the design ; 1.74 us 1.45 to 1.47 times faster ; Chain kernel (Part 0, built) ; 1.27 us 2.01 to 2.03 times faster ; AMX block kernel (Part A) ; 0.480 us 5.3 to 5.4 times faster ; Token kernel (today) ; 2.61 us core clock 2.39 GHz ; Chain kernel (Part 0, built) ; 1.37 us core clock 2.09 GHz ; AMX block kernel (Part A) ; 0.585 us core clock 1.89 to 2.10 GHz]
+
+Figure 6. Time of the GDN recurrence per value head and token, stand-alone on one CPU of delphi-3b35. - The upper group gives the lowest of 60 short runs.
+- The lower group gives loops of 4 s, with the core clock that the system reported.
+
+Kernel | Short runs: us per value head per token (3 runs) | Times faster than the token kernel | Loop of 4 s: us per value head per token | Core clock reading in that loop (GHz) | 
+Token kernel (today) | 2.55 to 2.57 | 1 | 2.60 to 2.61 | 2.39 | 
+Loop order of the design (two passes, [chunk][row] halves) | 1.74 to 1.75 | 1.45 to 1.47 | not measured | not measured | 
+Chain kernel as built (joined loops, row-contiguous halves) | 1.27 | 2.01 to 2.03 | 1.37 | 2.09 | 
+AMX block kernel | 0.48 to 0.49 | 5.26 to 5.40 | 0.57 to 0.59 | 1.89 to 2.10 | 
+
+Scalar work between two bursts (us) | Token kernel (us per burst) | Chain kernel (us per burst) | AMX block kernel (us per burst) | Core clock in the first quarter of the scalar work after an AMX burst (GHz) | Core clock in the rest of that work (GHz) | 
+0 (no gap) | 667 | 353 | 152 | n/a | n/a | 
+200 | 665 | 352 | 147 | 1.99 | 2.35 | 
+1,000 | 665 | 357 | 162 | 2.63 | 2.68 | 
+2,000 | 666 | 362 | 174 | 2.65 | 2.68 | 
+5,000 | 662 | 362 | 187 | 2.67 | 2.68 | 
+20,000 | 663 | 359 | 188 | 2.68 | 2.68 | 
+
+### The attention kernel for 256-wide heads (task 4)
+
+- The AMX kernels are 2.34 to 2.72 times faster than the AVX-512 path when the pages are in cache [Ref9].
+- For decode with pages from main memory they are 1.33 to 1.34 times faster. Loading the page takes most of the time there.
+- The system reported 2.40 GHz for the AMX loops and 2.70 GHz for the AVX-512 loops.
+
+Data | Use | AVX-512 path (us per page unit) | AMX kernels (us per page unit) | Times faster | Core clock, AVX-512 (GHz) | Core clock, AMX (GHz) | 
+Pages in cache | 16 query tokens per page | 4.14 | 1.52 to 1.56 | 2.65 to 2.72 | 2.70 | 2.40 | 
+Pages in cache | 128 query tokens per page | 4.22 | 1.59 to 1.62 | 2.61 to 2.65 | 2.70 | 2.40 | 
+Pages in cache | 1,024 query tokens per page | 4.28 to 4.29 | 1.80 to 1.83 | 2.34 to 2.38 | 2.70 | 2.40 | 
+Pages in cache | 1 query token per page | 4.14 | 1.53 to 1.56 | 2.65 to 2.71 | 2.70 | 2.40 | 
+Pages from main memory | 16 query tokens per page | 4.41 | 1.82 to 1.87 | 2.36 to 2.42 | 2.70 | 2.40 | 
+Pages from main memory | 128 query tokens per page | 4.27 | 1.62 to 1.66 | 2.57 to 2.63 | 2.70 | 2.40 | 
+Pages from main memory | 1,024 query tokens per page | 4.29 | 1.80 to 1.83 | 2.34 to 2.38 | 2.70 | 2.40 | 
+Pages from main memory | 1 query token per page | 8.43 to 8.44 | 6.31 to 6.33 | 1.33 to 1.34 | 2.70 | 2.40 | 
+
+## 10. Limits and open points
+
+- The measurement covers one server, one model and prompts of repeated text. Other prompts give other decay values and other attention patterns.
+- The core clock inside tron was not read. The clock readings on this page come from stand-alone loops.
+- The numeric checks used synthetic inputs. A capture of the GDN inputs of one real prompt would give the size of the differences on real data.
+- The owners of the GDN code have not accepted the numerics contract of Part A. The design named this as a condition.
+- The model's registry entry says that its tokens are not yet valid. The token comparison on this page is a check of equal bits, not of quality.
+- Part B also changes other models. Its kernel serves every model with 256-wide heads and 4 query heads per KV head. No such model was run.
+- The work around the recurrence is the next cost. The convolution alone was 0.50 us per step in a stand-alone test of 2026-11-20.
+- 16 of 56 threads run GDN, as before. Spreading the work over more threads is a scheduling change outside this design.
+
+## 11. Sources
+
+- [Ref1] The tron branch jhan-gdn-amx is in the worktree ~/workspace/ai-runs/tron-gdn-amx. Its commits are d5093e07c2 (counters), 8351e4ad52 (Part 0 and Part A) and aacdd287c0 (Part B). They sit on top of 72e1191804.
+- [Ref2] The run recipe is exec/gdn-impl-20261121/campaign.sh with exec/gdn-20261120/run-one.sh. The builds come from build.sh and build-all.sh. The logs are in exec/results/gdn-impl-20261121/rt/ and the load snapshots in load/.
+- [Ref3] The numbers of this page come from collect.py, compare.py, report_data.py and gen_report.py in exec/gdn-impl-20261121/. The prediction is exec/results/gdn-20261120/predictions.json. Section 4 of GDN/gdn-amx-design.html explains it.
+- [Ref4] Task 1 is bench/bench_gdn_task1.c with task1.sh in exec/gdn-impl-20261121/. Its results are bench/task1-*.txt in exec/results/gdn-impl-20261121/.
+- [Ref5] The loop variants are bench/bench_slice_variants.c. Their results are bench/slice-variants-cpu140-run*.txt.
+- [Ref6] Task 3 is bench/gdn_kernels.hpp and bench/amx_gdn_bench.cpp with task3.sh and task3_burst.sh. Its results are bench/task3-table-*.txt, task3-clock-cpu140.txt and task3-burst-cpu140.txt.
+- [Ref7] The test of register clearing before tile work is bench/task3-zeroupper-cpu140.txt.
+- [Ref8] The test of subnormal decay products is bench/task3-decay-cpu140.txt. The test for stalls of other cores is bench/stall_probe.c with stall_test.sh. Its result is bench/stall-test.txt.
+- [Ref9] Task 4 is bench/task4_attn256.cpp with task4.sh. Its results are bench/task4-summary-cpu142.txt and task4-table-*.txt.
+- [Ref10] The unit-test results are exec/results/gdn-impl-20261121/unit-tests.txt, written by unit-tests.sh. The new test sources are t/t_amx_gdn_numerics.cpp and t/t_gdn_stats.cpp. Changed test sources are t/t_gated_delta_net.cpp, t/t_amx_numerics.cpp and t/t_amx_dispatch_dtype.cpp.
+- [Ref11] The token comparison is exec/gdn-impl-20261121/token-check.sh. Its results are in exec/results/gdn-impl-20261121/tokens/.
+- [Ref12] The counters are documented in README.stats.md of the branch and in Note [GDN path stats] of gdn_stats.hpp.
+- [Ref13] Session 1 ran the commits 28c5dda93d, 50b5a9c4ef, cbcb771f61. Session 2 ran the commits 8351e4ad52, aacdd287c0, d5093e07c2. The steps of session 2 are in exec/gdn-impl-20261121/final-chain.sh, and the numbers of session 1 are in comparison-session1.json.
+- [Ref14] The review findings and their checks are review-result.json and review-verdicts.json in exec/gdn-impl-20261121/understand/. The second review is review2-result.json in the same folder.
+- [Ref15] The earlier campaign on token ties is definitive-decode/token30-results.html in this repository.
+- [Ref16] The branch head differs from the commits of session 2 only in comments, tests and README.stats.md. The branch jhan-gdn-amx-measured keeps the commits of session 2. The steps after session 2 are in exec/gdn-impl-20261121/post-chain.sh.
+

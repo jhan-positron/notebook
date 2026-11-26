@@ -1,0 +1,233 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/intel-amx/exec/3b35-inspect-20261112/delphi-3b35-vs-3bda.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/intel-amx/exec/3b35-inspect-20261112/delphi-3b35-vs-3bda.html
+-->
+<title>delphi-3b35 vs delphi-3bda</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* layout: one reading column; verdict strip first, then diagram, chart, record tables */
+:root{
+  --bg:#fbfcfd; --panel:#f1f4f7; --ink:#17212b; --mute:#566573; --line:#d5dce3;
+  --same:#2f6f8f; --diff:#b4470e; --ok:#1d7a4f; --warn-bg:#fdf1e7; --ok-bg:#e8f4ee;
+  --sans:"IBM Plex Sans",system-ui,Segoe UI,Arial,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;
+  padding-block:28px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1{font-size:26px;font-weight:600;margin:0;text-wrap:balance}
+h2{font-size:18px;font-weight:600;margin:14px 0 0;padding-top:14px;border-top:1px solid var(--line)}
+p{margin:0;max-width:72ch} ul{margin:0;padding-left:20px;max-width:74ch} li{margin:3px 0}
+.sub{color:var(--mute);font-size:13px}
+code,.m{font-family:var(--mono);font-size:13px}
+.short{background:var(--panel);padding:14px 16px;border-radius:6px}
+.short b{font-weight:600}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;vertical-align:top;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{font-weight:600;color:var(--mute);font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+td.k{font-weight:500;min-width:150px}
+.tag{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 7px;border-radius:10px;white-space:nowrap}
+.t-large{background:var(--warn-bg);color:var(--diff)} .t-none{background:var(--ok-bg);color:var(--ok)} .t-unk{background:var(--panel);color:var(--mute)}
+.yes{background:var(--ok-bg);color:var(--ok);padding:12px 16px;border-radius:6px;font-weight:500}
+svg text{font-family:var(--sans)}
+.cap{font-size:13px;color:var(--mute);max-width:72ch}
+pre{background:var(--panel);padding:12px 14px;border-radius:6px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;margin:0}
+</style>
+<main>
+<header>
+  <h1>delphi-3b35 vs delphi-3bda</h1>
+  <p class="sub">Read-only inspection, 2026-11-13 05:26 to 05:46 UTC. Both servers were under other users' load during the reads. No benchmark was run.</p>
+</header>
+
+<div class="short"><b>Short version.</b> The two servers have the same CPUs, memory and AMX features, and <code>SYSTEM_CONFIG="--instance 1,2"</code> is the correct setting for the second half of delphi-3b35. Three settings differ and can lower tron speed on 3b35: TSX is off, the flat-frequency service is missing, and the deep idle states are on. All three need root to change, and the jhan account has no root rights on 3b35.</div>
+
+<section>
+<h2>Words used here</h2>
+<ul>
+<li><b>tron</b>: the inference program under test. <b>runtron</b>: its command-line tool. <b>rinzler</b>: the production server.</li>
+<li><b>AMX</b>: the Intel matrix instruction set that our attention kernels use.</li>
+<li><b>TSX / RTM</b>: Intel transactional memory instructions. tron uses them when a worker waits for work.</li>
+<li><b>Flat-frequency service</b>: the July 2026 fix on 3bda. It uses Intel Speed Select (SST) to let the tron cores run above 2700 MHz.</li>
+<li><b>C6 / C6P</b>: deep CPU idle states. A core needs 170 to 210 us to leave them.</li>
+<li><b>Slice</b>: one eighth of the machine in tron's resource map (1 FPGA card, 14 application CPUs, 1 driver CPU).</li>
+<li><b>Instance "i,n"</b>: part i of n equal parts of the machine. "1,2" is the second of two halves.</li>
+<li><b>Hugepage</b>: a 1 GiB memory page. tron keeps model and KV data in files under <code>/dev/hugepages</code>.</li>
+<li><b>NUMA node</b>: one CPU socket with its own memory.</li>
+</ul>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+<h2>1. Is "--instance 1,2" correct?</h2>
+<div class="yes">Yes. It selects the four second-half cards, the socket-1 CPUs and hugepage files slice-4 to slice-7, the same as on 3bda.</div>
+<ul>
+<li>tron reads the instance from <code>SYSTEM_CONFIG</code> and looks it up in <code>resource-map.yaml</code> [R1].</li>
+<li>Both servers match the same map entry, <code>granite_rapids_6962p</code> [R1].</li>
+<li>The map lists cards and CPUs per slice as fixed values. It does not scan the PCI bus, so a different card layout cannot move the mapping [R1].</li>
+<li>A non-interactive <code>ssh delphi-3b35 'echo $SYSTEM_CONFIG'</code> already prints <code>--instance 1,2</code> [R2].</li>
+<li>The jhan account can open the four cards without root (device group <code>positron</code>) [R2].</li>
+</ul>
+<div class="scroll">
+<svg viewBox="0 0 900 250" width="900" height="250" role="img" aria-label="The two halves of delphi-3b35">
+  <rect x="10" y="30" width="430" height="200" rx="6" fill="#f1f4f7" stroke="#d5dce3"/>
+  <rect x="460" y="30" width="430" height="200" rx="6" fill="#e8f4ee" stroke="#1d7a4f" stroke-width="1.5"/>
+  <text x="22" y="20" font-size="13" font-weight="600" fill="#566573">First half = instance 0,2 = socket 0 (Brian Hamon)</text>
+  <text x="472" y="20" font-size="13" font-weight="600" fill="#1d7a4f">Second half = instance 1,2 = socket 1 (ours)</text>
+  <g font-size="12" fill="#17212b">
+    <g>
+      <rect x="24" y="48" width="92" height="56" rx="4" fill="#ffffff" stroke="#2f6f8f"/><text x="34" y="68">slice 0</text><text x="34" y="86" font-family="IBM Plex Mono,monospace">10:00.0</text><text x="34" y="100" font-size="10.5" fill="#b4470e">in use</text>
+      <rect x="126" y="48" width="92" height="56" rx="4" fill="#ffffff" stroke="#2f6f8f"/><text x="136" y="68">slice 1</text><text x="136" y="86" font-family="IBM Plex Mono,monospace">13:00.0</text><text x="136" y="100" font-size="10.5" fill="#b4470e">in use</text>
+      <rect x="228" y="48" width="92" height="56" rx="4" fill="#ffffff" stroke="#2f6f8f"/><text x="238" y="68">slice 2</text><text x="238" y="86" font-family="IBM Plex Mono,monospace">38:00.0</text><text x="238" y="100" font-size="10.5" fill="#566573">idle</text>
+      <rect x="330" y="48" width="92" height="56" rx="4" fill="#ffffff" stroke="#b4470e" stroke-dasharray="5 4"/><text x="340" y="68">slice 3</text><text x="340" y="86" font-family="IBM Plex Mono,monospace">3b:00.0</text><text x="340" y="100" font-size="10.5" fill="#b4470e">card absent</text>
+    </g>
+    <g>
+      <rect x="474" y="48" width="92" height="56" rx="4" fill="#ffffff" stroke="#1d7a4f"/><text x="484" y="68">slice 4</text><text x="484" y="86" font-family="IBM Plex Mono,monospace">90:00.0</text><text x="484" y="100" font-size="10.5" fill="#566573">idle</text>
+      <rect x="576" y="48" width="92" height="56" rx="4" fill="#ffffff" stroke="#1d7a4f"/><text x="586" y="68">slice 5</text><text x="586" y="86" font-family="IBM Plex Mono,monospace">93:00.0</text><text x="586" y="100" font-size="10.5" fill="#566573">idle</text>
+      <rect x="678" y="48" width="92" height="56" rx="4" fill="#ffffff" stroke="#1d7a4f"/><text x="688" y="68">slice 6</text><text x="688" y="86" font-family="IBM Plex Mono,monospace">b9:00.0</text><text x="688" y="100" font-size="10.5" fill="#566573">idle</text>
+      <rect x="780" y="48" width="92" height="56" rx="4" fill="#ffffff" stroke="#1d7a4f"/><text x="790" y="68">slice 7</text><text x="790" y="86" font-family="IBM Plex Mono,monospace">bc:00.0</text><text x="790" y="100" font-size="10.5" fill="#566573">idle</text>
+    </g>
+    <text x="24" y="130">CPUs 0-71 and 144-215</text>
+    <text x="24" y="150">31 threads of his rinzler are busy here (21.6 % of the socket)</text>
+    <text x="24" y="170">Hugepages: 224 of 256 free</text>
+    <text x="24" y="198" fill="#b4470e">His process may also use CPUs 75-82 on our socket.</text>
+    <text x="24" y="216" fill="#b4470e">12 idle threads of it sat there at the read.</text>
+    <text x="474" y="130">Application CPUs 96-143 and 223-230 (56 CPUs)</text>
+    <text x="474" y="150">Driver CPUs 75-78 (4 CPUs)</text>
+    <text x="474" y="170">Socket busy 0.0 % over a 10 s sample</text>
+    <text x="474" y="190">Hugepages: 240 of 256 free</text>
+    <text x="474" y="216" fill="#b4470e">slice-4..7 files exist, owner bhamon, 4 GiB each, last used Oct 23</text>
+  </g>
+</svg>
+</div>
+<p class="cap">State of delphi-3b35 at 05:45 UTC [R2][R3]. Box sizes are schematic.</p>
+<ul>
+<li>3b35 shows 7 FPGA cards, not 8. Card <code>3b:00.0</code> in the first half is absent [R2]. Hypothesis: a whole-machine run (<code>--instance 0,1</code>) fails on 3b35. One start attempt would confirm it.</li>
+<li>Brian's server runs under the account <code>disagg</code>. Its allowed CPU list is <code>27-34,75-82</code>, and CPUs 75-78 are our driver CPUs [R2]. Those threads used 0.0 % CPU in the sample.</li>
+<li>The hugepage files of our half already exist under Brian's name. No running process maps them [R4]. tron would open, lock and resize them (read from source, not run). Ask Brian before the first run.</li>
+</ul>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+<h2>2. What differs and can change AMX numbers</h2>
+<div class="scroll">
+<svg viewBox="0 0 900 190" width="900" height="190" role="img" aria-label="Observed frequency of busy CPUs on both servers">
+  <text x="10" y="18" font-size="13" font-weight="600" fill="#17212b">Frequency of busy CPUs, read from scaling_cur_freq (MHz)</text>
+  <!-- scale: 2500..4500 MHz -> x 170..870 ; 0.35 px per MHz -->
+  <g stroke="#d5dce3"><line x1="240" y1="40" x2="240" y2="150"/><line x1="415" y1="40" x2="415" y2="150"/><line x1="590" y1="40" x2="590" y2="150"/><line x1="765" y1="40" x2="765" y2="150"/></g>
+  <g font-size="11.5" fill="#566573" text-anchor="middle"><text x="240" y="168">2700</text><text x="415" y="168">3200</text><text x="590" y="168">3700</text><text x="765" y="168">4200</text><text x="835" y="168">4400 max</text></g>
+  <line x1="835" y1="40" x2="835" y2="150" stroke="#d5dce3" stroke-dasharray="3 3"/>
+  <text x="10" y="72" font-size="13" fill="#17212b">delphi-3bda</text><text x="10" y="88" font-size="11" fill="#566573">CI rinzler, socket 1</text>
+  <line x1="555" y1="70" x2="730" y2="70" stroke="#2f6f8f" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="660" cy="70" r="7" fill="#ffffff" stroke="#2f6f8f" stroke-width="2.5"/>
+  <text x="642" y="52" font-size="12" fill="#2f6f8f" text-anchor="middle">3600 to 4100, most at 3900 (43 of 56 CPUs)</text>
+  <circle cx="240" cy="70" r="5" fill="#ffffff" stroke="#2f6f8f" stroke-width="2"/>
+  <text x="252" y="90" font-size="11" fill="#566573">CPUs outside the fast ranges: 2700</text>
+  <text x="10" y="122" font-size="13" fill="#17212b">delphi-3b35</text><text x="10" y="138" font-size="11" fill="#566573">Brian's rinzler, socket 0</text>
+  <circle cx="240" cy="120" r="8" fill="#b4470e"/>
+  <text x="254" y="124" font-size="12" fill="#b4470e">29 of 31 busy CPUs at 2699 to 2700</text>
+  <circle cx="835" cy="120" r="5" fill="#ffffff" stroke="#b4470e" stroke-width="2"/>
+  <text x="823" y="124" font-size="11" fill="#566573" text-anchor="end">CPUs 54-55: 4400</text>
+</svg>
+</div>
+<p class="cap">On 3b35 the loaded cores sit at the 2700 MHz base frequency. On 3bda the tron cores run 900 to 1400 MHz higher [R5]. The two rows are different workloads, so this is a state reading and not a speed comparison.</p>
+<div class="scroll"><table>
+<tr><th>Item</th><th>delphi-3bda</th><th>delphi-3b35</th><th>Effect on tron / AMX</th></tr>
+<tr><td class="k">TSX (rtm, hle CPU flags)</td><td>On. Boot argument <code>tsx=on</code>.</td><td>Off. No <code>tsx=on</code> now or in the next-boot entry.</td><td><span class="tag t-large">large</span> tron's wait path falls back to spin and pause. The tron source says the fallback "costs 13-30% decode" [R6]. That number is a source comment, not our measurement. It applies to AMX-on and AMX-off runs alike.</td></tr>
+<tr><td class="k">Flat-frequency service</td><td>Present and active. 224 CPUs in the fast class, 64 CPUs capped at 2700 MHz.</td><td>Not installed. Class readback needs root.</td><td><span class="tag t-large">large</span> The July work on 3bda measured prefill +16 to +18 % and decode +5 to +8 % at prompt 1024 from this service [R7]. Hypothesis: 3b35 is in the BIOS default state, with most cores capped at 2700 MHz.</td></tr>
+<tr><td class="k">C6 / C6P idle states</td><td>Disabled on 288 CPUs (driver default).</td><td>Enabled on 288 CPUs. 95.1 % of CPU time since boot was spent there.</td><td><span class="tag t-unk">not measured</span> A sleeping worker needs up to 210 us to wake. tron workers spin while a run is active, so the effect may be small.</td></tr>
+<tr><td class="k">BIOS</td><td>92011500, release 1.15, 2026-03-27</td><td>92011800, release 1.18, 2026-06-01</td><td><span class="tag t-unk">not measured</span> Power limits readable without root are equal (500 W long, 600 W short per socket).</td></tr>
+<tr><td class="k">Microcode</td><td>0x1000405 (equals the OS package file)</td><td>0x1000423 (newer than the OS file, so the BIOS loads it)</td><td><span class="tag t-unk">not measured</span></td></tr>
+<tr><td class="k">Kernel</td><td>6.8.0-138-generic</td><td>6.8.0-136-generic. Next boot starts 6.8.0-138.</td><td><span class="tag t-none">none</span> The Ubuntu changelog for -137 and -138 lists only security fixes in networking, KVM, eventpoll and RDMA. The two kernel config files differ in one version line [R5].</td></tr>
+<tr><td class="k">Thermal throttle events</td><td>238 package events in 30 days, 91 C at load 128</td><td>0 events in 80 days, 73 C / 60 C at load 31</td><td><span class="tag t-unk">small</span> Total throttled time on 3bda is 376 ms. 3b35 was never seen with both sockets full.</td></tr>
+</table></div>
+<p><b>Meaning.</b> Absolute tron numbers from 3b35 are not comparable with our 3bda record until TSX and the frequency state match. Whether the AMX-on to AMX-off ratio also shifts is Insufficient data. One AMX-on and AMX-off pair on 3b35, on a cell we measured on 3bda, would resolve it.</p>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+<h2>3. What is the same</h2>
+<div class="scroll"><table>
+<tr><th>Item</th><th>Value on both servers</th></tr>
+<tr><td class="k">CPU</td><td>2 x Intel Xeon 6962P, family 6, model 173, stepping 1. 72 cores per socket, hyper-threading on, 288 CPUs.</td></tr>
+<tr><td class="k">NUMA layout</td><td>2 nodes. Node 0 = CPUs 0-71,144-215. Node 1 = CPUs 72-143,216-287. Sub-NUMA clustering off.</td></tr>
+<tr><td class="k">Caches</td><td>L1d 48 KiB and L2 2 MiB per core, L3 432 MiB per socket.</td></tr>
+<tr><td class="k">AMX</td><td>amx_tile, amx_bf16, amx_int8 present. AMX-FP16 present in raw CPUID and hidden from /proc/cpuinfo. 8 tiles of 16 rows x 64 bytes. The kernel offers the same tile state permission.</td></tr>
+<tr><td class="k">Memory</td><td>24 x 64 GB Samsung DDR5 at 6400 MT/s, one module per channel, all 12 channels per socket filled. On 3b35 the speed of 17 of 24 modules was readable without root. 0 memory errors.</td></tr>
+<tr><td class="k">Hugepages</td><td>512 x 1 GiB, 256 per node. Transparent hugepages <code>madvise</code>.</td></tr>
+<tr><td class="k">Frequency settings</td><td>intel_pstate active, governor performance, turbo on, 800 to 4400 MHz, base 2700 MHz, same uncore limits.</td></tr>
+<tr><td class="k">OS</td><td>Ubuntu 22.04.5, glibc 2.35, same mitigations, NUMA balancing on, no isolated CPUs.</td></tr>
+<tr><td class="k">FPGA cards (our half)</td><td>90:00.0, 93:00.0, b9:00.0, bc:00.0 on node 1, link 16 GT/s x16, driver vfio-pci.</td></tr>
+<tr><td class="k">Storage</td><td>/home and /scratch are the same network filer. Local disk on 3b35 has 2.8 TB free (3bda: 294 GB).</td></tr>
+</table></div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+<h2>4. Working on 3b35: what changes for us</h2>
+<ul>
+<li><b>No root.</b> <code>sudo -n</code> fails for jhan on 3b35. So perf counters, turbostat, intel-speed-select, the memory-lock raise and package installs do not work there. About 100 of our 462 campaign scripts call sudo [R8].</li>
+<li><b>Not a CI machine, confirmed.</b> No rinzler@N unit, no CI runner, no nightly timer, no lease file [R2].</li>
+<li><b>Installed tron package is from 2026-08-17.</b> It has no AMX kernels. Use our own builds only.</li>
+<li><b>Missing tools:</b> numactl, cpuid, rdmsr, intel-speed-select.</li>
+<li><b>Launch guard</b> (<code>exec/lib-guard.sh</code>, the script that refuses to start a campaign on a busy machine): it skips accounts with uid below 1000, so it cannot see Brian's server (uid 992). The load snapshot is the record of his activity.</li>
+<li><b>Worktree trap.</b> 98 tron worktrees are registered at 3bda-local paths. From 3b35 they look deletable. Never run <code>git worktree prune</code>. Create 3b35 worktrees under new names.</li>
+</ul>
+<p><b>Load snapshot for every performance report</b> (12 s, no root) [R3]:</p>
+<pre>ssh delphi-3b35 'bash ~/workspace/intel-AMX/exec/3b35-inspect-20261112/load-snapshot.sh'</pre>
+<div class="scroll"><table>
+<tr><th>Reading at 2026-11-13 05:45 UTC</th><th>Value</th></tr>
+<tr><td class="k">Load average (1 min)</td><td>31.00. This equals Brian's 31 spin-waiting threads. It does not change with his work volume.</td></tr>
+<tr><td class="k">Socket 0 busy</td><td>21.6 % (31 CPUs above 50 %)</td></tr>
+<tr><td class="k">Socket 1 busy (ours)</td><td>0.0 %. Our 56 application CPUs 0.0 %, our 4 driver CPUs 0.0 %.</td></tr>
+<tr><td class="k">CPU per user</td><td>disagg 31.35 CPUs, all on socket 0. Everyone else below 0.05.</td></tr>
+<tr><td class="k">FPGA cards open</td><td>10:00.0 and 13:00.0 only</td></tr>
+</table></div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+<h2>5. Tooling copied to 3b35</h2>
+<p>/home is shared, so scripts, results, the tron repository and models were already visible. Only host-local files under <code>/var/tmp/jhan</code> needed a copy. 2.0 GB was copied at idle priority.</p>
+<div class="scroll"><table>
+<tr><th>On 3b35 under /var/tmp/jhan</th><th>Size</th><th>Purpose</th></tr>
+<tr><td class="k m">seed-traces/b47f</td><td>188 MB</td><td>Newest model trace files (17 models). A new build copies them instead of exporting again.</td></tr>
+<tr><td class="k m">seed-traces/pr4</td><td>199 MB</td><td>The trace set that older scripts name.</td></tr>
+<tr><td class="k m">st-venv, uv-python</td><td>1.5 GB, 110 MB</td><td>Python 3.12.13 environment of the CI test harness, same absolute paths. <code>python --version</code> runs.</td></tr>
+<tr><td class="k m">from-3bda/</td><td>44 MB</td><td>Small benchmark sources and configs. Rebuild the binaries before timing.</td></tr>
+</table></div>
+<p><b>Not copied, on purpose:</b> 1.3 TiB of build worktrees (rebuilt from git), about 377 GiB of finished-campaign data, lock and marker files, and the 3bda sharing marker.</p>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:12px">
+<h2>6. Requests for an administrator of 3b35</h2>
+<ul>
+<li>Add <code>tsx=on</code> to the boot arguments and reboot. The reboot also brings kernel 6.8.0-138.</li>
+<li>Install and enable the flat-frequency service (intel-speed-select plus the state unit), as on 3bda.</li>
+<li>Decide on C6/C6P: disable to match 3bda, or keep.</li>
+<li>Grant jhan the read-only root commands we use: perf, turbostat, intel-speed-select, prlimit. Install numactl.</li>
+</ul>
+<h2>Insufficient data</h2>
+<ul>
+<li>Speed Select class per CPU on 3b35. Resolved by <code>sudo intel-speed-select --cpu 0-287 core-power get-assoc</code>.</li>
+<li>Real frequency and power under an AMX run on 3b35. Resolved by <code>sudo turbostat</code> during a run.</li>
+<li>Memory bandwidth on either server. Resolved by a STREAM-type run on an idle node.</li>
+<li>Effect of BIOS 1.18 and microcode 0x1000423. Resolved by the same binary on both servers at equal load.</li>
+<li>Speed of 7 of the 12 memory modules on socket 1 of 3b35. Resolved by <code>sudo dmidecode -t memory</code>.</li>
+</ul>
+</section>
+
+<section>
+<h2>References</h2>
+<p class="sub">Raw files are in <code>~/workspace/intel-AMX/exec/3b35-inspect-20261112/</code>.</p>
+<ul class="sub">
+<li>[R1] tron source: <code>src/system/system.cpp</code> (instance parsing) and <code>resource-map.yaml</code>, entry granite_rapids_6962p. Summary in <code>fpga-instance-users-*.txt</code>.</li>
+<li>[R2] <code>fpga-instance-users-*.txt</code>: lspci, sysfs, setup scripts, systemd listings, process affinity.</li>
+<li>[R3] <code>load-snapshot.sh</code>, run at 2026-11-13T05:45:25Z.</li>
+<li>[R4] <code>memory-*.txt</code> and <code>memory-verify-*-recheck.txt</code>: DIMM data, hugepage files, HugetlbPages per process.</li>
+<li>[R5] <code>power-freq-kernel-*.txt</code>: cmdline, cpufreq, cpuidle, SST readback on 3bda, changelog, grub.cfg.</li>
+<li>[R6] tron <code>src/system/mwaitx.cpp</code> lines 76-77.</li>
+<li>[R7] <code>~/workspace/notebook/handoffs/claude_20260702-20260729_debug-3bda-flat-freq-run-ci-tests.md</code>, status table row 1.</li>
+<li>[R8] <code>tooling-inventory-*.txt</code> and <code>verify-tooling-inventory-*.txt</code>.</li>
+<li>[R9] <code>cpu-firmware-*.txt</code>: lscpu, CPUID leaves, DMI BIOS strings, microcode.</li>
+</ul>
+</section>
+</main>

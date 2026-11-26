@@ -1,0 +1,758 @@
+[
+ {
+  "checked": [
+   "Reviewed by code inspection only. Nothing was built or run, as instructed. Paths below are in /home/jhan/workspace/ai-runs/tron-gdn-amx-review.",
+   "Row writers (gdn_stats.hpp:203-235, 399-412): only the worker that owns a row writes it. Worker 0 is the forward thread and worker w is pool worker w-1 (TronCpp.hs:1622-1623), so relaxed load-add-store is enough. Rows of two workers never share a cache line (192 bytes per row, 64-byte alignment).",
+   "Per-forward stamp slots (gdn_stats.hpp:284-295, 374-379, 418-441): each worker writes only its own lines. The forward thread reads and clears them after the plugin's run has waited for all workers (workers_done.wait, TronCpp.hs:1712). An index error in the slot stride would fail the wall test at t_gdn_stats.cpp:284.",
+   "One call per (worker, operation) per forward: validate_recurrent_minibatch asserts exactly one minibatch (model.hpp:2405), so a span slot is written at most once per forward.",
+   "Bounds: worker_ix < n_workers = 1 + n_main_helpers <= 1 + pool workers = row count (TronCpp.hs:1684-1689, model.hpp:1755-1756). Operation i has id i < gdn_operations.size() (gdn_registry.hpp:97-98). row(), timers_at() and forward_span() assert all three indexes.",
+   "Two model states at once and EAGLE draft states: each state owns its own model_stats, so no row, span or class is shared. The draft publishes under gdn_eagle/ (gdn_stats.hpp:738).",
+   "Tokens are counted exactly once per key head on every path: in-place chains in gdn_execution.hpp:179-183, working copies in gdn_rolling_executor.hpp:542-543, never both. run_gdn_operation never calls step() on a working copy. A chain always has at least 1 token (gdn_chain_plan.hpp:135). A refused block is counted once, under amx (see finding 5).",
+   "Cycle fields: start, pre, the recurrence per path, post and write are disjoint stamp intervals inside entry..exit, so their sum is at most busy_cycles.",
+   "half_full_block_tokens identity: a full window exists exactly when n_tokens >= to_boundary + 32, so every full window is an AMX window when the kernel is available, and a column-half window otherwise (block kernel off, TRON_AMX_GDN_DISABLE, TRON_AMX_DISABLE, no AMX, shape not served). A run with no full window adds 0. Refused blocks stay under amx, so the A/B identity holds.",
+   "amx_blocks and amx_fallback_blocks are counted once per value head (gdn_rolling_executor.hpp:669-680), as the comment in work_tally says.",
+   "No stamp sits inside a per-token loop: 4 stamps per work item (gdn_execution.hpp:148-172) and 4 per window of at most 32 tokens (gdn_rolling_executor.hpp:520-547), only when the switch is on.",
+   "Off state on the per-call path: one pointer load, one bool, a 136-byte stack tally per run_gdn_operation call, no time stamp, no atomic write, no allocation. forward_scope copies one bool.",
+   "GDN wall (gdn_stats.hpp:422-441): the minimum entry and maximum exit over the workers that ran, clamped at 0, filed under the class that forward_scope stored before the workers started.",
+   "JSON rendering: key names and commas match the exact-string tests. The largest leaf is 771 bytes with every value at the uint64 maximum (computed with a script), against the limit of 2,048 bytes. An operation with no job renders zeros. The off state renders {} for totals and forwards.",
+   "Exit report and lifetime: print_report reads only atomics and constants. The leaf callbacks hold a weak_ptr, so a read after the state is gone returns {}. A later state of the same id replaces the callbacks. Registration before a later constructor failure is safe because the member shared_ptr is released.",
+   "forward_scope placement (model.hpp:2161-2168): constructed before any worker starts and destroyed after the attention scope and the latch guard. The forward wall is stamped before the fold. The GDN forward wall includes the attention begin/end bookkeeping when both switches are on. I did not measure that cost.",
+   "Generator edit (TronCpp.hs:3140-3146): both emit sites, the main stream (3199) and the helper stream (3260), go through gdnExecutionCall, so both pass outer_state.gdn_path_stats.get(). No other caller of run_gdn_operation exists outside the tests.",
+   "README.stats.md against the code: every key that it names exists in put_counts or render_forwards, the leaf names match register_fuse_files, and the rule 'operation I is model layer I + I / 3' is right with integer division. The meanings that do not match are findings 3, 5 and 6.",
+   "t_gdn_stats.cpp: the rows, wall, forward_scope, bounds, off-state, FUSE and exit-report cases each fail under a wrong key, class, worker, operation or stride. The gaps are findings 1, 2 and 9."
+  ],
+  "findings": [
+   {
+    "title": "Hook test covers one partial window only: half_full_block_tokens, the AMX counters and multi-window sums are never non-zero under test",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_gated_delta_net.cpp",
+    "line": 2374,
+    "severity": "test-gap",
+    "problem": "The only test that passes a tally into advance() is the hook test at line 2293. Its longest chain has 3 tokens from position 0, which is one partial window on the chain kernel. So it checks half_full_block_tokens, amx_head_tokens, amx_blocks and amx_fallback_blocks only as == 0 (lines 2371-2374). No test runs the tally code of gdn_rolling_executor.hpp:538-548 and 679-680 with a full window, with two or more windows, or on the AMX path. run_chain_case (line 2719) and t_amx_gdn_numerics.cpp pass no tally. The header of t_gdn_stats.cpp (lines 8-9) says the hooks are covered by this test.",
+    "scenario": "Each of these deliberate breaks passes every test. (a) Delete line 544 of gdn_rolling_executor.hpp, or change its condition to 'if (full_window)'. Then the A/B identity of half_full_block_tokens is wrong. (b) Add key_heads_per_group * n_tokens per window in place of window_tokens. A 128-token chunk then counts 4 times its tokens. (c) Always file full windows under column_half, or drop the increment at line 680. (d) Make block_kernel_available() return false on an AMX host. The test at line 2778 still passes, because equal results are inside its bounds, and nothing shows that the chain kernel ran. These are the counters that the A/B comparison on delphi-3b35 reads.",
+    "fix": "Add one case that needs no AMX hardware. Use wide_chain_geometry and the head executor, first_position 7, 71 tokens (windows of 25, 32 and 14 tokens), and pass a work_tally to advance(). With gdn_block_kernel::off require half head tokens == 71 and half_full_block_tokens == 32. With when_available require amx head tokens + half_full_block_tokens == 32 and amx_blocks + amx_fallback_blocks == 2 * amx head tokens / 32 (2 value heads per key head). On a host where amx_gdn_k128v128::available() is true, also require amx head tokens == 32."
+   },
+   {
+    "title": "No test reaches the stats through the generated plugin or model::state::forward, and the null default hides a missing pass-through",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_execution.hpp",
+    "line": 101,
+    "severity": "test-gap",
+    "problem": "run_gdn_operation takes 'gdn_stats::model_stats* stats = nullptr'. The only code that passes a real pointer is the generator (ingest/src/TronCpp.hs:3140, 3146). No test names gdn_path_stats, and no ingest spec pins the rendered call. The forward_scope in model.hpp:2161-2165 also has no test: the hook test builds its own scope (t_gated_delta_net.cpp:2334).",
+    "scenario": "Break 1: remove pathStats at TronCpp.hs:3140. The plugin still compiles through the default, and every test passes. A run with TRON_GDN_STATS=1 then prints \"on\":true, forwards > 0 and chains > 0 with every GDN counter at 0, which reads as measured zeros. The same happens today for a plugin header that an older generator rendered: t/CMakeLists.txt:417 allows a prebuilt generator, and exec/results/gdn-20261120/plugin/ holds a header rendered before this change. Break 2: remove the emplace at model.hpp:2163. Every test passes. In production the rows fill, but forwards stays 0, wall_count stays 0 and the spans are never cleared.",
+    "fix": "Remove the default and pass nullptr in the two existing test calls (t_gated_delta_net.cpp:2015, 2286), so that a stale plugin fails to compile. In the case 'TronCpp-generated GDN executes through the full scheduler' (t/t_generate_mock_plugin.cpp:726), replace scheduler->state.gdn_path_stats with an enabled model_stats before the run. Then require gdn_jobs > 0, forwards > 0 and wall_count == forwards times the number of operations that ran."
+   },
+   {
+    "title": "README does not give the unit of amx_blocks or the scope of token_recurrence_cycles, so two obvious checks come out wrong",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/README.stats.md",
+    "line": 340,
+    "severity": "false-claim",
+    "problem": "Lines 340-343 say that amx_blocks counts 'the blocks of block_tokens tokens that the AMX block kernel finished'. The code counts one block per value head (gdn_rolling_executor.hpp:669-680), while amx_head_tokens counts once per key head (lines 542-543). Lines 344-347 list 'the three <path>_recurrence_cycles' as like parts. token_recurrence_cycles is the whole step() loop: convolution, recurrence, norm and output gate (gdn_execution.hpp:182, gdn_stats.hpp:193). half_ and amx_recurrence_cycles are the recurrence alone, with the rest in pre_cycles and post_cycles.",
+    "scenario": "Qwen3.5 4B has 16 key heads and 32 value heads. One full window of one work item adds 32 to amx_head_tokens and 2 to amx_blocks. A reader who checks amx_blocks x block_tokens against amx_head_tokens finds twice the tokens and suspects double counting. A reader who divides each recurrence counter by its head tokens to compare the token path with the chain kernel compares a whole step with a recurrence alone, and overstates the gain of the chain kernel.",
+    "fix": "Say 'value-head blocks' and give the identity amx_blocks + amx_fallback_blocks = amx_head_tokens / block_tokens x n_value_heads / n_key_heads. Add one sentence that token_recurrence_cycles covers the whole step(), and that the like-for-like value of a working copy is pre + recurrence + post."
+   },
+   {
+    "title": "Comment on BLOCK_TOKENS_32 states the wrong block grid",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 134,
+    "severity": "false-claim",
+    "problem": "Lines 134-135 say 'The blocks of a chain are counted from its first token, and that is the grid of half_full_block_tokens'. advance() cuts windows where the position in the sequence reaches a multiple of 32 (gdn_rolling_executor.hpp:514-517, Note at lines 104-109), not from the first token of the chain. gdn_stats.hpp was not updated by commit 28c5dda93d.",
+    "scenario": "A chain of 71 tokens that starts at position 7. The comment predicts two full blocks, 64 tokens per key head. The code gives windows of 25, 32 and 14 tokens, so half_full_block_tokens or amx_head_tokens grows by 32. A reader who predicts the AMX volume from this comment is wrong for every chain that does not start on a multiple of 32, for example after a resume from a stored state.",
+    "fix": "Reword: 'A block is a full window of advance(): 32 tokens that start where the token position in the sequence is a multiple of 32. That is the grid of half_full_block_tokens.'"
+   },
+   {
+    "title": "amx_head_tokens and amx_recurrence_cycles include blocks that the AMX kernel refused, and the comment gives only one of the two refusal reasons",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 539,
+    "severity": "false-claim",
+    "problem": "The path of a window is fixed before the kernel runs (lines 539-546). When advance_value_head refuses a value head, gdn_recurrence_chain_head advances it (lines 675-678), but its tokens stay under amx_head_tokens and its time, plus the refused attempt, stays under amx_recurrence_cycles. gdn_stats.hpp:27 says 'The code that advances a token counts it', and README.stats.md:336-337 says the keys count the tokens 'that each path advanced'. gdn_stats.hpp:180-181 says a block is refused 'because a value was not finite'. The kernel also refuses a finite correction of 2^100 or more (amx_gdn_iface.hpp, Note, paragraph Refusal).",
+    "scenario": "Both value heads of one key head are refused for one window, for example a state that holds an infinity. Then amx_head_tokens grows by 32 and amx_blocks by 0, and amx_recurrence_cycles grows by the chain-kernel time. amx_recurrence_cycles / amx_head_tokens then mixes the two kernels. The reader can see it only through amx_fallback_blocks.",
+    "fix": "Document it in the Note and the README: amx_head_tokens counts the tokens of full windows given to the block kernel, the refused share is amx_fallback_blocks / (amx_blocks + amx_fallback_blocks), and amx_recurrence_cycles includes the chain-kernel time of refused value heads. Add the second refusal reason to the comment at gdn_stats.hpp:180."
+   },
+   {
+    "title": "copy_cycles is a rendered key that no code writes",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 192,
+    "severity": "cleanup",
+    "problem": "copy_cycles is 'reserved for state layout copies of the chain path'. Those copies exist since commit 28c5dda93d: gdn_state_to_slices in start_from_checkpoint and gdn_slices_to_state in write_checkpoint (gdn_rolling_executor.hpp:358-363, 393-396). Their time goes to start_cycles and write_cycles. Nothing adds to copy_cycles. Every leaf and the exit report render it, README.stats.md:346 lists it as a part of busy_cycles, and the hook test pins it at 0 (t_gated_delta_net.cpp:2384).",
+    "scenario": "A reader of a prefill run sees \"copy_cycles\":0 and concludes that the working copy costs no layout conversion. The cost is inside start_cycles and write_cycles.",
+    "fix": "Remove the field, the row atomic and the key. Or keep the key and state in gdn_stats.hpp:188-198 and in the README that the layout copies are inside start_cycles and write_cycles and that copy_cycles reads 0."
+   },
+   {
+    "title": "The stats and the README call the kernel 'column-half'; the code calls it the chain kernel",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 22,
+    "severity": "style",
+    "problem": "gdn_stats.hpp:22-23, 126, 181 and README.stats.md:338, 342 name a 'column-half kernel' and gdn_path::column_half. No kernel has that name. The code and its Notes use 'chain kernel', gdn_recurrence_chain and 'slice' (gated_delta_net.hpp:309-336, gdn_rolling_executor.hpp:73, 111-118). The hook test has to bridge the two names in a comment (t_gated_delta_net.cpp:2366-2367). 'Half' is true only for a value head of 128 columns: the test geometry of 80 columns has one slice of 64 and one of 16.",
+    "scenario": "A reader of README.stats.md searches the source for 'column-half' to learn what half_head_tokens measures. The search finds only the stats files and the tests.",
+    "fix": "Keep the JSON prefix 'half' if scripts already read it, but name the path once in the Note and in the README: 'half: the chain kernel (gdn_recurrence_chain), which runs every token of a window on one slice of 64 value columns before the next slice'. Rename the enumerator to chain if the key may change."
+   },
+   {
+    "title": "gdn_stats::BLOCK_TOKENS_32 is a third copy of the window size with no compile-time tie",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 136,
+    "severity": "risk",
+    "problem": "The window size exists three times: gdn_window_tokens (gated_delta_net.hpp:348), amx_gdn_k128v128::BLOCK_TOKENS_32 (amx_gdn_iface.hpp:99) and gdn_stats::BLOCK_TOKENS_32. The summary key block_tokens comes from the stats copy (model.hpp:1747). The tally code uses gdn_window_tokens (gdn_rolling_executor.hpp:517). Nothing compares the stats copy with the other two.",
+    "scenario": "A later change sets gdn_window_tokens to 64. The summary still prints \"block_tokens\":32, while half_full_block_tokens counts windows of 64 tokens. Every figure derived as tokens / block_tokens is then off by a factor of 2, with no build error.",
+    "fix": "In gdn_rolling_executor.hpp, which includes both headers, add static_assert(gdn_stats::BLOCK_TOKENS_32 == gdn_window_tokens). Or set facts.block_tokens = gdn_window_tokens in model.hpp and drop the stats constant."
+   },
+   {
+    "title": "The clamp of the GDN wall for out-of-order stamps has no test",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 436,
+    "severity": "test-gap",
+    "problem": "end_forward sets the wall to 0 when the last exit stamp is not above the first entry stamp, because the stamps of two cores are compared as raw TSC values. Every span in t_gdn_stats.cpp has exit above entry over all workers.",
+    "scenario": "Replace line 436 with 'last_exit - first_entry'. Every test passes. A forward whose stamps are out of order then adds a value near 2^64 to wall_cycles and wall_max_cycles of that operation, which ruins the totals of the run.",
+    "fix": "In the GDN wall case of t_gdn_stats.cpp, add one forward with a single job whose exit stamp is below its entry stamp, for example entry 9000 and exit 8990. Require that wall_count grows by 1 and wall_cycles is unchanged."
+   }
+  ]
+ },
+ {
+  "checked": [
+   "128 x 4 kernel bodies unchanged: git diff --numstat 72e1191804 HEAD on src/tron/kernels/amx_attn.cpp gives 233 added, 0 deleted, so pack_q_group_128x4, qk_rowmajor_128x4 and weights_times_v_128x4 are byte-identical.",
+   "pack_q_group_256x4 (amx_attn.cpp:397-414): 8 panels of 512 bf16, dst index ((step*16+dim_pair)*16+q_head)*2 and src index q_head*256+step*32+2*dim_pair match the documented layout and the B-operand form of TDPBF16PS; only columns 0..3 are written.",
+   "qk_rowmajor_256x4 (amx_attn.cpp:421-458): Q panel load at step*512 bf16 with a 64-byte stride; K loads at block*16*256 + step*32 with a 512-byte stride; the last load ends exactly at 64*256 bf16 (no read past the K plane); 32 products into the same 4 accumulator tiles; 4 stores fill all 1024 floats of s_transposed before it is read.",
+   "store_query_rows (amx_attn.cpp:339-374): same unpack and shuffle sequence as the transposing store of the 128 kernel; lane 0 of columns[group][head] is the head's column; writes s + head*stride + tile*16, at most 256 floats for a stride of 64.",
+   "weights_times_v_256x4 (amx_attn.cpp:464-509): V offset p_tile*16*512 + (group*4+j)*32 bf16 with a 1024-byte stride matches plane[(token/2)*(2*D) + 2*d + token%2] of v_vnni.hpp for D = 256; the last V load ends at 32*512 bf16 (no overrun); stores at o + group*64 + j*16 with a 1024-byte row stride end exactly at 16*256 floats (no overrun of the 16 x 256 buffer).",
+   "Weight rounding (weights_to_bf16, amx_attn.cpp:381-393): cvtne2ps_pbh(hi, lo) keeps the token order, round to nearest even, rows 4..15 of the thread-local p_rows are never written, same as the 128 kernel.",
+   "Gates (self_attention.hpp:226-236): amx_serves_128x4 and amx_serves_256x4 use the same activation-scalar rule and cannot both hold; every former spelled-out gate (lines 1564, 1784, 1930) now reads amx_serves and gives the same value for a 128 x 4 model.",
+   "Slot size (self_attention.hpp:241-250, 290-292): 4096 elements only when plugin::attention_kernels holds a 256 x 4 kernel, else 2048; generated operations must use a geometry from that array (model.hpp:1823-1835), and packed_amx_query has a static_assert per branch that the slot holds the pack (1727-1735), so an undersized slot is a compile error, not an overrun.",
+   "Grow-only resize (self_attention.hpp:1583): the only writers of a slot are the two packers, and both write columns 0..3 only, so padding columns stay zero without a new zero fill; the packed bitset is local to each call, so a slot last written by another shape, another KV head or an earlier call is always packed again before it is read; no other code reads amx_qpack.size().",
+   "Model with both shapes: none exists in the tree (the three-kernel plugin of t/heterogeneous_scheduler_compile.cpp has kv_mul 1); by the argument above a shared 8192-byte slot would still be correct.",
+   "apply_dense_amx_page (self_attention.hpp:1775-1860): kernel choice by if constexpr; amx_o is 16 * head_size floats (16384 bytes for 256); rows are read at offset * operation_head_size; s_pages, scratch and the v*/s*/m* update contain no 128 constant.",
+   "Statistics on the new path: the AMX return {range_hint, page_size, visit_path::amx} is shared by both shapes; attn_stats.hpp has no shape test; header facts take head_size and kv_mul from the model.",
+   "t_amx_numerics.cpp: shape_256x4 calls the amx_attn_h256g4 kernels directly; the QK tolerance 1e-4 * abs_mass + 1e-6 (about 6e-3 for 256 dims) is far below the size of one dropped 32-dim step (standard deviation about 1.9) over 1024 checks; the PV checks fail for a dropped output group, a dropped token half or a wrong V slice; the packer case uses 1024 distinct bit patterns. The kernel cases still skip with a warning on a host without AMX (existing behaviour, README.ci.md:592-594).",
+   "t_amx_dispatch_dtype.cpp: all 9 external symbols of amx_attn.cpp are faked (available, begin_region, end_region, 3 kernels per shape), so the static library member is never extracted; a missing fake would give a duplicate-definition link error, not a silent real-kernel call; non-GDN models reference no amx_gdn symbol (model.hpp:1732-1745 is inside if constexpr), so the header's claim that no AMX instruction is linked still holds; the 256 fakes write the full 8192-byte slot and all 16 x 256 output floats.",
+   "Per-token cost: no new zero fill or copy on the page-visit path; the pack still runs before the dense predicate (existing, tested behaviour), now 1024 scalar copies per token and call (209.8 ns measured in task4-summary-cpu142.txt); its share of a real pass is not measured.",
+   "Notes updated correctly: amx_attn_iface.hpp Note [AMX attention dispatch] and Note [Tile stores write 16 rows], v_vnni.hpp Note [VNNI Packed V layout], t/CMakeLists.txt:696-697, the amx_qpack_slot comment (self_attention.hpp:285-289)."
+  ],
+  "findings": [
+   {
+    "title": "Two headers still say amx_attn.cpp is the only translation unit built with the AMX flags",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/kernels/amx_attn_iface.hpp",
+    "line": 4,
+    "severity": "false-claim",
+    "problem": "amx_attn_iface.hpp:3-5 says the implementations live in amx_attn.cpp, \"the only translation unit compiled with -mamx-tile/-mamx-bf16\". src/tron/kernels/amx_attn.cpp:2-3 says \"The ONLY translation unit compiled with -mamx-tile/-mamx-bf16\". Since commit 28c5dda93d this is false: src/tron/CMakeLists.txt:221-223 gives the same flags to kernels/amx_gdn.cpp, and the CMake comment at lines 212-213 already says \"two translation units\". Commit cbcb771f61 rewrote the neighbouring lines of both file headers and left the sentence.",
+    "scenario": "A reader who audits which objects may hold tile instructions (for example to keep the claim of t_amx_dispatch_dtype.cpp:5-8 that no AMX instruction is linked, or to change the -mamx flags) trusts the sentence, checks amx_attn.cpp only, and misses amx_gdn.cpp. The two statements in the tree contradict each other (header: one unit; CMake comment: two units).",
+    "fix": "Reword both sentences, for example: \"amx_attn.cpp, one of the two translation units compiled with -mamx-tile/-mamx-bf16 (the other is amx_gdn.cpp)\"."
+   },
+   {
+    "title": "Typed-view probes of t_llama_unit cover the 128 x 4 kernels only",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_llama_unit.cpp",
+    "line": 99,
+    "severity": "test-gap",
+    "problem": "amx_qk_accepts and amx_pv_accepts (t_llama_unit.cpp:98-106) and their STATIC_REQUIRE block (lines 509-531) name only qk_rowmajor_128x4 and weights_times_v_128x4. No commit of the change touches this file, so nothing checks that qk_rowmajor_256x4 rejects a bare pointer or a packed V view, or that weights_times_v_256x4 rejects a bare pointer or a K view. Design section 5.6 lists \"the tests that name the 128-wide kernel shape\" among the Part B tests.",
+    "scenario": "A later edit changes the first parameter of weights_times_v_256x4 to const bf16* (or swaps the K and V view types of the two 256 kernels) and adapts the one call site. Every test still passes. The same edit on a 128 kernel fails the STATIC_REQUIRE_FALSE lines at 523-529.",
+    "fix": "Make the two probes templates over the kernel (or add amx_qk256_accepts / amx_pv256_accepts) and repeat the STATIC_REQUIRE block with const_native_k_view<64, 256> and v_vnni_view<const bf16, 64, 256>."
+   },
+   {
+    "title": "Comment in the 128 PV kernel says \"one of the two layout-specific readers\"; there are now three",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_attn.cpp",
+    "line": 225,
+    "severity": "false-claim",
+    "problem": "amx_attn.cpp:224-225 says weights_times_v_128x4 \"is one of the two layout-specific readers allowed to take the plane address\". The change adds weights_times_v_256x4, which also calls detail::v_vnni_access::plane (line 473). v_vnni.hpp:44-51 was reworded to list three readers (scaled_v_expr and both PV kernels) and the new kernel's own comment (line 471) says \"one of the layout-specific readers\", so the two comments in one file disagree. A related leftover: Note [QK orientation] (amx_attn_iface.hpp:199) says stored K is \"one 128-dim bf16 row per token\", and the 256 kernel refers to that Note.",
+    "scenario": "A reader counts the code that may compute a packed V address from this comment, finds two, and misses the 256 kernel when the V layout changes.",
+    "fix": "Drop the count: \"This kernel is one of the layout-specific readers ...\". A comment edit does not change the kernel's object code. In the Note write \"one head-size bf16 row per token\"."
+   },
+   {
+    "title": "The transposing store and the weight rounding now exist twice in amx_attn.cpp",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_attn.cpp",
+    "line": 339,
+    "severity": "cleanup",
+    "problem": "store_query_rows (lines 339-374) repeats lines 186-215 of qk_rowmajor_128x4 instruction for instruction, and weights_to_bf16 (lines 381-393) repeats lines 233-241 of weights_times_v_128x4. The 128 kernels do not call the helpers. Duplicated logic is one of the review checks of this repository. Note [AMX attention dispatch] (amx_attn_iface.hpp:83-85) still says a truncating version \"is a one-line change at the cvtne2ps_pbh call\"; there are now two such calls (lines 239 and 390).",
+    "scenario": "A later fix to the rounding or to the transpose is made in one copy only. The two shapes then follow different numerics while the Note states one contract for both. The 128 band test and the 256 band test each check only their own copy.",
+    "fix": "Smallest step now: say in the helper comments that the 128 kernels keep their own copy on purpose (their object code was measured), and change the Note to \"at the two cvtne2ps_pbh calls\". Follow-up: call the two helpers from the 128 kernels and show equal bits with the band tests and an objdump comparison."
+   }
+  ]
+ },
+ {
+  "checked": [
+   "gdn_prepare_recurrence_token against gdn_recurrence (gated_delta_net.hpp:379-420 vs 240-307): no finding. Same normalize_gdn, gdn_decay, gdn_beta and BF16 rounding of the value. The only changed form is the query scale (vector multiply instead of scalar multiply then broadcast), which is one FP32 multiply per lane in both.",
+   "Compiler contraction and reordering: no finding. Neither kernel holds an a*b+c expression outside an explicit fma. The CMake files set no -ffast-math, -ffp-contract or -fveclib flag, and the presets use clang-19.",
+   "gdn_decay refactor inside gdn_recurrence (gated_delta_net.hpp:203-208, 268-269): no finding. The expression is the one that was inline before.",
+   "gdn_recurrence_slice (gated_delta_net.hpp:441-507): no finding. Per chunk, the fma sequence equals gdn_recurrence for the first token (separate read loop), for joined tokens, for the last token (else branch), for n_tokens = 1, and across windows (the state is stored, then read again by the next read loop). It matches chain_half of the prototype bench/gdn_kernels.hpp:93-144.",
+   "Slice layout helpers for value_head_dim 16, 80 and 128 (gated_delta_net.hpp:513-539): no finding. Slice s starts at key_head_dim * 64 * s floats, the last slice has width value_head_dim mod 64, and the total is key_head_dim * value_head_dim floats. gdn_recurrence_chain_head (lines 574-581) uses the same offsets.",
+   "gdn_recurrence_chain_head offsets and strides (gated_delta_net.hpp:545-582): no finding. Key head = value_head / (value heads per key head), value and output start at value_head * value_head_dim + first column, strides are the window row widths, decay and beta step by n_value_heads.",
+   "Alignment of every tron_mm_load_ps and tron_mm_store_ps on the chain path: no finding. The window arrays and recurrent_state_slices are alignas(64 bytes), every row and slice offset is a multiple of 16 floats, tensor::data is alignas(chunk_alignment), and the working set comes from make_unique_for_overwrite with over-aligned new.",
+   "Executor start_from_zero, start_from_checkpoint, write_checkpoint, validate_checkpoint_values (gdn_rolling_executor.hpp:320-403, 718-741): no finding. A group reads and writes only its own recurrent rows and history runs, the source is only read (memcpy), source == destination works with a working copy, and the NaN check covers every slice float and the group's history.",
+   "step() on a working copy and a chain of exactly 1 token (gdn_rolling_executor.hpp:421-428): no finding. It runs prepare, gdn_recurrence_chain with n_tokens = 1 and postprocess on window entry 0. run_gdn_operation still sends 1-token chains to step() in place. The existing case 'checkpoints preserve its dependency chain' runs step() with working_copy access.",
+   "Window grid arithmetic (gdn_rolling_executor.hpp:500-517): no finding. to_boundary is 0 on a boundary, a full window exists exactly when n_tokens >= to_boundary + 32, and window_tokens = min(tokens left, 32 - position mod 32). No size_t expression can overflow for real positions.",
+   "Aliasing of output rows with input rows: no finding. The plugin passes five distinct indexed_vector buffers (qwen_3p5_4b.hpp:973-977, 1165; decay and update swap between linear_2 and linear_3 per layer, consistent with the matmul names). An output row that exactly aliases its gate row is still safe in advance(): postprocess reads a gate chunk before it stores the same output chunk, and no later token of the window reads an output row. No test covers that alias case, for step() or for advance().",
+   "noexcept on advance(): no finding. It allocates nothing, and TRON_ASSERT aborts instead of throwing.",
+   "Concepts and ranges (gdn_rolling_executor.hpp:47-59, 475-480): no finding at run time. A non-random-access token container is rejected by the constraint. The body also calls std::ranges::size, so a random-access range without a size passes the constraint and fails inside the body; adding std::ranges::sized_range would state the real need.",
+   "Fallback after a refused AMX block (gdn_rolling_executor.hpp:673-678): no finding on the chain side. gdn_recurrence_chain_head gets the group-local value head and rewrites all output columns of that head, and the AMX kernel restores MXCSR through a scope object before it returns false (amx_gdn.cpp:141-153).",
+   "Cost of the new branch in step() on the decode path: no change visible in the existing runs. Base 273.3 tok/s (run q-orig) against 272.1 to 274.9 tok/s (runs q-a, f-a) at 1 user, prompt 1024, in /home/jhan/workspace/intel-AMX/exec/results/gdn-impl-20261121/rt-results.txt. These are single runs of tips 5d66d2f09f and e637cba82f, not of the reviewed HEAD cbcb771f61."
+  ],
+  "findings": [
+   {
+    "title": "advance() references the AMX tile-region functions in builds without TRON_AMX_DISPATCH",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 507,
+    "severity": "bug",
+    "problem": "Lines 507-510 call amx_attn_h128g4::begin_region() and end_region() outside any #ifdef TRON_AMX_DISPATCH. Both functions are defined only in src/tron/kernels/amx_attn.cpp. CMake compiles that file only when the option is ON (src/tron/CMakeLists.txt:220-225). Every other AMX reference in this header sits inside the #ifdef (lines 220, 637, 650). The attention call site does the same (self_attention.hpp:1555-1590). Note [AMX attention dispatch] says that with the option off every dispatch block is excluded (amx_attn_iface.hpp:37-39).",
+    "scenario": "Configure with the option off and without optimization. The presets asan, tsan and coverage in CMakePresets.json do this: CMAKE_BUILD_TYPE=Debug gives -O0, and the option defaults to OFF. use_block_kernel is a run-time bool, so at -O0 the compiler emits both calls. Every binary that instantiates advance() (t_gated_delta_net, each plugin with GDN operations) then fails to link with an undefined reference to tron::amx_attn_h128g4::begin_region(). Optimized builds link only because the optimizer removes the dead branch. I did not run a build (reader role); this follows from the code and the CMake files.",
+    "fix": "Put the two statements of lines 505-510 inside #ifdef TRON_AMX_DISPATCH, as self_attention.hpp does. Keep use_block_kernel defined outside the #ifdef, because block_window still reads it."
+   },
+   {
+    "title": "No test can fail when advance() cuts the windows wrongly or never calls the block kernel",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_gated_delta_net.cpp",
+    "line": 2778,
+    "severity": "test-gap",
+    "problem": "Four facts leave the window grid and the block dispatch of advance() unprotected. (1) With the block kernel off, every cut gives the same bytes, so the byte tests (lines 2755-2776) cannot see the grid. (2) The case 'stays close to step' accepts equal results. So it passes when the block kernel never runs. On a host without AMX it passes with no WARN, unlike t_amx_gdn_numerics.cpp:181-182. (3) Its comment (lines 2780-2783) says every run holds at least one full window of 32 tokens. The combination first_position 7, n_tokens 32 covers positions 7 to 38 and holds none. (4) The only executor-level check of the grid counter is half_full_block_tokens == 0 for a 3-token chain (line 2374).",
+    "scenario": "Three edits keep every test green on every host. Edit A: cut windows from the chain start in gdn_rolling_executor.hpp:516 (use done instead of position). Edit B: make use_block_kernel always false (line 502). Edit C: change gdn_slice_chunks, which turns block_kernel_shape to false without a diagnostic (lines 221-224). After A, the claim of Note [Rolling GatedDeltaNet execution] that windows follow the token position is broken, and resumed prompts give other bytes than the contract says. After B or C, the AMX block kernel is silently off.",
+    "fix": "In run_chain_case pass a gdn_stats::work_tally to advance() and return it. Check head_tokens[amx_block] + half_full_block_tokens == 32 x key heads x (grid windows inside the run): 2 windows for (0, 71), 1 for (7, 71), 0 for (7, 32). Where amx_gdn_k128v128::available() is true, also require amx_blocks + amx_fallback_blocks == value heads x that number; elsewhere WARN that the block kernel did not run. Correct the comment for the (7, 32) case."
+   },
+   {
+    "title": "gdn_stats.hpp states a block grid that advance() does not use",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 134,
+    "severity": "false-claim",
+    "problem": "The comment at lines 134-135 says: 'The blocks of a chain are counted from its first token, and that is the grid of half_full_block_tokens.' advance() counts full windows on the grid of token positions in the sequence (gdn_rolling_executor.hpp:500-517). The Note in the executor says the same as the code (lines 104-109).",
+    "scenario": "Take a chain with source height 7 and 71 tokens. The comment implies 2 full blocks (64 tokens). advance() finds one full window, positions 32 to 63, and counts 32 tokens per key head as half_full_block_tokens or on the amx path. A reader who uses the comment computes a wrong expected AMX share for prompts that resume inside a window.",
+    "fix": "Reword to: 'A block starts where the token position in the sequence is a multiple of 32; see Note [Rolling GatedDeltaNet execution].' Optionally fill facts.block_tokens in model.hpp from gdn_window_tokens, so that the stats constant and the executor constant cannot diverge."
+   },
+   {
+    "title": "Two executor comments describe only one of the two paths",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 422,
+    "severity": "false-claim",
+    "problem": "(1) Lines 422-423 say: 'A working copy holds the slice layout, which only the chain kernel reads.' The AMX block kernel reads and writes the same layout (amx_gdn_iface.hpp:100-102 and 147-149; call at executor lines 671-674). (2) Lines 129-137 of Note [Rolling GatedDeltaNet execution] say that the recurrence reads the convolved value suffix in the convolution buffer, writes a separate output tensor, and that postprocessing reuses that tensor. After this change that holds only for step() in place. On a working copy the recurrence reads window.value (a BF16-rounded copy) and writes window.output, and recurrence_output is unused.",
+    "scenario": "A reader who follows the Note looks for the output of a working-copy step in recurrence_output and finds stale values. A reader of line 422 concludes that the block kernel needs a layout conversion that does not exist.",
+    "fix": "Line 422: write 'the slice layout, which gdn_recurrence cannot read'. Note: add one sentence that on a working copy the window holds these values (window.value and window.output); see Note [GatedDeltaNet chain recurrence]."
+   }
+  ]
+ },
+ {
+  "checked": [
+   "Review narration (positron-code-review): no added comment cites a review round, a reviewer label, an issue or a pull request number. The 'Measured on a Xeon 6962P' lines give lasting reasons for bounds.",
+   "Hidden fills on per-token paths: working_set comes from make_unique_for_overwrite (gdn_rolling_executor.hpp:566), the fp32 decay and update rows use {uninitialized}, block_scratch and the kernel-local __m512 arrays have no fill, and s_transposed in qk_rowmajor_256x4 names its writer. No finding.",
+   "Try-with-fallback shape (ben-review G4) of the block kernel: advance_value_head is [[nodiscard]], returns false with the matrix untouched, and the executor falls back per value head (gdn_rolling_executor.hpp:673-678). No finding.",
+   "Formulas of Note [AMX GatedDeltaNet block kernel] against amx_gdn.cpp: g_t, w_tu, r_t, delta_t, o_t and S_B match the coefficient code at lines 387-418 and stages 1 to 4. The bounds 2^-103 (split exact) and 2^105 (stage 4 sum) agree with the split and with the refusal exponent 227. No finding.",
+   "NAME_<value> names in the 256 x 4 part of amx_attn.cpp and amx_attn_iface.hpp: every new constant carries its value and a static_assert checks it. No finding.",
+   "lower_snake constexpr names and braceless multi-line bodies in gated_delta_net.hpp follow the base file. No finding.",
+   "[[maybe_unused]] on tally (gdn_rolling_executor.hpp:649): needed, because the preprocessor removes the whole body without TRON_AMX_DISPATCH, and the #ifdef blocks follow the convention of self_attention.hpp. No finding.",
+   "Memory figure in Note [GDN path stats]: worker_op_row has 17 atomics (136 bytes), 192 bytes at alignas(64), and 2 x 56 x 24 x 192 = 516,096 bytes. Correct.",
+   "gdn_decay (gated_delta_net.hpp:205-208) is the expression that gdn_recurrence had inline, so both kernels share one definition. No finding.",
+   "Comments of self_attention.hpp and v_vnni.hpp for the second shape (slot size, 'the array only grows', the list of layout-specific kernels) match the code. No finding.",
+   "Chain kernel loop bodies (gated_delta_net.hpp:483-507): the write loop appears twice, joined and plain. I did not report it: sharing the three common lines changes the shape of the hottest loop and would need a measurement.",
+   "Scope cut: the test files were read for comments and helper structure only. Test strength (for example cases that pass on a host without AMX) belongs to another lens and is not reported here."
+  ],
+  "findings": [
+   {
+    "title": "Stats comment says blocks are counted from the chain's first token; advance() counts them on the sequence-position grid",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 134,
+    "severity": "false-claim",
+    "problem": "Lines 134-135 say: 'The blocks of a chain are counted from its first token, and that is the grid of half_full_block_tokens.' The second commit implements another rule. advance() ends a window where the token position in the sequence reaches a multiple of gdn_window_tokens (gdn_rolling_executor.hpp:498-516, and Note [Rolling GatedDeltaNet execution] lines 106-109). The grid starts at sequence position 0, not at the chain's first token.",
+    "scenario": "A chain has source_height 10 and 40 tokens. By the comment it holds one full block, so a reader expects 32 amx head tokens per key head (or 32 half_full_block_tokens without AMX). advance() cuts it into positions 10..31 (22 tokens) and 32..49 (18 tokens). There is no full window, and both counters read 0. A reader who checks the counters against chain lengths concludes that the AMX path lost tokens.",
+    "fix": "Replace lines 134-135 with: '// Tokens of one block of the AMX block path. A block covers the token\\n// positions 32 n to 32 n + 31 of a sequence, whatever position its chain\\n// starts at (Note [Rolling GatedDeltaNet execution]).\\n// half_full_block_tokens uses the same grid.'"
+   },
+   {
+    "title": "Note [Rolling GatedDeltaNet execution] states that step() and advance() give the same bytes, without the condition",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 102,
+    "severity": "false-claim",
+    "problem": "Lines 101-104 say: 'advance() advances it by a run of tokens and needs a working copy. Both give the same bytes for the same tokens'. The next paragraph (lines 111-115) says the block kernel gives results within an error band of step(), not its bytes. The only production caller passes gdn_block_kernel::when_available (gdn_execution.hpp:165-167). So the first sentence is false on every AMX host for a run that holds a full window.",
+    "scenario": "A reader needs to know whether prefill through advance() is bit-identical to a replay with step(). The reader stops at the first paragraph and answers yes. On an AMX host a 64-token prompt chain takes two block windows, and a share of its bf16 outputs differs by one increment.",
+    "fix": "Reword lines 102-104: 'advance() advances it by a run of tokens and needs a working copy. With the chain kernel it gives the bytes that step() gives for the same tokens; see Note [GatedDeltaNet chain recurrence] in tron/kernels/gated_delta_net.hpp.' The next paragraph then states the exception for the block kernel, as it does now."
+   },
+   {
+    "title": "Two unchanged comments still call amx_attn.cpp the only translation unit with the AMX flags",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_attn.cpp",
+    "line": 2,
+    "severity": "false-claim",
+    "problem": "amx_attn.cpp:2-3 says 'The ONLY translation unit compiled with -mamx-tile/-mamx-bf16.' amx_attn_iface.hpp:3-5 says 'the implementations live in src/tron/kernels/amx_attn.cpp, the only translation unit compiled with -mamx-tile/-mamx-bf16.' Commit 28c5dda93d adds src/tron/kernels/amx_gdn.cpp with the same flags and updates the CMake comment to 'two translation units' (src/tron/CMakeLists.txt). The two source comments were left as they were.",
+    "scenario": "A maintainer audits where AMX instructions can be emitted, for example for item 1 of the safety chain in Note [AMX attention dispatch]. The maintainer trusts 'the only translation unit' and does not look at amx_gdn.cpp.",
+    "fix": "amx_attn.cpp:1-3: '// AMX software-attention kernels. See Note [AMX attention dispatch]\\n// (in amx_attn_iface.hpp). Compiled with -mamx-tile/-mamx-bf16. The one\\n// other translation unit with these flags is amx_gdn.cpp.' amx_attn_iface.hpp:3-5: '...the implementations live in src/tron/kernels/amx_attn.cpp, which is compiled with -mamx-tile/-mamx-bf16.'"
+   },
+   {
+    "title": "'Does the block kernel serve this state' has two formulas, and the block length has three constants",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 221,
+    "severity": "risk",
+    "problem": "block_kernel_shape (lines 221-224) is shape_ok(...) && gdn_window_tokens == BLOCK_TOKENS_32 && gdn_slice_chunks * chunk_size == SLICE_COLUMNS_64. The last two terms do not depend on the geometry or on the build (chunk_size is always 16). They are consistency conditions between two files, written as terms of a run-time policy. model.hpp:1742-1745 answers the same question for the stats with another formula: shape_ok(...) and amx_gdn_k128v128::available(). A third constant for the same length, gdn_stats::BLOCK_TOKENS_32 (gdn_stats.hpp:136), feeds the 'block_tokens' fact (model.hpp:1747) and is tied to neither gdn_window_tokens nor amx_gdn_k128v128::BLOCK_TOKENS_32.",
+    "scenario": "Someone sets gdn_slice_chunks to 2 for an L1 experiment, or gdn_window_tokens to 64. The build passes. block_kernel_shape becomes false, and every window takes the chain kernel. The summary leaf still prints \"amx_gdn_enabled\":true and \"block_tokens\":32, because model.hpp uses its own formula and its own constant. amx_head_tokens reads 0 with no error.",
+    "fix": "Keep the geometry test in the predicate and make the two layout conditions fail the build:\n#ifdef TRON_AMX_DISPATCH\n  static constexpr bool block_kernel_shape =\n      amx_gdn_k128v128::shape_ok(key_head_dim, value_head_dim);\n  // The block kernel reads the window and the slice layout of this file.\n  static_assert(gdn_window_tokens == amx_gdn_k128v128::BLOCK_TOKENS_32);\n  static_assert(gdn_slice_chunks * chunk_size == amx_gdn_k128v128::SLICE_COLUMNS_64);\n#else ...\nAdd static_assert(gdn_stats::BLOCK_TOKENS_32 == gdn_window_tokens) in the same file, which includes both headers (or delete the stats constant and pass gdn_window_tokens). Let model.hpp ask the owner: make block_kernel_available() public and set facts.amx_gdn_enabled = gdn_rolling_head_executor<gdn_kernels[0].geometry>::block_kernel_available(). That removes the if constexpr and the amx_gdn_iface.hpp include from model.hpp."
+   },
+   {
+    "title": "amx_fallback_blocks comment gives one of the two refusal reasons; README omits the unit of amx_blocks",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 180,
+    "severity": "false-claim",
+    "problem": "Lines 180-181 say the kernel refused the blocks 'because a value was not finite'. The kernel also refuses a block whose corrections are finite but reach 2^100 (amx_gdn.cpp:77-79 and 465-470, and the 'Refusal' paragraph of Note [AMX GatedDeltaNet block kernel]). README.stats.md:340-341 says 'amx_blocks counts the blocks of block_tokens tokens'. The code counts one block per value head (gdn_rolling_executor.hpp:679-680), while amx_head_tokens counts once per key head.",
+    "scenario": "A run shows amx_fallback_blocks > 0. The reader searches for a NaN or an infinity in the state and finds none, because the cause was a finite correction of 2^100 or more. Second case: with two value heads per key head (the grouping that t_amx_gdn_numerics.cpp:33 names), amx_blocks x block_tokens is twice amx_head_tokens. By the README text the two should be equal, so the reader suspects double counting.",
+    "fix": "gdn_stats.hpp:180-181: '// Value-head blocks that the AMX block kernel refused: a correction or an\\n// output was not finite, or a correction reached 2^100. They ran the chain\\n// kernel.' README.stats.md:340-342: '`amx_blocks` counts the value-head blocks that the AMX block kernel finished. One value-head block is one value head over `block_tokens` tokens, so a key head with two value heads adds 2 per block. `amx_fallback_blocks` counts the value-head blocks that it refused.'"
+   },
+   {
+    "title": "One kernel has two names: 'chain kernel' and 'slice' in the kernels, 'column_half' and 'half' in the stats",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 126,
+    "severity": "cleanup",
+    "problem": "The kernel header and the executor call the non-AMX run kernel 'the chain kernel' (gdn_recurrence_chain), its column group 'a slice' and its token group 'a window'. The stats call the same path gdn_path::column_half, key prefix 'half', 'the column-half kernel' (lines 22-23, 181, 183), half_full_block_tokens, and 'block'. 'Half' is true only when a slice is half of a head (value_head_dim 128). The work_tally comments at lines 189, 192 and 195 use a third term, 'chain path', for advance() as a whole. That includes AMX block windows, so it collides with 'chain kernel'. Line 22-23 also says the kernel advances 'the tokens of a chain' over a column group. It advances the tokens of one window.",
+    "scenario": "t_gated_delta_net.cpp:2366-2367 needs a comment to translate: 'the chain kernel, which the stats call the column-half path'. A reader of 'pre_cycles ... (chain path)' assigns that time to the chain kernel only. AMX block windows add their prepare time to pre_cycles too (gdn_rolling_executor.hpp:545).",
+    "fix": "Rename before the JSON keys are used by scripts: gdn_path::column_half -> gdn_path::chain, PATH_NAMES {\"token\", \"chain\", \"amx\"}, half_full_block_tokens -> chain_full_window_tokens. Note line 22: '  chain  the chain kernel, gdn_recurrence_chain. It advances the tokens of a\\n//          window over one slice of state columns at a time.' In work_tally write '(advance())' where the comments say '(chain path)'. Update README.stats.md:336-343 and drop the translating comment in the test. If the key 'half' must stay because result files already use it, state the mapping once in Note [GDN path stats] and in README.stats.md:338."
+   },
+   {
+    "title": "GDN code and the 256 x 4 kernels reach into amx_attn_h128g4 for the AMX probe and the tile region",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 507,
+    "severity": "cleanup",
+    "problem": "available(), begin_region(), end_region(), TILE_ROWS_16 and TILE_ROW_BYTES_64 are facts of the process and the thread. They live in a namespace named after one attention shape. Before this change only that shape used them. Now the GDN executor (lines 507-510), amx_gdn.cpp (lines 19-20, 133), model.hpp:1738 and the amx_attn_h256g4 namespace (amx_attn_iface.hpp:260-264) import them from amx_attn_h128g4. The begin/finally bracket is also written a second time (self_attention.hpp:1584-1590 and gdn_rolling_executor.hpp:507-510). The comments 'One function answers for both kernel shapes' (amx_attn_iface.hpp:175-176) and 'one bracket serves the kernels of both namespaces' (247-248) do not count the GDN block kernel.",
+    "scenario": "A reader of the GDN executor sees amx_attn_h128g4::begin_region() in a recurrence kernel path. The reader must open the attention header to learn that the call is independent of the shape and of attention. A fourth kernel family would add one more import from a namespace whose name describes none of its users.",
+    "fix": "Smallest form, with no change to existing callers or test fakes. Add to amx_attn_iface.hpp:\nnamespace tron::amx {\n// The AMX probe, the tile shape and the tile region of every AMX kernel set.\nusing amx_attn_h128g4::available;\nusing amx_attn_h128g4::begin_region;\nusing amx_attn_h128g4::end_region;\nusing amx_attn_h128g4::TILE_ROWS_16;\nusing amx_attn_h128g4::TILE_ROW_BYTES_64;\n// Holds the tile configuration of the thread while `on` is true.\nclass tile_region {\npublic:\n  explicit tile_region(bool on) noexcept : on_(on) { if (on_) begin_region(); }\n  ~tile_region() { if (on_) end_region(); }\n  tile_region(tile_region const&) = delete;\n  tile_region& operator=(tile_region const&) = delete;\nprivate:\n  bool on_;\n};\n}\nThe new code (gdn_rolling_executor.hpp:507-510, amx_gdn.cpp, model.hpp:1738, amx_attn_h256g4) then uses tron::amx. The executor's four lines become 'amx::tile_region const tile_region(use_block_kernel);'. Reword the two comments to 'every AMX kernel set'."
+   },
+   {
+    "title": "gdn_slice_run and key_head_block are the same nine fields with different offset rules, and three sites compute window strides",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/kernels/amx_gdn_iface.hpp",
+    "line": 131,
+    "severity": "cleanup",
+    "problem": "gdn_slice_run (gated_delta_net.hpp:433-443) and key_head_block (amx_gdn_iface.hpp:131-141) both hold key, query, key_stride, value, output, value_stride, decay, beta, scalar_stride. The meanings differ. In gdn_slice_run, value/output/decay/beta already point at one value head and one slice. In key_head_block they point at the first value head of the key head, and the kernel adds the head. One holds the scaled query, the other the unscaled one. The layout of gdn_recurrence_window (row strides key_width, value_width, n_value_heads) is spelled out at three sites outside the type: gated_delta_net.hpp:579-592, gdn_rolling_executor.hpp:655-667 and t_amx_gdn_numerics.cpp:105-117. The stride fields do not name their unit, while amx_attn_iface.hpp uses s_stride_floats and row_stride_floats.",
+    "scenario": "A reader who knows one struct reads the other and assumes the same base addresses. block.decay[token * block.scalar_stride + value_head] (amx_gdn.cpp:395) and run.decay[token * run.scalar_stride] (gated_delta_net.hpp:471) then look like a bug in one of the two. A change of the window layout (for example one array per token) needs the same edit at three sites, and a missed site reads wrong rows without a compile error.",
+    "fix": "Let the window hand out its rows. Put one plain struct in a header without SIMD includes, so amx_gdn.cpp can include it:\n// Token-indexed FP32 rows of one key head of a gdn_recurrence_window. Row t of\n// a field starts t * <field>_stride_floats after its address.\nstruct gdn_key_head_rows {\n  float const* normalized_key;\n  float const* normalized_query;  // read by the AMX block kernel\n  float const* scaled_query;      // read by the chain kernel\n  size_t key_stride_floats;\n  float const* value;             // first value head of the key head\n  float* output;\n  size_t value_stride_floats;\n  float const* decay;\n  float const* beta;\n  size_t scalar_stride_floats;\n};\nAdd gdn_recurrence_window::key_head_rows(size_t key_head) as its one constructor. gdn_recurrence_slice takes (rows, value head of the key, first_column), and advance_value_head keeps (scratch, rows, value_head, head_slices). This deletes gdn_slice_run, key_head_block, the slice_run lambda, the initializer in the executor and block_of in the test. The differences that must stay: which query each kernel reads, and the slice column offset of the chain kernel."
+   },
+   {
+    "title": "Three call sites pick the kernel set with 'if constexpr (amx_serves_256x4<geometry>)'; the test already has the missing kernel-set type",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/self_attention.hpp",
+    "line": 1726,
+    "severity": "cleanup",
+    "problem": "packed_amx_query (1726-1737), the QK call (1802-1808) and the PV call (1834-1842) each carry the compile-time clause that picks amx_attn_h256g4 or amx_attn_h128g4. amx_q_pack_elems (241-250) is a fourth place that names both shapes. Each pair of branches differs only in the namespace and the name suffix. t_amx_numerics.cpp:45-81 defines the concept that production lacks: shape_128x4 and shape_256x4, each with head_size, q_pack_elems, pack, qk and pv.",
+    "scenario": "A reader of the dense-page path must compare three pairs of near-identical calls to confirm that only the shape differs. A third shape (for example 128 x 8) needs a new branch at every site, and a missed site compiles: the else branch silently takes the 128 x 4 kernel at the QK and PV sites, where only the pack site asserts amx_serves_128x4.",
+    "fix": "Move the two structs of the test into amx_attn_iface.hpp as amx_attn_h128g4::kernel_set and amx_attn_h256g4::kernel_set (inline wrappers around the existing entry points, so the fakes of t_amx_dispatch_dtype.cpp keep working). Select once in self_attention.hpp:\ntemplate <attention_geometry geometry>\nusing amx_kernel_set = std::conditional_t<amx_serves_256x4<geometry>,\n    amx_attn_h256g4::kernel_set, amx_attn_h128g4::kernel_set>;\nThe three sites become amx_kernel_set<geometry>::pack(q_group, slot), ::qk(...), ::pv(...), each with one static_assert on q_pack_elems or none. The test uses the shared structs."
+   },
+   {
+    "title": "prepare_window_token repeats the first 16 lines of step()",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 605,
+    "severity": "cleanup",
+    "problem": "Lines 605-620 (gather the group's channels, convert the decay and update rows to FP32, convolve in place) are a copy of lines 430-445 of step(). The seven-view argument list at 624-632 repeats 457-462. Only the comment differs by one word ('The kernel takes FP32 views' against 'The recurrence kernel takes FP32 views').",
+    "scenario": "A reader must compare the two blocks line by line to confirm that the in-place path and the working-copy path prepare a token in the same way. A later change to the gather or to the convolution call (for example another history layout) that reaches only one copy makes a one-token chain and a longer chain differ, and no type error reports it.",
+    "fix": "Extract the shared front part and call it from both:\n// Gathers the group's channels of one mixed Q/K/V row and convolves them in\n// place. See Note [Rolling GatedDeltaNet execution].\ntemplate <gdn_activation_row<full_convolution_channels> mixed_qkv_row>\nvoid convolve_token(mixed_qkv_row const& mixed_qkv) noexcept {\n  working_set& working = *working_;\n  for (size_t chunk = 0; chunk < group_convolution_chunks; ++chunk)\n    working.convolution_qkv.store_chunk(\n        chunk, mixed_qkv.chunk(working.source_chunks[chunk]));\n  gdn_conv1d_silu(working.convolution_qkv,\n      gdn_conv1d_history<full_convolution_channels>(working.convolution_history,\n          full_convolution_channels * gdn_conv1d_history_width),\n      working.convolution_qkv, working.operation->convolution_weights,\n      working.source_chunks);\n}\nThe FP32 conversion of the two scalar rows (6 lines) can move into a second small helper that fills two caller-declared {uninitialized} tensors."
+   },
+   {
+    "title": "advance() takes nine parameters and six template parameters; five of them are one row set",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 481,
+    "severity": "cleanup",
+    "problem": "advance(tokens, first_position, block_kernel, mixed_qkv, output_gate, decay_input, update_input, output, tally). The five row buffers are one concept: the activation rows of the operation, indexed by token job. The generator already names it (GDN.SequenceInputs, ingest/src/TronCpp.hs:3138). decay_rows and update_rows have the same constraint, gdn_activation_rows<token_range, n_value_heads>.",
+    "scenario": "At the call sites (gdn_execution.hpp:165-167 and four test calls) a reader must count nine positional arguments to match them to names. A call that swaps decay and update compiles, because both satisfy the same concept, and it returns plausible wrong outputs. step() has this hazard already. advance() repeats it with four more arguments around it.",
+    "fix": "Group the rows for the new function only, and leave step() and run_gdn_operation as they are:\n// The activation rows of one GatedDeltaNet operation, indexed by token job.\ntemplate <typename mixed_qkv_rows, typename gate_rows, typename decay_rows,\n    typename update_rows, typename output_rows>\nstruct gdn_sequence_rows {\n  mixed_qkv_rows const& mixed_qkv;\n  gate_rows const& output_gate;\n  decay_rows const& decay_input;\n  update_rows const& update_input;\n  output_rows& output;\n};\nvoid advance(token_range const& tokens, size_t first_position,\n    gdn_block_kernel block_kernel, rows_type const& rows,\n    gdn_stats::work_tally* tally = nullptr) noexcept;\nThe caller writes gdn_sequence_rows{.mixed_qkv = mixed_qkv, .output_gate = output_gate, .decay_input = decay, .update_input = update, .output = output}. That is five parameters, and the two same-typed rows are named at the call."
+   },
+   {
+    "title": "copy_cycles is never written: every leaf prints a counter that is always 0",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 192,
+    "severity": "cleanup",
+    "problem": "work_tally::copy_cycles is 'reserved for state layout copies of the chain path'. No code adds to it (the only uses are the definition, add(), row_sums::add and put_counts). The copies it was reserved for exist now: gdn_state_to_slices and gdn_slices_to_state run inside start_from_checkpoint and write_checkpoint, so their time is already in start_cycles and write_cycles. README.stats.md:345-347 and Note line 42 list copy_cycles as a part of busy_cycles.",
+    "scenario": "A reader of a report sees \"copy_cycles\":0 next to non-zero start and write cycles and concludes that the layout conversion costs nothing. The conversion of a 128 by 128 head per value head is in the two neighbouring counters. t_gated_delta_net.cpp:2384 pins the value to 0.",
+    "fix": "Delete the field from work_tally, worker_op_row, add(), row_sums::add, put_counts, the Note (line 42), README.stats.md:346 and the two tests (t_gdn_stats.cpp numbers the keys up to base + 15). If the key must stay for a fixed format, replace the comment with the fact: '// Always 0. The state layout copies of a working copy are counted in\\n// start_cycles and write_cycles.' and say the same in the README."
+   },
+   {
+    "title": "amx_gdn.cpp: constants without the value in the name, a duplicate definition, bare literals, and opaque field names",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_gdn.cpp",
+    "line": 285,
+    "severity": "style",
+    "problem": "The file follows NAME_<value> for most constants and breaks it in these places. (1) KQ_ROW_BYTES (285 and again 324), GH_ROW_BYTES (286), RU_ROW_BYTES (325), KT_ROW_BYTES (474): no value, function-local, one defined twice. The 256 x 4 code of the same change writes K_ROW_BYTES_512 with a static_assert. (2) REFUSE_CORRECTION_BITS (79) and NOT_FINITE_BITS (81): no value, built from bare 227u and 255u. (3) transpose_16x16 loop bounds 8 and 4 (171, 175, 183, 189), and 'KEY_DIM_128 / 2', 'BLOCK_TOKENS_32 / 2', '2 * pair' (339-342, 478-483). (4) Piece indexes 0, 1, 2 (345-348, 356-358, 485-491) stand for low, middle, high, while struct pieces lists high first. (5) Stage 2 loads K transposed into HIGH_PIECE_TILE_6 (294-302). (6) scratch_layout fields gh and ru (96, 102) are letters that the Note never defines, and 'query rows start at BLOCK_TOKENS_32' is written as BLOCK_TOKENS_32 + token at 240, 412 and 435.",
+    "scenario": "A reader of '_tile_loadd(HIGH_PIECE_TILE_6, s.kt_pairs[step][token_tile], ...)' looks for a three-piece split in stage 2, where there is none. A reader of s.ru[BLOCK_TOKENS_32 + token] must find the struct comment to learn that the second half holds the query products. A change of KEY_DIM_128 leaves the name KQ_ROW_BYTES silent about its new value, where the neighbouring file fails a static_assert.",
+    "fix": "At namespace scope, next to the other shape numbers:\nconstexpr size_t KQ_ROW_BYTES_256 = KEY_DIM_128 * sizeof(uint16_t);\nconstexpr size_t GH_ROW_BYTES_128 = BLOCK_TOKENS_32 * sizeof(float);\nconstexpr size_t RU_ROW_BYTES_512 = VALUE_DIM_128 * sizeof(float);\nconstexpr size_t KT_ROW_BYTES_64 = BLOCK_TOKENS_32 * sizeof(uint16_t);\nconstexpr uint32_t EXPONENT_OF_2_POW_100_227 = 227;\nconstexpr uint32_t EXPONENT_NOT_FINITE_255 = 255;\nconstexpr uint32_t REFUSE_CORRECTION_BITS_0X71800000 = EXPONENT_OF_2_POW_100_227 << EXPONENT_SHIFT_23;\nconstexpr uint32_t NOT_FINITE_BITS_0X7F800000 = EXPONENT_NOT_FINITE_255 << EXPONENT_SHIFT_23;\nconstexpr size_t PAIR_ROWS_2 = 2;\nconstexpr size_t LOW_PIECE_0 = 0, MIDDLE_PIECE_1 = 1, HIGH_PIECE_2 = 2;\nconstexpr int KEY_PAIRS_TILE_6 = 6;  // stage 2: K transposed, pair-interleaved\nconstexpr size_t QUERY_ROWS_FROM_32 = BLOCK_TOKENS_32;\nwith one static_assert that each name states its value, as amx_attn.cpp does. Name the two transpose loop bounds (LANES_16 / 2 and LANES_16 / 4) and keep the index offsets as literals, as store_query_rows does. Rename gh -> kq_dot_keys and ru -> kq_times_state."
+   },
+   {
+    "title": "Comment prose in amx_gdn_iface.hpp: undefined terms, joined claims, one imprecise statement",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/kernels/amx_gdn_iface.hpp",
+    "line": 7,
+    "severity": "style",
+    "problem": "(a) 'Words used here' (7-13) defines AMX, tile, TDPBF16PS, bf16 and AVX-512. The Note then uses MXCSR, FTZ, DAZ and 'subnormal' (62-70) without a definition. amx_gdn.cpp:136-137 says what the two bits do and does not expand the names. (b) Semicolons join two claims at 9-11, 108, 124-126 and 149-151, and at gdn_rolling_executor.hpp:271-272. (c) 'A value head that forgets fast' (66-67) is a figure of speech. (d) 'An infinity or a NaN in S0 makes every correction non-finite' (75-76) is not exact: only the corrections of the value column that holds the value become non-finite. (e) amx_gdn.cpp:31-33 uses 'pair-interleaved operand' and 'row-major operand' 180 lines before pair_row defines the first term.",
+    "scenario": "A reader who does not know the x86 control register cannot tell from the Note what 'sets the MXCSR bits FTZ and DAZ' changes. A reader who tests claim (d) with one infinity finds finite corrections in the other 127 columns and doubts the refusal logic, although the lane-wise maximum does catch the one column.",
+    "fix": "(a) Add to line 13: 'MXCSR is the control register of the SSE and AVX-512 floating-point instructions. Its bit FTZ (flush to zero) makes a subnormal result zero, and its bit DAZ (denormals are zero) makes a subnormal operand count as zero. A subnormal value is a non-zero value below 2^-126, the smallest normal FP32 magnitude.' (b) 9-11: '...into a tile of FP32 values. This text calls one execution a tile product.' 108: 'Probed once. The result is cached for the process lifetime.' 124-126: '...values that are representable in bf16. normalized_query has the same form and carries no query scale. The three strides count floats.' 149-151: 'Returns false when the kernel refuses the block. The matrix is then untouched, and the output columns hold no result.' Executor 271-272: 'The working memory of the AMX block kernel. It is an empty struct for a geometry that the kernel does not serve.' (c) 'When the decays of a value head are small, the product of the decays of a block underflows.' (d) 'An infinity or a NaN in S0 makes the corrections of its value column non-finite, so that case is covered.' (e) amx_gdn.cpp:33: add 'See Note [QK orientation] in amx_attn_iface.hpp for the two operand layouts.'"
+   },
+   {
+    "title": "Small comment and code points in the executor, model.hpp and gdn_execution.hpp",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 745,
+    "severity": "style",
+    "problem": "(1) Lines 743-747: the new comment of postprocess sits between the template header and the declaration. Every other function of the file has its comment above 'template'. The change also replaces the typed parameter tensor<group_value_width>& with float*, so the width and the 64-byte alignment that tron_mm_load_ps needs (line 759) are now a comment, not a type. (2) Lines 679-680: '++(finished ? tally->amx_blocks : tally->amx_fallback_blocks);' increments through a conditional expression, in a braceless two-line if directly below a braced if. (3) model.hpp:1740-1741: 'The second test keeps a model of another shape from referencing the kernel's translation unit.' The reader must guess that the first test is the #ifdef. The stated reason is also the weaker one: for another shape the fact must be false because the kernel does not serve it. (4) gdn_execution.hpp:45-48: 'The stamps sit around the token loop, never inside it. A hook inside the loop would ... change how the compiler inlines step().' After the second commit run_gdn_operation has that loop only for in-place chains. For a working copy, advance() takes four stamps per window inside its window loop.",
+    "scenario": "(1) A later caller passes a pointer into an unaligned buffer. It compiles, and the aligned load faults at run time. (2) A reader stops to parse which counter is incremented. (3) and (4) A reader looks for a second test, or for stamps around a token loop, that the code at that place does not have.",
+    "fix": "(1) Move the two comment lines above 'template <gdn_activation_row<...' at line 743. Prefer a typed parameter, for example tron::view<float, VIEW_ALIGNED_TRUE, false, seq<group_value_width>, sseq<1>>, if view offers chunk() and store_chunk(). I did not compile this. (2) 'if (tally != nullptr) {\\n  if (finished) ++tally->amx_blocks;\\n  else ++tally->amx_fallback_blocks;\\n}' (3) '// The AMX block kernel serves one matrix shape; see Note [AMX\\n// GatedDeltaNet block kernel]. For any other shape the fact stays false.' (4) 'No stamp is taken per token. run_gdn_operation stamps around the work of a chain, and advance() stamps around the three parts of a window. A stamp per token would add work to every token and could change how the compiler inlines step().'"
+   }
+  ]
+ },
+ {
+  "checked": [
+   "Block form: derived r_t, delta_t, o_t and S_B from gdn_recurrence (gated_delta_net.hpp:254-305). The Note formulas and the four stages of amx_gdn.cpp match the derivation.",
+   "Operand layouts: the A operand is row-major (kq, kt_rows). The B operand is pair-interleaved (kt_pairs, state_pieces, delta_pieces) with lane n = even row in the low 16 bits and odd row in the high 16 bits. This matches the index rule of TDPBF16PS (the AMX bf16 tile product).",
+   "Tile loads: every load address and stride (kq 256 bytes, kt_rows 64 bytes, piece tiles 64 bytes) stays inside its array for all loop values.",
+   "Tile stores: gh (stride 128 bytes, column 0 or 16), ru (stride 512 bytes, 8 column groups) and update (stride 64 bytes). The last store of each ends exactly at the end of its array. No store runs past a buffer.",
+   "transpose_16x16: traced lane by lane through the three shuffle levels. rows[i] holds column i. kt_rows[key][token] = K[token][key].",
+   "INTERLEAVE_LOW and INTERLEAVE_HIGH: dst[2j] = even[j] or even[16+j], dst[2j+1] = odd[j] or odd[16+j]. kt_pairs[step][tile][p][2j+e] = K[16*tile+j][32*step+2p+e] as the comment says.",
+   "Coefficient tables: w_tu is built by multiplication only. Lane t is set to 1 at token t. Lanes u > t are never read by the triangular loop. decay_to_end holds w_31,u. The own coefficient is scale * (q_t . k_t).",
+   "split and pair_row: the three pieces add up exactly for magnitudes of 2^-103 or more. With FTZ set the third piece has no low 16 bits, so the mask in pair_row changes nothing.",
+   "Refusal test: the sign bit is masked and the compare is unsigned. So -0.0, negative values, every NaN payload and infinities are handled. An infinity or NaN in S0 always reaches a correction through the second piece.",
+   "Stage 4 overflow bound of the Note (below 2^105): holds because every decay is at most 1 (gdn_decay is exp of a value that is not positive). The interface does not state this precondition.",
+   "MXCSR scope: flush_subnormals_scope is an RAII object, so the early return restores MXCSR. pack_key_head has no floating-point arithmetic (loads, shifts, permutes, tile products), so it needs no scope. The chain fallback runs after the restore.",
+   "Final write: g_31 * S0 + update for 64 key rows per part, at the slice-layout address that gdn_state_to_slices uses.",
+   "Scratch layout: the fields sum to 118,144 bytes with no padding, which equals BLOCK_SCRATCH_BYTES_118144. Every field is written before it is read within one block.",
+   "Note text: the 2^-103 bound, the switch rules and '5 times slower' (task3-decay-cpu140.txt: 2,959 and 3,239 ns against 587 and 598 ns) match the code and the data. Exceptions are in the findings.",
+   "Prototype compare (gdn_kernels.hpp): same arithmetic and indices. Two intended differences: no _mm256_zeroupper (task3-zeroupper-cpu140.txt: 590 to 601 ns with it, 590 to 592 ns without it) and no MXCSR scope in the pack function.",
+   "Call site for key_heads_per_group > 1: key offset, first_head offsets of value, output, decay and beta, scalar_stride, head_slices and the value_head passed to gdn_recurrence_chain_head are consistent. Read only; no test runs this case.",
+   "Fallback after a refusal: the kernel writes only its scratch and the head's output rows. The chain kernel reads normalized_key, scaled_query, value, decay and beta, which are intact, and it rewrites the output rows.",
+   "Tile region: begin_region runs only when the run holds a full window. tron::finally releases it. advance() has no early return after the bracket. A GDN statement runs on main workers outside the attention function, so no region is nested.",
+   "available(): a function-local static, so its first call is thread-safe. TRON_AMX_GDN_DISABLE is read before the AMX probe.",
+   "CMake: amx_gdn.cpp is compiled only with TRON_AMX_DISPATCH and gets the same AMX flags as amx_attn.cpp. Without the option, block_scratch_type is well-formed and no amx_gdn function is referenced. The amx_attn references are finding 1."
+  ],
+  "findings": [
+   {
+    "title": "A build without optimization and without TRON_AMX_DISPATCH fails to link: advance() calls begin_region/end_region outside the #ifdef",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 507,
+    "severity": "bug",
+    "problem": "Lines 507 and 509 call amx_attn_h128g4::begin_region() and end_region() outside #ifdef TRON_AMX_DISPATCH. Their definitions are in amx_attn.cpp, which is compiled only with that option (src/tron/CMakeLists.txt:220-221). use_block_kernel is a run-time bool. So only the optimizer removes the two calls. The attention call site keeps the same calls inside the #ifdef (self_attention.hpp:1556-1590). Note [AMX attention dispatch] item 1 says that every dispatch block is excluded without the option. The design text (section 5.6) says the GDN call site is inside the #ifdef.",
+    "scenario": "Configure a Debug build without the option. The presets coverage, asan and tsan do this (CMakePresets.json), and Debug adds -O0. CI builds the coverage preset (cpp-coverage.yml, make build-coverage). Every binary that instantiates advance() then has undefined references to tron::amx_attn_h128g4::begin_region() and end_region(). Examples are t_gated_delta_net (t_gated_delta_net.cpp:2719) and a plugin with a GDN operation. Evidence: a 20-line copy of the pattern, compiled with g++ 11.4, keeps both references at -O0 and has none at -O2. clang-19 was not available on this machine, so the clang result is inferred: at -O0 clang folds only conditions that are constant expressions, and this one depends on function arguments.",
+    "fix": "Put lines 505-510 (the begin_region call and the tron::finally that calls end_region) inside #ifdef TRON_AMX_DISPATCH, as self_attention.hpp does."
+   },
+   {
+    "title": "No test runs the refusal fallback of advance() or the counters of full windows",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 675,
+    "severity": "test-gap",
+    "problem": "No test reaches the fallback at lines 675-678, the counter update at lines 679-680, or the two full-window branches of the tally (line 540 for the amx path, line 544 for half_full_block_tokens). The executor test of the block path (t_gated_delta_net.cpp:2776-2824) uses finite inputs, the executor with one key head per group, and no tally. The kernel test of refusals (t_amx_gdn_numerics.cpp:304-320) calls the kernel directly and checks only that the matrix is unchanged. The one test that reads the block counters runs a chain of 3 tokens and expects zeros (t_gated_delta_net.cpp:2371-2374).",
+    "scenario": "Delete the gdn_recurrence_chain_head call, or pass head_of_key in place of value_head. The output rows of a refused value head then keep the kernel's unfinished values, and its matrix stays at the block start. Or swap amx_blocks with amx_fallback_blocks, or delete line 544. Every test still passes. The block path with key_heads_per_group > 1 (the first_head offsets at lines 654-666) is not run by any test either.",
+    "fix": "Add one executor case at wide_chain_geometry. Start from a checkpoint with one infinity in the matrix of one value head (start_from_checkpoint rejects only NaN). Advance one full window with when_available and a tally. Require the bytes of step() for that head's matrix rows and output columns, the existing band for the other heads, and on an AMX machine amx_fallback_blocks == 1. Add one case that needs no AMX: 32 tokens from position 0 with gdn_block_kernel::off and a tally must give half_full_block_tokens == 32 per key head."
+   },
+   {
+    "title": "Test comment says the 'small values' family goes below 2^-103; it does not, and no case can detect a wrong loss below 2^-103",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_amx_gdn_numerics.cpp",
+    "line": 188,
+    "severity": "false-claim",
+    "problem": "Lines 187-189 say that the family with scale 1e-20 'also takes values below 2^-103, where the split drops the bits'. 2^-103 is 9.86e-32. A float64 model of the test with the same generator calls gives for that family: smallest matrix value 3.1e-27, smallest w . Delta value 2.9e-26, and 0 split operands below 2^-103. Only the underflow family passes such operands through the split (14,111 of 32,768 w . Delta values in the model). Their size is about 1e-31 beside sums of about 1, which is far below every bound of the test.",
+    "scenario": "Change split() so that a value below 2^-103 gets a zero second piece. The relative error of such a value is then up to 2^-8. All 8 families still pass. The design text (section 5.6) lists 'the stated loss below 2^-103' among the tests of the block kernel, and no test covers it.",
+    "fix": "Correct the comment. Add a family with matrix and value scale near 1e-34 and a bound of its own that follows the stated loss (the unread part of one value is below 2^-126), compared with the float64 result."
+   },
+   {
+    "title": "gdn_stats.hpp describes a block grid that advance() does not use",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 134,
+    "severity": "false-claim",
+    "problem": "Lines 134-135 say: 'The blocks of a chain are counted from its first token, and that is the grid of half_full_block_tokens.' advance() ends a window where the token position in the sequence reaches a multiple of 32 (gdn_rolling_executor.hpp:514-517). The comment came with the stats commit, and the kernel commit did not update it. Two more statements are inexact. Lines 180-181 give 'a value was not finite' as the only reason for a refusal, and the kernel also refuses a finite correction of 2^100 or more. A refused value head still adds its tokens and its time to the amx path (gdn_rolling_executor.hpp:539-546), while README.stats.md:334-337 says that a path counts the tokens that it advanced.",
+    "scenario": "Take a chain of 64 tokens that starts at position 16, as after a resume. By the comment it holds 2 full blocks, which is 64 tokens per key head. advance() cuts it into 16 + 32 + 16 tokens and counts 32. A reader who predicts the AMX volume from the chain lengths is wrong by a factor of 2.",
+    "fix": "Reword lines 134-135: a block starts where the token position in the sequence is a multiple of 32. Reword lines 180-181: refused because a value was not finite or a correction was 2^100 or larger. Add one sentence to README.stats.md: amx_head_tokens includes the windows of refused value heads."
+   },
+   {
+    "title": "Note [AMX GatedDeltaNet block kernel], Numerics: 'differ by one increment' and 'last bits' are narrower than the measurements",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/kernels/amx_gdn_iface.hpp",
+    "line": 56,
+    "severity": "false-claim",
+    "problem": "Lines 55-57 say: 'a small share of the bf16-rounded outputs differ by one increment, and the matrix differs in its last bits'. The prototype table (exec/results/gdn-impl-20261121/bench/task3-table-cpu140-run1.txt) shows outputs that differ by 2 increments in two cases and by 16 increments in the zero-start case. Only outputs above 1 % of the typical size stay at 1 increment. One matrix entry differs by up to 251,789 FP32 increments (about 18 bits), while the relative L2 difference of the matrix is 1.6e-7. The test allows 2 increments for large outputs and sets no bound for small outputs (t_amx_gdn_numerics.cpp:242-261).",
+    "scenario": "A reader takes the Note as the contract and writes a check of 'at most one bf16 increment'. The check fails on outputs near zero with a correct kernel.",
+    "fix": "Use the wording of the test comment: an output above 1 % of the typical output size differs by 1 or 2 bf16 increments at most, outputs nearer to zero differ by more, and the matrices differ by about 1e-7 in relative L2 norm."
+   },
+   {
+    "title": "layout_of reaches the scratch object without std::launder",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_gdn.cpp",
+    "line": 124,
+    "severity": "style",
+    "problem": "reinterpret_cast<scratch_layout*>(scratch.bytes) gives a pointer to the first std::byte. It does not point to the scratch_layout object that C++20 creates implicitly inside the byte array. Access through it needs std::launder ([ptr.launder]). The executor of the same change uses std::launder for its cast of a byte destination (gdn_rolling_executor.hpp:570-573).",
+    "scenario": "No wrong code is expected from clang or gcc today: every access goes through float or uint16_t lvalues and through intrinsics. The rule is broken on paper only, and the file differs from the convention next to it.",
+    "fix": "return *std::launder(reinterpret_cast<scratch_layout*>(scratch.bytes)); and add #include <new>."
+   },
+   {
+    "title": "Option help text and README.ci.md still say that TRON_AMX_DISPATCH compiles attention kernels only",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/CMakeLists.txt",
+    "line": 46,
+    "severity": "cleanup",
+    "problem": "The option text says 'Compile the AMX software-attention kernels and their dispatch'. README.ci.md:586-592 says the same. After this change the option also compiles amx_gdn.cpp and turns on the GDN block path in advance(). The comment in src/tron/CMakeLists.txt:207-217 was updated. These two texts were not.",
+    "scenario": "A reader of the CI readme or of the option list does not learn that the option changes GDN prefill results on AMX hosts (an error band in place of the bytes of step()).",
+    "fix": "Add 'and the GatedDeltaNet block kernel (h/tron/kernels/amx_gdn_iface.hpp)' to both texts."
+   },
+   {
+    "title": "amx_gdn.cpp includes common/assert.hpp and uses nothing from it",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_gdn.cpp",
+    "line": 11,
+    "severity": "cleanup",
+    "problem": "The file contains only static_assert, which is a keyword. It uses no TRON_ASSERT and no other name of that header.",
+    "scenario": "Dead include. The two caller preconditions of the interface (row addresses aligned to 64 bytes, and a call inside a tile region) have no check. A misaligned row faults in _mm512_load_ps with no message.",
+    "fix": "Remove the include. Or use it: one TRON_ASSERT at the top of pack_key_head on the 64-byte alignment of the block's addresses."
+   }
+  ]
+ },
+ {
+  "checked": [
+   "Method: I read the 5 test files and the code they test at HEAD cbcb771f61. I built nothing and ran no tron test. For the error band I wrote a numpy emulation of the chain kernel and of the block kernel (/tmp/claude-0/-home-jhan-workspace-intel-AMX-GDN/6abaa6d4-a2e5-4e74-bd4c-106db969141b/scratchpad/testlens/sim_block.py). Its results are estimates (est.), not runs of the real kernel. Without a bug it gives 0.009 to 0.049 % differing bf16 words and a state difference of 1e-8 to 4e-7, close to the measured band in task3-table-cpu140-run1.txt (0.006 to 0.034 %, 5e-8 to 4e-7).",
+   "t_amx_gdn_numerics.cpp error band (lines 259-278): no finding on the tolerances. In the emulation, each of 15 injected bugs fails at least 3 of the 8 input families, for 2 seeds (est.). The bugs were: third piece of the split lost in stage 1, in stage 4, in both, in one accumulator tile, in one dimension step, in one value group; decay product w_tu wrong for u > 15; decay to the block end one factor short; output using the decay of the previous token; one earlier token dropped; final write with the wrong decay; final write without S0.",
+   "t_gated_delta_net.cpp block case bounds (lines 2809, 2822, 2823): the bounds are 25 to 60 times the measured band. In the emulation they pass a lost third piece in 0 of 16 family runs when the loss is in one stage or one tile (est.). This is acceptable only because the kernel-level case runs on the same hosts and catches it. A wrong index or a wrong decay product fails these bounds too (16 of 16 family runs, est.).",
+   "t_gated_delta_net.cpp byte cases at 128 x 128 and at the narrow heads (lines 2755-2776): no finding. The reference is step() in place, which runs gdn_recurrence and shares no loop with the chain kernel. Each of these bugs changes bytes and fails: the joined read loop using the decay of the current token (the decay input differs per token), a wrong offset or width of the narrow last slice (5-chunk and 1-chunk heads, zero start and checkpoint start), a token lost or repeated at a window boundary (positions 31 and 40, lengths 33, 127, 128), rows indexed by position instead of job id (job ids descend).",
+   "t_gated_delta_net.cpp 'advance needs a working copy' (line 2826): no finding. Without the assert, advance() returns and the forked child exits with 0, so the case can fail.",
+   "t_gated_delta_net.cpp stats replay case (line 2293): no finding on token, half, item, job and wall counts. A token counted twice gives 8 instead of 2 on the token path, or 12 instead of 6 on the half path. A wrong worker, class or operation row fails the per-worker checks. The AMX counters are a separate finding.",
+   "t_gdn_stats.cpp: no finding. Every tally field has its own value, so two swapped keys fail. The wall case makes one worker's busy time, the sum of busy times and the wall differ. The switch case runs in forked children and has a negative control.",
+   "t_amx_gdn_numerics.cpp refusal sections (lines 322-348): a matrix written before a refusal fails the memcmp check. The gaps are separate findings.",
+   "t_amx_numerics.cpp 256 x 4 cases: no finding. A dropped 32-dim step in qk_rowmajor_256x4 gives an error of about 1.9 (standard deviation, est.) against a tolerance of 0.0064, over 1,024 compared scores. The packer case uses the documented formula and one distinct bit pattern per element. The PV case compares with an exact float64 reference.",
+   "t_amx_dispatch_dtype.cpp 256 sections: no finding. A call that reaches a 128 x 4 entry point is counted (wrong_shape_calls), and the pack, QK and PV counts are checked for a full and a partial page. The query pattern has a period of 4 elements, so a shifted read is not detected. The 128 sections had this limit before the change.",
+   "Model slug audit: no finding. I ran the audit's own literal scanner (config/check_test_model_requirements.py, _quoted_strings) on the 5 files. The model-like literals are 'replay-model', 'test-model', 'big-model', 'off-model', 'shared-id' and 'a/b'. The audit compares whole literals, so the test names that contain 'Qwen' do not match.",
+   "Expected values copied from the implementation: none found. The stats counts follow from the chain plan, the JSON strings are the key contract that scripts read, and the band cases compare with gdn_recurrence_chain and a float64 token-form reference.",
+   "gdn_decay extraction (gated_delta_net.hpp:206): covered by the existing float64 reference at t_gated_delta_net.cpp:338-340, which computes the decay on its own.",
+   "Fallback code by reading (gdn_rolling_executor.hpp:669-681): the block offsets, the head index and the token count of the fallback call are right, and the FTZ/DAZ scope has ended before the fallback runs. No test executes it (finding 2)."
+  ],
+  "findings": [
+   {
+    "title": "No test shows that the AMX block kernel runs inside advance(), or on which windows",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_gated_delta_net.cpp",
+    "line": 2778,
+    "severity": "test-gap",
+    "problem": "The case 'advance with the block kernel stays close to step' accepts equal results, and advance() is called without a tally (line 2719). So the case passes when no window takes the block kernel, also on a host with AMX. The only assertions on amx_blocks, amx_fallback_blocks and the amx head tokens are '== 0' in the stats replay case (lines 2370-2373). That case uses a 16 x 80 head, which the block kernel never serves, so these assertions cannot fail. The comment at line 2780 is false for first_position 7 with 32 tokens: positions 7 to 38 hold no full window on the grid, so 1 of the 9 combinations never runs the block kernel.",
+    "scenario": "Three bugs pass every test on an AMX host. (a) to_boundary loses its final '% gdn_window_tokens' (gdn_rolling_executor.hpp:500): a chain of 32 tokens that starts on a window boundary never gets the block kernel, and the case passes with equal bytes. (b) The windows are cut from the chain start instead of the token position (gdn_rolling_executor.hpp:515): the run (first_position 7, 71 tokens) takes 2 block windows instead of 1. The results stay inside the band, but the rule of Note [Rolling GatedDeltaNet execution] (same tokens, same windows, however the scheduler cuts the sequence) is broken. (c) run_gdn_operation passes 0 instead of chain.source_height.i (gdn_execution.hpp:165): same effect as (b). No replay test uses a 128 x 128 kernel.",
+    "fix": "Pass a gdn_stats::work_tally through run_chain_case into advance() and assert the counts per case. For first_position 7 and 71 tokens, per head group: with AMX available, amx_blocks == 2, amx head tokens == 32, half head tokens == 39. With gdn_block_kernel::off or without AMX: half head tokens == 71, half_full_block_tokens == 32, amx_blocks == 0. For (7, 32): amx_blocks == 0 on every host. For (0, 32) with AMX: amx_blocks == 2. Correct the comment at line 2780."
+   },
+   {
+    "title": "The fallback after a refused block is never executed by a test",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 675,
+    "severity": "test-gap",
+    "problem": "The kernel-level refusal case (t_amx_gdn_numerics.cpp:282) checks two things: the kernel returns false, and the matrix is unchanged. No test drives advance() into a refusal. So the lines that run gdn_recurrence_chain_head for the refused value head (675-678) and count amx_fallback_blocks (680) have no coverage. The design asks for tests of 'the fallback cases' (design.txt section 5.6, row Tests). The prototype checked the bits after the fallback (task3-table-cpu140-run1.txt: 'value head 0 has the bits of the token kernel'). That check was not ported.",
+    "scenario": "If the 'if (!finished)' block is removed, or calls the chain kernel with the wrong value head, the refused head keeps its old matrix for 32 tokens and its output columns hold the partial results of the block kernel. Postprocessing then rounds and gates these values into the output rows. No test fails. A refused block counted in amx_blocks instead of amx_fallback_blocks also passes.",
+    "fix": "Add one executor-level case for hosts with AMX. Step 32 tokens, write the checkpoint, set one state value of one value head to 1e35 (finite, so the NaN check at start accepts it; the correction is then about 1e33, above the 2^100 bound), and advance 32 tokens with gdn_block_kernel::when_available and a tally. Require: the state rows and output columns of that value head equal the bytes of step(), the other value heads stay in the band, amx_fallback_blocks == 1 and amx_blocks == 1 for that head group."
+   },
+   {
+    "title": "The split rule range has no test, and a test comment claims coverage that the inputs do not give",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_amx_gdn_numerics.cpp",
+    "line": 187,
+    "severity": "false-claim",
+    "problem": "The comment at lines 187-189 says that the 'small values' family 'also takes values below 2^-103, where the split drops the bits that a tile product would read as zero'. The family uses a scale of 1e-20. 2^-103 is about 9.9e-32, 11 orders of magnitude lower. In the emulation of this family, 0 of 131,072 start-matrix values and 0 of 32,768 values of w . Delta were below 2^-103 in each of 3 seeds, and the smallest nonzero value was 2.4e-26 (est.). Values between 2^-126 and 2^-103 occur only in w . Delta of the two fast-decay families (19 to 263 of 32,768 for decay 0.01-0.30, about 4,200 for decay 0.001-0.05, est.). These values are tiny relative to the matrix, so the relative bounds do not see their loss. The design asks for a test of 'the split rule: exact sum from 2^-103 up to the largest FP32 value, the stated loss below 2^-103' (design.txt section 5.6). No such test exists. The error band catches a lost piece only statistically.",
+    "scenario": "A change to split() or pair_row() that is wrong only for some exponent range (for example a remainder taken with the wrong mask for values below 2^-110, or a loss larger than 2^-126 for small values) passes all 8 families, because no start-matrix value lies in that range.",
+    "fix": "Add an exact case through the public kernel interface. Token 0 has a one-hot key (1.0 at coordinate i), all other keys are zero, all values are zero, every decay is 1.0 and every beta is 1.0. Row i of the start matrix holds values with exponents from 2^-103 to just below 2^100. After the block, row i equals v minus the pieces that the tile products read. Require exactly 0.0 for these values, and a magnitude below 2^-126 for start values below 2^-103. In the emulation the correct kernel leaves 0 of 256 values nonzero, and a lost third piece in stage 1 or in stage 4 leaves 248 of 256 nonzero (est.). Repeat with the one-hot key at token 16 to cover the second key tile. Then correct the comment at lines 187-189."
+   },
+   {
+    "title": "gdn_stats.hpp names a block grid that advance() does not use, and no test fixes half_full_block_tokens",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 134,
+    "severity": "false-claim",
+    "problem": "Lines 134-135 say: 'The blocks of a chain are counted from its first token, and that is the grid of half_full_block_tokens.' advance() cuts windows by the token position in the sequence (gdn_rolling_executor.hpp:513-517) and adds to half_full_block_tokens only for a window of 32 tokens on that grid (line 544). The only test value of this counter is 0, for a chain of 3 tokens (t_gated_delta_net.cpp:2374).",
+    "scenario": "A chain of 64 tokens that starts at position 7. By the comment it has 2 full blocks, so a reader expects 64 tokens per key head. The code counts 32 (window 32..63). A person who compares a run with AMX and a run without AMX through this counter then computes the wrong share of tokens that AMX can take. An inverted condition at line 544 would also pass every test.",
+    "fix": "Change the comment to: the blocks lie on the grid of token positions (multiples of 32 in the sequence), not on the first token of the chain. Add a chain of 71 tokens with source height 7 to the stats replay case and require half_full_block_tokens == n_key_heads * 32 and half head tokens == n_key_heads * 71."
+   },
+   {
+    "title": "The refusal for a non-finite output is not exercised",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_gdn.cpp",
+    "line": 467,
+    "severity": "test-gap",
+    "problem": "The refusal test has two arms: a correction of 2^100 or more (line 465) and a non-finite output (line 467). All three refusal sections of t_amx_gdn_numerics.cpp (infinity, NaN, value 3e38) trip the first arm, because a non-finite or huge start value makes the correction non-finite or huge. If the second arm is deleted, every test still passes. The design names this case: the block form can overflow where the token form does not (design.txt section 5.4). The two sections on the bound also leave it open: one correction is at most 0.95 * 2^99, the other at least 0.05 * 3e38 (about 2^123.5), so any bound between 2^99 and 2^123 passes both.",
+    "scenario": "Every key has 0.0 at coordinates 5 and 6, every query has 0.75 there, and the start matrix has 3e38 at rows 5 and 6 of one column. K S0 does not see these rows, so all corrections stay small. Q S0 is 0.75 * 3e38 * 2 = 4.5e38, which overflows FP32 in the tile sum, so the output is infinite. The token form scales the query first and gives a finite output of about 4e37. Without the second arm the kernel accepts the block and returns infinite outputs.",
+    "fix": "Add a section with these inputs: require that the head is refused and its matrix unchanged. To fix the bound, add a case with a zero start matrix, beta 1.0 at token 0 and a value of exactly 2^100 (refused) and of the next lower bf16 value (taken)."
+   },
+   {
+    "title": "The block-kernel cases pass with zero assertions on a host without AMX",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_amx_gdn_numerics.cpp",
+    "line": 181,
+    "severity": "risk",
+    "problem": "Both cases return after WARN when available() is false (lines 181-184 and 284-287). Catch2 then reports them as passed. The executor-level case (t_gated_delta_net.cpp:2778) gives no message at all on such a host. src/tron/CMakeLists.txt:216-219 says that these tests run only when the CI job lands on a Granite Rapids runner. The tree holds two patterns for a missing precondition: WARN plus return in t_amx_numerics.cpp, and SKIP(...) in t_generate_ingest_1_gemma_3_4b.cpp:49 and t_rinzler_tokens.cpp:19470.",
+    "scenario": "A pull request that breaks the block kernel is tested on a runner without AMX. All GDN AMX cases show as passed. Nothing in the summary says that no assertion on the block kernel ran.",
+    "fix": "Use SKIP(\"AMX GatedDeltaNet block kernel unavailable\") in the two new cases, so the report says skipped. In the executor-level case, emit a WARN when the block kernel is not available. The older WARN plus return cases in t_amx_numerics.cpp follow the other pattern; flag them for a later cleanup and do not change them here."
+   },
+   {
+    "title": "No test checks that advance_value_head restores MXCSR",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_gdn.cpp",
+    "line": 321,
+    "severity": "test-gap",
+    "problem": "advance_value_head sets the FTZ and DAZ bits of MXCSR (the control register of the vector floating-point unit) and the note promises that it restores the caller's value before it returns, also on the refusal path (amx_gdn_iface.hpp:62-65). No test reads MXCSR after a call.",
+    "scenario": "A later change replaces the scope object by an explicit set and restore and misses the early 'return false' at line 469. After the first refused block, the worker thread keeps FTZ and DAZ. The chain kernel and step() on that thread then flush subnormal values, so they no longer give the bytes of gdn_recurrence when decay products underflow. Every test passes, because the step() reference runs before advance() and no later case has subnormal values.",
+    "fix": "In both cases of t_amx_gdn_numerics.cpp, read _mm_getcsr() before the kernel calls and require the same value after a block that was taken and after a block that was refused."
+   },
+   {
+    "title": "The chain kernel is never run with more than one key head per group and more than one token",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/kernels/gated_delta_net.hpp",
+    "line": 584,
+    "severity": "test-gap",
+    "problem": "Every advance() call in the tests uses gdn_rolling_head_executor, which has one key head per group. The window's key width then equals key_head_dim. The tests that call step() on a working copy of the whole executor (two key heads) run the chain kernel with one token per window, so the token stride is never applied. Production uses head executors only, so this is a latent path of the template.",
+    "scenario": "'.key_stride = key_head_dim' in place of window_type::key_width at line 584, or at gdn_rolling_executor.hpp:660, passes every test. The same holds for the key-head loop in advance_window_with_block_kernel and for 'key_heads_per_group * window_tokens' in the tally (gdn_rolling_executor.hpp:542).",
+    "fix": "In run_chain_case, run advance() once more on gdn_rolling_executor<geometry, geometry.n_key_heads> with a working copy (one group, two key heads) and require the same bytes as step()."
+   },
+   {
+    "title": "TRON_AMX_GDN_DISABLE has no test",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_gdn.cpp",
+    "line": 129,
+    "severity": "test-gap",
+    "problem": "The switch that turns only the GDN block kernel off is new in this change. The A/B runs of the plan depend on it (design.txt section 5.6, row Switches). The stats switch has a test in forked children (t_gdn_stats.cpp:157-181). This switch has none.",
+    "scenario": "A wrong variable name in detect(), or a comparison that accepts another value, leaves the block kernel on in the 'off' arm of an A/B run. Both arms then measure the same code, and no unit test fails. Only the stats summary (amx_gdn_enabled) of the run would show it.",
+    "fix": "Copy the forked-child pattern of the stats switch case into t_amx_gdn_numerics.cpp: with TRON_AMX_GDN_DISABLE=1 require amx_gdn_k128v128::available() == false; unset, 'true' and '11' must give the answer of amx_attn_h128g4::available(). On a host without AMX this case cannot fail, so SKIP it there."
+   },
+   {
+    "title": "The type-contract probes of t_llama_unit.cpp were not extended to the 256 x 4 kernels",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_llama_unit.cpp",
+    "line": 100,
+    "severity": "test-gap",
+    "problem": "amx_qk_accepts and amx_pv_accepts (lines 100-106) and the STATIC_REQUIRE block at lines 512-528 name only qk_rowmajor_128x4 and weights_times_v_128x4. The design lists 'the tests that name the 128-wide kernel shape' and t/t_llama_unit.cpp among the tests of Part B (design.txt section 5.6). The change does not touch this file.",
+    "scenario": "A later edit changes qk_rowmajor_256x4 or weights_times_v_256x4 to take a bare 'const bf16*', or the view of the other plane. The K plane and the packed V plane can then be swapped at a call site, and no test fails.",
+    "fix": "Add the same probes for amx_attn_h256g4 with const_native_k_view<64, 256> and v_vnni_view<const bf16, 64, 256>: accepted for the right plane, rejected for a bare pointer and for the other plane."
+   }
+  ]
+ },
+ {
+  "checked": [
+   "Revision: base 72e1191804 to HEAD cbcb771f61 in /home/jhan/workspace/ai-runs/tron-gdn-amx-review. Method: code inspection only. Nothing was compiled, no test was run, no object code was inspected.",
+   "Chain kernel (gated_delta_net.hpp:447-618): slice offsets, narrow last slice, row alignment for the aligned loads, and the joined write/read loop match gdn_recurrence term by term. No finding.",
+   "Slice layout conversion (gdn_state_to_slices, gdn_slices_to_state) against the executor start, NaN check and write_checkpoint paths. No finding.",
+   "Window grid in advance() (gdn_rolling_executor.hpp:498-518): to_boundary, full_window and use_block_kernel give block windows only on multiples of 32 of the sequence position. No finding.",
+   "AMX block kernel algebra (amx_gdn.cpp:316-532) against Note [AMX GatedDeltaNet block kernel]: g_t, w_tu, the two coefficient tables, the tile operand layouts and all tile strides are correct. No finding.",
+   "transpose_16x16 (amx_gdn.cpp:169-195): a symbolic Python simulation gave out[i][j] == in[j][i] for all 256 lanes. No finding.",
+   "Refusal path: advance_value_head returns before stage 4, so the matrix is untouched; the MXCSR scope restores on both returns; the chain fallback runs outside the scope. No finding.",
+   "Production block kernel against the prototype gdn_kernels.hpp: same steps, except that production has no _mm256_zeroupper(). task3-zeroupper-cpu140.txt measured 590 to 601 ns with it and 590 to 592 ns without it, so no finding.",
+   "256 x 4 attention kernels (amx_attn.cpp:397-511): pack layout, QK and PV tile offsets, row strides, the 16-row output buffer and the packed-query slot size (static_assert in packed_amx_query). No finding.",
+   "amx_qpack only-grow change (self_attention.hpp:1583): stale slot contents are overwritten by the per-call pack and the padding columns stay zero. No finding.",
+   "GDN stats rows: worker index range against the generator (n_workers = 1 + main helpers, at most 1 + pool workers), single-writer rows, span clearing, forward_scope order, class rule, off-state allocation. No finding.",
+   "Empty and singleton cases: a worker with an empty shard opens no job; a chain of 1 token takes step() in place; both are asserted in t_gated_delta_net.cpp:2293.",
+   "folks check 15 (spelling, near-miss names, wide Markdown lines), run with the skill's scripts on the diff: 0 real hits. All referenced Note titles have a definition.",
+   "folks checks 16, 23, 34 and the no-issue-numbers rule: no debug switch left on, no disabled code, no workaround, no issue or PR number in new source comments.",
+   "Not applicable: folks checks 3B, 7, 8, 9 (body part), 11, 12, 35. No pull request body, review thread or CI run exists for this change yet."
+  ],
+  "findings": [
+   {
+    "title": "advance() calls the AMX tile-region functions outside #ifdef TRON_AMX_DISPATCH",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 507,
+    "severity": "bug",
+    "problem": "Check: tron-code-review, feature disabled. Lines 507 and 509 call amx_attn_h128g4::begin_region() and end_region() behind the run-time bool use_block_kernel. AMX is Intel's tile-matrix instruction set. Both functions are defined only in src/tron/kernels/amx_attn.cpp. That file is compiled only when the CMake option TRON_AMX_DISPATCH is ON (src/tron/CMakeLists.txt:220-221). Without the option, the calls disappear only if the optimizer folds block_kernel_available() to false. self_attention.hpp:1556-1590 keeps the same two calls inside the #ifdef, and Note [AMX attention dispatch] item 1 says every dispatch block is excluded.",
+    "scenario": "The presets asan, tsan and coverage use CMAKE_BUILD_TYPE=Debug (CMakePresets.json:90, 103, 115). Debug is -O0 (CMakeLists.txt:78), and these presets leave TRON_AMX_DISPATCH OFF. At -O0 the compiler keeps both calls. Every binary that instantiates advance() then fails to link with an undefined reference to tron::amx_attn_h128g4::begin_region(). That covers t_gated_delta_net and the Qwen3.5 plugin. Evidence: inspection only, nothing was compiled.",
+    "fix": "Put lines 505-510 inside #ifdef TRON_AMX_DISPATCH and if constexpr (block_kernel_shape), as advance_window_with_block_kernel does at lines 650-651. Make use_block_kernel a constant false in every other build."
+   },
+   {
+    "title": "copy_cycles is rendered in every leaf but nothing writes it",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 192,
+    "severity": "false-claim",
+    "problem": "Checks: tron-code-review counter semantics (missing collection read as no work), folks 14 (no writer). work_tally::copy_cycles is 'reserved for state layout copies of the chain path'. No line in h/ or src/ adds to it. README.stats.md:346 lists it as a part of busy_cycles. The layout copies exist: gdn_state_to_slices runs in start_from_checkpoint and gdn_slices_to_state runs in write_checkpoint. Their time lands in start_cycles and write_cycles. t_gated_delta_net.cpp:2384 pins copy_cycles == 0.",
+    "scenario": "A reader of a TRON_GDN_STATS=1 report sees copy_cycles = 0 and concludes that the slice-layout conversion is free. The prototype measured 9,971 ns per chain for the conversion in and out, against 6,921 ns for two plain copies (task3-table-cpu140-run1.txt). Design task 2 asks for a separate timer for exactly this copy, to compare with the prediction.",
+    "fix": "Stamp the two conversion loops (gdn_rolling_executor.hpp:359-363 and 393-396) into copy_cycles through the tally. Or remove the key and state in README.stats.md that the conversion is inside start_cycles and write_cycles."
+   },
+   {
+    "title": "step() gained a test-only working-copy branch on the decode per-token path",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 421,
+    "severity": "risk",
+    "problem": "Checks: folks 30 (hot path), folks 14 (no production consumer), folks 18 (duplicated logic). run_gdn_operation sends every working copy to advance() (gdn_execution.hpp:160-168). So the new branch at lines 421-428 is reached only by tests. It sits at the top of step(), the function that runs once per token and key head in decode. If inlined, it pulls the chain kernel into step(). gated_delta_net.hpp:116-118 records that a larger step() once stopped clang from inlining it into the replay loop, and the replay ran slower. prepare_window_token (lines 605-620) is also a verbatim copy of the first 16 lines of the in-place body (lines 430-445).",
+    "scenario": "Decode with 1-token chains: step() may no longer be inlined into the loop of run_gdn_operation, so every decode token pays a call and loses cross-call optimization. Insufficient data: the decode speed of the base build against this head on delphi-3b35 resolves it. The reader report gdnpath.facts.md:56 asks for the same measurement.",
+    "fix": "Move the working-copy body into a private TRON(noinline) member, or delete it and let the tests call advance() with one token. Share the gather-and-convolve lines between step() and prepare_window_token through one helper. Report decode tokens per second for base and head."
+   },
+   {
+    "title": "No test proves that advance() takes the block kernel, counts it, or falls back after a refusal",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_gated_delta_net.cpp",
+    "line": 2778,
+    "severity": "test-gap",
+    "problem": "Checks: tron-code-review meaningful tests (deliberate break), folks 33 and 3A. 'GatedDeltaNet advance with the block kernel stays close to step' is the only test that reaches advance_window_with_block_kernel. Its bounds allow exact equality, and it passes no tally. On a host without AMX it passes with no SKIP and no WARN. The counters amx_head_tokens, amx_blocks, amx_fallback_blocks and half_full_block_tokens are asserted only as zero (lines 2371-2374). No test sends a refusing input through the executor.",
+    "scenario": "Three breaks that fail no assertion on any host. (1) Force block_window to false at gdn_rolling_executor.hpp:518: advance equals step, the test passes, and only speed is lost. (2) Delete the gdn_recurrence_chain_head call at lines 675-678: a refused value head keeps a stale matrix and unfinished outputs. (3) Swap the two counters at line 680, or drop line 544.",
+    "fix": "In this test pass a work_tally to advance(). When amx_gdn_k128v128::available() is true, require amx_blocks == full windows x value heads and at least one output word that differs from step(). Otherwise require half_full_block_tokens == 32 x full windows x key heads. Add one case that starts from a checkpoint with an infinity in one value head: require amx_fallback_blocks > 0 and the bytes of step() for that head."
+   },
+   {
+    "title": "Block kernel tests run only on AMX hosts, the split rule has no test, and one comment names the wrong input family",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_amx_gdn_numerics.cpp",
+    "line": 181,
+    "severity": "test-gap",
+    "problem": "Checks: tron-code-review hardware gate and exit code, folks 3A, folks 17. Both test cases do WARN and return when available() is false (lines 181-184 and 284-287). Catch2 counts that as a pass. The split of an FP32 value into three bf16 pieces is plain AVX-512 code, but it sits in the anonymous namespace of amx_gdn.cpp, so only these gated cases reach it. Design section 5.6 lists a split-rule test (exact sum from 2^-103 up, the stated loss below). No such test exists. Lines 188-189 say the 'small values' family takes values below 2^-103. Its scale is 1e-20, about 2^-66, so its three pieces are all normal bf16 values and nothing is dropped.",
+    "scenario": "On a runner without AMX the binary returns 0 and the lane shows a pass, while no line of the block kernel ran. A change to split() that loses precision only below 2^-103, or only near the largest FP32 value, fails no assertion on any host: no family holds such start values.",
+    "fix": "Move split() and pair_row() to a header that needs no AMX flags and test them on every host: sum of pieces == value for magnitudes from 2^-103 to the largest FP32 value, and the documented loss below. Use SKIP() in place of WARN plus return, so that a run without AMX shows as skipped. Correct the comment: the decay-underflow family is the one that produces values below 2^-103."
+   },
+   {
+    "title": "At head size 256 the dense AMX page path fills and copies 4,096 bytes per page visit on unchanged lines",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/self_attention.hpp",
+    "line": 1847,
+    "severity": "risk",
+    "problem": "Checks: tron-code-review raised size parameter, folks 30 raised-size trigger. The change raises the head size on apply_dense_amx_page from 128 to 256. Line 1847 declares tensor<operation_head_size> scratch with the zero-filling default constructor (tensor.hpp:41-42). Lines 1848-1849 then overwrite all of it with memcpy from amx_o. scratch is only read afterwards, by fma or by v_star.set.",
+    "scenario": "Per query token, full page and KV head: 4 heads x 1,024 bytes = 4,096 bytes copied at head size 256, against 2,048 bytes at 128. The same number of bytes is zero-filled first in the source. The compiler may remove that fill, because the overwrite is visible in the same function. Not measured, and the object code was not inspected.",
+    "fix": "Declare tensor<operation_head_size> scratch{uninitialized}. Better: read row `offset` of amx_o through a view in the fma and drop the copy. amx_o is alignas(64) and each row starts at a multiple of 64 bytes. Line 1795 (s_pages, 1,024 bytes zero-filled before the QK kernel writes all of it) does not grow with the head size and can take the same {uninitialized} form."
+   },
+   {
+    "title": "The stats header repeats kernel facts: a false grid comment, a third constant for 32, and a second AMX gate",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 134,
+    "severity": "false-claim",
+    "problem": "Checks: folks 17 (comment against code), 18 (duplicate), 31 (one gate per subsystem). Lines 134-135 say the blocks of a chain are counted from its first token and that this is the grid of half_full_block_tokens. advance() counts full windows on the grid of the sequence position (gdn_rolling_executor.hpp:514-517). gdn_stats::BLOCK_TOKENS_32 is a third copy of gdn_window_tokens and amx_gdn_k128v128::BLOCK_TOKENS_32, and nothing ties it to them. model.hpp:1742-1745 sets facts.amx_gdn_enabled from shape_ok of kernel 0 only. The executor gate block_kernel_shape (lines 221-224) has two more conditions and is evaluated per kernel.",
+    "scenario": "A chain that starts at position 5 with 64 tokens has 1 full window (positions 32 to 63). The comment predicts 2. If gdn_window_tokens changes, the summary key block_tokens still reads 32. If the two gates disagree, the summary reads amx_gdn_enabled true while no window takes the block kernel.",
+    "fix": "Reword the comment to 'full windows on the grid of the token position'. Set facts.block_tokens from gdn_window_tokens and delete gdn_stats::BLOCK_TOKENS_32. Give the executor a static accessor for its gate and use it in model.hpp."
+   },
+   {
+    "title": "amx_head_tokens and amx_recurrence_cycles include refused blocks, and README gives amx_blocks no unit",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_rolling_executor.hpp",
+    "line": 540,
+    "severity": "false-claim",
+    "problem": "Check: tron-code-review counter semantics (does the class describe the work counted). Lines 540-546 file a block window under the amx path before the result of the kernel is known. A value head that the kernel refuses is advanced by the chain kernel (lines 675-678). Its tokens and its time still count as amx. gdn_stats.hpp:27 says 'the code that advances a token counts it', and README.stats.md:336-339 says the keys count the tokens that each path advanced. README.stats.md:340 calls amx_blocks 'the blocks of block_tokens tokens'. The unit in the code is one block of one value head (gdn_stats.hpp:178).",
+    "scenario": "A reader divides amx_recurrence_cycles by amx_head_tokens to get the cost of the block kernel. After refusals the quotient mixes a failed block attempt with chain-kernel time. A reader checks amx_blocks x 32 against amx_head_tokens and finds a factor of 2 for Qwen3.5 (2 value heads per key head).",
+    "fix": "State in the Note and in README.stats.md that amx_head_tokens counts the tokens of windows handed to the block kernel, that amx_fallback_blocks of them ran the chain kernel inside amx_recurrence_cycles, and that amx_blocks and amx_fallback_blocks count value-head blocks."
+   },
+   {
+    "title": "The 256-dim arm of the dispatch test covers 2 of 5 arms, one KV head, and fakes that return zeros",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/t/t_amx_dispatch_dtype.cpp",
+    "line": 337,
+    "severity": "test-gap",
+    "problem": "Check: tron-code-review tests (outputs never read, index 0 only, one arm only). The 128 shape runs five arms: full page, partial page, available() false, float executor and fp16 executor. The 256 shape runs the first two (lines 337-344). The model has 1 KV head, so kv_head is always 0 and the query-group offset in packed_amx_query is multiplied by zero. The fake PV kernel writes zeros (lines 300-308), and v_star is never read.",
+    "scenario": "Change amx_o + offset * operation_head_size to amx_o + offset * 128 at self_attention.hpp:1848: every assertion still passes on every host. The kill-switch arm, which the A/B run of the 256 kernels uses, has no dispatch test at head size 256.",
+    "fix": "Add the three missing arms for 256 (one line each). Use 2 KV heads and visit kv_head 1. Let the fake PV kernel write a distinct value per row and dim, and require those values in v_star of each head after the call."
+   },
+   {
+    "title": "No test enters the stats wiring in model::state and in the generated plugin with the stats on",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/model.hpp",
+    "line": 2163,
+    "severity": "test-gap",
+    "problem": "Check: folks 33 (changed path through its production entry), tron-code-review forward-pass example. The stats tests build a model_stats object by hand and call run_gdn_operation directly. Nothing in t/ reads state.gdn_path_stats. The generator line that passes outer_state.gdn_path_stats.get() (ingest/src/TronCpp.hs:3146) and the forward_scope in model::state::forward (model.hpp:2161-2165) run in tests only with the switch off.",
+    "scenario": "If the generator passed no pointer, or the scope used another class, every test would pass. A run with TRON_GDN_STATS=1 would then report forwards with zero GDN jobs, which reads as 'no GDN work'.",
+    "fix": "In a test that runs a forward of a model with GDN operations, replace state.gdn_path_stats by an enabled object, as t_amx_dispatch_dtype.cpp:156-169 does for the attention stats. Require gdn_jobs > 0, one forward, and the class of that forward."
+   },
+   {
+    "title": "The switch TRON_AMX_GDN_DISABLE has no test",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_gdn.cpp",
+    "line": 129,
+    "severity": "test-gap",
+    "problem": "Check: folks 33. detect() reads TRON_AMX_GDN_DISABLE, the switch that the A/B run of the block kernel depends on. No file under t/ sets the variable. TRON_GDN_STATS has a forked-child test for the same kind of read (t_gdn_stats.cpp:157-181).",
+    "scenario": "Misspell the variable name in detect(), or invert the comparison: no test fails. The A/B run then compares two runs of the same path. Only the summary key amx_gdn_enabled would show it.",
+    "fix": "Add a forked-child case on an AMX host: with the variable set to 1, amx_gdn_k128v128::available() is false; with it unset, it equals amx_attn_h128g4::available()."
+   },
+   {
+    "title": "Comments and docs still say that AMX means attention only and that amx_attn.cpp is the only AMX translation unit",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_attn.cpp",
+    "line": 2,
+    "severity": "false-claim",
+    "problem": "Check: folks 17 (comment against code). amx_attn.cpp:2-3 says 'The ONLY translation unit compiled with -mamx-tile/-mamx-bf16', and amx_attn_iface.hpp:3-5 says the same. src/tron/CMakeLists.txt:220-222 now gives the flags to amx_gdn.cpp too. amx_attn.cpp:225 says 'one of the two layout-specific readers' of the packed V plane. There are now three, and v_vnni.hpp was updated. CMakeLists.txt:46 and README.ci.md:586 describe TRON_AMX_DISPATCH as the software-attention kernels only.",
+    "scenario": "A reader of README.ci.md or of the option text concludes that the option cannot change GatedDeltaNet output. With the option ON, as in the deb preset, a 128 by 128 GDN model on an AMX host takes the block kernel by default, and its bytes differ from the chain kernel.",
+    "fix": "Reword the five places to name both kernel files and the GatedDeltaNet block kernel. In README.ci.md add one sentence on the switch TRON_AMX_GDN_DISABLE."
+   },
+   {
+    "title": "The off-state contract says 'one bool per call and nothing else', but the code does more",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_execution.hpp",
+    "line": 124,
+    "severity": "false-claim",
+    "problem": "Checks: folks 6 (claim wider than the code), tron-code-review hidden zero fill. Lines 124-125 and gdn_stats.hpp:14-15 say the off state tests one bool per call and nothing else. Line 128 constructs work_tally, 15 fields of 8 bytes that are all zero-initialized, before the flag is used. Each work item tests the flag 6 times, and advance() tests it 5 times per window plus once per value-head block.",
+    "scenario": "With the switch off, every run_gdn_operation call that has work zero-fills 120 bytes that nothing reads. The cost is small, but the sentence is false as written, and a reviewer who relies on it will not look for the fill.",
+    "fix": "Reword to 'reads no time stamp, writes no atomic, allocates no row'. Or construct the tally in a std::optional only when stats_enabled is true."
+   },
+   {
+    "title": "The 256 x 4 query pack runs before the dense-page test and moves one bf16 pair per iteration",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_attn.cpp",
+    "line": 397,
+    "severity": "risk",
+    "problem": "Checks: tron-code-review (work before its test, scalar loop in a vector kernel), folks 30. packed_amx_query (self_attention.hpp:1659-1663) packs a token's query group at its first visible page of the call, before is_dense_amx_page decides whether any page takes the kernels. pack_q_group_256x4 is a triple loop of 512 iterations that moves 2 bf16 values each. The 128 version has 256 iterations.",
+    "scenario": "A call in which no page of the token is dense, such as decode on a context below 64 tokens or a section of partial pages, writes 2,048 bytes for nothing, twice the 128 cost. Hypothesis, not measured: for a worker section with one full page per token the pack is a visible share of the page unit. An instruction count of the function with the project compiler, and one timed call on the Xeon 6962P, confirm or reject it.",
+    "fix": "Measure first. If it shows, pack inside the dense branch (apply_page_tok, after is_dense_amx_page) and write the pack with AVX-512 permutes."
+   },
+   {
+    "title": "The stats call the chain kernel 'column-half' and publish 'half' in the JSON keys",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/h/tron/models/gdn_stats.hpp",
+    "line": 126,
+    "severity": "style",
+    "problem": "Check: folks 20 (identifier against the code's own spelling). gdn_path::column_half, PATH_NAMES 'half' and the README text 'column-half kernel' name a kernel that the code calls the chain kernel (gdn_recurrence_chain). The kernel works on slices of gdn_slice_chunks chunks. A slice is half of a head only at 128 columns. The test comment at t_gated_delta_net.cpp:2366-2367 has to translate between the two names.",
+    "scenario": "A reader searches the tree for 'column-half' or 'half' to find the code behind half_head_tokens and finds only the stats header. Scripts read the keys by name, so a rename after the first reports costs more than a rename now.",
+    "fix": "Rename the enumerator to chain and the key prefix to 'chain' (chain_head_tokens, chain_recurrence_cycles, chain_full_block_tokens), or name the kernel 'column-half' in gated_delta_net.hpp. Use one name in both commits."
+   },
+   {
+    "title": "The 256 x 4 kernels copy the transposing store and the weight conversion of the 128 x 4 kernels",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_attn.cpp",
+    "line": 339,
+    "severity": "style",
+    "problem": "Check: folks 18 (new code repeats an existing function). store_query_rows (lines 339-375) repeats the transposing store inside qk_rowmajor_128x4 (lines 186-215). Its own comment says so. weights_to_bf16 (lines 381-393) repeats lines 233-241 of weights_times_v_128x4. Neither helper depends on the head size.",
+    "scenario": "A later correction to one copy, for example a truncating weight conversion that the Note at amx_attn_iface.hpp:83-85 calls a one-line change, leaves the other shape with the old numerics.",
+    "fix": "Let qk_rowmajor_128x4 and weights_times_v_128x4 call the two new helpers. The instruction sequence is the same, so the bits of the 128 kernels do not change."
+   },
+   {
+    "title": "amx_gdn.cpp includes common/assert.hpp and uses nothing from it",
+    "file": "/home/jhan/workspace/ai-runs/tron-gdn-amx-review/src/tron/kernels/amx_gdn.cpp",
+    "line": 11,
+    "severity": "cleanup",
+    "problem": "Check: folks 14 (include without a consumer). The file holds no TRON_ASSERT and no other name from common/assert.hpp.",
+    "scenario": "The include brings spdlog and fmt inline code into a translation unit that is compiled with extra instruction-set flags. Nothing breaks today, but the file header of the sibling amx_attn.cpp keeps such includes out on purpose.",
+    "fix": "Delete line 11."
+   }
+  ]
+ }
+]
