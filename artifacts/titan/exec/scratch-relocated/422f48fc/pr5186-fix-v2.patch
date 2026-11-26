@@ -1,0 +1,471 @@
+diff --git a/emu/common/tests/test_hemi_notel.py b/emu/common/tests/test_hemi_notel.py
+index 586c63d..0f0dd8b 100644
+--- a/emu/common/tests/test_hemi_notel.py
++++ b/emu/common/tests/test_hemi_notel.py
+@@ -61,6 +61,17 @@ MANIFEST_CHECKS = {
+     'run_sim.sh': section(SIM, '\nemu_vdebug_require_manifest "$BUILD_DIR/MANIFEST"',
+                           '\nif ! grep -Fqx "c2c_gc_master_avip:'),
+ }
++LINUX_WINDOW = section(SOURCES['run_emu.sh'], '\nLINUX_BOOT=0', '\nRUN_NS=')
++RUN_CYCLES_DISPATCH = section(SOURCES['run_emu.sh'], '\n  run_cycles_flags=',
++                              '\n  # FW forwarded')
++# The snapshot helpers are replaced; the window value marks a launcher default.
++DEFAULT_WINDOW = '1000000000'
++LINUX_FIXTURE = f'''
++ASIMOV_OS_DIR=/fixture; ASIMOV_OS_SNAPSHOT=fixture
++asimov_os_palladium_ready() {{ :; }}
++asimov_os_sms_defaults() {{ :; }}
++asimov_os_linux_boot_cycles() {{ echo {DEFAULT_WINDOW}; }}
++'''
+ 
+ 
+ def shell(source, args):
+@@ -411,5 +422,96 @@ emu_vdebug_require_manifest() { :; }
+                 self.check_reused_manifest(name, 'stage: legacy\n', 0, True, nocmn=0)
+ 
+ 
++class HemiAuxTimingWindow(unittest.TestCase):
++    """A Linux boot on an image with timed AUX lanes needs the caller's window.
++
++    The default window was measured with untimed AP system DRAM, and a build
++    with HEMI_GC_AUX_TIMING lands in the same directory as the default image.
++    """
++    TIMED = 'defines:  CMN_RESET_FULL_SEQ GC_BEHAV HEMI_GC_AUX_TIMING\n'
++    UNTIMED = 'defines:  CMN_RESET_FULL_SEQ GC_BEHAV\n'
++
++    def before_build(self, args):
++        return shell(LINUX_FIXTURE + PARSERS['run_emu.sh'] + LINUX_WINDOW
++                     + '\nprintf "BUILD_STARTS\\n"\n', args)
++
++    def before_launch(self, args, manifest, setup=''):
++        with tempfile.TemporaryDirectory(prefix='hemi-aux-manifest-') as directory:
++            Path(directory, 'MANIFEST').write_text(manifest)
++            source = (f"BUILD_DIR={shlex.quote(directory)}; BUILD_CMD='fixture-build --build'\n"
++                      + setup
++                      + LINUX_FIXTURE + PARSERS['run_emu.sh'] + LINUX_WINDOW
++                      + MANIFEST_CHECKS['run_emu.sh']
++                      + '\nprintf "LAUNCH %s\\n" "$RUN_CYCLES"\n')
++            return shell(source, args)
++
++    def assert_launched(self, result, cycles):
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertIn(f'LAUNCH {cycles}', result.stdout)
++
++    def assert_rejected(self, result, marker):
++        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertNotIn(marker, result.stdout)
++        self.assertIn('HEMI_GC_AUX_TIMING', result.stderr)
++        self.assertIn('explicit --run-cycles', result.stderr)
++
++    def test_timed_image_needs_an_explicit_window(self):
++        # No phase flag reuses the image and elaborates; --run-only reuses the snapshot.
++        for phase in ((), ('--run-only',)):
++            with self.subTest(phase=phase):
++                self.assert_launched(self.before_launch(phase, self.UNTIMED), DEFAULT_WINDOW)
++                self.assert_rejected(self.before_launch(phase, self.TIMED), 'LAUNCH')
++                self.assert_launched(
++                    self.before_launch((*phase, '--run-cycles', '1600000000'), self.TIMED),
++                    '1600000000')
++
++    def test_timed_image_without_a_linux_boot_keeps_its_default_window(self):
++        # Only the Linux-boot window was measured with untimed AP system DRAM.
++        result = self.before_launch(('--novb',), self.TIMED, 'export HEMI_LINUX_BOOT=0\n')
++        self.assert_launched(result, '100000000')
++
++    def test_only_the_complete_define_marks_a_timed_image(self):
++        for defines, timed in (('HEMI_GC_AUX_TIMING=1 OTHER', True),
++                               ('OTHER\tHEMI_GC_AUX_TIMING', True),
++                               ('HEMI_GC_AUX_TIMING_EXTRA', False),
++                               ('OTHER_HEMI_GC_AUX_TIMING', False)):
++            with self.subTest(defines=defines):
++                result = self.before_launch((), f'defines: {defines}\n')
++                if timed:
++                    self.assert_rejected(result, 'LAUNCH')
++                else:
++                    self.assert_launched(result, DEFAULT_WINDOW)
++
++    def test_timed_build_without_a_window_stops_before_the_build(self):
++        build = ('--build', '--define', 'HEMI_GC_AUX_TIMING')
++        self.assert_rejected(self.before_build(build), 'BUILD_STARTS')
++        for extra in (('--run-cycles', '1600000000'), ('--build-only',)):
++            with self.subTest(extra=extra):
++                result = self.before_build((*build, *extra))
++                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++                self.assertIn('BUILD_STARTS', result.stdout)
++        # The image of a finished build is checked again before the launch.
++        self.assert_rejected(self.before_launch(('--build',), self.TIMED), 'LAUNCH')
++
++    def test_dispatch_tells_the_remote_who_chose_the_window(self):
++        # The dispatch always forwards --run-cycles; two hops cover a re-dispatch.
++        for args, allowed in (((), False), (('--run-cycles', '1600000000'), True)):
++            with self.subTest(args=args):
++                for _ in range(2):
++                    source = (LINUX_FIXTURE + PARSERS['run_emu.sh'] + LINUX_WINDOW
++                              + RUN_CYCLES_DISPATCH + '\nprintf "%s\\n" "$run_cycles_flags"\n')
++                    result = shell(source, args)
++                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++                    args = tuple(shlex.split(result.stdout.splitlines()[-1]))
++                    self.assertIn('--run-cycles', args)
++                    remote = self.before_launch(args, self.TIMED)
++                    if allowed:
++                        self.assert_launched(remote, '1600000000')
++                    else:
++                        self.assert_rejected(remote, 'LAUNCH')
++                    self.assert_launched(self.before_launch(args, self.UNTIMED),
++                                         args[args.index('--run-cycles') + 1])
++
++
+ if __name__ == '__main__':
+     unittest.main()
+diff --git a/emu/hemi_tlm/agents/goldcrest_ew_fullconn_avip.sv b/emu/hemi_tlm/agents/goldcrest_ew_fullconn_avip.sv
+index 21bd47d..aedac3f 100644
+--- a/emu/hemi_tlm/agents/goldcrest_ew_fullconn_avip.sv
++++ b/emu/hemi_tlm/agents/goldcrest_ew_fullconn_avip.sv
+@@ -640,11 +640,18 @@ module goldcrestEW_ip_fullconn_wrapper
+ `ifdef HEMI_GC_EMBEDDED_MEM
+   // All 18 pairs (32 DP + 4 AUX lanes) use 16-GiB AVIP STB memories; the AP
+   // system DRAM on the AUX lanes is preloaded by hemi_sys_mem.cpp through MARG.
+-  // Every HEMI pair (DP 0..15, AUX 16..17) gets the DDR timing profile; without
+-  // the HEMI pair index (-1, e.g. FC) the lanes stay untimed.
++  // HEMI DP pairs 0..15 get the DDR timing profile. AUX pairs 16..17 get it
++  // only with +define+HEMI_GC_AUX_TIMING: the default Linux-boot run window was
++  // measured with untimed AP DRAM. Without the HEMI pair index (-1, e.g. FC)
++  // the lanes stay untimed.
++`ifdef HEMI_GC_AUX_TIMING
++  localparam int GC_TIMED_PAIRS = 18;
++`else
++  localparam int GC_TIMED_PAIRS = 16;
++`endif
+   hemi_gc_lane_avip #(
+     .EMBEDDED        (1'b1),
+-    .DATAPATH_TIMING (GC_PAIR_INDEX >= 0 && GC_PAIR_INDEX < 18)
++    .DATAPATH_TIMING (GC_PAIR_INDEX >= 0 && GC_PAIR_INDEX < GC_TIMED_PAIRS)
+   ) lane_bfm0 (
+     .aclk     (axi1_aclk_s_i),
+     .aresetn  (rstn_i),
+@@ -690,7 +697,7 @@ module goldcrestEW_ip_fullconn_wrapper
+ 
+   hemi_gc_lane_avip #(
+     .EMBEDDED        (1'b1),
+-    .DATAPATH_TIMING (GC_PAIR_INDEX >= 0 && GC_PAIR_INDEX < 18)
++    .DATAPATH_TIMING (GC_PAIR_INDEX >= 0 && GC_PAIR_INDEX < GC_TIMED_PAIRS)
+   ) lane_bfm1 (
+     .aclk     (axi0_aclk_s_i),
+     .aresetn  (rstn_i),
+diff --git a/emu/hemi_tlm/doc/GC_DDR_TIMING.md b/emu/hemi_tlm/doc/GC_DDR_TIMING.md
+index dbe72f9..30a19ce 100644
+--- a/emu/hemi_tlm/doc/GC_DDR_TIMING.md
++++ b/emu/hemi_tlm/doc/GC_DDR_TIMING.md
+@@ -1,10 +1,13 @@
+ # Goldcrest AVIP timing
+ 
+-The 36 embedded Goldcrest XMS lanes (32 datapath and 4 AUX) use the existing
+-Cadence AXI AVIP register bank for response latency and an emulation-only
+-service scheduler for bandwidth and refresh pauses. XMS accesses these memories
+-through AXI. Host timing settings apply only to the 32 datapath lanes; the four
+-AUX lanes, which hold the AP system DRAM, run the reset profile. Timing is
++The 32 embedded Goldcrest datapath lanes use the existing Cadence AXI AVIP
++register bank for response latency and an emulation-only service scheduler for
++bandwidth and refresh pauses. XMS accesses these memories through AXI. The four
++AUX lanes, which hold the AP system DRAM, are also embedded memories. They are
++untimed by default and run the same reset profile only in an image built with
++`--define HEMI_GC_AUX_TIMING` (see
++[Startup and reset contract](#startup-and-reset-contract)). Host timing
++settings apply only to the 32 datapath lanes. Datapath timing is
+ available in the ordinary embedded-memory/Gauntlet build. It needs no timing
+ build switch or separate image variant. The scheduler is part of the emulation
+ wrapper; Asimov compute RTL and AVIP backing storage are unchanged.
+@@ -65,7 +68,7 @@ additions. The backing memory remains in the native Cadence BFM.
+ ## Startup and reset contract
+ 
+ The HEMI wrapper loads this provisional optimistic profile at power-on and on
+-**every XMS lane reset** (datapath and AUX):
++**every datapath lane reset**:
+ 
+ | Control                                 | Reset value                                     |
+ | --------------------------------------- | ----------------------------------------------: |
+@@ -83,12 +86,28 @@ The reset is the AVIP lane's active-low `ARESETn`, connected to the Goldcrest
+ wrapper's `rstn_i`. A reset that does not reach that pin does not restore the
+ profile. Reset flushes AXI transactions, including pending responses, without
+ clearing the backing memory. Data from an incomplete write is not guaranteed.
+-The four AUX lanes load the same profile.
++The four AUX lanes retain native zero-delay startup and programmed-control
++retention across reset, unless the image defines `HEMI_GC_AUX_TIMING`.
+ Instances without a HEMI pair index, including the current FC integration,
+-retain native zero-delay startup and programmed-control retention across
+-reset. These instances elaborate neither the
++also retain that existing behavior. These instances elaborate neither the
+ added timing-bank initialization/reset processes nor the service MARG map.
+ 
++`run_build.sh --define HEMI_GC_AUX_TIMING` (or `run_emu.sh --build --define
++HEMI_GC_AUX_TIMING`) makes the four AUX lanes load the same profile at power-on
++and on every AUX lane reset. The host cannot change it: `goldcrest_timing`
++reaches only the 32 datapath lanes. The define is off by default because the
++default Linux-boot run window (`asimov_os_linux_boot_cycles`) was measured with
++untimed AP DRAM: Linux init at 874-883M cfclks in a 1.0G cfclk window. Each
++AP DRAM read gains about 58 AXI cycles (est.), and a timed-AUX boot has
++not been measured. `run_emu.sh` therefore rejects a Linux boot on such an
++image unless the caller passes an explicit `--run-cycles`. A direct
++`run_emu.sh --build` call checks the `--define` list before the build. Every
++run checks the MANIFEST `defines:` line of the image before the emulator
++starts, including a reused image and `--run-only`. The define adds no image
++tag token, so the image replaces the untimed one in the same build directory;
++its MANIFEST `defines:` line records the define. `run_sim.sh` has no
++`--define` option, so simulation keeps untimed AUX lanes.
++
+ **Reset restores defaults. Program non-default settings after reset release,
+ before traffic, and reapply them after every subsequent lane reset.** Writes
+ during active reset can be overwritten by the reset defaults. Keep reset stable
+@@ -291,8 +310,8 @@ All delays are nonnegative integer **AXI clock cycles**, independently of the
+ core-clock waits used by host operations. Bandwidth is integer bytes per 1024
+ AXI cycles: `rate / 1024` GB/s at 1 GHz. Convert physical latency using the
+ actual AXI frequency of the selected image. The delay width is 16 bits and the
+-compiled native outstanding limit is 64 for HEMI XMS lanes (datapath and AUX)
+-and 16 for instances without a HEMI pair index.
++compiled native outstanding limit is 64 for timed lanes (datapath, and AUX with
++`HEMI_GC_AUX_TIMING`) and 16 for untimed lanes.
+ 
+ ### Native Cadence AVIP parameters
+ 
+@@ -374,8 +393,11 @@ Every later lane reset restores defaults and requires reprogramming overrides.
+ Resets must remain stable throughout programming. Snapshot restore retains its
+ saved bank values; it does not imply a fresh reset.
+ The HEMI emulation-copy patch passes the existing `GC_PAIR_INDEX`
+-parameter, which enables timing on every XMS GC pair (DP and AUX); instances
+-without it stay untimed. Compute RTL is unchanged.
++parameter to distinguish DP from AUX; AUX pairs are timed only with
++`HEMI_GC_AUX_TIMING`, and instances without the parameter stay untimed.
++`tests/test_gc_timing_selection.py` checks this selection in the wrapper
++source text for both lane instances, with and without the define.
++Compute RTL is unchanged.
+ 
+ Within each GC pair, BFM suffixes retain XMS logical lane numbering:
+ `slave_bfm0` / `lane_bfm0` connect to native Goldcrest AXI1 (logical lane 0),
+@@ -437,8 +459,9 @@ Removing either bandwidth budget or refresh must fail its dedicated checker.
+ rates, unequal-width fairness, credit bounds, refresh timing, invalid profiles,
+ ID metadata through the 63-request boundary, narrow/unaligned costs and
+ independent pools at different clocks.
+-The `aux` scenario qualifies the untimed lane used without a HEMI pair index
+-(HEMI AUX lanes are timed and share the datapath lane qualification). It
++The `aux` scenario qualifies the untimed lane: the default HEMI AUX lanes and
++lanes without a HEMI pair index (AUX lanes built with `HEMI_GC_AUX_TIMING`
++share the datapath lane qualification). It
+ compares raw startup controls and complete AXI traces with an untouched native
+ AVIP reference. It checks zero effective startup delays,
+ compiled limits of 16, and retention of programmed latency/limits across reset.
+diff --git a/emu/hemi_tlm/doc/HOST_PROGRAM_V1.md b/emu/hemi_tlm/doc/HOST_PROGRAM_V1.md
+index 1a58b80..574caf4 100644
+--- a/emu/hemi_tlm/doc/HOST_PROGRAM_V1.md
++++ b/emu/hemi_tlm/doc/HOST_PROGRAM_V1.md
+@@ -96,7 +96,8 @@ transport latency, shared DDR bandwidth and the larger response window.
+ A supplied zero clears a delay or bandwidth budget until the next lane reset;
+ clearing both rates and refresh duration bypasses service scheduling.
+ Only specified controls are changed, on all 32 datapath lanes, with readback.
+-The four AUX lanes keep the reset profile.
++The four AUX lanes are not programmable: they are untimed by default and keep
++the reset profile in a `HEMI_GC_AUX_TIMING` image.
+ Each lane has an independent pool shared by reads and writes. Combined refresh
+ settings are checked against every resident profile before any writes. Configure
+ with traffic drained; a setting change restarts that lane's service calendar.
+diff --git a/emu/hemi_tlm/scripts/run_emu.sh b/emu/hemi_tlm/scripts/run_emu.sh
+index 6c538ae..364425a 100755
+--- a/emu/hemi_tlm/scripts/run_emu.sh
++++ b/emu/hemi_tlm/scripts/run_emu.sh
+@@ -285,6 +285,7 @@ SERIAL_CFG=""
+ HOST_PROGRAM=""
+ HOST_PROGRAM_SUPPORT=0
+ RUN_CYCLES_SET=0
++RUN_CYCLES_DEFAULTED=0   # 1 = the ssh dispatch forwarded a launcher default as --run-cycles
+ EXTRA_PLUSARGS=()
+ while [[ $# -gt 0 ]]; do
+   case $1 in
+@@ -334,6 +335,7 @@ while [[ $# -gt 0 ]]; do
+                   RUN_WAIT=$2; RUN_WAIT_SET=1; shift 2 ;;
+     --run-cycles) [[ $# -lt 2 ]] && { printf '\033[1;31m%s\033[0m\n' "ERROR: --run-cycles needs a value" >&2; exit 1; }
+                   RUN_CYCLES=$2; RUN_CYCLES_SET=1; shift 2 ;;
++    --run-cycles-default) RUN_CYCLES_DEFAULTED=1; shift ;;   # internal-only: added by the ssh dispatch
+     --timelimit)  [[ $# -lt 2 ]] && { printf '\033[1;31m%s\033[0m\n' "ERROR: --timelimit needs a value" >&2; exit 1; }
+                   RUN_TIMELIMIT=$2; RUN_TIMELIMIT_SET=1; shift 2 ;;
+     --waves)      WAVES=1; shift ;;
+@@ -638,6 +640,15 @@ if [[ $PCIESB -eq 1 ]]; then
+   # ~1950 s on hemi_notws_sb_tlm.
+   [[ $RUN_TIMELIMIT_SET -eq 1 || $LINUX_BOOT -eq 1 ]] || RUN_TIMELIMIT=1800
+ fi
++# The default Linux-boot windows were measured with untimed AUX lanes (the AP
++# system DRAM).  HEMI_GC_AUX_TIMING times those lanes, and no boot of such an
++# image has been measured.  Stop before the build when the caller left the
++# window to the launcher.
++if [[ $LINUX_BOOT -eq 1 && $RUN -eq 1 && ( $RUN_CYCLES_SET -eq 0 || $RUN_CYCLES_DEFAULTED -eq 1 ) &&
++      " ${BUILD_FLAGS[*]} " =~ [[:space:]]HEMI_GC_AUX_TIMING(=[^[:space:]]*)?[[:space:]] ]]; then
++  printf '\033[1;31m%s\033[0m\n' "ERROR: --define HEMI_GC_AUX_TIMING times the AP system DRAM, and the default Linux-boot window ($RUN_CYCLES cfclks) was measured without that timing. Pass an explicit --run-cycles, or pass --build-only to build without running" >&2
++  exit 1
++fi
+ RUN_NS=$(( RUN_CYCLES / 2 ))
+ 
+ # -----------------------------------------------------------------------------
+@@ -858,6 +869,10 @@ if [[ "$(hostname -s)" != "${PALLADIUM_HOST%%.*}" ]]; then
+     phase_flags="$phase_flags $plusarg_q"
+   done
+   phase_flags="$phase_flags ${BUILD_FLAGS[*]}"
++  # The remote always receives --run-cycles.  --run-cycles-default tells it
++  # that the caller did not choose the value.
++  run_cycles_flags="--run-cycles $RUN_CYCLES"
++  [[ $RUN_CYCLES_SET -eq 1 && $RUN_CYCLES_DEFAULTED -eq 0 ]] || run_cycles_flags+=" --run-cycles-default"
+   # FW forwarded 2026-07-29: on emu (CMN_RESET_FULL_SEQ) reset release is
+   # firmware-driven and FW=hemi_release_boot selects the release-all boot ROM;
+   # without forwarding, a dispatched run silently stages the default Asimov
+@@ -877,7 +892,7 @@ if [[ "$(hostname -s)" != "${PALLADIUM_HOST%%.*}" ]]; then
+   # `env` prefix: the remote command runs under the user's LOGIN shell; bare
+   # VAR=val prefixes are bash-only and die under csh/tcsh with
+   # "VAR=...: Command not found" (hit 2026-07-29 dispatching to ga13pd02).
+-  exec ssh "$PALLADIUM_HOST" "cd '$REPO_ROOT' && env $remote_env ./emu/hemi_tlm/scripts/run_emu.sh --run-cycles $RUN_CYCLES --run-wait $RUN_WAIT --timelimit $RUN_TIMELIMIT $phase_flags"
++  exec ssh "$PALLADIUM_HOST" "cd '$REPO_ROOT' && env $remote_env ./emu/hemi_tlm/scripts/run_emu.sh $run_cycles_flags --run-wait $RUN_WAIT --timelimit $RUN_TIMELIMIT $phase_flags"
+ fi
+ 
+ if [[ $WMEM_PRELOAD -eq 1 && $RUN -eq 1 ]]; then
+@@ -961,6 +976,14 @@ done
+ # Reuse the mode recorded by the compiled design: --run-only cannot carry
+ # build flags, including a C2C-only passive override.
+ compiled_defines=$(sed -n 's/^defines:[[:space:]]*//p' "$BUILD_DIR/MANIFEST")
++# The build directory is the same with and without HEMI_GC_AUX_TIMING, so the
++# netlist decides.  A Linux boot on a netlist with timed AUX lanes (the AP
++# system DRAM) has no measured window.  The caller must pass --run-cycles.
++if [[ ${LINUX_BOOT:-0} -eq 1 && ${RUN:-1} -eq 1 && ( ${RUN_CYCLES_SET:-0} -eq 0 || ${RUN_CYCLES_DEFAULTED:-0} -eq 1 ) &&
++      " $compiled_defines " =~ [[:space:]]HEMI_GC_AUX_TIMING(=[^[:space:]]*)?[[:space:]] ]]; then
++  printf '\033[1;31m%s\033[0m\n' "ERROR: netlist has HEMI_GC_AUX_TIMING, which times the AP system DRAM: the default Linux-boot window ($RUN_CYCLES cfclks) was measured without that timing. Pass an explicit --run-cycles, or rebuild without the define ($BUILD_CMD)" >&2
++  exit 1
++fi
+ # The config-master verdict and its probes follow the netlist, not the flags.  A
+ # real-CMN Linux boot cannot pass on a config-master netlist: its tie-off of the
+ # CXX->CCX HRA leg stalls the SCP firmware's PCIe0 bring-up before the AP is
+diff --git a/emu/hemi_tlm/scripts/setup_tree.sh b/emu/hemi_tlm/scripts/setup_tree.sh
+index 6bc1015..5f90e57 100755
+--- a/emu/hemi_tlm/scripts/setup_tree.sh
++++ b/emu/hemi_tlm/scripts/setup_tree.sh
+@@ -713,8 +713,9 @@ else
+     echo "  WARN: ip/goldcrest/goldcrest_ip_fullconn_wrapper_if_behav.sv not found in hemi_closure.f — C2C GC-AVIP swap NOT applied" >&2
+ fi
+ 
+-# Pass the pair index in the emulation copy so every XMS GC lane (32 DP and
+-# 4 AUX) receives the reset timing profile. All 36 memories remain embedded.
++# Pass the pair index in the emulation copy so only DP lanes receive the
++# reset timing profile by default; +define+HEMI_GC_AUX_TIMING adds the 4 AUX
++# lanes. All 36 memories remain embedded.
+ if [[ $EMBEDDED_GC_MEMORY -eq 1 ]]; then
+     XMS_TOP_SRC=$REPO_ROOT/design/xms/rtl/xms_top.sv
+     XMS_TOP_PATCH=$PATCHED_F/xms_top_gc_pair_index.sv
+diff --git a/emu/hemi_tlm/tests/test_gc_timing_selection.py b/emu/hemi_tlm/tests/test_gc_timing_selection.py
+new file mode 100644
+index 0000000..57ce347
+--- /dev/null
++++ b/emu/hemi_tlm/tests/test_gc_timing_selection.py
+@@ -0,0 +1,109 @@
++"""Keep the DDR timing profile off the AUX pairs unless the image opts in.
++
++The default Linux-boot run window was measured with untimed AP system DRAM.
++A default image that times AUX pairs 16..17 can miss that window.
++"""
++import operator
++from pathlib import Path
++import re
++import unittest
++
++if __package__:
++    from .test_gc_port_order import parenthesized
++else:
++    from test_gc_port_order import parenthesized
++
++HEMI = Path(__file__).resolve().parents[1]
++
++WRAPPER = "goldcrestEW_ip_fullconn_wrapper"
++DEFINE = "HEMI_GC_AUX_TIMING"
++PAIR_INDICES = (-1, 0, 15, 16, 17, 18)
++# Pairs 0..15 are datapath pairs and pairs 16..17 are AUX pairs.
++# -1 is the index of an instance without a HEMI pair index.
++EXPECTED_TIMED = {
++    False: {-1: False, 0: True, 15: True, 16: False, 17: False, 18: False},
++    True: {-1: False, 0: True, 15: True, 16: True, 17: True, 18: False},
++}
++COMPARISONS = {
++    ">=": operator.ge, "<=": operator.le, "==": operator.eq,
++    "!=": operator.ne, ">": operator.gt, "<": operator.lt,
++}
++
++
++def wrapper_body(text):
++    """Return the comment-free body of the outer Goldcrest wrapper module."""
++    text = re.sub(r"/\*.*?\*/|//[^\n]*", "", text, flags=re.DOTALL)
++    matches = re.findall(rf"^module\s+{WRAPPER}\b(.*?)^endmodule\b", text,
++                         flags=re.DOTALL | re.MULTILINE)
++    if len(matches) != 1:
++        raise AssertionError(f"expected exactly one {WRAPPER}, found {len(matches)}")
++    return matches[0]
++
++
++def timed_pairs(body, defined):
++    """Evaluate GC_TIMED_PAIRS for one state of the build define."""
++    blocks = re.findall(
++        r"^`(ifdef|ifndef)[ \t]+(\w+)\s*\n"
++        r"\s*localparam\s+int\s+GC_TIMED_PAIRS\s*=\s*(\d+)\s*;\s*\n"
++        r"`else\s*\n"
++        r"\s*localparam\s+int\s+GC_TIMED_PAIRS\s*=\s*(\d+)\s*;\s*\n"
++        r"`endif\b", body, flags=re.MULTILINE)
++    if len(blocks) != 1 or len(re.findall(r"\bGC_TIMED_PAIRS\s*=", body)) != 2:
++        raise AssertionError("expected one ifdef/else block defining GC_TIMED_PAIRS")
++    directive, macro, first, second = blocks[0]
++    if macro != DEFINE or len(re.findall(rf"\b{DEFINE}\b", body)) != 1:
++        raise AssertionError(f"GC_TIMED_PAIRS must depend on {DEFINE} alone")
++    return int(first if defined == (directive == "ifdef") else second)
++
++
++def timing_expression(body, instance):
++    """Extract one lane instance's DATAPATH_TIMING parameter expression."""
++    matches = [
++        parenthesized(body, match.end() - 1)[0]
++        for match in re.finditer(r"\bhemi_gc_lane_avip\s*#\s*\(", body)
++        if re.match(rf"\s*{re.escape(instance)}\s*\(",
++                    body[parenthesized(body, match.end() - 1)[1]:])
++    ]
++    if len(matches) != 1:
++        raise AssertionError(f"expected exactly one {instance}, found {len(matches)}")
++    openings = list(re.finditer(r"\.DATAPATH_TIMING\s*\(", matches[0]))
++    if len(openings) != 1:
++        raise AssertionError(f"expected one {instance}.DATAPATH_TIMING")
++    expression, _ = parenthesized(matches[0], openings[0].end() - 1)
++    return re.sub(r"\s+", "", expression)
++
++
++def is_timed(expression, pair_index, limit):
++    """Evaluate a conjunction of GC_PAIR_INDEX comparisons, rejecting other forms."""
++    result = True
++    for clause in expression.split("&&"):
++        match = re.fullmatch(
++            r"GC_PAIR_INDEX(>=|<=|==|!=|>|<)(\d+|GC_TIMED_PAIRS)", clause)
++        if not match:
++            raise AssertionError(f"unsupported DATAPATH_TIMING clause: {clause!r}")
++        bound = limit if match.group(2) == "GC_TIMED_PAIRS" else int(match.group(2))
++        result = result and COMPARISONS[match.group(1)](pair_index, bound)
++    return result
++
++
++class GcTimingSelectionTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.body = wrapper_body(
++            (HEMI / "agents/goldcrest_ew_fullconn_avip.sv").read_text())
++
++    def test_aux_pairs_are_timed_only_with_the_build_define(self):
++        for logical in range(2):
++            expression = timing_expression(self.body, f"lane_bfm{logical}")
++            for defined, expected in EXPECTED_TIMED.items():
++                with self.subTest(logical=logical, defined=defined):
++                    limit = timed_pairs(self.body, defined)
++                    self.assertEqual(
++                        {index: is_timed(expression, index, limit)
++                         for index in PAIR_INDICES},
++                        expected,
++                    )
++
++
++if __name__ == "__main__":
++    unittest.main()

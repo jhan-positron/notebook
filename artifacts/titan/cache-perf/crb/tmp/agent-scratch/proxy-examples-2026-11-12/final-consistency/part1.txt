@@ -1,0 +1,320 @@
+52 Short version. A CRB core sees four levels: a 64 KiB L1 at 1.43 ns, a 2 MiB private L2 at 3.75 ns, a 128 MiB SLC (system level cache: the shared cache that Linux lists as L3, located in the on-chip mesh interconnect) at about 30 ns, and DRAM at 148 ns. One core reads at most 133 GB/s from L1, 85 GB/s from L2, 67 GB/s from the SLC and 30 GB/s from DRAM, and the whole chip reads 15.9 TB/s from L1, at least 0.62 TB/s from the SLC and 533 GB/s from DRAM. Two findings matter for software: with a buffer of 8 MiB each, the two cores of a pair (cores 2k and 2k+1, three pairs tested) together read only about 78 GB/s, against 125 to 134 GB/s for two cores of different pairs, and the core's prefetcher learns a repeated access pattern, so simple cache benchmarks under-report the SLC latency by five times.
+
+55 Contents
+
+57 The hierarchy at a glance Where each number in the figure comes from
+
+58 What "3 loads / 2 stores of 16 B per cycle" means The read loop compiled from C: 1.5 loads per cycle
+
+59 Cache ways: what "4-way" and "8-way" mean A worked example with real addresses
+
+60 The SLC (L3) and the pair port Is it an L3 cache? The mesh, and why older versions said "mesh cache" Is the pair port how the SLC is reached?
+
+61 Latency from each core to each slice (root run) Lines homed on the other mesh are served by a local proxy
+
+62 Latency Effective capacity is 64 MiB for one buffer A first read of lines cached on the other chiplet costs 85 ns, later reads 32 ns SLC latency by core position
+
+63 Bandwidth per core Where one writer's 73 GB/s limit sits (part 5)
+
+64 Bandwidth of the whole chip SLC: not saturated yet
+
+65 Who reads, who provides: the data path of each bandwidth number Read, 1 core Write, 1 core Read, whole chip Write, whole chip Why the SLC row uses 40 threads, not 120 Where one load is served: the five cases
+
+66 DRAM bandwidth against thread count Writers on both meshes collapse DRAM write bandwidth
+
+67 The pair finding
+
+68 Record Per-core bandwidth, GB/s (1 thread) Whole-chip bandwidth, GB/s (best configuration) Latency, all sizes (ns per load)
+
+69 Method and caveats
+
+70 Open items
+
+71 Words used here
+
+72 When the runs happened
+
+75 The hierarchy at a glance
+
+80 Measured
+
+81 Spec
+
+82 Core 2.8 GHz fixed 3 loads / 2 stores of 16 B per cycle *
+
+83 L1 data 64 KiB 1.43 ns (4 cycles) 133 GB/s read private, 4-way *
+
+84 L2 2 MiB 3.75 ns (10.5 cycles) 85 GB/s read private, 8-way *
+
+85 pair port * ~80 GB/s per 2 cores
+
+86 SLC (L3) 128 MiB * 30 ns (85 cycles) ≥0.62 TB/s whole chip shared by 128 cores 16-way, in the mesh
+
+87 DRAM 320 GiB 148 ns (415 cycles) 533 GB/s read, whole chip 10 channels DDR5-8000
+
+89 read: 3 loads × 2.8 GHz × 16 B = 134.4 GB/s write: 2 stores × 2.8 GHz × 16 B = 89.6 GB/s
+
+90 measured above
+
+91 measured above
+
+92 estimated 64 GB/s
+
+93 unknown
+
+94 10 channels × 8000 MT/s × 8 B per transfer = 640 GB/s theoretical peak
+
+97 Measured row. Latency = one dependent load from an idle core, best case. L1 and L2 bandwidth = one core, one thread, asm loop. Whole-chip = best measured aggregate on CPUs 0-119 (the 8 reserved cores were not used). SLC bandwidth is an estimated lower bound: mesh counters attribute 0.62 TB/s (est.) of a 1.38 TB/s run to the SLC (the rest hit L2). Each of these counters ran for about half of that run, and perf (the Linux counter tool) scaled its count to the whole run. A separate series of runs with 8 to 40 threads stopped at 40 threads, and its total was still increasing there. Spec row. The throughput that the specification of each block allows. It is calculated, not measured. "measured above" means that Arm's guide for the core states no throughput for this cache, so nothing is calculated here. "estimated 64 GB/s" at the pair port is a calculation that rests on a hypothesis. The hypothesis is not confirmed. The estimate counts only the bytes that cross the port in one direction. The measured ~80 GB/s above it counts every byte that two partner cores read, also the bytes from their own L2. "unknown" means that this row gives no number. The table below gives the reason for each box. Labels marked * are explained in the next three sections.
+
+100 Where each number in the figure comes from
+
+101 The Measured row is named for its latency and bandwidth values. It also holds numbers of other kinds, and the table below gives the kind of each label. Measured means run on CRB by the programs in bench/ . Read from the machine means taken from sysfs, cpufreq or the DIMM inventory, not measured and not from a document. Arm document means stated in one of Arm's manuals. Derived means computed from other numbers here. The Spec row holds derived numbers only. The 64 GB/s of the pair port is an estimate (est.). One of its three factors is a hypothesis.
+
+103 Label in the figure Source
+
+104 Core, 2.8 GHz fixed Read from the machine: the Linux frequency driver (cpufreq) reports 2,800,000 kHz on all 128 cores, the highest value it offers on CRB. The governor (the Linux policy that selects the frequency) is "performance". Frequency boost is disabled [inspection-record-2026-10-30.md, rows "Frequencies" and "Governor / driver"]. Measured: the core cycle counter of CPU 2 advanced 2.800 × 10 9 cycles per second while CPU 2 ran the asm loop in part 5 of run_sudo.sh. The six cases of that run give 2.7998 to 2.8001 × 10 9 cycles per second [results/sudo-20261102T211150Z/writepath.csv, event armv8_pmuv3_0/cycles/].
+
+105 3 loads / 2 stores of 16 B per cycle Arm document: the V3AE software optimisation guide, tables 3-13 and 3-14. Confirmed by measurement: 133 and 89.5 GB/s measured against 134.4 and 89.6 computed. The two numbers are separate limits. The core can start at most 3 loads + 1 store, or 2 loads + 2 stores, in one cycle (next section).
+
+106 L1 data 64 KiB, private, 4-way Read from the machine (the cores' cache registers through sysfs).
+
+107 1.43 ns (4 cycles), 133 GB/s read Measured (pointer chase; asm read loop, one thread). Cycles derived.
+
+108 L2 2 MiB, private, 8-way Read from the machine (sysfs).
+
+109 3.75 ns (10.5 cycles), 85 GB/s read Measured. Cycles derived.
+
+110 pair port, ~80 GB/s per 2 cores Measured: two partner cores together read 78 GB/s with a buffer of 8 MiB each (77.5 to 78.5 GB/s in five runs). Two cores of different pairs together read 125 to 134 GB/s. "~80" is 78 rounded. The 78 GB/s counts every byte that the loops read. One core alone takes 17 % of its lines from its own L2. No run counted this share with only two partner cores busy. That two cores sit on one crosspoint port is inferred from two timing tests and from the map's port count (see "The SLC (L3) and the pair port"). Arm's manual describes the block that allows it (CAL2). It was not read from hardware. What limits the pair was not measured. That the full port is the limit is hypothesis 2 in "Open items".
+
+111 SLC (L3) 128 MiB, shared by 128 cores, 16-way Read from the machine (sysfs). "In the mesh" is from the Arm manual and the driver's map.
+
+112 SLC latency avg: 30 ns (85 cycles) Measured (averaged over all slices). Range: 19 to 44 ns by slice.
+
+113 SLC throughput ≥0.62 TB/s whole chip From the mesh counters (est.): the part of a 1.38 TB/s run that the home nodes served. An estimated lower bound. The counters were read in that one run. The value comes from two counters, one for each mesh. Each ran for 49 % of the run, and perf scaled its count to the whole run [results/uncore2-20261030T203752Z/cmn-asmread-3M-40T-even.csv]. The run used 40 threads of 3 MiB each [bw-asmread-3M-40T-even.csv in the same folder]. A separate series of runs of the same day used 8, 16, 24, 32 and 40 threads without counters. It stopped at 40 threads by its own rule: all buffers together stay below the 128 MiB cache size, and 48 threads of 3 MiB each would be 144 MiB. The total of that series (SLC plus L2 hits) was still increasing there: 899 GB/s at 32 threads and 1,349 GB/s at 40 [results/slc-20261030T194835Z/slc.csv].
+
+114 DRAM 320 GiB, 10 channels DDR5-8000 Read from the machine (DIMM inventory, dmidecode).
+
+115 148 ns (415 cycles), 533 GB/s read Measured. Cycles derived.
+
+116 Spec row, Core: read 134.4 GB/s, write 89.6 GB/s Derived. Read: 3 loads per cycle × 2.8 GHz × 16 B. Write: 2 stores per cycle × 2.8 GHz × 16 B. The per-cycle counts are from the Arm document (row "3 loads / 2 stores of 16 B per cycle" above). Not measured. The measured L1 values are 132.7 GB/s for read and 89.5 GB/s for write.
+
+117 Spec row, L1 and L2: measured above No calculation. Arm's optimization guide for the core states no bandwidth for the L1 or the L2 cache. The whole guide was searched [SOG]. For L1 the only limit that can be calculated is the pipeline limit in the Core box of the Spec row.
+
+118 Spec row, pair port: estimated 64 GB/s Derived, and an estimate (est.). Not measured. One data flit holds 32 B (a flit is one transfer unit on a mesh port, see "flit" in "Words used here"). One data flit per mesh cycle is 32 B × 2.0 GHz = 64 GB/s in each direction (est.). The 32 B are from Arm's manual [CMN S3 TRM, Table A-2 page 2120]. The mesh clock is measured (see "mesh clock" in "Words used here"). That the port passes at most one data flit per mesh cycle in each direction is hypothesis 1 (capacity) in "Open items". It is not confirmed. The estimate counts only the bytes that cross the port. The measured ~80 GB/s counts every byte that the two partner cores read. The text under this table explains both points.
+
+119 Spec row, SLC (L3): unknown No number is given. Arm's manual states no throughput for the cache in the home nodes. It gives the timing of the data array of one slice: 2 or 3 cycles for one access, and one access at a time [CMN S3 TRM, page 280]. Which of the two values CRB uses was not read. See "Open items".
+
+120 Spec row, DRAM: 640 GB/s theoretical peak Derived: 10 channels × 8000 MT/s (million transfers per second) × 8 B per transfer (64 data bits). Not measured. CRB has 10 DIMMs, one per channel [results/dmidecode-t17-2026-10-30.txt]. Arm's user guide lists twelve memory interfaces for the platform [SVK user guide, page 10]. Twelve channels at 8000 MT/s would be 768 GB/s.
+
+121 The estimate for the pair port. The Spec box of the pair port says "estimated 64 GB/s". The estimate is the product of three factors. Factor Value How it is known Data that one data flit holds 32 B Arm document Mesh clock 2.0 GHz Measured Data flits that the port passes in one direction in one mesh cycle at most 1 Hypothesis 1, not confirmed Product: bytes that cross the port in one direction 64 GB/s Derived (est.) The third factor is the uncertain one. It is hypothesis 1 in "Open items": the port has one data channel in each direction, and a channel passes at most one data flit per mesh cycle. The number of data channels at the port was not read from CRB. Arm's manual draws one data channel in each direction at a device port [CMN S3 TRM, Figure 2-25 page 89]. The estimate is a maximum for one direction. It does not say that a run reaches it. Why the estimate is lower than the measured ~80 GB/s. The two numbers are counted at two different places. The measured rate counts every byte that the two loops read. The estimate counts only the bytes that cross the port in one direction. The table is for two partner cores that each read their own buffer of 8 MiB. Where the bytes are counted Rate Kind At the loops: every byte that the two cores read 77.5 to 78.5 GB/s Measured Part that the cores take from their own L2 (17 % of the lines) about 13.5 GB/s est. Part that crosses the pair port toward the cores (83 % of the lines) 64.1 to 64.9 GB/s est. The measured rates are from five runs of 2026-10-30: four with the read loop compiled from C and one with the asm loop [results/followup-20261030T194205Z/pair.csv, results/followup-20261030T194205Z/asm.csv and results/20261030T193108Z/bandwidth.csv]. The split of 83 % and 17 % was counted on 2026-11-02 with the asm loop and with one busy core. Three counters gave it [results/sudo-20261102T211150Z/writepath.csv, case r8M-c2; results/sudo-20261102T054936Z/writebw.csv, case asmread-8M-1]. No run counted it with only two partner cores busy. An older count gives 81 % (est., from scaled counts of 2026-10-30). With that share 62.9 to 63.7 GB/s cross the port (est.). So this conversion cannot say whether the rate on the port is below or above 64 GB/s. For one core alone the two places of counting were measured in one pair of runs (0.2 s and 2 s). The loop read 71 GB/s, and its port carried 58.7 GB/s toward the core [results/sudo-20261102T211150Z/writepath.csv, case r8M-c2]. Three kinds of run with two partner cores can be converted to the port. Each converted rate is close to 64 GB/s. Run with two partner cores At the loops, measured At the port (est.) Share of the estimate (est.) Read, 8 MiB each 77.5 to 78.5 GB/s 64.1 to 64.9 GB/s 1.00 to 1.01 Write, 8 MiB each, asm loop 81.4 to 82.3 GB/s 62.0 to 62.7 GB/s 0.97 to 0.98 Write, 1 GiB each, asm loop 63.2 GB/s 63.2 GB/s 0.99 The read rates are from the five runs of the table above. The write rates at 8 MiB are from the nine runs of 2 s of part 5 on CPUs 2 and 3 (2026-11-02, 81.4 to 82.1 GB/s) and from one run of 2026-10-30 on CPUs 0 and 1 (82.3 GB/s) [results/sudo-20261102T211150Z/writepath.csv, case w8M-c2c3; results/followup-20261030T194205Z/asm.csv]. Both are converted with the count of CPU 2. The write rate at 1 GiB is from one run with the asm loop on 2026-10-30 [results/followup-20261030T194205Z/asm.csv]. The conversion differs by run. For the reads it is the share of 83 %. For the writes at 8 MiB one asm writer alone sends 1.52 bus writes per 64 B line, not 2. For the writes at 1 GiB one asm writer alone sends 2.00 bus writes per line. A bus write is one data transfer from a core to the mesh (see "bus access" in "Words used here"). The conversion makes two assumptions. One bus write is one data flit of 32 B at the port. A count that was measured on one core alone also holds for two partner cores. No run counted the bus accesses of both cores of a pair. One pair of runs (0.2 s and 2 s) counted one core of a writing pair. In these runs CPU 2 sent 1.52 bus writes per line that it wrote itself. That is the same count as alone. The read row has one more limitation. The share of 83 % was counted with the asm loop on 2026-11-02. Four of the five read rates are from the read loop compiled from C on 2026-10-30. No run counted the share for that loop with one or two busy cores. Only the lowest rate, 77.5 GB/s, is from the asm loop. Converted, it is 64.1 GB/s at the port (est.). The rates fit the estimate. They do not prove it. A rate close to 64 GB/s also fits a port with a higher maximum, if something else limits the pair to that rate. Other runs with two partner cores at 8 MiB or 1 GiB were not converted. No bus count exists for them. So these runs were not compared with the estimate. The write runs of the loop compiled from C gave 75.6 GB/s at 8 MiB and 63.2 GB/s at 1 GiB [results/20261030T193108Z/bandwidth.csv]. The copy runs of the asm loop gave 80.9 GB/s at 8 MiB and 72.5 GB/s at 1 GiB [results/followup-20261030T194205Z/asm.csv]. The copy runs of the loop compiled from C gave 77.9 GB/s at 8 MiB and 72.4 GB/s at 1 GiB [results/20261030T193108Z/bandwidth.csv]. A copy rate counts bytes read plus bytes written. The read runs at 1 GiB gave 52.6 GB/s with the loop compiled from C and 56.7 GB/s with the asm loop (table in "The pair finding"). Two tests are missing. The first reads the number of data channels at the port from CRB (register field dat_vc_num_p). The second counts the bus reads of both partner cores and the mesh cycles in one run. "Open items" describes both tests and gives the source of each rate and count.
+
+122 What "3 loads / 2 stores of 16 B per cycle" means
+
+123 The core has four pipelines that start loads and stores. Three of them can each start one load per cycle (named Load/Store 0, Load 1 and Load 2). Two of them can each start one store per cycle (Load/Store 0 and Store 1). Load/Store 0 is in both groups. Each pipeline accepts one operation per cycle. So in one cycle Load/Store 0 does either a load or a store [SOG, section 2.1 page 11, Figure 2-1 and Table 2-1, pages 12 to 13].
+
+124 It follows that the core can start at most 3 loads + 1 store, or 2 loads + 2 stores, in one cycle. So the label "3 loads / 2 stores" gives two separate limits. It does not mean five operations in one cycle. The core never starts 4 loads + 1 store in one cycle. Only three pipelines accept loads. The guide gives these roles as part of the core's design. It describes no setting that changes them.
+
+125 The asm copy loop (the hand-written loop that loads 16 B registers from one buffer and stores them to another) is a measured case of the second mix. It measured 178.4 GB/s in L1, which counts the bytes read plus the bytes written (table "Per-core bandwidth" in Record). A mix of 2 loads + 2 stores of 16 B per cycle is 179.2 GB/s at 2.8 GHz.
+
+126 The widest register a plain load or store can fill is a 128-bit vector register (a "q register"), which holds 16 B. Arm's throughput table gives 3 such loads per cycle (LDR q: 3 per cycle; LDP q, which loads two 16 B registers in one instruction: 1.5 per cycle) and 2 such stores per cycle (STR q: 2 per cycle; STP q: 1 per cycle) [SOG, Table 3-13 page 23 and Table 3-14 pages 24 to 25]. So the L1 can deliver 48 B per cycle to loads and take 32 B per cycle from stores.
+
+127 The guide draws two more memory pipelines, Store data 0 and Store data 1 [SOG, Figure 2-1 page 12]. They carry the data of a store from a general-purpose register and do not start a store. The data of a 16 B store from a q register goes through one of the two vector pipelines, FP/ASIMD 0 and FP/ASIMD 1 [SOG, Table 2-1 page 13 and Table 3-14 pages 24 to 25].
+
+129 Left: the asm read loop issues LDP q instructions, so all three load pipelines carry 16 B every cycle. Right: the asm write loop issues STP q, so the two store pipelines each start a 16 B store every cycle and Load 1 and Load 2 have nothing to do. Clock 2.8 GHz.
+
+130 The measured L1 numbers are the pipeline limit. 48 B per cycle at 2.8 GHz is 134.4 GB/s, and the asm read loop measured 132.7 GB/s (99 %). 32 B per cycle is 89.6 GB/s, and the asm write loop measured 89.5 GB/s. The asm loops use exactly LDP q and STP q [bench/bandwidth.c:179 to 186 and 204 to 211].
+
+131 The read loop compiled from C: 1.5 loads per cycle The read loop compiled from C reaches 66.8 GB/s, which is 1.5 loads of 16 B per cycle. The asm read loop measured 132.7 GB/s, which is 99 % of 3 loads per cycle. The limit of two vector adds per cycle can explain at most part of this gap. The cause of the rest is not established. This section gives the source code, the machine code, the limits that were checked, and the test that is missing. Source code. The read loop compiled from C is the function k_read in bench/bandwidth.c [lines 138 to 148]. It adds every 8 B word of the buffer into one of 16 running sums, and gcc 14.2 chooses the instructions. __attribute__((noinline)) static uint64_t k_read(const uint64_t *a, size_t n)
+
+132 The limits that were checked. The limit of two vector adds per cycle can explain at most part of the gap between 66.8 GB/s and the 134.4 GB/s of the load pipelines. The core has two vector pipelines (FP/ASIMD 0 and 1), and Arm's table gives 2 vector adds per cycle [SOG, Table 2-1 page 13 and Table 3-15 page 26]. Two adds per cycle allow 2 loads per cycle, which is 89.6 GB/s. The measured 66.8 GB/s is 25 % below that. Arm's guide also limits how many operations the core dispatches in one cycle [SOG, section 4.1 "Dispatch constraints", page 55]. Dispatch is the step before the pipelines. A dispatched operation waits for its inputs and then goes to a pipeline [SOG, section 2.1 page 11]. So a dispatch limit can be higher than the number of operations that the pipelines accept in one cycle. This report calls these limits dispatch limits. The section lists eight of them. The table below compares each limit with the average rate of the loop. How the loop is counted: The guide counts instructions after decoding and calls them MOPs (macro-operations). The dispatch step handles at most 10 of them per cycle. The guide calls operations µOPs (micro-operations). It gives no count for LDP q. This report counts one LDP q as two operations, one for each 16 B load (est.). One pass of the loop (128 B) has about 20 operations: 8 loads, 8 vector adds, 2 integer adds, one compare and one branch. At most 4 of the 20 operations are integer or branch operations. One pass takes 5.37 cycles at 32 KiB (see "Observation" below). Limit in Arm's guide Allowed per cycle This loop, average per cycle Loads of 16 B on the three load pipelines 3 1.5 Vector adds on the two vector pipelines 2 1.5 Dispatch: instructions (MOPs) 10 3.0 Dispatch: operations for the load pipelines 6 1.5 loads of 16 B Dispatch: operations for FP/ASIMD 0, and for FP/ASIMD 1 (2 limits) 2 and 2 1.5 vector adds on both together Dispatch: operations in total 20 3.7 (est.) Dispatch: operations for 3 groups of integer and branch pipelines (3 limits) 4, 4 and 2 at most 0.75 in total (est.) So the loop stays below every limit that was checked: 3 loads per cycle, 2 vector adds per cycle, and the eight dispatch limits. The rates of the loop in the last two rows of the table are estimates (est.). The check compares average rates only. It covers only these limits. It does not exclude any other limit, whether the guide lists it or not. The cause of the remaining gap is not established.
+
+133 Observation. One pass of the loop (128 B, 8 loads and 8 adds) takes 5.37 cycles at 32 KiB and 5.34 cycles at 1 MiB. Each load and each add writes one vector register. So the loop writes 2.98 to 3.00 vector registers per cycle, half of them by loads and half by adds. Two readings fit this number. Hypothesis A: loads and adds that write vector registers share a limit of 3 per cycle. Hypothesis B: the adds reach only 1.5 per cycle for a reason that is not known, and the loads follow the adds. The loop also runs 3 instructions per cycle. A general limit of 3 instructions per cycle does not fit. The write and copy loops compiled from C have 4 and 5 instructions per pass, and they run about 4 and about 5 instructions per cycle at 32 KiB and 1 MiB [results/probe-20261111T210017Z.txt; results/20261030T193108Z/bandwidth.csv]. The test that is missing. The test that separates A and B is a loop with loads and adds in a 3:2 ratio. Not run. Result of the 3:2 loop Meaning 80.6 GB/s Hypothesis A predicts it 100.8 GB/s Hypothesis B predicts it 134.4 GB/s, the limit of the load pipelines It would reject both
+
+135 Cache ways: what "4-way" and "8-way" mean
+
+136 A cache does not search all of its slots for an address. It is divided into sets, and a line (64 B) can live only in the one set that its address bits select. Inside that set there are a fixed number of slots side by side, and that number is the number of ways. "4-way" means each set has 4 slots, so a line has 4 possible places in the whole cache, no more.
+
+138 L1 data cache of one CRB core: the address selects one of 256 sets, and the line may sit in any of the 4 ways of that set. The 6 offset bits pick the byte inside the 64 B line. The tag (the remaining address bits) is stored with the line and compared on lookup.
+
+139 The geometry of CRB's three caches comes from the cores' own cache identification registers, as read through sysfs on CRB [ /sys/devices/system/cpu/cpu0/cache/index0, index2, index3 , read 2026-11-01]. The SLC's 16 ways match one of the two values Arm offers for it, 12 or 16 [CMN S3 TRM, Table 1-9 pages 31 to 32].
+
+141 Cache Size Sets Ways Line Check: sets × ways × line Address bits that pick the set
+
+142 L1 data 64 KiB 256 4 64 B 256 × 4 × 64 = 64 KiB bits 13 to 6 (8 bits)
+
+143 L2 2 MiB 4,096 8 64 B 4,096 × 8 × 64 = 2 MiB bits 17 to 6 (12 bits)
+
+144 SLC (L3) 128 MiB 131,072 16 64 B 131,072 × 16 × 64 = 128 MiB a hash of the address picks the home node and the set
+
+146 Why the number of ways matters. More ways make it less likely that two useful lines fight for the same slot, and fewer ways make lookups cheaper. The 4-way L1 has 256 sets of 64 B, so two addresses exactly 16 KiB apart land in the same set. A program that cycles through 5 lines spaced 16 KiB apart misses in L1 on every access, although it uses only 320 B. The benchmarks in this report avoid this: the random cycle spreads lines evenly over all sets, which is why the 64 KiB footprint shows 0 L1 refills (table in Latency).
+
+148 A worked example with real addresses
+
+149 The address does not choose the slot inside a set. The cache control logic does. The seven addresses below show how. Each is split for the L1 data cache: offset = bits 5 to 0, set index = bits 13 to 6, tag = bits 47 to 14. C, D, E and F are each 16 KiB (0x4000) further than A. Adding 16 KiB does not change bits 13 to 0, so the set stays 37 and only the tag changes. G is 64 B further than A, so it is the next line and lands in set 38.
+
+151 Name Address Tag (bits 47 to 14) Set (bits 13 to 6) Offset (bits 5 to 0) Relation to A
+
+152 A 0x7f1234560940 0x1fc48d158 37 0 start of a line
+
+153 B 0x7f1234560950 0x1fc48d158 37 16 same line, 16 B in
+
+154 C 0x7f1234564940 0x1fc48d159 37 0 A + 16 KiB
+
+155 D 0x7f1234568940 0x1fc48d15a 37 0 A + 32 KiB
+
+156 E 0x7f123456c940 0x1fc48d15b 37 0 A + 48 KiB
+
+157 F 0x7f1234570940 0x1fc48d15c 37 0 A + 64 KiB
+
+158 G 0x7f1234560980 0x1fc48d158 38 0 A + 64 B, the next line
+
+160 What each field does.
+
+162 Set index (bits 13 to 6) is a plain lookup. For A the hardware goes straight to set 37, with no search.
+
+163 Offset (bits 5 to 0) picks one byte inside the 64 B line. B is byte 16 of A's line.
+
+164 Tag (bits 47 to 14) is the address shifted right by 14 bits. For A: 0x7f1234560940 >> 14 = 0x1fc48d158 . 14 bits is 3 hex digits plus 2 bits, so drop "940" to get 0x7f1234560 , then divide by 4. 2 34 different lines map to set 37, and the tag stored in a slot says which one of them the slot holds.
+
+166 How a slot is chosen when a line is loaded. Every load does two separate checks. First, "is this line already here?" compares the tag of the address with the tag stored in each of the 4 slots. Second, if it is not here, "where do I put it?" looks for a free slot, and evicts a line only when none is free. Starting from an empty set 37:
+
+168 Load A. No slot has tag 0x1fc48d158 , so it is a miss. All 4 slots are free. A goes into slot 0, and its tag is stored next to the 64 bytes.
+
+169 Load C. Slot 0 holds tag 0x1fc48d158 (A), which is not C's tag 0x1fc48d159 . Slots 1 to 3 are empty, so they cannot match either. Miss. Slot 0 is taken, so C goes into the next free slot, slot 1.
+
+170 Load D, then E. Same two checks. They go into slots 2 and 3. Set 37 is now full.
+
+171 Load F. No slot has tag 0x1fc48d15c . Miss. No slot is free, so the cache evicts one of the four lines and puts F in its place. Which line goes depends on the core's replacement rule, usually the one used longest ago. The V3AE core manual that states the rule was not available, so the figure assumes slot 0 (est.).
+
+172 Load A again. If A was the evicted line, this is a miss. The report calls this a conflict miss: the program touched only 5 lines, 320 B, in a 64 KiB cache, and still missed.
+
+175 Set 37 of the L1 data cache during the example. Left: after A, C, D and E are loaded, all four slots hold a line and the tags tell them apart. Middle: F arrives, no slot is free, one line is evicted (slot 0 shown, est.). Right: a read of B compares its tag with all four stored tags at the same time, slot 0 matches, and the offset 16 picks the byte inside that line.
+
+176 How a slot is found on a read. Read B, 0x7f1234560950 . Bits 13 to 6 give 37, so the hardware goes to set 37. It compares 0x1fc48d158 with the four stored tags in parallel, and slot 0 matches. Bits 5 to 0 give 16, so byte 16 of slot 0's line is returned. "4-way" therefore means four tag comparators per lookup, and four lines with the same set index can be in the cache at once. In a 1-way (direct-mapped) cache, A and C would already push each other out.
+
+177 On Arm cores the stored tag is built from the physical address after translation, not from the virtual address shown above. The lookup works the same way. The V3AE core manual that would confirm this detail for CRB was not obtainable (see "Arm documents cited").
+
+178 The SLC (L3) and the pair port
+
+179 Three questions from the review: is the SLC an L3 cache, why did older versions of this report call it the "mesh cache", and is the pair port the way the SLC is reached. Each answer is tied to an Arm document or to a measurement. The CAL2 and the two hypotheses on the pair port are marked as an inference or as hypotheses.
+
+180 Is it an L3 cache?
+
+181 Linux lists it as cache level 3, unified, 128 MiB, 16-way, shared by CPUs 0 to 127 [ /sys/devices/system/cpu/cpu0/cache/index3 ]. The core itself has two levels: Arm lists "Separate L1 data and instruction caches" and a "Private, unified data and instruction L2 cache" and no L3 for this core [SOG, section 1.1 page 9]. So it is the third level a core sees, and in that sense it is the L3. It is not inside the core or a core cluster. It sits in the interconnect, and Arm's name for it is the System Level Cache (SLC): "The System Level Cache (SLC) is a last-level cache" inside each home node [CMN S3 TRM, section 2.1.1.3 page 54].
+
+182 The mesh, and why older versions said "mesh cache"
+
+183 CRB's interconnect is Arm's CMN S3, the Coherent Mesh Network. The Linux mesh counter driver reports part number 0x43e, which the driver source names CMN S3 [ /sys/bus/event_source/devices/arm_cmn_0/identifier = 43e05; Linux drivers/perf/arm-cmn.c, PART_CMN_S3 = 0x43e], and its event names start with "hns", the Super Home Node of CMN S3. Arm describes the structure as "a configurable rectangular grid that is composed of network routers that are known as Crosspoints (XPs)", where "each XP connects horizontally and vertically to other XPs, creating a two-dimensional mesh structure", and "each XP can have up to four device ports for connecting CHI-compliant devices" [CMN S3 TRM, section 1.4 page 17]. "Each byte of address space is assigned to a single Home Node (HN)", and "each HN-S can contain an SF and an SLC" [CMN S3 TRM, Home Nodes, page 19]. The SLC is therefore a set of slices, one per home node, spread over the mesh, and every address has exactly one home. An L2 miss travels across the mesh to the home node of its address, or to a local proxy of it. Versions of this report before 2026-11-12 called the SLC the "mesh cache" for that reason. The report now uses Arm's name. A home node also acts as a proxy (Arm: the LCN role of the super home node, whose proxy lines share the slice with its home lines as the LCC) for addresses homed on the other mesh [CMN S3 TRM, Super Home Node, page 55], so a line can be cached by its home slice or by a proxy slice on the other mesh. Whether a line sits in both at once was not measured. The root run measured service from both kinds (section "Latency from each core to each slice").
+
+184 The mesh driver prints a map of each mesh for root: sudo cat /sys/kernel/debug/arm-cmn/map /sys/kernel/debug/arm-cmn/map_1 , one file per mesh [Linux drivers/perf/arm-cmn.c, arm_cmn_debugfs_init and arm_cmn_map_show]. Jibin read both on 2026-11-01 [crb/results/cmn-map.txt]. The node names below are Arm's [CMN S3 TRM, Table 1-1 page 13]. What the map shows:
+
+186 Grid. Each mesh is 9 columns by 8 rows, 72 crosspoints. The two maps are identical, so the two meshes are the same design.
+
+187 64 home nodes per mesh, 128 in total. They sit two per crosspoint on port 0 of the 32 crosspoints in rows 1 to 5, columns 1 to 7 (the cells that list two HN-S ids in the figure). Three crosspoints in row 5 (columns 1, 4 and 7) have the home-node port but no node enumerated, so they hold no slice.
+
+188 1 MiB per slice (est.), 64 MiB per mesh. Arm sizes the slices as total SLC divided by the number of home nodes [CMN S3 TRM, Home Nodes, page 19]. 128 MiB from sysfs divided by 128 nodes is 1 MiB. The map does not print sizes, so this is derived. 64 slices of 1 MiB per mesh matches the 64 MiB effective capacity measured for one buffer (Latency section), which was a hypothesis until the map was read. The earlier estimate in this report, 32 home nodes, was wrong: it assumed Arm's 4 MiB maximum per node.
+
+189 35 core ports per mesh (RN-F, Arm's "fully coherent Requesting Node", which is what a core is to the mesh), on port 1 of the same 35 crosspoints. 64 cores per mesh on 35 ports means at least 29 ports carry two cores. The driver prints no ids for cores, so the map cannot show that pairing directly. It does show two home nodes sharing port 0 on each of those 32 crosspoints, which is the CAL arrangement, so the design uses CALs.
+
+190 12 memory ports per mesh (SN-F, Arm's "CHI Completer Node", the memory side), in columns 0 and 8, rows 1 to 6. 8 chip-to-chip gateways per mesh (CCG), the links between the two meshes. Rows 0, 6 and 7 otherwise hold I/O home and request nodes (HN-I, HN-T, HN-P, HN-D, RN-I, RN-D, SBSX) and six ports of a type this driver version does not know, printed "????".
+
+192 Where each core sits, how far each slice is from it, and which mesh homes a given line were all measured on 2026-11-02 with the mesh counters under root. See "Latency from each core to each slice (root run)" below.
+
+194 CRB mesh 0 as the Linux mesh driver maps it, with the core port of every crosspoint and the cores found on it. Each box is one crosspoint (XP). A port is a connection point on the crosspoint. The cores and the home nodes are devices attached to a port. So a port and a device are separate things. In the inset, the dashed box marked "CAL2 ?" is inferred from the pair measurement. It was not read from hardware.
+
+196 Source of the grid. All 72 cells are copied from the map file /home/jhan/workspace/titan/cache-perf/crb/results/cmn-map.txt . That file holds both maps: /sys/kernel/debug/arm-cmn/map (mesh 0) and /sys/kernel/debug/arm-cmn/map_1 (mesh 1), read on CRB with root on 2026-11-01. The raw copies are results/map and results/map_1 in the same folder. A script compared the 72 cells of the figure with the file on 2026-11-10 and found 0 differences.
+
+197 Shape. 9 columns (X 0 to 8) by 8 rows (Y 0 to 7). The two raw files are identical byte for byte. So mesh 1 has the same shape, the same port types and the same node ids.
+
+198 Core ports come from the map. The map prints the port type RN-F_F_E on port 1 of 35 crosspoints. They are in columns 1 to 7, rows 1 to 5. RN-F_F_E is the driver's short form of Arm's RN-F_CHIF_ESAM (a fully coherent requester) [CMN S3 TRM, page 1648]. A core is that kind of node to the mesh. XP 46, 49 and 52 are among the 35. Each of the three has one core port. The other 37 crosspoints have no core port.
+
+199 Cores do not come from the map. A core is outside the mesh. The driver lists only nodes inside the mesh. So it prints no id under a core port. The CPU numbers are placed by the latency fit (each core is assigned to the crosspoint that best matches its measured latency to every slice, see "Latency from each core to each slice" below) [ results/sudo-20261102T054936Z/core-positions.json ]. The fit puts 2 CPUs on each of 32 core ports of mesh 0. It puts no CPU on the other 3 core ports (XP 10, 46, 52). The fit puts CPU n + 64 on mesh 1 at the crosspoint that CPU n has on mesh 0, for n = 0 to 55 (CPUs 64 to 119). CPUs 120 to 127 were not measured.
+
+200 "HN-S, no node" (XP 46, 49, 52). The crosspoint reports a port of type HN-S, and the driver lists no home node on it. The map does not say why. It gives one hint: the HN-S ids skip #56, #57 and #62, #63, exactly at XP 46 and XP 49. Hypothesis: the home nodes exist. The hardware marks them as isolated (switched off from the mesh). The driver skips nodes with that mark. Reading bit 30 (child node owned by an isolated device) of the por_mxp_child_pointer_0-31 registers of these crosspoints would confirm or reject it [CMN S3 TRM, pages 96 and 1653; Linux drivers/perf/arm-cmn.c, CMN_CHILD_NODE_ISOLATED].
+
+203 Question Arm CMN S3 allows CRB, each mesh How CRB's value is known
+
+204 Device ports per crosspoint 2 inside the grid, up to 3 on an edge, up to 4 on a corner [CMN S3 TRM, page 51] 2 at most (port 0 and port 1) The map prints ports 0 and 1 only
+
+205 Core ports per crosspoint no limit per port found in the manual (inference) [CMN S3 TRM, page 1648] 1 on 35 crosspoints, 0 on 37 Port type RN-F_F_E in the map
+
+206 Cores per core port 1 with no CAL, 2 with a CAL2 (the two-device CAL), 4 with a CAL4 (the four-device CAL) [CMN S3 TRM, pages 63 and 64] 2 on every port where a CPU was found (32 ports on mesh 0, 28 on mesh 1) Latency fit (all 120 CPUs that were measured), and the pair test. The pair test ran partner cores on three pairs (CPUs 0 and 1, 2 and 3, 4 and 5). Each pair together read 77.5 to 78.5 GB/s with a buffer of 8 MiB for each core. Two cores of different pairs read 125 to 134 GB/s (see "The pair finding"). For these three pairs the pair test fits two cores on one port. It does not show what limits the pair. Not read from hardware
+
+207 Cores per crosspoint 8 at most (derived: the node id has 3 bits for device port plus device id, which is 2 ports x 4 devices or 4 ports x 2 devices) [CMN S3 TRM, pages 126, 127 and 130] 2 or 0 Same as the row above
+
+208 Home nodes per HN-S port 1, 2 with a CAL2, 4 with a CAL4 [CMN S3 TRM, pages 63 and 64] 2 on 32 ports, none listed on 3 Node ids in the map
+
+210 Insufficient data on two points. The number of cores behind each core port was not read from hardware. Field num_dev_p1 (bits 2:0, the number of devices connected to the port) of register por_mxp_p1_info on each crosspoint would give it [CMN S3 TRM, pages 1654 and 1655]. Whether XP 10, 46 and 52 have unused cores attached is unknown for the same reason.
+
+211 Is the pair port how the SLC is reached?
+
+212 Yes. A core reaches everything beyond its L2 through one connection: its requester interface (an RN-F in Arm's terms) into a crosspoint device port. Every L2 miss, every write-back and every snoop answer from the core uses that connection, so the SLC, the other cores' caches and DRAM are all behind it.
+
+213 Arm provides a block that puts two devices on one such port: "A Component Aggregation Layer (CAL) allows multiple devices to connect to a single device port on an XP", and the two-device version "CAL2" supports fully coherent requesters (RN-F) [CMN S3 TRM, section 2.1.1.15 page 63]. The measurement in "The pair finding" ran two cores at the same time. Each core read its own buffer of 8 MiB, which does not fit in its L2. The rates of the two cores were added. One core alone gets 67 GB/s. When the two busy cores are partners (cores 2k and 2k+1, for example 0 and 1), the total is 78 GB/s, so they share one limit. When the two busy cores come from different pairs, the total is 125 to 134 GB/s. That is 1.9 to 2.0 times the rate of one core alone. For example, CPUs 0 and 2 together read 126.6 GB/s with the read loop compiled from C and 129.7 GB/s with the asm loop. Only cores on different meshes (CPUs 0 and 64, CPUs 0 and 119) reached 134 GB/s. Every core has a partner, so the limit does not depend on which cores exist. It depends on which cores are busy at the same time. With one more busy core on another pair, a core with an idle partner read 62.4 to 67.1 GB/s (seven runs, best repetition of each). A core with a busy partner read 37.8 to 40.3 GB/s (five runs, best repetition of each). What is confirmed by the document is that the mechanism exists. What is measured is that the two cores of a pair slow each other on the three pairs that were tested (CPUs 0 to 5). That CRB attaches its core pairs through a CAL2 is the simplest reading of the two, and it is not confirmed by any CRB document: the firmware tables give each core its own cluster [ /sys/devices/system/cpu/cpu*/topology/cluster_cpus_list ]. The mesh map adds a counting argument: 64 cores per mesh sit on 35 core ports, so at least 29 ports carry two cores, and the map shows the home nodes on the same crosspoints already sharing ports in twos [crb/results/cmn-map.txt].
+
+214 For software: with a buffer of 8 MiB for each thread, two threads on two pairs read 1.6 to 1.7 times as much as two threads on one pair. What limits a pair was not measured. The rates in the table are for a buffer of 8 MiB for each thread. They were measured on 2026-10-30 with no other busy core [results/followup-20261030T194205Z/pair.csv, results/followup-20261030T194205Z/asm.csv and results/20261030T193108Z/bandwidth.csv]. Each rate is the best repetition of its run. Threads and runs Read rate of all threads together One thread alone on CPU 0 (three runs: two with the asm loop, one with the read loop compiled from C) 66.9 to 67.5 GB/s Two threads on partner cores (five runs on the pairs of CPUs 0 to 5: four with the read loop compiled from C, one with the asm loop) 77.5 to 78.5 GB/s Two threads on cores of different pairs, both on mesh 0 (five runs) 125 to 132 GB/s Two threads on cores of different meshes (two runs) 134 GB/s Four threads on two pairs, CPUs 0 to 3 (one run with the asm loop, one with the read loop compiled from C) 127.6 and 129.1 GB/s With two busy pairs (CPUs 0 to 3) the four threads together read 0.82 to 0.83 of two times the rate of one pair. In the root runs of 2026-11-02 one thread alone read 69.6 to 71.2 GB/s (CPUs 0 and 2, runs of 2 s) [results/sudo-20261102T054936Z/writebw.csv; results/sudo-20261102T211150Z/writepath.csv]. The cause of the difference from the 66.9 to 67.5 GB/s of 2026-10-30 is not known. All these rates count the bytes that the loops read. They include the lines that a core takes from its own L2. For one core alone that is 0.17 of the lines. No run counted it with only two partner cores busy. What limits the pair was not measured. Hypothesis 2 of "Open items" says that the full pair port is this limit. Hypothesis 1 says that the port passes at most 64 GB/s in each direction. The 78 GB/s and the 64 GB/s are counted at two different places. If 0.83 of the lines cross the port, as counted for one core alone, 77.5 to 78.5 GB/s at the loops is about 64 to 65 GB/s at the port (est.). With a buffer of 1 GiB for each core, reads and writes behave differently on a pair (section "The pair finding").
+
+215 Arm's documentation site serves its pages by script and could not be read by the fetch tool. The three documents above were downloaded as PDFs from Arm's documentation service and are kept in crb/refs/ . The Neoverse V3AE core TRM (document 101595) could not be downloaded, so the L1 and L2 way counts rest on the cores' own registers via sysfs.
+
+217 Latency from each core to each slice (root run)
+
+218 On 2026-11-02 Jibin ran the root tool bench/homelat on CRB (final set 05:49 to 06:04 UTC, results in results/sudo-20261102T054936Z/ ). It works in three steps. First it finds the home nodes: a mesh counter opened with a node id answers only for a node that exists, and 64 answered on each mesh. Second it finds the home node of every 64 B line of a 32 MiB buffer: flush the line, read the 8 home-node counters of a quadrant with one call, load the line 256 times with a flush between loads, read again, and take the one node that rose by 256. Third, for every core and every home node, it builds a random chain through 2048 lines of that node, loads them once in a random order, pushes them out of L1 and L2 with 8 MiB of random loads, and times one walk of the chain that has never been walked, seven times with a fresh chain each time.
+
+219 Checks that passed in that run: 524,288 lines classified with none left over; 511 of 512 lines probed again with only their assigned node's counter open agreed, with one probe where a control node also rose; all 128 nodes received exactly 4096 lines; all 16 chunks of 2 MiB were physically contiguous on every page; and on 8 slices the timed loads showed 1.00 to 1.04 accesses and 0.000 to 0.016 misses at the home for the 4 local slices, 0.000 to 0.003 for the 4 remote ones, 1.04 to 1.23 L2 refills per load in the pass that counts the home's own counters (1.02 to 2.05 in the separate pass that counts both whole meshes, where accesses summed over both meshes were 1.01 to 2.13 and misses -0.006 to 0.346 per load, an excess beyond the timed loads that is recorded but not attributed), at 22 to 36 ns, with an empty counter window of the same cache state subtracted [ full/verify.csv , run.log ]. The repeat spread of the 7 chains is 3 % of the median (5 % at the 90th percentile) [ full/latency.csv , every repeat kept]. An earlier complete run at 04:06 UTC gave the same matrix within 0.2 ns per row (median) and the same core positions; it is kept in results/sudo-20261102T040631Z/ .
+
+221 Where the cores are. Each core's latency to the 64 slices of its own mesh falls off with the crosspoint distance from one crosspoint; that crosspoint is drawn here. All 60 partner pairs share a crosspoint, and CPUs 0 to 63 are on arm_cmn_0, 64 to 119 on arm_cmn_1 [ results/sudo-20261102T054936Z/core-positions.json ]. The positions are inferred by a fit over all 35 core-port crosspoints per mesh ( bench/fitpos.py , residual 0.8 ns median, 1.1 ns worst). The dashed cells have a core port but no slice (from the map); the fit puts cores 34, 35, 98 and 99 on one of them, (4,5), one hop from their nearest slice.
+
+223 Latency in ns from CPU 0 to each slice, median of 7 fresh chains, mean of the two slices on a crosspoint. Left: the 64 slices of its own mesh; CPU 0 sits at column 1, row 2 (red border). Right: the 64 slices of the other mesh. Those lines are served by a proxy on CPU 0's own mesh (see below), so the right panel shows the distance to the proxies, not to the remote slices.
+
+225 Across the 120 cores Minimum Median Maximum
+
+226 Nearest slice of the own mesh, ns 18.8 19.0 22.2
+
+227 Cost per crosspoint hop, ns (slope of a fit against Manhattan distance) 2.33 2.67 2.89
+
+228 Farthest slice of the own mesh, ns 32.9 39.1 44.2
+
+230 From any core the nearest slice answers in 19 ns, each crosspoint hop adds 2.6 ns, and the far corner is 33 to 44 ns. The 29 to 30 ns SLC latency in the hierarchy figure is the average of this over all slices. A core's position changes its average by up to 5 ns (section "SLC latency by core position"), and its nearest-versus-farthest spread is 14 to 25 ns.
+
+231 Lines homed on the other mesh are served by a local proxy
+
+234 Latency
+
+235 The chart shows nanoseconds per dependent load against the footprint of the random cycle. The blue series is the honest number (fresh chain). The orange series is what a textbook pointer chase reports on this core: once the footprint leaves L2, the core learns the repeated cycle and hides most of the SLC latency.
+
+236 fresh chain (not learnable) repeated chain (learned by the core)
+
+238 Single thread pinned to CPU 3, 2 MiB pages (confirmed per size), best of 7 fresh passes or 3 repeated reps. Fresh chain starts at 256 KiB because one pass of a smaller cycle is too short to time. Shaded bands mark the cache sizes from sysfs.
+
+239 Only the blue series is a latency. Between 8 and 56 MiB the repeated chain reports 5.4 to 6.8 ns while hardware counters show every load missing L2. The fresh chain reports 26 to 31 ns for the same sizes. The core refills L2 just in time from a learned sequence. Beyond 64 MiB the learning stops helping and both series meet at DRAM.
+
+242 Level Footprint used Best latency Cycles Counter evidence per load (main sweep)
+
+243 L1 data, 64 KiB 4 KiB to 64 KiB 1.43 ns 4.0 0 L1 refills up to 64 KiB
+
+244 L2, 2 MiB 256 KiB to 1.5 MiB (fresh) 3.75 ns 10.5 1.00 L1 refills, 0.00 L2 refills at 1 MiB
+
+245 SLC, 128 MiB 32 to 56 MiB (fresh) 30.2 to 30.7 ns 85 to 86 1.05 L2 refills per load; mesh counters: 1.03 SLC accesses and 0.002 misses per load at 32 MiB
+
+246 SLC, corrected est. about 32 ns est. about 89 est. 3 to 6 % of loads still hit L2 at 32 to 56 MiB and pull the average down
+
+247 DRAM 1 GiB to 2 GiB (fresh and repeated agree) 148 ns 415 0.99 last-level misses, 1.67 L2 refills (an extra line is fetched with each miss)
+
+249 Counters are from perf stat on the main sweep and on a separate mesh-counter pass, as (long run minus short run) divided by the extra loads, so setup work cancels. Latency did not depend on which core ran the chase: CPUs 3, 64 and 119 agree within 1 ns at 16 MiB and within 3 ns at 1 GiB.
+
+250 Effective capacity is 64 MiB for one buffer
+
+251 SLC misses for a single buffer start at 64 MiB (11 % of loads) and reach 81 % at 96 MiB, far earlier than a 128 MiB cache predicts. The same counters show all of the buffer's traffic on the core's own mesh (arm_cmn_0) up to 96 MiB, and 34 % on the other mesh at 1 GiB. The root run of 2026-11-02 explains it: half of the lines are homed on the other mesh, but a proxy on the core's own mesh serves them, so a core's whole working set is cached on its own mesh, 64 slices of 1 MiB (section "Latency from each core to each slice"). The earlier hypothesis in this paragraph, that physical memory is assigned to a mesh in large pieces and a buffer lives in one half, was wrong: every 2 MiB chunk splits exactly in half between the meshes.
+
+252 A first read of lines cached on the other chiplet costs 85 ns, later reads 32 ns
+
+255 SLC latency by core position
+
+256 The same 16 MiB fresh pointer chase was run pinned to each CPU from 0 to 119, twice, with a new buffer each time, plus a one-thread asmread stream at 8 MiB from each CPU [results/followup3-20261102T031936Z/percore-latency-1.csv, -2.csv, percore-asmread-1.csv, -2.csv].
+
+258 Top: fresh 16 MiB latency per CPU, two sweeps drawn as two dots per CPU (they lie within 0.2 ns of each other). Bottom: one-thread SLC read bandwidth per CPU. CPUs 0 to 63 (mesh 0) in blue, 64 to 119 (mesh 1) in orange. The slowest and fastest CPUs are labelled.
+
+259 SLC latency depends on where the core sits: 25.4 ns on CPU 94 to 30.5 ns on CPU 56, a 5 ns spread, repeatable to 0.2 ns. Partner cores (2k and 2k+1) share the same value, as they should if they sit on the same crosspoint. The repeated chase, which the core learns and prefetches, shows no spread (5.3 to 5.8 ns). One-thread read bandwidth varies only from 66 to 72 GB/s. The spread is an average over all slices of the core's mesh, and the root run shows what it is made of: 19 ns to the nearest slice, 2.6 ns per hop, up to 44 ns to the farthest (section "Latency from each core to each slice").
+
+260 The older per-thread spread (25 to 58 GB/s per thread, 40 threads one per pair, 3 MiB each) was rerun with one line per thread and repetition [ results/followup3-20261102T031936Z/perthread-asmread-3M-40.csv ]. In each of the 3 repetitions the 32 threads on mesh 0 got 25.4 to 30.5 GB/s and together 869 to 890 GB/s, and the 8 threads on mesh 1 got 58.1 to 61.6 GB/s and together 473 to 482 GB/s. So that spread was the two meshes, not core position: 32 readers share one mesh, 8 readers have the other to themselves.
+

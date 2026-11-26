@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""Two-page briefs of the performance reports for a reader who knows the chip but only wants the
+results: asimov-c1nano-perf-brief.html and asimov-cme-perf-brief.html. Every number comes from
+gen_perf.py's data layer (run 4 boot E as the latest, run 3 and boots A to D beside it, all read from
+the CSV files); nothing is typed in. Print check: chrome --print-to-pdf, then count pages (2 A4 pages
+each at most). gen_perf.main() writes both briefs; the __main__ block here writes them alone."""
+import os, sys
+A = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, A)
+import gen_perf as p
+from gen_perf import kib, fmt, table, line_chart, bars_h, SLC_BYTES
+g = p.g
+C = g.C   # the chart colours (gen_perf.C is boot C's table)
+
+CSS = r"""
+:root { --bg:#ffffff; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781; --grid:#e1e0d9; --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --font:system-ui,-apple-system,"Segoe UI",sans-serif; color-scheme:light; }
+@page { size: A4; margin: 11mm 12mm; }
+html, body { background:var(--bg); color:var(--ink); font-family:var(--font); font-size:10.5px; line-height:1.38; margin:0; }
+main { max-width:188mm; margin:0 auto; padding:8px 12px; }
+h1 { font-size:19px; margin:0 0 2px; line-height:1.2; }
+h2 { font-size:12.5px; margin:9px 0 3px; border-top:1px solid var(--grid); padding-top:5px; }
+p { margin:3px 0; } ul { margin:2px 0 4px; padding-left:16px; } li { margin:1px 0; }
+.meta { color:var(--ink2); font-size:9.5px; }
+.short { border-left:3px solid var(--s1); padding:5px 9px; margin:6px 0; background:#f6f8fb; }
+figure { margin:5px 0 2px; break-inside:avoid; page-break-inside:avoid; }
+figure svg { width:100%; height:auto; display:block; }
+figcaption { font-size:9.5px; color:var(--ink2); margin:2px 0 0; }
+.take { font-weight:600; color:var(--ink); }
+.tbl { margin:3px 0; }
+tr { break-inside:avoid; page-break-inside:avoid; }   /* a long table may split between rows, never inside one */
+table { border-collapse:collapse; font-size:9.5px; font-variant-numeric:tabular-nums; width:100%; }
+th, td { text-align:left; padding:2px 5px; border-bottom:1px solid var(--grid); vertical-align:top; }
+th { color:var(--ink2); font-weight:600; }
+td:nth-child(n+2), th:nth-child(n+2) { text-align:right; }
+td:last-child, th:last-child { text-align:left; }
+.note { color:var(--ink2); font-size:9px; margin:1px 0 0; }
+dl { display:grid; grid-template-columns:max-content 1fr; gap:1px 8px; font-size:9.5px; margin:2px 0; }
+dt { font-weight:600; } dd { margin:0; }
+.hyp { font-size:9px; padding:0 5px; border-radius:8px; background:#fbe9e2; color:#8a3a1c; margin-right:4px; }
+.gap { font-size:9px; padding:0 5px; border-radius:8px; background:#eef0f3; color:#3b3f46; margin-right:4px; }
+.r6 { background:#fff1c2; }   /* the core brief's additions from run 6 boot F1 (2026-11-06), so a reader can tell them from the earlier text */
+.r6tag { font-size:9px; padding:0 5px; border-radius:8px; background:#f2c14e; color:#3b2f00; margin-right:4px; font-weight:600; }
+svg text { font-family:var(--font); }
+"""
+
+def page(title, meta, body):
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title><style>{CSS}</style></head><body><main><h1>{title}</h1><p class="meta">{meta}</p>{body}</main></body></html>"""
+
+def fig(svg, take, rest=""):
+    return f'<figure>{svg}<figcaption><span class="take">{take}</span> {rest}</figcaption></figure>'
+
+def bars_compact(rows, w=900, unit="GB/s", color=None, xlim=None, rh=17, L=330):
+    """gen_run3.bars_h with a row height and label width that fit the brief's two pages"""
+    color = color or C["s1"]; Rr, T, B = 95, 26, 10; h = T + B + rh * len(rows)
+    svg = g.SVG(w, h); x1 = xlim or max(r["v"] for r in rows) * 1.05
+    fx = lambda v: L + v / x1 * (w - L - Rr)
+    for tk in [i * x1 / 5 for i in range(6)]:
+        svg.line(fx(tk), T - 6, fx(tk), h - B, C["grid"]); svg.text(fx(tk), T - 10, f"{tk:.0f}", 10, "middle", C["muted"])
+    svg.text(w - Rr + 30, T - 10, unit, 10, "start", C["ink2"])
+    for i, r in enumerate(rows):
+        y = T + rh * i + 2
+        svg.text(L - 10, y + 11, r["label"], 11, "end")
+        svg.rect(L, y, fx(r["v"]) - L, rh - 4, r.get("color", color), f"{r['label']}: {r['v']:,.1f} {unit}", rx=2)
+        svg.text(fx(r["v"]) + 6, y + 11, f"{r['v']:,.1f}", 10, "start", C["ink2"])
+    return svg.out()
+
+# figure heights (SVG units at w=900 or w=1150, scaled to the page width): set so each brief prints on 2 A4 pages
+F1_H, BAR_RH, CF1_H, CF2_H = 170, 15, 140, 110
+PE, R3 = p.PLATFORM["E"], p.RUN3
+META = (f"Latest: run 4 boot E (membench-jibin-{PE['run_id']}, {PE['date']}, commit {PE['commit']}, SCP {PE['scp']} (the system control firmware), TF-A {PE['tfa']} (the Arm Trusted Firmware)) on the GA13 Palladium (one Asimov hemisphere), "
+        f"the first boot with the DSU L3 in use as a cache (IMP_CLUSTERPWRSTAT_EL1 {PE['pwrstat'][0]} on CPU 2's cluster, Jesse's README). Beside it: run 3 (membench-jibin-{R3['run_id']}, {R3['date']}) and run 4 "
+        f"boots A to D (005 to 008), all measured with the L3 of CPUs 2 to 9 holding no data (register 0x0, 0 L3 hits). One C1-Nano core on CPU 2 unless stated. DRAM is an emulator memory, not LPDDR5X. "
+        f"Full reports: asimov-c1nano-perf.html, asimov-cme-perf.html. Every number here is read from the CSV files by gen_brief.py through gen_perf.py.")
+
+# the level map of boot E, by (size, kind); the L3 hit set by size
+LV = {(d["size"], d["kind"]): d for d in p.LEVELS}
+HIT = {h["size"]: h for h in p.HITSET}
+def lv(size, kind="repeat", boot=None): return LV[(size, kind)]["ns"] if boot is None else LV[(size, kind)]["ns_boot"][boot]
+def lv3(size, kind="repeat"): return LV[(size, kind)]["ns3"]
+FL_E, FL_3 = lv(8388608, "flushed"), lv3(8388608, "flushed")
+one = {d["size"]: d for d in g.ONE}
+rv = {(d["kernel"], d["size"]): d for d in p.READ_VARIANTS}
+g8 = {(d["form"], d["kernel"], d["size"]): d for d in p.G8_ROWS}
+L3_LO, L3_HI = min(p.L3_HIT_EST.values()), max(p.L3_HIT_EST.values())
+SPARSE2 = [d for d in p.OCM_SPARSE if d["cpu"] == 2]
+ALL5_3 = p.ALL5_RUN3_ALL
+PCTS = lambda s: 100 * HIT[s]["l3_hit"]
+SHARE = lambda s: f"{100 * HIT[s]['l2_hit']:.0f} / {100 * HIT[s]['l3_hit']:.0f} / {100 * HIT[s]['l3_refill']:.0f} %"   # per load, from the hit-set counters
+SEQ_DEMAND_E = p.SEQ_ROW["l1_refill"]["E"] - p.SEQ_ROW["l1pf"]["E"]   # L1 refills not made by the prefetcher: the demand misses per load
+SEQ_GBPS_E = 64 / p.SEQ_ROW["ns"]["E"]   # one line per load: the stream rate in GB/s (1e9 bytes)
+A8 = {(d["kernel"], d["size"]): d["run3"] for d in g.ALL8}; PD = {(d["kernel"], d["size"]): d["run3"] for d in g.PERDSU}
+W8 = max(v for (k, s), v in A8.items() if k == "write"); R8 = max(v for (k, s), v in A8.items() if k == "read")
+READ_LIMIT, WRITE_LIMIT = 32 * g.CORE_GHZ, 16 * g.CORE_GHZ
+
+# ======================================================================= core brief
+def core_brief():
+    pts_e = [(d["size"], d["ns"], f"{kib(d['size'])} {d['kind']}, boot E: {d['ns']:.3f} ns") for d in p.LEVELS if d["kind"] in ("repeat", "fresh")]
+    pts_3 = [(d["size"], d["ns3"], f"{kib(d['size'])} {d['kind']}, run 3: {d['ns3']:.3f} ns") for d in p.LEVELS if d["kind"] in ("repeat", "fresh")]
+    f1 = line_chart([dict(name="boot E, the L3 on", color=C["s1"], pts=pts_e, short="boot E"),
+                     dict(name="run 3, the L3 holding no data", color=C["muted"], pts=pts_3, dash="5 4", short="run 3", dy=14)],
+                    w=900, h=F1_H, marks=((32768, "L1 32 KiB"), (131072, "L2 128 KiB"), (262144, "L3 256 KiB (on, boot E)"), (SLC_BYTES, "SLC 3.75 MiB")), ylim=(0, 60), ticks_y=[0, 15, 30, 45, 60])
+    t1 = table(["Level", "Boot E (L3 on), ns per load", "Run 3 (L3 off), ns", "How it was measured", "Note"],
+               [["L1 (32 KiB per core)", fmt(lv(4096), 1), fmt(lv3(4096), 1), "4 KiB chain walked repeatedly", f"{p.CONTROLS['E']['p4k_cyc']:.2f} cycles at 2 GHz, the same on every boot"],
+                ["L2 (128 KiB per DSU)", fmt(lv(131072), 1), fmt(lv3(131072), 1), "128 KiB chain walked repeatedly", f"every load misses L1, {HIT[131072]['l2_hit']:.2f} L2 read hits per load"],
+                ["L3 (256 KiB per DSU), first measured on boot E", f"{HIT[196608]['ns']:.1f} / {HIT[262144]['ns']:.1f} / {HIT[393216]['ns']:.1f}", f"{lv3(196608):.1f} / {lv3(262144):.1f} / {lv3(393216):.1f}", "192 / 256 / 384 KiB chains walked repeatedly",
+                 f"every load misses L1. Share of loads served by L2 / L3 / mesh: {SHARE(196608)} at 192 KiB, {SHARE(262144)} at 256 KiB, {SHARE(393216)} at 384 KiB. One L3 hit costs about {L3_LO:.1f} to {L3_HI:.1f} ns est. (derived below)"],
+                ["SLC (3.75 MiB over five home nodes)", fmt(lv(2097152, "fresh"), 1), fmt(lv3(2097152, "fresh"), 1), "2 MiB chain walked once", "the 2 MiB buffer is DRAM memory. Its lines are cached in the SLC, each address at one of the five home nodes, chosen by a hash of the address"],
+                ["OCM region, from CPU 2 (sparse chain)", f"{min(d['E']['best'] for d in SPARSE2):.1f} to {max(d['E']['best'] for d in SPARSE2):.1f}", f"{min(d['run3']['best'] for d in SPARSE2):.1f} to {max(d['run3']['best'] for d in SPARSE2):.1f}", "256 KiB sparse chain, every line flushed first, best of 7 passes",
+                 f"On boot E only {p.SPARSE_L3_RNG_CPU2['E'][0]:.2f} to {p.SPARSE_L3_RNG_CPU2['E'][1]:.2f} of the loads in these rows are read from the mesh (L3 read refills per load). The other loads are served by the L3, so these values are below the true OCM latency"],
+                ["OCM, all five regions, dense chain", f"{p.ALL5[2]['E']['dense']:.1f} (CPU 2), {p.ALL5[8]['E']['dense']:.1f} (CPU 8)", f"{min(ALL5_3[c]['dense'] for c in ALL5_3):.1f} to {max(ALL5_3[c]['dense'] for c in ALL5_3):.1f} (CPUs 2, 4, 6, 8)", "1.25 MiB dense chain, flushed, best of 2 passes",
+                 f"the OCM number to quote: on E every load of this row is read from the mesh ({p.ALL5_DENSE_L3[2]:.2f} L3 read refills per load), so none is served by the L3 (derived, the L3 hit counter was not run on this row)"],
+                ["DRAM (emulator memory model, fixed delay)", fmt(FL_E, 1), fmt(FL_3, 1), "8 MiB random chain, every line flushed from all caches", f"a 32 MiB chain walked once: {lv(33554432, 'fresh'):.1f} ns on E, {lv3(33554432, 'fresh'):.1f} on run 3"],
+                ["DRAM (emulator memory model, fixed delay)", fmt(p.SEQ_ROW['ns']['E'], 1), "not run", "8 MiB sequential chain in address order, every line flushed first", f"the hardware prefetcher brought every load's line into L1 before or while the load waited for it ({p.SEQ_ROW['l1pf']['E']:.2f} L1 prefetch refills per load, {SEQ_DEMAND_E:.4f} demand refills per load). The loads run at the prefetch stream's rate: 64 B per {p.SEQ_ROW['ns']['E']:.2f} ns is {SEQ_GBPS_E:.1f} GB/s, about the one-core plain DRAM read on E ({rv[('read', 33554432)]['agg']['E']:.1f} GB/s). {p.SEQ_ROW['ns']['C']:.1f} ns with the L3 off (boot C), {p.SEQ_ROW['ns']['B']:.1f} with the prefetchers off (boot B)"]],
+               f"Best pass of each row [latency-dram-*.csv, latency-dram-small-l3.csv, latency-ocm-*.csv]. The L3 hit cost is derived over the 256 and 384 KiB rows: {p.L3_HIT_EST_HOW}. The 192 KiB row gives {p.L3_HIT_EST_192:.1f} ns est. the same way and is left out: under half its loads hit the L3 ({PCTS(196608):.0f} %), so the subtracted L2 term is as large as the L3 term.")
+    bw = [dict(label="1 core read path limit (dual 128-bit, computed)", v=READ_LIMIT, color=C["muted"]), dict(label="1 core write path limit (128-bit, computed)", v=WRITE_LIMIT, color=C["muted"]),
+          dict(label="1 core read 16 KiB (L1) (run 3, L3 off)", v=one[16384]["read"]), dict(label="1 core read 24 KiB (L1), single-call form (boot E, L3 on)", v=g8[("asm", "read", 24576)]["agg"]["E"]),
+          dict(label="1 core read, L1 rate from the 8 and 16 KiB passes, single-call form (boot E, L3 on, derived)", v=p.G8_MARGINAL[("E", "asm")], color=C["s4"]),
+          dict(label="1 core read 32 MiB (DRAM) (run 3, L3 off)", v=one[33554432]["read"]), dict(label="1 core read 32 MiB (DRAM) (boot E, L3 on)", v=rv[("read", 33554432)]["agg"]["E"]),
+          dict(label="1 core write 32 MiB (run 3, L3 off)", v=one[33554432]["write"], color=C["s2"]), dict(label="1 core copy 32 MiB, read + write bytes (run 3, L3 off)", v=one[33554432]["copy"], color=C["s3"]),
+          dict(label="2 cores of one DSU write 16 MiB (run 3, L3 off)", v=g.PAIR_W, color=C["s2"]), dict(label="4 cores, one per DSU, write 16 MiB (run 3, L3 off)", v=PD[("write", 16777216)], color=C["s2"]),
+          dict(label="8 cores write 16 MiB each (run 3, L3 off)", v=A8[("write", 16777216)], color=C["s2"]), dict(label="8 cores read 16 MiB each (run 3, L3 off)", v=A8[("read", 16777216)]),
+          dict(label="1 core reads one OCM region (run 3, L3 off)", v=max(g.OCMBW["region"])), dict(label="4 cores read four OCM regions (run 3, L3 off)", v=g.OCMBW["four"]), dict(label="1 core streaming write to OCM (run 3, L3 off)", v=g.OCMBW["write"], color=C["s2"])]
+    K1 = p.F1["core"]; one1 = {d["size"]: d for d in K1["ONE"]}; m1 = {(d["kernel"], d["size"], d["threads"]): d["agg"] for d in K1["PAIR"] + K1["PERDSU"] + K1["ALL8"]}   # run 6 boot F1, the L3 on
+    R6 = C["s7"]
+    bw += [dict(label="1 core read 48 KiB (L2) (run 6 F1, L3 on)", v=one1[49152]["read"], color=R6), dict(label="1 core read 48 KiB (L2) (run 3, L3 off)", v=one[49152]["read"]),
+           dict(label="4 cores (one per DSU) read 16 MiB each (run 6 F1, L3 on)", v=m1[("read", 16777216, 4)], color=R6), dict(label="4 cores (one per DSU) read 16 MiB each (run 3, L3 off)", v=PD[("read", 16777216)]),
+           dict(label="8 cores read 16 MiB each (run 6 F1, L3 on)", v=m1[("read", 16777216, 8)], color=R6), dict(label="8 cores write 16 MiB each (run 6 F1, L3 on)", v=m1[("write", 16777216, 8)], color=R6),
+           dict(label="1 core reads one OCM region (run 6 F1, L3 on)", v=max(K1["OCMBW"]["region"]), color=R6), dict(label="4 cores read four OCM regions (run 6 F1, L3 on)", v=K1["OCMBW"]["four"], color=R6)]
+    f2 = bars_compact(bw, w=1150, xlim=170, rh=BAR_RH)
+    read_x = rv[("read", 33554432)]["agg"]["E"] / one[33554432]["read"]
+    r6_read_x = {s: one1[s]["read"] / one[s]["read"] for s in one1 if s >= 49152}
+    w1_lo, w1_hi = min(d["write"] for d in g.ONE), max(d["write"] for d in g.ONE)   # run 3's one-core write at 16 KiB to 32 MiB
+    e_sparse_lo, e_sparse_hi = min(d["E"]["best"] for d in SPARSE2), max(d["E"]["best"] for d in SPARSE2)
+    e2m, c2m = rv[("read", 2097152)]["e"]["E"], rv[("read", 2097152)]["e"]["C"]   # the plain 2 MiB read's counters per line
+    body = f"""
+
+<h2>Words used here</h2>
+<dl>
+<dt>run, boot</dt><dd>A run is one job on the emulator (run 3 = membench-jibin-004). Run 4 is five boots: A as run 3, B the data prefetchers off, C the 64 KiB contiguous hint on the OCM mapping, D both, E the L3 on.</dd>
+<dt>chase, hit set</dt><dd>A random pointer chain, one load per 64-byte line. Fresh: walked once. Flushed: every line cleaned and invalidated from the caches first. Hit set: the 64 KiB to 512 KiB chases with the L2 and L3 hit events.</dd>
+<dt>sparse chain, dense chain</dt><dd>Dense chain: every 64-byte line of the buffer is a member of the chain. Sparse chain: one member line per 4 KiB page, so a line the prefetcher fetches next to a member is never a member.</dd>
+<dt>single-call form, looped form</dt><dd>The two forms of run 4's L1 bandwidth rows: every pass of a rep inside one call (single-call), or one call per pass (looped).</dd>
+</dl>
+<h2>1. Latency by level</h2>
+{fig(f1, f"Steps at 48 KiB (past L1), 192 KiB (past L2: {lv(196608):.1f} ns on boot E with the L3 on, {lv3(196608):.1f} ns on run 3 with the L3 holding no data) and 4 to 16 MiB (past the SLC).", "Latency test (a dependent chase): each load's address is the value the previous load returned. Loads cannot overlap. Up to 384 KiB the same list is walked repeatedly, from 512 KiB a random list is walked once. Dashed: run 3 (membench-jibin-004).")}
+{t1}
+
+<h2>2. Bandwidth</h2>
+{fig(f2, f"With the L3 on, one core reads {rv[('read', 33554432)]['agg']['E']:.1f} GB/s from DRAM, {read_x:.1f} times run 3's {one[33554432]['read']:.1f} GB/s. The other rows are run 3's with the L3 off: reads scale with cores ({one[33554432]['read']:.1f} GB/s for one at 32 MiB, {A8[('read', 2097152)]:.1f} for eight at 2 MiB each), writes are limited per DSU ({w1_lo:.1f} to {w1_hi:.1f} GB/s for one core at 16 KiB to 32 MiB, {g.PAIR_W:.0f} for two of one DSU) and reach {A8[('write', 2097152)]:.0f} with eight at 2 MiB each (the bars: the 16 MiB rows, {A8[('read', 16777216)]:.1f} and {A8[('write', 16777216)]:.1f}).", f"GB = 1e9 bytes, best rep [bandwidth-*.csv]. The grey rows are computed: the Arm C1-Nano TRM's dual 128-bit read path and single 128-bit write path at the {g.CORE_GHZ:.1f} GHz the latency rows show. One core's L1 reads reach {100 * g8[('asm', 'read', 24576)]['agg']['E'] / READ_LIMIT:.0f} % of the read limit in the single-call form (every pass inside one assembly call).")}
+
+<h2>3. What else the runs showed</h2>
+<ul>
+<li><b>The L3 is on for the first time.</b> On runs 1 to 3 and boots A to D the L3 of CPUs 2 to 9 held no data (register 0x0, {HIT[262144]['hitC']:.0f} L3 hits per load on boot C). Boot E's rebuilt SCP stages the full L3 before the clusters power on. Its hit set counts {PCTS(196608):.0f}, {PCTS(262144):.0f} and {PCTS(393216):.0f} % L3 read hits per load at 192, 256 and 384 KiB, and the data read fell from {HIT[196608]['nsC']:.1f}, {HIT[262144]['nsC']:.1f} and {HIT[393216]['nsC']:.1f} ns on boot C to {HIT[196608]['ns']:.1f}, {HIT[262144]['ns']:.1f} and {HIT[393216]['ns']:.1f} ns [latency-dram-small-l3.csv, Jesse's boot E README].</li>
+<li><b>The 52 ns DRAM data read is a fixed-delay memory model.</b> On boot B an address-order 8 MiB chain reads {p.DRAM_MODEL['seq_B']:.3f} ns per load and a random one {p.DRAM_MODEL['random_B']:.3f} ns. The model answers in a fixed time. {p.DRAM_MODEL['home_hop']:.1f} ns of it is the home-node load (the 2 MiB SLC data read), and the rest, about {p.DRAM_MODEL['rest_est']:.1f} ns est., is the model's delay. The L3 does not change it ({p.DRAM_MODEL['flushed_E']:.3f} ns flushed on E, {p.DRAM_MODEL['flushed_C']:.3f} on C) [latency-dram-seq.csv, latency-dram-flushed.csv, boots B, C, E].</li>
+<li><b>One core reads {read_x:.1f} times more from DRAM with the L3 on.</b> The plain read loop reads 32 MiB at {one[33554432]['read']:.1f} GB/s on run 3 and {rv[('read', 33554432)]['agg']['C']:.1f} GB/s on boot C, both with the L3 off. On boot E, with the L3 on, the same loop reads {rv[('read', 33554432)]['agg']['E']:.1f} GB/s. Adding a software prefetch hint (PRFM, the Arm prefetch instruction, issued 4 lines ahead) does not help. It changes boot C by {100 * (rv[('read-pf4', 33554432)]['agg']['C'] / rv[('read', 33554432)]['agg']['C'] - 1):+.0f} % and lowers boot E to {rv[('read-pf4', 33554432)]['agg']['E']:.1f} GB/s. Why the L3 makes the loop faster is <span class="gap">Insufficient data</span>. The refill counters per line are about the same on both boots (L1 {e2m['l1d_refill']:.2f} and {c2m['l1d_refill']:.2f}, L2 {e2m['l2d_refill']:.2f} and {c2m['l2d_refill']:.2f}, L1 prefetch {e2m['l1d_refill_hwprf']:.2f} and {c2m['l1d_refill_hwprf']:.2f} at 2 MiB), so they do not show the mechanism [bandwidth-read-prefetch.csv].</li>
+</ul>
+
+<h2>4. Caveats</h2>
+<ul>
+<li>DRAM on this emulator image is a memory model, not LPDDR5X, so the DRAM latency and multi-core bandwidth rows are not silicon numbers.</li>
+<li><span class="hyp">hypothesis</span> Boot E reads {p.EC_DELTA[33554432]:+.2f} ns at 32 MiB and {p.EC_DELTA[16777216]:+.2f} ns at 16 MiB above boot C (same commit): translation walks. A walk-counted 32 MiB row on E and C in one process would test it.</li>
+</ul>
+
+"""
+    return page("Asimov C1-Nano memory performance: brief", META, body)
+
+# ======================================================================= CME brief
+def cme_brief():
+    c = {(d["size"], d["kind"]): d for d in p.CME_LEVELS}
+    cb = dict(p.CME_B)
+    # run 6: boot F1 (the L3 on, prefetchers on, the whole CME set) and boot F2 (the L3 on, prefetchers off) [gen_run6 through gen_perf]
+    F1, F2 = p.F1, p.F2; C1, C2 = F1["cme"], F2["cme"]; K1 = F1["core"]
+    CLV1 = {(d["size"], d["kind"]): d for d in C1["CLV"]}; CLV2 = {(d["size"], d["kind"]): d for d in C2["CLV"]}; CL3_2 = {(d["size"], d["kind"]): d for d in C2["CL3"]}
+    CBW1 = {d["size"]: d for d in C1["CBW"]}; CBW2 = {d["size"]: d for d in C2["CBW"]}; ASM1 = {d["size"]: d for d in C1["CBW_ASM"]}; ONE1 = {d["size"]: d for d in K1["ONE"]}
+    FORM1 = C1["FORM"]; COCM1, COCM2 = C1["COCM"], C2["COCM"]; OCMBW1, COCMBW1 = K1["OCMBW"], C1["COCMBW"]; CC1 = C1["CALLCOST"]
+    L1S = (4096, 8192, 16384, 24576); SINGLE_RD = [FORM1[("single", "read")]["rows"][s]["agg"] for s in L1S] + [ASM1[49152]["read"]["agg"]]; SINGLE_WR = [FORM1[("single", "write")]["rows"][s]["agg"] for s in L1S] + [ASM1[49152]["write"]["agg"]]
+    L3S = (196608, 262144, 393216); f2_l3 = {s: CLV2[(s, "repeat")] for s in L3S}; rt6 = C2["RT_NS"][0]
+    f2_sp = [COCM2[r]["best"] for r in range(5)]; f1_sp = [COCM1[r]["best"] for r in range(5)]; big1 = [d for d in C1["CBW"] if d["size"] >= 163840]
+    f2_in = (min(d["emean"]["cme_l1d_refill_inner"] for d in f2_l3.values()), max(d["emean"]["cme_l1d_refill_inner"] for d in f2_l3.values())); f2_out = (min(d["emean"]["cme_l1d_refill_outer"] for d in f2_l3.values()), max(d["emean"]["cme_l1d_refill_outer"] for d in f2_l3.values()))
+    BPC6 = 0.5   # bytes per CME cycle per GB/s at 2 GHz
+    F1_PAIR_W = next(q["agg"] for q in K1["PLACE"] if q["cpus"] == "2-3")
+    STAMP = C1["CALL_NS"][0] - min(d["ns"] for f in __import__("glob").glob(p.A_DIR + "/" + p.PLATFORM["E"]["dir"] + "cme-latency-*.csv") for d in p.r4.lat(f) if d["mode"] == "cme-call")   # ns est.: cme-call on F1 against boot E
+    CW1 = dict(small=(min(d["write"]["agg"] for d in C1["CBW"] if d["size"] <= 262144), max(d["write"]["agg"] for d in C1["CBW"] if d["size"] <= 262144)), big=(min(d["write"]["agg"] for d in C1["CBW"] if d["size"] >= 1048576), max(d["write"]["agg"] for d in C1["CBW"] if d["size"] >= 1048576)))
+    W3_TXT = f"{max(d['write'] for d in g.CBW if d['size'] <= 2097152):.0f} GB/s at 16 KiB to 2 MiB and {next(d['write'] for d in g.CBW if d['size'] == 33554432):.0f} at 32 MiB"
+    f2_in_best = (min(d["e"]["cme_l1d_refill_inner"] for d in f2_l3.values()), max(d["e"]["cme_l1d_refill_inner"] for d in f2_l3.values()))
+    rt, rt_cyc = p.CONTROLS["E"]["rt"][0], g.RT_CYC[0]
+    CBW, COCMBW, OCMBW, CALLB = g.CBW, g.COCMBW, g.OCMBW, g.CALLB
+    chase = [d for d in p.CME_LEVELS if d["kind"] in ("repeat", "fresh")]
+    f1 = line_chart([dict(name="C1-Nano core, CPU 2, boot E", color=C["s1"], pts=[(d["size"], d["core"]) for d in chase], short="core", dy=14),
+                     dict(name="through the CME, boot E (L3 on, prefetchers on)", color=C["s2"], pts=[(d["size"], d["ns"], f"CME {kib(d['size'])}, boot E: {d['ns']:.3f} ns") for d in chase], short="CME E"),
+                     dict(name="through the CME, boot F2 (L3 on, prefetchers off, run 6)", color=C["s7"], pts=[(d["size"], CLV2[(d["size"], d["kind"])]["ns"], f"CME {kib(d['size'])}, boot F2: {CLV2[(d['size'], d['kind'])]['ns']:.3f} ns") for d in chase], short="CME F2", dy=14),
+                     dict(name="through the CME, boot B (CME prefetcher off)", color=C["s3"], pts=[(d["size"], d["nsB"]) for d in chase], dash="2 3", short="CME B", dy=-10)],
+                    w=900, h=CF1_H, marks=((32768, "core L1 32 KiB"), (65536, "CME L1 64 KiB"), (262144, "L3 256 KiB (on, boot E)"), (SLC_BYTES, "SLC 3.75 MiB")), ylim=(0, 75), ticks_y=[0, 15, 30, 45, 60, 75],
+                    hline=(rt, f"round-trip baseline {rt:.1f} ns", 98304))
+    f2 = line_chart([dict(name="core read, boot F1 (L3 on)", color=C["s1"], pts=[(s, ONE1[s]["read"]) for s in sorted(ONE1)], dash="5 4", short="core read", dy=14),
+                     dict(name="CME read, boot F1 (L3 on)", color=C["s1"], pts=[(d["size"], d["read"]["agg"], f"CME read F1 {kib(d['size'])}: {d['read']['agg']:.2f} GB/s by the bracket, {d['read']['span']:.2f} in span") for d in C1["CBW"]], short="CME read", dy=-6),
+                     dict(name="CME read, run 3 (L3 off)", color=C["muted"], pts=[(d["size"], d["read"]) for d in CBW], dash="2 3", short=""),
+                     dict(name="core write, boot F1", color=C["s2"], pts=[(s, ONE1[s]["write"]) for s in sorted(ONE1)], dash="5 4", short="core write", dy=14),
+                     dict(name="CME write, boot F1 (L3 on)", color=C["s2"], pts=[(d["size"], d["write"]["agg"], f"CME write F1 {kib(d['size'])}: {d['write']['agg']:.2f} GB/s by the bracket, {d['write']['span']:.2f} in span") for d in C1["CBW"]], short="CME write", dy=12),
+                     dict(name="CME write, run 3 (L3 off)", color=C["s2"], pts=[(d["size"], d["write"]) for d in CBW], dash="2 3", short="run 3 write", dy=-8)],
+                    w=900, h=CF2_H, ylabel="GB/s by the bracket, one thread on CPU 2 (solid: run 6 boot F1, the L3 on; dotted: run 3, the L3 off; dashed: the core on F1)", marks=((65536, "CME L1 64 KiB"), (262144, "L3 256 KiB (on)"), (SLC_BYTES, "SLC")), ylim=(0, 110), ticks_y=[0, 25, 50, 75, 100])
+    big = [d for d in CBW if d["size"] >= 163840]
+    b48 = [d for d in CBW if d["size"] == 49152][0]; b32m = [d for d in CBW if d["size"] == 33554432][0]
+    co = p.CME_OCM; e_sp = [d["E"]["sparse"] for d in co]; r3_sp = [d["run3"]["best"] for d in co]
+    assert sorted(d["dist"] for d in co) == [1, 1, 1, 3, 3], [d["dist"] for d in co]   # the OCM bullet names the two distances
+    core_sp = [d["E"]["best"] for d in p.OCM_SPARSE if d["cpu"] == 2]
+    k8, k16 = c[(8192, "repeat")], c[(16384, "repeat")]
+    WAKE_US = (0.1, 0.3)   # Jesse's run 3 README bounds on a fixed cost per timed span, us: not a measured row
+    b16 = [d for d in CBW if d["size"] == 16384][0]
+    copy_small = (min(b16["copy"], b48["copy"]), max(b16["copy"], b48["copy"])); copy_big = (min(d["copy"] for d in big), max(d["copy"] for d in big))
+    rt_b = p.CONTROLS["B"]["rt"][0]; b_l1 = [ns for s, ns in p.CME_B if s <= 65536]   # boot B: the CME prefetcher off, the chain load from 4 to 64 KiB
+    t16r, t48r = 16384 / b16["read"], 49152 / b48["read"]   # ns per pass = bytes / (GB/s), GB = 1e9
+    L1_READ_RATE = (49152 - 16384) / (t48r - t16r)          # GB/s est.: the line through the 16 and 48 KiB rows, its per-call cost removed (two points)
+    BPC = 0.5   # bytes per CME cycle per GB/s at 2 GHz
+    t1 = table(["Row", "Core", "CME", "Source", "Note"],
+               [["Dependent load, 4 KiB chain", f"{c[(4096, 'repeat')]['core']:.1f} ns", f"{c[(4096, 'repeat')]['ns']:.1f} ns", "boot E", f"round-trip baseline (DUP, LASTB, no load) {rt:.1f} ns = {rt_cyc:.0f} CME cycles; chain load minus baseline {c[(4096, 'repeat')]['ns'] - rt:.2f} ns (derived). Run 3 {c[(4096, 'repeat')]['ns3']:.1f}, F1 {CLV1[(4096, 'repeat')]['ns']:.1f}"],
+                ["L1 hit, dependent load, 4 to 64 KiB, CME prefetcher off", f"{c[(4096, 'repeat')]['core']:.1f} ns (4 KiB, boot E)", f"{min(b_l1):.1f} to {max(b_l1):.1f} ns", "boots B, F2", f"every load hits the CME L1 (B {min(b_l1):.2f} to {max(b_l1):.2f} ns, F2 {CLV2[(4096, 'repeat')]['ns']:.2f} to {CLV2[(65536, 'repeat')]['ns']:.2f}), {min(b_l1) - rt_b:.2f} to {max(b_l1) - rt_b:.2f} ns above the baseline (derived). Prefetcher on: boot E {k8['ns']:.1f} / {k16['ns']:.1f} / {c[(65536, 'repeat')]['ns']:.1f} ns at 8 / 16 / 64 KiB, F1 {CLV1[(8192, 'repeat')]['ns']:.1f} / {CLV1[(16384, 'repeat')]['ns']:.1f} / {CLV1[(65536, 'repeat')]['ns']:.1f}: the climb is the prefetcher's"],
+                ["L3-served load, 192 / 256 / 384 KiB chain, CME prefetcher off", f"{HIT[196608]['ns']:.1f} / {HIT[262144]['ns']:.1f} / {HIT[393216]['ns']:.1f} ns (boot E)", " / ".join(f"{f2_l3[s]['ns']:.1f}" for s in L3S) + " ns", "boot F2 (run 6)", f"one demand refill per load, {f2_in_best[0]:.2f} to {f2_in_best[1]:.2f} of it from inside the cluster (best rep; rep mean {f2_in[0]:.2f} to {f2_in[1]:.2f}); " + " / ".join(f"{f2_l3[s]['ns'] - rt6:.1f}" for s in L3S) + f" ns above the baseline (derived). The exploratory L3-hit event puts {CL3_2[(196608, 'repeat')]['hit']:.2f} to {CL3_2[(393216, 'repeat')]['hit']:.2f} of the loads in the L3, the rest in CPU 2's own cache (hypothesis). Boot B (L3 off) " + " / ".join(f"{cb[s]:.1f}" for s in L3S) + "; F1 (prefetcher on) " + " / ".join(f"{CLV1[(s, 'repeat')]['ns']:.1f}" for s in L3S)],
+                ["2 MiB chain walked once (SLC on the core)", f"{c[(2097152, 'fresh')]['core']:.1f} ns", f"{c[(2097152, 'fresh')]['ns']:.1f} ns", "boot E", f"run 3 {c[(2097152, 'fresh')]['ns3']:.1f}; F1 {CLV1[(2097152, 'fresh')]['ns']:.1f}, F2 (prefetchers off) {CLV2[(2097152, 'fresh')]['ns']:.1f}"],
+                ["DRAM (emulator memory model, fixed delay), 8 MiB random chain, every line flushed from all caches", f"{c[(8388608, 'flushed')]['core']:.1f} ns", f"{c[(8388608, 'flushed')]['ns']:.1f} ns", "boot E", f"run 3 {c[(8388608, 'flushed')]['ns3']:.1f}, C {c[(8388608, 'flushed')]['nsC']:.1f}, F1 {CLV1[(8388608, 'flushed')]['ns']:.1f}; prefetchers off: F2 {CLV2[(8388608, 'flushed')]['ns']:.1f}, B {p.CME_FLUSHED['B']:.1f} (the prefetcher, not the L3, sets this row)"],
+                ["OCM, one region (1 to 3 crosspoints); all five regions, every line", f"{min(core_sp):.1f} to {max(core_sp):.1f}; {p.ALL5[2]['E']['dense']:.1f} ns", f"{min(f2_sp):.1f} to {max(f2_sp):.1f} ns (F2, demand only), {min(e_sp):.1f} to {max(e_sp):.1f} (E); {p.CME_ALL5['E']['dense']:.1f} (E), {C2['CALL5D']['best']:.1f} (F2)", "boots F2, E", f"one line per 4 KiB page, best of 7 passes of 64 loads; all five: 20,480 loads a pass. With the prefetchers off (F2) every line comes from outside the cluster: the demand-only OCM latency through the CME. With it on (E; F1 {min(f1_sp):.1f} to {max(f1_sp):.1f}; run 3 {min(r3_sp):.1f} to {max(r3_sp):.1f}) some lines are fetched first. The core's one-region values are below the true OCM latency (the L3 serves part of its loads)"],
+                ["L1 read / write bandwidth, single-call form, 4 to 48 KiB", f"{g8[('asm', 'read', 24576)]['agg']['E']:.1f} / {g8[('asm', 'write', 24576)]['agg']['E']:.1f} GB/s at 24 KiB (boot E)", f"{min(SINGLE_RD):.0f} to {max(SINGLE_RD):.0f} / {min(SINGLE_WR):.0f} to {max(SINGLE_WR):.0f} GB/s", "boot F1 (run 6)", f"{BPC6 * min(SINGLE_RD):.0f} to {BPC6 * max(SINGLE_RD):.0f} / {BPC6 * min(SINGLE_WR):.0f} bytes per CME cycle: one 64-byte load per cycle and {BPC6 * max(SINGLE_WR) / 64:.2f} of a store. The looped form reads {FORM1[('looped', 'read')]['rows'][24576]['agg']:.0f} / {FORM1[('looped', 'write')]['rows'][24576]['agg']:.0f} at 24 KiB: the call's cost hides the rate"],
+                ["CME pipeline widths (hardware)", "", "2 loads or stores per cycle", "Arm guides", f"3 SME instructions issued per cycle, loads and stores 2 [C1-Nano SOG 109590, 2.33]; CME L1 4-way, 16 banks, two 512-bit read paths [C1-SME2 TRM 107831, table 6-1]; the LLVM model: 1 streaming load or store per cycle. Measured (F1): one load and {BPC6 * max(SINGLE_WR) / 64:.1f} of a store per cycle; why stores stop there is Insufficient data"],
+                ["Read bandwidth, 48 KiB; 160 KiB to 32 MiB", f"{ONE1[49152]['read']:.1f}; {ONE1[33554432]['read']:.1f} GB/s at 32 MiB", f"{CBW1[49152]['read']['agg']:.1f} ({CBW1[49152]['read']['span']:.1f} in span); {min(d['read']['agg'] for d in big1):.1f} to {max(d['read']['agg'] for d in big1):.1f} GB/s", "boot F1 (run 6)", f"48 KiB is the CME's peak; the bracket adds the call's save, SMSTART, SMSTOP, restore and run 6's clock stamps (run 3, L3 off: {b48['read']:.1f}). At 32 MiB {CBW1[33554432]['read']['agg'] / ONE1[33554432]['read']:.1f} times the core (run 3: {b32m['read']:.1f} against {b32m['core_read']:.1f}); with the CME prefetcher off (F2) {CBW2[33554432]['read']['agg']:.1f} GB/s"],
+                ["Write bandwidth, 16 KiB to 32 MiB", f"{min(ONE1[s]['write'] for s in ONE1):.1f} to {max(ONE1[s]['write'] for s in ONE1):.1f} GB/s", f"{CW1['small'][0]:.0f} to {CW1['small'][1]:.0f} GB/s to 256 KiB, {CW1['big'][0]:.0f} to {CW1['big'][1]:.0f} from 1 MiB", "boot F1 (run 6)", f"by the bracket, in span too from 96 KiB on, on F1 and F2 alike; run 3 wrote {W3_TXT} with the L3 off (open, full page section 10)"],
+                ["Cost per call (the four L1 forms, 4 to 24 KiB)", "", f"read call about {FORM1[('looped', 'read')]['fit']['a_ns']:.0f} ns by the bracket, about {STAMP:.0f} of it run 6's clock stamps and {FORM1[('looped', 'read')]['fit']['a_ns'] - FORM1[('nofold', 'read')]['fit']['a_ns']:.0f} the fold", "boot F1 (run 6)", f"the looped read's line (ns per pass against bytes) gives {FORM1[('looped', 'read')]['fit']['a_ns']:.0f} ns per pass; cme-call (one instruction) reads {C1['CALL_NS'][0]:.0f} ns on run 6 against boot E's {C1['CALL_NS'][0] - STAMP:.0f}, so net of the stamps about {FORM1[('looped', 'read')]['fit']['a_ns'] - STAMP:.0f} ns est. (run 3's 1 KiB read call {CALLB['read']:.0f}); no row isolates the stamps. A write call's cost overlaps with its posted stores; DSB ST before SMSTOP exposes {FORM1[('dsb', 'write')]['rows'][4096]['t_pass'] - FORM1[('looped', 'write')]['rows'][4096]['t_pass']:.0f} to {FORM1[('dsb', 'write')]['rows'][8192]['t_pass'] - FORM1[('looped', 'write')]['rows'][8192]['t_pass']:.0f} ns per pass"]],
+               "CPU 2 with CPU 3 offline. Best rep or best pass of each row [cme-latency-*.csv of boots E, B, F1 and F2, cme-bandwidth-*.csv of boot F1 and run 3, and the same runs' core rows]. GB = 1e9 bytes. Run 6's --cme rows carry a second time read inside the streaming span (in span) beside the bracket.")
+    cme_add = c[(4096, "repeat")]["ns"] - c[(4096, "repeat")]["core"]; dram_add = c[(8388608, "flushed")]["ns"] - c[(8388608, "flushed")]["core"]
+    rep_sizes = [d["size"] for d in p.CME_LEVELS if d["kind"] == "repeat" and d["size"] >= 49152]
+    body = f"""
+<h2>Words used here</h2>
+<dl>
+<dt>CME, streaming mode</dt><dd>The Compute Matrix Engine, Arm's C1-SME2 unit: one per two-core cluster (DSU), runs the cores' streaming-mode (SME, SMSTART to SMSTOP) instructions with a 64-byte vector length, with its own 64 KiB L1 data cache, TLB (translation buffer) and hardware prefetcher. Its path to memory is CME L1, DSU L3 (in use on boots E, F1 and F2), then the mesh; the core's L1 and L2 are not on it.</dd>
+<dt>run, boot</dt><dd>A run is one job on the emulator (the GA13 Palladium; run 3 = membench-jibin-004). Run 4 is five boots, A to E (B the prefetchers off, the CME's too; E the L3 on). Run 6 (commit 0c190a1): F1 the L3 on, prefetchers on (every row); F2 the L3 on, the prefetchers of the cores and the CMEs off (the CME rows).</dd>
+<dt>bracket, in span; looped, single-call form</dt><dd>Run 6 times every CME call by the clock reads around the call (bracket) and by clock reads inside the streaming span (in span). An L1 bandwidth row calls the kernel once per pass (looped form) or runs every pass of a rep inside one call (single-call form). Fold: the read kernel's end-of-call sum of its 16 running totals. DSB ST: the Arm barrier that waits for every earlier store.</dd>
+<dt>round-trip baseline</dt><dd>The latency test's loop with the load replaced by a register move (DUP then LASTB): one core-to-CME-to-core round trip with no memory access.</dd>
+<dt>OCM, SLC, crosspoint; SOG, TRM, LLVM model</dt><dd>OCM: the on-chip SRAM, five regions, each behind one home node of the mesh. SLC: the mesh's system level cache, 3.75 MiB over five home nodes. Crosspoint: one switch of the mesh; a region's home node is 1 or 3 crosspoints from the DSU. SOG, TRM: Arm's Software Optimization Guide and Technical Reference Manual. LLVM model: the public C1-Nano timing table in the LLVM compiler.</dd>
+</dl>
+<h2>1. Read latency: core against CME</h2>
+{fig(f1, f"The CME has no clear step at its 64 KiB L1 on boot E: the climb starts at 8 KiB ({k8['ns'] - c[(4096, 'repeat')]['ns']:+.1f} ns) and the 64 to 96 KiB step is {c[(98304, 'repeat')]['ns'] - c[(65536, 'repeat')]['ns']:+.1f} ns. With the CME prefetcher off (boot B) the chain load stays at {cb[4096]:.1f} to {cb[65536]:.1f} ns to 64 KiB and steps by {cb[98304] - cb[65536]:+.1f} ns at 96 KiB. Boot F2 (run 6: the L3 on, the prefetchers off) repeats boot B to 64 KiB and reads {min(d['ns'] for d in f2_l3.values()):.1f} to {max(d['ns'] for d in f2_l3.values()):.1f} ns at 192 to 384 KiB, where every load is served inside the cluster ({CL3_2[(196608, 'repeat')]['hit']:.2f} to {CL3_2[(393216, 'repeat')]['hit']:.2f} per load by the exploratory L3-hit event; the rest is a hypothesis, section 4).", f"Latency test (a chain of dependent loads): each load's address is the value the previous load returned, so loads cannot overlap. Up to 384 KiB, same list is walked repeatedly; from 512 KiB onwards, a random list is walked once. The horizontal line is the round-trip baseline ({rt_cyc:.0f} CME cycles).")}
+
+<h2>2. Bandwidth: core against CME (run 6 boot F1, the L3 on)</h2>
+{fig(f2, f"With the L3 on the CME reads {CBW1[49152]['read']['agg']:.0f} GB/s at 48 KiB by the bracket ({CBW1[49152]['read']['span']:.0f} in span, run 3's {b48['read']:.0f}) and {min(d['read']['agg'] for d in big1):.0f} to {max(d['read']['agg'] for d in big1):.0f} GB/s from 160 KiB on, where the core reads {ONE1[33554432]['read']:.0f}. It writes {CW1['small'][0]:.0f} to {CW1['small'][1]:.0f} GB/s from 16 to 256 KiB and {CW1['big'][0]:.0f} to {CW1['big'][1]:.0f} from 1 MiB, against run 3's {W3_TXT} with the L3 off; the core writes {ONE1[33554432]['write']:.0f}.", f"Run 6 boot F1 (membench-jibin-011), the L3 on, and run 3 (004), the L3 off. One thread, 256 bytes per instruction, best of 3 reps, the bracket rate drawn. Copy, not drawn, holds {min(CBW1[16384]['copy']['agg'], CBW1[49152]['copy']['agg']):.0f} to {max(CBW1[16384]['copy']['agg'], CBW1[49152]['copy']['agg']):.0f} GB/s (read plus write bytes) at 16 and 48 KiB and {min(d['copy']['agg'] for d in big1):.0f} to {max(d['copy']['agg'] for d in big1):.0f} from 160 KiB.")}
+
+<h2>3. The numbers side by side</h2>
+{t1}
+
+<h2>4. What it means, and what it does not</h2>
+<ul>
+<li><b>A single load through the CME is slow, a stream is fast.</b> The CME path adds {cme_add:.1f} ns to a dependent load and {dram_add:.1f} ns to a DRAM load that misses every cache (boot E). A 256-byte load per instruction with no dependency gives {CBW1[33554432]['read']['agg'] / ONE1[33554432]['read']:.1f} times the core's DRAM read rate and {CBW1[33554432]['write']['agg'] / ONE1[33554432]['write']:.1f} times its write rate with the L3 on (F1).</li>
+<li><b>The L3-served load through the CME is {min(d['ns'] for d in f2_l3.values()):.1f} to {max(d['ns'] for d in f2_l3.values()):.1f} ns (boot F2).</b> With the prefetchers off every CME refill is a demand refill, and the 192 to 384 KiB chains refill once per load from inside the cluster: {min(d['ns'] for d in f2_l3.values()) - rt6:.1f} to {max(d['ns'] for d in f2_l3.values()) - rt6:.1f} ns above the round-trip baseline (derived; the core's own L3 hit: {L3_LO:.1f} to {L3_HI:.1f} ns est.). Boot B, the L3 off, read {cb[196608]:.1f} to {cb[393216]:.1f} ns. <span class="hyp">hypothesis</span> {CL3_2[(196608, 'repeat')]['hit']:.2f} to {CL3_2[(393216, 'repeat')]['hit']:.2f} of those loads hit the L3 by the exploratory events, the rest come from CPU 2's own cache (it built the chain); no control validates those events yet [full page, section 5.2].</li>
+<li><b>The CME prefetcher explains the climb from 8 KiB, and carries half of a DRAM stream.</b> With the prefetcher off (boots B and F2) the chain load reads {cb[4096]:.2f} to {cb[65536]:.2f} ns from 4 to 64 KiB: the L1 step the other boots hide. With it on (boot E) its fills evict the chain and cost {k16['ns'] - cb[16384]:.1f} ns per load at 16 KiB. On a stream it doubles the DRAM read rate: {CBW2[33554432]['read']['agg']:.1f} GB/s at 32 MiB with it off (F2) against {CBW1[33554432]['read']['agg']:.1f} with it on (F1); the writes do not change.</li>
+<li><b>The L3 on costs the CME's writes.</b> On F1 and F2 alike the CME writes {CW1['small'][0]:.0f} to {CW1['small'][1]:.0f} GB/s by the bracket from 16 to 256 KiB and {CW1['big'][0]:.0f} to {CW1['big'][1]:.0f} from 1 MiB (in span too from 96 KiB on), where run 3 wrote {W3_TXT} with the L3 off; the core's own writes did not move and the kernels are run 3's byte for byte. <span class="hyp">hypothesis</span> The CME's stores allocate in the L3 and drain at its write rate; a CME write row with the L3 events, or Arm's statement of the CME L1's write policy, would test it [full page, section 10].</li>
+<li><b>OCM through the CME: the demand-only latency is {min(f2_sp):.1f} to {max(f2_sp):.1f} ns per region (boot F2).</b> One refill per load from outside the cluster, the same as boot B within {100 * max(abs(COCM2[o['region']]['best'] / o['B']['sparse'] - 1) for o in co):.0f} %, so the L3 on does not change these rows; with the prefetcher on they read {min(f1_sp):.1f} to {max(f1_sp):.1f} ns (F1) and {min(e_sp):.1f} to {max(e_sp):.1f} (E). The CME streams OCM at {COCMBW1['all5']:.1f} GB/s over all five regions against the core's {OCMBW1['all5']:.1f} (F1, the L3 on; run 3 {COCMBW['all5']:.1f} against {OCMBW['all5']:.1f}) and writes it at {COCMBW1['write']:.1f} against {OCMBW1['write']:.1f}.</li>
+<li><b>Not measured.</b> <span class="gap">Insufficient data</span> Two cores of one DSU in streaming mode at once (the CME is shared), a CME matrix multiply with its operands in OCM, and the wake-up cost of a 64-load OCM pass (full page, section 10).</li>
+</ul>
+
+"""
+    META6 = (f"Latest: run 6 boots F1 and F2 (membench-jibin-011 and 012, 2026-11-06 and 07, commit {p.F1['commit']}, SCP {p.F1['scp']} (the system control firmware), TF-A {p.F1['tfa']} and {p.F2['tfa']} (the Arm Trusted Firmware; F2 turns the data prefetchers off)) on the GA13 Palladium emulator (one Asimov hemisphere), "
+             f"the DSU L3 in use as a cache (IMP_CLUSTERPWRSTAT_EL1 {p.F1['pwrstat'][0]} on CPU 2's cluster, Jesse's READMEs). Beside them: run 4 boot E (010, {PE['date']}, the L3 on), boot B (006, the L3 off, prefetchers off) and run 3 (004, {R3['date']}, the L3 off). "
+             f"CPU 2 with CPU 3 offline. DRAM is an emulator memory, not LPDDR5X. Full report: asimov-cme-perf.html. Every number is read from the CSV files by gen_brief.py through gen_perf.py.")
+    return page("Asimov CME memory performance: brief", META6, body)
+
+if __name__ == "__main__":
+    open(p.OUT["core_brief"], "w").write(core_brief())
+    open(p.OUT["cme_brief"], "w").write(cme_brief())
+    print("wrote both briefs")

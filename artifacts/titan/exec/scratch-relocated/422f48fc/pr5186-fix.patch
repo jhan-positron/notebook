@@ -1,0 +1,156 @@
+diff --git a/emu/hemi_tlm/agents/goldcrest_ew_fullconn_avip.sv b/emu/hemi_tlm/agents/goldcrest_ew_fullconn_avip.sv
+--- a/emu/hemi_tlm/agents/goldcrest_ew_fullconn_avip.sv
++++ b/emu/hemi_tlm/agents/goldcrest_ew_fullconn_avip.sv
+@@ -640,11 +640,18 @@
+ `ifdef HEMI_GC_EMBEDDED_MEM
+   // All 18 pairs (32 DP + 4 AUX lanes) use 16-GiB AVIP STB memories; the AP
+   // system DRAM on the AUX lanes is preloaded by hemi_sys_mem.cpp through MARG.
+-  // Every HEMI pair (DP 0..15, AUX 16..17) gets the DDR timing profile; without
+-  // the HEMI pair index (-1, e.g. FC) the lanes stay untimed.
++  // HEMI DP pairs 0..15 get the DDR timing profile. AUX pairs 16..17 get it
++  // only with +define+HEMI_GC_AUX_TIMING: the default Linux-boot run window was
++  // measured with untimed AP DRAM. Without the HEMI pair index (-1, e.g. FC)
++  // the lanes stay untimed.
++`ifdef HEMI_GC_AUX_TIMING
++  localparam int GC_TIMED_PAIRS = 18;
++`else
++  localparam int GC_TIMED_PAIRS = 16;
++`endif
+   hemi_gc_lane_avip #(
+     .EMBEDDED        (1'b1),
+-    .DATAPATH_TIMING (GC_PAIR_INDEX >= 0 && GC_PAIR_INDEX < 18)
++    .DATAPATH_TIMING (GC_PAIR_INDEX >= 0 && GC_PAIR_INDEX < GC_TIMED_PAIRS)
+   ) lane_bfm0 (
+     .aclk     (axi1_aclk_s_i),
+     .aresetn  (rstn_i),
+@@ -690,7 +697,7 @@
+ 
+   hemi_gc_lane_avip #(
+     .EMBEDDED        (1'b1),
+-    .DATAPATH_TIMING (GC_PAIR_INDEX >= 0 && GC_PAIR_INDEX < 18)
++    .DATAPATH_TIMING (GC_PAIR_INDEX >= 0 && GC_PAIR_INDEX < GC_TIMED_PAIRS)
+   ) lane_bfm1 (
+     .aclk     (axi0_aclk_s_i),
+     .aresetn  (rstn_i),
+diff --git a/emu/hemi_tlm/doc/GC_DDR_TIMING.md b/emu/hemi_tlm/doc/GC_DDR_TIMING.md
+--- a/emu/hemi_tlm/doc/GC_DDR_TIMING.md
++++ b/emu/hemi_tlm/doc/GC_DDR_TIMING.md
+@@ -1,10 +1,13 @@
+ # Goldcrest AVIP timing
+ 
+-The 36 embedded Goldcrest XMS lanes (32 datapath and 4 AUX) use the existing
+-Cadence AXI AVIP register bank for response latency and an emulation-only
+-service scheduler for bandwidth and refresh pauses. XMS accesses these memories
+-through AXI. Host timing settings apply only to the 32 datapath lanes; the four
+-AUX lanes, which hold the AP system DRAM, run the reset profile. Timing is
++The 32 embedded Goldcrest datapath lanes use the existing Cadence AXI AVIP
++register bank for response latency and an emulation-only service scheduler for
++bandwidth and refresh pauses. XMS accesses these memories through AXI. The four
++AUX lanes, which hold the AP system DRAM, are also embedded memories. They are
++untimed by default and run the same reset profile only in an image built with
++`--define HEMI_GC_AUX_TIMING` (see
++[Startup and reset contract](#startup-and-reset-contract)). Host timing
++settings apply only to the 32 datapath lanes. Datapath timing is
+ available in the ordinary embedded-memory/Gauntlet build. It needs no timing
+ build switch or separate image variant. The scheduler is part of the emulation
+ wrapper; Asimov compute RTL and AVIP backing storage are unchanged.
+@@ -65,7 +68,7 @@
+ ## Startup and reset contract
+ 
+ The HEMI wrapper loads this provisional optimistic profile at power-on and on
+-**every XMS lane reset** (datapath and AUX):
++**every datapath lane reset**:
+ 
+ | Control                                 | Reset value                                     |
+ | --------------------------------------- | ----------------------------------------------: |
+@@ -83,12 +86,24 @@
+ wrapper's `rstn_i`. A reset that does not reach that pin does not restore the
+ profile. Reset flushes AXI transactions, including pending responses, without
+ clearing the backing memory. Data from an incomplete write is not guaranteed.
+-The four AUX lanes load the same profile.
++The four AUX lanes retain native zero-delay startup and programmed-control
++retention across reset, unless the image defines `HEMI_GC_AUX_TIMING`.
+ Instances without a HEMI pair index, including the current FC integration,
+-retain native zero-delay startup and programmed-control retention across
+-reset. These instances elaborate neither the
++also retain that existing behavior. These instances elaborate neither the
+ added timing-bank initialization/reset processes nor the service MARG map.
+ 
++`run_build.sh --define HEMI_GC_AUX_TIMING` (or `run_emu.sh --build --define
++HEMI_GC_AUX_TIMING`) makes the four AUX lanes load the same profile at power-on
++and on every AUX lane reset. The host cannot change it: `goldcrest_timing`
++reaches only the 32 datapath lanes. The define is off by default because the
++default Linux-boot run window (`asimov_os_linux_boot_cycles`) was measured with
++untimed AP DRAM: Linux init at 874-883M cfclks in a 1.0G cfclk window. Each
++AP DRAM read gains about 58 AXI cycles (est.), and a timed-AUX boot has
++not been measured. Pass an explicit larger `--run-cycles` when booting Linux on
++such an image. The define adds no image tag token, so the image replaces the
++untimed one in the same build directory; its MANIFEST `defines:` line records
++the define.
++
+ **Reset restores defaults. Program non-default settings after reset release,
+ before traffic, and reapply them after every subsequent lane reset.** Writes
+ during active reset can be overwritten by the reset defaults. Keep reset stable
+@@ -291,8 +306,8 @@
+ core-clock waits used by host operations. Bandwidth is integer bytes per 1024
+ AXI cycles: `rate / 1024` GB/s at 1 GHz. Convert physical latency using the
+ actual AXI frequency of the selected image. The delay width is 16 bits and the
+-compiled native outstanding limit is 64 for HEMI XMS lanes (datapath and AUX)
+-and 16 for instances without a HEMI pair index.
++compiled native outstanding limit is 64 for timed lanes (datapath, and AUX with
++`HEMI_GC_AUX_TIMING`) and 16 for untimed lanes.
+ 
+ ### Native Cadence AVIP parameters
+ 
+@@ -374,8 +389,9 @@
+ Resets must remain stable throughout programming. Snapshot restore retains its
+ saved bank values; it does not imply a fresh reset.
+ The HEMI emulation-copy patch passes the existing `GC_PAIR_INDEX`
+-parameter, which enables timing on every XMS GC pair (DP and AUX); instances
+-without it stay untimed. Compute RTL is unchanged.
++parameter to distinguish DP from AUX; AUX pairs are timed only with
++`HEMI_GC_AUX_TIMING`, and instances without the parameter stay untimed.
++Compute RTL is unchanged.
+ 
+ Within each GC pair, BFM suffixes retain XMS logical lane numbering:
+ `slave_bfm0` / `lane_bfm0` connect to native Goldcrest AXI1 (logical lane 0),
+@@ -437,8 +453,9 @@
+ rates, unequal-width fairness, credit bounds, refresh timing, invalid profiles,
+ ID metadata through the 63-request boundary, narrow/unaligned costs and
+ independent pools at different clocks.
+-The `aux` scenario qualifies the untimed lane used without a HEMI pair index
+-(HEMI AUX lanes are timed and share the datapath lane qualification). It
++The `aux` scenario qualifies the untimed lane: the default HEMI AUX lanes and
++lanes without a HEMI pair index (AUX lanes built with `HEMI_GC_AUX_TIMING`
++share the datapath lane qualification). It
+ compares raw startup controls and complete AXI traces with an untouched native
+ AVIP reference. It checks zero effective startup delays,
+ compiled limits of 16, and retention of programmed latency/limits across reset.
+diff --git a/emu/hemi_tlm/doc/HOST_PROGRAM_V1.md b/emu/hemi_tlm/doc/HOST_PROGRAM_V1.md
+--- a/emu/hemi_tlm/doc/HOST_PROGRAM_V1.md
++++ b/emu/hemi_tlm/doc/HOST_PROGRAM_V1.md
+@@ -96,7 +96,8 @@
+ A supplied zero clears a delay or bandwidth budget until the next lane reset;
+ clearing both rates and refresh duration bypasses service scheduling.
+ Only specified controls are changed, on all 32 datapath lanes, with readback.
+-The four AUX lanes keep the reset profile.
++The four AUX lanes are not programmable: they are untimed by default and keep
++the reset profile in a `HEMI_GC_AUX_TIMING` image.
+ Each lane has an independent pool shared by reads and writes. Combined refresh
+ settings are checked against every resident profile before any writes. Configure
+ with traffic drained; a setting change restarts that lane's service calendar.
+diff --git a/emu/hemi_tlm/scripts/setup_tree.sh b/emu/hemi_tlm/scripts/setup_tree.sh
+--- a/emu/hemi_tlm/scripts/setup_tree.sh
++++ b/emu/hemi_tlm/scripts/setup_tree.sh
+@@ -713,8 +713,9 @@
+     echo "  WARN: ip/goldcrest/goldcrest_ip_fullconn_wrapper_if_behav.sv not found in hemi_closure.f — C2C GC-AVIP swap NOT applied" >&2
+ fi
+ 
+-# Pass the pair index in the emulation copy so every XMS GC lane (32 DP and
+-# 4 AUX) receives the reset timing profile. All 36 memories remain embedded.
++# Pass the pair index in the emulation copy so only DP lanes receive the
++# reset timing profile by default; +define+HEMI_GC_AUX_TIMING adds the 4 AUX
++# lanes. All 36 memories remain embedded.
+ if [[ $EMBEDDED_GC_MEMORY -eq 1 ]]; then
+     XMS_TOP_SRC=$REPO_ROOT/design/xms/rtl/xms_top.sv
+     XMS_TOP_PATCH=$PATCHED_F/xms_top_gc_pair_index.sv

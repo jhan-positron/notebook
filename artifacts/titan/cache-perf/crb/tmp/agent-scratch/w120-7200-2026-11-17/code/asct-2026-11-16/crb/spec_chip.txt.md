@@ -1,0 +1,55 @@
+# `spec_chip.txt` explained, line by line
+
+- Source file: `asct-2026-11-16/crb/spec_chip.txt` in the code repo `/home/jhan/workspace/ai-proj/arm-crb/code` (text file, 4 lines, 118 bytes).
+- sha256 of the source when this page was built: `8de7907f3ab8ec7fcf029a8e11f001ec4f5e1dc80aa971c7473b37a5cbb4bf93`.
+
+## Short version: purpose
+
+`spec_chip.txt` is the list of the whole-chip cases for the mesh-counter runs of the ASCT cross-check. The script `run_mesh.sh` reads it as its input and starts one ASCT benchmark process per line, during which it reads the counters of the mesh. These runs did not happen [Ref1].
+
+## Words used here
+
+- **CRB**: the Arm reference server under test. It has 128 CPUs.
+- **ASCT**: a measurement tool from Arm.
+- **ASCT cross-check**: the test of 2026-11-16. It repeats our read tests with the benchmark binary of ASCT on the same CPUs and buffer sizes.
+- **Decisions file**: the file `DECISIONS.md` in the folder `asct-2026-11-16`. It holds the plan and the rules of the cross-check, written before the data.
+- **Mesh 0, mesh 1**: the two halves of the chip. CPUs 0 to 63 sit on mesh 0. CPUs 64 to 127 sit on mesh 1.
+- **Tag**: the name of one case. `run_mesh.sh` uses it in the names of the output files.
+- **Layout**: the CPUs that get a thread. `6456` is 64 threads on mesh 0 plus 56 on mesh 1. `6400` is mesh 0 only.
+- **Injected NOPs**: an option of the ASCT binary (`--bw-fine-delay N`). For N above 0 the binary runs an empty loop of N rounds after each load.
+- **Measured phase**: the part of a run of the ASCT binary for which it reports its rate. The option `--duration` sets its length in seconds.
+- **Counting window**: one run of the command `perf stat -a` for a fixed number of seconds. `run_mesh.sh` opens one window per event set.
+- **GB, MiB**: GB = 1e9 bytes. MiB = 1048576 bytes (2 to the power of 20).
+
+## Main flow
+
+1. Read each line as one case. A `|` stands between the five fields (lines 1 to 4).
+2. Field 1 is the tag. `run_mesh.sh` writes the output of the process to `TAG.out` and the counts of each window to `TAG.SET.perf`.
+3. Field 2 is the layout. The function `cpuflags` of `run_mesh.sh` turns it into one `--bw-cpu` option per CPU.
+4. Field 3 is the buffer size of each thread in bytes. It becomes the option `--bw-buflen`.
+5. Field 4 is the number of injected NOPs. It becomes the option `--bw-fine-delay`.
+6. Field 5 is the length of the measured phase in seconds. It becomes the option `--duration`.
+
+## Behavior a reader must know
+
+- `run_mesh.sh` skips a line with an empty first field. It copies the four other fields into the `launch` line of `launches.txt`.
+- By the decisions file these cases belong to the event set file `sets_chip.txt`: 22 sets, with a window of 3 s per set [Ref1]. The default window of `run_mesh.sh` is 4 s. The plan needs the setting `WIN=3`.
+- The cases run in the order of the lines, one process at a time.
+- The mesh-counter runs did not happen. So no result exists for these cases [Ref1].
+
+## Source and explanation, line by line
+
+- Text shown: the file `asct-2026-11-16/crb/spec_chip.txt` of the code repo `/home/jhan/workspace/ai-proj/arm-crb/code` (4 lines, 118 bytes, sha256 `8de7907f3ab8ec7fcf029a8e11f001ec4f5e1dc80aa971c7473b37a5cbb4bf93`).
+- Each row of a source table holds one line of the source: the line number, the line itself (copied by a script) and its explanation. A blank line of the source has no row.
+- In the raw text of this page, each `|` of the source is written `\|`. A plain `|` would end the table cell. A Markdown viewer shows `|`.
+
+| Line | Source | Explanation |
+|---:|---|---|
+| 1 | `c6456n0\|6456\|268435456\|0\|100` | Case `c6456n0`. The five fields have a `\|` between them. Field 1 is the tag. `run_mesh.sh` puts it into the names of the output files of the case. Field 2 is the layout `6456`: one read thread on each of the CPUs 0 to 119, which is 64 threads on mesh 0 plus 56 on mesh 1. Field 3 is the buffer size of each thread, 268435456 bytes (256 MiB). Field 4 is the number of injected NOPs, here 0. Field 5 is the length of the measured phase, 100 s. |
+| 2 | `c6456n4\|6456\|268435456\|4\|100` | Case `c6456n4`: the same layout and buffer size with 4 injected NOPs, again for 100 s. The decisions file added this case after the whole-chip data. At 4 injected NOPs only the threads of mesh 0 were fast [Ref1]. |
+| 3 | `c6456n20\|6456\|268435456\|20\|100` | Case `c6456n20`: the same layout and buffer size with 20 injected NOPs, again for 100 s. |
+| 4 | `c6400n0\|6400\|268435456\|0\|100` | Case `c6400n0`: the layout `6400`, one read thread on each of the CPUs 0 to 63, mesh 0 only. 256 MiB per thread, 0 injected NOPs, 100 s. |
+
+## References
+
+- [Ref1] `DECISIONS.md` in the folder `asct-2026-11-16`, sections "Added 2026-11-16 23:23 UTC" (plan of the mesh-counter runs), "Added 2026-11-16 23:37 UTC" (the case with 4 injected NOPs) and "Record of 2026-11-16 23:50 UTC" (the runs did not happen).

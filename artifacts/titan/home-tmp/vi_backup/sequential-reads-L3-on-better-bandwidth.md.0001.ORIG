@@ -1,0 +1,103 @@
+# Sequential reads of a large buffer run faster with the DSU L3 on: the picture and how to prove it
+
+2026-11-09. Jibin Han, with Claude. Sources: asimov-c1nano-perf.html section 2.3, follow-up-run-plan.md section 14, codex review rounds 17 to 27.
+
+**Short version.** With the L3 of CPU 2's cluster in full mode, one core's sequential read of a 32 MiB buffer runs 2.7 times faster than with the L3 in snoop-filter-only mode, although the buffer is 128 times the L3 and every line still comes from memory once per pass. Jibin's picture: the core's prefetchers run ahead into the L3 many lines at a time, so the core rarely waits; with the L3 off they can run ahead only into L1 and L2, and the core catches up and waits. The open question is how to show that this, and not a change in how the cluster handles the same prefetch requests, is what caused the gain.
+
+## Words used here
+
+- **DSU**: the DynamIQ Shared Unit, the cluster of two cores (CPUs 2 and 3 for CPU 2) with their shared L2 (128 KiB) and L3 (256 KiB). L1 data is 32 KiB per core.
+- **L3 full mode / snoop-filter-only mode**: with the L3 RAM on, the L3 holds data. In snoop-filter-only mode the L3 RAM holds no data and the DSU keeps only the snoop filter (its record of which lines the cores hold); every L2 miss goes to the mesh. Run 3 ran CPUs 2 to 9 in snoop-filter-only mode; boots E and F1 ran them in full mode (register IMP_CLUSTERPWRSTAT_EL1 read 0x70).
+- **Sequential read**: bandwidth.c's read kernel, eight 32-byte load pairs per 256 bytes in address order, independent loads, which the hardware prefetcher follows.
+- **Random read chain**: latency.c's chase, one load per 64-byte line in a random cycle, each address taken from the previous load, so one load is in flight at a time.
+- **Prefetcher**: one of the core's hardware data prefetchers. The C1-Nano has several, and each chooses the cache its linefills go to, L1, L2 or L3 [C1-Nano TRM 107753, Hardware data prefetcher]. The DSU TRM describes no prefetcher of the DSU's own.
+- **In flight**: a read issued and not yet returned.
+- **est.**: an estimate, not a measurement.
+
+## 1. What was measured
+
+| Row, CPU 2, best rep | L3 off | L3 on | Ratio |
+|---|---|---|---|
+| sequential read 32 MiB, GB/s (run 3 / F1) | 9.2 | 24.6 | 2.68 |
+| sequential read 2 MiB, GB/s (run 3 / F1) | 9.3 | 25.0 | 2.69 |
+| sequential read 32 MiB, GB/s (boot C / boot E, one build) | 9.2 | 24.5 | 2.67 |
+| write 32 MiB, GB/s (run 3 / F1) | 32.0 | 32.0 | 1.00 |
+| random read chain 32 MiB, ns per load (run 3 / F1) | 52.2 | 52.2 | 1.00 |
+| random read chain 2 MiB, ns per load (run 3 / F1) | 24.1 | 23.7 | 1.02 |
+
+Counters on the 32 MiB sequential read, per 64-byte line, boots C and E (run 3's and F1's bandwidth rows carry no core counters):
+
+| Event | L3 off (boot C) | L3 on (boot E) |
+|---|---|---|
+| L1 refills | 1.00 | 1.00 |
+| L1 refills requested by a hardware prefetcher | 1.00 | 1.00 |
+| L2 refills | 1.00 | 1.00 |
+| L3 read refills from outside the cluster (0xA2) | 0.0004 | 0.0000 |
+
+Mesh counters: F1's counted 2 MiB read put 0.975 times run 3's requests on the five home nodes, over the whole command [cmn-counts.csv of 011 and 004].
+
+What these say:
+- Every line of the stream is filled into L2 and L1 once per pass on both boots, and the prefetcher requested every one of those fills. The core's own loads hit L1 on both boots.
+- The number of requests reaching the home nodes is about the same on both boots. The L3 did not save traffic from memory: a 32 MiB buffer is 128 times the L3, so a line is gone before the next pass reaches it.
+- One DRAM load costs 52.2 ns on both boots (the chain). The stream spends 7.0 ns per line with the L3 off and 2.6 ns with it on. Divided into the chain's latency, that is about 7.5 lines in flight est. against about 20 est. These two numbers are derived from the rates, not counted.
+- 0xA2 reads about zero on both boots, although every line came from outside on boot C. So 0xA2 did not count this stream's fills on boot C. Whether that is because it skips prefetch fills in general is an interpretation, not a measurement.
+
+The L3-sized chains (192 to 384 KiB) are a different case: they got 1.8 to 2.1 times faster because the L3 holds the whole chain, and 0xA2 fell from 0.5 to 0.9 per load to about 0. That is a measurement, and it is not the question of this note.
+
+## 2. Jibin's picture
+
+The question is why a stream whose lines all come from memory runs 2.7 times faster when the L3 holds data.
+
+- The prefetchers choose where each linefill lands. With the L3 RAM on, they can aim linefills at the L3.
+- With the L3 on, the prefetch stream runs ahead of the core into the L3, many lines at a time. The core's loads then hit L1, L2 or L3 and rarely wait.
+- With the L3 off, the stream can run ahead only into L1 and L2, fewer lines at a time. The core catches up with the prefetcher and waits on fills that have not landed.
+- Every line still comes from the SLC or DRAM once per pass on both boots. What the L3 mode changes is when each memory read is issued and how many are outstanding together, not how many there are.
+
+This picture accounts for every measurement above: the same fills per line, about the same requests at the home nodes, the unchanged random chains (one load in flight, nothing to run ahead), the unchanged writes (posted stores already overlap), and the 2.7 times faster streams at footprints the L3 cannot hold. Nothing on disk contradicts it. Codex (round 23) called it the working explanation.
+
+## 3. Why it is not yet proven
+
+Two of the picture's statements have never been counted:
+
+1. **That prefetched lines are placed in, and found in, the L3 on the L3-on boots.** No run has counted a line entering or hitting the L3 on a stream. The events that would (0x8156 L3D_CACHE_HWPRF, prefetch accesses aimed at the L3; 0x81E6 L3D_CACHE_HIT_RD_FHWPRF, demand reads whose first hit is a line a prefetcher placed in the L3) have not been run.
+2. **That more lines are outstanding at once with the L3 on.** The 7.5 against 20 lines in flight est. restate the gain; nothing counts requests in flight.
+
+And there is a competing mechanism that fits the same facts (codex, round 23). The L3 mode changes the path every L2 miss takes inside the DSU, not only whether the RAM holds data. With the L3 on, the L3 pipeline may give the cluster more entries for requests in flight: the L2 hands a miss to the L3 and frees its own buffer sooner, so more misses can be outstanding, while the data still go straight on into L2 and L1 and nothing waits in the L3 for long. Same fills, same requests, faster stream, chains and writes unchanged, and no data parked in the L3. The DSU TRM we have does not give the tracker sizes per mode, so this is a hypothesis about the hardware in the same way Jibin's picture is. The two differ in what the extra capacity is used for: holding data ahead of the core, or holding more outstanding requests.
+
+## 4. How to prove the picture: run 7 and what each part can show
+
+Run 7 (run_l3.sh, follow-up-run-plan.md section 14) runs the same 27 commands on four boots that vary the L3 mode and the prefetchers one at a time: L3 on and off, each with the prefetchers on and off. Per boot about 1.2 to 3.8 s est. of chip time; 7.8 to 10.4 s est. for the four.
+
+| Measurement | What an accepted result establishes | What stays open |
+|---|---|---|
+| the four firmware conditions: run 3's one-core read sweep on each boot | whether the gain needs the prefetchers at all: a gain that disappears with them off establishes prefetch dependence; a gain that persists says prefetching is not the whole explanation | where the prefetched data wait, and why request handling improves |
+| 0x8156 per line (prefetch accesses aimed at the L3) | the prefetchers aim fetches at the L3 on the stream | whether lines were allocated or stayed in the L3 (the DSU counts a prefetch whose L3 stash is not performed as an access too) |
+| 0x81E6 per line (first demand hits on prefetched L3 lines), validated | some of the core's loads found lines in the L3 that a prefetcher put there: the part of the picture the alternative denies | how much those hits contribute to the gain, and how far ahead the prefetches run |
+| mesh read-queue occupancy at the home nodes (hns_qos_pocq_occupancy_read, with dtc_cycles; mean entries = count shifted left by 12, over cycles) | whether more read requests wait in the home nodes' queues with the L3 on, over the whole command | the number of reads the core or cluster holds open during the timed passes |
+| requests at the home nodes under the request set, same rows | the external fetches per command for each L3 mode on one build | the timed passes apart from the setup; prefetch apart from demand |
+| 16 MiB readers on one cluster against two clusters | whether a limit is shared inside the cluster | which resource the limit is |
+
+Rules that apply to every row: a column that never reads nonzero on any boot stays unvalidated, and a conclusion that needs it is Insufficient data; a nonzero count establishes activity for that event only; a zero 0x81E6 does not reject the picture, since an L1 prefetch may fetch a line onward from the L3 before a demand read reaches it. Participation is not cause: L3 hits do not rule out improved request handling as the main cause, since the two can coexist.
+
+So run 7 can support the picture (prefetch dependence, L3 accesses and hits present, external fetches unchanged, queue occupancy up) or challenge it (a gain without the prefetchers, or no L3 hits with the events validated elsewhere). It cannot prove it in the strict sense, because the distance the prefetch stream runs ahead and the number of requests in flight are not measured.
+
+## 5. The one test that acts on the picture directly
+
+IMP_CPUECTLR_EL1 bit 6, L1SPFL2, "stride prefetcher cache level control": clear, the stride prefetcher prefetches into L1 and L3; set, into L1 and L2 [C1-Nano TRM, IMP_CPUECTLR_EL1]. A fifth boot with the L3 in full mode, the prefetchers on and bit 6 set, with the bit read back on this boot and on the baseline boot, changes only where the stride prefetches land.
+
+- If the 32 MiB read falls toward the L3-off rate, the gain depends on the stride prefetcher's L3 destination: the heart of the picture.
+- If the rate holds, this change had no observed effect at this workload and precision. It does not exclude other L3-directed prefetching: the L3 offset prefetcher has its own control (L3OPFCTL, bits 14:13).
+- Changing the destination may change request handling as well as storage, so a rate change establishes an effect of the setting, and attribution to data stored ahead of demand still needs the 0x81E6 and 0x8156 rows beside it.
+
+It is a firmware change on Jesse's side, like the prefetchers-off TF-A build, and it is in the draft to Jesse as a candidate for his assessment.
+
+## 6. What would settle it
+
+- A trace of the timed stream's request issue and completion, with the L3 allocations and the forwarding to L2, on the two L3 modes. Not available on the emulator image as it stands.
+- Or a supported way to prevent L3-prefetch allocation while keeping the request path, which is what the bit-6 boot approximates for the stride prefetcher.
+
+Until one of these runs, the status is: Jibin's picture is the working explanation, nothing measured contradicts it, and the mechanism is not established.
+
+## 7. A side question answered on the way
+
+"L3 misses with the L3 on" cannot be read from the core's last-level-cache events (0x36 LL_CACHE_RD, 0x37 LL_CACHE_MISS_RD). What they count depends on IMP_CPUECTLR_EL1.EXTLLC and the caches present: with EXTLLC set and no L3 present, returns from outside the cluster; with EXTLLC clear and an L2 and L3 present, the L3's own read accesses and refills, the populations of 0xA0 and 0xA2 [C1-Nano TRM, event 0x32; nevis0_dpu_pmu.sv]. On this chip, with an L3 present, neither setting gives the external count. 0x400B L3D_CACHE_LMISS_RD is the same signal as 0xA2 in this RTL. Run 7 carries these three events as a cheap check, with an EXTLLC readback, and takes the external fetch count from the mesh's request counters instead.

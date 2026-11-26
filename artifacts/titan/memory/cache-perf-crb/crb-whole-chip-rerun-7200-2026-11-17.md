@@ -1,0 +1,22 @@
+---
+name: crb-whole-chip-rerun-7200-2026-11-17
+description: "Where the 120-thread rerun at 7200 MT/s (old read kernel against new read kernel, 2026-11-17) lives - report, generators, facts sheet, run scripts, result folders - and how it was driven on CRB without root"
+metadata:
+  node_type: memory
+  type: reference
+  originSessionId: 405492c8-bb52-418d-ab08-c4ac8ac9980e
+  modified: 2026-11-24T22:37:38.103Z
+---
+
+Rerun of the whole-chip (120-thread) read test after the DIMM speed change to 7200 MT/s, asked by the user on 2026-11-17 ("run old kernel ... and new kernel ... compare the results").
+
+- Report: `crb/new-test-kernel/whole-chip-rerun-7200.html`, written by `crb/tmp/agent-scratch/w120-7200-2026-11-17/make_report.py` (edit the generator, not the HTML; `test_make_report.py` holds its fail-loud tests; `render/render_r3.sh` makes the screenshots).
+- Facts sheet: `FACTS.md` and `facts.json` in the same scratch folder, written by `build_facts.py` (+ `facts_data.py`, `facts_text.py`, `facts_text4.py`). `baselines-and-rules.txt` there holds the 8000 MT/s row list and the comparison rules that I fixed before the run.
+- Run scripts (same folder, copies on CRB under `~/cache-perf/w120-7200-20261117/`): `go.sh` (3 sessions of part A, part L, part C, plus one more part C process), `ra.sh` (part A = the 120-thread part of `kernels-2026-11-13/run_kernels.sh` with the binaries `bw_old` / `bw_new` in `~/cache-perf/scratch-kernels-20261113/`), `like.spec` / `cfwd.spec` / `crev.spec` (argument lines for `bwx12` through `w120-20261115/rx.sh`), `go2.sh` (idle-start control, added after the first numbers were seen). Since 2026-11-24 the local `go.sh` differs from the text that ran in the message of line 20. The user asked for this edit. No command of that work ran on CRB. Details and the open task: [[crb-go-sh-remove-boot-id-todo]].
+- Result folders: `crb/results/k120-T72A*`, `w120-T72L*`, `w120-T72C*`, `w120-T72I*`, logs `go-T72-*.log`, `go2-T72-*.log`.
+- No root was used. Not read for that reason: the kernel log during the rerun (hardware error records) and the memory speed during the rerun.
+- `rx.sh` returns status 0 even when `bwx12` fails. A driver must check for exactly one `rc 0` line in the newest `launches.txt` (function `rxok` in `go.sh`).
+- Starting a new run after a reboot: `go.sh` line 16 and `go2.sh` line 12 hold the fixed boot id of 2026-11-17 (`3bfc57a1...`), and line 26 (go2.sh: 21) stops the script in any other boot. CRB rebooted on 2026-11-19 01:04 UTC (boot id `f42f8973...` on 2026-11-20). The recorded start command is line 313 of the session record `405492c8-...jsonl`. The boot id is only a stand-in for the memory speed, which needs root to read; the run of 2026-11-17 was to use no root. The user pointed out on 2026-11-22 (local date; 2026-11-23 05:02 UTC) that the gate is not needed when speed and MemTotal are read directly at each start (my reading: prefer a direct check of the property over a stand-in whenever the direct read is allowed). Procedure given to the user on the same day (2026-11-23 05:05 UTC), one command: read `sudo -n dmidecode -t 17` and MemTotal, save them as `results/memcheck-<time>.txt`, stop unless 12 x 7200 MT/s and MemTotal >= 395000000 kB, write a copy `go-direct.sh` = `go.sh` without line 26 (`sed "/boot id is not the boot checked/d"`; a plain `/boot_id/d` would also delete the `state` function in line 17), start the copy with the recorded command. The user saved this command as `crb/new-test-kernel/manual-run/run.sh` (file time 2026-11-23 05:29 UTC). Its line 4 runs `sha256sum -c local.sha` on CRB. So it starts a run only when every listed file on CRB has its listed sha256. Edit `go.sh` only on the user's instruction (done once: line 20 on 2026-11-24). Do not write `local.sha` or `go2.sha` again. They are the records of the two launches. The facts sheet depends on them. The command was tested only locally with stand-in programs, not on CRB. The kept test is `crb/tmp/agent-scratch/go-edit-2026-11-24/check_start_command.py` (2026-11-24, three states of the copy on CRB).
+- A second run reuses the step names T72A1 to T72C4. Do not copy its folders into `crb/results`: `facts_data.py` (function `find`) expects exactly one folder per step name and stops.
+
+Related: [[crb-go-sh-remove-boot-id-todo]] (open task: remove the boot-id check from the scripts; state of `go.sh` after the edit of 2026-11-24), [[crb-whole-chip-read-drop-2026-11-15]], [[crb-memory-module-count-varies-per-boot]], [[crb-check-dimm-count-every-use]].

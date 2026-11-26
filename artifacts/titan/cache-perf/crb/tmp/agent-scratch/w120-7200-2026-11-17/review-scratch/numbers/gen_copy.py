@@ -1,0 +1,1848 @@
+#!/usr/bin/env python3
+"""make_report.py - builds the report page of the whole-chip read rerun at 7200 MT/s.
+
+Output: crb/new-test-kernel/whole-chip-rerun-7200.html (one self-contained HTML file).
+Input:  facts.json of this folder (records "intervals", meta.launches, meta.rerun).
+
+Rules of this script:
+- Every measured number of the page is computed here from the interval records. No measured number is typed.
+- facts.json holds the bwx rates rounded to 0.001 GB/s. For the last digit at 0.01 GB/s the function val() sums the
+  thread rows of the raw csv that a record names, and it stops when that sum does not round to the record value.
+- Record counts are asserted. A wrong count stops the build.
+- The computed values are compared with FACTS.md and with the "verdicts" of facts.json.
+  A mismatch is printed in the self-check list, the page is not written, and the exit status is 1.
+- The facts of the section "Machine state" are checked in the raw files (read only) before they are written.
+Python 3 standard library only. Edit this file, never the HTML.
+"""
+import html
+import json
+import os
+import re
+import sys
+import time
+from decimal import Decimal, ROUND_HALF_UP
+
+S = "/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/w120-7200-2026-11-17"
+R = "/home/jhan/workspace/titan/cache-perf/crb/results"
+OUT = "/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/w120-7200-2026-11-17/review-scratch/numbers/rebuilt.html"
+EARLIER = "/home/jhan/workspace/titan/cache-perf/crb/new-test-kernel/whole-chip-read-drop-easy-read.html"
+
+BLUE, ORANGE = "#2a78d6", "#eb6834"          # old read kernel, load-only loop (validated, see palette check)
+INK, MUTED, GRID, SURF = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
+BAND, BAND_EDGE, LINK = "#ebe9e0", "#b9b7ae", "#8d8c86"
+
+CHECKS = []          # (ok, text)
+PROSE = []           # visible prose outside tables, captions, word list and references (for the word count)
+
+
+def stop(msg):
+    sys.exit("make_report.py: STOP: " + msg)
+
+
+def need(cond, msg):
+    """Hard assertion. A wrong record count or a failed raw-file check stops the build."""
+    if not cond:
+        stop(msg)
+
+
+def check(ok, text):
+    CHECKS.append((bool(ok), text))
+
+
+def grouped(label, start):
+    """Replace the checks added since index start by one line: n of m equal, and the first mismatch."""
+    sub = CHECKS[start:]
+    del CHECKS[start:]
+    bad = [t for ok, t in sub if not ok]
+    check(not bad, f"{label}: {len(sub) - len(bad)} of {len(sub)} comparisons equal" + ("" if not bad else ". First mismatch: " + bad[0]))
+
+
+def read_retry(path, parse, complete=lambda t: True):
+    """Another agent rebuilds facts.json and FACTS.md from time to time. Retry a failed or partial read."""
+    last = None
+    for _ in range(10):
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            if complete(text):
+                return parse(text)
+            last = "file is not complete"
+        except (OSError, ValueError) as e:
+            last = e
+        time.sleep(1.5)
+    stop(f"cannot read {path}: {last}")
+
+
+def lines_of(path):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read().splitlines()
+
+
+# ------------------------------------------------------------------ numbers
+def D(x):
+    return x if isinstance(x, Decimal) else Decimal(str(x))
+
+
+def q(x, places="0.01"):
+    return D(x).quantize(Decimal(places), rounding=ROUND_HALF_UP)
+
+
+def f2(x):
+    return f"{q(x):.2f}"
+
+
+def f1(x):
+    return f"{q(x, '0.1'):.1f}"
+
+
+def median(vals):
+    s = sorted(vals)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def esc(s):
+    return html.escape(str(s), quote=True)
+
+
+_TROWS = {}
+
+
+def t_rows(rec):
+    """The T rows (one per thread) of the interval of a bwx record: (cpu, bytes, elapsed_s, t_start_s, t_end_s)."""
+    key = (rec["folder"], rec["file"])
+    if key not in _TROWS:
+        d = {}
+        for line in lines_of(os.path.join(R, rec["folder"].replace("R/", "", 1), rec["file"])):
+            if line.startswith("T,"):
+                p = line.split(",")
+                need(len(p) == 13, f"{key}: a T row without 13 fields")
+                d.setdefault((int(p[1]), int(p[2]), p[3]), []).append((int(p[5]), int(p[6]), float(p[7]), float(p[9]), float(p[10])))
+        _TROWS[key] = d
+    tl = _TROWS[key].get((rec["round"], rec["pos"], rec["kernel"]), [])
+    need(len(tl) == 120, f"{key}: no 120 T rows for round {rec['round']} position {rec['pos']} {rec['kernel']}")
+    return tl
+
+
+def val(rec):
+    """Rate of an interval record in GB/s.
+    Part A: the record holds the value of the csv (2 decimals).
+    bwx runners: facts.json holds the rate rounded to 0.001 GB/s, and FACTS.md rounds the unrounded value to 0.01 GB/s.
+    For the same last digit this function sums the 120 T rows that the record names (the method of build_facts.py)
+    and stops when the sum does not round to the value of the record."""
+    if rec["part"] == "A":
+        return D(rec["GBps"])
+    if "_exact" not in rec:
+        tl = t_rows(rec)
+        tot = sum(b / e / 1e9 for c, b, e, _, _ in tl if c < 64) + sum(b / e / 1e9 for c, b, e, _, _ in tl if c >= 64)
+        need(abs(round(tot, 3) - rec["GBps"]) < 1e-9, f"{rec['folder']}/{rec['file']} line {rec['line']}: sum of the T rows {tot:.6f} is not the record value {rec['GBps']}")
+        rec["_exact"] = Decimal(repr(round(tot, 6)))
+    return rec["_exact"]
+
+
+class Rg:
+    """Lowest-to-highest range of a list of interval records."""
+
+    def __init__(self, recs):
+        need(len(recs) > 0, "empty selection")
+        self.recs = sorted(recs, key=lambda r: (r["launch_utc"], r["interval"]))
+        self.v = [val(r) for r in self.recs]
+        self.lo, self.hi, self.med = min(self.v), max(self.v), median(self.v)
+        self.n = len(recs)
+        self.procs = sorted({r["proc_key"] for r in recs})
+        self.np = len(self.procs)
+
+    def txt(self):
+        return f"{f2(self.lo)} to {f2(self.hi)}"
+
+    def overlaps(self, other):
+        return self.lo <= other.hi and other.lo <= self.hi
+
+    def nearest(self, other):
+        """Distance of the nearest ends, + when self is the higher range. 0 when the ranges overlap."""
+        if self.overlaps(other):
+            return Decimal(0)
+        return self.lo - other.hi if self.lo > other.hi else self.hi - other.lo
+
+    def farthest(self, other):
+        return max(self.hi - other.lo, other.hi - self.lo)
+
+
+def plural(n, word):
+    return f"{n} {word}" if n == 1 else f"{n} {word}{'es' if word.endswith('s') else 's'}"
+
+
+def signed(x):
+    x = q(x)
+    return "0" if x == 0 else f"{'+' if x > 0 else '-'}{abs(x):.2f}"
+
+
+# ------------------------------------------------------------------ load the facts
+def facts_complete(t):
+    return "Output files of this sheet" in t and "## 7. Files" in t
+
+
+FJ = read_retry(S + "/facts.json", json.loads)
+FMD = read_retry(S + "/FACTS.md", lambda t: t, facts_complete)
+IV = FJ["intervals"]
+META = FJ["meta"]
+RERUN = META["rerun"]
+need(len(IV) == META["counts"]["intervals"], "facts.json: number of interval records differs from meta.counts")
+
+
+def sel(**kw):
+    out = []
+    for r in IV:
+        ok = True
+        for k, v in kw.items():
+            if callable(v):
+                ok = v(r[k])
+            elif isinstance(v, (list, tuple, set)):
+                ok = r[k] in v
+            else:
+                ok = r[k] == v
+            if not ok:
+                break
+        if ok:
+            out.append(r)
+    return out
+
+
+def expect(recs, n, nproc, what):
+    need(len(recs) == n, f"{what}: expected {n} interval records, found {len(recs)}")
+    got = len({r["proc_key"] for r in recs})
+    need(got == nproc, f"{what}: expected {nproc} processes, found {got}")
+    need(all(r["threads"] == 120 for r in recs), f"{what}: a record is not a 120-thread interval")
+    return recs
+
+
+LPOOL = ("L-1", "L-2", "L-3", "L-4")
+APOOL = ("A-1", "A-2", "A-3")
+
+# part A, the repeat of the 2026-11-13 test
+A_OLD = expect(sel(dataset="rerun-A", binary="bw_old", kernel="read"), 18, 6, "part A, bw_old read")
+A_NEW = expect(sel(dataset="rerun-A", binary="bw_new", kernel="read"), 18, 6, "part A, bw_new read")
+# part L and the rows of the same argument line
+L_OLD = expect(sel(dataset="rerun-L", kernel="oldread", pos=0), 6, 3, "part L, oldread")
+L_ASM = expect(sel(dataset="rerun-L", kernel="asmread", pos=1), 6, 3, "part L, asmread")
+I_OLD = expect(sel(dataset="control-I", kernel="oldread", pos=0), 4, 2, "control I, oldread")
+I_ASM = expect(sel(dataset="control-I", kernel="asmread", pos=1), 4, 2, "control I, asmread")
+F_OLD = expect(sel(dataset="F72d12", kernel="oldread", pos=0), 2, 1, "F72d12, oldread")
+F_ASM = expect(sel(dataset="F72d12", kernel="asmread", pos=1), 2, 1, "F72d12, asmread")
+# part C
+C_OLD = expect(sel(dataset="rerun-C", kernel="oldread"), 8, 4, "part C, oldread")
+C_READ = expect(sel(dataset="rerun-C", kernel="read"), 8, 4, "part C, read")
+C_ASM = expect(sel(dataset="rerun-C", kernel="asmread"), 8, 4, "part C, asmread")
+C_READ_AO = expect([r for r in C_READ if r["kernel_before"] == "oldread"], 4, 2, "part C, read after oldread")
+C_READ_AA = expect([r for r in C_READ if r["kernel_before"] == "asmread"], 4, 2, "part C, read after asmread")
+C_ASM_AR = expect([r for r in C_ASM if r["kernel_before"] == "read"], 4, 2, "part C, asmread after read")
+C_ASM_AO = expect([r for r in C_ASM if r["kernel_before"] == "oldread"], 2, 2, "part C, asmread after oldread")
+C_ASM_FI = expect([r for r in C_ASM if r["kernel_before"].startswith("none")], 2, 2, "part C, asmread first interval")
+# 8000 MT/s rows
+B_L_OLD = {d: sel(dataset=d, kernel="oldread", pos=0) for d in LPOOL}
+B_L_ASM = {d: sel(dataset=d, kernel="asmread", pos=1) for d in LPOOL}
+for d, n, p in (("L-1", 2, 1), ("L-2", 4, 2), ("L-3", 2, 1), ("L-4", 3, 3)):
+    expect(B_L_OLD[d], n, p, f"{d}, oldread at position 0")
+    expect(B_L_ASM[d], n, p, f"{d}, asmread at position 1")
+P_L_OLD = expect([r for d in LPOOL for r in B_L_OLD[d]], 11, 7, "pool L-1 to L-4, oldread")
+P_L_ASM = expect([r for d in LPOOL for r in B_L_ASM[d]], 11, 7, "pool L-1 to L-4, asmread")
+B_A_OLD = {d: sel(dataset=d, binary="bw_old", kernel="read") for d in APOOL}
+B_A_NEW = {d: sel(dataset=d, binary="bw_new", kernel="read") for d in ("A-1", "A-2")}
+for d, n, p in (("A-1", 6, 2), ("A-2", 6, 2), ("A-3", 9, 3)):
+    expect(B_A_OLD[d], n, p, f"{d}, bw_old read")
+for d in ("A-1", "A-2"):
+    expect(B_A_NEW[d], 6, 2, f"{d}, bw_new read")
+P_A_OLD = expect([r for d in APOOL for r in B_A_OLD[d]], 21, 7, "pool A-1 to A-3, bw_old read")
+
+USED = (A_OLD + A_NEW + L_OLD + L_ASM + I_OLD + I_ASM + F_OLD + F_ASM + C_OLD + C_READ + C_ASM
+        + P_L_OLD + P_L_ASM + P_A_OLD + B_A_NEW["A-1"] + B_A_NEW["A-2"])
+need(all(r["modules"] == 12 for r in USED), "a record used on the page is not a 12-module run")
+SEVEN = [r for r in USED if r["speed_MTps"] == 7200]
+EIGHT = [r for r in USED if r["speed_MTps"] == 8000]
+need(len(SEVEN) + len(EIGHT) == len(USED), "a record has another memory speed")
+need({r["boot"] for r in SEVEN} == {RERUN["boot_id"]}, "the 7200 MT/s records are not from one boot")
+need(len({r["boot"] for r in EIGHT}) == 1, "the 8000 MT/s records are not from one boot")
+need({r["dataset"] for r in SEVEN} == {"rerun-A", "rerun-L", "rerun-C", "control-I", "F72d12"}, "7200 MT/s datasets")
+need(all(r["min_ms"] == 500 and r["stop"] == "whole pass" for r in USED if r["part"] == "A"), "part A method")
+need(all(r["stop"] == "common" for r in USED if r["part"] != "A"), "bwx12 rows: stop rule")
+need(all(r["min_ms"] == 6000 for r in USED if r["dataset"] in ("rerun-L", "rerun-C", "control-I", "F72d12", "L-1")),
+     "6 s rows")
+need(all(r["min_ms"] == 4000 for r in USED if r["dataset"] in ("L-2", "L-3", "L-4")), "4 s rows")
+check(True, f"record counts: {len(USED)} interval records used, all 120 threads, 12 modules; "
+            f"7200 MT/s records from 1 boot, 8000 MT/s records from 1 boot")
+
+
+def src(recs):
+    """Source text for a tooltip: file and line numbers."""
+    by = {}
+    for r in recs:
+        by.setdefault(f"{r['folder']}/{r['file']}", []).append(r["line"])
+    return "; ".join(f"{p} line{'s' if len(ls) > 1 else ''} {', '.join(str(x) for x in sorted(ls))}" for p, ls in by.items())
+
+
+def hm(utc, date=False):
+    return (utc[:10] + " " if date else "") + utc[11:16] + " UTC"
+
+
+def n7200(recs, pairs=None):
+    """n as intervals / processes / sessions / boots for records of the 7200 MT/s boot."""
+    ds = {r["dataset"] for r in recs}
+    np_ = len({r["proc_key"] for r in recs})
+    first = plural(pairs, "pair") if pairs is not None else plural(len(recs), "interval")
+    if ds <= {"control-I", "F72d12"}:
+        sess = "no session"
+    else:
+        named = sorted({r["session"] for r in recs if r["session"] is not None})
+        extra = len({r["proc_key"] for r in recs if r["session"] is None})
+        if extra == 0:
+            sess = plural(len(named), "session")
+            if len(named) < 3:
+                sess = ("session " if len(named) == 1 else "sessions ") + " and ".join(str(s) for s in named)
+        else:
+            sess = (f"{plural(len(named), 'session')}" if len(named) != 1 else f"session {named[0]}") \
+                   + f" and {extra} extra process"
+    return f"{first} / {plural(np_, 'process')} / {sess} / 1 boot"
+
+
+def n8000(recs, pairs=None):
+    first = plural(pairs, "pair") if pairs is not None else plural(len(recs), "interval")
+    return f"{first} / {plural(len({r['proc_key'] for r in recs}), 'process')} / 1 boot"
+
+
+# ------------------------------------------------------------------ Q1: drops
+def pairs_in_process(olds, news):
+    """Pairs of (old, load-only) intervals of the same process and round."""
+    out = []
+    for n in sorted(news, key=lambda r: (r["launch_utc"], r["round"])):
+        o = [x for x in olds if x["proc_key"] == n["proc_key"] and x["round"] == n["round"]]
+        need(len(o) == 1, "pair: no single old-kernel interval for a load-only interval")
+        out.append((o[0], n))
+    return out
+
+
+def drop(old, new):
+    return (1 - D(new) / D(old)) * 100
+
+
+def drops_of(pairs):
+    return [drop(val(o), val(n)) for o, n in pairs]
+
+
+def drop_txt(ds):
+    lo, hi = f1(min(ds)), f1(max(ds))
+    return f"{lo} %" if lo == hi else f"{lo} % to {hi} %"
+
+
+Q1 = {}
+Q1["C_ao"] = dict(pairs=pairs_in_process(C_OLD, C_READ_AO))
+Q1["C_aa"] = dict(pairs=pairs_in_process(C_OLD, C_READ_AA))
+Q1["L"] = dict(pairs=pairs_in_process(L_OLD, L_ASM))
+Q1["I"] = dict(pairs=pairs_in_process(I_OLD, I_ASM))
+Q1["F"] = dict(pairs=pairs_in_process(F_OLD, F_ASM))
+Q1["L1"] = dict(pairs=pairs_in_process(B_L_OLD["L-1"], B_L_ASM["L-1"]))
+for k, npairs in (("C_ao", 4), ("C_aa", 4), ("L", 6), ("I", 4), ("F", 2), ("L1", 2)):
+    need(len(Q1[k]["pairs"]) == npairs, f"Q1 {k}: expected {npairs} pairs")
+    Q1[k]["drops"] = drops_of(Q1[k]["pairs"])
+    Q1[k]["old"] = Rg([o for o, _ in Q1[k]["pairs"]])
+    Q1[k]["new"] = Rg([n for _, n in Q1[k]["pairs"]])
+
+
+def a_pair(olds, news, rnd):
+    o = Rg([r for r in olds if r["round"] == rnd])
+    n = Rg([r for r in news if r["round"] == rnd])
+    need(o.n == 3 and n.n == 3 and o.np == 1 and n.np == 1, "part A pair: expected 3 intervals of 1 process per kernel")
+    return dict(old=o, new=n, drop=drop(o.med, n.med), round=rnd)
+
+
+A_PAIRS = {}       # (session, round) -> pair of process medians
+for s_ in (1, 2, 3):
+    for rnd in (1, 2):
+        A_PAIRS[(s_, rnd)] = a_pair([r for r in A_OLD if r["session"] == s_], [r for r in A_NEW if r["session"] == s_], rnd)
+A8_PAIRS = {(d, rnd): a_pair(B_A_OLD[d], B_A_NEW[d], rnd) for d in ("A-1", "A-2") for rnd in (1, 2)}
+Q1["A"] = dict(drops=[p["drop"] for p in A_PAIRS.values()])
+Q1["A8"] = dict(drops=[p["drop"] for p in A8_PAIRS.values()])
+SAME_LINE_DROPS = Q1["L"]["drops"] + Q1["I"]["drops"] + Q1["F"]["drops"]     # the like.spec line in the 7200 MT/s boot
+ALL_7200_DROPS = Q1["C_ao"]["drops"] + Q1["C_aa"]["drops"] + SAME_LINE_DROPS + Q1["A"]["drops"]
+need(all(d > 0 for d in ALL_7200_DROPS), "a load-only interval is not below the old read kernel")
+
+# ------------------------------------------------------------------ Q2: ranges
+rA_old, rPA_old = Rg(A_OLD), Rg(P_A_OLD)
+rL_old, rL_asm = Rg(L_OLD), Rg(L_ASM)
+rC_old, rI_old, rI_asm, rF_old, rF_asm = Rg(C_OLD), Rg(I_OLD), Rg(I_ASM), Rg(F_OLD), Rg(F_ASM)
+rPL_old, rPL_asm = Rg(P_L_OLD), Rg(P_L_ASM)
+rL1_asm = Rg(B_L_ASM["L-1"])
+rC_asm_ao = Rg(C_ASM_AO)
+rC_read_ao, rC_read_aa = Rg(C_READ_AO), Rg(C_READ_AA)
+WORD_SAME = "no difference seen"
+WORD_DIFF = "differs between the 8000 MT/s boot and the 7200 MT/s boot"
+need(FJ["verdicts"]["rule_wordings"]["same"] == WORD_SAME and FJ["verdicts"]["rule_wordings"]["differs"] == WORD_DIFF,
+     "the fixed wordings differ from facts.json")
+
+
+def width_pct(rg):
+    """Width of a range in percent of its lower end: the size that a 'no difference seen' test cannot exclude (est.)."""
+    return (rg.hi - rg.lo) / rg.lo * 100
+
+
+def wording(r7, r8):
+    return WORD_SAME if r7.overlaps(r8) else WORD_DIFF
+
+
+# old read kernel
+need(rA_old.overlaps(rPA_old) and rC_old.overlaps(rPL_old) and rF_old.overlaps(rPL_old) and rI_old.overlaps(rPL_old),
+     "old read: an expected overlap is missing")
+need(not rL_old.overlaps(rPL_old) and rL_old.hi < rPL_old.lo, "old read, part L: expected below the 8000 MT/s pool")
+L_OLD_NEAR = rL_old.nearest(rPL_old)                       # negative: part L is lower
+L_OLD_MED = rL_old.med - rPL_old.med
+L_OLD_NEAR_PCT = abs(L_OLD_NEAR) / rPL_old.lo * 100        # percent of the lower end of the 8000 MT/s range
+L_OLD_MED_PCT = abs(L_OLD_MED) / rPL_old.med * 100         # percent of the 8000 MT/s median
+# load-only loop
+need(not rL_asm.overlaps(rPL_asm) and rL_asm.lo > rPL_asm.hi, "asmread, part L: expected above the 8000 MT/s pool")
+need(rF_asm.overlaps(rPL_asm), "asmread, F72d12: expected inside the 8000 MT/s pool")
+need(rPL_asm.lo <= rF_asm.lo and rF_asm.hi <= rPL_asm.hi, "asmread, F72d12: expected inside the 8000 MT/s pool")
+need(not rI_asm.overlaps(rPL_asm) and rI_asm.lo > rPL_asm.hi, "asmread, control I: expected above the 8000 MT/s pool")
+need(not rC_asm_ao.overlaps(rPL_asm), "asmread after oldread, part C: expected above the 8000 MT/s pool")
+need(not rF_asm.overlaps(rL_asm) and not rF_asm.overlaps(rI_asm) and not rI_asm.overlaps(rL_asm),
+     "the three visits of the 7200 MT/s boot overlap")
+VISIT_LO, VISIT_HI = min(rF_asm.lo, rL_asm.lo, rI_asm.lo), max(rF_asm.hi, rL_asm.hi, rI_asm.hi)
+VISIT_OLD_LO, VISIT_OLD_HI = min(rF_old.lo, rL_old.lo, rI_old.lo), max(rF_old.hi, rL_old.hi, rI_old.hi)
+DIST = {  # the same kind of distance on both sides: part L against the 8000 MT/s pool, part L against F72d12
+    "nearest": (rL_asm.nearest(rPL_asm), rL_asm.nearest(rF_asm)),
+    "medians": (rL_asm.med - rPL_asm.med, rL_asm.med - rF_asm.med),
+    "farthest": (rL_asm.farthest(rPL_asm), rL_asm.farthest(rF_asm)),
+}
+# part A, new read kernel: session 1 against the 8000 MT/s processes of the same round (rule V3)
+A_V3 = {}
+for rnd in (1, 2):
+    r7 = Rg([r for r in A_NEW if r["session"] == 1 and r["round"] == rnd])
+    r8 = Rg([r for d in ("A-1", "A-2") for r in B_A_NEW[d] if r["round"] == rnd])
+    need(r7.n == 3 and r7.np == 1 and r8.n == 6 and r8.np == 2, "part A, rule V3: record counts")
+    need(not r7.overlaps(r8) and r7.lo > r8.hi, "part A, session 1: expected above the 8000 MT/s range of the round")
+    A_V3[rnd] = dict(r7=r7, r8=r8, near=r7.nearest(r8),
+                     p7=sorted({r["passes"] for r in r7.recs}), p8=sorted(r["passes"] for r in r8.recs))
+need(all(len(A_V3[rnd]["p7"]) == 1 for rnd in (1, 2)), "part A, session 1, bw_new read: more than one pass count in a round")
+
+# the pool L-1 to L-4 without the interval that holds the lowest asmread value (machine state section)
+LOWEST_ASM = min(P_L_ASM, key=val)
+rPL_asm_wo = Rg([r for r in P_L_ASM if r is not LOWEST_ASM])
+need(rL_asm.lo > rPL_asm_wo.hi, "part L does not lie above the pool without its lowest interval")
+
+# ------------------------------------------------------------------ cross-check with FACTS.md and facts.json verdicts
+def md_sections(md):
+    secs, cur = {}, None
+    for line in md.splitlines():
+        m = re.match(r"^#{2,3} (.*)$", line)
+        if m:
+            k = re.match(r"^(\d+(?:\.\d+)?)[. ]", m.group(1))
+            cur = k.group(1) if k else "#" + m.group(1)
+            secs[cur] = []
+        elif cur is not None:
+            secs[cur].append(line)
+    return {k: "\n".join(v) for k, v in secs.items()}
+
+
+def md_tables(text):
+    tables, cur = [], None
+    for line in text.splitlines():
+        if line.startswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if cur is None:
+                cur = {"head": cells, "rows": []}
+                tables.append(cur)
+            elif set("".join(cells)) <= set("-: "):
+                continue
+            else:
+                cur["rows"].append(dict(zip(cur["head"], cells)))
+        else:
+            cur = None
+    return tables
+
+
+SEC = md_sections(FMD)
+for k_ in ("0", "3.1", "3.2", "3.3", "3.4", "4.2", "4.3", "4.4", "4.5", "4.6", "4.9"):
+    need(k_ in SEC and SEC[k_].strip(), f"FACTS.md: section {k_} not found")
+NUM = r"[-+]?\d+(?:\.\d+)?"
+
+
+def col(row, start):
+    ks = [k for k in row if k.startswith(start)]
+    need(len(ks) == 1, f"FACTS.md table: no single column that starts with '{start}'")
+    return row[ks[0]]
+
+
+def facts_row(sec, where, what):
+    """The first table row of a FACTS.md section for which where(row) is true."""
+    for t in md_tables(SEC[sec]):
+        for row in t["rows"]:
+            try:
+                if where(row):
+                    return row
+            except KeyError:
+                continue
+    stop(f"FACTS.md section {sec}: row not found: {what}")
+
+
+def rng_of(cell):
+    m = re.search(rf"({NUM}) to ({NUM})", cell)
+    need(m, f"FACTS.md: no range in cell '{cell}'")
+    return Decimal(m.group(1)), Decimal(m.group(2))
+
+
+def near(a, b, tol):
+    return abs(D(a) - D(b)) <= Decimal(tol)
+
+
+def xc_range(label, rg_lo, rg_hi, cell, tol="0.01", unit="GB/s", fmt=f2):
+    lo, hi = rng_of(cell)
+    check(near(q(rg_lo, tol), lo, tol) and near(q(rg_hi, tol), hi, tol),
+          f"{label}: computed {fmt(rg_lo)} to {fmt(rg_hi)} {unit}, FACTS.md {lo} to {hi} {unit}")
+
+
+def xc_val(label, mine, cell, tol="0.01", unit="GB/s", fmt=f2):
+    m = re.search(NUM, cell)
+    need(m, f"FACTS.md: no number in cell '{cell}'")
+    theirs = Decimal(m.group(0))
+    check(near(q(mine, tol), theirs, tol), f"{label}: computed {fmt(mine)} {unit}, FACTS.md {theirs} {unit}")
+
+
+def xc_text(label, sec, value, unit, tol="0.01", fmt=f2):
+    """A number with this unit, equal within the tolerance, stands in the text of a FACTS.md section."""
+    found = [Decimal(x) for x in re.findall(rf"({NUM}) ?{re.escape(unit)}", SEC[sec])]
+    check(any(near(q(abs(D(value)), tol), x, tol) for x in found),
+          f"{label}: computed {fmt(abs(D(value)))} {unit}, present in FACTS.md section {sec}")
+
+
+def xc_text_range(label, sec, lo, hi, unit_mid, tol, fmt):
+    found = re.findall(rf"({NUM}){re.escape(unit_mid)} to ({NUM})", SEC[sec])
+    check(any(near(q(lo, tol), Decimal(a), tol) and near(q(hi, tol), Decimal(b), tol) for a, b in found),
+          f"{label}: computed {fmt(lo)} to {fmt(hi)}, present in FACTS.md section {sec}")
+
+
+def xc_drops(label, ds, row):
+    lo, hi = Decimal(col(row, "Smallest drop")), Decimal(col(row, "Largest drop"))
+    check(near(q(min(ds), "0.1"), lo, "0.1") and near(q(max(ds), "0.1"), hi, "0.1"),
+          f"{label}: computed {f1(min(ds))} % to {f1(max(ds))} %, FACTS.md {lo} % to {hi} %")
+
+
+# Q1 (headline values)
+T34 = lambda part, frag: facts_row("3.4", lambda r: r["Part"].startswith(part) and frag in r["Pair"], f"{part} {frag}")
+xc_drops("Q1 part C, read directly after oldread", Q1["C_ao"]["drops"], T34("C", "`read` (new read kernel) directly after `oldread`"))
+xc_drops("Q1 part C, read directly after asmread", Q1["C_aa"]["drops"], T34("C", "`read` (new read kernel) directly after `asmread`"))
+xc_drops("Q1 part L, asmread against oldread", Q1["L"]["drops"], T34("L", "asmread"))
+xc_drops("Q1 part A, process medians", Q1["A"]["drops"], T34("A", "bw_new"))
+xc_drops("Q1 control I", Q1["I"]["drops"], T34("I (control", "asmread"))
+xc_drops("Q1 F72d12", Q1["F"]["drops"], T34("F72d12", "asmread"))
+G33 = lambda g: facts_row("3.3", lambda r: r["Group"].startswith(g), g)
+xc_range("part C, read after oldread", rC_read_ao.lo, rC_read_ao.hi, col(G33("read after oldread"), "Min to max"))
+xc_range("part C, read after asmread", rC_read_aa.lo, rC_read_aa.hi, col(G33("read after asmread"), "Min to max"))
+xc_range("part C, oldread", rC_old.lo, rC_old.hi, col(G33("oldread, all positions"), "Min to max"))
+for key_, ds in (("C_ao", Q1["C_ao"]["drops"]), ("C_aa", Q1["C_aa"]["drops"]), ("L", Q1["L"]["drops"]), ("A", Q1["A"]["drops"])):
+    xc_text_range(f"Q1 drop {key_} in the Short version of FACTS.md", "0", min(ds), max(ds), " %", "0.1", f1)
+g0 = len(CHECKS)
+for (s_, rnd), p in A_PAIRS.items():
+    row = facts_row("3.1", lambda r, s_=s_, rnd=rnd: r["Session"] == str(s_) and r["Round"] == str(rnd) and "New below old, %" in r,
+                    f"session {s_} round {rnd}")
+    xc_val(f"part A session {s_} round {rnd}, median bw_old read", p["old"].med, row["bw_old read, median GB/s"])
+    xc_val(f"part A session {s_} round {rnd}, median bw_new read", p["new"].med, row["bw_new read, median GB/s"])
+    xc_val(f"part A session {s_} round {rnd}, new below old", p["drop"], row["New below old, %"], "0.1", "%", f1)
+grouped("FACTS.md section 3.1, part A per session and round: medians of bw_old read and bw_new read (0.01 GB/s) and the drop (0.1 %)", g0)
+g0 = len(CHECKS)
+for o, n in Q1["L"]["pairs"] + Q1["I"]["pairs"] + Q1["F"]["pairs"]:
+    tag = n["tag"] if n["dataset"] != "F72d12" else "F72d12"
+    row = facts_row("3.2", lambda r, tag=tag, n=n: r["Folder tag or row"] == tag and r["Round"] == str(n["round"]), f"{tag} round {n['round']}")
+    xc_val(f"{tag} round {n['round']}, oldread", val(o), row["oldread, GB/s"])
+    xc_val(f"{tag} round {n['round']}, asmread", val(n), row["asmread, GB/s"])
+    xc_val(f"{tag} round {n['round']}, asmread below oldread", drop(val(o), val(n)), row["asmread below oldread, %"], "0.1", "%", f1)
+grouped("FACTS.md section 3.2, part L, control I and F72d12 per process and round: oldread and asmread (0.01 GB/s) and the drop (0.1 %)", g0)
+
+# Q2 old read kernel (headline values)
+R42 = lambda name: facts_row("4.2", lambda r: r["Row"].startswith(name) and "Min to max, GB/s" in r, name)
+C42 = lambda a, b: facts_row("4.2", lambda r: r["7200 MT/s row"].startswith(a) and r["8000 MT/s range used"].startswith(b), f"{a} / {b}")
+xc_range("Q2 old read, part A", rA_old.lo, rA_old.hi, R42("part A, sessions 1 to 3")["Min to max, GB/s"])
+xc_range("Q2 old read, pool A-1 to A-3", rPA_old.lo, rPA_old.hi, R42("pool A-1 to A-3")["Min to max, GB/s"])
+xc_range("Q2 old read, part L", rL_old.lo, rL_old.hi, R42("part L (T72L1 to T72L3)")["Min to max, GB/s"])
+xc_range("Q2 old read, pool L-1 to L-4", rPL_old.lo, rPL_old.hi, R42("pool L-1 to L-4")["Min to max, GB/s"])
+xc_range("Q2 old read, part C", rC_old.lo, rC_old.hi, R42("part C, all oldread intervals")["Min to max, GB/s"])
+xc_range("Q2 old read, F72d12", rF_old.lo, rF_old.hi, R42("F72d12")["Min to max, GB/s"])
+xc_range("Q2 old read, control I", rI_old.lo, rI_old.hi, R42("control I")["Min to max, GB/s"])
+xc_val("Q2 old read, median of part L", rL_old.med, R42("part L (T72L1 to T72L3)")["Median, GB/s"])
+xc_val("Q2 old read, median of pool L-1 to L-4", rPL_old.med, R42("pool L-1 to L-4")["Median, GB/s"])
+row = C42("part A, sessions 1 to 3", "pool A-1 to A-3")
+check(WORD_SAME in col(row, "Wording") and wording(rA_old, rPA_old) == WORD_SAME, f'Q2 old read, part A: wording "{WORD_SAME}" computed and in FACTS.md')
+xc_val("Q2 old read, part A: size the test cannot exclude (est.)", width_pct(rPA_old), col(row, "Width of the 8000 MT/s range"), "0.1", "%", f1)
+row = C42("part C, all oldread intervals", "pool L-1 to L-4 (position 0)")
+check(WORD_SAME in col(row, "Wording") and wording(rC_old, rPL_old) == WORD_SAME, f'Q2 old read, part C: wording "{WORD_SAME}" computed and in FACTS.md')
+xc_val("Q2 old read, part C: size the test cannot exclude (est.)", width_pct(rPL_old), col(row, "Width of the 8000 MT/s range"), "0.1", "%", f1)
+row = C42("part L", "pool L-1 to L-4")
+check(WORD_DIFF in col(row, "Wording") and wording(rL_old, rPL_old) == WORD_DIFF, f'Q2 old read, part L: wording "{WORD_DIFF}" computed and in FACTS.md')
+xc_val("Q2 old read, part L: distance of the nearest ends", L_OLD_NEAR, col(row, "Distance of the nearest ends"))
+xc_text("Q2 old read, part L: distance of the medians", "4.9", L_OLD_MED, "GB/s")
+xc_text("Q2 old read, part L: nearest ends in percent", "4.9", L_OLD_NEAR_PCT, "%", "0.1", f1)
+xc_text("Q2 old read, part L: medians in percent", "4.9", L_OLD_MED_PCT, "%", "0.1", f1)
+for nm, rg in (("F72d12", rF_old), ("control I", rI_old)):
+    row = C42(nm, "pool L-1 to L-4")
+    check(col(row, "Overlap") == "yes" and rg.overlaps(rPL_old), f"Q2 old read, {nm}: overlaps the 8000 MT/s pool, computed and in FACTS.md")
+
+# Q2 load-only loop (headline values)
+R44 = lambda name: facts_row("4.4", lambda r: r["Row"].startswith(name) and "Min to max, GB/s" in r, name)
+C44 = lambda a, b: facts_row("4.4", lambda r: r["7200 MT/s row"].startswith(a) and r["8000 MT/s range used"] == b, f"{a} / {b}")
+xc_range("Q2 load-only, part L asmread", rL_asm.lo, rL_asm.hi, R44("part L (T72L1 to T72L3)")["Min to max, GB/s"])
+xc_range("Q2 load-only, pool L-1 to L-4 asmread", rPL_asm.lo, rPL_asm.hi, R44("pool L-1 to L-4")["Min to max, GB/s"])
+xc_range("Q2 load-only, F72d12 asmread", rF_asm.lo, rF_asm.hi, R44("F72d12")["Min to max, GB/s"])
+xc_range("Q2 load-only, control I asmread", rI_asm.lo, rI_asm.hi, R44("control I")["Min to max, GB/s"])
+row = C44("part L", "pool L-1 to L-4")
+check(WORD_DIFF in col(row, "Wording") and wording(rL_asm, rPL_asm) == WORD_DIFF, f'Q2 load-only, part L: wording "{WORD_DIFF}" computed and in FACTS.md')
+xc_val("Q2 load-only, part L: distance of the nearest ends", DIST["nearest"][0], col(row, "Distance of the nearest ends"))
+xc_val("Q2 load-only, F72d12 above L-1 alone", rF_asm.nearest(rL1_asm), col(C44("F72d12", "L-1 alone"), "Distance of the nearest ends"))
+check(col(C44("F72d12", "pool L-1 to L-4"), "Overlap") == "yes", "Q2 load-only, F72d12: inside the 8000 MT/s pool range, computed and in FACTS.md")
+xc_val("Q2 load-only, control I above the pool", rI_asm.nearest(rPL_asm), col(C44("control I", "pool L-1 to L-4"), "Distance of the nearest ends"))
+for rnd in (1, 2):
+    row = facts_row("4.3", lambda r, rnd=rnd: r["Binary and kernel"] == "bw_new read" and r["Round"] == str(rnd) and "Wording by rule V3" in r, f"bw_new read round {rnd}")
+    v = A_V3[rnd]
+    xc_range(f"Q2 part A, bw_new read, round {rnd}: 8000 MT/s range", v["r8"].lo, v["r8"].hi, row["8000 MT/s range of the round, GB/s"])
+    cell7 = [Decimal(x) for x in re.findall(r"(\d+\.\d+) \(\d+\)", row["7200 MT/s, session 1"])]
+    check(len(cell7) == 3 and near(min(cell7), q(v["r7"].lo), "0.01") and near(max(cell7), q(v["r7"].hi), "0.01"),
+          f"Q2 part A, bw_new read, round {rnd}: session 1 computed {v['r7'].txt()} GB/s, FACTS.md {min(cell7)} to {max(cell7)} GB/s")
+    check(row["Wording by rule V3"] == "outside (above)", f"Q2 part A, bw_new read, round {rnd}: wording outside (above), computed and in FACTS.md")
+    xc_val(f"Q2 part A, bw_new read, round {rnd}: distance of the nearest ends", v["near"], col(row, "Distance to the nearer end"))
+    pc = sorted(int(x) for x in re.findall(r"\((\d+)\)", row["8000 MT/s, A-1, same round"] + row["8000 MT/s, A-2, same round"]))
+    check(pc == v["p8"], f"Q2 part A, bw_new read, round {rnd}: pass counts at 8000 MT/s {v['p8']}, FACTS.md {pc}")
+row = facts_row("4.5", lambda r: r["7200 MT/s row"].startswith("part C, asmread after oldread") and r["8000 MT/s range used"].startswith("pool L-1 to L-4 (after oldread)"), "part C asmread after oldread")
+xc_range("Q2 load-only, part C asmread after oldread", rC_asm_ao.lo, rC_asm_ao.hi, col(row, "Its range"))
+xc_val("Q2 load-only, part C asmread after oldread: distance", rC_asm_ao.nearest(rPL_asm), col(row, "Distance of the nearest ends"))
+check("Insufficient data: no 8000 MT/s run of kernel read with bwx12" in SEC["4.5"], "Q2 part C, kernel read: Insufficient data wording present in FACTS.md section 4.5")
+xc_text("three visits of the 7200 MT/s boot: span", "4.6", VISIT_HI - VISIT_LO, "GB/s")
+xc_text_range("three visits of the 7200 MT/s boot: lowest to highest asmread", "4.9", VISIT_LO, VISIT_HI, "", "0.01", f2)
+for kind in ("nearest", "medians", "farthest"):
+    xc_text(f"part L above the 8000 MT/s pool, {kind}", "4.6", DIST[kind][0], "GB/s")
+    xc_text(f"part L above F72d12, {kind}", "4.6", DIST[kind][1], "GB/s")
+xc_text("same line in the 7200 MT/s boot: span of oldread", "3.4", VISIT_OLD_HI - VISIT_OLD_LO, "GB/s")
+
+# the same values against the "verdicts" records of facts.json
+V = FJ["verdicts"]
+
+
+def vrow(part, kernel, row7, scope8):
+    hit = [r for r in V["q2_rows"] if r["part"] == part and r["kernel"] == kernel and r["row_7200"] == row7 and r["scope_8000"] == scope8]
+    need(len(hit) == 1, f"facts.json verdicts: no single row {part} / {kernel} / {row7} / {scope8}")
+    return hit[0]
+
+
+def xv(label, r7, r8, vr, dist):
+    ok = (near(r7.lo, vr["lo_7200"], "0.001") and near(r7.hi, vr["hi_7200"], "0.001") and near(r8.lo, vr["lo_8000"], "0.001")
+          and near(r8.hi, vr["hi_8000"], "0.001") and near(dist, vr["distance_GBps"], "0.001") and r7.overlaps(r8) == vr["overlap"]
+          and r7.n == vr["n_7200"] and r8.n == vr["n_8000"] and r7.np == vr["processes_7200"] and r8.np == vr["processes_8000"])
+    check(ok, f"{label}: ranges, n, overlap and distance equal to the verdict record of facts.json")
+
+
+g0 = len(CHECKS)
+xv("old read, part A", rA_old, rPA_old, vrow("A", "bw_old read", "part A, sessions 1 to 3", "pool A-1 to A-3"), 0)
+xv("old read, part L", rL_old, rPL_old, vrow("L", "oldread", "part L", "pool L-1 to L-4"), L_OLD_NEAR)
+xv("old read, part C", rC_old, rPL_old, vrow("C", "oldread", "part C, all oldread intervals", "pool L-1 to L-4 (position 0)"), 0)
+xv("old read, F72d12", rF_old, rPL_old, vrow("L", "oldread", "F72d12 (same boot, not pooled)", "pool L-1 to L-4"), 0)
+xv("old read, control I", rI_old, rPL_old, vrow("L", "oldread", "control I (same boot, not pooled)", "pool L-1 to L-4"), 0)
+xv("asmread, part L", rL_asm, rPL_asm, vrow("L", "asmread", "part L", "pool L-1 to L-4"), DIST["nearest"][0])
+xv("asmread, F72d12", rF_asm, rPL_asm, vrow("L", "asmread", "F72d12 (same boot, not pooled)", "pool L-1 to L-4"), 0)
+xv("asmread, control I", rI_asm, rPL_asm, vrow("L", "asmread", "control I (same boot, not pooled)", "pool L-1 to L-4"), rI_asm.nearest(rPL_asm))
+xv("asmread after oldread, part C", rC_asm_ao, rPL_asm, vrow("C", "asmread", "part C, asmread after oldread", "pool L-1 to L-4 (after oldread)"), rC_asm_ao.nearest(rPL_asm))
+for rnd in (1, 2):
+    xv(f"bw_new read, session 1, round {rnd}", A_V3[rnd]["r7"], A_V3[rnd]["r8"],
+       vrow("A", "bw_new read", f"session 1, round {rnd}", f"A-1 and A-2, round {rnd}"), A_V3[rnd]["near"])
+for key_, grp in (("C_ao", "read after oldread"), ("C_aa", "read after asmread")):
+    vr = [r for r in V["q1_parts"] if r["part"] == "C" and r["group"] == grp]
+    need(len(vr) == 1, f"facts.json verdicts: no single Q1 row {grp}")
+    check(near(min(Q1[key_]["drops"]), vr[0]["smallest_drop_pct"], "0.01") and near(max(Q1[key_]["drops"]), vr[0]["largest_drop_pct"], "0.01"),
+          f"Q1 part C, {grp}: drops equal to the verdict record of facts.json to 0.01 %")
+grouped("verdict records of facts.json (11 comparisons of Q2 with ranges, n, overlap and distance to 0.001 GB/s; 2 drop ranges of Q1 to 0.01 %)", g0)
+sb = V["same_boot"]
+check(near(VISIT_HI - VISIT_LO, sb["spread_GBps"], "0.001")
+      and all(near(DIST[k][0], sb["part_L_above_pool_8000_GBps"][j], "0.001") and near(DIST[k][1], sb["part_L_above_F72d12_GBps"][j], "0.001")
+              for k, j in (("nearest", "nearest_ends"), ("medians", "medians"), ("farthest", "farthest_ends"))),
+      "three visits of the 7200 MT/s boot: span and the 6 distances equal to the same_boot record of facts.json")
+
+# ------------------------------------------------------------------ raw-file checks for the machine state section
+REFS = []            # (key, path, text shown, note)
+
+
+def addref(key, path, note, lines=None):
+    need(os.path.exists(path), f"reference {key}: path does not exist: {path}")
+    shown = path.replace(R + "/", "R/").replace(S + "/", "S/")
+    REFS.append((key, shown + (f" ({lines})" if lines else ""), note))
+
+
+def ref(*keys):
+    """Reference marks. The numbers are given at the end, in the order of first use on the page (number_refs)."""
+    for k in keys:
+        need(sum(1 for r in REFS if r[0] == k) == 1, f"unknown reference key {k}")
+    return '<span class="ref">' + "".join(f"\x00{k}\x00" for k in keys) + "</span>"
+
+
+def number_refs(page):
+    order = []
+    for k in re.findall("\x00(.+?)\x00", page):
+        if k not in order:
+            order.append(k)
+    uncited = [r[0] for r in REFS if r[0] not in order]
+    num = {k: i + 1 for i, k in enumerate(order + uncited)}
+    by_key = {r[0]: r for r in REFS}
+    items = "".join(f'<li id="ref{num[k]}">[Ref{num[k]}] <code>{esc(by_key[k][1])}</code>: {esc(by_key[k][2])}</li>' for k in order + uncited)
+    page = re.sub("\x00(.+?)\x00", lambda m: f'<a href="#ref{num[m.group(1)]}">[Ref{num[m.group(1)]}]</a>', page)
+    return page.replace("\x01REFLIST\x01", items), uncited
+
+
+GOLOG = R + "/go-T72-20261117T221209Z.log"
+GO2LOG = R + "/go2-T72-20261117T222335Z.log"
+STATE_RE = re.compile(r"^== (.+?) utc (\S+) boot (\S+) MemTotal: (\d+) kB load (\S+) (\S+) (\S+) (\d+)/(\d+) \d+ users (\d+) marker (\S+) processes per user: (.*)$")
+SYSTEM_ACCOUNTS = {"messagebus", "polkitd", "syslog", "systemd-network", "systemd-resolve", "systemd-timesync"}
+
+
+def state_lines(path):
+    out = []
+    for no, line in enumerate(lines_of(path), 1):
+        m = STATE_RE.match(line)
+        if m:
+            users = {}
+            for part in m.group(12).split(";"):
+                part = part.split()
+                if len(part) == 2:
+                    users[part[1]] = int(part[0])
+            out.append(dict(line=no, name=m.group(1), utc=m.group(2), boot=m.group(3), mem=int(m.group(4)),
+                            load1=Decimal(m.group(5)), logins=int(m.group(10)), marker=m.group(11), users=users))
+    return out
+
+
+ST_GO, ST_GO2 = state_lines(GOLOG), state_lines(GO2LOG)
+need(len(ST_GO) == 12 and len(ST_GO2) == 6, "run logs: expected 12 and 6 state lines")
+ST_ALL = ST_GO + ST_GO2
+need(all(s["boot"] == RERUN["boot_id"] for s in ST_ALL), "run logs: a state line holds another boot id")
+need(all(s["mem"] == RERUN["memtotal_kB"] for s in ST_ALL), "run logs: a state line holds another MemTotal")
+need(all(s["logins"] == 0 and s["marker"] == "absent" for s in ST_ALL), "run logs: a login or the marker file")
+ACCOUNTS = set().union(*[set(s["users"]) for s in ST_ALL])
+need(ACCOUNTS == {"jhan", "root"} | SYSTEM_ACCOUNTS, f"run logs: unexpected account owns a process: {sorted(ACCOUNTS)}")
+need(all(s["users"][a] == 1 for s in ST_ALL for a in SYSTEM_ACCOUNTS), "run logs: a system account owns more than 1 process")
+JHAN_PROCS = sorted({s["users"]["jhan"] for s in ST_ALL})
+need(len(JHAN_PROCS) == 1, "run logs: the process count of jhan changes")
+gl, g2l = lines_of(GOLOG), lines_of(GO2LOG)
+GO_DONE = sum(1 for l in gl if l.startswith("done "))
+need(GO_DONE == 10 and gl[-1] == "ALLDONE" and not any(l.startswith("FAILED") for l in gl), "go.sh log: not 10 steps, or not ALLDONE")
+need(sum(1 for l in g2l if l.startswith("done ")) == 2 and g2l[-1] == "ALLDONE" and not any(l.startswith("FAILED") for l in g2l), "go2.sh log")
+need(ST_GO[0]["utc"] == RERUN["go_start"] and ST_GO[-1]["utc"] == RERUN["go_end"], "go.sh log: start or end time differs from facts.json")
+need(ST_GO2[0]["utc"] == RERUN["go2_start"] and ST_GO2[-1]["utc"] == RERUN["go2_end"], "go2.sh log: start or end time differs from facts.json")
+LAUNCH = {l["tag"]: l for l in META["launches"]}
+STEPS = ["T72A1", "T72L1", "T72C1", "T72A2", "T72L2", "T72C2", "T72A3", "T72L3", "T72C3", "T72C4", "T72I1", "T72I2"]
+need([l["tag"] for l in META["launches"]] == STEPS, "meta.launches: unexpected list of steps")
+BWX_FOLDERS = sorted({r["folder"] for r in L_OLD + C_OLD + I_OLD})
+need(len(BWX_FOLDERS) == 9, "expected 9 bwx12 folders of the rerun and the control")
+for fo in BWX_FOLDERS:
+    ll = lines_of(fo.replace("R/", R + "/", 1) + "/launches.txt")
+    need(sum(1 for l in ll if l.startswith("rc ")) == 1 and sum(1 for l in ll if l.startswith("rc 0 ")) == 1, f"{fo}: no single 'rc 0' line")
+check(True, f"run logs: {len(ST_ALL)} state lines hold boot id {RERUN['boot_id']} and MemTotal {RERUN['memtotal_kB']} kB, 0 logins; "
+            f"accounts with processes: jhan, root and {len(SYSTEM_ACCOUNTS)} system accounts; go.sh log: {GO_DONE} 'done' lines and ALLDONE; 9 bwx12 folders with one 'rc 0' line")
+
+# the boot record of 12 modules at 7200 MT/s
+TRY6 = R + "/dimm7200-20261117/try6.txt"
+t6 = lines_of(TRY6)
+need(t6[1].strip() == RERUN["boot_id"], "try6.txt: line 2 is not the boot id of the rerun")
+need(re.match(r"^MemTotal:\s+%d kB$" % RERUN["memtotal_kB"], t6[3]), "try6.txt: line 4 holds another MemTotal")
+m_ = re.match(r"^\s*(\d+)\s+Configured Memory Speed: (\d+) MT/s$", t6[6])
+need(m_ and int(m_.group(1)) == 12 and int(m_.group(2)) == RERUN["speed_MTps"] == 7200, "try6.txt: line 7 is not 12 x 7200 MT/s")
+TRY6_UTC = t6[0].strip()
+need(re.match(r"^2026-11-17T\d\d:\d\d:\d\dZ$", TRY6_UTC), "try6.txt: line 1 is not a time")
+# why F72d12 belongs to this boot
+BOOTS = R + "/dimm7200-20261117/boots.txt"
+bl = [l.split() for l in lines_of(BOOTS) if l.strip()]
+need(bl[-1][0] == "0" and bl[-1][1] == RERUN["boot_id"].replace("-", ""), "boots.txt: row 0 is not the boot of the rerun")
+BOOT_FIRST, BOOT_LAST = bl[-1][4], bl[-1][8]
+need(time.strftime("%H:%M:%S", time.gmtime(os.path.getmtime(BOOTS))) == BOOT_LAST, "boots.txt: its file time is not the end time of row 0")
+FL = R + "/w120-w120-F72d12-20261117T200231Z/launches.txt"
+fl = lines_of(FL)
+m1, m2 = re.match(r"^launch a6456 utc (\S+) load (\S+) ", fl[0]), re.match(r"^rc 0 a6456 utc (\S+)$", fl[1])
+need(m1 and m2, "F72d12 launches.txt: launch or rc line not found")
+F_LAUNCH, F_END = m1.group(1), m2.group(1)
+need(F_OLD[0]["launch_utc"] == f"2026-11-17T{F_LAUNCH}Z" and D(m1.group(2)) == D(F_OLD[0]["load1_at_launch"]), "F72d12: launch differs from facts.json")
+need(TRY6_UTC[11:19] < F_LAUNCH and BOOT_FIRST <= F_LAUNCH < F_END <= BOOT_LAST and BOOT_LAST < ST_GO[0]["utc"][11:19],
+     "F72d12: the process does not lie inside the recorded time of boot 3bfc57a1")
+check(True, f"try6.txt ({TRY6_UTC}): boot id of the rerun, MemTotal {RERUN['memtotal_kB']} kB, 12 x 7200 MT/s; boots.txt row 0 = this boot, "
+            f"{BOOT_FIRST} to {BOOT_LAST}; F72d12 ran {F_LAUNCH} to {F_END} inside it")
+
+# corrected hardware error records in the journal of the 8000 MT/s boot (defect partL-r3-partL-1, checked here)
+JOURNAL = R + "/dimm-check-20261117/h-5.txt"
+HW = []
+for no, line in enumerate(lines_of(JOURNAL), 1):
+    m_ = re.match(r"^(\S+?)\+00:00 \S+ kernel: \{(\d+)\}\[Hardware Error\]: (.*)$", line)
+    if not m_:
+        continue
+    if m_.group(3).startswith("Hardware error from APEI"):
+        HW.append(dict(line=no, ts=m_.group(1), sev=None))
+    elif m_.group(3).startswith("event severity:") and HW:
+        HW[-1]["sev"] = m_.group(3).split(":", 1)[1].strip()
+need(len(HW) > 0 and {h["sev"] for h in HW} == {"corrected"}, "journal: no records, or a severity other than 'corrected'")
+# the saved kernel log of the same boot: its first and last line, the module count line, the same number of records
+KLOG = R + "/dimm-check-20261117/k-5.txt"
+kl = lines_of(KLOG)
+mk0, mk1 = re.match(r"^Nov (\d\d) (\d\d:\d\d:\d\d) ", kl[0]), re.match(r"^Nov (\d\d) (\d\d:\d\d:\d\d) ", kl[-1])
+need(mk0 and mk1, "kernel log of the 8000 MT/s boot: first or last line has no time")
+BOOT8_FROM, BOOT8_TO = f"2026-11-{mk0.group(1)}T{mk0.group(2)}Z", f"2026-11-{mk1.group(1)}T{mk1.group(2)}Z"
+need(sum(1 for l in kl if "ghes_edac: This system has 12 DIMM sockets" in l) == 1, "kernel log of the 8000 MT/s boot: module count line")
+need(sum(1 for l in kl if "Hardware error from APEI" in l) == len(HW), "kernel log and journal of the 8000 MT/s boot: record counts differ")
+need(lines_of(JOURNAL)[0].startswith(BOOT8_FROM[:19]), "journal and kernel log of the 8000 MT/s boot: first line times differ")
+need(all(BOOT8_FROM < r["launch_utc"] < BOOT8_TO for r in EIGHT), "an 8000 MT/s row was not launched inside the saved kernel log of its boot")
+
+
+def launch_window(folder, tag):
+    ll = lines_of(R + "/" + folder + "/launches.txt")
+    a = [re.match(rf"^launch {tag} utc (\S+) ", l) for l in ll]
+    b = [re.match(rf"^rc 0 {tag} utc (\S+)$", l) for l in ll]
+    a, b = [x for x in a if x], [x for x in b if x]
+    need(len(a) == 1 and len(b) == 1, f"{folder}: launch window of {tag} not found")
+    return a[0].group(1), b[0].group(1)
+
+
+def hw_in(day, t0, t1):
+    return [h for h in HW if h["ts"][:10] == day and t0 <= h["ts"][11:19] <= t1]
+
+
+HW_ROWS = {}
+for d in LPOOL:
+    for pk in sorted({r["proc_key"] for r in B_L_ASM[d]}):
+        r0 = [r for r in B_L_ASM[d] if r["proc_key"] == pk][0]
+        folder, tag = r0["folder"].replace("R/", "", 1), r0["tag"]
+        t0, t1 = launch_window(folder, tag)
+        need(r0["launch_utc"][11:19] == t0, f"{d} {tag}: launch time differs from facts.json")
+        HW_ROWS[(d, tag)] = dict(t0=t0, t1=t1, day=r0["launch_utc"][:10], recs=hw_in(r0["launch_utc"][:10], t0, t1))
+HW_L1 = len(HW_ROWS[("L-1", "a6456")]["recs"])
+HW_L2 = [len(HW_ROWS[("L-2", t)]["recs"]) for t in ("p1nop", "p2add")]
+HW_L34 = sum(len(v["recs"]) for (d, _), v in HW_ROWS.items() if d in ("L-3", "L-4"))
+need(HW_L1 > 0 and min(HW_L2) > 0 and HW_L34 == 0, "journal: the record counts of rows L-1 to L-4 are not as the defect states")
+# the interval with the lowest asmread value of the pool: its time inside the process, from the T rows of the csv
+need(LOWEST_ASM["dataset"] == "L-2" and LOWEST_ASM["tag"] == "p2add", "the lowest asmread interval of the pool is not in L-2 p2add")
+T_START = Decimal(repr(min(t[3] for t in t_rows(LOWEST_ASM))))      # seconds since the process start
+T_END = Decimal(repr(max(t[4] for t in t_rows(LOWEST_ASM))))
+
+
+def clock(hms, add):
+    """Launch time plus seconds since the process start, to the nearest second."""
+    h, m, s = (int(x) for x in hms.split(":"))
+    tot = h * 3600 + m * 60 + s + int(add.to_integral_value(rounding=ROUND_HALF_UP))
+    return f"{tot // 3600:02d}:{tot // 60 % 60:02d}:{tot % 60:02d}"
+
+
+LOW_T0 = HW_ROWS[("L-2", "p2add")]["t0"]
+LOW_FROM, LOW_TO = clock(LOW_T0, T_START), clock(LOW_T0, T_END)
+HW_LOW = hw_in(LOWEST_ASM["launch_utc"][:10], LOW_FROM, LOW_TO)
+need(len(HW_LOW) == 2 and len({h["ts"] for h in HW_LOW}) == 1, "journal: not 2 records with one time inside the lowest asmread interval")
+m_ = re.search(rf"Without this (?:one )?interval the pool spans ({NUM}) to ({NUM}) GB/s", FMD)
+if m_:
+    check(near(q(rPL_asm_wo.lo), m_.group(1), "0.01") and near(q(rPL_asm_wo.hi), m_.group(2), "0.01"),
+          f"pool L-1 to L-4 (asmread) without its lowest interval: computed {rPL_asm_wo.txt()} GB/s, FACTS.md {m_.group(1)} to {m_.group(2)} GB/s")
+else:
+    check(True, f"pool L-1 to L-4 (asmread) without its lowest interval: computed {rPL_asm_wo.txt()} GB/s. FACTS.md holds no such sentence, so this value rests on the raw files only")
+check(True, f"journal of the 8000 MT/s boot: corrected records during L-1: {HW_L1}, L-2: {HW_L2[0]} and {HW_L2[1]}, L-3 and L-4: {HW_L34}; "
+            f"{len(HW_LOW)} records at {HW_LOW[0]['ts'][11:19]} inside the interval of {f2(val(LOWEST_ASM))} GB/s ({LOW_FROM} to {LOW_TO}); "
+            f"pool without it {rPL_asm_wo.txt()} GB/s")
+
+# firmware settings (defect state-r3-S3-1, checked here)
+FW = R + "/fwtest-20261117"
+
+
+def set_records(path):
+    """(name, answer) of every response of a settings file that carries 'modified: true', and the time of line 1."""
+    text = "\n".join(lines_of(path))
+    out = [(m.group(1), m.group(2)) for m in re.finditer(r'name: "([^"]+)",\s*answer: "([^"]+)",[^}]*\},\s*modified: true', text, re.S)]
+    for line in text.splitlines():
+        if line.startswith('{"responses"'):
+            for resp in json.loads(line)["responses"]:
+                if resp.get("modified") is True:
+                    out.append((resp["question"]["name"], resp["question"]["answer"]))
+    m = re.match(r"^\w+ Nov 17 (\d\d:\d\d:\d\d) (AM|PM) UTC 2026$", text.splitlines()[0])
+    when = None
+    if m:
+        h = int(m.group(1)[:2]) % 12 + (12 if m.group(2) == "PM" else 0)
+        when = f"{h:02d}{m.group(1)[2:]}"
+    return out, when
+
+
+X1, X1_T = set_records(FW + "/x1/set.txt")
+X2, X2_T = set_records(FW + "/x2/set.txt")
+RV, RV_T = set_records(FW + "/revert/set.txt")
+D72, _ = set_records(R + "/dimm7200-20261117/set.txt")
+need(X1 == [("TXREQ Min", "1/4 L2 TQ")] and X2 == [("TXREQ Max", "1/4 L2 TQ")], "fwtest: the two TXREQ changes are not as expected")
+Q_BASE = json.load(open(R + "/uefisettings-20261117/questions.json"))
+Q_REV = json.load(open(FW + "/revert/questions.json"))
+orig = {x["name"]: x["answer"] for x in Q_BASE if x["name"] in ("TXREQ Max", "TXREQ Min")}
+need(len(orig) == 2 and sorted(RV) == sorted(orig.items()), "fwtest: the revert does not set both TXREQ settings to the original values")
+need(X1_T and X2_T and RV_T and X1_T < X2_T < RV_T, "fwtest: times of the three records")
+canon = lambda qs: sorted(json.dumps(x, sort_keys=True) for x in qs)
+need(len(Q_BASE) == len(Q_REV) and canon(Q_BASE) == canon(Q_REV), "fwtest: the settings list after the revert differs from the list of the 8000 MT/s boot")
+need([x["answer"] for x in Q_BASE if x["name"] == "DIMM Frequency"] == ["8000 MT/s"], "settings list of the 8000 MT/s boot: DIMM Frequency is not 8000 MT/s")
+QBASE_T = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(R + "/uefisettings-20261117/questions.json")))
+need(BOOT8_FROM < QBASE_T < BOOT8_TO, "settings list of the 8000 MT/s boot: its file time is not inside that boot")
+N_SET = len(Q_BASE)
+SAME_ORDER = Q_BASE == Q_REV
+N_UNREAD = sum(1 for x in Q_BASE if str(x["answer"]).startswith("<ValueUnavailable"))
+need(D72 == [("DIMM Frequency", "7200 MT/s")], "dimm7200 set.txt: not the single change DIMM Frequency = 7200 MT/s")
+SET_FILES = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(R) for f in fs if f == "set.txt")
+need(SET_FILES == sorted([FW + "/x1/set.txt", FW + "/x2/set.txt", FW + "/revert/set.txt", R + "/dimm7200-20261117/set.txt"]),
+     "results folder: the files named set.txt are not the 4 expected ones")
+D72_T = time.strftime("%H:%M:%S", time.gmtime(os.path.getmtime(R + "/dimm7200-20261117/set.txt")))
+need(RV_T < D72_T < TRY6_UTC[11:19], "dimm7200 set.txt: file time is not between the revert and the boot record")
+check(True, f"firmware settings: TXREQ Min changed {X1_T}, TXREQ Max changed {X2_T}, both set back {RV_T} to the values of the 8000 MT/s list; "
+            f"list after the revert equal in {N_SET} entries ({N_UNREAD} not readable); 4 files set.txt under R, last: DIMM Frequency = 7200 MT/s ({D72_T} file time)")
+
+# ------------------------------------------------------------------ references
+addref("facts", S + "/FACTS.md", "the detailed record of this rerun (facts sheet): every interval, every check, every decision")
+addref("json", S + "/facts.json", "every interval as one record, built from the raw files. Data source of this page")
+addref("rules", S + "/baselines-and-rules.txt", "the list of 8000 MT/s rows and the comparison rules V1 to V4, F1, F2, written before the run")
+addref("gen", S + "/make_report.py", "script: generator of this page. It computes every number from the records of facts.json and prints the self-check list. "
+       "For a bwx12 rate it sums the 120 thread rows that the record names, because the records are rounded to 0.001 GB/s")
+addref("build", S + "/build_facts.py", "script: builds FACTS.md and facts.json from the raw files")
+addref("go", S + "/go.sh", "script: driver of the rerun. Three sessions of parts A, L, C and a fourth part C process")
+addref("ra", S + "/ra.sh", "script: part A, the 120-thread part of the test of 2026-11-13 with the same two binaries")
+addref("go2", S + "/go2.sh", "script: control I (added after the first numbers were seen), the part L line twice from an idle machine")
+addref("like", S + "/like.spec", "argument line of part L")
+addref("cfwd", S + "/cfwd.spec", "argument line of part C, order oldread, read, asmread")
+addref("crev", S + "/crev.spec", "argument line of part C, order asmread, read, oldread")
+addref("golog", GOLOG, "log of go.sh: 12 state lines, 10 'done' lines, ALLDONE")
+addref("go2log", GO2LOG, "log of go2.sh (control I, added after the first numbers were seen): 6 state lines, ALLDONE")
+for s_ in (1, 2, 3):
+    addref(f"A{s_}", R + "/" + [r for r in A_OLD if r["session"] == s_][0]["folder"][2:] + "/threads120.csv", f"part A, session {s_}: interval rows")
+for s_ in (1, 2, 3):
+    addref(f"L{s_}", R + "/" + [r for r in L_OLD if r["session"] == s_][0]["folder"][2:] + "/a6456.csv", f"part L, session {s_}: interval rows")
+for t_ in ("T72C1", "T72C2", "T72C3", "T72C4"):
+    r0 = [r for r in C_OLD if r["tag"] == t_][0]
+    addref(t_, R + "/" + r0["folder"][2:] + "/" + r0["file"], f"part C, process {t_}: interval rows")
+for t_ in ("T72I1", "T72I2"):
+    r0 = [r for r in I_OLD if r["tag"] == t_][0]
+    addref(t_, R + "/" + r0["folder"][2:] + "/" + r0["file"], f"control I (added after the first numbers were seen), process {t_}: interval rows")
+addref("F72", R + "/w120-w120-F72d12-20261117T200231Z/a6456.csv", "F72d12 (earlier run of the same boot, not part of the rerun): interval rows")
+addref("F72l", FL, "F72d12 (earlier run of the same boot, not part of the rerun): launch time, load at launch and end of the process", "lines 1 and 2")
+addref("A-1", R + "/kernels-20261113T181222Z/threads120.csv", "row A-1 (8000 MT/s): the test of 2026-11-13")
+addref("A-2", R + "/partA-20261113T205055Z/A1.csv", "row A-2 (8000 MT/s): same binaries, other process order")
+addref("A-3", R + "/partA-20261113T205055Z/A3.csv", "row A-3 (8000 MT/s): three processes of bw_old read")
+addref("L-1", R + "/w120-R8-20261117T020549Z/a6456.csv", "row L-1 (8000 MT/s): identical argument line")
+addref("L-1l", R + "/w120-R8-20261117T020549Z/launches.txt", "row L-1: launch time and end of the process", "lines 1 and 2")
+addref("L-2a", R + "/w120-R1-20261115T185140Z/p1nop.csv", "row L-2 (8000 MT/s), process p1nop")
+addref("L-2b", R + "/w120-R1-20261115T185140Z/p2add.csv", "row L-2 (8000 MT/s), process p2add. It holds the lowest asmread interval of the pool",
+       f"I row in line {LOWEST_ASM['line']}, T rows in the 120 lines after it")
+addref("L-2l", R + "/w120-R1-20261115T185140Z/launches.txt", "row L-2: launch times and ends of the two processes", "lines 1 to 4")
+addref("L-3", R + "/w120-R5-20261115T203152Z/thp.csv", "row L-3 (8000 MT/s)")
+addref("L-3l", R + "/w120-R5-20261115T203152Z/launches.txt", "row L-3: launch time and end of the process thp", "lines 3 and 4")
+addref("L-4a", R + "/w120-R6-20261115T203438Z/st1.csv", "row L-4 (8000 MT/s), process st1")
+addref("L-4b", R + "/w120-R6-20261115T203438Z/st2.csv", "row L-4 (8000 MT/s), process st2")
+addref("L-4c", R + "/w120-R6-20261115T203438Z/st3.csv", "row L-4 (8000 MT/s), process st3")
+addref("L-4l", R + "/w120-R6-20261115T203438Z/launches.txt", "row L-4: launch times and ends of the three processes", "lines 1 to 6")
+addref("try6", TRY6, "record of boot 3bfc57a1: boot id, MemTotal, 12 x \"Configured Memory Speed: 7200 MT/s\"", "lines 1, 2, 4 and 7")
+addref("boots", BOOTS, "boot list of the journal, saved in boot 3bfc57a1: row 0 is this boot", "line 9")
+addref("journal", JOURNAL, "saved journal lines of the 8000 MT/s boot (started 2026-11-09): hardware error records",
+       "lines " + ", ".join(str(x) for x in sorted(h["line"] for v in HW_ROWS.values() for h in v["recs"])))
+addref("klog", KLOG, "saved kernel log of the same boot: first line, module count line, last line",
+       f"lines 1, {[i for i, l in enumerate(kl, 1) if 'This system has 12 DIMM sockets' in l][0]} and {len(kl)}")
+addref("x1", FW + "/x1/set.txt", "firmware setting change: TXREQ Min", "lines 1, 8, 9 and 18")
+addref("x2", FW + "/x2/set.txt", "firmware setting change: TXREQ Max", "lines 1 and 2")
+addref("rev", FW + "/revert/set.txt", "firmware settings set back: TXREQ Max and TXREQ Min", "lines 1, 2 and 4")
+addref("qbase", R + "/uefisettings-20261117/questions.json", "firmware settings list of the 8000 MT/s boot")
+addref("qrev", FW + "/revert/questions.json", "firmware settings list saved after the revert")
+addref("d72", R + "/dimm7200-20261117/set.txt", "firmware setting change: DIMM Frequency = 7200 MT/s", "lines 7 and 8")
+addref("earlier", EARLIER, "the earlier report (2026-11-15): why the load-only loop reads less on the whole chip")
+
+# ------------------------------------------------------------------ small HTML helpers
+CI = "control I (added after the first numbers were seen)"
+F72 = "F72d12 (earlier run of the same boot, not part of the rerun)"
+
+
+def strip_tags(s):
+    return html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r'<span class="ref">.*?</span>', " ", s)))
+
+
+def P(text, cls=None):
+    PROSE.append(text)
+    return f'<p{" class=" + chr(34) + cls + chr(34) if cls else ""}>{text}</p>'
+
+
+def UL(items):
+    PROSE.extend(items)
+    return "<ul>" + "".join(f"<li>{x}</li>" for x in items) + "</ul>"
+
+
+def table(head, rows, cls=""):
+    o = [f'<div class="tw"><table class="{cls}"><thead><tr>']
+    o += [f'<th{" class=n" if c.startswith("#") else ""}>{c.lstrip("#")}</th>' for c in head]
+    o.append("</tr></thead><tbody>")
+    for r in rows:
+        if isinstance(r, str):
+            o.append(f'<tr class="grp"><td colspan="{len(head)}">{r}</td></tr>')
+            continue
+        o.append("<tr>" + "".join(f'<td{" class=n" if head[i].startswith("#") else ""}>{c}</td>' for i, c in enumerate(r)) + "</tr>")
+    o.append("</tbody></table></div>")
+    return "".join(o)
+
+
+def small(s):
+    return f'<span class="sm">{s}</span>'
+
+
+# ------------------------------------------------------------------ figure 1: dumbbell
+def T(x, y, s, size=12, fill=INK, anchor="start", weight=None, extra=""):
+    w = f' font-weight="{weight}"' if weight else ""
+    return f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" fill="{fill}" text-anchor="{anchor}"{w}{extra}>{esc(s)}</text>'
+
+
+HALO = f' paint-order="stroke" stroke="{SURF}" stroke-width="3.5" stroke-linejoin="round"'
+TAB = ' style="font-variant-numeric:tabular-nums"'
+
+
+def marker(x, y, color, hollow, r=5.5):
+    if hollow:
+        return f'<circle class="mk" cx="{x:.1f}" cy="{y:.1f}" r="{r - 0.9:.1f}" fill="{SURF}" stroke="{color}" stroke-width="2.2"/>'
+    return (f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r + 1.6:.1f}" fill="{SURF}"/>'
+            f'<circle class="mk" cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{color}"/>')
+
+
+def kernel_name(recs):
+    r = recs[0]
+    if r["part"] == "A":
+        return f"{r['binary']} read ({'old' if r['binary'] == 'bw_old' else 'new'} read kernel)"
+    return {"oldread": "oldread (old read kernel)", "read": "read (new read kernel)",
+            "asmread": "asmread (in place of the new read kernel)"}[r["kernel"]]
+
+
+def dot_title(name, rg):
+    vals = ", ".join(f2(v) for v in rg.v)
+    return (f"{name}: {kernel_name(rg.recs)}. Median {f2(rg.med)} GB/s. Intervals: {vals} GB/s. "
+            f"n = {plural(rg.n, 'interval')} / {plural(rg.np, 'process')}. Source: {src(rg.recs)}.")
+
+
+def f1_row(name, notes, old, new, drops, hollow, how):
+    return dict(name=name, notes=notes, old=old, new=new, drops=drops, hollow=hollow, how=how)
+
+
+def bwx_row(name, notes, olds, news, hollow=False):
+    pr = pairs_in_process(olds, news)
+    return f1_row(name, notes, Rg([o for o, _ in pr]), Rg([n for _, n in pr]), drops_of(pr), hollow,
+                  "drop per pair of the same process and round")
+
+
+IN_PLACE = "asmread in place of the new read kernel"
+B1_8000 = [bwx_row(f"L-1 · {hm(B_L_OLD['L-1'][0]['launch_utc'], True)}", [IN_PLACE, "row with the identical argument line"], olds=B_L_OLD["L-1"], news=B_L_ASM["L-1"], hollow=True)]
+B1_7200 = [bwx_row(f"F72d12 · {hm(F_OLD[0]['launch_utc'])}", [IN_PLACE, "earlier run of the same boot, not part of the rerun"], olds=F_OLD, news=F_ASM)]
+for s_ in (1, 2, 3):
+    o_ = [r for r in L_OLD if r["session"] == s_]
+    B1_7200.append(bwx_row(f"Part L, session {s_} ({o_[0]['tag']})", [IN_PLACE], olds=o_, news=[r for r in L_ASM if r["session"] == s_]))
+for t_ in ("T72C1", "T72C2", "T72C3", "T72C4"):
+    o_ = [r for r in C_OLD if r["tag"] == t_]
+    n_ = [r for r in C_READ if r["tag"] == t_]
+    B1_7200.append(bwx_row(f"Part C, {t_} ({o_[0]['file'][:-4]})", [f"kernel read = the new read kernel, after {n_[0]['kernel_before']}"], olds=o_, news=n_))
+for t_ in ("T72I1", "T72I2"):
+    B1_7200.append(bwx_row(f"Control I, {t_}", [IN_PLACE, "added after the first numbers were seen"],
+                           olds=[r for r in I_OLD if r["tag"] == t_], news=[r for r in I_ASM if r["tag"] == t_]))
+B2_8000 = [f1_row(f"{d}, round {rnd} · {hm(p['old'].recs[0]['launch_utc'], True)}", ["bw_new read against bw_old read"], p["old"], p["new"], [p["drop"]], True,
+                  "drop between the medians of the two processes")
+           for (d, rnd), p in A8_PAIRS.items()]
+B2_7200 = [f1_row(f"Session {s_}, round {rnd} (T72A{s_})", ["bw_new read against bw_old read"], p["old"], p["new"], [p["drop"]], False,
+                  "drop between the medians of the two processes")
+           for (s_, rnd), p in A_PAIRS.items()]
+F1_BLOCKS = [
+    dict(title="6 s measurements, runner bwx12, all threads stop together",
+         groups=[dict(title="8000 MT/s · hollow markers", rows=B1_8000), dict(title="7200 MT/s · filled markers", rows=B1_7200)]),
+    dict(title="0.5 s measurements, the two binaries of 2026-11-13, each thread finishes its pass",
+         groups=[dict(title="8000 MT/s · hollow markers", rows=B2_8000), dict(title="7200 MT/s · filled markers", rows=B2_7200)]),
+]
+SAME_LINE_ROWS = [r for r in B1_7200 if not r["name"].startswith("Part C")]
+need(len(SAME_LINE_ROWS) == 6, "figure 1: expected 6 rows of the same test line in the 7200 MT/s boot")
+F1_NROWS = sum(len(g["rows"]) for b in F1_BLOCKS for g in b["groups"])
+need(F1_NROWS == 21, "figure 1: expected 21 rows")
+
+
+def fig1():
+    W, X0, X1, XMAX = 940, 356, 846, 500
+    sx = lambda v: X0 + (X1 - X0) * float(v) / XMAX
+    y = 30
+    for b in F1_BLOCKS:
+        b["y"] = y
+        y += 30
+        for g in b["groups"]:
+            g["y"] = y
+            y += 22
+            for r in g["rows"]:
+                r["h"] = 22 + 13 * len(r["notes"])
+                r["y"] = y
+                y += r["h"]
+        y += 6
+    yb = y
+    H = yb + 50
+    o = [f'<svg viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-label="Dumbbell chart: whole-chip read rate of the old read kernel and of the load-only kernel, one row per process, {F1_NROWS} rows">']
+    for t in range(0, XMAX + 1, 100):
+        o.append(f'<line x1="{sx(t):.1f}" y1="24" x2="{sx(t):.1f}" y2="{yb}" stroke="{GRID}"/>')
+        o.append(T(sx(t), 17, t, 12, MUTED, "middle", extra=TAB))
+        o.append(T(sx(t), yb + 16, t, 12, MUTED, "middle", extra=TAB))
+    o.append(T((X0 + X1) / 2, yb + 38, "Whole-chip read rate, GB/s (sum of the 120 threads). The axis starts at 0.", 12.5, MUTED, "middle"))
+    for b in F1_BLOCKS:
+        o.append(f'<rect x="0" y="{b["y"]}" width="{W}" height="26" fill="#f1f0ec"/>')
+        o.append(T(12, b["y"] + 17.5, b["title"], 13, INK, weight=600))
+        for g in b["groups"]:
+            o.append(T(12, g["y"] + 15, g["title"], 12, MUTED, weight=600))
+            for r in g["rows"]:
+                cy = r["y"] + r["h"] / 2
+                ty = cy - 6.5 * len(r["notes"]) + 4
+                o.append(T(24, ty, r["name"], 12.5, INK))
+                for i, nt in enumerate(r["notes"]):
+                    o.append(T(24, ty + 13 * (i + 1), nt, 11, MUTED))
+                xo, xn = sx(r["old"].med), sx(r["new"].med)
+                dt = drop_txt(r["drops"])
+                tipname = r["name"] + " (" + "; ".join(r["notes"]) + ")"
+                o.append(f'<g><title>{esc(tipname)}: the load-only dot lies {esc(dt)} below the old-kernel dot ({esc(r["how"])}, n = {plural(len(r["drops"]), "pair")}). Source: {esc(src(r["old"].recs + r["new"].recs))}.</title>'
+                         f'<line x1="{xn:.1f}" y1="{cy:.1f}" x2="{xo:.1f}" y2="{cy:.1f}" stroke="{LINK}" stroke-width="1.5"/>'
+                         f'<line x1="{xn:.1f}" y1="{cy:.1f}" x2="{xo:.1f}" y2="{cy:.1f}" stroke="{SURF}" stroke-opacity="0" stroke-width="14"/>'
+                         + T((xo + xn) / 2, cy - 6, dt, 11.5, INK, "middle", extra=HALO + TAB) + "</g>")
+                for rg, x, color, side in ((r["old"], xo, BLUE, 1), (r["new"], xn, ORANGE, -1)):
+                    xa, xb = sx(rg.lo), sx(rg.hi)
+                    o.append(f'<g class="pt"><title>{esc(dot_title(tipname, rg))}</title>'
+                             f'<circle cx="{x:.1f}" cy="{cy:.1f}" r="12" fill="{SURF}" fill-opacity="0"/>'
+                             + marker(x, cy, color, r["hollow"])
+                             + f'<path d="M{xa:.1f} {cy - 3.5:.1f}V{cy + 3.5:.1f}M{xb:.1f} {cy - 3.5:.1f}V{cy + 3.5:.1f}M{xa:.1f} {cy:.1f}H{xb:.1f}" stroke="{INK}" stroke-width="1.1" fill="none"/></g>')
+                    off = max(xb - x, x - xa) + 8
+                    o.append(T(x + side * max(off, 10.5), cy + 4.2, f2(rg.med), 12, INK, "start" if side > 0 else "end", extra=HALO + TAB))
+    o.append("</svg>")
+    return "\n".join(o)
+
+
+# ------------------------------------------------------------------ figure 2: every interval, two panels
+def beeswarm(xs, r=4.3):
+    """Vertical offsets so that dots of one row do not cover each other."""
+    lanes = [0, -5.5, 5.5, -11, 11]
+    placed, out = [], [0.0] * len(xs)
+    for i in sorted(range(len(xs)), key=lambda k: xs[k]):
+        for ln in lanes:
+            if all(abs(xs[i] - px) >= 2 * r or ln != pl for px, pl in placed):
+                break
+        placed.append((xs[i], ln))
+        out[i] = ln
+    return out
+
+
+def p_row(name, recs, hollow, notes=(), label=None, band=None, more=()):
+    """One row of figure 2. With band (the 8000 MT/s range of the block) the row gets a note with its place against the band.
+    A note that starts with "!" is drawn in ink colour: it is the key distance of the row."""
+    rg = Rg(recs)
+    notes = list(notes)
+    if band is not None:
+        d = rg.nearest(band)
+        notes.append("!inside the band" if band.lo <= rg.lo and rg.hi <= band.hi else
+                     f"!{f2(abs(d))} GB/s {'above' if d > 0 else 'below'} the band" if d != 0 else "!overlaps the band")
+    notes += list(more)
+    return dict(name=name, rg=rg, hollow=hollow, notes=notes, label=label or name)
+
+
+def plain_notes(notes):
+    return [n.lstrip("!").replace("|", " ") for n in notes]
+
+
+def note_lines(notes):
+    """(text, strong) for every drawn line of the notes of a row."""
+    return [(seg, n.startswith("!")) for n in notes for seg in n.lstrip("!").split("|")]
+
+
+def panel(title, sub, lo, hi, majors, minors, blocks, color, aria):
+    W, X0, X1 = 466, 190, 450
+    sx = lambda v: X0 + (X1 - X0) * (float(v) - lo) / (hi - lo)
+    y = 70
+    for b in blocks:
+        b["y"] = y
+        y += 22 + 13 * len(b["band_txt"])
+        for g in b["groups"]:
+            g["y"] = y
+            y += 20
+            for r in g["rows"]:
+                r["h"] = max(30, 8 + 13 * (2 + len(note_lines(r["notes"]))))
+                r["y"] = y
+                y += r["h"]
+        b["yend"] = y
+        y += 8
+    yb = y
+    H = yb + 56
+    o = [f'<svg viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-label="{esc(aria)}">']
+    o.append(T(10, 18, title, 13.5, INK, weight=600))
+    o.append(T(10, 33, sub, 11.5, MUTED))
+    o.append(T(10, 49, "under a row name: lowest to", 10.5, MUTED))
+    o.append(T(10, 61, "highest, GB/s (n intervals)", 10.5, MUTED))
+    for t in minors:
+        o.append(f'<line x1="{sx(t):.1f}" y1="66" x2="{sx(t):.1f}" y2="{yb}" stroke="{GRID}" stroke-opacity="0.55"/>')
+    for t in majors:
+        o.append(f'<line x1="{sx(t):.1f}" y1="66" x2="{sx(t):.1f}" y2="{yb}" stroke="{GRID}"/>')
+        o.append(T(sx(t), 60, t, 11.5, MUTED, "middle", extra=TAB))
+        o.append(T(sx(t), yb + 16, t, 11.5, MUTED, "middle", extra=TAB))
+    # axis line with a break mark: the axis does not start at 0
+    o.append(f'<path d="M{X0 - 14} {yb}h5l3 -5l4 10l3 -5H{X1}" stroke="{MUTED}" fill="none"/>')
+    o.append(T((X0 + X1) / 2 - 20, yb + 34, "Whole-chip read rate, GB/s", 12, MUTED, "middle"))
+    o.append(T((X0 + X1) / 2 - 20, yb + 49, f"The axis starts at {lo} GB/s, not at 0.", 12, INK, "middle", weight=600))
+    for b in blocks:
+        o.append(f'<rect x="0" y="{b["y"]}" width="{W}" height="{18 + 13 * len(b["band_txt"])}" fill="#f1f0ec"/>')
+        o.append(T(10, b["y"] + 15, b["title"], 12.5, INK, weight=600))
+        for i, bt in enumerate(b["band_txt"]):
+            o.append(T(10, b["y"] + 29 + 13 * i, bt, 10.5, MUTED))
+        on = [g for g in b["groups"] if g.get("band")]
+        if b.get("band") and on:
+            y0, y1 = on[0]["y"] + 2, on[-1]["rows"][-1]["y"] + on[-1]["rows"][-1]["h"]
+            xa, xb = sx(b["band"].lo), sx(b["band"].hi)
+            o.append(f'<g><title>{esc(b["band_title"])}</title><rect x="{xa:.1f}" y="{y0}" width="{xb - xa:.1f}" height="{y1 - y0}" fill="{BAND}"/>'
+                     f'<path d="M{xa:.1f} {y0}V{y1}M{xb:.1f} {y0}V{y1}" stroke="{BAND_EDGE}"/></g>')
+        for g in b["groups"]:
+            o.append(T(10, g["y"] + 14, g["title"], 11.5, MUTED, weight=600, extra=HALO))
+            for r in g["rows"]:
+                cy = r["y"] + r["h"] / 2
+                nl = 2 + len(note_lines(r["notes"]))
+                ty = cy - 6.5 * (nl - 1) + 4
+                o.append(T(18, ty, r["label"], 12, INK))
+                o.append(T(18, ty + 13, f"{r['rg'].txt()} ({r['rg'].n})", 10.5, MUTED, extra=TAB))
+                for i, (nt, strong) in enumerate(note_lines(r["notes"])):
+                    o.append(T(18, ty + 13 * (i + 2), nt, 10.5, INK if strong else MUTED, weight=600 if strong else None))
+                o.append(f'<line x1="{X0}" y1="{r["y"] + r["h"]}" x2="{X1}" y2="{r["y"] + r["h"]}" stroke="{GRID}" stroke-opacity="0.6"/>')
+                xs = [sx(v) for v in r["rg"].v]
+                for rec, x, dy in zip(r["rg"].recs, xs, beeswarm(xs)):
+                    before = rec["kernel_before"] + ("" if rec["kernel_before"] in ("oldread", "read", "asmread") or rec["kernel_before"].startswith("none") else " (another test loop of bwx12)")
+                    where = (f"process {rec['process']} of the file, round {rec['round']}, interval {rec['interval'] + 1}" if rec["part"] == "A"
+                             else f"process {rec['tag']}, round {rec['round']}, position {rec['pos']}, directly after {before}")
+                    tipname = r["name"] + (" (" + "; ".join(plain_notes(r["notes"])) + ")" if r["notes"] else "")
+                    tip = (f"{tipname}: {kernel_name([rec])}, {where}: {f2(val(rec))} GB/s. "
+                           f"Row: {r['rg'].txt()} GB/s, n = {plural(r['rg'].n, 'interval')} / {plural(r['rg'].np, 'process')}. "
+                           f"Source: {rec['folder']}/{rec['file']} line {rec['line']}.")
+                    o.append(f'<g class="pt"><title>{esc(tip)}</title><circle cx="{x:.1f}" cy="{cy + dy:.1f}" r="7.5" fill="{SURF}" fill-opacity="0"/>'
+                             + (f'<circle class="mk" cx="{x:.1f}" cy="{cy + dy:.1f}" r="3.4" fill="{SURF}" stroke="{color}" stroke-width="1.8"/>' if r["hollow"]
+                                else f'<circle class="mk" cx="{x:.1f}" cy="{cy + dy:.1f}" r="4.3" fill="{color}" stroke="{SURF}" stroke-width="1.2"/>') + "</g>")
+    o.append("</svg>")
+    return "\n".join(o)
+
+
+def secs_txt(recs):
+    return f"{int(recs[0]['min_ms']) // 1000} s"
+
+
+def l_rows(pool):
+    rows = []
+    for d in LPOOL:
+        rows.append(p_row(d, pool[d], True, label=f"{d} ({secs_txt(pool[d])})"))
+    return rows
+
+
+def band_title(what, rg, n):
+    files = "; ".join(sorted({f"{r['folder']}/{r['file']}" for r in rg.recs}))
+    return f"Grey band: {what}. {rg.txt()} GB/s, n = {n}. Source: {files}."
+
+
+F72_NOTES = ["earlier run of the same boot,|not part of the rerun"]      # "|" = line break inside one note
+CI_NOTES = ["added after the first|numbers were seen"]
+P_OLD_BLOCKS = [
+    dict(title="0.5 s measurements, bw_old read", band=rPA_old,
+         band_txt=["grey band = 8000 MT/s rows A-1 to A-3:", f"{rPA_old.txt()} GB/s, n = {n8000(P_A_OLD)}"],
+         band_title=band_title("lowest to highest interval of the 8000 MT/s rows A-1 to A-3, bw_old read", rPA_old, n8000(P_A_OLD)),
+         groups=[dict(title="8000 MT/s", band=True, rows=[p_row(d, B_A_OLD[d], True) for d in APOOL]),
+                 dict(title="7200 MT/s", band=True, rows=[p_row(f"Part A, session {s_}", [r for r in A_OLD if r["session"] == s_], False, label=f"Session {s_} (T72A{s_})") for s_ in (1, 2, 3)])]),
+    dict(title="6 s measurements, bwx12 oldread", band=rPL_old,
+         band_txt=["grey band = 8000 MT/s rows L-1 to L-4:", f"{rPL_old.txt()} GB/s, n = {n8000(P_L_OLD)}", "(L-2 to L-4: 4 s measurements, other counter events)"],
+         band_title=band_title("lowest to highest interval of the 8000 MT/s rows L-1 to L-4, oldread at position 0", rPL_old, n8000(P_L_OLD)),
+         groups=[dict(title="8000 MT/s", band=True, rows=l_rows(B_L_OLD)),
+                 dict(title="7200 MT/s", band=True, rows=[
+                     p_row("F72d12", F_OLD, False, F72_NOTES),
+                     p_row("Part L", L_OLD, False, label="Part L (3 sessions)", band=rPL_old, more=[f"!medians: {f2(abs(L_OLD_MED))} GB/s lower"]),
+                     p_row("Part C", C_OLD, False, label="Part C (4 processes)"),
+                     p_row("Control I", I_OLD, False, CI_NOTES)])]),
+]
+
+
+def a_new_block(rnd):
+    v = A_V3[rnd]
+    rows8 = [p_row(f"{d}, round {rnd}", [r for r in B_A_NEW[d] if r["round"] == rnd], True, label=d) for d in ("A-1", "A-2")]
+    rows7 = []
+    for s_ in (1, 2, 3):
+        rows7.append(p_row(f"Part A, session {s_}, round {rnd}", [r for r in A_NEW if r["session"] == s_ and r["round"] == rnd], False,
+                           [] if s_ == 1 else ["used for Q1 only (rule V3)"], label=f"Session {s_} (T72A{s_})", band=v["r8"] if s_ == 1 else None))
+    return dict(title=f"0.5 s measurements, bw_new read, round {rnd}", band=v["r8"],
+                band_txt=[f"grey band = 8000 MT/s rows A-1 and A-2 of round {rnd}:", f"{v['r8'].txt()} GB/s, n = {n8000(v['r8'].recs)}"],
+                band_title=band_title(f"lowest to highest interval of the 8000 MT/s rows A-1 and A-2, bw_new read, round {rnd}", v["r8"], n8000(v["r8"].recs)),
+                groups=[dict(title="8000 MT/s", band=True, rows=rows8), dict(title="7200 MT/s", band=True, rows=rows7)])
+
+
+P_NEW_BLOCKS = [
+    dict(title="6 s measurements, bwx12", band=rPL_asm,
+         band_txt=["grey band = 8000 MT/s rows L-1 to L-4, asmread:", f"{rPL_asm.txt()} GB/s, n = {n8000(P_L_ASM)}", "(L-2 to L-4: 4 s measurements, other counter events)"],
+         band_title=band_title("lowest to highest interval of the 8000 MT/s rows L-1 to L-4, asmread at position 1, directly after oldread", rPL_asm, n8000(P_L_ASM)),
+         groups=[dict(title="8000 MT/s · asmread in place of the new read kernel", band=True, rows=l_rows(B_L_ASM)),
+                 dict(title="7200 MT/s · asmread in place of the new read kernel", band=True, rows=[
+                     p_row("F72d12", F_ASM, False, F72_NOTES, band=rPL_asm),
+                     p_row("Part L", L_ASM, False, label="Part L (3 sessions)", band=rPL_asm),
+                     p_row("Part C, asmread directly after oldread", C_ASM_AO, False, ["asmread after oldread"], label="Part C (crev, round 1)", band=rPL_asm),
+                     p_row("Control I", I_ASM, False, CI_NOTES, band=rPL_asm)]),
+                 dict(title="7200 MT/s · part C, no 8000 MT/s row of this kind (no band)", band=False, rows=[
+                     p_row("Part C, read directly after oldread", C_READ_AO, False, ["new read kernel, after oldread"], label="Part C, read"),
+                     p_row("Part C, read directly after asmread", C_READ_AA, False, ["new read kernel, after asmread"], label="Part C, read"),
+                     p_row("Part C, asmread directly after read", C_ASM_AR, False, ["after read"], label="Part C, asmread"),
+                     p_row("Part C, asmread as first interval of the process", C_ASM_FI, False, ["first interval of the process"], label="Part C, asmread")])]),
+    a_new_block(1), a_new_block(2),
+]
+P_OLD_BLOCKS.reverse()
+
+
+def panel_rows(blocks, band_only=True):
+    return [(b, g, r) for b in blocks for g in b["groups"] for r in g["rows"] if g["band"] or not band_only]
+
+
+# facts that the takeaway line of figure 2 states: checked here, so the sentence cannot go stale
+OLD_7200_BELOW = [r["name"] for b, g, r in panel_rows(P_OLD_BLOCKS) if not r["hollow"] and not r["rg"].overlaps(b["band"])]
+need(OLD_7200_BELOW == ["Part L"], f"figure 2, old read: the rows outside the band are {OLD_7200_BELOW}")
+NEW_CMP = [(b, r) for b, g, r in panel_rows(P_NEW_BLOCKS) if not r["hollow"] and any(n.startswith("!") for n in r["notes"])]   # rows that the rules compare
+NEW_7200_IN = [r["name"] for b, r in NEW_CMP if r["rg"].overlaps(b["band"])]
+NEW_7200_RIGHT = [r["name"] for b, r in NEW_CMP if r["rg"].lo > b["band"].hi]
+need(NEW_7200_IN == ["F72d12"] and len(NEW_7200_RIGHT) == 5 and len(NEW_CMP) == 6, f"figure 2, load-only: compared rows inside the band {NEW_7200_IN}, right of it {len(NEW_7200_RIGHT)}")
+allv_old = [v for b, g, r in panel_rows(P_OLD_BLOCKS, False) for v in r["rg"].v]
+allv_new = [v for b, g, r in panel_rows(P_NEW_BLOCKS, False) for v in r["rg"].v]
+OLD_AX, NEW_AX = (458, 476), (276, 340)
+need(OLD_AX[0] < min(allv_old) and max(allv_old) < OLD_AX[1] and NEW_AX[0] < min(allv_new) and max(allv_new) < NEW_AX[1], "figure 2: a value lies outside an axis")
+N_DOTS = len(allv_old) + len(allv_new)
+
+
+def legend(items):
+    return '<div class="legend">' + "".join(f'<span class="li">{sw}<span>{txt}</span></span>' for sw, txt in items) + "</div>"
+
+
+def sw_dot(color, hollow=False):
+    c = (f'<circle cx="8" cy="8" r="4.6" fill="{SURF}" stroke="{color}" stroke-width="2.2"/>' if hollow else f'<circle cx="8" cy="8" r="5.5" fill="{color}"/>')
+    return f'<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">{c}</svg>'
+
+
+SW_WHISK = f'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><path d="M3 4.5V11.5M19 4.5V11.5M3 8H19" stroke="{INK}" stroke-width="1.1" fill="none"/></svg>'
+SW_BAND = f'<svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true"><rect x="1" y="1" width="20" height="14" fill="{BAND}"/><path d="M1 1V15M21 1V15" stroke="{BAND_EDGE}"/></svg>'
+SW_PCT = f'<svg width="30" height="16" viewBox="0 0 30 16" aria-hidden="true"><line x1="1" y1="11" x2="29" y2="11" stroke="{LINK}" stroke-width="1.5"/><text x="15" y="8" font-size="9" text-anchor="middle" fill="{INK}">%</text></svg>'
+LEG1 = legend([
+    (sw_dot(BLUE), "old read kernel (median of the row)"),
+    (sw_dot(ORANGE), "load-only loop: new read kernel, or asmread where the row says so"),
+    (sw_dot(MUTED, True), "hollow marker: 8000 MT/s"),
+    (sw_dot(MUTED), "filled marker: 7200 MT/s"),
+    (SW_WHISK, "lowest to highest interval of the row, to scale (often narrower than the dot)"),
+    (SW_PCT, "percent on the line: how far the load-only dot lies below the old-kernel dot"),
+])
+LEG2 = legend([
+    (sw_dot(BLUE), "old read kernel, one dot per interval"),
+    (sw_dot(ORANGE), "load-only loop, one dot per interval"),
+    (sw_dot(MUTED, True), "hollow marker: 8000 MT/s"),
+    (sw_dot(MUTED), "filled marker: 7200 MT/s"),
+    (SW_BAND, "grey band: lowest to highest interval of the 8000 MT/s rows of the block"),
+])
+
+# ------------------------------------------------------------------ tables
+def q1_table():
+    def row(label, key, n):
+        ds = Q1[key]["drops"]
+        return [label, f1(min(ds)), f1(max(ds)), Q1[key]["old"].txt(), Q1[key]["new"].txt(), n]
+    a_r1 = [p["new"].med for (s_, rnd), p in A_PAIRS.items() if rnd == 1]
+    a_r2 = [p["new"].med for (s_, rnd), p in A_PAIRS.items() if rnd == 2]
+    a8 = Q1["A8"]["drops"]
+    rows = [
+        "7200 MT/s, the planned rerun",
+        row(f"<b>Part C</b>: kernel read (the new read kernel) directly after oldread, processes T72C1 and T72C3 {ref('T72C1', 'T72C3')}", "C_ao", n7200(Q1["C_ao"]["new"].recs, 4)),
+        row(f"<b>Part C</b>: kernel read (the new read kernel) directly after asmread, processes T72C2 and T72C4 {ref('T72C2', 'T72C4')}", "C_aa", n7200(Q1["C_aa"]["new"].recs, 4)),
+        row(f"<b>Part L</b>: asmread (in place of the new read kernel) directly after oldread {ref('L1', 'L2', 'L3')}", "L", n7200(Q1["L"]["new"].recs, 6)),
+        [f"<b>Part A</b>: bw_new read against bw_old read, 0.5 s, whole-pass stop. Drop between the medians of the two processes. Less exact than parts L and C {ref('A1', 'A2', 'A3')}",
+         f1(min(Q1["A"]["drops"])), f1(max(Q1["A"]["drops"])), rA_old.txt(),
+         f"round 1: {f2(min(a_r1))} to {f2(max(a_r1))}<br>round 2: {f2(min(a_r2))} to {f2(max(a_r2))}<br>{small('(medians of the processes)')}",
+         f"{len(A_PAIRS)} pairs of process medians / {plural(rA_old.np + Rg(A_NEW).np, 'process')} / 3 sessions / 1 boot"],
+        "7200 MT/s, same boot, not part of the planned rerun (never pooled with it)",
+        row(f"<b>Control I</b> (added after the first numbers were seen, not part of the plan fixed before the run): asmread (in place of the new read kernel), idle start {ref('T72I1', 'T72I2')}", "I", n7200(Q1["I"]["new"].recs, 4)),
+        row("<b>F72d12</b> (earlier run of the same boot at " + hm(F_OLD[0]["launch_utc"]) + f", not part of the rerun): asmread (in place of the new read kernel) {ref('F72')}", "F", n7200(Q1["F"]["new"].recs, 2)),
+        "8000 MT/s, for context only (same computation)",
+        row(f"<b>L-1</b>: asmread (in place of the new read kernel) directly after oldread {ref('L-1')}", "L1", n8000(Q1["L1"]["new"].recs, 2)),
+        [f"<b>A-1, A-2</b>: bw_new read against bw_old read, drop between the medians of the two processes {ref('A-1', 'A-2')}", f1(min(a8)), f1(max(a8)),
+         Rg(B_A_OLD["A-1"] + B_A_OLD["A-2"]).txt(), small("one row per round in Figure 1"),
+         f"{len(A8_PAIRS)} pairs of process medians / {plural(Rg(B_A_OLD['A-1'] + B_A_OLD['A-2'] + B_A_NEW['A-1'] + B_A_NEW['A-2']).np, 'process')} / 1 boot"],
+    ]
+    return table(["Part and pair", "#Lowest drop, %", "#Highest drop, %", "#Old read kernel, GB/s", "#Load-only kernel, GB/s", "n"], rows, "q1")
+
+
+def cmp_cell(rg, n):
+    return f'<span class="num">{rg.txt()}</span><br>{small(n)}'
+
+
+def q2_table():
+    pool_l = ("pool L-1 to L-4 (L-1: 6 s, identical argument line; L-2 to L-4: 4 s, other counter events) "
+              + ref("L-1", "L-2a", "L-2b", "L-3", "L-4a", "L-4b", "L-4c"))
+    rows = ["Old read kernel"]
+    rows.append(["Part A (bw_old read)", cmp_cell(rA_old, n7200(A_OLD)), f"pool A-1 to A-3 {ref('A-1', 'A-2', 'A-3')}<br>" + cmp_cell(rPA_old, n8000(P_A_OLD)), "yes", "0",
+                 f"&quot;{WORD_SAME}&quot;. The test cannot exclude a difference of about {f1(width_pct(rPA_old))} % (est. from one boot)"])
+    rows.append(["Part C (oldread)", cmp_cell(rC_old, n7200(C_OLD)), pool_l + "<br>" + cmp_cell(rPL_old, n8000(P_L_OLD)), "yes", "0",
+                 f"&quot;{WORD_SAME}&quot;. The test cannot exclude a difference of about {f1(width_pct(rPL_old))} % (est. from one boot)"])
+    rows.append(["Part L (oldread)", cmp_cell(rL_old, n7200(L_OLD)), "pool L-1 to L-4<br>" + cmp_cell(rPL_old, n8000(P_L_OLD)), "no", signed(L_OLD_NEAR),
+                 f"&quot;{WORD_DIFF}&quot;. Part L is lower by {f2(abs(L_OLD_NEAR))} GB/s at the nearest ends ({f1(L_OLD_NEAR_PCT)} % of the lower end of the 8000 MT/s range) "
+                 f"and by {f2(abs(L_OLD_MED))} GB/s between the medians ({f1(L_OLD_MED_PCT)} % of the 8000 MT/s median). The data do not show the cause (section 3)"])
+    rows.append([f"F72d12 (oldread; earlier run of the same boot, not part of the rerun)", cmp_cell(rF_old, n7200(F_OLD)), "pool L-1 to L-4<br>" + cmp_cell(rPL_old, n8000(P_L_OLD)),
+                 "yes", "0", f"&quot;{WORD_SAME}&quot;. The test cannot exclude a difference of about {f1(width_pct(rPL_old))} % (est. from one boot). Not pooled with part L"])
+    rows.append([f"Control I (oldread; added after the first numbers were seen)", cmp_cell(rI_old, n7200(I_OLD)), "pool L-1 to L-4<br>" + cmp_cell(rPL_old, n8000(P_L_OLD)),
+                 "yes", "0", f"&quot;{WORD_SAME}&quot;. The test cannot exclude a difference of about {f1(width_pct(rPL_old))} % (est. from one boot). Not pooled with part L"])
+    rows.append("Load-only loop (no percent change between the two speeds is given)")
+    rows.append(["Part L (asmread, in place of the new read kernel)", cmp_cell(rL_asm, n7200(L_ASM)), "pool L-1 to L-4, asmread<br>" + cmp_cell(rPL_asm, n8000(P_L_ASM)),
+                 "no", signed(DIST["nearest"][0]), f"&quot;{WORD_DIFF}&quot;. Part L is higher"])
+    for rnd in (1, 2):
+        v = A_V3[rnd]
+        p8 = ", ".join(str(x) for x in sorted(set(v["p8"])))
+        rows.append([f"Part A, session 1, round {rnd} (bw_new read, the new read kernel)", cmp_cell(v["r7"], n7200(v["r7"].recs)),
+                     f"A-1 and A-2, round {rnd}<br>" + cmp_cell(v["r8"], n8000(v["r8"].recs)), "no", signed(v["near"]),
+                     f"outside (above) the 8000 MT/s range of the same round. Pass counts per interval: {v['p7'][0]} at 7200 MT/s, {p8} at 8000 MT/s. They are not all equal, so part A gives no exact size"])
+    rows.append(["Part C, kernel read (the new read kernel)",
+                 f'after oldread: <span class="num">{rC_read_ao.txt()}</span><br>{small(n7200(C_READ_AO))}<br>after asmread: <span class="num">{rC_read_aa.txt()}</span><br>{small(n7200(C_READ_AA))}',
+                 "no bwx12 run", "-", "-", "Insufficient data: no 8000 MT/s run of kernel read with bwx12"])
+    rows.append(["Part C, asmread directly after oldread (in place of the new read kernel)", cmp_cell(rC_asm_ao, n7200(C_ASM_AO)),
+                 "pool L-1 to L-4, asmread<br>" + cmp_cell(rPL_asm, n8000(P_L_ASM)), "no", signed(rC_asm_ao.nearest(rPL_asm)), f"&quot;{WORD_DIFF}&quot;. Part C is higher"])
+    rows.append(["F72d12 (asmread, in place of the new read kernel; earlier run of the same boot, not part of the rerun)", cmp_cell(rF_asm, n7200(F_ASM)),
+                 "pool L-1 to L-4, asmread<br>" + cmp_cell(rPL_asm, n8000(P_L_ASM)), "yes", "0",
+                 f"inside the range of the 8000 MT/s pool: &quot;{WORD_SAME}&quot;. The test cannot exclude a difference of {f2(rPL_asm.hi - rPL_asm.lo)} GB/s, the width of that range (est. from one boot). "
+                 f"Against L-1 alone F72d12 is {f2(rF_asm.nearest(rL1_asm))} GB/s higher. Not pooled with part L"])
+    rows.append(["Control I (asmread, in place of the new read kernel; added after the first numbers were seen)", cmp_cell(rI_asm, n7200(I_ASM)),
+                 "pool L-1 to L-4, asmread<br>" + cmp_cell(rPL_asm, n8000(P_L_ASM)), "no", signed(rI_asm.nearest(rPL_asm)),
+                 f"&quot;{WORD_DIFF}&quot;. Control I is higher. Not pooled with part L"])
+    # the choice of the pool: the same test against row L-1 alone (the row with the identical argument line)
+    rL1_old = Rg(B_L_OLD["L-1"])
+    alone = [("part L, oldread", rL_old, rPL_old, rL1_old), ("part C, oldread", rC_old, rPL_old, rL1_old), ("F72d12, oldread", rF_old, rPL_old, rL1_old),
+             ("control I, oldread", rI_old, rPL_old, rL1_old), ("part L, asmread", rL_asm, rPL_asm, rL1_asm), ("part C, asmread", rC_asm_ao, rPL_asm, rL1_asm),
+             ("F72d12, asmread", rF_asm, rPL_asm, rL1_asm), ("control I, asmread", rI_asm, rPL_asm, rL1_asm)]
+    changed = [nm for nm, r7, pool, l1 in alone if r7.overlaps(pool) != r7.overlaps(l1)]
+    need(changed == ["F72d12, asmread"], f"table 2: rows whose overlap result changes against L-1 alone: {changed}")
+    rows.append("Notes")
+    rows.append(f'<span class="tn">Pool or L-1 alone: with row L-1 alone in place of the pool L-1 to L-4, {len(alone) - len(changed)} of the {len(alone)} rows that use the pool keep their overlap result. '
+                f"The exception is F72d12 with asmread (earlier run of the same boot, not part of the rerun): it lies {f2(rF_asm.nearest(rL1_asm))} GB/s above L-1.</span>")
+    rows.append(f'<span class="tn">Part C: the fixed rules contradict each other. One rule would show part C at 7200 MT/s only. This page follows the facts sheet and compares the two part C rows that have an 8000 MT/s row of the list {ref("facts")}.</span>')
+    return table(["7200 MT/s row", "Range at 7200 MT/s, GB/s, and n", "8000 MT/s rows: range, GB/s, and n", "Overlap", "#Distance of the nearest ends, GB/s (+ = 7200 MT/s row higher)",
+                  "Wording by the rules fixed before the run"], rows, "q2")
+
+
+def dist_table():
+    names = {"nearest": "Nearest ends of the two ranges", "medians": "Medians", "farthest": "Farthest ends of the two ranges"}
+    rows = [[names[k], f2(DIST[k][0]), f2(DIST[k][1])] for k in ("nearest", "medians", "farthest")]
+    return table(["Kind of distance", "#Part L above the 8000 MT/s pool L-1 to L-4, GB/s", "#Part L above F72d12 (same 7200 MT/s boot, earlier run, not part of the rerun), GB/s"], rows, "narrow")
+
+
+def load_table():
+    hms = lambda utc, date=False: (utc[:10] + " " if date else "") + utc[11:19] + " UTC"
+    what = {"A": "part A, session {s}: first of {n} processes", "L": "part L, session {s}", "C": "part C", "I": "control I (added after the first numbers were seen)"}
+    rows = ["7200 MT/s: first launch of every step of the rerun and of control I (added after the first numbers were seen)"]
+    for tg in STEPS:
+        l = LAUNCH[tg]
+        w = what[l["part"]].format(s=l["session"], n=len({r["proc_key"] for r in sel(dataset="rerun-A", session=l["session"])}) if l["part"] == "A" else 0)
+        if l["part"] == "C":
+            w = "part C" + (f", session {l['session']}" if l["session"] else ", extra process")
+        ld = f2(l["load1_at_first_launch"])
+        if l["part"] == "A":
+            used = sorted({(r["launch_utc"], r["proc_key"]): D(r["load1_at_launch"]) for r in A_OLD + A_NEW if r["session"] == l["session"]}.items())
+            need(used[0][1] == D(l["load1_at_first_launch"]), "part A: the first read process is not the first launch of the step")
+            ld += "<br>" + small(f"the {len(used)} read processes used: " + ", ".join(f2(v) for _, v in used))
+        rows.append([tg, w, hms(l["first_launch"]), ld, "-" if l["gap_s"] is None else f"{int(l['gap_s'])}"])
+    rows.append("Earlier rows used on this page: launch of every process used")
+    rows.append(["F72d12", "earlier run of the same boot, not part of the rerun", hms(F_OLD[0]["launch_utc"]), f2(F_OLD[0]["load1_at_launch"]), "-"])
+    for d, recs in (("A-1", B_A_OLD["A-1"] + B_A_NEW["A-1"]), ("A-2", B_A_OLD["A-2"] + B_A_NEW["A-2"]), ("A-3", B_A_OLD["A-3"]),
+                    ("L-1", B_L_OLD["L-1"]), ("L-2", B_L_OLD["L-2"]), ("L-3", B_L_OLD["L-3"]), ("L-4", B_L_OLD["L-4"])):
+        procs = {}
+        for r in recs:
+            procs[r["proc_key"]] = (r["launch_utc"], D(r["load1_at_launch"]))
+        ps = sorted(procs.values())
+        times = hms(ps[0][0], True) if len(ps) == 1 else f"{hms(ps[0][0], True)[:-4]} to {hms(ps[-1][0])}"
+        rows.append([d, f"8000 MT/s, {plural(len(ps), 'process')}", times, ", ".join(f2(x[1]) for x in ps), "-"])
+    return table(["Step or row", "What", "Launch", "#1-minute load average at launch", "#Time since the end of the previous 120-thread process of go.sh or go2.sh, s (given for their steps only)"], rows, "load")
+
+
+def detail_fig1():
+    rows = []
+    for b in F1_BLOCKS:
+        for g in b["groups"]:
+            rows.append(f"{b['title']} · {g['title'].split(' ·')[0]}")
+            for r in g["rows"]:
+                rows.append([esc(r["name"]) + "<br>" + small("; ".join(esc(n) for n in r["notes"])),
+                             f2(r["old"].med), ", ".join(f2(v) for v in r["old"].v), f2(r["new"].med), ", ".join(f2(v) for v in r["new"].v), drop_txt(r["drops"])])
+    return table(["Row", "#Old read kernel: median, GB/s", "#Its intervals, GB/s", "#Load-only kernel: median, GB/s", "#Its intervals, GB/s", "#Drop"], rows, "detail")
+
+
+def detail_fig2():
+    rows = []
+    for nm, blocks in (("Old read kernel", P_OLD_BLOCKS), ("Load-only loop", P_NEW_BLOCKS)):
+        for b in blocks:
+            rows.append(f"{nm} · {b['title']}")
+            for g in b["groups"]:
+                for r in g["rows"]:
+                    sp = "8000" if r["hollow"] else "7200"
+                    rows.append([esc(r["name"]) + (" " + small(esc("; ".join(plain_notes(r["notes"])))) if r["notes"] else ""), f"{sp} MT/s", str(r["rg"].n), ", ".join(f2(v) for v in sorted(r["rg"].v))])
+    return table(["Row", "Memory speed", "#n intervals", "Intervals, GB/s, sorted"], rows, "detail")
+
+
+# ------------------------------------------------------------------ word list
+def facts_words():
+    m = re.search(r"<summary>Words used here</summary>(.*?)</details>", FMD, re.S)
+    need(m, "FACTS.md: word list not found")
+    out = {}
+    for line in m.group(1).splitlines():
+        k = re.match(r"^- \*\*(.+?)\*\*: (.*)$", line)
+        if k:
+            out[k.group(1)] = k.group(2)
+    return out
+
+
+FW_WORDS = facts_words()
+
+
+def fw(key):
+    """A definition of the word list of FACTS.md, reused word for word ("this sheet" becomes "this page")."""
+    need(key in FW_WORDS, f"FACTS.md word list: term '{key}' not found")
+    t = FW_WORDS[key]
+    t = re.sub(r"\s*\[Ref\d+\]", "", t).replace("this sheet", "this page").replace("This sheet", "This page")
+    t = re.sub(r"`([^`]+)`", r"<code>\1</code>", esc(t).replace("&quot;", '"'))
+    return t[0].upper() + t[1:]
+
+
+WORDS = [
+    ("Q1, Q2", "The two questions of the rerun. Q1: is the whole-chip read rate of the new read kernel still below that of the old read kernel at 7200 MT/s, and by how much. Q2: did the rate of either kernel differ from the earlier runs at 8000 MT/s."),
+    ("CRB", fw("CRB")),
+    ("Whole chip, 120 threads", "The runs use 120 threads on CPUs 0-119 only. Each thread reads its own buffer of 256 MiB from memory."),
+    ("MT/s", fw("MT/s")),
+    ("Memory module", fw("Memory module")),
+    ("GB/s", "Gigabytes per second. 1 GB is 1e9 bytes."),
+    ("Read kernel", fw("Read kernel")),
+    ("Old read kernel", fw("Old read kernel")),
+    ("New read kernel", fw("New read kernel")),
+    ("asmread", fw("asmread")),
+    ("Load-only loop", fw("Load-only loop")),
+    ("bandwidth.c, bw_old, bw_new", fw("bandwidth.c, bw_old, bw_new")),
+    ("bwx12", "A later runner program for the same loops. It prints one row per thread."),
+    ("Process, interval, round, position", fw("Process, interval, round, position")),
+    ("Rate, total", fw("Rate, total")),
+    ("Median", "The middle value of a sorted list. For an even number of values it is the mean of the two middle values."),
+    ("Facts sheet", "The file FACTS.md with its data file facts.json. It is the detailed record of this rerun. A script built it from the raw result files."),
+    ("Session, step", fw("Session") + " go.sh ran 3 sessions and then one more part C process (T72C4), which the n text calls the extra process. A step is one part of one session, or one process of control I (added after the first numbers were seen)."),
+    ("go.sh, go2.sh", "The driver scripts. go.sh ran the planned rerun. go2.sh ran control I (added after the first numbers were seen)."),
+    ("Part A", fw("Part A")),
+    ("Part L", "One bwx12 process that times oldread, then asmread, then three other test loops that this page does not use. The process runs this sequence twice (rounds 0 and 1)."),
+    ("Part C, cfwd, crev, kernel order", fw("Part C") + " Each process runs its sequence twice (rounds 0 and 1). The kernel order is the order of the kernels in this sequence."),
+    ("Control I", fw("Control I")),
+    ("F72d12", "One process of the part L line. It ran at " + hm(F_OLD[0]["launch_utc"]) + " on 2026-11-17 for another test, in the same boot as the rerun and before it. It is not part of the rerun."),
+    ("T72A1 to T72I2", "The names of the result folders of the rerun: T72, then the part (A, L, C or I), then a number."),
+    ("A-1, A-2, A-3", "The 8000 MT/s rows for part A, all of 2026-11-13, with the same two binaries. A-1 is the original test. A-2 is a second run with another process order. A-3 is three more processes of bw_old read."),
+    ("L-1, L-2, L-3, L-4", "The 8000 MT/s rows for parts L and C, all with bwx12. L-1 (2026-11-17) used the identical argument line. L-2 to L-4 (2026-11-15) used 4 s measurements and counted other hardware events of the CPU. From these rows only oldread at position 0 and asmread at position 1 are used."),
+    ("Line, argument line, test line, spec file", fw("Line, argument line") + " A spec file is a text file with one argument line."),
+    ("Visit", fw("Visit")),
+    ("Idle start", fw("Idle start")),
+    ("Whole-pass stop", fw("Whole-pass stop")),
+    ("Pass count", "Part A only: the number of buffer passes that all 120 threads completed in one interval."),
+    ("Pair, drop", "A pair is one load-only interval and one old-kernel interval of the same process and round. The drop of a pair is (1 - load-only rate / old-kernel rate) x 100, in percent. In part A the two kernels run in two processes. There the drop uses the medians of the two processes of one session and round."),
+    ("List of 8000 MT/s rows", "The earlier 8000 MT/s runs with 12 modules that the rules file names for the comparison: rows A-1 to A-3 and L-1 to L-4. The list was fixed before the run."),
+    ("Pool", fw("Pool")),
+    ("Overlap of two ranges", fw("Ranges overlap")),
+    ("Distance of the nearest ends, farthest ends", fw("Distance of the nearest ends") + " The distance of the farthest ends is the highest value of the higher range minus the lowest value of the lower range."),
+    ("n", fw("n")),
+    ("Rules V1 to V4, F1, F2", fw("Rules V1 to V4, F1, F2")),
+    ("Boot, boot id", fw("Boot id") + " The rerun ran in boot 3bfc57a1 (the first 8 characters of its boot id)."),
+    ("MemTotal", fw("MemTotal")),
+    ("State line", fw("State line")),
+    ("Load average, load", fw("Load average")),
+    ("Exit status", "The number that a process returns when it ends. 0 means success."),
+    ("Root", "Administrator rights on the machine. They were not approved for this task."),
+    ("Journal, kernel log", "The kernel log is the list of messages of the Linux kernel. The journal is the saved system log of one boot. It holds the kernel log."),
+    ("Corrected hardware error record", "A record that the firmware writes into the kernel log. Its lines are marked &quot;[Hardware Error]&quot;. The severity &quot;corrected&quot; means that the hardware corrected the error itself."),
+    ("Firmware setting, DIMM Frequency, TXREQ", "A firmware setting is a value that the machine applies at its next start. &quot;DIMM Frequency&quot; sets the memory speed. TXREQ is a group of settings that were changed for another investigation."),
+    ("est.", fw("est.")),
+]
+
+# ------------------------------------------------------------------ text of the page
+BOOT8 = RERUN["boot_id"][:8]
+OLD_PARTS = [(rA_old, rPA_old), (rC_old, rPL_old), (rL_old, rPL_old)]          # old read kernel: parts A, C, L of the rerun
+OLD_SAME_PARTS = sum(1 for a, b in OLD_PARTS if a.overlaps(b))
+need(OLD_SAME_PARTS == 2 and not rL_old.overlaps(rPL_old), "Short version: the old read kernel does not overlap in 2 of 3 parts with part L as the other part")
+c_ao, c_aa = Q1["C_ao"]["drops"], Q1["C_aa"]["drops"]
+SHORT = [
+    f"Yes: at 7200 MT/s with 12 memory modules the new read kernel (a benchmark loop with loads only) still read {f1(min(c_ao))} % to {f1(max(c_ao))} % less than the "
+    f"old read kernel (each load is followed by an add) when the new one ran directly after the old one, and {f1(min(c_aa))} % to {f1(max(c_aa))} % less in the reverse kernel order "
+    f"({len(c_ao)} pairs of 6 s measurements per order).",
+    f"Against the earlier 8000 MT/s runs the old read kernel gives &quot;{WORD_SAME}&quot; in {OLD_SAME_PARTS} of the {len(OLD_PARTS)} parts of the rerun (these tests cannot exclude about {f1(width_pct(rPA_old))} % and {f1(width_pct(rPL_old))} %, est.), and in the other part it was lower by "
+    f"{f2(abs(L_OLD_NEAR))} GB/s at the nearest ends of the two ranges and by {f2(abs(L_OLD_MED))} GB/s between the medians "
+    f"({n7200(L_OLD)} against {n8000(P_L_OLD)}).",
+    f"In the rerun the load-only loop ran above the 8000 MT/s runs of the same test, but the same test gave load-only rates up to {f2(VISIT_HI - VISIT_LO)} GB/s apart at three times "
+    f"inside the one 7200 MT/s boot, and each memory speed has only 1 boot, so the data do not show that the memory speed is the cause.",
+]
+
+l1d = Q1["L1"]["drops"]
+SEC1_INTRO = UL([
+    f"The rerun ran three sessions, each with three parts {ref('go')}.",
+    f"Part A repeats the test of 2026-11-13 with the same two binaries {ref('ra')}. Its stop rule makes the total change in steps. So part A is less exact than parts L and C {ref('facts')}.",
+    f"Part C runs the new read kernel itself {ref('cfwd', 'crev')}. Part L runs asmread in its place: a hand-written loop with the same loads {ref('like')}.",
+    f"F72d12 (an earlier run of the same boot, not part of the rerun) and control I (added after the first numbers were seen) are shown apart and are never pooled with the rerun {ref('go2')}.",
+])
+SEC1_AFTER = UL([
+    f"The load-only kernel is below the old read kernel in all {len(ALL_7200_DROPS)} pairs of the 7200 MT/s rows.",
+    f"The drop is not one fixed value: the same test line gave {f1(min(SAME_LINE_DROPS))} % to {f1(max(SAME_LINE_DROPS))} % at three times inside the one 7200 MT/s boot (Figure 1).",
+    f"At 8000 MT/s the same line gave {drop_txt(l1d)} (row L-1). The data do not show that the smaller drop of the rerun is an effect of the memory speed (section 2).",
+])
+SEC2_INTRO = UL([
+    f"The comparison rules and the list of 8000 MT/s rows were fixed before the run {ref('rules')}. A rule compares two ranges: the lowest to the highest interval at 7200 MT/s, and the same for the 8000 MT/s rows of the list.",
+    f"Overlap: the wording is &quot;{WORD_SAME}&quot;. The width of the 8000 MT/s range is then the size that the test cannot exclude (est.).",
+    f"No overlap: the wording is &quot;{WORD_DIFF}&quot;.",
+    "Each memory speed has exactly 1 boot. So a difference between the two boots is not shown to be an effect of the memory speed.",
+])
+SEC2_BOOT = UL([
+    f"The same test line ran at three times in the 7200 MT/s boot: in {F72}, in part L, and in {CI}.",
+    f"The three asmread ranges do not overlap each other. Together they span {f2(VISIT_LO)} to {f2(VISIT_HI)} GB/s ({f2(VISIT_HI - VISIT_LO)} GB/s).",
+    "At the nearest ends and at the medians, part L lies farther above that earlier run than above the 8000 MT/s pool (Table 3). At the farthest ends the order is the opposite.",
+])
+INSUFF = UL([
+    "Insufficient data: whether a difference of the new read kernel comes from the memory speed. Runs in several boots per speed would resolve it (needs reboots and a change of the firmware setting).",
+    "Insufficient data: why the load-only loop moved between the three visits of the one 7200 MT/s boot. This measurement would resolve it: run the part L line alternately from an idle start and directly after part A, at least 3 times each in one boot. Repeat it some hours later.",
+    "Insufficient data: why the old read kernel was lower in part L. The same measurement would resolve it.",
+    "Insufficient data: no 8000 MT/s run of kernel read with bwx12. A run of the two part C lines at 8000 MT/s would resolve it (needs a change of the firmware setting and a reboot).",
+    "Insufficient data: whether hardware error records occurred during the rerun. A count of the &quot;[Hardware Error]&quot; lines of the kernel log would resolve it (needs root, which was not approved for this task).",
+    "Insufficient data: a direct reading of the memory speed during the rerun. The command <code>sudo dmidecode -t 17</code> prints the configured speed of every module and would resolve it (needs root).",
+    "Insufficient data: the firmware settings in the boot of the rerun, apart from the memory speed (Table 4). A settings list saved in that boot would resolve it (needs root).",
+])
+go_first = LAUNCH["T72A1"]
+others = [LAUNCH[t]["load1_at_first_launch"] for t in STEPS[1:10]]
+need(all(LAUNCH[t]["gap_s"] == 5 for t in STEPS[1:10]), "a step of go.sh did not start 5 s after the previous process")
+need(LAUNCH["T72A1"]["gap_s"] is None, "T72A1 is not the first step")
+need(D(go_first["load1_at_first_launch"]) < 1, "the first launch of the rerun is not an idle start")
+
+
+def state_table():
+    hw_refs = ref("journal", "L-1l", "L-2l", "L-3l", "L-4l")
+    rows = [
+        ["12 memory modules during the rerun",
+         f"MemTotal is {RERUN['memtotal_kB']} kB in all {len(ST_ALL)} state lines of the two run logs {ref('golog', 'go2log')}. The record of this boot holds the same value {ref('try6')}.",
+         "-"],
+        ["Memory speed 7200 MT/s during the rerun",
+         f"Every state line holds the boot id {RERUN['boot_id']}. The record of this boot, written at {TRY6_UTC[11:19]} UTC, shows 12 x &quot;Configured Memory Speed: 7200 MT/s&quot; {ref('try6')}.",
+         "The speed was not read during the rerun, because that needs root. Assumption, not measured: the speed does not change inside one boot."],
+        ["The rerun is complete",
+         f"go.sh ran from {RERUN['go_start'][11:19]} to {RERUN['go_end'][11:19]} UTC. The script stops at the first exit status other than 0 {ref('go')}. Its log holds {GO_DONE} &quot;done&quot; lines and the final line ALLDONE {ref('golog')}. So {GO_DONE} of {GO_DONE} steps ended with exit status 0.",
+         "-"],
+        ["Control I (added after the first numbers were seen) ran afterwards",
+         f"go2.sh ran from {RERUN['go2_start'][11:19]} to {RERUN['go2_end'][11:19]} UTC. Its log holds 2 &quot;done&quot; lines and the final line ALLDONE {ref('go2log')}.",
+         "Control I is not part of the plan fixed before the run."],
+        [f"F72d12 (earlier run of the same boot, not part of the rerun) belongs to boot {BOOT8}",
+         f"The record of this boot was written at {TRY6_UTC[11:19]} UTC {ref('try6')}. The boot list, saved at {BOOT_LAST} UTC, shows this boot from {BOOT_FIRST} UTC as the last boot {ref('boots')}. "
+         f"The F72d12 process ran from {F_LAUNCH} to {F_END} UTC {ref('F72l')}. The go.sh log shows the same boot id at {RERUN['go_start'][11:19]} UTC {ref('golog')}.",
+         "The proof uses these times only. The speed was not read during the process."],
+        ["Firmware settings other than the memory speed",
+         f"Two TXREQ settings were changed for another test on 2026-11-17, at {X1_T} and {X2_T} UTC {ref('x1', 'x2')}. Both were set back at {RV_T} UTC to their values of the 8000 MT/s boot {ref('rev')}. "
+         f"The settings list saved after that is equal to the list of the 8000 MT/s boot in all {N_SET} entries{'' if SAME_ORDER else ' (the order of the entries differs)'} {ref('qbase', 'qrev')}. "
+         f"The only later change on record is DIMM Frequency = 7200 MT/s (file time {D72_T} UTC) {ref('d72')}.",
+         f"{N_UNREAD} of the {N_SET} entries show no readable value in both lists. No full list was saved in the boot of the rerun. &quot;On record&quot; means the {len(SET_FILES)} files named set.txt in the results folder."],
+        ["The 8000 MT/s rows: one boot, 12 modules",
+         f"The saved kernel log of that boot runs from {BOOT8_FROM[:10]} {BOOT8_FROM[11:19]} to {BOOT8_TO[:10]} {BOOT8_TO[11:19]} UTC and holds the line &quot;This system has 12 DIMM sockets&quot; {ref('klog')}. "
+         f"Every 8000 MT/s process used here was launched inside this time. The settings list saved in that boot shows DIMM Frequency = 8000 MT/s {ref('qbase')}.",
+         "No reading of the applied speed was saved in that boot."],
+        ["Corrected hardware error records in the 8000 MT/s rows L-1 to L-4",
+         f"The journal of the 8000 MT/s boot holds such records during two of the four rows: {HW_L1} during L-1, and {HW_L2[0]} and {HW_L2[1]} during the two processes of L-2. It holds {HW_L34} during L-3 and L-4 {hw_refs}.",
+         "For the rerun the kernel log was not read (section 3)."],
+        ["The lowest asmread value of the 8000 MT/s pool comes from an interval with such records",
+         f"The lowest asmread value of the pool L-1 to L-4 is {f2(val(LOWEST_ASM))} GB/s. {len(HW_LOW)} corrected hardware error records have the journal time {HW_LOW[0]['ts'][11:19]} UTC, "
+         f"and this interval ran from {LOW_FROM} to {LOW_TO} UTC {ref('journal', 'L-2b', 'L-2l')}. "
+         f"Without this one interval the pool spans {rPL_asm_wo.txt()} GB/s ({n8000(rPL_asm_wo.recs)}). Part L ({rL_asm.txt()} GB/s, {n7200(L_ASM)}) still lies above it, by {f2(rL_asm.nearest(rPL_asm_wo))} GB/s at the nearest ends.",
+         "The data do not show that the records lowered this interval. Both times have a resolution of 1 s."],
+    ]
+    return table(["Fact", "Proof", "Limit"], rows, "state")
+
+
+LOAD = UL([
+    f"The first launch of the rerun was at a load of {f2(go_first['load1_at_first_launch'])}. The other {len(others)} steps of go.sh started at {f2(min(others))} to {f2(max(others))}, "
+    "each 5 s after a 120-thread process of the rerun had ended. A 1-minute average still counts such a process.",
+    f"Hypothesis, not tested: the whole load came from the rerun's own processes. What fits: the {len(ST_GO)} state lines of the go.sh log show 0 logins and processes of jhan, root and {len(SYSTEM_ACCOUNTS)} system accounts only {ref('golog')}. "
+    "A sample of the load once per second between two steps would confirm or reject it.",
+])
+
+CSS = """
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:#fcfcfb;color:#0b0b0b;font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:28px;line-height:1.25;margin:0 0 6px}
+h2{font-size:21px;margin:40px 0 10px;padding-top:14px;border-top:1px solid #e4e3df}
+h3{font-size:17px;margin:22px 0 8px}
+p{margin:8px 0}
+ul{margin:4px 0 8px;padding-left:22px}
+li{margin:3px 0}
+a{color:inherit}
+code{font-size:0.92em;overflow-wrap:anywhere}
+.sub{color:#52514e;font-size:14px;margin:0 0 18px}
+.short{background:#f1f0ec;border-left:4px solid #2a78d6;padding:12px 16px;margin:14px 0}
+.short p{margin:6px 0}
+dl.words{display:grid;grid-template-columns:minmax(120px,210px) 1fr;gap:4px 14px;margin:8px 0;font-size:15px}
+dl.words dt{font-weight:600}
+dl.words dd{margin:0}
+@media (max-width:600px){dl.words{grid-template-columns:1fr;gap:0}dl.words dd{margin:0 0 8px}}
+.tw{overflow-x:auto;margin:10px 0}
+table{border-collapse:collapse;font-size:14px;line-height:1.35}
+th,td{border-bottom:1px solid #e4e3df;padding:4px 10px;text-align:left;vertical-align:top}
+th{background:#f1f0ec;font-weight:600}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+td.n{white-space:nowrap}
+tr.grp td{background:#f8f7f4;font-weight:600;color:#52514e;font-size:13px}
+tr.grp td .tn{font-weight:400;color:#0b0b0b;font-size:13.5px}
+table.state td:first-child{min-width:150px}
+table.state td:nth-child(2){min-width:300px}
+table.state td:nth-child(3){min-width:190px}
+.hint{display:none;color:#52514e;font-size:13.5px;margin:4px 0}
+@media (max-width:760px){.hint{display:block}}
+table.q1 td:first-child{min-width:230px}
+table.q1 td:last-child{min-width:170px}
+table.q2 td:first-child{min-width:150px}
+table.q2 td:nth-child(2),table.q2 td:nth-child(3){min-width:170px}
+table.q2 td:last-child{min-width:230px}
+table.q2 th:nth-child(5){min-width:120px}
+table.narrow{max-width:760px}
+table.load td.n{white-space:normal}
+table.load td:nth-child(2){min-width:150px}
+table.load td:nth-child(3){min-width:110px}
+table.load td:nth-child(4){min-width:170px}
+table.load td:nth-child(5){min-width:190px}
+table.detail{font-size:13px}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.sm{color:#52514e;font-size:12.5px}
+figure{margin:16px 0}
+.fig{overflow-x:auto;border:1px solid #e4e3df;border-radius:6px;background:#fcfcfb}
+.fig svg{display:block;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+.panels{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+.panels>.fig,.panels>.col{flex:0 1 468px;max-width:100%}
+ul.how{font-size:13.5px;color:#52514e;margin:10px 0 0;padding-left:20px}
+.legend{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13.5px;margin:0 0 8px}
+.legend .li{display:inline-flex;align-items:center;gap:6px}
+.legend svg{flex:none}
+g.pt:hover .mk{stroke:#0b0b0b;stroke-width:1.6}
+figcaption{font-size:14.5px;margin-top:8px}
+.take{font-weight:600}
+.ref{color:#52514e;font-size:0.85em}
+.ref a{text-decoration:none;white-space:nowrap}
+.ref a:hover{text-decoration:underline}
+.note{color:#52514e;font-size:14px}
+.tcap{font-weight:600;font-size:14.5px;margin:18px 0 0}
+ol.refs{font-size:14px;padding-left:0;list-style:none}
+ol.refs li{margin:5px 0;overflow-wrap:anywhere}
+details{margin:8px 0}
+summary{cursor:pointer;font-weight:600}
+"""
+
+
+def build():
+    words = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in WORDS)
+    short = "".join(P(s) for s in SHORT)
+    how = ('<ul class="how">'
+           "<li>One dot is one interval of 120 threads.</li>"
+           "<li>A grey band spans the lowest to the highest interval of the 8000 MT/s rows of its block.</li>"
+           "<li>A 7200 MT/s row with all dots left of the band, or all dots right of it, does not overlap the 8000 MT/s range.</li>"
+           "<li>A bold line under a row name gives the place of the row against the band.</li>"
+           "<li>Right panel, 0.5 s blocks: the rule compares session 1 only (rule V3). Sessions 2 and 3 started 5 s after 120-thread work.</li>"
+           "<li>The two panels have different scales, and neither axis starts at 0.</li></ul>")
+    fig2 = ('<div class="panels"><div class="col"><div class="fig">'
+            + panel("Old read kernel", "bw_old read and bwx12 oldread", OLD_AX[0], OLD_AX[1], range(460, 477, 4), range(458, 477, 2), P_OLD_BLOCKS, BLUE,
+                    "Strip plot: every interval of the old read kernel, rows by method and memory speed")
+            + '</div>' + how + '</div><div class="fig">'
+            + panel("Load-only loop", "new read kernel, or asmread in its place where the label says so", NEW_AX[0], NEW_AX[1], range(280, 341, 20), range(280, 341, 10), P_NEW_BLOCKS, ORANGE,
+                    "Strip plot: every interval of the load-only loop, rows by method and memory speed")
+            + "</div></div>")
+    page = f"""<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Whole-chip read test at 7200 MT/s</title>
+<style>{CSS}</style>
+</head>
+<body>
+<main>
+<h1>Whole-chip read test at 7200 MT/s: old read kernel against new read kernel</h1>
+<p class="sub">2026-11-17, all times in UTC. Machine: CRB (an Arm reference server with 128 CPUs). 120 threads on CPUs 0-119, 256 MiB per thread. 12 memory modules at 7200 MT/s.</p>
+
+<h2 id="short">Short version</h2>
+<div class="short">
+{short}
+</div>
+{P(f"A script computes every measured number of this page from the data of the facts sheet {ref('gen', 'json', 'facts', 'build')}. An earlier report explains why the load-only loop reads less {ref('earlier')}.", "note")}
+
+<details><summary>Words used here</summary>
+<dl class="words">{words}</dl>
+</details>
+
+<h2 id="q1">1. Is the new read kernel still below the old one? (Q1)</h2>
+{SEC1_INTRO}
+<figure>
+{LEG1}
+<p class="hint">On a narrow screen: scroll the chart sideways to see the dots.</p>
+<div class="fig">{fig1()}</div>
+<figcaption><span class="take">Figure 1. The orange dot (load-only loop) lies below the blue dot (old read kernel) in every row. The blue dot stays, and the orange dot moves. In the {len(SAME_LINE_ROWS)} rows of the same test line in the 7200 MT/s boot, the old read kernel spans {f2(VISIT_OLD_HI - VISIT_OLD_LO)} GB/s ({f2(VISIT_OLD_LO)} to {f2(VISIT_OLD_HI)} GB/s). The load-only loop spans {f2(VISIT_HI - VISIT_LO)} GB/s there ({f2(VISIT_LO)} to {f2(VISIT_HI)} GB/s).</span> These rows are part L, {CI} and {F72}. Each span runs from the lowest to the highest interval. Each dot is the median of the intervals of its row. Point at a mark to see its values and its source file {ref('json')}.</figcaption>
+</figure>
+<p class="tcap">Table 1. The drop per part.</p>
+{q1_table()}
+{SEC1_AFTER}
+<details><summary>Table view of Figure 1: every row</summary>
+{detail_fig1()}
+</details>
+
+<h2 id="q2">2. Did a rate differ from the 8000 MT/s runs? (Q2)</h2>
+{SEC2_INTRO}
+<figure>
+{LEG2}
+<p class="hint">On a narrow screen: scroll each panel sideways to see all dots.</p>
+{fig2}
+<figcaption><span class="take">Figure 2. Old read kernel (left): every 7200 MT/s row overlaps the grey band of its block, except part L. Part L lies {f2(abs(L_OLD_NEAR))} GB/s below its band at the nearest ends, and its median is {f2(abs(L_OLD_MED))} GB/s lower. Load-only loop (right): every 7200 MT/s row that the rules compare lies to the right of its band, except F72d12 (earlier run of the same boot, not part of the rerun). F72d12 lies inside its band.</span> The figure shows {N_DOTS} intervals. Control I was added after the first numbers were seen. Table 2 gives n for every comparison {ref('json', 'rules')}.</figcaption>
+</figure>
+<p class="tcap">Table 2. 7200 MT/s against 8000 MT/s, one row per comparison. Each memory speed has 1 boot.</p>
+{q2_table()}
+<h3>The load-only loop moved inside the one 7200 MT/s boot</h3>
+{SEC2_BOOT}
+<p class="tcap">Table 3. The same kind of distance on both sides (asmread).</p>
+{dist_table()}
+<details><summary>Table view of Figure 2: every interval</summary>
+{detail_fig2()}
+</details>
+
+<h2 id="open">3. What the data do not show</h2>
+{INSUFF}
+
+<h2 id="state">4. Machine state and system load</h2>
+<p class="tcap">Table 4. Machine state: each fact with its proof and its limit.</p>
+{state_table()}
+<h3>System load</h3>
+{LOAD}
+<p class="tcap">Table 5. 1-minute load average of Linux, read by the scripts directly before each launch {ref('json')}.</p>
+{load_table()}
+
+<h2 id="refs">References</h2>
+<p class="note">R = <code>{R}</code><br>S = <code>{S}</code></p>
+<ol class="refs">\x01REFLIST\x01</ol>
+</main>
+</body>
+</html>
+"""
+    return page
+
+
+PAGE, UNCITED = number_refs(build())
+
+# ------------------------------------------------------------------ checks of the built page
+words_n = sum(len(re.findall(r"\S+", strip_tags(t))) for t in PROSE)
+check(700 <= words_n <= 1000, f"prose outside tables, captions, word list and references: {words_n} words (target 700 to 1000)")
+check(len(SHORT) == 3 and all(len(re.findall(r"[.!?](?:\s|$)", strip_tags(s).replace("MT/s.", "MT/s"))) == 1 for s in SHORT), "Short version: 3 sentences")
+check(not UNCITED, f"references: {len(REFS)} paths exist, {len(REFS) - len(UNCITED)} are cited in the body, numbered in the order of first use")
+check(not re.search(r"prefers-color-scheme|<script|<link|@import|url\(|<img|src=", PAGE), "one light theme, no script, no external file")
+# control I and F72d12 carry their label in every bullet, caption, table row and tooltip that names them
+units = [strip_tags(x[1]) for x in re.findall(r"<(li|p|figcaption|title|dd|tr)\b[^>]*>(.*?)</\1>", PAGE, re.S)]
+for lab, pat, must in (("control I", r"[Cc]ontrol I\b", ("added after the first numbers were seen",)),
+                       ("F72d12", r"F72d12", ("not part of the rerun",))):
+    hit = [u for u in units if re.search(pat, u)]
+    miss = [u for u in hit if not any(m in u for m in must)]
+    check(len(hit) > 0 and not miss, f"label of {lab}: {len(hit)} text units name it, {len(miss)} without the label in the same unit" + ("" if not miss else ": " + " | ".join(m[:60] for m in miss)))
+check(len(re.findall(r"<title>", PAGE)) - 1 >= N_DOTS + 2 * F1_NROWS, f"tooltips: {len(re.findall(r'<title>', PAGE)) - 1} SVG titles for {N_DOTS} interval dots and {3 * F1_NROWS} marks of figure 1")
+
+print("self-check list of make_report.py")
+bad = 0
+for ok, text in CHECKS:
+    bad += 0 if ok else 1
+    print(("  PASS  " if ok else "  FAIL  ") + text)
+print(f"{len(CHECKS) - bad} of {len(CHECKS)} checks pass")
+if bad:
+    print("NOT WRITTEN: a check failed. The page on disk was not changed.")
+    sys.exit(1)
+with open(OUT, "w", encoding="utf-8") as f:
+    f.write(PAGE)
+print(f"wrote {OUT} ({len(PAGE)} bytes)")
+print("Short version as built:")
+for s in SHORT:
+    print("  " + strip_tags(s))

@@ -1,0 +1,735 @@
+<!--
+  Rendered page (open in browser):
+  https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/titan/cache-perf/crb/new-test-kernel/whole-chip-read-drop.html
+  Backup renderer:
+  https://raw.githack.com/jhan-positron/notebook/main/artifacts/titan/cache-perf/crb/new-test-kernel/whole-chip-read-drop.html
+-->
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Whole-chip read drop</title>
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:#fcfcfb;color:#0b0b0b;font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+main{max-width:980px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:28px;line-height:1.25;margin:0 0 6px}
+h2{font-size:21px;margin:40px 0 10px;padding-top:14px;border-top:1px solid #e4e3df}
+h3{font-size:16px;margin:22px 0 6px}
+p{margin:8px 0}
+ul{margin:6px 0 10px;padding-left:22px}
+li{margin:4px 0}
+.sub{color:#52514e;font-size:14px;margin:0 0 18px}
+.short{background:#f1f0ec;border-left:4px solid #2a78d6;padding:12px 16px;margin:14px 0}
+.short p{margin:4px 0}
+dl.words{display:grid;grid-template-columns:minmax(120px,210px) 1fr;gap:4px 14px;margin:8px 0;font-size:15px}
+dl.words dt{font-weight:600}
+dl.words dd{margin:0}
+@media (max-width:600px){dl.words{grid-template-columns:1fr;gap:0}dl.words dd{margin:0 0 8px}}
+code{font-family:ui-monospace,"DejaVu Sans Mono",Menlo,Consolas,monospace;font-size:0.9em;background:#f1f0ec;padding:0 3px;border-radius:3px}
+.tw{overflow-x:auto;margin:10px 0}
+table{border-collapse:collapse;font-size:13.5px;line-height:1.35}
+th,td{border-bottom:1px solid #e4e3df;padding:3px 9px;text-align:left;vertical-align:top}
+th{background:#f1f0ec;font-weight:600}
+td:first-child{min-width:150px}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+caption{caption-side:top;text-align:left;font-weight:600;padding:4px 0;font-size:14px}
+figure{margin:16px 0}
+.fig{overflow-x:auto;border:1px solid #e4e3df;border-radius:6px;background:#fcfcfb}
+.fig svg{display:block;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+figcaption{font-size:14.5px;margin-top:6px}
+figcaption b{font-weight:600}
+.take{font-weight:600}
+.ref{color:#52514e;font-size:0.85em;white-space:nowrap}
+.note{color:#52514e;font-size:14px}
+ol.refs{font-size:14px;padding-left:0;list-style:none}
+ol.refs li{margin:5px 0;overflow-wrap:anywhere}
+details{margin:8px 0}
+summary{cursor:pointer;font-weight:600}
+</style>
+</head>
+<body>
+<main>
+
+<h1>Why the whole-chip read rate fell with the new test kernel</h1>
+<p class="sub">CRB, 120 threads, DRAM-sized buffers. Measured on 2026-11-15, 16:56 to 21:03 UTC. A generator script builds this page <span class="ref">[Ref19]</span>. Its numbers come from the facts sheet <span class="ref">[Ref1]</span>.</p>
+<h2 id="short">Short version</h2><div class="short">
+<p>With 120 threads only read really dropped (about 300 GB/s against about 468 GB/s, -36 %): copy did not drop, and most of the write drop comes from the stop rule of the benchmark.</p>
+<p>The new read loop holds loads only, and the out-of-order window of a core (the instructions that it can start ahead) then covers 36 to 40 cache lines (64 B each) instead of 18 to 22 (one-thread test), and the 120-thread total falls when the window covers more than about 30 lines.</p>
+<p>Adding 72 or more do-nothing instructions per 256 B of data read restores 459 to 480 GB/s, and the drop did not appear when the same loads read the memory in one scrambled order instead of address order, and the exact rule inside the core is not established.</p></div>
+<h2 id="words">Words used here</h2><dl class="words">
+<dt>CRB</dt><dd>The Arm server under test. It has 128 cores of type Neoverse V3AE. The tests use CPUs 0 to 119. The core clock is 2.8 GHz.</dd>
+<dt>kernel</dt><dd>One timed loop of the benchmark. It is not the Linux kernel. This page mostly says "loop".</dd>
+<dt>old read (<code>oldread</code>)</dt><dd>The read loop of the old benchmark, written in C. Per 128 B it holds 4 load-pair instructions and 8 vector adds.</dd>
+<dt>new read, asm read (<code>asmread</code>)</dt><dd>The read loops of the new benchmark. One is written in C and one in assembly. Both hold 8 load-pair instructions per 256 B and nothing else. This page calls them the load-only loop.</dd>
+<dt>nop</dt><dd>An instruction that does nothing. It still uses one place in the window.</dd>
+<dt>padded loop</dt><dd>The load-only loop with nop instructions added. <code>read_nop96</code> has 96 nop per 256 B. <code>read_nop256</code> has 256 nop per 256 B.</dd>
+<dt>ldp, ldr, prfm</dt><dd>Arm instructions: load a pair of registers, load one register, prefetch.</dd>
+<dt><code>read_1pl</code></dt><dd>A loop with 4 single loads (ldr) per 256 B, one load per 64 B line, and nothing else. <code>read_1pl_nop96</code> is the same loop plus 96 nop.</dd>
+<dt><code>read_daddN</code>, <code>read_iadd16</code></dt><dd>The load-only loop plus N vector adds per 256 B. In <code>read_dadd16</code> the adds use the loaded data. In <code>read_iadd16</code> the 16 adds do not use the loaded data.</dd>
+<dt><code>read_spN</code>, <code>read_sparse</code></dt><dd>Loops with 4 load-pair instructions and N nop per 128 B. <code>read_sparse</code> has 9 nop.</dd>
+<dt><code>read_pfN</code></dt><dd>The load-only loop plus software prefetch instructions (prfm) that ask for the data N bytes ahead.</dd>
+<dt>sequential order, sequential stream</dt><dd>The loop reads its buffer from the lowest address to the highest. All loops of sections 1 to 5 do this.</dd>
+<dt>scrambled order</dt><dd>The loop reads the same bytes, but it does not follow the addresses. Each buffer is cut into chunks of 2 MiB. One chunk has 8192 blocks of 256 B. The loop visits every block of a chunk once, in an order that jumps between the blocks.</dd>
+<dt><code>rand_nop0</code>, <code>rand_nop96</code>, <code>rand_nop256</code></dt><dd>The scrambled-order loops. They hold 8 load-pair instructions per 256 B and 0, 96 or 256 nop. These are the loads and the padding of <code>asmread</code>, <code>read_nop96</code> and <code>read_nop256</code>.</dd>
+<dt>request limit</dt><dd>The largest number of memory requests that a core keeps outstanding at one time.</dd>
+<dt>DRAM</dt><dd>The main memory of the machine. It lies outside the caches of the chip.</dd>
+<dt>prefetcher</dt><dd>The part of a core that requests data before the loop asks for it. The hardware prefetcher does this without any instruction. A software prefetch is an instruction in the loop.</dd>
+<dt>streaming core</dt><dd>A core that runs a read loop over its buffer.</dd>
+<dt>latency probe, pointer chase</dt><dd>A test loop on one core. Each load gives the address of the next load, and each load misses the cache. The time of one step is about the time of one DRAM read.</dd>
+<dt>huge page</dt><dd>A memory page of 2 MiB. The normal page is 4 KiB.</dd>
+<dt>line</dt><dd>One cache line. It is 64 B.</dd>
+<dt>window (out-of-order window)</dt><dd>The instructions that a core holds between fetch and retirement. The core can start the loads of all instructions in the window before the first one finishes.</dd>
+<dt>window depth in lines</dt><dd>The number of 64 B lines that the loads inside one full window touch. It was measured for each loop with one thread on CPU 2. The result is a range, for example 36 to 40 lines.</dd>
+<dt>lines in flight</dt><dd>The lines that one core has requested from memory and has not yet received.</dd>
+<dt>mesh 0, mesh 1</dt><dd>The chip has two meshes (grids of links that connect cores, cache and memory ports). CPUs 0 to 63 are on mesh 0. CPUs 64 to 119 are on mesh 1.</dd>
+<dt>64+56</dt><dd>64 threads on CPUs 0 to 63 and 56 threads on CPUs 64 to 119. Each thread has its own 256 MiB buffer. The data comes from DRAM. Other layouts use the same form, for example 64+0.</dd>
+<dt>gateway</dt><dd>The link that carries requests and data from one mesh to the other mesh.</dd>
+<dt>memory port</dt><dd>A port of the mesh that leads to a DRAM controller. The counters cover 24 ports.</dd>
+<dt>home node</dt><dd>A node of the mesh that receives the memory requests of the cores and passes them on.</dd>
+<dt>busy level</dt><dd>A value from 0 to 3 that a response message carries. A higher value says that the sender is more busy.</dd>
+<dt>flit</dt><dd>One unit of transfer on a mesh link. Two data flits carry one line.</dd>
+<dt>whole-pass stop</dt><dd>The stop rule of <code>bandwidth.c</code> (the benchmark). A thread stops only at the end of a whole pass over its buffer. The threads stop at different times.</dd>
+<dt>common stop</dt><dd>All threads stop at the same time.</dd>
+<dt>slow, between, fast, fastest</dt><dd>Names for the 120-thread read total. Slow is 280 to 310 GB/s (230 to 235 GB/s for <code>read_1pl</code>). Between is 325 to 367 GB/s. Fast is 459 to 480 GB/s. Fastest is 544 to 549 GB/s (<code>read_nop256</code>).</dd>
+<dt>squeezed</dt><dd>A mesh is squeezed when its threads read less because the other mesh runs a different loop.</dd>
+<dt>total</dt><dd>The sum of the rates of all threads.</dd>
+<dt>n</dt><dd>The number of timed intervals behind a value.</dd>
+<dt>GB</dt><dd>1e9 bytes. MiB and KiB are powers of 2.</dd>
+<dt>est.</dt><dd>Estimate. The value is computed with an assumption. It is not measured directly.</dd>
+</dl>
+<h2 id="a">1. Only read really dropped</h2>
+<ul>
+<li>The original run used the whole-pass stop and 0.5 s per interval <span class="ref">[Ref2]</span>. Read fell there by more than one third. Write fell by a smaller amount. Copy did not fall.</li>
+<li>Copy was measured again at 64+56 with a common stop and 6 s. All five copy loops gave 152.4 to 153.6 GB/s <span class="ref">[Ref3]</span>.</li>
+<li>Write was measured again at 64+56 with a common stop and 8 s. The old loop gave 126.1 to 126.8 GB/s. The new loops gave 120.2 to 129.3 GB/s <span class="ref">[Ref3]</span>. Padding does not change write.</li>
+<li>The write drop depends on the stop rule. Earlier controlled runs compared old write and new C write under four timing rules <span class="ref">[Ref4]</span>. The old loop is 21.5 % higher with the whole-pass stop and 0.5 s. It is 3.1 % to 3.7 % higher with a common stop.</li>
+<li>So most of the write drop in the original run comes from the whole-pass stop rule. 3 to 4 % remains with a common stop.</li>
+<li>The original file supports this. At equal pass count (296 passes) old write is 144.2 to 145.6 GB/s. New write is 143.6 GB/s and 147.8 GB/s <span class="ref">[Ref2]</span>.</li>
+<li>Read is different. The drop stays with a common stop: 288.5 to 309.8 GB/s against 465.5 to 470.1 GB/s (section 2) <span class="ref">[Ref6]</span>.</li>
+</ul>
+<div class="tw"><table><caption>Original run: total in GB/s, 120 threads, whole-pass stop, 0.5 s (n = 6 per loop) <span class="ref">[Ref2]</span></caption><thead><tr><th>test</th><th class="n">old C loop</th><th class="n">new C loop</th><th class="n">asm loop</th><th class="n">result</th></tr></thead><tbody><tr><td>read</td><td class="n">464.4–466.7</td><td class="n">279.7–304.1</td><td class="n">271.1–305.9</td><td class="n">drop</td></tr><tr><td>write</td><td class="n">140.9–186.9 (median 144.6)</td><td class="n">123.5–147.8 (median 131.9)</td><td class="n">not in the facts sheet</td><td class="n">smaller drop</td></tr><tr><td>copy (read + written bytes)</td><td class="n">155.0–158.6</td><td class="n">153.9–162.4</td><td class="n">not in the facts sheet</td><td class="n">no drop</td></tr></tbody></table></div>
+<div class="tw"><table><caption>Controlled runs at 64+56 with a common stop: total in GB/s (n = 2 intervals per loop) <span class="ref">[Ref3]</span></caption><thead><tr><th>test</th><th class="n">interval</th><th class="n">old loop</th><th class="n">asm loop</th><th class="n">new C loop</th><th class="n">padded loops</th></tr></thead><tbody><tr><td>copy</td><td class="n">6 s</td><td class="n">152.7–153.0</td><td class="n">152.4–152.6</td><td class="n">152.7–153.4</td><td class="n">copy_nop96 153.2–153.6, copy_nop192 153.3–153.4</td></tr><tr><td>write</td><td class="n">8 s</td><td class="n">126.1–126.8</td><td class="n">121.3–121.8</td><td class="n">121.4–129.3</td><td class="n">write_nop32, 96, 128, 256: 120.2–122.9</td></tr></tbody></table></div>
+<div class="tw"><table><caption>Old write against new C write under four timing rules: median total in GB/s (64 processes, 64 intervals per cell) <span class="ref">[Ref4]</span></caption><thead><tr><th>stop rule</th><th class="n">interval</th><th class="n">old write</th><th class="n">new C write</th><th class="n">old above new</th></tr></thead><tbody><tr><td>whole-pass stop</td><td class="n">0.5 s</td><td class="n">144.1</td><td class="n">118.6</td><td class="n">+21.5 %</td></tr><tr><td>whole-pass stop</td><td class="n">15 s</td><td class="n">131.3</td><td class="n">117.4</td><td class="n">+11.9 %</td></tr><tr><td>common stop</td><td class="n">0.5 s</td><td class="n">126.4</td><td class="n">122.0</td><td class="n">+3.7 %</td></tr><tr><td>common stop</td><td class="n">15 s</td><td class="n">126.6</td><td class="n">122.8</td><td class="n">+3.1 %</td></tr></tbody></table></div>
+<ul><li>Writers on one mesh only (64+0) reach 455 GB/s with <code>oldwrite</code>, <code>asmwrite</code>, <code>write_nop128</code> and <code>write_nop256</code> <span class="ref">[Ref3]</span>.</li><li>Writers at 32+32 reach 204 to 209 GB/s <span class="ref">[Ref3]</span>.</li><li>So the write total falls from 455 GB/s (64+0) to 120 to 129 GB/s (64+56) when writers run on both meshes. The fall is the same for old and new loops. It is not explained here.</li></ul>
+<h2 id="b">2. The read rate follows the window depth</h2>
+<ul>
+<li>A window test with one thread on CPU 2 measured how much one core holds in its window <span class="ref">[Ref5]</span>. The window holds 684 nop, or 159 vector-register writes, or 191 integer adds.</li>
+<li>The same test measured the window depth of each loop in lines. One loop body was the unit. The result is a range: the last count that fits, to the first count that does not fit <span class="ref">[Ref5]</span>.</li>
+<li>29 loop variants were then run at 64+56. Figure 1 shows the total of each variant against its window depth <span class="ref">[Ref6]</span>.</li>
+<li>Every variant with a window of 32 lines or more is slow: 280 to 310 GB/s. <code>read_1pl</code> covers about 160 lines and gives 230 to 235 GB/s.</li>
+<li>Every variant whose measured range is at or below 24 to 28 lines is fast: 459 to 480 GB/s. <code>read_nop256</code> covers 8 to 12 lines and gives 543.9 to 549.0 GB/s.</li>
+<li>The four variants whose measured range lies inside 26 to 32 lines are slow or between (<code>read_nop56</code>, <code>read_dadd4</code>, <code>read_nop64</code>, <code>read_sp32</code>).</li>
+</ul>
+<figure><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" width="920" height="480" viewBox="0 0 920 480" role="img" aria-label="Total read rate at 64+56 against the measured window depth of each loop variant">
+<rect x="0" y="0" width="920" height="480" fill="#fcfcfb"/>
+<rect x="456.0" y="30.0" width="56.0" height="360.0" fill="#8a8880" fill-opacity="0.16"></rect>
+<text x="484.0" y="44.0" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="600">switch from fast to slow</text>
+<text x="484.0" y="58.0" font-size="11" text-anchor="middle" fill="#52514e">28–32 lines</text>
+<line x1="64.0" y1="390.0" x2="694.0" y2="390.0" stroke="#e4e3df" stroke-width="1"/>
+<line x1="744.0" y1="390.0" x2="884.0" y2="390.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="58.0" y="394.0" font-size="11" text-anchor="end" fill="#52514e">0</text>
+<line x1="64.0" y1="330.0" x2="694.0" y2="330.0" stroke="#e4e3df" stroke-width="1"/>
+<line x1="744.0" y1="330.0" x2="884.0" y2="330.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="58.0" y="334.0" font-size="11" text-anchor="end" fill="#52514e">100</text>
+<line x1="64.0" y1="270.0" x2="694.0" y2="270.0" stroke="#e4e3df" stroke-width="1"/>
+<line x1="744.0" y1="270.0" x2="884.0" y2="270.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="58.0" y="274.0" font-size="11" text-anchor="end" fill="#52514e">200</text>
+<line x1="64.0" y1="210.0" x2="694.0" y2="210.0" stroke="#e4e3df" stroke-width="1"/>
+<line x1="744.0" y1="210.0" x2="884.0" y2="210.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="58.0" y="214.0" font-size="11" text-anchor="end" fill="#52514e">300</text>
+<line x1="64.0" y1="150.0" x2="694.0" y2="150.0" stroke="#e4e3df" stroke-width="1"/>
+<line x1="744.0" y1="150.0" x2="884.0" y2="150.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="58.0" y="154.0" font-size="11" text-anchor="end" fill="#52514e">400</text>
+<line x1="64.0" y1="90.0" x2="694.0" y2="90.0" stroke="#e4e3df" stroke-width="1"/>
+<line x1="744.0" y1="90.0" x2="884.0" y2="90.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="58.0" y="94.0" font-size="11" text-anchor="end" fill="#52514e">500</text>
+<line x1="64.0" y1="30.0" x2="694.0" y2="30.0" stroke="#e4e3df" stroke-width="1"/>
+<line x1="744.0" y1="30.0" x2="884.0" y2="30.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="58.0" y="34.0" font-size="11" text-anchor="end" fill="#52514e">600</text>
+<line x1="64.0" y1="390.0" x2="694.0" y2="390.0" stroke="#52514e" stroke-width="1"/>
+<line x1="744.0" y1="390.0" x2="884.0" y2="390.0" stroke="#52514e" stroke-width="1"/>
+<line x1="64.0" y1="30.0" x2="64.0" y2="390.0" stroke="#52514e" stroke-width="1"/>
+<text x="24.0" y="16.0" font-size="12" text-anchor="start" fill="#52514e">total read rate at 64+56, GB/s (axis starts at 0)</text>
+<line x1="64.0" y1="390.0" x2="64.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="64.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">0</text>
+<line x1="134.0" y1="390.0" x2="134.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="134.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">5</text>
+<line x1="204.0" y1="390.0" x2="204.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="204.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">10</text>
+<line x1="274.0" y1="390.0" x2="274.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="274.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">15</text>
+<line x1="344.0" y1="390.0" x2="344.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="344.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">20</text>
+<line x1="414.0" y1="390.0" x2="414.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="414.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">25</text>
+<line x1="484.0" y1="390.0" x2="484.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="484.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">30</text>
+<line x1="554.0" y1="390.0" x2="554.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="554.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">35</text>
+<line x1="624.0" y1="390.0" x2="624.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="624.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">40</text>
+<line x1="694.0" y1="390.0" x2="694.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="694.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">45</text>
+<line x1="744.0" y1="390.0" x2="744.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="744.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">150</text>
+<line x1="814.0" y1="390.0" x2="814.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="814.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">160</text>
+<line x1="884.0" y1="390.0" x2="884.0" y2="394.0" stroke="#52514e" stroke-width="1"/>
+<text x="884.0" y="407.0" font-size="11" text-anchor="middle" fill="#52514e">170</text>
+<line x1="710.0" y1="397.0" x2="718.0" y2="383.0" stroke="#52514e" stroke-width="1.5"/>
+<line x1="718.0" y1="397.0" x2="726.0" y2="383.0" stroke="#52514e" stroke-width="1.5"/>
+<text x="719.0" y="376.0" font-size="10" text-anchor="middle" fill="#52514e">axis break</text>
+<text x="379.0" y="428.0" font-size="12" text-anchor="middle" fill="#52514e">measured window depth, cache lines (mark = middle of the measured range, thin bar = the range)</text>
+<line x1="176.0" y1="62.1" x2="232.0" y2="62.1" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="204.0" y1="63.7" x2="204.0" y2="60.6" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="288.0" y1="108.3" x2="344.0" y2="108.3" stroke="#eb6834" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="316.0" y1="108.5" x2="316.0" y2="108.2" stroke="#eb6834" stroke-width="2.5"/>
+<line x1="316.0" y1="109.3" x2="372.0" y2="109.3" stroke="#eb6834" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="344.0" y1="110.7" x2="344.0" y2="107.9" stroke="#eb6834" stroke-width="2.5"/>
+<line x1="400.0" y1="114.5" x2="456.0" y2="114.5" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="428.0" y1="114.6" x2="428.0" y2="114.4" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="568.0" y1="210.5" x2="624.0" y2="210.5" stroke="#1baf7a" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="596.0" y1="216.9" x2="596.0" y2="204.1" stroke="#1baf7a" stroke-width="2.5"/>
+<line x1="786.0" y1="250.4" x2="842.0" y2="250.4" stroke="#1baf7a" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="814.0" y1="251.9" x2="814.0" y2="249.0" stroke="#1baf7a" stroke-width="2.5"/>
+<line x1="232.0" y1="103.2" x2="288.0" y2="103.2" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="260.0" y1="103.3" x2="260.0" y2="103.1" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="232.0" y1="102.2" x2="288.0" y2="102.2" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="254.0" y1="102.2" x2="254.0" y2="102.1" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="288.0" y1="109.1" x2="344.0" y2="109.1" stroke="#eb6834" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="310.0" y1="110.0" x2="310.0" y2="108.1" stroke="#eb6834" stroke-width="2.5"/>
+<line x1="288.0" y1="107.3" x2="344.0" y2="107.3" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="322.0" y1="107.3" x2="322.0" y2="107.3" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="288.0" y1="104.9" x2="344.0" y2="104.9" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="304.0" y1="105.7" x2="304.0" y2="104.2" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="316.0" y1="105.8" x2="344.0" y2="105.8" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="330.0" y1="105.8" x2="330.0" y2="105.8" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="344.0" y1="108.0" x2="372.0" y2="108.0" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="358.0" y1="108.0" x2="358.0" y2="107.9" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="344.0" y1="112.3" x2="400.0" y2="112.3" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="372.0" y1="112.3" x2="372.0" y2="112.3" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="344.0" y1="109.2" x2="400.0" y2="109.2" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="366.0" y1="110.7" x2="366.0" y2="107.6" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="372.0" y1="109.9" x2="400.0" y2="109.9" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="386.0" y1="109.9" x2="386.0" y2="109.9" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="400.0" y1="114.1" x2="456.0" y2="114.1" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="422.0" y1="114.2" x2="422.0" y2="114.1" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="400.0" y1="113.5" x2="456.0" y2="113.5" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="434.0" y1="113.5" x2="434.0" y2="113.5" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="400.0" y1="112.5" x2="456.0" y2="112.5" stroke="#eb6834" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="416.0" y1="112.6" x2="416.0" y2="112.4" stroke="#eb6834" stroke-width="2.5"/>
+<line x1="428.0" y1="170.1" x2="484.0" y2="170.1" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="456.0" y1="170.2" x2="456.0" y2="170.0" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="456.0" y1="221.0" x2="512.0" y2="221.0" stroke="#eb6834" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="484.0" y1="221.9" x2="484.0" y2="220.1" stroke="#eb6834" stroke-width="2.5"/>
+<line x1="456.0" y1="204.7" x2="512.0" y2="204.7" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="484.0" y1="204.8" x2="484.0" y2="204.5" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="456.0" y1="192.2" x2="512.0" y2="192.2" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="484.0" y1="194.7" x2="484.0" y2="189.7" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="512.0" y1="220.8" x2="540.0" y2="220.8" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="526.0" y1="221.5" x2="526.0" y2="220.1" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="512.0" y1="214.1" x2="568.0" y2="214.1" stroke="#eb6834" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="540.0" y1="215.9" x2="540.0" y2="212.2" stroke="#eb6834" stroke-width="2.5"/>
+<line x1="512.0" y1="206.2" x2="568.0" y2="206.2" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="540.0" y1="206.8" x2="540.0" y2="205.7" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="568.0" y1="213.8" x2="624.0" y2="213.8" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="590.0" y1="219.1" x2="590.0" y2="208.4" stroke="#2a78d6" stroke-width="2.5"/>
+<line x1="568.0" y1="210.8" x2="624.0" y2="210.8" stroke="#1baf7a" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="602.0" y1="215.7" x2="602.0" y2="205.9" stroke="#1baf7a" stroke-width="2.5"/>
+<line x1="596.0" y1="211.2" x2="652.0" y2="211.2" stroke="#2a78d6" stroke-width="1.2" stroke-opacity="0.55"/>
+<line x1="624.0" y1="213.2" x2="624.0" y2="209.1" stroke="#2a78d6" stroke-width="2.5"/>
+<circle cx="624.0" cy="211.2" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_sparse: window 38 to 42 lines, total 294.6 to 301.5 GB/s, n = 6 intervals, slow</title></circle>
+<rect x="597.5" y="206.3" width="9.0" height="9.0" fill="#1baf7a" stroke="#fcfcfb" stroke-width="1.5"><title>read_pf2048: window 36 to 40 lines, total 290.5 to 306.8 GB/s, n = 11 intervals, slow</title></rect>
+<circle cx="590.0" cy="213.8" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop32: window 36 to 40 lines, total 284.8 to 302.7 GB/s, n = 4 intervals, slow</title></circle>
+<circle cx="540.0" cy="206.2" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop48: window 32 to 36 lines, total 305.4 to 307.2 GB/s, n = 2 intervals, slow</title></circle>
+<polygon points="540.0,208.6 534.5,218.6 545.5,218.6" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>read_dadd2: window 32 to 36 lines, total 290.1 to 296.4 GB/s, n = 2 intervals, slow</title></polygon>
+<circle cx="526.0" cy="220.8" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_sp24: window 32 to 34 lines, total 280.9 to 283.2 GB/s, n = 2 intervals, slow</title></circle>
+<circle cx="484.0" cy="204.7" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop56: window 28 to 32 lines, total 308.6 to 309.1 GB/s, n = 2 intervals, slow</title></circle>
+<polygon points="484.0,215.5 478.5,225.5 489.5,225.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>read_dadd4: window 28 to 32 lines, total 280.1 to 283.2 GB/s, n = 2 intervals, slow</title></polygon>
+<circle cx="484.0" cy="192.2" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop64: window 28 to 32 lines, total 325.5 to 333.9 GB/s, n = 13 intervals, between</title></circle>
+<circle cx="456.0" cy="170.1" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_sp32: window 26 to 30 lines, total 366.3 to 366.6 GB/s, n = 2 intervals, between</title></circle>
+<polygon points="416.0,107.0 410.5,117.0 421.5,117.0" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>read_dadd8: window 24 to 28 lines, total 462.4 to 462.6 GB/s, n = 2 intervals, fast</title></polygon>
+<circle cx="434.0" cy="113.5" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_1pl_nop96: window 24 to 28 lines, total 460.8 to 460.9 GB/s, n = 2 intervals, fast</title></circle>
+<circle cx="422.0" cy="114.1" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop80: window 24 to 28 lines, total 459.7 to 459.8 GB/s, n = 2 intervals, fast</title></circle>
+<circle cx="386.0" cy="109.9" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_sp40: window 22 to 24 lines, total 466.8 to 466.9 GB/s, n = 2 intervals, fast</title></circle>
+<circle cx="372.0" cy="112.3" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop88: window 20 to 24 lines, total 462.8 to 462.9 GB/s, n = 2 intervals, fast</title></circle>
+<circle cx="366.0" cy="109.2" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop96: window 20 to 24 lines, total 465.5 to 470.6 GB/s, n = 16 intervals, fast</title></circle>
+<circle cx="358.0" cy="108.0" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_sp48: window 20 to 22 lines, total 470.0 to 470.1 GB/s, n = 2 intervals, fast</title></circle>
+<circle cx="330.0" cy="105.8" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_sp56: window 18 to 20 lines, total 473.6 to 473.7 GB/s, n = 2 intervals, fast</title></circle>
+<polygon points="310.0,103.6 304.5,113.6 315.5,113.6" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>read_dadd16: window 16 to 20 lines, total 466.7 to 469.8 GB/s, n = 5 intervals, fast</title></polygon>
+<circle cx="322.0" cy="107.3" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop112: window 16 to 20 lines, total 471.1 to 471.2 GB/s, n = 2 intervals, fast</title></circle>
+<circle cx="304.0" cy="104.9" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop128: window 16 to 20 lines, total 473.8 to 476.4 GB/s, n = 9 intervals, fast</title></circle>
+<circle cx="260.0" cy="103.2" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop160: window 12 to 16 lines, total 477.9 to 478.2 GB/s, n = 2 intervals, fast</title></circle>
+<circle cx="254.0" cy="102.2" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop192: window 12 to 16 lines, total 479.6 to 479.8 GB/s, n = 2 intervals, fast</title></circle>
+<rect x="809.5" y="245.9" width="9.0" height="9.0" fill="#1baf7a" stroke="#fcfcfb" stroke-width="1.5"><title>read_1pl: window 156 to 164 lines, total 230.2 to 235.0 GB/s, n = 16 intervals, slow</title></rect>
+<rect x="591.5" y="206.0" width="9.0" height="9.0" fill="#1baf7a" stroke="#fcfcfb" stroke-width="1.5"><title>asmread (= new C read): window 36 to 40 lines, total 288.5 to 309.8 GB/s, n = 22 intervals, slow</title></rect>
+<circle cx="428.0" cy="114.5" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop72: window 24 to 28 lines, total 459.0 to 459.3 GB/s, n = 2 intervals, fast</title></circle>
+<polygon points="344.0,103.8 338.5,113.8 349.5,113.8" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>oldread (old C read): window 18 to 22 lines, total 465.5 to 470.1 GB/s, n = 22 intervals, fast</title></polygon>
+<polygon points="316.0,102.8 310.5,112.8 321.5,112.8" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>read_iadd16: window 16 to 20 lines, total 469.2 to 469.7 GB/s, n = 2 intervals, fast</title></polygon>
+<circle cx="204.0" cy="62.1" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>read_nop256: window 8 to 12 lines, total 543.9 to 549.0 GB/s, n = 9 intervals, fastest</title></circle>
+<text x="216.0" y="66.1" font-size="12" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">read_nop256: 543.9–549.0 GB/s</text>
+<line x1="258.0" y1="84.0" x2="316.0" y2="108.3" stroke="#52514e" stroke-width="0.8"/>
+<text x="70.0" y="84.0" font-size="12" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">read_iadd16: 469.2–469.7 GB/s</text>
+<line x1="250.0" y1="142.0" x2="344.0" y2="109.3" stroke="#52514e" stroke-width="0.8"/>
+<text x="70.0" y="150.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">old read loop (oldread):</text>
+<text x="70.0" y="165.0" font-size="12" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">465.5–470.1 GB/s</text>
+<line x1="516.0" y1="130.0" x2="428.0" y2="114.5" stroke="#52514e" stroke-width="0.8"/>
+<text x="519.0" y="134.0" font-size="12" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">read_nop72: 459.0–459.3</text>
+<line x1="596.0" y1="247.0" x2="596.0" y2="216.5" stroke="#52514e" stroke-width="0.8"/>
+<text x="500.0" y="260.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">new load-only loop (asmread):</text>
+<text x="500.0" y="275.0" font-size="12" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">288.5–309.8 GB/s</text>
+<text x="814.0" y="272.4" font-size="12" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">read_1pl</text>
+<text x="814.0" y="287.4" font-size="12" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">230.2–235.0 GB/s</text>
+<text x="70.0" y="318.0" font-size="12" text-anchor="start" fill="#52514e">Measured range at or below 24–28 lines:</text>
+<text x="70.0" y="334.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">fast, 459 GB/s or more</text>
+<text x="530.0" y="318.0" font-size="12" text-anchor="start" fill="#52514e">Window of 32 lines or more:</text>
+<text x="530.0" y="334.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">slow, 280–310 GB/s</text>
+<text x="530.0" y="350.0" font-size="12" text-anchor="start" fill="#52514e">(read_1pl: 230–235 GB/s)</text>
+<circle cx="69.0" cy="456.0" r="4.5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"></circle>
+<text x="80.0" y="460.0" font-size="12" text-anchor="start" fill="#52514e">loads plus padding instructions (nop)</text>
+<polygon points="364.5,450.5 359.0,460.5 370.0,460.5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"></polygon>
+<text x="375.5" y="460.0" font-size="12" text-anchor="start" fill="#52514e">loads plus vector adds</text>
+<rect x="551.1" y="451.5" width="9.0" height="9.0" fill="#1baf7a" stroke="#fcfcfb" stroke-width="1.5"></rect>
+<text x="566.6" y="460.0" font-size="12" text-anchor="start" fill="#52514e">plain loads only</text>
+<text x="700.0" y="460.0" font-size="12" text-anchor="start" fill="#52514e">vertical bar = min to max</text>
+</svg></div><figcaption><b>Figure 1.</b> Total read rate at 64+56 against the measured window depth, one mark per loop variant (29 marks). The window depth comes from a test with one thread on CPU 2. 10 marks would cover other marks. They are moved sideways by at most 12.0 px (0.86 lines). The thin horizontal bar and the table below give the exact range. Hover over a mark for its values. <span class="take">Takeaway: variants below the switch band give 459 GB/s or more, and variants above it give 310 GB/s or less, for every kind of loop.</span></figcaption></figure>
+<ul>
+<li>The old read loop is fast because its 8 vector adds per 128 B occupy vector registers. The window holds 159 vector-register writes <span class="ref">[Ref1][Ref5]</span>.</li>
+<li>The adds do not need to wait for data. <code>read_iadd16</code> has adds that do not use the loaded data. <code>read_dadd16</code> has adds that use it. The two totals overlap (469.2 to 469.7 GB/s and 466.7 to 469.8 GB/s) <span class="ref">[Ref6]</span>.</li>
+<li>Software prefetch does not restore the rate. <code>read_pf256</code> gives 289.1 to 300.1 GB/s (n = 4). <code>read_pf512</code> gives 302.3 to 303.9 GB/s (n = 2). <code>read_pf1024</code> gives 311.8 to 315.8 GB/s (n = 2) <span class="ref">[Ref6]</span>.</li>
+<li>The page size does not matter. With 4 KiB pages instead of 2 MiB pages (huge pages) the results are the same. The differences to the process with huge pages are -2.4 % to +0.2 % (one process per page size) <span class="ref">[Ref7]</span>.</li>
+</ul>
+<div class="tw"><table><caption>Per-thread read rate in GB/s <span class="ref">[Ref6]</span></caption><thead><tr><th>state</th><th class="n">mesh 0 threads</th><th class="n">mesh 1 threads</th></tr></thead><tbody><tr><td>slow</td><td class="n">2.5–2.75</td><td class="n">2.25–2.45</td></tr><tr><td>fast (the 459–480 GB/s group)</td><td class="n">4.27–5.45</td><td class="n">2.51–2.78</td></tr><tr><td>read_nop256</td><td class="n">4.99–5.22</td><td class="n">3.84–3.97</td></tr></tbody></table></div>
+<details><summary>Exact numbers of Figure 1 (29 variants)</summary>
+<div class="tw"><table><caption>Total at 64+56 in GB/s (min–max over all intervals) and window depth in lines (one-thread test). 12 processes. 169 intervals in this table, 177 with the three variants <code>read_pf256</code>, <code>read_pf512</code> and <code>read_pf1024</code>. The ranges and n include the process with 4 KiB pages (2 intervals for each of its 7 loops) <span class="ref">[Ref5][Ref6][Ref7]</span></caption><thead><tr><th>loop</th><th>what the loop holds per iteration</th><th>colour class in Figure 1</th><th class="n">window depth, lines</th><th class="n">total, GB/s</th><th class="n">n</th><th class="n">state</th></tr></thead><tbody><tr><td><code>read_1pl</code></td><td>4 ldr q, one per line (256 B)</td><td>plain loads only</td><td class="n">156–164</td><td class="n">230.2–235.0</td><td class="n">16</td><td class="n">slow</td></tr><tr><td><code>read_sparse</code></td><td>4 ldp + 9 nop (128 B)</td><td>loads plus padding instructions (nop)</td><td class="n">38–42</td><td class="n">294.6–301.5</td><td class="n">6</td><td class="n">slow</td></tr><tr><td><code>asmread</code> (= new C read)</td><td>8 ldp q (256 B)</td><td>plain loads only</td><td class="n">36–40</td><td class="n">288.5–309.8</td><td class="n">22</td><td class="n">slow</td></tr><tr><td><code>read_pf2048</code></td><td>8 ldp + 4 prfm 2048 B ahead</td><td>plain loads only</td><td class="n">36–40</td><td class="n">290.5–306.8</td><td class="n">11</td><td class="n">slow</td></tr><tr><td><code>read_nop32</code></td><td>8 ldp + 32 nop</td><td>loads plus padding instructions (nop)</td><td class="n">36–40</td><td class="n">284.8–302.7</td><td class="n">4</td><td class="n">slow</td></tr><tr><td><code>read_nop48</code></td><td>8 ldp + 48 nop</td><td>loads plus padding instructions (nop)</td><td class="n">32–36</td><td class="n">305.4–307.2</td><td class="n">2</td><td class="n">slow</td></tr><tr><td><code>read_dadd2</code></td><td>8 ldp + 2 vector adds</td><td>loads plus vector adds</td><td class="n">32–36</td><td class="n">290.1–296.4</td><td class="n">2</td><td class="n">slow</td></tr><tr><td><code>read_sp24</code></td><td>4 ldp + 24 nop (128 B)</td><td>loads plus padding instructions (nop)</td><td class="n">32–34</td><td class="n">280.9–283.2</td><td class="n">2</td><td class="n">slow</td></tr><tr><td><code>read_nop56</code></td><td>8 ldp + 56 nop</td><td>loads plus padding instructions (nop)</td><td class="n">28–32</td><td class="n">308.6–309.1</td><td class="n">2</td><td class="n">slow</td></tr><tr><td><code>read_dadd4</code></td><td>8 ldp + 4 vector adds</td><td>loads plus vector adds</td><td class="n">28–32</td><td class="n">280.1–283.2</td><td class="n">2</td><td class="n">slow</td></tr><tr><td><code>read_nop64</code></td><td>8 ldp + 64 nop</td><td>loads plus padding instructions (nop)</td><td class="n">28–32</td><td class="n">325.5–333.9</td><td class="n">13</td><td class="n">between</td></tr><tr><td><code>read_sp32</code></td><td>4 ldp + 32 nop (128 B)</td><td>loads plus padding instructions (nop)</td><td class="n">26–30</td><td class="n">366.3–366.6</td><td class="n">2</td><td class="n">between</td></tr><tr><td><code>read_nop72</code></td><td>8 ldp + 72 nop</td><td>loads plus padding instructions (nop)</td><td class="n">24–28</td><td class="n">459.0–459.3</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_dadd8</code></td><td>8 ldp + 8 vector adds</td><td>loads plus vector adds</td><td class="n">24–28</td><td class="n">462.4–462.6</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_1pl_nop96</code></td><td>4 ldr q + 96 nop</td><td>loads plus padding instructions (nop)</td><td class="n">24–28</td><td class="n">460.8–460.9</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_nop80</code></td><td>8 ldp + 80 nop</td><td>loads plus padding instructions (nop)</td><td class="n">24–28</td><td class="n">459.7–459.8</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_sp40</code></td><td>4 ldp + 40 nop (128 B)</td><td>loads plus padding instructions (nop)</td><td class="n">22–24</td><td class="n">466.8–466.9</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_nop88</code></td><td>–</td><td>loads plus padding instructions (nop)</td><td class="n">20–24</td><td class="n">462.8–462.9</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_nop96</code></td><td>–</td><td>loads plus padding instructions (nop)</td><td class="n">20–24</td><td class="n">465.5–470.6</td><td class="n">16</td><td class="n">fast</td></tr><tr><td><code>read_sp48</code></td><td>–</td><td>loads plus padding instructions (nop)</td><td class="n">20–22</td><td class="n">470.0–470.1</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>oldread</code> (old C read)</td><td>4 ldp + 8 vector adds (128 B)</td><td>loads plus vector adds</td><td class="n">18–22</td><td class="n">465.5–470.1</td><td class="n">22</td><td class="n">fast</td></tr><tr><td><code>read_sp56</code></td><td>–</td><td>loads plus padding instructions (nop)</td><td class="n">18–20</td><td class="n">473.6–473.7</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_dadd16</code></td><td>8 ldp + 16 vector adds that use the loaded data</td><td>loads plus vector adds</td><td class="n">16–20</td><td class="n">466.7–469.8</td><td class="n">5</td><td class="n">fast</td></tr><tr><td><code>read_iadd16</code></td><td>8 ldp + 16 vector adds that do not use the loaded data</td><td>loads plus vector adds</td><td class="n">16–20</td><td class="n">469.2–469.7</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_nop112</code></td><td>–</td><td>loads plus padding instructions (nop)</td><td class="n">16–20</td><td class="n">471.1–471.2</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_nop128</code></td><td>–</td><td>loads plus padding instructions (nop)</td><td class="n">16–20</td><td class="n">473.8–476.4</td><td class="n">9</td><td class="n">fast</td></tr><tr><td><code>read_nop160</code></td><td>–</td><td>loads plus padding instructions (nop)</td><td class="n">12–16</td><td class="n">477.9–478.2</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_nop192</code></td><td>–</td><td>loads plus padding instructions (nop)</td><td class="n">12–16</td><td class="n">479.6–479.8</td><td class="n">2</td><td class="n">fast</td></tr><tr><td><code>read_nop256</code></td><td>8 ldp + 256 nop</td><td>loads plus padding instructions (nop)</td><td class="n">8–12</td><td class="n">543.9–549.0</td><td class="n">9</td><td class="n">fastest</td></tr></tbody></table></div>
+<p class="note">A dash means that the facts sheet does not list the content of that loop. The colour class is assigned in this report from the content of the loop.</p>
+<div class="tw"><table><caption>4 KiB pages: total at 64+56 in GB/s <span class="ref">[Ref7]</span></caption><thead><tr><th>loop</th><th class="n">total, GB/s</th></tr></thead><tbody><tr><td>oldread</td><td class="n">466.0–468.5</td></tr><tr><td>asmread</td><td class="n">298.0–300.3</td></tr><tr><td>read_nop64</td><td class="n">325.9–326.1</td></tr><tr><td>read_nop96</td><td class="n">467.7–467.8</td></tr><tr><td>read_nop256</td><td class="n">543.9–545.0</td></tr><tr><td>read_1pl</td><td class="n">234.8–235.0</td></tr><tr><td>read_pf2048</td><td class="n">297.6–302.5</td></tr></tbody></table></div>
+</details>
+<h2 id="c">3. The padded loop follows the old loop in every thread layout</h2>
+<ul>
+<li>Four loops were run in seven more thread layouts <span class="ref">[Ref8]</span>.</li>
+<li>The padded loops follow the old read loop in every layout, within 2.3 %.</li>
+<li>This includes 64+32. There the load-only loop is 8 % faster than the old loop, and the padded loops are not.</li>
+<li>The drop exists only with many threads on both meshes. With one mesh only (64+0, 0+56) and at 32+32 all four loops agree within 1.6 %.</li>
+</ul>
+<div class="tw"><table><caption>Total read rate in GB/s by thread layout (threads on mesh 0 + threads on mesh 1; one interval per cell) <span class="ref">[Ref8]</span></caption><thead><tr><th>layout</th><th class="n">oldread</th><th class="n">asmread (load-only)</th><th class="n">read_nop96</th><th class="n">read_nop128</th></tr></thead><tbody><tr><td>56+56</td><td class="n">534.8</td><td class="n">300.1</td><td class="n">538.1</td><td class="n">547.1</td></tr><tr><td>48+48</td><td class="n">412.1</td><td class="n">349.9</td><td class="n">414.4</td><td class="n">417.2</td></tr><tr><td>64+44</td><td class="n">432.9</td><td class="n">356.3</td><td class="n">437.2</td><td class="n">435.0</td></tr><tr><td>64+32</td><td class="n">412.2</td><td class="n">445.0</td><td class="n">417.8</td><td class="n">413.4</td></tr><tr><td>64+0</td><td class="n">348.0</td><td class="n">348.4</td><td class="n">349.0</td><td class="n">351.0</td></tr><tr><td>0+56</td><td class="n">318.0</td><td class="n">318.1</td><td class="n">319.2</td><td class="n">321.7</td></tr><tr><td>32+32</td><td class="n">336.9</td><td class="n">336.5</td><td class="n">339.9</td><td class="n">341.9</td></tr></tbody></table></div>
+<h2 id="d">4. With mixed loops, the deeper window takes the larger share</h2>
+<ul>
+<li>Two processes ran at the same time, one per mesh, for 12 s. Each process ran one loop. The two intervals overlapped by 98.8 % to 99.97 % <span class="ref">[Ref9]</span>.</li>
+<li>The rate of a thread depends on the loop of the other threads.</li>
+<li>Mesh 0 alone with the load-only loop reads 348 GB/s. With the load-only loop on mesh 0 and a padded loop on mesh 1, mesh 0 reads 331.9 to 349.8 GB/s. Mesh 1 is squeezed to 108 to 116 GB/s.</li>
+<li>The reverse case also holds. With <code>read_nop256</code> on mesh 0 and the load-only loop on mesh 1, mesh 0 reads 137.3 GB/s and mesh 1 reads 251.3 GB/s.</li>
+</ul>
+<figure><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" width="920" height="440" viewBox="0 0 920 440" role="img" aria-label="Read rate of each mesh for nine pairs of loops">
+<rect x="0" y="0" width="920" height="440" fill="#fcfcfb"/>
+<rect x="367.0" y="46.0" width="83.3" height="336.0" fill="#8a8880" fill-opacity="0.13"></rect>
+<rect x="635.0" y="46.0" width="83.3" height="336.0" fill="#8a8880" fill-opacity="0.13"></rect>
+<line x1="96.0" y1="336.0" x2="900.0" y2="336.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="90.0" y="340.0" font-size="11" text-anchor="end" fill="#52514e">0</text>
+<line x1="96.0" y1="271.6" x2="900.0" y2="271.6" stroke="#e4e3df" stroke-width="1"/>
+<text x="90.0" y="275.6" font-size="11" text-anchor="end" fill="#52514e">100</text>
+<line x1="96.0" y1="207.1" x2="900.0" y2="207.1" stroke="#e4e3df" stroke-width="1"/>
+<text x="90.0" y="211.1" font-size="11" text-anchor="end" fill="#52514e">200</text>
+<line x1="96.0" y1="142.7" x2="900.0" y2="142.7" stroke="#e4e3df" stroke-width="1"/>
+<text x="90.0" y="146.7" font-size="11" text-anchor="end" fill="#52514e">300</text>
+<line x1="96.0" y1="78.2" x2="900.0" y2="78.2" stroke="#e4e3df" stroke-width="1"/>
+<text x="90.0" y="82.2" font-size="11" text-anchor="end" fill="#52514e">400</text>
+<text x="16.0" y="16.0" font-size="12" text-anchor="start" fill="#52514e">sum of the read rate of one mesh, GB/s (axis starts at 0)</text>
+<line x1="96.0" y1="111.7" x2="900.0" y2="111.7" stroke="#0b0b0b" stroke-width="1.2" stroke-dasharray="6 4"/>
+<text x="100.0" y="36.0" font-size="12" text-anchor="start" fill="#0b0b0b">dashed line: mesh 0 alone with the load-only loop = 348 GB/s</text>
+<line x1="126.0" y1="40.0" x2="126.0" y2="111.7" stroke="#52514e" stroke-width="0.8"/>
+<text x="90.0" y="356.0" font-size="11" text-anchor="end" fill="#52514e">mesh 0 loop</text>
+<text x="90.0" y="372.0" font-size="11" text-anchor="end" fill="#52514e">mesh 1 loop</text>
+<rect x="107.7" y="222.8" width="32.0" height="113.2" fill="#2a78d6" rx="3"><title>mesh 0 runs asmread, mesh 1 runs asmread: mesh 0 sum 175.7 GB/s, total 302.9 GB/s</title></rect>
+<rect x="107.7" y="332.0" width="32.0" height="4.0" fill="#2a78d6"></rect>
+<text x="123.7" y="218.8" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">175.7</text>
+<rect x="141.7" y="254.0" width="32.0" height="82.0" fill="#eb6834" rx="3"><title>mesh 0 runs asmread, mesh 1 runs asmread: mesh 1 sum 127.2 GB/s, total 302.9 GB/s</title></rect>
+<rect x="141.7" y="332.0" width="32.0" height="4.0" fill="#eb6834"></rect>
+<text x="157.7" y="250.0" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">127.2</text>
+<text x="140.7" y="66.0" font-size="11" text-anchor="middle" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">total 302.9</text>
+<text x="140.7" y="356.0" font-size="11" text-anchor="middle" fill="#0b0b0b">load-only</text>
+<text x="140.7" y="372.0" font-size="11" text-anchor="middle" fill="#0b0b0b">load-only</text>
+<rect x="197.0" y="239.7" width="32.0" height="96.3" fill="#2a78d6" rx="3"><title>mesh 0 runs read_nop96, mesh 1 runs asmread: mesh 0 sum 149.5 GB/s, total 303.8 GB/s</title></rect>
+<rect x="197.0" y="332.0" width="32.0" height="4.0" fill="#2a78d6"></rect>
+<text x="213.0" y="235.7" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">149.5</text>
+<rect x="231.0" y="236.6" width="32.0" height="99.4" fill="#eb6834" rx="3"><title>mesh 0 runs read_nop96, mesh 1 runs asmread: mesh 1 sum 154.3 GB/s, total 303.8 GB/s</title></rect>
+<rect x="231.0" y="332.0" width="32.0" height="4.0" fill="#eb6834"></rect>
+<text x="247.0" y="232.6" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">154.3</text>
+<text x="230.0" y="66.0" font-size="11" text-anchor="middle" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">total 303.8</text>
+<text x="230.0" y="356.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop96</text>
+<text x="230.0" y="372.0" font-size="11" text-anchor="middle" fill="#0b0b0b">load-only</text>
+<rect x="286.3" y="247.5" width="32.0" height="88.5" fill="#2a78d6" rx="3"><title>mesh 0 runs read_nop256, mesh 1 runs asmread: mesh 0 sum 137.3 GB/s, total 388.6 GB/s</title></rect>
+<rect x="286.3" y="332.0" width="32.0" height="4.0" fill="#2a78d6"></rect>
+<text x="302.3" y="243.5" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">137.3</text>
+<rect x="320.3" y="174.1" width="32.0" height="161.9" fill="#eb6834" rx="3"><title>mesh 0 runs read_nop256, mesh 1 runs asmread: mesh 1 sum 251.3 GB/s, total 388.6 GB/s</title></rect>
+<rect x="320.3" y="332.0" width="32.0" height="4.0" fill="#eb6834"></rect>
+<text x="336.3" y="170.1" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">251.3</text>
+<text x="319.3" y="66.0" font-size="11" text-anchor="middle" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">total 388.6</text>
+<text x="319.3" y="356.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop256</text>
+<text x="319.3" y="372.0" font-size="11" text-anchor="middle" fill="#0b0b0b">load-only</text>
+<rect x="375.7" y="122.1" width="32.0" height="213.9" fill="#2a78d6" rx="3"><title>mesh 0 runs asmread, mesh 1 runs read_nop96: mesh 0 sum 331.9 GB/s, total 448.1 GB/s</title></rect>
+<rect x="375.7" y="332.0" width="32.0" height="4.0" fill="#2a78d6"></rect>
+<text x="391.7" y="118.1" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">331.9</text>
+<rect x="409.7" y="261.1" width="32.0" height="74.9" fill="#eb6834" rx="3"><title>mesh 0 runs asmread, mesh 1 runs read_nop96: mesh 1 sum 116.2 GB/s, total 448.1 GB/s</title></rect>
+<rect x="409.7" y="332.0" width="32.0" height="4.0" fill="#eb6834"></rect>
+<text x="425.7" y="257.1" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">116.2</text>
+<text x="408.7" y="66.0" font-size="11" text-anchor="middle" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">total 448.1</text>
+<text x="408.7" y="356.0" font-size="11" text-anchor="middle" fill="#0b0b0b">load-only</text>
+<text x="408.7" y="372.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop96</text>
+<rect x="465.0" y="130.5" width="32.0" height="205.5" fill="#2a78d6" rx="3"><title>mesh 0 runs read_nop96, mesh 1 runs read_nop96: mesh 0 sum 318.9 GB/s, total 469.5 GB/s</title></rect>
+<rect x="465.0" y="332.0" width="32.0" height="4.0" fill="#2a78d6"></rect>
+<text x="481.0" y="126.5" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">318.9</text>
+<rect x="499.0" y="238.9" width="32.0" height="97.1" fill="#eb6834" rx="3"><title>mesh 0 runs read_nop96, mesh 1 runs read_nop96: mesh 1 sum 150.7 GB/s, total 469.5 GB/s</title></rect>
+<rect x="499.0" y="332.0" width="32.0" height="4.0" fill="#eb6834"></rect>
+<text x="515.0" y="234.9" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">150.7</text>
+<text x="498.0" y="66.0" font-size="11" text-anchor="middle" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">total 469.5</text>
+<text x="498.0" y="356.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop96</text>
+<text x="498.0" y="372.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop96</text>
+<rect x="554.3" y="182.6" width="32.0" height="153.4" fill="#2a78d6" rx="3"><title>mesh 0 runs read_nop256, mesh 1 runs read_nop96: mesh 0 sum 238.1 GB/s, total 492.3 GB/s</title></rect>
+<rect x="554.3" y="332.0" width="32.0" height="4.0" fill="#2a78d6"></rect>
+<text x="570.3" y="178.6" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">238.1</text>
+<rect x="588.3" y="172.2" width="32.0" height="163.8" fill="#eb6834" rx="3"><title>mesh 0 runs read_nop256, mesh 1 runs read_nop96: mesh 1 sum 254.2 GB/s, total 492.3 GB/s</title></rect>
+<rect x="588.3" y="332.0" width="32.0" height="4.0" fill="#eb6834"></rect>
+<text x="604.3" y="168.2" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">254.2</text>
+<text x="587.3" y="66.0" font-size="11" text-anchor="middle" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">total 492.3</text>
+<text x="587.3" y="356.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop256</text>
+<text x="587.3" y="372.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop96</text>
+<rect x="643.7" y="110.6" width="32.0" height="225.4" fill="#2a78d6" rx="3"><title>mesh 0 runs asmread, mesh 1 runs read_nop256: mesh 0 sum 349.8 GB/s, total 457.9 GB/s</title></rect>
+<rect x="643.7" y="332.0" width="32.0" height="4.0" fill="#2a78d6"></rect>
+<text x="659.7" y="106.6" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">349.8</text>
+<rect x="677.7" y="266.3" width="32.0" height="69.7" fill="#eb6834" rx="3"><title>mesh 0 runs asmread, mesh 1 runs read_nop256: mesh 1 sum 108.2 GB/s, total 457.9 GB/s</title></rect>
+<rect x="677.7" y="332.0" width="32.0" height="4.0" fill="#eb6834"></rect>
+<text x="693.7" y="262.3" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">108.2</text>
+<text x="676.7" y="66.0" font-size="11" text-anchor="middle" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">total 457.9</text>
+<text x="676.7" y="356.0" font-size="11" text-anchor="middle" fill="#0b0b0b">load-only</text>
+<text x="676.7" y="372.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop256</text>
+<rect x="733.0" y="111.9" width="32.0" height="224.1" fill="#2a78d6" rx="3"><title>mesh 0 runs read_nop96, mesh 1 runs read_nop256: mesh 0 sum 347.8 GB/s, total 471.3 GB/s</title></rect>
+<rect x="733.0" y="332.0" width="32.0" height="4.0" fill="#2a78d6"></rect>
+<text x="749.0" y="107.9" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">347.8</text>
+<rect x="767.0" y="256.4" width="32.0" height="79.6" fill="#eb6834" rx="3"><title>mesh 0 runs read_nop96, mesh 1 runs read_nop256: mesh 1 sum 123.5 GB/s, total 471.3 GB/s</title></rect>
+<rect x="767.0" y="332.0" width="32.0" height="4.0" fill="#eb6834"></rect>
+<text x="783.0" y="252.4" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">123.5</text>
+<text x="766.0" y="66.0" font-size="11" text-anchor="middle" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">total 471.3</text>
+<text x="766.0" y="356.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop96</text>
+<text x="766.0" y="372.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop256</text>
+<rect x="822.3" y="125.0" width="32.0" height="211.0" fill="#2a78d6" rx="3"><title>mesh 0 runs read_nop256, mesh 1 runs read_nop256: mesh 0 sum 327.4 GB/s, total 549.1 GB/s</title></rect>
+<rect x="822.3" y="332.0" width="32.0" height="4.0" fill="#2a78d6"></rect>
+<text x="838.3" y="121.0" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">327.4</text>
+<rect x="856.3" y="193.1" width="32.0" height="142.9" fill="#eb6834" rx="3"><title>mesh 0 runs read_nop256, mesh 1 runs read_nop256: mesh 1 sum 221.8 GB/s, total 549.1 GB/s</title></rect>
+<rect x="856.3" y="332.0" width="32.0" height="4.0" fill="#eb6834"></rect>
+<text x="872.3" y="189.1" font-size="10.5" text-anchor="middle" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">221.8</text>
+<text x="855.3" y="66.0" font-size="11" text-anchor="middle" fill="#0b0b0b" font-weight="600" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">total 549.1</text>
+<text x="855.3" y="356.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop256</text>
+<text x="855.3" y="372.0" font-size="11" text-anchor="middle" fill="#0b0b0b">nop256</text>
+<line x1="96.0" y1="336.0" x2="900.0" y2="336.0" stroke="#52514e" stroke-width="1"/>
+<rect x="96.0" y="395.0" width="12.0" height="12.0" fill="#2a78d6" rx="2"></rect>
+<text x="114.0" y="406.0" font-size="12" text-anchor="start" fill="#52514e">mesh 0 sum (64 threads)</text>
+<rect x="286.0" y="395.0" width="12.0" height="12.0" fill="#eb6834" rx="2"></rect>
+<text x="304.0" y="406.0" font-size="12" text-anchor="start" fill="#52514e">mesh 1 sum (56 threads)</text>
+<text x="96.0" y="428.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">Shaded groups: the load-only loop on mesh 0 reads as if it were alone. Mesh 1 is squeezed to 108–116 GB/s.</text>
+</svg></div><figcaption><b>Figure 2.</b> Sum of the read rate of each mesh for nine pairs of loops. "load-only" is <code>asmread</code>, "nop96" is <code>read_nop96</code>, "nop256" is <code>read_nop256</code>. <span class="take">Takeaway for the question: the read rate of a mesh depends on the loop of the other mesh. The mesh with the deeper window takes the larger share, and the other mesh loses rate.</span></figcaption></figure>
+<div class="tw"><table><caption>Exact numbers of Figure 2: sum in GB/s <span class="ref">[Ref9]</span></caption><thead><tr><th>mesh 0 loop</th><th>mesh 1 loop</th><th class="n">mesh 0 sum</th><th class="n">mesh 1 sum</th><th class="n">total</th></tr></thead><tbody><tr><td>asmread</td><td>asmread</td><td class="n">175.7</td><td class="n">127.2</td><td class="n">302.9</td></tr><tr><td>read_nop96</td><td>asmread</td><td class="n">149.5</td><td class="n">154.3</td><td class="n">303.8</td></tr><tr><td>read_nop256</td><td>asmread</td><td class="n">137.3</td><td class="n">251.3</td><td class="n">388.6</td></tr><tr><td>asmread</td><td>read_nop96</td><td class="n">331.9</td><td class="n">116.2</td><td class="n">448.1</td></tr><tr><td>read_nop96</td><td>read_nop96</td><td class="n">318.9</td><td class="n">150.7</td><td class="n">469.5</td></tr><tr><td>read_nop256</td><td>read_nop96</td><td class="n">238.1</td><td class="n">254.2</td><td class="n">492.3</td></tr><tr><td>asmread</td><td>read_nop256</td><td class="n">349.8</td><td class="n">108.2</td><td class="n">457.9</td></tr><tr><td>read_nop96</td><td>read_nop256</td><td class="n">347.8</td><td class="n">123.5</td><td class="n">471.3</td></tr><tr><td>read_nop256</td><td>read_nop256</td><td class="n">327.4</td><td class="n">221.8</td><td class="n">549.1</td></tr></tbody></table></div>
+<ul>
+<li>The loops were also mixed inside both meshes: even CPUs ran the load-only loop and odd CPUs ran a padded loop <span class="ref">[Ref9]</span>.</li>
+<li>With <code>read_nop256</code> on the odd CPUs, the load-only threads read 3.04 to 3.36 GB/s each. The <code>read_nop256</code> threads read 1.99 to 2.20 GB/s each. The total is 318.2 GB/s.</li>
+<li>With <code>read_nop96</code> on the odd CPUs, the values are 2.63 to 3.08 GB/s against 2.06 to 2.40 GB/s. The total is 306.3 GB/s.</li>
+<li>In the same split, all <code>read_nop256</code> gives 548.3 GB/s and all <code>asmread</code> gives 300.3 GB/s.</li>
+</ul>
+<h2 id="e">5. The slow state is not congestion</h2>
+<h3>Latency probe and lines in flight</h3><ul>
+<li>One core per mesh (CPU 2 and CPU 66) ran a latency probe (a pointer chase). Each step issues two independent loads that miss the cache at the same time. So the step time is about the time of one DRAM read. The other 118 cores ran a read loop <span class="ref">[Ref10]</span>.</li>
+<li>On the idle machine one step takes 146.9 ns on both CPUs <span class="ref">[Ref10]</span>.</li>
+<li>With the load-only loop on all cores (total 298 GB/s) one step takes 203.1 ns and 211.3 ns. With the padded loops on all cores one step takes 238.0 to 286.5 ns <span class="ref">[Ref10]</span>.</li>
+<li>With the load-only loop on mesh 0 against <code>read_nop256</code> on mesh 1, one step takes 297.1 ns on mesh 0 (fast) and 236.4 ns on mesh 1 (squeezed). In the reverse case one step takes 212.9 ns on mesh 0 (squeezed) and 223.5 ns on mesh 1 (fast) <span class="ref">[Ref10]</span>.</li>
+<li>So one memory request takes less time in the slow state than in the fast states: 203 to 211 ns against 238 to 297 ns. The 297 ns is the fast mesh 0 of the mixed case.</li>
+<li>Lines in flight per streaming core (est.) = lines per second per thread x probe time. The estimate assumes that a request of a streaming core takes as long as a request of the probe.</li>
+<li>Slow or squeezed meshes have 6.5 to 9.2 lines in flight per core (est.). Fast meshes have 14.9 to 25.3 (est.).</li>
+</ul>
+<figure><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" width="920" height="542" viewBox="0 0 920 542" role="img" aria-label="Estimated lines in flight per core for each case of the latency probe">
+<rect x="0" y="0" width="920" height="542" fill="#fcfcfb"/>
+<rect x="410.2" y="70.0" width="33.3" height="344.0" fill="#eb6834" fill-opacity="0.13"></rect>
+<rect x="513.8" y="70.0" width="128.3" height="344.0" fill="#2a78d6" fill-opacity="0.11"></rect>
+<text x="426.8" y="48.0" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="600">slow or squeezed meshes</text>
+<text x="426.8" y="63.0" font-size="11" text-anchor="middle" fill="#52514e">6.5–9.2 lines (est.)</text>
+<text x="577.9" y="48.0" font-size="12" text-anchor="middle" fill="#0b0b0b" font-weight="600">fast meshes</text>
+<text x="577.9" y="63.0" font-size="11" text-anchor="middle" fill="#52514e">14.9–25.3 lines (est.)</text>
+<text x="16.0" y="48.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">case</text>
+<text x="16.0" y="63.0" font-size="11" text-anchor="start" fill="#52514e">loop on mesh 0 | loop on mesh 1</text>
+<text x="716.0" y="48.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">time of one DRAM read</text>
+<text x="716.0" y="63.0" font-size="11" text-anchor="start" fill="#52514e">by the probe, CPU 2 | CPU 66</text>
+<line x1="330.0" y1="70.0" x2="330.0" y2="414.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="330.0" y="430.0" font-size="11" text-anchor="middle" fill="#52514e">0</text>
+<line x1="391.7" y1="70.0" x2="391.7" y2="414.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="391.7" y="430.0" font-size="11" text-anchor="middle" fill="#52514e">5</text>
+<line x1="453.3" y1="70.0" x2="453.3" y2="414.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="453.3" y="430.0" font-size="11" text-anchor="middle" fill="#52514e">10</text>
+<line x1="515.0" y1="70.0" x2="515.0" y2="414.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="515.0" y="430.0" font-size="11" text-anchor="middle" fill="#52514e">15</text>
+<line x1="576.7" y1="70.0" x2="576.7" y2="414.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="576.7" y="430.0" font-size="11" text-anchor="middle" fill="#52514e">20</text>
+<line x1="638.3" y1="70.0" x2="638.3" y2="414.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="638.3" y="430.0" font-size="11" text-anchor="middle" fill="#52514e">25</text>
+<line x1="700.0" y1="70.0" x2="700.0" y2="414.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="700.0" y="430.0" font-size="11" text-anchor="middle" fill="#52514e">30</text>
+<line x1="330.0" y1="414.0" x2="700.0" y2="414.0" stroke="#52514e" stroke-width="1"/>
+<text x="515.0" y="448.0" font-size="12" text-anchor="middle" fill="#52514e">estimated lines in flight per streaming core (est.)</text>
+<text x="16.0" y="95.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 0: load-only (asmread)</text>
+<text x="16.0" y="111.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 1: load-only (asmread)</text>
+<text x="716.0" y="103.0" font-size="12" text-anchor="start" fill="#0b0b0b">203.1 | 211.3 ns</text>
+<line x1="433.4" y1="90.0" x2="427.6" y2="106.0" stroke="#52514e" stroke-width="1.5" stroke-opacity="0.6"/>
+<circle cx="433.4" cy="90.0" r="5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 0 runs load-only (asmread): 8.4 lines in flight per core (est.)</title></circle>
+<text x="442.4" y="94.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">8.4</text>
+<rect x="422.6" y="101.0" width="10" height="10" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 1 runs load-only (asmread): 7.9 lines in flight per core (est.)</title></rect>
+<text x="436.6" y="110.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">7.9</text>
+<line x1="16.0" y1="120.0" x2="904.0" y2="120.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="16.0" y="143.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 0: read_1pl</text>
+<text x="16.0" y="159.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 1: read_1pl</text>
+<text x="716.0" y="151.0" font-size="12" text-anchor="start" fill="#0b0b0b">219.2 | 219.4 ns</text>
+<line x1="409.6" y1="138.0" x2="417.1" y2="154.0" stroke="#52514e" stroke-width="1.5" stroke-opacity="0.6"/>
+<circle cx="409.6" cy="138.0" r="5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 0 runs read_1pl: 6.5 lines in flight per core (est.)</title></circle>
+<text x="418.6" y="142.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">6.5</text>
+<rect x="412.1" y="149.0" width="10" height="10" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 1 runs read_1pl: 7.1 lines in flight per core (est.)</title></rect>
+<text x="426.1" y="158.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">7.1</text>
+<line x1="16.0" y1="168.0" x2="904.0" y2="168.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="16.0" y="191.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 0: read_nop256</text>
+<text x="16.0" y="207.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 1: load-only (asmread)</text>
+<text x="716.0" y="199.0" font-size="12" text-anchor="start" fill="#0b0b0b">212.9 | 223.5 ns</text>
+<line x1="416.4" y1="186.0" x2="535.0" y2="202.0" stroke="#52514e" stroke-width="1.5" stroke-opacity="0.6"/>
+<circle cx="416.4" cy="186.0" r="5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 0 runs read_nop256: 7.0 lines in flight per core (est.)</title></circle>
+<text x="407.4" y="190.0" font-size="11" text-anchor="end" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">7.0</text>
+<rect x="530.0" y="197.0" width="10" height="10" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 1 runs load-only (asmread): 16.6 lines in flight per core (est.)</title></rect>
+<text x="544.0" y="206.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">16.6</text>
+<line x1="16.0" y1="216.0" x2="904.0" y2="216.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="16.0" y="239.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 0: load-only (asmread)</text>
+<text x="16.0" y="255.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 1: read_nop256</text>
+<text x="716.0" y="247.0" font-size="12" text-anchor="start" fill="#0b0b0b">297.1 | 236.4 ns</text>
+<line x1="642.3" y1="234.0" x2="424.3" y2="250.0" stroke="#52514e" stroke-width="1.5" stroke-opacity="0.6"/>
+<circle cx="642.3" cy="234.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 0 runs load-only (asmread): 25.3 lines in flight per core (est.)</title></circle>
+<text x="651.3" y="238.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">25.3</text>
+<rect x="419.3" y="245.0" width="10" height="10" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 1 runs read_nop256: 7.6 lines in flight per core (est.)</title></rect>
+<text x="415.3" y="254.0" font-size="11" text-anchor="end" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">7.6</text>
+<line x1="16.0" y1="264.0" x2="904.0" y2="264.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="16.0" y="287.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 0: read_nop96</text>
+<text x="16.0" y="303.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 1: read_nop96</text>
+<text x="716.0" y="295.0" font-size="12" text-anchor="start" fill="#0b0b0b">286.5 | 238.1 ns</text>
+<line x1="622.8" y1="282.0" x2="443.3" y2="298.0" stroke="#52514e" stroke-width="1.5" stroke-opacity="0.6"/>
+<circle cx="622.8" cy="282.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 0 runs read_nop96: 23.7 lines in flight per core (est.)</title></circle>
+<text x="631.8" y="286.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">23.7</text>
+<rect x="438.3" y="293.0" width="10" height="10" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 1 runs read_nop96: 9.2 lines in flight per core (est.)</title></rect>
+<text x="434.3" y="302.0" font-size="11" text-anchor="end" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">9.2</text>
+<line x1="16.0" y1="312.0" x2="904.0" y2="312.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="16.0" y="335.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 0: read_nop256</text>
+<text x="16.0" y="351.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 1: read_nop256</text>
+<text x="716.0" y="343.0" font-size="12" text-anchor="start" fill="#0b0b0b">238.0 | 246.9 ns</text>
+<line x1="566.8" y1="330.0" x2="513.8" y2="346.0" stroke="#52514e" stroke-width="1.5" stroke-opacity="0.6"/>
+<circle cx="566.8" cy="330.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 0 runs read_nop256: 19.2 lines in flight per core (est.)</title></circle>
+<text x="575.8" y="334.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">19.2</text>
+<rect x="508.8" y="341.0" width="10" height="10" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 1 runs read_nop256: 14.9 lines in flight per core (est.)</title></rect>
+<text x="504.8" y="350.0" font-size="11" text-anchor="end" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">14.9</text>
+<line x1="16.0" y1="360.0" x2="904.0" y2="360.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="16.0" y="383.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 0: load-only (asmread)</text>
+<text x="16.0" y="399.0" font-size="12" text-anchor="start" fill="#0b0b0b">mesh 1: idle (no stream)</text>
+<text x="716.0" y="391.0" font-size="12" text-anchor="start" fill="#0b0b0b">278.0 | 165.5 ns</text>
+<circle cx="618.3" cy="378.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>mesh 0 runs load-only (asmread): 23.4 lines in flight per core (est.)</title></circle>
+<text x="627.3" y="382.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">23.4</text>
+<circle cx="22.0" cy="468.0" r="5" fill="#52514e" stroke="#fcfcfb" stroke-width="1.5"></circle>
+<text x="33.0" y="472.0" font-size="12" text-anchor="start" fill="#52514e">mesh 0</text>
+<rect x="93.0" y="463.0" width="10" height="10" fill="#52514e" stroke="#fcfcfb" stroke-width="1.5"></rect>
+<text x="109.0" y="472.0" font-size="12" text-anchor="start" fill="#52514e">mesh 1</text>
+<circle cx="178.0" cy="468.0" r="5" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"></circle>
+<text x="189.0" y="472.0" font-size="12" text-anchor="start" fill="#52514e">slow or squeezed</text>
+<circle cx="308.0" cy="468.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"></circle>
+<text x="319.0" y="472.0" font-size="12" text-anchor="start" fill="#52514e">fast</text>
+<text x="16.0" y="496.0" font-size="12.5" text-anchor="start" fill="#0b0b0b" font-weight="600">A request is not slower in the slow state: 203–211 ns against 238–297 ns.</text>
+<text x="16.0" y="514.0" font-size="11.5" text-anchor="start" fill="#52514e">203–211 ns: load-only loop on all cores (row 1). 238–297 ns: padded loops on all cores (rows 5 and 6),</text>
+<text x="16.0" y="530.0" font-size="11.5" text-anchor="start" fill="#52514e">and mesh 0 with the load-only loop against read_nop256 (row 4). The other values are in the column at the right.</text>
+</svg></div><figcaption><b>Figure 3.</b> Estimated lines in flight per streaming core (est.), one row per case of the latency probe. A streaming core is a core that runs a read loop. The column at the right is the time of one DRAM read by a test core, in ns. <span class="take">Takeaway for the question: the drop is not congestion. A slow or squeezed mesh keeps about 8 lines (est.) in flight per core instead of about 20 (est.), although each request is served faster.</span></figcaption></figure>
+<div class="tw"><table><caption>Exact numbers of Figure 3: lines in flight per streaming core (est.) and probe time per step <span class="ref">[Ref10]</span></caption><thead><tr><th>mesh 0 loop</th><th>mesh 1 loop</th><th class="n">mesh 0, lines (est.)</th><th class="n">mesh 1, lines (est.)</th><th class="n">CPU 2, ns</th><th class="n">CPU 66, ns</th></tr></thead><tbody><tr><td>idle machine</td><td>–</td><td class="n">–</td><td class="n">–</td><td class="n">146.9</td><td class="n">146.9</td></tr><tr><td>load-only (asmread)</td><td>load-only (asmread)</td><td class="n">8.4</td><td class="n">7.9</td><td class="n">203.1</td><td class="n">211.3</td></tr><tr><td>read_1pl</td><td>read_1pl</td><td class="n">6.5</td><td class="n">7.1</td><td class="n">219.2</td><td class="n">219.4</td></tr><tr><td>read_nop256</td><td>load-only (asmread)</td><td class="n">7.0</td><td class="n">16.6</td><td class="n">212.9</td><td class="n">223.5</td></tr><tr><td>load-only (asmread)</td><td>read_nop256</td><td class="n">25.3</td><td class="n">7.6</td><td class="n">297.1</td><td class="n">236.4</td></tr><tr><td>read_nop96</td><td>read_nop96</td><td class="n">23.7</td><td class="n">9.2</td><td class="n">286.5</td><td class="n">238.1</td></tr><tr><td>read_nop256</td><td>read_nop256</td><td class="n">19.2</td><td class="n">14.9</td><td class="n">238.0</td><td class="n">246.9</td></tr><tr><td>load-only (asmread)</td><td>idle (no stream)</td><td class="n">23.4</td><td class="n">–</td><td class="n">278.0</td><td class="n">165.5</td></tr></tbody></table></div>
+<p class="note">The lines in flight per case were recomputed for this report from the raw files of the probe run <span class="ref">[Ref10]</span>. Each value is the mean over the streaming threads of one mesh. They agree with the ranges in the facts sheet <span class="ref">[Ref1]</span>.</p>
+<h3>Mesh counters</h3><ul>
+<li>Root counters of the mesh were read during 64+56 runs. No row was multiplexed (every counter ran for the whole interval) <span class="ref">[Ref11]</span>.</li>
+<li>Per line read, the slow state has fewer retries, a lower queue occupancy and fewer stalls than the fast states. The exception is the north and south data links <span class="ref">[Ref11]</span>.</li>
+<li>Each value in the table is a counter total divided by the number of 64 B lines read. A lower value means fewer retries or less waiting per line.</li>
+<li><b>Insufficient data:</b> what one count of the queue-occupancy counter and of the busy-level counter stands for. The facts sheet does not say it. The counter description in the manual of the mesh would resolve it. The comparison between the states does not need it.</li>
+</ul>
+<div class="tw"><table><caption>Mesh counters at 64+56: counter events per 64 B line read <span class="ref">[Ref11]</span></caption><thead><tr><th>counter</th><th class="n">slow: asmread, 299 GB/s</th><th class="n">fast: read_nop96, 470 GB/s</th><th class="n">fast: oldread, 468 GB/s</th></tr></thead><tbody><tr><td>home-node request retries (<code>hns_pocq_retry_all</code>)</td><td class="n">0.047</td><td class="n">0.072</td><td class="n">0.069</td></tr><tr><td>home-node queue occupancy (<code>hns_qos_pocq_occupancy_all</code>)</td><td class="n">0.087</td><td class="n">0.121</td><td class="n">0.118</td></tr><tr><td>memory-controller retries (<code>hns_mc_retries_local_all</code>)</td><td class="n">0.0046</td><td class="n">0.043</td><td class="n">0.039</td></tr><tr><td>gateway data stalls (<code>ccra_chidat_stalls</code>)</td><td class="n">0.21</td><td class="n">0.73</td><td class="n">0.73</td></tr><tr><td>home-node busy level 3 (<code>hns_cbusy11_all</code>)</td><td class="n">0.21</td><td class="n">1.49</td><td class="n">1.53</td></tr><tr><td>request-link stalls east (<code>mxp_e_req_txflit_stall</code>)</td><td class="n">0.013</td><td class="n">0.167</td><td class="n">0.163</td></tr><tr><td>data-link stalls east</td><td class="n">0.162</td><td class="n">0.344</td><td class="n">0.351</td></tr><tr><td>data-link stalls north (exception)</td><td class="n">0.119</td><td class="n">0.069</td><td class="n">0.073</td></tr><tr><td>data-link stalls south (exception)</td><td class="n">0.027</td><td class="n">0.020</td><td class="n">0.025</td></tr></tbody></table></div>
+<h3>Memory ports</h3><ul>
+<li>The 24 memory ports get one read request per line in the slow state and in the fast states <span class="ref">[Ref12]</span>.</li>
+<li>They get almost no write data (0.0003 to 0.0004 per line). So DRAM does one read per line in both states. DRAM does no extra reads <span class="ref">[Ref12]</span>.</li>
+</ul>
+<div class="tw"><table><caption>Memory-port counts per line read, 24 ports <span class="ref">[Ref12]</span></caption><thead><tr><th>count</th><th class="n">asmread 64+56 (307 GB/s)</th><th class="n">read_nop96 (468 GB/s)</th><th class="n">read_nop256 (550 GB/s)</th><th class="n">asmread 64+0 (349 GB/s)</th></tr></thead><tbody><tr><td>read requests into the ports</td><td class="n">1.004</td><td class="n">1.002</td><td class="n">1.076</td><td class="n">0.997</td></tr><tr><td>request stalls</td><td class="n">0.0005</td><td class="n">0.018</td><td class="n">0.030</td><td class="n">0.000</td></tr><tr><td>write data into the ports</td><td class="n">0.0004</td><td class="n">0.0003</td><td class="n">0.0003</td><td class="n">0.0003</td></tr><tr><td>data flits out (2 flits = 1 line)</td><td class="n">1.992</td><td class="n">1.996</td><td class="n">1.995</td><td class="n">1.995</td></tr></tbody></table></div>
+<h3>Data path, busy level and core counters</h3><ul>
+<li>Per line, a core gets 0.50 + 0.50 flits from the two memory-port columns of its own mesh and 1.00 flit from the gateway row. This holds in every state: slow, fast, squeezed and alone <span class="ref">[Ref13]</span>.</li>
+<li>So half of the lines arrive directly from the memory ports of the own mesh. The other half arrive through the gateway from the other mesh.</li>
+<li>Response messages with busy level 0 are 82 to 93 % on slow or squeezed meshes. They are 4 to 26 % on fast meshes <span class="ref">[Ref14]</span>.</li>
+<li>Three cases are in between. Mesh 1 under <code>read_nop96</code> or <code>oldread</code> at 64+56 has 73 to 74 %. Mesh 1 with <code>asmread</code> against <code>read_nop256</code> on mesh 0 has 44 to 46 % <span class="ref">[Ref14]</span>.</li>
+<li>So the squeezed cores do not receive a higher busy level than the fast cores.</li>
+<li>Data that arrives through the gateway carries busy level 3 in 89 to 100 % of the flits. This holds in every state, also with the other mesh idle <span class="ref">[Ref14]</span>.</li>
+<li>The core counters per line are the same in the slow and fast states. They are 2.08 bus accesses (transfers between the core and the mesh), 1.000 L2 refills (lines that arrive in the L2 cache, the second cache level of the core) and 1.000 L2 hardware-prefetch events (as counted by the core for its hardware prefetcher). The instruction counts are as coded <span class="ref">[Ref1]</span>.</li>
+<li>Only the cycles per line differ: 66 to 77 in the slow state against 35 to 37 in the fast state on mesh 0. The core clock is 2.8 GHz in all runs <span class="ref">[Ref1]</span>.</li>
+</ul>
+<h2 id="r">6. The drop needs a sequential stream</h2>
+<h3>The scrambled-order loops</h3><ul>
+<li>Three more loops were added to the benchmark program (<code>bwx13</code>, the runner): <code>rand_nop0</code>, <code>rand_nop96</code> and <code>rand_nop256</code> <span class="ref">[Ref21]</span>.</li>
+<li>They read the same bytes as the load-only loop: 8 load-pair instructions per 256 B block, and every block once. They add 0, 96 or 256 nop per block.</li>
+<li>So their loads and padding are those of the load-only loop (<code>asmread</code>), of <code>read_nop96</code> and of <code>read_nop256</code>.</li>
+<li>The difference is the order. The 8192 blocks of each 2 MiB chunk are visited in a scrambled order. Visit number i reads block (i x (2i + 1)) mod 8192 <span class="ref">[Ref1]</span>.</li>
+<li>The intent was that the hardware prefetcher cannot follow the order from block to block. The one-thread counters below do not confirm an idle prefetcher.</li>
+<li>The window depth in lines is taken from the sequential loop with the same loads and padding: 36 to 40 lines, 20 to 24 lines and 8 to 12 lines. The scrambled loops have 5 more integer instructions per block <span class="ref">[Ref1]</span>. Their window depth was not measured separately.</li>
+</ul>
+<h3>One thread</h3><ul>
+<li>One thread on CPU 2 read a 256 MiB buffer. This section uses two runs of 0.5 s per loop, both with the common stop: one for the rate, and one with the core counters switched on <span class="ref">[Ref21]</span>.</li>
+<li>The load-only loop in sequential order read 35.7 GB/s. In scrambled order the loops read 10.8 GB/s (no padding), 8.4 GB/s (96 nop) and 4.8 GB/s (256 nop).</li>
+<li>The core counters differ per line. The scrambled loops have 1.63 to 1.64 L2 refills per line against 1.00 in sequential order. They have 0.41 to 0.42 loads per line that miss all caches against 0.00 to 0.06 (<code>read_nop256</code> has 0.00) <span class="ref">[Ref1][Ref21]</span>.</li>
+<li>The scrambled loops show 1.84 to 1.91 L2 hardware-prefetch events per line against 1.00 in sequential order <span class="ref">[Ref1][Ref21]</span>. So the hardware prefetcher is not idle in scrambled order.</li>
+<li>A second counter run of the same test used the whole-pass stop. Its scrambled loops show 1.44 to 1.51 L2 hardware-prefetch events per line and 0.58 to 0.60 loads per line that miss all caches <span class="ref">[Ref1][Ref21]</span>.</li>
+<li>So with one thread the scrambled order is the slower one, and the loop has more cache misses.</li>
+</ul>
+<h3>120 threads at 64+56</h3><ul>
+<li>Two processes ran at the same time, one per mesh, for 10 s. There is one interval per cell <span class="ref">[Ref20]</span>.</li>
+<li>With the scrambled loops on both meshes the total is 489.6 GB/s (no padding), 473.5 GB/s (96 nop) and 382.5 GB/s (256 nop).</li>
+<li>Two sequential controls ran in the same run. The load-only loop gave 297.8 GB/s. <code>read_nop256</code> gave 547.2 GB/s. Both lie inside the ranges of section 2.</li>
+<li><code>read_nop96</code> in sequential order was not repeated in this run. Figure 4 uses its range from section 2: 465.5 to 470.6 GB/s (n = 16) <span class="ref">[Ref6]</span>.</li>
+</ul>
+<figure><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" width="920" height="408" viewBox="0 0 920 408" role="img" aria-label="Total read rate at 64+56 in sequential order and in scrambled order for three paddings">
+<rect x="0" y="0" width="920" height="408" fill="#fcfcfb"/>
+<text x="16.0" y="50.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">loop</text>
+<text x="16.0" y="65.0" font-size="11" text-anchor="start" fill="#52514e">padding per 256 B | window depth</text>
+<text x="716.0" y="50.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">scrambled minus sequential</text>
+<text x="716.0" y="65.0" font-size="11" text-anchor="start" fill="#52514e">total, GB/s</text>
+<line x1="232.0" y1="76.0" x2="232.0" y2="270.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="232.0" y="286.0" font-size="11" text-anchor="middle" fill="#52514e">0</text>
+<line x1="308.7" y1="76.0" x2="308.7" y2="270.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="308.7" y="286.0" font-size="11" text-anchor="middle" fill="#52514e">100</text>
+<line x1="385.3" y1="76.0" x2="385.3" y2="270.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="385.3" y="286.0" font-size="11" text-anchor="middle" fill="#52514e">200</text>
+<line x1="462.0" y1="76.0" x2="462.0" y2="270.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="462.0" y="286.0" font-size="11" text-anchor="middle" fill="#52514e">300</text>
+<line x1="538.7" y1="76.0" x2="538.7" y2="270.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="538.7" y="286.0" font-size="11" text-anchor="middle" fill="#52514e">400</text>
+<line x1="615.3" y1="76.0" x2="615.3" y2="270.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="615.3" y="286.0" font-size="11" text-anchor="middle" fill="#52514e">500</text>
+<line x1="692.0" y1="76.0" x2="692.0" y2="270.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="692.0" y="286.0" font-size="11" text-anchor="middle" fill="#52514e">600</text>
+<line x1="232.0" y1="270.0" x2="692.0" y2="270.0" stroke="#52514e" stroke-width="1"/>
+<text x="462.0" y="304.0" font-size="12" text-anchor="middle" fill="#52514e">total read rate at 64+56, GB/s (axis starts at 0)</text>
+<polyline points="460.3,120.0 590.8,182.0 651.6,244.0" fill="none" stroke="#2a78d6" stroke-width="2" stroke-opacity="0.55" stroke-linejoin="round"/>
+<polyline points="607.3,102.0 595.0,164.0 525.3,226.0" fill="none" stroke="#eb6834" stroke-width="2" stroke-opacity="0.55" stroke-linejoin="round"/>
+<text x="16.0" y="108.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">no padding</text>
+<text x="16.0" y="124.0" font-size="12" text-anchor="start" fill="#52514e">window 36–40 lines</text>
+<circle cx="460.3" cy="120.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>no padding, sequential order: 297.8 GB/s (same run)</title></circle>
+<rect x="602.3" y="97.0" width="10" height="10" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>no padding, scrambled order: 489.6 GB/s (one 10 s interval)</title></rect>
+<text x="451.3" y="124.0" font-size="11" text-anchor="end" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">297.8</text>
+<text x="616.3" y="106.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">489.6</text>
+<text x="716.0" y="116.0" font-size="12" text-anchor="start" fill="#0b0b0b">+191.8</text>
+<line x1="16.0" y1="140.0" x2="904.0" y2="140.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="16.0" y="170.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">96 nop</text>
+<text x="16.0" y="186.0" font-size="12" text-anchor="start" fill="#52514e">window 20–24 lines</text>
+<circle cx="590.8" cy="182.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>96 nop, sequential order: 465.5–470.6 GB/s (earlier runs, n = 16)</title></circle>
+<rect x="590.0" y="159.0" width="10" height="10" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>96 nop, scrambled order: 473.5 GB/s (one 10 s interval)</title></rect>
+<text x="599.8" y="186.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">465.5–470.6</text>
+<text x="604.0" y="168.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">473.5</text>
+<text x="716.0" y="178.0" font-size="12" text-anchor="start" fill="#0b0b0b">+2.9 to +8.0</text>
+<line x1="16.0" y1="202.0" x2="904.0" y2="202.0" stroke="#e4e3df" stroke-width="1"/>
+<text x="16.0" y="232.0" font-size="12" text-anchor="start" fill="#0b0b0b" font-weight="600">256 nop</text>
+<text x="16.0" y="248.0" font-size="12" text-anchor="start" fill="#52514e">window 8–12 lines</text>
+<circle cx="651.6" cy="244.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"><title>256 nop, sequential order: 547.2 GB/s (same run)</title></circle>
+<rect x="520.3" y="221.0" width="10" height="10" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"><title>256 nop, scrambled order: 382.5 GB/s (one 10 s interval)</title></rect>
+<text x="660.6" y="248.0" font-size="11" text-anchor="start" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">547.2</text>
+<text x="516.3" y="230.0" font-size="11" text-anchor="end" fill="#0b0b0b" stroke="#fcfcfb" stroke-width="3" paint-order="stroke" stroke-linejoin="round">382.5</text>
+<text x="716.0" y="240.0" font-size="12" text-anchor="start" fill="#0b0b0b">−164.7</text>
+<circle cx="22.0" cy="326.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="1.5"></circle>
+<text x="33.0" y="330.0" font-size="12" text-anchor="start" fill="#52514e">sequential order (asmread, read_nop96, read_nop256)</text>
+<rect x="415.0" y="321.0" width="10" height="10" fill="#eb6834" stroke="#fcfcfb" stroke-width="1.5"></rect>
+<text x="431.0" y="330.0" font-size="12" text-anchor="start" fill="#52514e">scrambled order (rand_nop0, rand_nop96, rand_nop256)</text>
+<text x="16.0" y="354.0" font-size="12.5" text-anchor="start" fill="#0b0b0b" font-weight="600">Less padding lowers the total in sequential order and raises it in scrambled order.</text>
+<text x="16.0" y="372.0" font-size="11.5" text-anchor="start" fill="#52514e">Sequential order: the total rises from 297.8 to 547.2 GB/s when the window gets less deep.</text>
+<text x="16.0" y="388.0" font-size="11.5" text-anchor="start" fill="#52514e">Scrambled order: the total falls from 489.6 to 382.5 GB/s.</text>
+</svg></div><figcaption><b>Figure 4.</b> Total read rate at 64+56 in sequential order and in scrambled order, for the same loads and the same padding. One row per padding. The window depth is that of the sequential loop. Each scrambled value and the sequential values of rows 1 and 3 are one 10 s interval of the same run. The sequential value of row 2 is the range of 16 intervals of earlier runs of the same evening, and its mark is the middle of that range. <span class="take">Takeaway: with the deepest window the scrambled order reads 489.6 GB/s and the sequential order reads 297.8 GB/s, so the deep window alone does not lower the total.</span> Hypothesis, not tested: part of the fall of the scrambled values to 382.5 GB/s is the limit of one core with 256 nop (4.8 GB/s with one thread).</figcaption></figure>
+<div class="tw"><table><caption>Scrambled-order run: sum in GB/s per mesh and per-thread range in GB/s. 13 groups, 24 processes, one 10 s interval per cell. 64 threads on mesh 0, 56 threads on mesh 1 <span class="ref">[Ref20]</span></caption><thead><tr><th>mesh 0 loop</th><th>mesh 1 loop</th><th class="n">mesh 0 sum</th><th class="n">mesh 1 sum</th><th class="n">total</th><th class="n">mesh 0, per thread</th><th class="n">mesh 1, per thread</th></tr></thead><tbody><tr><td><code>rand_nop0</code></td><td><code>rand_nop0</code></td><td class="n">268.8</td><td class="n">220.8</td><td class="n">489.6</td><td class="n">4.15–4.24</td><td class="n">3.89–3.98</td></tr><tr><td><code>rand_nop96</code></td><td><code>rand_nop96</code></td><td class="n">250.5</td><td class="n">222.9</td><td class="n">473.5</td><td class="n">3.87–3.96</td><td class="n">3.93–4.02</td></tr><tr><td><code>rand_nop256</code></td><td><code>rand_nop256</code></td><td class="n">204.3</td><td class="n">178.3</td><td class="n">382.5</td><td class="n">3.16–3.22</td><td class="n">3.15–3.21</td></tr><tr><td><code>rand_nop0</code></td><td><code>rand_nop256</code></td><td class="n">264.2</td><td class="n">158.1</td><td class="n">422.3</td><td class="n">4.08–4.18</td><td class="n">2.79–2.85</td></tr><tr><td><code>rand_nop256</code></td><td><code>rand_nop0</code></td><td class="n">192.5</td><td class="n">230.0</td><td class="n">422.6</td><td class="n">2.97–3.04</td><td class="n">4.06–4.14</td></tr><tr><td><code>rand_nop0</code></td><td><code>read_nop256</code></td><td class="n">182.8</td><td class="n">278.8</td><td class="n">461.6</td><td class="n">2.83–2.88</td><td class="n">4.91–5.07</td></tr><tr><td><code>read_nop256</code></td><td><code>rand_nop0</code></td><td class="n">307.2</td><td class="n">158.4</td><td class="n">465.6</td><td class="n">4.72–4.92</td><td class="n">2.79–2.84</td></tr><tr><td><code>asmread</code></td><td><code>rand_nop256</code></td><td class="n">282.9</td><td class="n">134.2</td><td class="n">417.1</td><td class="n">4.34–4.46</td><td class="n">2.37–2.42</td></tr><tr><td><code>rand_nop256</code></td><td><code>asmread</code></td><td class="n">127.5</td><td class="n">266.5</td><td class="n">393.9</td><td class="n">1.95–2.01</td><td class="n">4.61–4.80</td></tr><tr><td><code>asmread</code></td><td><code>asmread</code></td><td class="n">166.3</td><td class="n">131.5</td><td class="n">297.8</td><td class="n">2.58–2.61</td><td class="n">2.33–2.36</td></tr><tr><td><code>read_nop256</code></td><td><code>read_nop256</code></td><td class="n">328.5</td><td class="n">218.7</td><td class="n">547.2</td><td class="n">5.03–5.21</td><td class="n">3.86–3.93</td></tr><tr><td><code>rand_nop0</code></td><td>idle (no stream)</td><td class="n">342.8</td><td class="n">–</td><td class="n">342.8</td><td class="n">5.30–5.40</td><td class="n">–</td></tr><tr><td><code>rand_nop256</code></td><td>idle (no stream)</td><td class="n">223.3</td><td class="n">–</td><td class="n">223.3</td><td class="n">3.45–3.53</td><td class="n">–</td></tr></tbody></table></div>
+<p class="note">The values of this table were recomputed for this report from the raw files of the run <span class="ref">[Ref20]</span>. They agree with the facts sheet to 0.1 GB/s <span class="ref">[Ref1]</span>. A total is the sum of the unrounded mesh sums. So it can differ by 0.1 GB/s from the sum of the two rounded values.</p>
+<h3>Mixed pairs</h3><ul>
+<li>In the four pairs of a sequential loop against a scrambled loop, the mesh with the sequential loop reads more (rows 6 to 9 of the table).</li>
+<li>With <code>read_nop256</code> on the other mesh, <code>rand_nop0</code> reads 182.8 GB/s on mesh 0 and 158.4 GB/s on mesh 1. With <code>rand_nop0</code> on both meshes it reads 268.8 GB/s and 220.8 GB/s.</li>
+<li>Mesh 0 alone reads 342.8 GB/s with <code>rand_nop0</code> and 223.3 GB/s with <code>rand_nop256</code>.</li>
+</ul>
+<h3>Reading</h3><ul>
+<li>In scrambled order the deep window is the faster one: 489.6 GB/s (no padding) is above 473.5 GB/s (96 nop), and that is above 382.5 GB/s (256 nop). In sequential order it is the reverse: 297.8 GB/s is below 465.5 to 470.6 GB/s, and that is below 547.2 GB/s.</li>
+<li>Hypothesis: part of the fall to 382.5 GB/s is the limit of one core with 256 nop. <code>rand_nop256</code> reads 4.8 GB/s with one thread <span class="ref">[Ref21]</span>. It reads 3.15 to 3.22 GB/s per thread with 120 threads <span class="ref">[Ref20]</span>. A run of <code>rand_nop256</code> with fewer threads per mesh would test this. That run was not done.</li>
+<li>The same loads and padding (window depth assumed equal, not measured) read 489.6 GB/s in scrambled order and 297.8 GB/s in sequential order. So the deep window alone does not lower the total. In this run the drop appeared in sequential order. It did not appear in the one scrambled order tested.</li>
+<li>So the drop depends on how the cores handle a sequential stream. The facts sheet reads this as: the rule is in the cores, not in the mesh, the gateways or DRAM <span class="ref">[Ref1]</span>. This narrows the open item of section 7. The exact rule inside the core is still not established.</li>
+</ul>
+<p class="note">Limits of this section: every cell is one interval of 10 s from one evening. No cell was repeated. Only one scrambled pattern was tested. The hardware prefetcher was not switched off. Its settings were not read. The one-thread counters show hardware-prefetch events in scrambled order too (1.84 to 1.91 per line), so the scrambled loops do not show the cores without prefetch. The window depth of the scrambled loops was not measured. The latency probe did not run with the scrambled loops, so their lines in flight are not known.</p>
+<h2 id="f">7. What is established and what is not</h2>
+<h3>Established</h3><ul>
+<li>Read is the only real drop. Its size at 64+56 is about 300 GB/s against about 468 GB/s (-36 %) (sections 1 and 2) <span class="ref">[Ref1]</span>.</li>
+<li>Cause in the benchmark (section 2) <span class="ref">[Ref1]</span>:<ul><li>The load-only loop lets the window of a core cover 36 to 40 lines.</li><li>The old loop covered 18 to 22 lines.</li><li>Above about 30 lines the 120-thread total falls.</li><li>Vector adds are not needed.</li></ul></li>
+<li>Mechanism as far as measured (sections 4 and 5) <span class="ref">[Ref1]</span>:<ul><li>Cores (or their prefetchers) whose loop covers more lines take a larger share.</li><li>A whole mesh then runs with about 8 lines (est.) in flight per core instead of about 20 (est.).</li><li>Each request is served faster in that state.</li><li>Nothing is congested.</li><li>DRAM does one read per line.</li></ul></li>
+<li>Narrowing (section 6) <span class="ref">[Ref1][Ref20]</span>:<ul><li>A loop with the same loads and padding (window depth assumed equal, not measured) reads 489.6 GB/s in scrambled order and 297.8 GB/s in sequential order.</li><li>So the deep window alone does not lower the total.</li><li>The drop depends on how the cores handle a sequential stream.</li><li>This rests on one scrambled pattern and on one interval of 10 s per cell from one evening.</li></ul></li>
+<li>Fix verified (section 2) <span class="ref">[Ref1]</span>: 72 nop or more per 256 B in the load-only loop restores 459 to 480 GB/s. 256 nop gives 544 to 549 GB/s. That is 17 % above the old loop.</li>
+</ul>
+<h3>Not established</h3><ul>
+<li><b>Insufficient data:</b> which rule inside the core lowers the lines in flight for a sequential stream in the slow state. Section 6 shows that the drop depends on the sequential stream. It does not identify the rule. The prefetch controls of the V3AE core cannot be read from a normal Linux program. Two hypotheses exist. Neither is confirmed. H-a and H-b are only labels for them <span class="ref">[Ref1]</span>.<ul><li>Hypothesis H-a: the cores set their request limit or their prefetch strength dynamically. The manual of the Neoverse V2 core documents a dynamic limit of outstanding requests that the busy level drives (<code>IMP_CPUECTLR2_EL1 TXREQ_LIMIT_DYNAMIC</code>) and adaptive prefetch modes (<code>PF_MODE</code>). It is not known whether the V3AE core has this limit. It is not known how the firmware set it. One finding contradicts a simple form of H-a: the squeezed cores receive lower busy levels.</li><li>Hypothesis H-b: a prefetcher adapts its distance to how early the data arrives. This combines with the need to receive both halves of the lines in order (the half from the own mesh and the half from the other mesh).</li><li>Measurement that would resolve it: read the registers <code>IMP_CPUECTLR_EL1</code> and <code>IMP_CPUECTLR2_EL1</code> on CRB (this needs a Linux kernel module or firmware access). Other sources: the prefetch section of the V3AE manual, or a question to Arm support with the data of sections 4, 5 and 6.</li></ul></li>
+<li><b>Insufficient data:</b> why the write total falls with writers on both meshes. The fall is the same for old and new loops. The facts sheet names no measurement for it. A first step would be the mesh counters of section 5 during write runs at 64+0 and at 64+56.</li>
+<li><b>Insufficient data:</b> why old write stays 3 to 4 % above new write under a common stop. The facts sheet names no measurement for it. A first step would be the core counters per line for both write loops.</li>
+</ul>
+<h3>Limits of this work</h3><ul>
+<li>All runs come from one evening (2026-11-15, 16:56 to 21:03 UTC) and one machine.</li>
+<li>Many cells have n = 2 intervals from one process. The layout table has one interval per cell. The sample count of each value is in the tables.</li>
+<li>The window depth of each loop is a measured range from a test with one thread. It was not measured during the 120-thread runs.</li>
+<li>The lines in flight are estimates (est.). They depend on the assumption named in section 5.</li>
+<li>The scrambled-order results of section 6 have one interval of 10 s per cell. No cell was repeated.</li>
+<li>The two "first step" proposals above come from this report. They are not in the facts sheet.</li>
+</ul>
+<h2 id="g">8. Recommendation for the benchmark</h2><ul>
+<li>Keep the new load-only loops for one-thread and cache-size measurements. They measure the load path without extra work.</li>
+<li>For whole-chip DRAM read numbers, state the loop. Report the load-only loop and a window-limited loop. One example is <code>read_nop256</code>: 544 to 549 GB/s at 64+56. With one thread and a 32 KiB buffer it reaches 23 GB/s, and the core limits it there <span class="ref">[Ref1]</span>.</li>
+<li>The 465 to 470 GB/s of the old read loop is one value among several. The value depends on the loop. It is not a constant of the chip <span class="ref">[Ref1]</span>.</li>
+<li>For write totals use a common stop time or a long interval. The whole-pass rule with 0.5 s raises old write by 14 % (144 GB/s against 126 GB/s, median) <span class="ref">[Ref1][Ref4]</span>.</li>
+<li>The source of the benchmark was not changed <span class="ref">[Ref1]</span>.</li>
+</ul>
+<h2 id="h">9. How it was measured</h2><ul>
+<li>Machine: CRB. All runs: 2026-11-15, 16:56 to 21:03 UTC, a Sunday.</li>
+<li>Machine state: nobody had reserved the machine in the Slack channel #phoenix-crb. The marker file (a file whose presence says that another performance run is active) was absent. No other user was logged in <span class="ref">[Ref1]</span>.</li>
+<li>Load: this report read the load lines in the 14 result folders of 16:56 to 21:03 UTC again. They agree with the facts sheet <span class="ref">[Ref1][Ref17]</span>.<ul><li>The 1-minute load average at the start of a script was 0.00 to 71.24.</li><li>At the launch of a process it was 0.00 to 109.60.</li><li>At every one of the 101 launches 1 task was runnable and 0 users were logged in.</li><li>The scripts wait until at most 2 tasks are runnable.</li><li>For the scrambled-order run (section 6) the load average was 0.18 at the start of the script and 0.17 to 68.54 at the 13 launches <span class="ref">[Ref20]</span>.</li><li>Hypothesis: the high values are the load average that still falls after the earlier 120-thread processes of the same script and of this same session. The check: each high value follows the end of such a process by a few minutes at most (times in <code>launches.txt</code>). This check was not done.</li></ul></li>
+<li>Runner: <code>bwx12.c</code> (the earlier runner program <code>bwx11</code> plus 26 loops). The binary on CRB has the SHA-256 checksum <code>cd58e564...546a</code> <span class="ref">[Ref15]</span>.</li>
+<li>Runner of section 6: <code>bwx13</code> (<code>bwx12</code> plus the three scrambled-order loops). The binary on CRB has the SHA-256 checksum <code>a2858df5...8dad</code> <span class="ref">[Ref21]</span>.</li>
+<li>Run scripts: plain runs, simultaneous processes, and runs with root counters <span class="ref">[Ref16]</span>.</li>
+<li>Root use: the user approved <code>sudo perf stat</code> (the Linux counter tool, run as root for the whole system). The user also approved temporary changes of settings. No setting was changed <span class="ref">[Ref1]</span>.</li>
+<li>Window test: one thread on CPU 2. Two independent loads that miss the cache are separated by N filler units. The capacity is the N where the time per iteration rises from the time of about one cache miss to about two <span class="ref">[Ref5]</span>.</li>
+<li>Latency probe: the probe cores were CPU 2 and CPU 66. The streaming processes used the other 118 cores <span class="ref">[Ref10]</span>.</li>
+<li>Analysis scripts: six Python scripts compute the totals, the per-mesh rates and the counters per line <span class="ref">[Ref18]</span>.</li>
+<li>Check: an independent checker (a second automated agent, workflow id wf_9d39bfdd-935) recomputed every number of the facts sheet from the raw files. The facts sheet holds the corrected values <span class="ref">[Ref1]</span>.</li>
+<li>The scrambled-order section of the facts sheet was added after that check. This report recomputed its 64+56 sums from the raw files (section 6) <span class="ref">[Ref20]</span>.</li>
+</ul>
+<div class="tw"><table><caption>Sample counts <span class="ref">[Ref1][Ref10][Ref11][Ref20][Ref21]</span></caption><thead><tr><th>measurement</th><th>samples</th></tr></thead><tbody><tr><td>original run (section 1)</td><td>n = 6 per read loop, 0.5 s intervals</td></tr><tr><td>copy and write at 64+56 (section 1)</td><td>n = 2 intervals per loop, 6 s and 8 s</td></tr><tr><td>write under four timing rules (section 1)</td><td>64 processes, 64 intervals per cell</td></tr><tr><td>window test (section 2)</td><td>one thread on CPU 2; the number of repetitions is not in the facts sheet</td></tr><tr><td>read against window depth (section 2)</td><td>12 processes, 177 intervals in total: 169 in the table of Figure 1 (n per loop 2 to 22) and 8 for the three variants read_pf256, read_pf512, read_pf1024</td></tr><tr><td>4 KiB pages (section 2)</td><td>one process per page size</td></tr><tr><td>thread layouts (section 3)</td><td>one interval per cell; a second process for 56+56</td></tr><tr><td>mixed loops (section 4)</td><td>two processes at the same time, 12 s</td></tr><tr><td>scrambled-order loops at 64+56 (section 6)</td><td>run R7: 13 groups, 24 processes, one 10 s interval each (11 groups of two processes at the same time, 2 groups with mesh 0 alone)</td></tr><tr><td>scrambled-order loops with one thread (section 6)</td><td>two runs of 0.5 s per loop on CPU 2: one for the rate, one with counters</td></tr><tr><td>latency probe (section 5)</td><td>one run per case; per probe core 9 repetitions of 1,000,000 iterations (header of the raw probe files)</td></tr><tr><td>mesh counters (section 5)</td><td>one run per state; 22 counter windows per run (raw folder); no multiplexed row</td></tr><tr><td>memory-port counters, data path, busy level, core counters (section 5)</td><td>not in the facts sheet</td></tr></tbody></table></div>
+<h2 id="refs">References</h2><ol class="refs">
+<li>[Ref1] Facts sheet: <code>/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/w120-2026-11-15/FINDINGS.md</code></li>
+<li>[Ref2] Original run: <code>/home/jhan/workspace/titan/cache-perf/crb/results/kernels-20261113T181222Z/threads120.csv</code> (benchmark <code>bandwidth.c</code>)</li>
+<li>[Ref3] Copy, write and 56+56 runs: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-R1-20261115T185140Z/</code> (files <code>p4copy.csv</code>, <code>p3write.csv</code>, <code>p6w6400.csv</code>, <code>p7w3232.csv</code>, <code>p5r5656.csv</code>)</li>
+<li>[Ref4] Write under four timing rules: <code>/home/jhan/workspace/titan/cache-perf/crb/results/B10a-*</code> and <code>/home/jhan/workspace/titan/cache-perf/crb/results/B10b-*</code></li>
+<li>[Ref5] Window test: <code>/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/w120-2026-11-15/robsize/</code> (program <code>robsize.c</code>, results <code>results/rob-k1-*.csv</code>, <code>rob-k2-*.csv</code>, <code>rob-k3-*.csv</code>)</li>
+<li>[Ref6] Read runs at 64+56: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-R0-20261115T165608Z/</code>, <code>w120-R0b-20261115T170342Z/</code>, <code>w120-R1-20261115T185140Z/</code>, <code>w120-R5-20261115T203152Z/</code>, <code>w120-R6-20261115T203438Z/</code></li>
+<li>[Ref7] 4 KiB pages: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-R5-20261115T203152Z/nothp.csv</code></li>
+<li>[Ref8] Thread layouts: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-R0b-20261115T170342Z/</code> and <code>p5r5656.csv</code> of [Ref3]</li>
+<li>[Ref9] Mixed loops: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-R3-20261115T193922Z/</code></li>
+<li>[Ref10] Latency probe: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-R4-20261115T200016Z/</code></li>
+<li>[Ref11] Mesh counters: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-RC1-20261115T190208Z/</code></li>
+<li>[Ref12] Memory-port counters: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-RC2-20261115T192222Z/</code></li>
+<li>[Ref13] Data path to the cores: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-RC5-20261115T201920Z/</code></li>
+<li>[Ref14] Busy level on responses: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-RC4-20261115T201114Z/</code> and <code>w120-RC6-20261115T202517Z/</code></li>
+<li>[Ref15] Runner: <code>/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx12-2026-11-15/bwx12.c</code>. Binary on CRB: <code>~/cache-perf/bwx12-20261115/bwx12</code></li>
+<li>[Ref16] Run scripts in <code>/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/w120-2026-11-15/</code>: <code>r0.sh</code>, <code>rx.sh</code> (plain runs), <code>rg.sh</code> (simultaneous processes), <code>rc.sh</code>, <code>rc2.sh</code>, <code>rgc.sh</code> (root counters)</li>
+<li>[Ref17] All result folders of this session: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-*</code> (files <code>env.txt</code> and <code>launches.txt</code>)</li>
+<li>[Ref18] Analysis scripts in <code>/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/w120-2026-11-15/</code>: <code>an.py</code>, <code>anc.py</code>, <code>anc2.py</code>, <code>anc3.py</code>, <code>anc4.py</code>, <code>ang.py</code></li>
+<li>[Ref19] Generator of this page: <code>/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/w120-2026-11-15/report_w120.py</code></li>
+<li>[Ref20] Scrambled-order run R7: <code>/home/jhan/workspace/titan/cache-perf/crb/results/w120-R7-20261115T205946Z/</code> (per group <code>&lt;group&gt;.m0.csv</code> and <code>&lt;group&gt;.m1.csv</code>, <code>launches.txt</code>, <code>env.txt</code>)</li>
+<li>[Ref21] Runner with the scrambled-order loops: <code>/home/jhan/workspace/titan/cache-perf/crb/tmp/agent-scratch/bwx13-2026-11-15/</code> (source <code>bwx13.c</code>, one-thread test <code>crb-build-1/smoke13.txt</code>). Binary on CRB: <code>~/cache-perf/bwx13-20261115/bwx13</code></li>
+</ol>
+</main>
+</body>
+</html>

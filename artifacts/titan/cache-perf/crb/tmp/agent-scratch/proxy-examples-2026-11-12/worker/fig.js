@@ -1,0 +1,54 @@
+ // Home, proxy and data: four reads of the three example lines (homes from full/homes.csv, proxy crosspoints from the fit in proxy-positions.json)
+(function () {
+  const s = document.getElementById('homeex'), HF = '#cfe0f7', PF = '#fbd9c8', RED = '#c8373a', NOS = ['1,5', '4,5', '7,5'], DX = 26, DY = 24, CW = 24, CH = 22;
+  const key = (lx, f, k, label, o) => { el('rect', Object.assign({x: lx, y: 6, width: 18, height: 16, rx: 2, fill: f, stroke: k}, o || {}), s); el('text', {x: lx + 24, y: 18, 'font-size': 11.5, fill: INK}, s, label); };
+  key(20, HF, S1, 'H: home node'); key(140, PF, S2, 'P: proxy node'); key(262, '#fff', INK, 'thick border: the slice that answers (panels 2 to 4: fitted)', {'stroke-width': 2.5}); key(610, '#fff', RED, 'R: crosspoint of the reading core', {'stroke-width': 2});
+  // each panel: title, sub-title, core [mesh, x, y], home [mesh, x, y], proxy [mesh, x, y] or null, text under the grids
+  const P = [
+    ['1. CPU 0 reads line A', 'The home is on the mesh of CPU 0. No proxy is needed.', [0, 1, 2], [0, 2, 5], null, 'Home: mesh 0, (2,5). Lines of this home node: 29.0 ns from CPU 0.'],
+    ['2. CPU 0 reads line B', 'The home is on mesh 1. A proxy on mesh 0 answers.', [0, 1, 2], [1, 5, 2], [0, 2, 5], 'Home: mesh 1, (5,2). Proxy: mesh 0, (2,5). 29.0 ns from CPU 0.'],
+    ['3. CPU 0 reads line C', 'The home is on mesh 1. Its proxy is 1 hop from CPU 0.', [0, 1, 2], [1, 7, 2], [0, 1, 3], 'Home: mesh 1, (7,2). Proxy: mesh 0, (1,3). 22.2 ns from CPU 0.'],
+    ['4. CPU 64 reads line A', 'The line of panel 1, read from mesh 1. A proxy on mesh 1 answers.', [1, 1, 2], [0, 2, 5], [1, 5, 2], 'Home: mesh 0, (2,5). Proxy: mesh 1, (5,2). 32.1 ns from CPU 64.']];
+  P.forEach((p, i) => {
+    const px = 20 + (i % 2) * 440, py = 44 + Math.floor(i / 2) * 230, core = p[2], home = p[3], prox = p[4], data = prox || home;
+    el('text', {x: px, y: py, 'font-size': 12.5, fill: INK, 'font-weight': 600}, s, p[0]);
+    el('text', {x: px, y: py + 16, 'font-size': 11.5, fill: MUTED}, s, p[1]);
+    const gx = m => px + 24 + m * 206, gy = py + 52, cx = (m, x) => gx(m) + (x - 1) * DX, cy = y => gy + (5 - y) * DY;
+    for (let m = 0; m < 2; m++) {
+      el('text', {x: gx(m), y: py + 34, 'font-size': 11, fill: INK, 'font-weight': 600}, s, 'mesh ' + m);
+      for (let x = 1; x <= 7; x++) el('text', {x: cx(m, x) + CW / 2, y: gy - 5, 'text-anchor': 'middle', 'font-size': 9, fill: MUTED}, s, 'X' + x);
+      for (let y = 1; y <= 5; y++) el('text', {x: gx(m) - 4, y: cy(y) + CH / 2 + 3, 'text-anchor': 'end', 'font-size': 9, fill: MUTED}, s, 'Y' + y);
+      for (let y = 1; y <= 5; y++) for (let x = 1; x <= 7; x++) el('rect', Object.assign({x: cx(m, x), y: cy(y), width: CW, height: CH, rx: 2, fill: '#fff', stroke: RULE}, NOS.includes(x + ',' + y) ? {'stroke-dasharray': '3 2'} : {}), s);
+    }
+    const mark = (c, f, k, w, letter) => { el('rect', {x: cx(c[0], c[1]), y: cy(c[2]), width: CW, height: CH, rx: 2, fill: f, stroke: k, 'stroke-width': w}, s); el('text', {x: cx(c[0], c[1]) + CW / 2, y: cy(c[2]) + CH / 2 + 4, 'text-anchor': 'middle', 'font-size': 11.5, fill: INK, 'font-weight': 600}, s, letter); };
+    mark(home, HF, prox ? S1 : INK, prox ? 1.2 : 2.5, 'H');
+    if (prox) mark(prox, PF, INK, 2.5, 'P');
+    mark(core, '#fff', RED, 2, 'R');
+    // schematic arrow from the core to the slice that answers, left out when the two cells touch
+    const ax = cx(core[0], core[1]) + CW / 2, ay = cy(core[2]) + CH / 2, bx = cx(data[0], data[1]) + CW / 2, by = cy(data[2]) + CH / 2, d = Math.hypot(bx - ax, by - ay), ux = (bx - ax) / d, uy = (by - ay) / d;
+    const x1 = ax + ux * 13, y1 = ay + uy * 13, x2 = bx - ux * 15, y2 = by - uy * 15;
+    if (d > 40) el('line', {x1, y1, x2, y2, stroke: RED, 'stroke-width': 1.5}, s);
+    if (d > 40) el('path', {d: 'M' + x2 + ',' + y2 + ' L' + (x2 - ux * 7 - uy * 3.5) + ',' + (y2 - uy * 7 + ux * 3.5) + ' L' + (x2 - ux * 7 + uy * 3.5) + ',' + (y2 - uy * 7 - ux * 3.5) + ' Z', fill: RED}, s);
+    el('text', {x: px, y: gy + 5 * DY + 16, 'font-size': 11.5, fill: INK}, s, p[5]);
+  });
+})();
+ // Proxy map: key = home crosspoint on mesh 1, value = its proxy crosspoint on mesh 0 (32 fits from the cores of mesh 0)
+(function () {
+  const s = document.getElementById('proxymap'), M10 = {"1,1":"5,4","1,2":"5,5","1,3":"6,3","1,4":"5,1","2,1":"6,4","2,2":"6,5","2,3":"5,3","2,4":"6,1","2,5":"5,2","3,1":"7,4","3,2":"7,3","3,3":"7,2","3,4":"7,1","3,5":"6,2","4,1":"2,3","4,2":"4,4","4,3":"4,3","4,4":"4,2","5,1":"1,4","5,2":"2,5","5,3":"4,1","5,4":"1,1","5,5":"1,2","6,1":"2,4","6,2":"3,5","6,3":"3,2","6,4":"2,1","6,5":"2,2","7,1":"3,4","7,2":"1,3","7,3":"3,3","7,4":"3,1"};
+  const M01 = {}; for (const h in M10) M01[M10[h]] = h;
+  const DX = 54, DY = 46, CW = 50, CH = 40, shade = c => 'hsl(213 65% ' + (93 - (c - 1) * 8.5) + '%)';
+  [[0, 44, 'mesh 0: each cell shows the matching crosspoint on mesh 1', M01], [1, 486, 'mesh 1: each cell shows its proxy crosspoint on mesh 0', M10]].forEach(([m, X0, title, map]) => {
+    const Y0 = 44;
+    el('text', {x: X0, y: 16, 'font-size': 12.5, fill: INK, 'font-weight': 600}, s, title);
+    for (let x = 1; x <= 7; x++) el('text', {x: X0 + (x - 1) * DX + CW / 2, y: 36, 'text-anchor': 'middle', 'font-size': 10.5, fill: MUTED}, s, 'X' + x);
+    for (let y = 1; y <= 5; y++) el('text', {x: X0 - 6, y: Y0 + (5 - y) * DY + CH / 2 + 4, 'text-anchor': 'end', 'font-size': 10.5, fill: MUTED}, s, 'Y' + y);
+    for (let y = 1; y <= 5; y++) for (let x = 1; x <= 7; x++) {
+      const v = map[x + ',' + y], X = X0 + (x - 1) * DX, Y = Y0 + (5 - y) * DY;
+      if (v === undefined) { el('rect', {x: X, y: Y, width: CW, height: CH, rx: 3, fill: '#fff', stroke: MUTED, 'stroke-dasharray': '3 2'}, s); el('text', {x: X + CW / 2, y: Y + 24, 'text-anchor': 'middle', 'font-size': 10, fill: MUTED}, s, 'no slice'); continue; }
+      const col = m === 0 ? x : +v.split(',')[0], eg = (m === 0 && x === 2 && y === 5) || (m === 1 && x === 5 && y === 2);
+      el('rect', {x: X, y: Y, width: CW, height: CH, rx: 3, fill: shade(col), stroke: eg ? '#c8373a' : '#fff', 'stroke-width': eg ? 2.5 : 1}, s);
+      el('text', {x: X + CW / 2, y: Y + 25, 'text-anchor': 'middle', 'font-size': 12.5, fill: col > 5 ? '#fff' : INK, 'font-weight': 600}, s, v);
+    }
+  });
+  el('text', {x: 44, y: 290, 'font-size': 11.5, fill: INK, 'font-weight': 600}, s, 'Red border: the example, (2,5) of mesh 0 and (5,2) of mesh 1. Light to dark: column X1 to X7 of the mesh 0 crosspoint.');
+})();

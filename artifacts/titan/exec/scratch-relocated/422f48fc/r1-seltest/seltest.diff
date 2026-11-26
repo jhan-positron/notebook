@@ -1,0 +1,115 @@
+diff --git a/emu/hemi_tlm/tests/test_gc_timing_selection.py b/emu/hemi_tlm/tests/test_gc_timing_selection.py
+new file mode 100644
+index 0000000..57ce347
+--- /dev/null
++++ b/emu/hemi_tlm/tests/test_gc_timing_selection.py
+@@ -0,0 +1,109 @@
++"""Keep the DDR timing profile off the AUX pairs unless the image opts in.
++
++The default Linux-boot run window was measured with untimed AP system DRAM.
++A default image that times AUX pairs 16..17 can miss that window.
++"""
++import operator
++from pathlib import Path
++import re
++import unittest
++
++if __package__:
++    from .test_gc_port_order import parenthesized
++else:
++    from test_gc_port_order import parenthesized
++
++HEMI = Path(__file__).resolve().parents[1]
++
++WRAPPER = "goldcrestEW_ip_fullconn_wrapper"
++DEFINE = "HEMI_GC_AUX_TIMING"
++PAIR_INDICES = (-1, 0, 15, 16, 17, 18)
++# Pairs 0..15 are datapath pairs and pairs 16..17 are AUX pairs.
++# -1 is the index of an instance without a HEMI pair index.
++EXPECTED_TIMED = {
++    False: {-1: False, 0: True, 15: True, 16: False, 17: False, 18: False},
++    True: {-1: False, 0: True, 15: True, 16: True, 17: True, 18: False},
++}
++COMPARISONS = {
++    ">=": operator.ge, "<=": operator.le, "==": operator.eq,
++    "!=": operator.ne, ">": operator.gt, "<": operator.lt,
++}
++
++
++def wrapper_body(text):
++    """Return the comment-free body of the outer Goldcrest wrapper module."""
++    text = re.sub(r"/\*.*?\*/|//[^\n]*", "", text, flags=re.DOTALL)
++    matches = re.findall(rf"^module\s+{WRAPPER}\b(.*?)^endmodule\b", text,
++                         flags=re.DOTALL | re.MULTILINE)
++    if len(matches) != 1:
++        raise AssertionError(f"expected exactly one {WRAPPER}, found {len(matches)}")
++    return matches[0]
++
++
++def timed_pairs(body, defined):
++    """Evaluate GC_TIMED_PAIRS for one state of the build define."""
++    blocks = re.findall(
++        r"^`(ifdef|ifndef)[ \t]+(\w+)\s*\n"
++        r"\s*localparam\s+int\s+GC_TIMED_PAIRS\s*=\s*(\d+)\s*;\s*\n"
++        r"`else\s*\n"
++        r"\s*localparam\s+int\s+GC_TIMED_PAIRS\s*=\s*(\d+)\s*;\s*\n"
++        r"`endif\b", body, flags=re.MULTILINE)
++    if len(blocks) != 1 or len(re.findall(r"\bGC_TIMED_PAIRS\s*=", body)) != 2:
++        raise AssertionError("expected one ifdef/else block defining GC_TIMED_PAIRS")
++    directive, macro, first, second = blocks[0]
++    if macro != DEFINE or len(re.findall(rf"\b{DEFINE}\b", body)) != 1:
++        raise AssertionError(f"GC_TIMED_PAIRS must depend on {DEFINE} alone")
++    return int(first if defined == (directive == "ifdef") else second)
++
++
++def timing_expression(body, instance):
++    """Extract one lane instance's DATAPATH_TIMING parameter expression."""
++    matches = [
++        parenthesized(body, match.end() - 1)[0]
++        for match in re.finditer(r"\bhemi_gc_lane_avip\s*#\s*\(", body)
++        if re.match(rf"\s*{re.escape(instance)}\s*\(",
++                    body[parenthesized(body, match.end() - 1)[1]:])
++    ]
++    if len(matches) != 1:
++        raise AssertionError(f"expected exactly one {instance}, found {len(matches)}")
++    openings = list(re.finditer(r"\.DATAPATH_TIMING\s*\(", matches[0]))
++    if len(openings) != 1:
++        raise AssertionError(f"expected one {instance}.DATAPATH_TIMING")
++    expression, _ = parenthesized(matches[0], openings[0].end() - 1)
++    return re.sub(r"\s+", "", expression)
++
++
++def is_timed(expression, pair_index, limit):
++    """Evaluate a conjunction of GC_PAIR_INDEX comparisons, rejecting other forms."""
++    result = True
++    for clause in expression.split("&&"):
++        match = re.fullmatch(
++            r"GC_PAIR_INDEX(>=|<=|==|!=|>|<)(\d+|GC_TIMED_PAIRS)", clause)
++        if not match:
++            raise AssertionError(f"unsupported DATAPATH_TIMING clause: {clause!r}")
++        bound = limit if match.group(2) == "GC_TIMED_PAIRS" else int(match.group(2))
++        result = result and COMPARISONS[match.group(1)](pair_index, bound)
++    return result
++
++
++class GcTimingSelectionTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.body = wrapper_body(
++            (HEMI / "agents/goldcrest_ew_fullconn_avip.sv").read_text())
++
++    def test_aux_pairs_are_timed_only_with_the_build_define(self):
++        for logical in range(2):
++            expression = timing_expression(self.body, f"lane_bfm{logical}")
++            for defined, expected in EXPECTED_TIMED.items():
++                with self.subTest(logical=logical, defined=defined):
++                    limit = timed_pairs(self.body, defined)
++                    self.assertEqual(
++                        {index: is_timed(expression, index, limit)
++                         for index in PAIR_INDICES},
++                        expected,
++                    )
++
++
++if __name__ == "__main__":
++    unittest.main()

@@ -1,0 +1,197 @@
+diff --git a/emu/common/tests/test_hemi_notel.py b/emu/common/tests/test_hemi_notel.py
+index 586c63d..f139340 100644
+--- a/emu/common/tests/test_hemi_notel.py
++++ b/emu/common/tests/test_hemi_notel.py
+@@ -61,6 +61,17 @@ MANIFEST_CHECKS = {
+     'run_sim.sh': section(SIM, '\nemu_vdebug_require_manifest "$BUILD_DIR/MANIFEST"',
+                           '\nif ! grep -Fqx "c2c_gc_master_avip:'),
+ }
++LINUX_WINDOW = section(SOURCES['run_emu.sh'], '\nLINUX_BOOT=0', '\nRUN_NS=')
++RUN_CYCLES_DISPATCH = section(SOURCES['run_emu.sh'], '\n  run_cycles_flags=',
++                              '\n  # FW forwarded')
++# The snapshot helpers are replaced; the window value marks a launcher default.
++DEFAULT_WINDOW = '1000000000'
++LINUX_FIXTURE = f'''
++ASIMOV_OS_DIR=/fixture; ASIMOV_OS_SNAPSHOT=fixture
++asimov_os_palladium_ready() {{ :; }}
++asimov_os_sms_defaults() {{ :; }}
++asimov_os_linux_boot_cycles() {{ echo {DEFAULT_WINDOW}; }}
++'''
+ 
+ 
+ def shell(source, args):
+@@ -411,5 +422,90 @@ emu_vdebug_require_manifest() { :; }
+                 self.check_reused_manifest(name, 'stage: legacy\n', 0, True, nocmn=0)
+ 
+ 
++class HemiAuxTimingWindow(unittest.TestCase):
++    """A Linux boot on an image with timed AUX lanes needs the caller's window.
++
++    The default window was measured with untimed AP system DRAM, and a build
++    with HEMI_GC_AUX_TIMING lands in the same directory as the default image.
++    """
++    TIMED = 'defines:  CMN_RESET_FULL_SEQ GC_BEHAV HEMI_GC_AUX_TIMING\n'
++    UNTIMED = 'defines:  CMN_RESET_FULL_SEQ GC_BEHAV\n'
++
++    def before_build(self, args):
++        return shell(LINUX_FIXTURE + PARSERS['run_emu.sh'] + LINUX_WINDOW
++                     + '\nprintf "BUILD_STARTS\\n"\n', args)
++
++    def before_launch(self, args, manifest):
++        with tempfile.TemporaryDirectory(prefix='hemi-aux-manifest-') as directory:
++            Path(directory, 'MANIFEST').write_text(manifest)
++            source = (f"BUILD_DIR={shlex.quote(directory)}; BUILD_CMD='fixture-build --build'\n"
++                      + LINUX_FIXTURE + PARSERS['run_emu.sh'] + LINUX_WINDOW
++                      + MANIFEST_CHECKS['run_emu.sh']
++                      + '\nprintf "LAUNCH %s\\n" "$RUN_CYCLES"\n')
++            return shell(source, args)
++
++    def assert_launched(self, result, cycles):
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertIn(f'LAUNCH {cycles}', result.stdout)
++
++    def assert_rejected(self, result, marker):
++        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertNotIn(marker, result.stdout)
++        self.assertIn('HEMI_GC_AUX_TIMING', result.stderr)
++        self.assertIn('explicit --run-cycles', result.stderr)
++
++    def test_timed_image_needs_an_explicit_window(self):
++        # No phase flag reuses the image and elaborates; --run-only reuses the snapshot.
++        for phase in ((), ('--run-only',)):
++            with self.subTest(phase=phase):
++                self.assert_launched(self.before_launch(phase, self.UNTIMED), DEFAULT_WINDOW)
++                self.assert_rejected(self.before_launch(phase, self.TIMED), 'LAUNCH')
++                self.assert_launched(
++                    self.before_launch((*phase, '--run-cycles', '1600000000'), self.TIMED),
++                    '1600000000')
++
++    def test_only_the_complete_define_marks_a_timed_image(self):
++        for defines, timed in (('HEMI_GC_AUX_TIMING=1 OTHER', True),
++                               ('OTHER\tHEMI_GC_AUX_TIMING', True),
++                               ('HEMI_GC_AUX_TIMING_EXTRA', False),
++                               ('OTHER_HEMI_GC_AUX_TIMING', False)):
++            with self.subTest(defines=defines):
++                result = self.before_launch((), f'defines: {defines}\n')
++                if timed:
++                    self.assert_rejected(result, 'LAUNCH')
++                else:
++                    self.assert_launched(result, DEFAULT_WINDOW)
++
++    def test_timed_build_without_a_window_stops_before_the_build(self):
++        build = ('--build', '--define', 'HEMI_GC_AUX_TIMING')
++        self.assert_rejected(self.before_build(build), 'BUILD_STARTS')
++        for extra in (('--run-cycles', '1600000000'), ('--build-only',)):
++            with self.subTest(extra=extra):
++                result = self.before_build((*build, *extra))
++                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++                self.assertIn('BUILD_STARTS', result.stdout)
++        # The image of a finished build is checked again before the launch.
++        self.assert_rejected(self.before_launch(('--build',), self.TIMED), 'LAUNCH')
++
++    def test_dispatch_tells_the_remote_who_chose_the_window(self):
++        # The dispatch always forwards --run-cycles; two hops cover a re-dispatch.
++        for args, allowed in (((), False), (('--run-cycles', '1600000000'), True)):
++            with self.subTest(args=args):
++                for _ in range(2):
++                    source = (LINUX_FIXTURE + PARSERS['run_emu.sh'] + LINUX_WINDOW
++                              + RUN_CYCLES_DISPATCH + '\nprintf "%s\\n" "$run_cycles_flags"\n')
++                    result = shell(source, args)
++                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++                    args = tuple(shlex.split(result.stdout.splitlines()[-1]))
++                    self.assertIn('--run-cycles', args)
++                    remote = self.before_launch(args, self.TIMED)
++                    if allowed:
++                        self.assert_launched(remote, '1600000000')
++                    else:
++                        self.assert_rejected(remote, 'LAUNCH')
++                    self.assert_launched(self.before_launch(args, self.UNTIMED),
++                                         args[args.index('--run-cycles') + 1])
++
++
+ if __name__ == '__main__':
+     unittest.main()
+diff --git a/emu/hemi_tlm/doc/GC_DDR_TIMING.md b/emu/hemi_tlm/doc/GC_DDR_TIMING.md
+index 823a79f..e654348 100644
+--- a/emu/hemi_tlm/doc/GC_DDR_TIMING.md
++++ b/emu/hemi_tlm/doc/GC_DDR_TIMING.md
+@@ -100,7 +100,7 @@ default Linux-boot run window (`asimov_os_linux_boot_cycles`) was measured with
+ untimed AP DRAM: Linux init at 874-883M cfclks in a 1.0G cfclk window. Each
+ AP DRAM read gains about 58 AXI cycles (est.), and a timed-AUX boot has
+ not been measured. Pass an explicit larger `--run-cycles` when booting Linux on
+-such an image. The define adds no image tag token, so the image replaces the
++such an image. `run_emu.sh` stops with an error otherwise. The define adds no image tag token, so the image replaces the
+ untimed one in the same build directory; its MANIFEST `defines:` line records
+ the define.
+ 
+diff --git a/emu/hemi_tlm/scripts/run_emu.sh b/emu/hemi_tlm/scripts/run_emu.sh
+index 6c538ae..364425a 100755
+--- a/emu/hemi_tlm/scripts/run_emu.sh
++++ b/emu/hemi_tlm/scripts/run_emu.sh
+@@ -285,6 +285,7 @@ SERIAL_CFG=""
+ HOST_PROGRAM=""
+ HOST_PROGRAM_SUPPORT=0
+ RUN_CYCLES_SET=0
++RUN_CYCLES_DEFAULTED=0   # 1 = the ssh dispatch forwarded a launcher default as --run-cycles
+ EXTRA_PLUSARGS=()
+ while [[ $# -gt 0 ]]; do
+   case $1 in
+@@ -334,6 +335,7 @@ while [[ $# -gt 0 ]]; do
+                   RUN_WAIT=$2; RUN_WAIT_SET=1; shift 2 ;;
+     --run-cycles) [[ $# -lt 2 ]] && { printf '\033[1;31m%s\033[0m\n' "ERROR: --run-cycles needs a value" >&2; exit 1; }
+                   RUN_CYCLES=$2; RUN_CYCLES_SET=1; shift 2 ;;
++    --run-cycles-default) RUN_CYCLES_DEFAULTED=1; shift ;;   # internal-only: added by the ssh dispatch
+     --timelimit)  [[ $# -lt 2 ]] && { printf '\033[1;31m%s\033[0m\n' "ERROR: --timelimit needs a value" >&2; exit 1; }
+                   RUN_TIMELIMIT=$2; RUN_TIMELIMIT_SET=1; shift 2 ;;
+     --waves)      WAVES=1; shift ;;
+@@ -638,6 +640,15 @@ if [[ $PCIESB -eq 1 ]]; then
+   # ~1950 s on hemi_notws_sb_tlm.
+   [[ $RUN_TIMELIMIT_SET -eq 1 || $LINUX_BOOT -eq 1 ]] || RUN_TIMELIMIT=1800
+ fi
++# The default Linux-boot windows were measured with untimed AUX lanes (the AP
++# system DRAM).  HEMI_GC_AUX_TIMING times those lanes, and no boot of such an
++# image has been measured.  Stop before the build when the caller left the
++# window to the launcher.
++if [[ $LINUX_BOOT -eq 1 && $RUN -eq 1 && ( $RUN_CYCLES_SET -eq 0 || $RUN_CYCLES_DEFAULTED -eq 1 ) &&
++      " ${BUILD_FLAGS[*]} " =~ [[:space:]]HEMI_GC_AUX_TIMING(=[^[:space:]]*)?[[:space:]] ]]; then
++  printf '\033[1;31m%s\033[0m\n' "ERROR: --define HEMI_GC_AUX_TIMING times the AP system DRAM, and the default Linux-boot window ($RUN_CYCLES cfclks) was measured without that timing. Pass an explicit --run-cycles, or pass --build-only to build without running" >&2
++  exit 1
++fi
+ RUN_NS=$(( RUN_CYCLES / 2 ))
+ 
+ # -----------------------------------------------------------------------------
+@@ -858,6 +869,10 @@ if [[ "$(hostname -s)" != "${PALLADIUM_HOST%%.*}" ]]; then
+     phase_flags="$phase_flags $plusarg_q"
+   done
+   phase_flags="$phase_flags ${BUILD_FLAGS[*]}"
++  # The remote always receives --run-cycles.  --run-cycles-default tells it
++  # that the caller did not choose the value.
++  run_cycles_flags="--run-cycles $RUN_CYCLES"
++  [[ $RUN_CYCLES_SET -eq 1 && $RUN_CYCLES_DEFAULTED -eq 0 ]] || run_cycles_flags+=" --run-cycles-default"
+   # FW forwarded 2026-07-29: on emu (CMN_RESET_FULL_SEQ) reset release is
+   # firmware-driven and FW=hemi_release_boot selects the release-all boot ROM;
+   # without forwarding, a dispatched run silently stages the default Asimov
+@@ -877,7 +892,7 @@ if [[ "$(hostname -s)" != "${PALLADIUM_HOST%%.*}" ]]; then
+   # `env` prefix: the remote command runs under the user's LOGIN shell; bare
+   # VAR=val prefixes are bash-only and die under csh/tcsh with
+   # "VAR=...: Command not found" (hit 2026-07-29 dispatching to ga13pd02).
+-  exec ssh "$PALLADIUM_HOST" "cd '$REPO_ROOT' && env $remote_env ./emu/hemi_tlm/scripts/run_emu.sh --run-cycles $RUN_CYCLES --run-wait $RUN_WAIT --timelimit $RUN_TIMELIMIT $phase_flags"
++  exec ssh "$PALLADIUM_HOST" "cd '$REPO_ROOT' && env $remote_env ./emu/hemi_tlm/scripts/run_emu.sh $run_cycles_flags --run-wait $RUN_WAIT --timelimit $RUN_TIMELIMIT $phase_flags"
+ fi
+ 
+ if [[ $WMEM_PRELOAD -eq 1 && $RUN -eq 1 ]]; then
+@@ -961,6 +976,14 @@ done
+ # Reuse the mode recorded by the compiled design: --run-only cannot carry
+ # build flags, including a C2C-only passive override.
+ compiled_defines=$(sed -n 's/^defines:[[:space:]]*//p' "$BUILD_DIR/MANIFEST")
++# The build directory is the same with and without HEMI_GC_AUX_TIMING, so the
++# netlist decides.  A Linux boot on a netlist with timed AUX lanes (the AP
++# system DRAM) has no measured window.  The caller must pass --run-cycles.
++if [[ ${LINUX_BOOT:-0} -eq 1 && ${RUN:-1} -eq 1 && ( ${RUN_CYCLES_SET:-0} -eq 0 || ${RUN_CYCLES_DEFAULTED:-0} -eq 1 ) &&
++      " $compiled_defines " =~ [[:space:]]HEMI_GC_AUX_TIMING(=[^[:space:]]*)?[[:space:]] ]]; then
++  printf '\033[1;31m%s\033[0m\n' "ERROR: netlist has HEMI_GC_AUX_TIMING, which times the AP system DRAM: the default Linux-boot window ($RUN_CYCLES cfclks) was measured without that timing. Pass an explicit --run-cycles, or rebuild without the define ($BUILD_CMD)" >&2
++  exit 1
++fi
+ # The config-master verdict and its probes follow the netlist, not the flags.  A
+ # real-CMN Linux boot cannot pass on a config-master netlist: its tie-off of the
+ # CXX->CCX HRA leg stalls the SCP firmware's PCIe0 bring-up before the AP is

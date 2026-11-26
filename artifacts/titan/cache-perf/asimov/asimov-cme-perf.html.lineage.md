@@ -145,7 +145,7 @@ Canonical files are on claude-agentsrv. The sizes below are bytes.
 
 # Lineage inventory: artifacts/titan/cache-perf/asimov/asimov-cme-perf.html
 
-Written by the 2026-11-06 handoff run. One line per file under the inputs and sources the page's lineage names (handoff: claude_20261101-20261106_handoff-2026-11-02-md.md). Repo path = preserved at that path; otherwise the left-behind reason.
+Written by the 2026-11-06 handoff run. One line per file under the inputs and sources the page's lineage names (handoff: claude_20261101-20261108_handoff-2026-11-02-md.md). Repo path = preserved at that path; otherwise the left-behind reason.
 
 | canonical | repo path or reason | bytes |
 |---|---|---|
