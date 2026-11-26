@@ -15,6 +15,8 @@ Registered by the 2026-10-16 `SCOPE: auto` handoff run of claude-handoff-generat
 - `PR-description/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/PR-description/SKILL.md` (11745 bytes). Installed personal skill (PR-description). (handoff: [claude_20261013_pr-4868-description-trim.md](../../handoffs/claude_20261013_pr-4868-description-trim.md))
 - `PR-description/evals/evals.json` -> `claude-agentsrv:/home/jhan/.claude/skills/PR-description/evals/evals.json` (1604 bytes). Installed personal skill (PR-description). (handoff: [claude_20261013_pr-4868-description-trim.md](../../handoffs/claude_20261013_pr-4868-description-trim.md))
 - `PR-description/references/example-how-to-review.md` -> `claude-agentsrv:/home/jhan/.claude/skills/PR-description/references/example-how-to-review.md` (2807 bytes). Installed personal skill (PR-description). (handoff: [claude_20261013_pr-4868-description-trim.md](../../handoffs/claude_20261013_pr-4868-description-trim.md))
+Moved on 2026-11-25: the canonical folder `~/.claude/skills/Wade-code-review/` was renamed to `folks-code-review/` on 2026-11-19, and the mirror folder followed with `git mv`. The 10 `Wade-code-review/` entries below are history. The current entries are in the 2026-11-25 batch at the end of this file.
+
 - `Wade-code-review/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/SKILL.md` (79222 bytes). Installed personal skill (Wade-code-review). (handoff: [claude_20261005-20261006_wade-code-review-skill-for-pr4557.md](../../handoffs/claude_20261005-20261006_wade-code-review-skill-for-pr4557.md))
 - `Wade-code-review/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/agents/openai.yaml` (313 bytes). Installed personal skill (Wade-code-review). (handoff: [claude_20261005-20261006_wade-code-review-skill-for-pr4557.md](../../handoffs/claude_20261005-20261006_wade-code-review-skill-for-pr4557.md))
 - `Wade-code-review/references/check15/prose.py` -> `claude-agentsrv:/home/jhan/.claude/skills/Wade-code-review/references/check15/prose.py` (1262 bytes). Installed personal skill (Wade-code-review). (handoff: [claude_20261006-20261007_wade-code-review-skill-from-wades-pr-reviews.md](../../handoffs/claude_20261006-20261007_wade-code-review-skill-from-wades-pr-reviews.md))
@@ -74,4 +76,44 @@ Each path below is relative to this topic. Original files are on claude-agentsrv
 - `cpp-coding-guide/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/cpp-coding-guide/SKILL.md` (4831 mirror bytes).
 
 ### Related handoffs
+
+
+## Batch: 2026-11-25 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-11-25 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory, same files). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first. `<skill>/` -> `claude-agentsrv:/home/jhan/.claude/skills/<skill>/`. `CLAUDE.md` -> `claude-agentsrv:/home/jhan/.claude/CLAUDE.md`. `folks-code-review/` is the former `Wade-code-review/`: the canonical folder was renamed on 2026-11-19, and this batch moved the mirror folder with `git mv` and then copied the 10 canonical files over it (4 of them had changed).
+
+Refreshed from their canonical files on 2026-11-25 (registered earlier, content changed since): `CLAUDE.md`, `cpp-coding-guide/SKILL.md`, `explain-bash/SKILL.md`.
+
+Covers 2 handoff(s) written or updated on 2026-11-25 (see "Related" on each entry). Preserved: 14 files, 0.31 MiB in this topic. Files of these handoffs that were not copied, one reason per file (the per-file inventories are in the `.lineage.md` companions named under each report page):
+
+- (scratchpad file not named in the handoff): 306 files
+- (no value used: empty file): 75 files
+- (pre-edit copy of a file preserved at its current state): 25 files
+- held back at the gate (identity capture or raw export, no explicit yes): 6 files
+
+Reason names: `provenance` = logs, compiled binaries, .pyc files, raw workflow outputs and other rule-4 classes of the prompt. `size` = a file above 5 MiB. `regenerable` = a command rebuilds the file. `duplicate (<repo path>)` = the same bytes are already held at that repo path. `vendor material` and `private configuration` = not copied while the repository is public. `held back at the gate` = identity captures of machines (firmware, DMI, sudo rules, process lists) and raw exports of private sources, proposed at the gate and not approved by an explicit yes.
+
+### All files of this batch
+
+Repo path -> canonical path (bytes). `origin:` = the session-store or scratchpad path a relocated file was copied from (history only, never fetched again).
+
+Related: [claude_20261119-20261120_tron-pr-5022-review-comment-authorship.md](../../handoffs/claude_20261119-20261120_tron-pr-5022-review-comment-authorship.md)
+
+- `folks-code-review/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/SKILL.md` (92363 bytes)
+- `folks-code-review/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/agents/openai.yaml` (340 bytes)
+- `folks-code-review/references/check15/prose.py` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/references/check15/prose.py` (1262 bytes)
+- `folks-code-review/references/check15/spell.py` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/references/check15/spell.py` (1609 bytes)
+- `folks-code-review/references/check15/step5.py` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/references/check15/step5.py` (1861 bytes)
+- `folks-code-review/references/check15/width.py` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/references/check15/width.py` (1238 bytes)
+- `folks-code-review/references/pr4557-misses.md` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/references/pr4557-misses.md` (13822 bytes)
+- `folks-code-review/references/procedures.md` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/references/procedures.md` (113157 bytes)
+- `folks-code-review/references/wade-corpus.md` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/references/wade-corpus.md` (6224 bytes)
+- `folks-code-review/references/wade-style.md` -> `claude-agentsrv:/home/jhan/.claude/skills/folks-code-review/references/wade-style.md` (27917 bytes)
+- `tron-code-review/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/tron-code-review/SKILL.md` (19702 bytes)
+
+Related: [claude_20261120_plain-english-skill-inspection-report.md](../../handoffs/claude_20261120_plain-english-skill-inspection-report.md)
+
+- `plain-english-experiment/SKILL.md` -> `claude-agentsrv:/home/jhan/.claude/skills/plain-english-experiment/SKILL.md` (10877 bytes)
+- `plain-english-experiment/scripts/check_lengths.py` -> `claude-agentsrv:/home/jhan/.claude/skills/plain-english-experiment/scripts/check_lengths.py` (13434 bytes)
+- `synced/9f692352-f26b-4069-97fb-0917798e6ccb_c26b559e-a9e0-4e4b-8012-0fe688c7d709/skill-creator/eval-viewer/generate_review.py` -> `claude-agentsrv:/home/jhan/.claude/skills/synced/9f692352-f26b-4069-97fb-0917798e6ccb_c26b559e-a9e0-4e4b-8012-0fe688c7d709/skill-creator/eval-viewer/generate_review.py` (21963 bytes)
 
