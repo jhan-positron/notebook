@@ -1,0 +1,1 @@
+- [Tron commits need delphi-3b35 for hooks](tron-commit-needs-delphi-for-hooks.md) — on agentsrv the lefthook pre-commit binary is missing; commit over ssh on delphi-3b35, never skip the hook

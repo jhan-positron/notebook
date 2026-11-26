@@ -1,0 +1,952 @@
+{
+ "area": "cpp-pos-system",
+ "variables": [
+  {
+   "name": "SYSTEM_CONFIG",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/driver.cpp:208",
+     "mechanism": "getenv in pos_startup_host; the text goes to tron::hardware::system::system_parse_env (src/system/system.cpp:2112)",
+     "when": "once at startup"
+    },
+    {
+     "program": "pos_fake, the driver stand-in (rinzler_proxy, rinzler_mock, rinzler_host, tests without FPGA cards)",
+     "site": "src/pos/fake.cpp:99",
+     "mechanism": "getenv in pos_startup_host; the text goes to tron::hardware::system::system_parse_env",
+     "when": "once at startup"
+    },
+    {
+     "program": "libsystem: early_parse_instance (called by rinzler and runtron) and get_sub_instances (called by tests)",
+     "site": "src/system/system.cpp:949",
+     "mechanism": "std::getenv in parse_instance_from_system_config; only the --instance option is taken",
+     "when": "every call of parse_instance_from_system_config"
+    },
+    {
+     "program": "libsystem: system_parse_args (called by rinzler and runtron)",
+     "site": "src/system/system.cpp:2108",
+     "mechanism": "std::getenv; reached only when DICE_DAEMON_CHILD is 1",
+     "when": "every call of system_parse_args"
+    }
+   ],
+   "setters": [
+    {
+     "site": "bin/dice:3666",
+     "value": "the submitted SYSTEM_CONFIG merged with --instance for the granted slots",
+     "why": "the Dice daemon passes the granted instance to the child process"
+    },
+    {
+     "site": "bin/slice:3464",
+     "value": "--instance <id>,<count>",
+     "why": "Slice runs each test on its own instance"
+    },
+    {
+     "site": "bin/hugepage_exhaustion_repro.py:215",
+     "value": "--instance <value of the --instance flag>",
+     "why": "the reproduction script selects the instance for the child"
+    }
+   ],
+   "values": "Text in command-line form. It is split at white space. A token in double quotes may hold spaces, and a backslash escapes a quote or a backslash inside the quotes (std::quoted, src/system/system.cpp:2074-2081). Recognised options (src/system/system.cpp:1954-2052): --instance x,y (also --instance=x,y; x is the instance number from 0, y is the instance count, x < y), --devices LIST, --app-cores LIST, --dev-cores LIST, --helper-cores LIST, --numa N, --nr_hugepages N, --hugepage_file PATH, --resource-map PATH, --tracer-core N, --kv-cache-gb N, -o or --optimize, --no-opt, --heap-shadow. A token -- ends the parse. Any other token is ignored without a message.",
+   "default": "Unset: the startup code does not parse it. Only the system options from the command line apply. Exception: when DICE_DAEMON_CHILD is 1, an unset or empty value makes startup fail, because --instance is then required. Empty and DICE_DAEMON_CHILD not 1: the text is parsed as an empty option list.",
+   "effect": "Gives the system placement options to the process through the environment. --instance selects which share (FPGA cards, CPU cores, NUMA node, hugepage files) of the server this process owns. pos_startup_host parses the variable after the command line was parsed, so an option given here replaces the same option from the command line.",
+   "notes": "1. Second use: rinzler and runtron call early_parse_instance at program start (src/rinzler.cpp:4563, src/runtron.cpp:489). That call reads --instance from this variable only when the command line has no --instance. rinzler uses the result for the log line prefix and for the FUSE stats mount directory. runtron uses it for the FUSE stats mount directory. 2. A bad value makes system_parse_env return false. pos_startup_host then logs 'INIT: invalid SYSTEM_CONFIG' and returns -1, and get_devices exits the process with status 1 (src/pos/driver.cpp:887-889). Causes: --instance not in the form x,y, two --instance options, an empty or badly formed device list (each entry is bus:device.function in hexadecimal, for example e1:00.0), an empty CPU list, an option that needs a value at the end of the text. 3. Numbers are parsed with std::stoi or std::stoull with no error handling: the values of --numa, --nr_hugepages, --tracer-core and --kv-cache-gb (src/system/system.cpp:2022-2047) and the numbers inside CPU lists (src/system/system.cpp:398-405). Non-numeric text there throws a C++ exception. On this path the caller pos_startup_host is marked noexcept (src/pos/driver.cpp:191), so the process ends. 4. Each parse outside a Dice grant reloads the resource map (src/system/system.cpp:1935). A SYSTEM_CONFIG without --resource-map then uses the default search order. 5. The hugepage count from --nr_hugepages is replaced later by POS_1GB_PER_NUMA or POS_NR_HUGEPAGES, and --hugepage_file by POS_HUGEPAGE_PATH (src/pos/driver.cpp:249-288). 6. Under a Dice grant (DICE_DAEMON_CHILD=1) the command line and this variable are checked together against the granted slots before any option is applied. The --instance here must equal the instance that DICE_SLOTS describes (src/system/system.cpp:2086-2102). 7. Setter sites listed are examples from outside this area. The other sweeps hold the full list.",
+   "confidence": "high"
+  },
+  {
+   "name": "POS_1GB_PER_NUMA",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/driver.cpp:249",
+     "mechanism": "getenv, then atoi",
+     "when": "once at startup"
+    }
+   ],
+   "setters": [],
+   "values": "Integer parsed with atoi: the number of 1 GiB hugepages on each NUMA node of the server. Non-numeric text is read as 0. There is no range check.",
+   "default": "Unset: POS_NR_HUGEPAGES is used when it is set. Otherwise the count is the --nr_hugepages value, or 16 hugepages (default_n_hugepages, h/system/config.hpp:12).",
+   "effect": "Sets how many 1 GiB hugepages the process maps for its DMA heap (the memory that the FPGA cards read and write). With --instance: pages = value x NUMA node count / 8 x slices owned by this instance, in integer arithmetic (src/pos/driver.cpp:260). Without --instance: pages = value.",
+   "notes": "Wins over POS_NR_HUGEPAGES and over --nr_hugepages from the command line or SYSTEM_CONFIG. The result is capped by the locked-memory limit of the process (RLIMIT_MEMLOCK in GiB, src/pos/driver.cpp:277-281). With --instance that limit is first rounded down to a multiple of the slices owned. The comment at src/system/huge.cpp:64-72 names this variable as the one to use in production. When no KV cache size is given, the default KV cache size is half of the hugepage count (src/system/system.cpp:2539-2545). Not read by pos_fake programs (rinzler_proxy). No setter was found in the files of this area.",
+   "confidence": "high"
+  },
+  {
+   "name": "POS_NR_HUGEPAGES",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/driver.cpp:272",
+     "mechanism": "getenv, then atoi",
+     "when": "once at startup"
+    }
+   ],
+   "setters": [
+    {
+     "site": "bin/hugepage_exhaustion_repro.py:216",
+     "value": "the value of the script's hugepage argument",
+     "why": "the reproduction script sizes the heap of the child"
+    }
+   ],
+   "values": "Integer parsed with atoi: the total number of 1 GiB hugepages for this process. Non-numeric text is read as 0. There is no range check.",
+   "default": "Unset: the count is the --nr_hugepages value, or 16 hugepages (default_n_hugepages, h/system/config.hpp:12).",
+   "effect": "Sets how many 1 GiB hugepages the process maps for its DMA heap (the memory that the FPGA cards read and write).",
+   "notes": "Ignored when POS_1GB_PER_NUMA is set (else-if at src/pos/driver.cpp:272). Wins over --nr_hugepages from the command line or SYSTEM_CONFIG. The result is capped by the locked-memory limit of the process (RLIMIT_MEMLOCK in GiB, src/pos/driver.cpp:277-281). With --instance the final count must divide evenly by the number of slices owned, or an assertion fails (src/system/huge.cpp:665-666). The comment at src/system/huge.cpp:65 and 71 calls this variable deprecated. That comment spells it POS_NR_HUGEPAGE; the code reads POS_NR_HUGEPAGES. Not read by pos_fake programs (rinzler_proxy).",
+   "confidence": "high"
+  },
+  {
+   "name": "POS_HUGEPAGE_PATH",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/driver.cpp:283",
+     "mechanism": "getenv; the text becomes the global hugepage_file",
+     "when": "once at startup"
+    },
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/driver.cpp:240",
+     "mechanism": "getenv; the path is checked by dice_validate_hugepage_path (a check that only acts when DICE_DAEMON_CHILD is 1)",
+     "when": "once at startup"
+    },
+    {
+     "program": "libsystem: dice_parse_arguments (rinzler, runtron, rinzler_proxy, tests), reached only when DICE_DAEMON_CHILD is 1",
+     "site": "src/system/system.cpp:2089",
+     "mechanism": "std::getenv; the path is checked by dice_validate_hugepage_path",
+     "when": "every call of dice_parse_arguments"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/t_system.cpp:307",
+     "value": "a path equal to /dev/hugepages/libpos after normalisation",
+     "why": "the test checks the Dice grant path check"
+    }
+   ],
+   "values": "Path of a file on a hugetlbfs mount (a file system that hands out hugepages). The text is used as given.",
+   "default": "Unset: the path from --hugepage_file (command line or SYSTEM_CONFIG), or /dev/hugepages/libpos (default_hugepage_file, h/system/config.hpp:6). An empty value is not treated as unset: the path becomes empty. The result of an empty path was not determined.",
+   "effect": "Sets the base path of the hugepage file that backs the DMA heap. Without --instance the process maps this one file. With --instance only the directory of the path is used: the files are <directory>/slice-<k>-of-8, one for each slice that the instance owns (src/system/huge.cpp:639-643).",
+   "notes": "Wins over --hugepage_file. Startup cleanup removes unused hugepage files that match this path or its directory (src/system/huge.cpp:97-107, 686-718). Under a Dice grant (DICE_DAEMON_CHILD=1) the path must resolve to the same file as /dev/hugepages/libpos. Another path fails startup with a 'Dice grant ...: POS_HUGEPAGE_PATH requested ...' error, and the default path is the one used (src/pos/driver.cpp:286-287). The apply step at src/pos/driver.cpp:283 runs only in the real driver. pos_fake programs only reach the Dice check at src/system/system.cpp:2089.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRACE_FILE",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/driver.cpp:228",
+     "mechanism": "getenv; the text becomes tron::perfetto_trace_dest",
+     "when": "once at startup"
+    }
+   ],
+   "setters": [],
+   "values": "Either the exact text traced, or a file path. The text is not checked at startup.",
+   "default": "Unset: the trace destination stays traced (src/pos/perf.cpp:34). traced is the Perfetto system daemon; an outside client owns the session.",
+   "effect": "Sets the process-wide Perfetto trace destination. A SIGUSR1 capture (a 10 second trace that the process starts when it receives signal SIGUSR1, src/pos/perf.cpp:248-291) then writes to that file from inside the process, instead of sending events to the traced daemon.",
+   "notes": "The file is opened with O_TRUNC and mode 0600 at each capture (src/pos/perf.cpp:173-175), so a new capture replaces the old file. If the file cannot be opened, start_tracing throws inside a noexcept thread and the process ends; an empty value fails the same way (comment at perfetto/tools/rinzler-capture.sh:202-205). runtron --trace and --trace-gen also write tron::perfetto_trace_dest (src/runtron.cpp:263, 295). The order between those writes and this read was not traced. Not read by pos_fake programs (rinzler_proxy). Two tests read the same name with their own getenv (t/t_gof_staging_leaks.cpp:74, t/t_pos_lifecycle_fake.cpp:200); those files belong to another sweep.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_TRACE_CATEGORIES",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos and pos_fake (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/pos/perf.cpp:50",
+     "mechanism": "std::getenv(trace_categories_variable); the constant holds the name and is defined at h/common/perfetto.hpp:243",
+     "when": "every call of trace_categories_spec"
+    },
+    {
+     "program": "libpos and pos_fake (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/pos/perf.cpp:144",
+     "mechanism": "call of trace_categories_spec in local_trace_config; used when the caller gives no category text",
+     "when": "every call of local_trace_config"
+    },
+    {
+     "program": "libpos and pos_fake (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/pos/perf.cpp:127",
+     "mechanism": "call of trace_categories_spec in require_no_trace_category_override; start_tracing calls it when the destination is traced",
+     "when": "every call of require_no_trace_category_override"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/t_trace_passes.cpp:88",
+     "value": "the category text under test",
+     "why": "the test sets and restores the variable around each case"
+    }
+   ],
+   "values": "Comma-separated list of entries. Each entry is +name (record the category) or -name (do not record it). name is a registered category, or the start of one followed by *. Registered categories (h/common/perfetto.hpp:103-138): rinzler, sys, scheduler, model, model-moe, matmul, loading, driver, driver-detail, gen, hwattention, hwattention-detail, hw, memory.",
+   "default": "Unset or empty: no category selection is sent and the Perfetto defaults apply. The comment at h/common/perfetto.hpp:245-249 says a category is then recorded unless it is tagged debug or slow (driver-detail is tagged slow, memory is tagged debug).",
+   "effect": "Selects which trace categories an in-process trace records. An in-process trace is one that the process writes to a file itself: runtron --trace FILE, a SIGUSR1 capture when TRACE_FILE names a file, or a FUSE capture that gives no category text of its own.",
+   "notes": "The variable is read at each trace start (start_tracing at src/pos/perf.cpp:165, local_trace_config at src/pos/perf.cpp:144). A bad entry (empty, no + or - sign, * not at the end, no matching category) makes the trace start throw std::invalid_argument (src/pos/perf.cpp:92-124). When the destination is traced (the Perfetto daemon) and the variable is set and not empty, start_tracing throws (src/pos/perf.cpp:126-134), because the daemon takes its categories from its own config file. In the SIGUSR1 capture thread this ends the process (perfetto/tools/rinzler-capture.sh:202-207). A FUSE capture that passes its own category text replaces this variable for that capture (src/pos/trace_capture.cpp:460-461). A plain search for getenv with a quoted name does not find this variable, because the name is held in a constant.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_HW_SAMPLER",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos and pos_fake (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/pos/hwperf.cpp:127",
+     "mechanism": "std::getenv in sampler_opted_in",
+     "when": "every call of enable_hw_sampling"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/t_hwperf.cpp:146",
+     "value": "1",
+     "why": "the test turns the sampler on for the case"
+    },
+    {
+     "site": "t/t_pos_lifecycle_fake.cpp:118",
+     "value": "1",
+     "why": "the lifecycle test needs a sampler thread"
+    }
+   ],
+   "values": "Exactly the text 1 or the text true enables it. Any other value is off.",
+   "default": "Unset: the sampler thread is never created and a trace holds no hw counters.",
+   "effect": "Turns on the hardware telemetry sampler. When a trace session starts, the process creates one background thread. While the trace records the hw category, the thread reads CPU temperature (hwmon), CPU frequency (cpufreq) and package power (RAPL) from sysfs and writes them to the trace as counters.",
+   "notes": "The check runs at each trace start until the thread exists (spawn_hw_sampler_locked, src/pos/hwperf.cpp:151-152). enable_hw_sampling is called from start_tracing (src/pos/perf.cpp:197) and from the FUSE capture path (src/pos/trace_capture.cpp:612). The code comment at src/pos/hwperf.cpp:122-125 gives the reason for off by default: a thread, sysfs reads on every sample, and package power needs wider read access to the RAPL energy files. perfetto/grant-rapl-read tests the same variable before it widens that access (perfetto/grant-rapl-read:24). The sample period is TRON_HW_SAMPLER_INTERVAL_MS.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_HW_SAMPLER_INTERVAL_MS",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos and pos_fake (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/pos/hwperf.cpp:171",
+     "mechanism": "std::getenv, then atoll, in sampler_interval_ms",
+     "when": "every call of hw_sampler_run"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/t_hwperf.cpp:148",
+     "value": "the interval that the test case passes in",
+     "why": "the test shortens the sample period"
+    },
+    {
+     "site": "t/t_pos_lifecycle_fake.cpp:120",
+     "value": "5",
+     "why": "the lifecycle test shortens the sample period"
+    }
+   ],
+   "values": "Integer parsed with atoll: milliseconds between two samples. Only a value above 0 is used. There is no upper limit.",
+   "default": "Unset, 0, negative or non-numeric: 100 ms (default_interval_ms, src/pos/hwperf.cpp:92).",
+   "effect": "Sets the time between two samples of the hardware telemetry sampler.",
+   "notes": "Has an effect only when TRON_HW_SAMPLER enables the sampler. Read once when the sampler thread starts (src/pos/hwperf.cpp:645); a change after that is not seen by the running thread.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_HW_SAMPLER_SYSFS_ROOT",
+   "role": "read",
+   "owner": "tron",
+   "audience": "test",
+   "readers": [
+    {
+     "program": "libpos and pos_fake (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/pos/hwperf.cpp:180",
+     "mechanism": "std::getenv in sampler_sysfs_root",
+     "when": "every call of hw_sampler_run"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/t_hwperf.cpp:147",
+     "value": "the path of a made-up sysfs tree",
+     "why": "the test feeds the sampler known sensor files"
+    },
+    {
+     "site": "t/t_pos_lifecycle_fake.cpp:119",
+     "value": "/nonexistent-sysfs",
+     "why": "the lifecycle test wants a sampler that finds no sensor"
+    }
+   ],
+   "values": "Path to a directory that has the layout of /sys.",
+   "default": "Unset or empty: /sys (default_sysfs_root, h/pos/hwperf.hpp:25).",
+   "effect": "Replaces /sys as the root of every file the hardware telemetry sampler reads: <root>/class/hwmon, <root>/class/powercap and <root>/devices/system/cpu.",
+   "notes": "Product code reads it, but the note at h/pos/hwperf.hpp:17-24 says it exists so that tests can point the sampler at a made-up tree. Has an effect only when TRON_HW_SAMPLER enables the sampler. Read once when the sampler thread starts (src/pos/hwperf.cpp:644).",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_HW_SAMPLER_ALL_SENSORS",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos and pos_fake (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/pos/hwperf.cpp:185",
+     "mechanism": "std::getenv in sampler_all_sensors",
+     "when": "every call of discover_hw_state"
+    }
+   ],
+   "setters": [],
+   "values": "Exactly the text 1 or the text true enables it. Any other value is off.",
+   "default": "Unset: for each CPU socket the trace gets the package temperature and the minimum, average and maximum over the other temperature sensors.",
+   "effect": "Adds one temperature counter for every single hwmon sensor to the trace, next to the per-socket summary counters.",
+   "notes": "Has an effect only when TRON_HW_SAMPLER enables the sampler. Read once per sampler thread, at its first sample (src/pos/hwperf.cpp:522, 667). The comment at src/pos/hwperf.cpp:539-543 gives the sensor counts that the summary avoids: 26 sensors on a two-socket EPYC server and about 146 on a two-socket Granite Rapids server. No setter was found in the checkout.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_FIRST_RESULT_WARMUP",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/driver.cpp:818",
+     "mechanism": "std::getenv in warm_up_first_result_fault",
+     "when": "every call of warm_up_first_result_fault"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/t_first_result_fault.cpp:51",
+     "value": "0 (only when the variable is not already set)",
+     "why": "the fault detector test must see the fault that the warm-up would clear"
+    },
+    {
+     "site": "t/t_newregs.cpp:25",
+     "value": "0",
+     "why": "the register test expects reset values that the warm-up would change"
+    }
+   ],
+   "values": "Exactly the text 0 skips the warm-up. Any other value, also an empty one, leaves it on.",
+   "default": "Unset: the warm-up runs.",
+   "effect": "Controls the first-result warm-up. At the first call of get_devices the driver runs one throwaway int4 matrix multiply on each FPGA card and discards the result. Value 0 skips this step and logs 'INIT: first-result warm-up skipped'.",
+   "notes": "Reason for the warm-up (Note at src/pos/driver.cpp:799-816): on some Archer bitfiles the first int4 weight fetch after an FPGA configuration stores corrupted weights, so the first result is wrong. warm_up_first_result_fault is called once per process, from get_devices (src/pos/driver.cpp:906). Not read by pos_fake programs (rinzler_proxy).",
+   "confidence": "high"
+  },
+  {
+   "name": "HWATTN_MAX_B",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/driver.cpp:1599",
+     "mechanism": "std::getenv, then atoi, inside a function-local static in maximum_hwattn_batch_size",
+     "when": "once, on first use (cached)"
+    }
+   ],
+   "setters": [],
+   "values": "Integer parsed with atoi. Only a value above 0 is used.",
+   "default": "Unset, 0, negative or non-numeric: the limit is the value computed from the device (the smaller of the metadata limit and maximum_batch_size, src/pos/driver.cpp:1611-1618).",
+   "effect": "Lowers the largest batch (number of queries in one pass) that hardware attention accepts on a card. The result is min(value, computed limit), so the variable cannot raise the limit.",
+   "notes": "The model code uses the result as the number of queries per hardware attention pass (h/tron/models/model.hpp:3046-3050), and the worker asserts against it (src/pos/worker.cpp:822-827). The computed limit is at most MAX_B = 32 (h/libpos.hpp:33). The pos_fake version of the function does not read the variable (src/pos/fake.cpp:415-418). No setter and no document were found for it in the checkout; the audience value is a judgement.",
+   "confidence": "high"
+  },
+  {
+   "name": "HWATTN_WLR",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/device.cpp:215",
+     "mechanism": "hwattn_env_override(\"HWATTN_WLR\"); the helper calls std::getenv(env_name) at src/pos/device.cpp:103 and then atoi",
+     "when": "once, on first use (cached)"
+    }
+   ],
+   "setters": [],
+   "values": "Integer parsed with atoi. A value above 0 forces the feature on. Any other set value (0, negative, non-numeric, empty) forces it off.",
+   "default": "Unset: each card decides from its bitfile version (hwattn_wlr_bitfile_ok, h/pos/device.hpp:780-795): project 01 needs version 05.08 or later; project 03 needs version 05.08 or later with a release date of 2026-05-18 or later.",
+   "effect": "Forces hardware attention weight-load reuse (WLR) on or off for every card, without the bitfile check. With WLR on, when an attention command repeats the weight commands of the previous attention command, the worker sends one K and V pair that tells the FPGA to reuse the weights it already loaded (src/pos/worker.cpp:1380-1398).",
+   "notes": "When set, the driver logs once: 'HW attention: HWATTN_WLR=<value> forces the feature ON|OFF by env flag; the bitfile capability check is bypassed' (src/pos/device.cpp:106-108). The value is read at the first PosDevice::init and kept for the life of the process. Forcing it on for a bitfile that does not support WLR is not guarded by the code. A plain search for getenv with a quoted name does not find this variable, because the name is passed to a helper. No setter was found in the checkout. Not read by pos_fake programs.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_HWATTN_HEAD_TILING",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos, the real FPGA driver (rinzler, runtron, hardware tests)",
+     "site": "src/pos/device.cpp:217",
+     "mechanism": "hwattn_env_override(\"TRON_HWATTN_HEAD_TILING\"); the helper calls std::getenv(env_name) at src/pos/device.cpp:103 and then atoi",
+     "when": "once, on first use (cached)"
+    }
+   ],
+   "setters": [],
+   "values": "Integer parsed with atoi. A value above 0 forces the feature on. Any other set value (0, negative, non-numeric, empty) forces it off.",
+   "default": "Unset: each card decides from its bitfile version (hwattn_tiling_bitfile_ok, h/pos/device.hpp:802-808): project 01 or 03 with version 05.09 or later.",
+   "effect": "Forces hardware attention head tiling on or off for every card, without the bitfile check. With head tiling on, an attention pass that covers more KV shards than fit in EMEM in one pass is sent as one hardware command that handles fewer heads per pass (hwattn_plan_cmd_shape, h/libpos.hpp:205-219). EMEM is the FPGA memory that holds the intermediate Q.K dot products of hardware attention (h/libpos.hpp:128-130). With it off, such a pass is split into several commands.",
+   "notes": "When set, the driver logs once: 'HW attention: TRON_HWATTN_HEAD_TILING=<value> forces the feature ON|OFF by env flag; the bitfile capability check is bypassed' (src/pos/device.cpp:106-108). The value is read at the first PosDevice::init and kept for the life of the process. The flag is used by the worker (src/pos/worker.cpp:872-874) and by the model planner (h/tron/models/model.hpp:2990-2992, 3057-3061). A plain search for getenv with a quoted name does not find this variable, because the name is passed to a helper. No setter was found in the checkout. Not read by pos_fake programs.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_USE_ARENA_ALLOCATOR",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem, reached only through libpos startup (rinzler, runtron, hardware tests)",
+     "site": "src/system/memory.cpp:94",
+     "mechanism": "std::getenv, then strcmp with 1, in read_arena_allocator_env",
+     "when": "every call of pos_heap_setup"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/CMakeLists.txt:384",
+     "value": "1",
+     "why": "CTest runs this test with the arena allocator"
+    },
+    {
+     "site": "t/CMakeLists.txt:456",
+     "value": "1",
+     "why": "CTest runs this test with the arena allocator"
+    }
+   ],
+   "values": "Exactly the text 1 selects the arena allocator. Any other set value, also an empty one, selects the legacy allocator.",
+   "default": "Unset: the build decides. The CMake option TRON_ARENA_ALLOCATOR_DEFAULT_ON is ON by default (src/system/CMakeLists.txt:86), so a default build uses the arena allocator.",
+   "effect": "Selects the allocator for the DMA heap (the hugepage memory that the FPGA cards read and write): pos_heap_v2, called the arena allocator, or the legacy pos_heap.",
+   "notes": "pos_heap_setup runs once in pos_startup_host (src/pos/driver.cpp:290), so the choice is fixed for the process. Other code reads the fixed choice through pos_heap_is_arena_allocator (h/system/memory.hpp:27-33). The comment at src/system/system.cpp:80-84 says that arena mode ignores the static KV cache sizing settings (RZ_KV_CACHE_GB, --kv-cache-gb, --kv-cache-bytes) and warns once for each one supplied. TRON_HEAP_SHADOW has an effect only with the arena allocator. Not read by pos_fake programs, because their startup does not call pos_heap_setup (src/pos/fake.cpp:91-124). t/CMakeLists.txt sets it for more tests than the two listed; the count belongs to the test sweep.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_HEAP_SHADOW",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libsystem, reached only through libpos startup (rinzler, runtron, hardware tests)",
+     "site": "src/system/memory.cpp:107",
+     "mechanism": "std::getenv, then strcmp with 1, in read_heap_shadow_env",
+     "when": "every call of pos_heap_setup"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/CMakeLists.txt:461",
+     "value": "1",
+     "why": "CTest runs this test with the shadow map on"
+    }
+   ],
+   "values": "Exactly the text 1 enables it. Any other value is off.",
+   "default": "Unset: the shadow map is off, unless the option --heap-shadow was given on the command line or in SYSTEM_CONFIG.",
+   "effect": "Turns on the shadow map of the arena allocator: one record per live DMA allocation with the requested size and the caller address. It allows an exact size check when memory is freed, and the profile dump that TRON_HEAP_PROFILE_PATH writes.",
+   "notes": "Read only when the arena allocator is selected (src/system/memory.cpp:175-181). The value is fixed when the heap is created. Cost given in the comment at h/system/heap_v2.hpp:6-18: one map entry per live allocation (about 750 000 at the measured peak) plus an insert and an erase per allocation. t/CMakeLists.txt sets it for more tests than the one listed; the count belongs to the test sweep.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_HEAP_PROFILE_PATH",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libsystem, reached only through libpos startup (rinzler, runtron, hardware tests)",
+     "site": "src/system/heap_v2.cpp:915",
+     "mechanism": "std::getenv in pos_heap_v2::dump_profile",
+     "when": "every call of pos_heap_v2::dump_profile"
+    },
+    {
+     "program": "libsystem, only in a build that defines the macro HEAP_SHADOW (it is commented out at h/system/heap.hpp:20)",
+     "site": "src/system/heap.cpp:219",
+     "mechanism": "std::getenv in pos_heap::dump_profile",
+     "when": "every call of pos_heap::dump_profile"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/t_heap_v2.cpp:1385",
+     "value": "the path of a temporary file",
+     "why": "the test checks the content of the dump"
+    }
+   ],
+   "values": "Path of a file. The file is opened in append mode.",
+   "default": "Unset: no profile is written. An empty value is not treated as unset; the open of the empty path then fails and a warning is logged.",
+   "effect": "Names the file that receives a text histogram of the live DMA heap allocations, grouped by size class and by caller address. The arena allocator writes it when an allocation fails for lack of memory (tag OOM, src/system/heap_v2.cpp:523).",
+   "notes": "The arena allocator writes nothing unless its shadow map is on (TRON_HEAP_SHADOW=1 or --heap-shadow); the check is at src/system/heap_v2.cpp:914. Each dump is appended, so the file grows. If the file cannot be opened the code logs a warning and continues. The caller addresses are raw; the comment at src/system/heap.cpp:210-213 says to resolve them with addr2line.",
+   "confidence": "high"
+  },
+  {
+   "name": "SUDO_USER",
+   "role": "read",
+   "owner": "third-party:sudo",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem, reached only through libpos startup (rinzler, runtron, hardware tests)",
+     "site": "src/system/memory.cpp:128",
+     "mechanism": "std::getenv; only presence is tested",
+     "when": "every call of pos_heap_setup"
+    }
+   ],
+   "setters": [],
+   "values": "Any value, also an empty one, counts as set. The text is not parsed.",
+   "default": "Unset: no effect.",
+   "effect": "When the process runs as root (effective user id 0) and this variable is set, heap setup refuses to start. It logs 'Please do not run as sudo ...' and pos_startup_host returns -1.",
+   "notes": "The comment at src/system/memory.cpp:124-127 gives the reason: sudo sets this variable, and a run under sudo would create root-owned files in /dev/hugepages that other users cannot remove. Root without this variable (CI as root, a systemd service) is allowed. After the failure get_devices exits the process with status 1 (src/pos/driver.cpp:887-889). Not read by pos_fake programs, because their startup does not call pos_heap_setup.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_NO_RTM",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libsystem (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/system/mwaitx.cpp:41",
+     "mechanism": "std::getenv, then strcmp with 1, in rtm_disabled_by_env; called from the initialiser of the global is_rtm_supported",
+     "when": "at static initialization"
+    }
+   ],
+   "setters": [],
+   "values": "Exactly the text 1 enables it. Any other value is off.",
+   "default": "Unset: Intel RTM (TSX, transactional memory instructions) is used for timed waits when the CPU reports it.",
+   "effect": "Stops the use of Intel RTM in the wait code. Waits then use the spin and pause path.",
+   "notes": "The variable is read only on an Intel CPU that reports RTM (short-circuit at src/system/mwaitx.cpp:57-59). It has no effect on AMD CPUs. When it takes effect, startup logs an error banner that says: Intel RTM (TSX) DISABLED by TRON_NO_RTM=1, waits fall back to spin+pause, 13-30% slower decode, benchmarking only, never production (src/system/mwaitx.cpp:70-74). A test reads the same name with its own getenv (t/t_mwaitx_cliff.cpp:239). No setter was found in the checkout.",
+   "confidence": "high"
+  },
+  {
+   "name": "TRON_LOG_LEVEL",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem: tron::init_logging (rinzler and its variants at src/rinzler.cpp:4547, runtron at src/runtron.cpp:439, libpos startup at src/pos/driver.cpp:198, tests)",
+     "site": "src/system/spdlog.cpp:39",
+     "mechanism": "getenv; the text goes to spdlog::level::from_str",
+     "when": "once at startup"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/t_rinzler_proxy.cpp:1383",
+     "value": "warn",
+     "why": "the test checks that the proxy launcher removes the variable"
+    }
+   ],
+   "values": "A spdlog level name. Names seen in the checkout: debug (the default) and warn. not determined: the full list of accepted names and the behaviour on an unknown name are defined inside spdlog, whose source is not in the checkout.",
+   "default": "Unset: debug.",
+   "effect": "Sets the lowest message level that TRON writes. The level is applied to the log file, to the console output on stderr, and to the default logger.",
+   "notes": "Only the first call of init_logging reads it (static guard at src/system/spdlog.cpp:36-37). SPDLOG_LEVEL is applied after it (src/system/spdlog.cpp:60). Several tests read the same name with their own getenv (for example t/t_scheduler.cpp:35); those files belong to another sweep.",
+   "confidence": "medium"
+  },
+  {
+   "name": "TRON_LOG_DIR",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem: tron::init_logging (rinzler and its variants at src/rinzler.cpp:4547, runtron at src/runtron.cpp:439, libpos startup at src/pos/driver.cpp:198, tests)",
+     "site": "src/system/spdlog.cpp:76",
+     "mechanism": "getenv",
+     "when": "every call of init_logging"
+    }
+   ],
+   "setters": [
+    {
+     "site": "packaging/tron-host/90-rinzler-host.conf:18",
+     "value": "/var/log/rinzler/%i",
+     "why": "the tron-host systemd drop-in gives each rinzler_host instance a log directory it can write"
+    },
+    {
+     "site": "bin/slice:3465",
+     "value": "the run directory of the test",
+     "why": "Slice keeps the log of each test in its run directory"
+    }
+   ],
+   "values": "Path to a directory. The directory must exist and be writable.",
+   "default": "Unset: the log file is alderaan.log in the current working directory, or alderaan-root.log there when the effective user is root. An empty value gives alderaan.log in the current working directory for every user.",
+   "effect": "Sets the directory of the TRON log file. The file is <directory>/alderaan.log.",
+   "notes": "The log file rotates: the size argument is 536870912 bytes (512 MiB) and the file count argument is 3 (src/system/spdlog.cpp:45-46). If the log file cannot be opened, the process prints 'Log initialization failed' and exits with status 1 (src/system/spdlog.cpp:64-67). The variable is read at every call of init_logging, but only the first call creates the logger. bin/slice sets it at a second site (bin/slice:4702).",
+   "confidence": "high"
+  },
+  {
+   "name": "SPDLOG_LEVEL",
+   "role": "read",
+   "owner": "third-party:spdlog",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem: tron::init_logging (rinzler and its variants, runtron, libpos startup, tests)",
+     "site": "src/system/spdlog.cpp:60",
+     "mechanism": "library call spdlog::cfg::load_env_levels(); the getenv is inside spdlog",
+     "when": "once at startup"
+    }
+   ],
+   "setters": [
+    {
+     "site": "t/t_rinzler_proxy.cpp:1384",
+     "value": "warn",
+     "why": "the test checks that the proxy launcher removes the variable"
+    }
+   ],
+   "values": "not determined: the format is defined inside spdlog, whose source is not in the checkout. The comment at src/system/spdlog.cpp:59 gives the example SPDLOG_LEVEL=debug,console=err.",
+   "default": "Unset: the levels set from TRON_LOG_LEVEL stay.",
+   "effect": "Changes spdlog logger levels after TRON has set them from TRON_LOG_LEVEL.",
+   "notes": "The name SPDLOG_LEVEL does not appear in a getenv call in the checkout. The evidence is the comment at src/system/spdlog.cpp:59 and the test comment at t/t_rinzler_proxy.cpp:1380-1382, which says rinzler reads both TRON_LOG_LEVEL and SPDLOG_LEVEL and that either one set to warn hides info messages. The two outputs (file and stderr) keep the level from TRON_LOG_LEVEL (src/system/spdlog.cpp:47, 50). not determined: how spdlog combines the logger level with the level of each output.",
+   "confidence": "medium"
+  },
+  {
+   "name": "RZ_FUSE_MOUNT_PATH",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem: tron::fuse::default_mountpoint (rinzler at src/rinzler.cpp:4725, runtron at src/runtron.cpp:491, tests)",
+     "site": "src/system/fuse_helpers.cpp:25",
+     "mechanism": "std::getenv in base_mountpoint",
+     "when": "every call of default_mountpoint"
+    }
+   ],
+   "setters": [
+    {
+     "site": "packaging/systemd/rinzler@.service:7",
+     "value": "/var/run/rinzler/%i",
+     "why": "the packaged systemd unit gives each rinzler instance its own mount directory"
+    },
+    {
+     "site": "bin/slice:3466",
+     "value": "a FUSE directory made for the test",
+     "why": "Slice gives each test its own mount directory"
+    },
+    {
+     "site": ".github/workflows/cmake-single-platform.yml:35",
+     "value": "/tmp/tron-stats-<run id>-<run attempt>-<job>",
+     "why": "each CI job gets its own mount directory"
+    },
+    {
+     "site": "t/t_fuse_helpers.cpp:43",
+     "value": "a temporary directory",
+     "why": "the test checks the path rules"
+    }
+   ],
+   "values": "Path to a directory. The code creates it when it does not exist (ensure_mountpoint, src/system/fuse_helpers.cpp:99-107).",
+   "default": "Unset or empty: <repository root>/stats for a development build (the program file path contains /gen/), otherwise /opt/positron/stats.",
+   "effect": "Sets the base directory where the process mounts its FUSE stats file system (the files that show live statistics and settings of rinzler or runtron). When the process is one of several instances (--instance x,y with y above 1), the code adds /instance-<x> to the path, unless RZ_FUSE_MOUNT_PRESCOPED is 1.",
+   "notes": "The command-line option --fuse-mount wins and is used as given (src/rinzler.cpp:4725, src/runtron.cpp:490-492). When the variable is used, the code logs 'FUSE mount point from RZ_FUSE_MOUNT_PATH: <path>'. rinzler_proxy is built with RINZLER_NO_FUSE_MOUNT and never mounts, so it does not use the path (src/CMakeLists.txt:193-194, src/rinzler.cpp:129-134). The packaged unit also expands the variable in its ExecStartPre and ExecStop lines (packaging/systemd/rinzler@.service:50-55); that file belongs to another sweep. More setters exist in CI workflows and tests than the four listed.",
+   "confidence": "high"
+  },
+  {
+   "name": "RZ_FUSE_MOUNT_PRESCOPED",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem: tron::fuse::default_mountpoint (rinzler at src/rinzler.cpp:4725, runtron at src/runtron.cpp:491, tests)",
+     "site": "src/system/fuse_helpers.cpp:85",
+     "mechanism": "std::getenv, then comparison with the text 1",
+     "when": "every call of default_mountpoint"
+    }
+   ],
+   "setters": [
+    {
+     "site": "packaging/systemd/rinzler@.service:15",
+     "value": "1",
+     "why": "the unit already puts the instance number in RZ_FUSE_MOUNT_PATH through %i"
+    },
+    {
+     "site": "t/t_fuse_helpers.cpp:47",
+     "value": "1 by default, or the value under test",
+     "why": "the test checks the strict comparison"
+    }
+   ],
+   "values": "Exactly the text 1 enables it. Any other value (true, yes, 0, empty) is off.",
+   "default": "Unset: for a process that is one of several instances, /instance-<x> is added to the FUSE mount path.",
+   "effect": "Tells the process that the FUSE mount path already differs per instance, so the code must not add /instance-<x> to it.",
+   "notes": "The Note at src/system/fuse_helpers.cpp:41-82 explains the pair: two processes that mount at the same path fail with 'user has no write access to mountpoint', so the code adds the suffix; the packaged unit sets RZ_FUSE_MOUNT_PATH=/var/run/rinzler/%i and this variable so that the path is not nested twice. The comment at packaging/systemd/rinzler@.service:20-25 warns that the per-instance environment file must not set this variable. No effect when --fuse-mount is given, and no effect when the instance count is 1 or --instance is absent.",
+   "confidence": "high"
+  },
+  {
+   "name": "REPO_ROOT_OVERRIDE",
+   "role": "read",
+   "owner": "tron",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libsystem and every other user of the inline function tron::get_repo_root",
+     "site": "h/common/paths.hpp:67",
+     "mechanism": "std::getenv in tron::get_repo_root",
+     "when": "every call of get_repo_root"
+    },
+    {
+     "program": "libsystem: resource_map_manager::load_resource_map (every program that parses system options outside a Dice grant: rinzler, runtron, rinzler_proxy, tests)",
+     "site": "src/system/resource_map.cpp:96",
+     "mechanism": "call of tron::get_repo_root, which reads the variable at h/common/paths.hpp:67",
+     "when": "every call of load_resource_map"
+    },
+    {
+     "program": "libsystem: tron::fuse::default_mountpoint, only in a development build (rinzler, runtron, tests)",
+     "site": "src/system/fuse_helpers.cpp:31",
+     "mechanism": "call of tron::get_repo_root, which reads the variable at h/common/paths.hpp:67",
+     "when": "every call of default_mountpoint"
+    }
+   ],
+   "setters": [],
+   "values": "Path to a directory that stands for the repository checkout. The text is used as given.",
+   "default": "Unset or empty: the root is derived from the path of the running program. The last path part named gen or gen-<variant> marks the build tree; a .checkout-root file inside it names the checkout, otherwise the directory above the build tree is the root. A program outside such a tree has no root.",
+   "effect": "Replaces the repository root that the program works out for itself. The resource map search then tries <value>/config/resource-map.yaml (src/system/resource_map.cpp:94-100). In a development build the default FUSE stats mount directory becomes <value>/stats.",
+   "notes": "The resource map search order is: the --resource-map path, resource-map.yaml in the current working directory, the repository root entry, the entry next to the program, /opt/positron/config/resource-map.yaml (src/system/resource_map.cpp:86-112). The resource map use applies to installed builds too, because that caller does not test for a development build. The FUSE use applies only when the program path contains /gen/ and RZ_FUSE_MOUNT_PATH is unset or empty. No setter was found in the checkout. README.stats.md:182 and t/t_rinzler.cpp:126 mention it as a variable that test infrastructure may set. Other callers of get_repo_root may exist outside this area; a search of the checkout found only the two listed.",
+   "confidence": "high"
+  },
+  {
+   "name": "DICE_DAEMON_CHILD",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/system/system.cpp:120",
+     "mechanism": "std::getenv, then strcmp with 1, in dice_child_context; public name dice_grant_active",
+     "when": "every call of dice_grant_active"
+    }
+   ],
+   "setters": [
+    {
+     "site": "bin/dice:3657",
+     "value": "1",
+     "why": "the Dice daemon marks every process it starts"
+    }
+   ],
+   "values": "Exactly the text 1 enables it. Any other value is off.",
+   "default": "Unset: the process is not under a Dice grant. System options are parsed in the old way, with no check against granted slots.",
+   "effect": "Tells the C++ startup code that the Dice daemon (the tool that hands out slices of the server to jobs) started this process. The code then requires DICE_SLOTS, DICE_GRANT_ID, DICE_GRANT_TOKEN and a SYSTEM_CONFIG with --instance, and it rejects any placement option that asks for resources outside the granted slots.",
+   "notes": "Meant to be set by the Dice daemon, not by hand. Effects in this area: 1. pos_startup_host parses SYSTEM_CONFIG even when it is unset, and fails without --instance (src/pos/driver.cpp:209-224, src/pos/fake.cpp:100-115). 2. --instance, --resource-map, --devices, --app-cores, --dev-cores, --helper-cores, --numa, --tracer-core and --hugepage_file from the command line and from SYSTEM_CONFIG are checked against the grant (src/system/system.cpp:1785-1865). 3. The trusted resource map is read only from /opt/positron/config/resource-map.yaml (src/system/system.cpp:1681-1682). 4. The hugepage path must resolve to /dev/hugepages/libpos (src/system/system.cpp:1649-1661). 5. system_optimize only pins the application threads to the granted cores; --no-opt does not stop that (src/system/system.cpp:1339-1345). A failed check logs 'Dice grant <id>: <option> requested ...; permitted ...' and startup fails. 6. The choice of peer CPUs and the NUMA memory policy follow the real sibling CPUs and NUMA node numbers of the grant (src/system/system.cpp:416-438, 450-459, 763-776). The variable is read again at each call, not cached. The code calls dice_grant_active at 19 places in this area: 14 in src/system/system.cpp, 3 in src/pos/driver.cpp, 2 in src/pos/fake.cpp. Python launchers also use the name (bin/rinzler:62, bin/runtron:68, bin/slice:101); those files belong to another sweep.",
+   "confidence": "high"
+  },
+  {
+   "name": "DICE_SLOTS",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/system/system.cpp:1471",
+     "mechanism": "std::getenv in parse_dice_slots; each item is parsed with std::from_chars",
+     "when": "every call of parse_dice_slots"
+    },
+    {
+     "program": "libsystem (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/system/system.cpp:129",
+     "mechanism": "std::getenv in dice_grant_env_complete; tests that the value is set and not empty",
+     "when": "every call of dice_grant_env_complete"
+    }
+   ],
+   "setters": [
+    {
+     "site": "bin/dice:3656",
+     "value": "the granted slot numbers joined with commas",
+     "why": "the Dice daemon tells the child which slots it owns"
+    }
+   ],
+   "values": "Comma-separated list of slot numbers: decimal integers of 0 or more, with no spaces, no empty item and no comma at the end. The order does not matter; the code sorts the list.",
+   "default": "Unset or empty: not read unless DICE_DAEMON_CHILD is 1. With DICE_DAEMON_CHILD=1 an unset or empty value fails startup with 'Incomplete Dice grant environment'.",
+   "effect": "Names the slots that the Dice daemon granted to this process. A slot is one equal share of the server (FPGA cards, CPU cores, memory); the built-in layout has 4 slots per NUMA node (src/system/system.cpp:1167-1194). The C++ code works out the one --instance that these slots form and takes the permitted cards, cores and NUMA nodes from them.",
+   "notes": "Read only when DICE_DAEMON_CHILD is 1. Rules (src/system/system.cpp:1689-1708): the slots must be one unbroken run, the run length must divide the total slot count, the first slot must be a multiple of the run length, and the last slot must be below the total. The --instance in SYSTEM_CONFIG must describe the same slots, or startup fails with 'SYSTEM_CONFIG --instance does not match DICE_SLOTS' or a 'Dice grant' conflict message. Python tools also read the name (bin/rinzler:472, bin/runtron:491); those files belong to another sweep.",
+   "confidence": "high"
+  },
+  {
+   "name": "DICE_GRANT_ID",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/system/system.cpp:1674",
+     "mechanism": "std::getenv in dice_prepare_placement; the text is the identity of the stored placement",
+     "when": "every call of dice_prepare_placement"
+    },
+    {
+     "program": "libsystem (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/system/system.cpp:130",
+     "mechanism": "std::getenv in dice_grant_env_complete; tests that the value is set and not empty",
+     "when": "every call of dice_grant_env_complete"
+    },
+    {
+     "program": "libsystem (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/system/system.cpp:1640",
+     "mechanism": "std::getenv in dice_conflict; the text is printed in the error message",
+     "when": "every call of dice_conflict"
+    }
+   ],
+   "setters": [
+    {
+     "site": "bin/dice:3660",
+     "value": "the id of the submission",
+     "why": "the Dice daemon (in shared mode) names the grant for the child"
+    }
+   ],
+   "values": "Any non-empty text. It is not parsed.",
+   "default": "Unset or empty: not read unless DICE_DAEMON_CHILD is 1. With DICE_DAEMON_CHILD=1 an unset or empty value fails startup with 'Incomplete Dice grant environment'.",
+   "effect": "Names the Dice grant. The C++ code keeps the placement it worked out for a grant and reuses it while this id and the slot list stay the same. The id also appears in every 'Dice grant <id>: ...' error message.",
+   "notes": "Read only when DICE_DAEMON_CHILD is 1. bin/dice sets it only in its shared mode (bin/dice:3658-3661); the conditions of that mode belong to the Python sweep.",
+   "confidence": "high"
+  },
+  {
+   "name": "DICE_GRANT_TOKEN",
+   "role": "read",
+   "owner": "tron",
+   "audience": "operator",
+   "readers": [
+    {
+     "program": "libsystem (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/system/system.cpp:131",
+     "mechanism": "std::getenv in dice_grant_env_complete; tests that the value is set and not empty",
+     "when": "every call of dice_grant_env_complete"
+    }
+   ],
+   "setters": [
+    {
+     "site": "bin/dice:3661",
+     "value": "the grant token of the submission",
+     "why": "the Dice daemon (in shared mode) gives the child its token"
+    }
+   ],
+   "values": "Any non-empty text. The C++ code in this area does not parse or compare it.",
+   "default": "Unset or empty: not read unless DICE_DAEMON_CHILD is 1. With DICE_DAEMON_CHILD=1 an unset or empty value fails startup with 'Incomplete Dice grant environment'.",
+   "effect": "In this area the C++ code only checks that the token is present. A missing token makes the startup under a Dice grant fail.",
+   "notes": "Read only when DICE_DAEMON_CHILD is 1. The value is a secret that the Dice daemon gives out; a test asserts that it is not written to logs (bin/slice-tests/test_dice_client.py:1704). What the Python tools do with the token belongs to another sweep.",
+   "confidence": "high"
+  },
+  {
+   "name": "PERFETTO_PRODUCER_SOCK_NAME",
+   "role": "read",
+   "owner": "third-party:perfetto",
+   "audience": "developer-debug",
+   "readers": [
+    {
+     "program": "libpos and pos_fake (rinzler, runtron, rinzler_proxy, rinzler_mock, rinzler_host, tests)",
+     "site": "src/pos/perf.cpp:169",
+     "mechanism": "library call perfetto::Tracing::Initialize with the system backend, in the branch of start_tracing for the destination traced; the read is inside the Perfetto SDK",
+     "when": "every call of start_tracing"
+    }
+   ],
+   "setters": [],
+   "values": "Path of the socket of the Perfetto traced daemon, as the Perfetto SDK defines it. not determined: the SDK source is not in the checkout.",
+   "default": "Unset: the comment at perfetto/tools/rinzler-capture.sh:240-248 says Perfetto uses /run/perfetto/traced-producer.sock when /run/perfetto/ exists and is accessible, otherwise /tmp/perfetto-producer.",
+   "effect": "Selects the socket through which the process sends trace events to the traced daemon, when the trace destination is traced.",
+   "notes": "TRON code never names this variable in C++. The evidence is the comment at perfetto/tools/rinzler-capture.sh:232-233: 'The rinzler producer connects to whatever PERFETTO_PRODUCER_SOCK_NAME it was started with'. The Perfetto SDK is downloaded at build time (CMakeLists.txt:359-366), so the read could not be checked in this snapshot. Scripts under perfetto/ and bin/ci set and read the name; those files belong to other sweeps. Listed so that the reference document can say that rinzler and runtron honour it; remove the entry if the document covers only names that TRON code reads directly.",
+   "confidence": "low"
+  }
+ ],
+ "wrappers": [
+  {
+   "symbol": "hwattn_env_override",
+   "site": "src/pos/device.cpp:102",
+   "description": "Static helper. Takes the variable name as a parameter and reads it with std::getenv at line 103. Unset gives no override; atoi above 0 gives true; any other set value gives false. Logs the override. Callers: src/pos/device.cpp:215 (HWATTN_WLR) and src/pos/device.cpp:217 (TRON_HWATTN_HEAD_TILING)."
+  },
+  {
+   "symbol": "tron::trace_categories_variable",
+   "site": "h/common/perfetto.hpp:243",
+   "description": "Constant that holds the name TRON_TRACE_CATEGORIES. trace_categories_spec (src/pos/perf.cpp:49) reads it with std::getenv and treats an empty value as unset. Callers of trace_categories_spec: require_no_trace_category_override (src/pos/perf.cpp:127) and local_trace_config (src/pos/perf.cpp:144)."
+  },
+  {
+   "symbol": "tron::hardware::system::system_parse_env",
+   "site": "src/system/system.cpp:2112",
+   "description": "Does not read the environment itself. Takes the SYSTEM_CONFIG text, splits it with system_config_arguments (src/system/system.cpp:2074) and applies the options. Callers: src/pos/driver.cpp:211 and src/pos/fake.cpp:102, each right after getenv(\"SYSTEM_CONFIG\"). Tests call it with literal text."
+  },
+  {
+   "symbol": "tron::hardware::system::parse_instance_from_system_config",
+   "site": "src/system/system.cpp:948",
+   "description": "Reads SYSTEM_CONFIG with std::getenv and returns only the --instance pair, or -1,-1. Callers: early_parse_instance (src/system/system.cpp:1027, used by src/rinzler.cpp:4563 and src/runtron.cpp:489) and get_sub_instances (src/system/system.cpp:1226)."
+  },
+  {
+   "symbol": "tron::hardware::system::system_parse_args",
+   "site": "src/system/system.cpp:2104",
+   "description": "Parses command-line system options. When DICE_DAEMON_CHILD is 1 it also reads SYSTEM_CONFIG (line 2108) and checks both sources together. Callers: src/rinzler.cpp:4046, src/runtron.cpp:248, tests."
+  },
+  {
+   "symbol": "tron::hardware::system::dice_grant_active",
+   "site": "src/system/system.cpp:124",
+   "description": "Returns true when DICE_DAEMON_CHILD is exactly 1 (std::getenv at line 120, in dice_child_context). Not cached. Called from src/pos/driver.cpp, src/pos/fake.cpp, src/system/system.cpp and from tests."
+  },
+  {
+   "symbol": "dice_grant_env_complete",
+   "site": "src/system/system.cpp:128",
+   "description": "Static helper. Returns true when DICE_SLOTS, DICE_GRANT_ID and DICE_GRANT_TOKEN are all set and not empty. Callers: dice_grant_matches_instance (line 1494) and dice_prepare_placement (line 1666)."
+  },
+  {
+   "symbol": "parse_dice_slots",
+   "site": "src/system/system.cpp:1470",
+   "description": "Static helper. Reads DICE_SLOTS with std::getenv and parses the comma-separated integers. Callers: dice_grant_matches_instance (line 1503) and dice_prepare_placement (line 1671)."
+  },
+  {
+   "symbol": "tron::get_repo_root",
+   "site": "h/common/paths.hpp:66",
+   "description": "Inline function. Returns REPO_ROOT_OVERRIDE when it is set and not empty, otherwise the root derived from /proc/self/exe. Callers: src/system/fuse_helpers.cpp:31 and src/system/resource_map.cpp:96."
+  },
+  {
+   "symbol": "tron::fuse::default_mountpoint",
+   "site": "src/system/fuse_helpers.cpp:83",
+   "description": "Returns the FUSE stats mount directory. Reads RZ_FUSE_MOUNT_PATH through base_mountpoint (line 24) and RZ_FUSE_MOUNT_PRESCOPED (line 85). Callers: src/rinzler.cpp:4065, src/rinzler.cpp:4725, src/runtron.cpp:491, tests."
+  },
+  {
+   "symbol": "read_arena_allocator_env",
+   "site": "src/system/memory.cpp:93",
+   "description": "Static helper. Reads TRON_USE_ARENA_ALLOCATOR; unset gives the build default. Caller: pos_heap_setup (src/system/memory.cpp:174)."
+  },
+  {
+   "symbol": "read_heap_shadow_env",
+   "site": "src/system/memory.cpp:106",
+   "description": "Static helper. Returns true when TRON_HEAP_SHADOW is exactly 1. Caller: pos_heap_setup (src/system/memory.cpp:181)."
+  },
+  {
+   "symbol": "sampler_opted_in / sampler_interval_ms / sampler_sysfs_root / sampler_all_sensors",
+   "site": "src/pos/hwperf.cpp:126",
+   "description": "Four helpers in an unnamed namespace (lines 126, 170, 179, 184). Each reads one fixed name: TRON_HW_SAMPLER, TRON_HW_SAMPLER_INTERVAL_MS, TRON_HW_SAMPLER_SYSFS_ROOT, TRON_HW_SAMPLER_ALL_SENSORS. Callers: lines 152, 645, 644 and 522 of the same file."
+  },
+  {
+   "symbol": "rtm_disabled_by_env",
+   "site": "src/system/mwaitx.cpp:40",
+   "description": "Static helper. Returns true when TRON_NO_RTM is exactly 1. Caller: the initialiser of the global is_rtm_supported (src/system/mwaitx.cpp:57-59)."
+  },
+  {
+   "symbol": "tron::init_logging",
+   "site": "src/system/spdlog.cpp:75",
+   "description": "Reads TRON_LOG_DIR (line 76), then calls init_logging(path) (line 35), which reads TRON_LOG_LEVEL (line 39) and calls spdlog::cfg::load_env_levels (line 60, reads SPDLOG_LEVEL inside spdlog). Callers: src/pos/driver.cpp:198, src/rinzler.cpp:4547, src/runtron.cpp:439, t/t_chat_template.cpp:420, t/t_rinzler.cpp:193."
+  }
+ ],
+ "dynamic_sites": [
+  {
+   "site": "src/pos/device.cpp:103",
+   "description": "std::getenv(env_name): the name is a parameter of hwattn_env_override. It is not built from pieces. The only names passed are HWATTN_WLR (line 215) and TRON_HWATTN_HEAD_TILING (line 217)."
+  },
+  {
+   "site": "src/pos/perf.cpp:50",
+   "description": "std::getenv(trace_categories_variable): the name comes from a constant, not a literal at the call. The constant is TRON_TRACE_CATEGORIES (h/common/perfetto.hpp:243). It is not built from pieces."
+  }
+ ],
+ "files_skipped": [],
+ "notes": "Scope covered: all 121 files of the list. Every file was searched for getenv, secure_getenv, environ, envp, setenv, putenv, unsetenv, clearenv, load_env, exec and spawn calls, and for helper names that hint at settings. The code around every hit was read. Files with no hit were not read in full. Result: 30 names, all with role read; 29 are read by code in this area and 1 (PERFETTO_PRODUCER_SOCK_NAME) is read inside a library on behalf of this code. No file in this area sets, exports or unsets an environment variable, so there is no set_only name. The C files under bin/iotools-1.5 read no environment variable; bin/iotools-1.5/misc.c:253 starts a program with execvp and passes the environment on unchanged. src/list_devices.cpp reads no environment variable. src/pos/trace_capture.cpp:481 states that FUSE capture files always go to /tmp and that TMPDIR is not used. Setter sites come from outside this area and are examples only; they were each opened and checked. Names that the independent quoted-name scan cannot see, and that are listed here: HWATTN_WLR, TRON_HWATTN_HEAD_TILING (name passed to a helper), TRON_TRACE_CATEGORIES (name in a constant), SPDLOG_LEVEL and PERFETTO_PRODUCER_SOCK_NAME (read inside third-party libraries). Not examined: environment variables that third-party libraries read on their own with no trace in the checkout (hwloc, libfuse, TBB, libpci, Perfetto apart from the socket name above). The library sources are not in the snapshot. Which programs reach each reader: the real driver library pos is linked into rinzler and runtron (through full_scheduler_static) and into hardware tests; pos_fake is linked into rinzler_proxy (src/CMakeLists.txt:187), rinzler_mock and rinzler_host (src/CMakeLists.txt:60-194, src/pos/CMakeLists.txt:4-68, src/tron/CMakeLists.txt:386-446). Readers in src/pos/driver.cpp and src/pos/device.cpp, and the heap setup in src/system/memory.cpp, are therefore not reached by rinzler_proxy. Findings worth a line in the final document: (1) the comment at src/system/huge.cpp:65 spells the variable POS_NR_HUGEPAGE, but the code reads POS_NR_HUGEPAGES; (2) HWATTN_WLR and HWATTN_MAX_B have no TRON_ prefix, unlike TRON_HWATTN_HEAD_TILING beside them; (3) SYSTEM_CONFIG numeric options have no error handling for non-numeric text."
+}
