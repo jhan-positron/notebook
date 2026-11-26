@@ -229,3 +229,98 @@ Each path below is relative to this topic. Original files are on claude-agentsrv
 
 ### Related handoffs
 
+
+## Batch: 2026-11-25 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-11-25 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory, same files). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first. `herdr-config/` -> `claude-agentsrv:/home/jhan/.config/herdr/`. `ai-runs/handoff-relocated/` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/` (files relocated from sessions whose project has no canonical root; their `origin:` is recorded). New prefixes in this batch: `machines/arm-crb/` -> `claude-agentsrv:/home/jhan/workspace/machines/arm-crb/`, `agent-cpu-guard/` -> `claude-agentsrv:/home/jhan/.config/agent-cpu-guard/`, `claude-config/` -> `claude-agentsrv:/home/jhan/.claude/` (one file, `statusline-command.sh`).
+
+Refreshed from their canonical files on 2026-11-25 (registered earlier, content changed since): `herdr-config/sessions/claude-agentsrv/session.json`.
+
+Covers 6 handoff(s) written or updated on 2026-11-25 (see "Related" on each entry). Preserved: 23 files, 0.26 MiB in this topic. Files of these handoffs that were not copied, one reason per file (the per-file inventories are in the `.lineage.md` companions named under each report page):
+
+- (provenance): 141 files
+- held back at the gate (identity capture or raw export, no explicit yes): 49 files
+- (no value used: empty file): 34 files
+- (private configuration: not copied into a public repository): 8 files
+- (on ubuntu: directory or size not recorded, not fetched): 8 files
+- (provenance: raw workflow output): 2 files
+- (provenance: tool output of the session store): 2 files
+- (vendor material: not copied into a public repository): 2 files
+- (on delphi-3b35: directory or size not recorded, not fetched): 2 files
+- (pre-edit copy of a file preserved at its current state): 2 files
+- (on 192.168.2.45: directory or size not recorded, not fetched): 2 files
+- (symbolic link to /home/jhan/.codex/skills/inter-agent-review-loop): 1 files
+- (duplicate (artifacts/titan/cache-perf/crb/tmp/agent-scratch/bwx13-2026-11-15/ref-bwx12/listing.txt)): 1 files
+- (uncommitted file of the git checkout /home/jhan/workspace/ai-proj: that repository preserves it once it is committed): 1 files
+- (on the CRB: a login there needs the block check first, not fetched): 1 files
+
+Reason names: `provenance` = logs, compiled binaries, .pyc files, raw workflow outputs and other rule-4 classes of the prompt. `size` = a file above 5 MiB. `regenerable` = a command rebuilds the file. `duplicate (<repo path>)` = the same bytes are already held at that repo path. `vendor material` and `private configuration` = not copied while the repository is public. `held back at the gate` = identity captures of machines (firmware, DMI, sudo rules, process lists) and raw exports of private sources, proposed at the gate and not approved by an explicit yes.
+
+### Report pages and their lineage
+
+#### machines/arm-crb/DIMM-flaky-report.md
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/machines/arm-crb/DIMM-flaky-report.md` (25363 canonical bytes). Related: [claude_20261115-20261117_whole-chip-throughput-drop-with-new-test-kernel.md](../../handoffs/claude_20261115-20261117_whole-chip-throughput-drop-with-new-test-kernel.md)
+- generator: none (written with the Write tool, then patched by inline Python and sed commands)
+- input: none
+- input built by: none
+- sources: `/home/jhan/workspace/titan/cache-perf/crb/results/dimm-check-20261117`: nothing preserved; held back at the gate (identity capture or raw export, no explicit yes) dmi16-19.txt, dmi17-062957.txt, h-1.txt, h-10.txt, h-11.txt, h-2.txt ...; `/home/jhan/workspace/titan/cache-perf/crb/results/dimm7200-20261117`: preserved boots.txt, gaps.txt, hwerr-final.txt, lastlines.txt, set.txt, setting-final.txt, try1.txt, try2.txt, try3.txt, try4.txt, try5.txt, try6.txt ...; held back at the gate (identity capture or raw export, no explicit yes) dmi17-7200.txt, dmi2.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/uefisettings-20261117`: nothing preserved; held back at the gate (identity capture or raw export, no explicit yes) identify.txt, ifr.txt, questions.json; left behind (no value used: empty file) ifr.err, questions.err; `/home/jhan/workspace/titan/cache-perf/crb/results/fwtest-20261117`: preserved boot_id.txt, cmdline.txt, gov.txt, hii-get.txt, huge.txt, ip.txt, lsmod.txt, mounts.txt, online.txt, questions.json, services.txt, set.txt ...; held back at the gate (identity capture or raw export, no explicit yes) bios.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/dmidecode-t17-2026-10-30.txt`: preserved dmidecode-t17-2026-10-30.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/w120-R8-20261117T020549Z`: preserved a0001.csv, a0056.csv, a6400.csv, a6432.csv, a6456.csv, env.txt, launches.txt; left behind (no value used: empty file) stderr.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/w120-BASEd10-20261117T041738Z`: preserved a0001.csv, a0056.csv, a6400.csv, a6432.csv, a6456.csv, env.txt, launches.txt; left behind (no value used: empty file) stderr.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/w120-X2d12-20261117T040922Z`: preserved a0001.csv, a0056.csv, a6400.csv, a6432.csv, a6456.csv, env.txt, launches.txt; left behind (no value used: empty file) stderr.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/w120-X1d10-20261117T034916Z`: preserved a0001.csv, a0056.csv, a6400.csv, a6432.csv, a6456.csv, env.txt, launches.txt; left behind (no value used: empty file) stderr.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/w120-X1d10b-20261117T040407Z`: preserved a6400.csv, a6456.csv, env.txt, launches.txt; left behind (no value used: empty file) stderr.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/w120-w120-F72d12-20261117T200231Z`: preserved a0001.csv, a0056.csv, a6400.csv, a6432.csv, a6456.csv, env.txt, launches.txt; left behind (no value used: empty file) stderr.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/w120-w120-F72d12g-20261117T200504Z`: preserved env.txt, g_asm_asm.m0.csv, g_asm_asm.m1.csv, g_asm_nop256.m0.csv, g_asm_nop256.m1.csv, g_nop256_asm.m0.csv, g_nop256_asm.m1.csv, g_nop256_nop256.m0.csv, g_nop256_nop256.m1.csv, launches.txt; left behind (no value used: empty file) stderr.txt; `/home/jhan/workspace/vendor-resources/ARM/agi-cpu-welcome-kit/gitlab-profile/CHANGELOG.md`: nothing preserved; left behind (vendor material: not copied into a public repository) CHANGELOG.md; `/home/jhan/workspace/vendor-resources/ARM/agi-cpu-welcome-kit/svk-release/docs/Arm_AGI_CPU_CRB_SVK_UserGuide_3.0.pdf`: nothing preserved; left behind (vendor material: not copied into a public repository) Arm_AGI_CPU_CRB_SVK_UserGuide_3.0.pdf
+- regenerate: none
+- regenerate unverified (no generator: the page was written or edited directly)
+- inventory: [DIMM-flaky-report.md.lineage.md](machines/arm-crb/DIMM-flaky-report.md.lineage.md) (137 lines)
+
+#### machines/arm-crb/arm-support-case-20261117/email-to-arm-support.html
+
+- mirror of `claude-agentsrv:/home/jhan/workspace/machines/arm-crb/arm-support-case-20261117/email-to-arm-support.html` (31839 canonical bytes). Related: [claude_20261117-20261119_arm-support-email-for-dimm-flaky-report-md.md](../../handoffs/claude_20261117-20261119_arm-support-email-for-dimm-flaky-report-md.md)
+  Rendered view: https://htmlpreview.github.io/?https://github.com/jhan-positron/notebook/blob/main/artifacts/dev-machines/machines/arm-crb/arm-support-case-20261117/email-to-arm-support.html
+- generator: /home/jhan/workspace/machines/arm-crb/exec/scratch-relocated/acbf327d/scripts/build_email.py
+- input: the email text held in the generator, and the 12 kernel logs in /home/jhan/workspace/titan/cache-perf/crb/results/dimm-check-20261117 from which it recomputes the boot table and the record totals
+- input built by: the session, by hand, from /home/jhan/workspace/machines/arm-crb/DIMM-flaky-report.md; the kernel logs were saved by the peer session of 2026-11-15 to 2026-11-17
+- sources: `/home/jhan/workspace/titan/cache-perf/crb/results/dimm-check-20261117`: nothing preserved; held back at the gate (identity capture or raw export, no explicit yes) dmi16-19.txt, dmi17-062957.txt, h-1.txt, h-10.txt, h-11.txt, h-2.txt ...; `/home/jhan/workspace/titan/cache-perf/crb/results/dimm7200-20261117`: preserved boots.txt, gaps.txt, hwerr-final.txt, lastlines.txt, set.txt, setting-final.txt, try1.txt, try2.txt, try3.txt, try4.txt, try5.txt, try6.txt ...; held back at the gate (identity capture or raw export, no explicit yes) dmi17-7200.txt, dmi2.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/uefisettings-20261117`: nothing preserved; held back at the gate (identity capture or raw export, no explicit yes) identify.txt, ifr.txt, questions.json; left behind (no value used: empty file) ifr.err, questions.err; `/home/jhan/workspace/titan/cache-perf/crb/results/dmidecode-t17-2026-10-30.txt`: preserved dmidecode-t17-2026-10-30.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/w120-R8-20261117T020549Z`: preserved a0001.csv, a0056.csv, a6400.csv, a6432.csv, a6456.csv, env.txt, launches.txt; left behind (no value used: empty file) stderr.txt; `/home/jhan/workspace/titan/cache-perf/crb/results/w120-BASEd10-20261117T041738Z`: preserved a0001.csv, a0056.csv, a6400.csv, a6432.csv, a6456.csv, env.txt, launches.txt; left behind (no value used: empty file) stderr.txt; `/home/jhan/workspace/machines/arm-crb/DIMM-flaky-report.md`: preserved DIMM-flaky-report.md; `/home/jhan/workspace/machines/arm-crb/firmware-snapshot-20261117`: nothing preserved; left behind (private configuration: not copied into a public repository) arm-platform-settings.json, decoded-settings.json; left behind (no value used: empty file) settings-questions.err; left behind (provenance) ABPolicy-d1b7431e-bd11-4f47-993a-3238dcfb38a0, ABStatus-4a8dd2d2-8acf-11ef-b864-0242ac120038, ABTelemetry-69571844-cc31-4807-9c10-547038b14c72, APIC.bin, APMT.bin, Boot0000-8be4df61-93ca-11d2-aa0d-00e098032b8c ...; held back at the gate (identity capture or raw export, no explicit yes) SHA256SUMS, decode_hii_offline.py, efibootmgr.txt, extract-db.log, identify.txt, kernel-firmware-lines.txt ...
+- regenerate: python3 -I /home/jhan/workspace/machines/arm-crb/exec/scratch-relocated/acbf327d/scripts/build_email.py <OUT> <OUT>/extra
+- regenerate unverified (the rebuild from the canonical files is byte-identical, but the generator reads inputs that are not in the repository: 12 files held back at the gate (identity capture or raw export) (k-1.txt, k-10.txt, k-11.txt, k-2.txt ...; 4717707 bytes))
+- inventory: [email-to-arm-support.html.lineage.md](machines/arm-crb/arm-support-case-20261117/email-to-arm-support.html.lineage.md) (186 lines)
+
+### All files of this batch
+
+Repo path -> canonical path (bytes). `origin:` = the session-store or scratchpad path a relocated file was copied from (history only, never fetched again).
+
+Related: [claude_20261110_inter-agent-review-loop-skill-md.md](../../handoffs/claude_20261110_inter-agent-review-loop-skill-md.md)
+
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5f1c66d8/SKILL.md.before` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5f1c66d8/SKILL.md.before` (8088 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-notebook-artifacts-ai-prompts/5f1c66d8-63b1-4e8d-aa07-b93f7101fcf3/scratchpad/SKILL.md.before`
+- `ai-runs/handoff-relocated/exec/workflows/review-inter-agent-review-loop-skill-wf_a8019a65-ae6.js` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/workflows/review-inter-agent-review-loop-skill-wf_a8019a65-ae6.js` (7819 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-notebook-artifacts-ai-prompts/5f1c66d8-63b1-4e8d-aa07-b93f7101fcf3/workflows/scripts/review-inter-agent-review-loop-skill-wf_a8019a65-ae6.js`
+
+Related: [claude_20261115-20261117_whole-chip-throughput-drop-with-new-test-kernel.md](../../handoffs/claude_20261115-20261117_whole-chip-throughput-drop-with-new-test-kernel.md)
+
+
+Related: [claude_20261117-20261119_arm-support-email-for-dimm-flaky-report-md.md](../../handoffs/claude_20261117-20261119_arm-support-email-for-dimm-flaky-report-md.md)
+
+- `machines/arm-crb/exec/scratch-relocated/acbf327d/out/email-body-for-gmail.html` -> `claude-agentsrv:/home/jhan/workspace/machines/arm-crb/exec/scratch-relocated/acbf327d/out/email-body-for-gmail.html` (14487 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-machines-arm-crb/acbf327d-4bb3-4a65-988b-dc65afa38bd7/scratchpad/out/email-body-for-gmail.html`
+- `machines/arm-crb/exec/scratch-relocated/acbf327d/scripts/build_bundle.py` -> `claude-agentsrv:/home/jhan/workspace/machines/arm-crb/exec/scratch-relocated/acbf327d/scripts/build_bundle.py` (2675 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-machines-arm-crb/acbf327d-4bb3-4a65-988b-dc65afa38bd7/scratchpad/scripts/build_bundle.py`
+- `machines/arm-crb/exec/scratch-relocated/acbf327d/scripts/build_email.py` -> `claude-agentsrv:/home/jhan/workspace/machines/arm-crb/exec/scratch-relocated/acbf327d/scripts/build_email.py` (25217 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-machines-arm-crb/acbf327d-4bb3-4a65-988b-dc65afa38bd7/scratchpad/scripts/build_email.py`
+
+Related: [claude_20261120_agents-running-slow-at-agentsrv-md.md](../../handoffs/claude_20261120_agents-running-slow-at-agentsrv-md.md)
+
+- `agent-cpu-guard/guard.sh` -> `claude-agentsrv:/home/jhan/.config/agent-cpu-guard/guard.sh` (1853 bytes)
+
+Related: [claude_20261124-20261125_pr5022-rebase-and-merge.md](../../handoffs/claude_20261124-20261125_pr5022-rebase-and-merge.md)
+
+- `claude-config/statusline-command.sh` -> `claude-agentsrv:/home/jhan/.claude/statusline-command.sh` (1422 bytes)
+
+Related: [claude_20261125_manual-run-sh-for-crb-perf-capture.md](../../handoffs/claude_20261125_manual-run-sh-for-crb-perf-capture.md)
+
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/agent-run-2026-11-17-commands.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/agent-run-2026-11-17-commands.txt` (8711 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/agent-run-2026-11-17-commands.txt`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-asrun/w120-20261115/rx.sh` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-asrun/w120-20261115/rx.sh` (1419 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/crb-asrun/w120-20261115/rx.sh`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-asrun/w120-7200-20261117/go.sh` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-asrun/w120-7200-20261117/go.sh` (3628 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/crb-asrun/w120-7200-20261117/go.sh`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-asrun/w120-7200-20261117/go2.sh` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-asrun/w120-7200-20261117/go2.sh` (2697 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/crb-asrun/w120-7200-20261117/go2.sh`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-run1.sha` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-run1.sha` (4772 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/crb-run1.sha`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-test-run-1.log` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/crb-test-run-1.log` (10908 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/crb-test-run-1.log`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/dump_session.py` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/dump_session.py` (1730 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/dump_session.py`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/harness/last-run-fixed.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/harness/last-run-fixed.txt` (23083 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/harness/last-run-fixed.txt`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/harness/last-run.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/harness/last-run.txt` (24107 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/harness/last-run.txt`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/harness/run_all.sh` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/harness/run_all.sh` (27633 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/harness/run_all.sh`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/harness/summary.txt` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/harness/summary.txt` (21312 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/harness/summary.txt`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/local-run1.sha` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/local-run1.sha` (4772 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/local-run1.sha`
+- `ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/verify-safety/tools/scen.py` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/scratch-relocated/5580b561/verify-safety/tools/scen.py` (6853 bytes). origin: `claude-agentsrv:/tmp/claude-0/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/scratchpad/verify-safety/tools/scen.py`
+- `ai-runs/handoff-relocated/exec/workflows/review-manual-run-wf_6eeae9a7-1f0.js` -> `claude-agentsrv:/home/jhan/workspace/ai-runs/handoff-relocated/exec/workflows/review-manual-run-wf_6eeae9a7-1f0.js` (15524 bytes). origin: `claude-agentsrv:/home/jhan/.claude/projects/-home-jhan-workspace-ai-proj-arm-crb/5580b561-5d79-4843-8268-4fd921b91f81/workflows/scripts/review-manual-run-wf_6eeae9a7-1f0.js`
+
