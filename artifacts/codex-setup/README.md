@@ -104,6 +104,8 @@ Files left behind are enumerated in `logs/codex-handoff-20261016-artifacts.json`
 
 ### Files
 
+Moved on 2026-11-25: the canonical folder `~/.codex/skills/wade-code-review/` was renamed to `folks-code-review/` on 2026-11-19, and the mirror folder followed with `git mv`. The 10 `skills/wade-code-review/` entries below are history. The current entries are in the 2026-11-25 batch at the end of this file.
+
 - `skills/wade-code-review/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/SKILL.md` (79222 bytes). NEW. Groups: installed-wade-skill.
 - `skills/wade-code-review/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/agents/openai.yaml` (313 bytes). NEW. Groups: installed-wade-skill.
 - `skills/wade-code-review/references/check15/prose.py` -> `claude-agentsrv:/home/jhan/.codex/skills/wade-code-review/references/check15/prose.py` (1262 bytes). NEW. Groups: installed-wade-skill.
@@ -171,3 +173,53 @@ Each path below is relative to this topic. Original files are on claude-agentsrv
 ### Related handoffs
 
 - [Create inter-agent-review-loop skill](../../handoffs/codex_20261110_create-inter-agent-review-loop-skill.md)
+
+## Batch: 2026-11-25 SCOPE:auto run (Claude, claude-agentsrv)
+
+Registered by the 2026-11-25 `SCOPE: auto` handoff run of claude-handoff-generation-prompt.md. `claude-agentsrv` is the podman container on the dev server `agentsrv` (same home directory, same files). Repo path -> canonical path (bytes). Canonical -> repo; edit the canonical file first. `skills/<skill>/` -> `claude-agentsrv:/home/jhan/.codex/skills/<skill>/`. `skills/folks-code-review/` is the former `skills/wade-code-review/`: the canonical folder was renamed on 2026-11-19, and this batch moved the mirror folder with `git mv` and then copied the 10 canonical files over it (4 of them had changed). New prefixes in this batch: `AGENTS.md` -> `claude-agentsrv:/home/jhan/.codex/AGENTS.md`, `codex-home-claude-agentsrv/` -> `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/`.
+
+Refreshed from their canonical files on 2026-11-25 (registered earlier, content changed since): `skills/cpp-coding-guide/SKILL.md`, `skills/explain-bash/SKILL.md`.
+
+Covers 4 handoff(s) written or updated on 2026-11-25 (see "Related" on each entry). Preserved: 16 files, 0.30 MiB in this topic. Files of these handoffs that were not copied, one reason per file (the per-file inventories are in the `.lineage.md` companions named under each report page):
+
+- (scratchpad file not named in the handoff): 306 files
+- (no value used: empty file): 75 files
+- (pre-edit copy of a file preserved at its current state): 25 files
+- (private configuration: not copied into a public repository): 9 files
+- held back at the gate (identity capture or raw export, no explicit yes): 6 files
+- (uncommitted file of the git checkout /home/jhan/workspace/ai-runs/reviewr-test-20261109: that repository preserves it once it is committed): 1 files
+
+Reason names: `provenance` = logs, compiled binaries, .pyc files, raw workflow outputs and other rule-4 classes of the prompt. `size` = a file above 5 MiB. `regenerable` = a command rebuilds the file. `duplicate (<repo path>)` = the same bytes are already held at that repo path. `vendor material` and `private configuration` = not copied while the repository is public. `held back at the gate` = identity captures of machines (firmware, DMI, sudo rules, process lists) and raw exports of private sources, proposed at the gate and not approved by an explicit yes.
+
+### All files of this batch
+
+Repo path -> canonical path (bytes). `origin:` = the session-store or scratchpad path a relocated file was copied from (history only, never fetched again).
+
+Related: [claude_20261109_herdr-reviewr-plugin-install-tar-ownership-error.md](../../handoffs/claude_20261109_herdr-reviewr-plugin-install-tar-ownership-error.md)
+
+- `codex-home-claude-agentsrv/herdr-agent-state.sh` -> `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/herdr-agent-state.sh` (2966 bytes)
+- `codex-home-claude-agentsrv/hooks.json` -> `claude-agentsrv:/home/jhan/codex-home-claude-agentsrv/hooks.json` (274 bytes)
+
+Related: [claude_20261119-20261120_tron-pr-5022-review-comment-authorship.md](../../handoffs/claude_20261119-20261120_tron-pr-5022-review-comment-authorship.md)
+
+- `skills/folks-code-review/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/SKILL.md` (92363 bytes)
+- `skills/folks-code-review/agents/openai.yaml` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/agents/openai.yaml` (340 bytes)
+- `skills/folks-code-review/references/check15/prose.py` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/references/check15/prose.py` (1262 bytes)
+- `skills/folks-code-review/references/check15/spell.py` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/references/check15/spell.py` (1609 bytes)
+- `skills/folks-code-review/references/check15/step5.py` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/references/check15/step5.py` (1861 bytes)
+- `skills/folks-code-review/references/check15/width.py` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/references/check15/width.py` (1238 bytes)
+- `skills/folks-code-review/references/pr4557-misses.md` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/references/pr4557-misses.md` (13822 bytes)
+- `skills/folks-code-review/references/procedures.md` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/references/procedures.md` (113157 bytes)
+- `skills/folks-code-review/references/wade-corpus.md` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/references/wade-corpus.md` (6224 bytes)
+- `skills/folks-code-review/references/wade-style.md` -> `claude-agentsrv:/home/jhan/.codex/skills/folks-code-review/references/wade-style.md` (27917 bytes)
+- `skills/tron-code-review/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/tron-code-review/SKILL.md` (19702 bytes)
+
+Related: [claude_20261120_agents-running-slow-at-agentsrv-md.md](../../handoffs/claude_20261120_agents-running-slow-at-agentsrv-md.md)
+
+- `AGENTS.md` -> `claude-agentsrv:/home/jhan/.codex/AGENTS.md` (11709 bytes)
+
+Related: [claude_20261120_plain-english-skill-inspection-report.md](../../handoffs/claude_20261120_plain-english-skill-inspection-report.md)
+
+- `skills/plain-english-experiment/SKILL.md` -> `claude-agentsrv:/home/jhan/.codex/skills/plain-english-experiment/SKILL.md` (10877 bytes)
+- `skills/plain-english-experiment/scripts/check_lengths.py` -> `claude-agentsrv:/home/jhan/.codex/skills/plain-english-experiment/scripts/check_lengths.py` (13434 bytes)
+
