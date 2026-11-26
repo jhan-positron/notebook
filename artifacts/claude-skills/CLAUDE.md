@@ -29,6 +29,39 @@ otherwise use the notebook rules.
 
 Do not use other delphi or andoria machine unless user specifically mentioned.
 
+## agentsrv and its claude-dev container (added 2026-11-20)
+agentsrv allows each user 8 CPUs, 64 GiB RAM and 8 GiB swap. The limit covers
+the claude-dev container and all host logins together. Programs still see 32
+CPUs. When the 8 CPUs are used up, the kernel pauses every process of the
+user, the agents included.
+
+- A guard pins every shell command of Claude Code and Codex to CPUs 26-31
+  (~/.config/agent-cpu-guard/guard.sh, loaded through BASH_ENV). `nproc`
+  reports 6 there.
+- If `nproc` reports 32 in a shell command on agentsrv, the guard is not
+  loaded. Tell the user, and keep the total of busy processes at 6 or fewer.
+- Size worker pools and `make -j` from `nproc` or
+  `len(os.sched_getaffinity(0))`. Do not use `os.cpu_count()`,
+  `multiprocessing.cpu_count()` or a fixed number above 6.
+- Do not widen the pin (`taskset`, `numactl`, `os.sched_setaffinity`) unless
+  the user asks.
+- Send larger jobs to LSF (the batch scheduler that the admins provide).
+- Measurements: ~/workspace/random/from-claude/agent-cpu-guard.html
+
+# emulator (Asimov on Palladium, added 2026-11-24)
+
+- Before any emulation action, load the palladium-emulation skill (the team's
+  run procedure, a plugin from positron-ai/aps-agent-skills).
+- Before choosing a release, a model or a boot stack, load the
+  asimov-emu-models skill and read its models.md. Its real folder is
+  ~/workspace/notebook/skills/asimov-emu-models/. Re-check the table when the
+  newest row of its check log is older than 7 days.
+- Default model: hemi_rtws_tlm. Use --run-only on a published release.
+- Every launch, build, stop and delete on a shared filer needs my yes for that
+  one action.
+- The Asimov repos are cloned under ~/dev. Start emulator sessions there.
+  Builds go under /scratch/jhan/agent-builds.
+
 # English
 
 Rules for all prose live in the plain-english skill; imported here so they
