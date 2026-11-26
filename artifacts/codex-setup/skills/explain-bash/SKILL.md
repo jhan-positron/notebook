@@ -27,3 +27,6 @@ For a script:
 Do not give helper functions dedicated sections. Explain what a helper does in one clause at the point where a primary function calls it; if a helper is called from several places, explain it at its first use and refer back after that.
 
 Mention a detail outside the main flow only when it changes behavior the reader must know, e.g. `set -e` (the script stops at the first failed command) or a destructive step like `rm -rf "$DIR"`.
+
+## line by line explaination
+By default, line by line explaination is not needed, but if specifically requested, use side by side structure to list the source code at left and explaination at right. Each line is explained.
